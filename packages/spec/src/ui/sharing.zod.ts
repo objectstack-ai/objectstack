@@ -5,9 +5,12 @@
  *
  * Sharing & Embedding Protocol
  *
- * Public-link sharing and iframe-embed configuration. The module name is
- * plural, but the two shapes below are in **opposite** postures, and #4001 批 14
- * measured why rather than assuming a file-level verdict:
+ * Public-link sharing of a form view. The module name is plural for historical
+ * reasons: it once held two shapes in **opposite** postures, and #4001 批 14
+ * measured them per SCHEMA rather than assuming a file-level verdict —
+ * `SharingConfigSchema` a live authoring door, `EmbedConfigSchema` no door at
+ * all. That measurement is what let the two be disposed of separately, and the
+ * asymmetry survives as the reason this file reads the way it does:
  *
  * - `SharingConfigSchema` has a **live authoring door**. `FormViewSchema.sharing`
  *   carries it (`view.zod.ts`), `view` is a metadata-type root, and the runtime
@@ -15,11 +18,13 @@
  *   when `sharing.allowAnonymous === true` and a `sharing.publicLink` slug
  *   matches. Both example apps author it (`app-showcase` `inquiry.view.ts`,
  *   `app-crm` `lead.view.ts`). It is `strictObject` as of #4001 批 14.
- * - `EmbedConfigSchema` has **no door at all** — see its own block below.
+ * - `EmbedConfigSchema` was **REMOVED** at #5015 (ADR-0049 enforce-or-remove) —
+ *   see the block below where it stood.
  *
- * That split is the point. The ledger's classification question is *"who writes
- * this schema's input?"*, and it is answered per SCHEMA, not per file; before
- * 批 14 this file's row carried one verdict for both.
+ * The ledger's classification question is *"who writes this schema's input?"*,
+ * and it is answered per SCHEMA, not per file; before 批 14 this file's row
+ * carried one verdict for both, and a file-level verdict would have been wrong
+ * in one direction or the other whichever way it fell.
  */
 
 import { z } from 'zod';
@@ -97,50 +102,41 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
     .describe('Allow access without authentication'),
 }));
 
-/**
- * Embed Config Schema
- * Configuration for iframe embedding of an app, page, or form.
- * Supports origin restrictions, display options, and responsive sizing.
- *
- * ⛔ **DELIBERATELY NOT `strictObject` — this shape has NO AUTHORING DOOR**
- * (#4001 批 14, ADR-0078 completeness gate). Three independent measurements on
- * 2026-08-03, each with a positive control that passed in the same run:
- *
- * 1. **Carrier key** — nothing in `packages/spec/src` imports this schema except
- *    the `ui/index.ts` barrel. No metadata type declares an `embed` key; the one
- *    sibling in this file (`SharingConfigSchema`) is carried by
- *    `FormViewSchema.sharing`, and this one is carried by nothing.
- * 2. **Graph reachability** — BFS from the 24 metadata-type roots plus
- *    `defineStack`'s `ObjectStackSchema` (the closure `build-schemas.ts` uses for
- *    the #4650 deletion check) visits 6860 nodes and never reaches it. Controls
- *    `PageSchema` / `ActionSchema` / `DashboardWidgetSchema` / `WebhookSchema`
- *    were all `root-graph` in the same run, and injecting a synthetic carrier
- *    flipped this schema to `root-graph` — so "unreachable" is a fact about the
- *    graph, not a broken instrument.
- * 3. **Call sites** — no `.parse()` anywhere in framework or objectui outside
- *    this module's own `sharing.test.ts` and objectui's export-surface pin,
- *    which parses a literal it wrote itself.
- *
- * `.strict()` is a property of a PARSE, and nothing parses this. Closing it
- * would spend a v17 breaking change to make the file look finished and leave a
- * precisely-validated dead slot — *"the more convincing lie"* (#4583). The
- * verdict this shape actually needs is ADR-0049 enforce-or-remove; filed as #5015
- * and recorded in the strictness ledger's `no door` class.
- *
- * The pin in `sharing.test.ts` goes RED the moment anyone gives this shape a
- * carrier key — at which point it becomes authorable and this comment is wrong.
- */
-export const EmbedConfigSchema = lazySchema(() => z.object({
-  enabled: z.boolean().default(false).describe('Enable iframe embedding'),
-  allowedOrigins: z.array(z.string()).optional()
-    .describe('Allowed iframe parent origins (e.g. ["https://example.com"])'),
-  width: z.string().optional().default('100%').describe('Embed width (CSS value)'),
-  height: z.string().optional().default('600px').describe('Embed height (CSS value)'),
-  showHeader: z.boolean().optional().default(true).describe('Show interface header in embed'),
-  showNavigation: z.boolean().optional().default(false).describe('Show navigation in embed'),
-  responsive: z.boolean().optional().default(true).describe('Enable responsive resizing'),
-}));
+// [#5015] `EmbedConfigSchema` / `EmbedConfig` were REMOVED per ADR-0049
+// enforce-or-remove, ruled REMOVE on 2026-08-04.
+//
+// The shape described iframe embedding of an app, page or form — `enabled`,
+// `allowedOrigins`, `width` / `height`, `showHeader` / `showNavigation`,
+// `responsive` — and **nothing in the repo so much as named it**. #4001 批 14
+// measured it three ways on 2026-08-03 with positive controls; this retirement
+// re-ran all three against `origin/main` first:
+//
+//   1. **Carrier key** — this module's only importers were the `ui/index.ts`
+//      barrel and `ui/view.zod.ts`, and `view.zod.ts` names
+//      `SharingConfigSchema` specifically. No schema anywhere declared an
+//      `embed` key of this type. (Specifier RESOLUTION, not substring matching:
+//      the repo holds two `sharing.zod` modules, and a substring test miscredits
+//      `stack.zod.ts` / `security/index.ts` as importers of this one.)
+//   2. **Graph reachability** — BFS from the 24 metadata-type roots plus
+//      `defineStack`'s `ObjectStackSchema` never reached it, while
+//      `SharingConfigSchema` — its own sibling in this file — resolved
+//      `root-graph` in the same run alongside `Page` / `Action` /
+//      `DashboardWidget` / `Webhook`, and a synthetic carrier flipped it.
+//   3. **Call sites** — zero `.parse()` in objectstack, cloud or objectui
+//      outside this module's own unit test.
+//
+// Why it was an orphan is worth recording, because it explains the asymmetry
+// this file kept: the key that would have carried it, `App.embed`, was itself
+// retired in 17.0.0 (2026-06 liveness audit / ADR-0049 — no iframe route ever
+// read it) and survives one file over as a `retiredKey()` tombstone in
+// `app.zod.ts`. The value shape simply outlived its key. An exported schema with
+// no consumer is read as a capability (#3950), so it goes with it.
+//
+// ⚠️ `SharingConfigSchema` above is UNTOUCHED and is a LIVE door — see the module
+// header. One file, two verdicts; that split is the point, and it is per SCHEMA.
+//
+// Embedding, if it is ever built, returns via the enforce route of ADR-0049:
+// a route that honours the origins first, the vocabulary second.
 
 // Type Exports
 export type SharingConfig = z.infer<typeof SharingConfigSchema>;
-export type EmbedConfig = z.infer<typeof EmbedConfigSchema>;

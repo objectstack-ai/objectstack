@@ -18,12 +18,33 @@
  *     the user — e.g. the cloud's personal-org provisioning — wins, and there
  *     is never a double membership);
  *   - honors the deployment's `membershipPolicy` (`auto` binds; `invite-only`
- *     never auto-binds);
+ *     never auto-binds; anything else is REFUSED, see below);
  *   - binds only to an unambiguous target org (single-org's default org;
  *     `multi` mode returns none — invite / JIT own membership there);
  *   - is idempotent (keyed on the `(organization_id, user_id)` unique index)
  *     and never throws (a failed bind must not fail user creation — the
  *     kernel:ready backfill is the self-healing net).
+ *
+ * ## Both entry points refuse an off-vocabulary policy (#5205)
+ *
+ * `reconcileMembership` and `backfillMemberships` are public exports of
+ * `@objectstack/plugin-auth`, so a JavaScript caller or a host stack can hand
+ * either one a policy the `MembershipPolicy` type would have rejected. They
+ * used to disagree about what that means: the sign-up reconciler tested
+ * `policy === 'invite-only'`, so a typo'd `'inviteOnly'` fell through to the
+ * `auto` branch and **auto-bound anyway** (fail-open — a caller who believed
+ * they had switched auto-binding off got it silently), while the backfill
+ * tested `policy !== 'auto'` and refused (fail-safe). One input, two opposite
+ * postures, and the dangerous one was on the per-sign-up path.
+ *
+ * Both now check {@link isMembershipPolicy} at the entry and return a distinct
+ * `'invalid-policy'` outcome/reason naming the offending value. It is a
+ * separate verdict on purpose rather than a reuse of `policy-skip`: reporting
+ * "skipped by policy" for "your policy is not a policy" sends whoever is
+ * debugging the auto-bind to read the deployment's setting, which is fine, and
+ * find it looking exactly as they left it, which is not. This matches the
+ * posture #5152 took one layer up at the settings boundary — an unrecognised
+ * value is rejected loudly, never coerced to `auto`.
  */
 
 import { authSystemWriteContext } from './auth-actor-attribution.js';
@@ -55,6 +76,12 @@ export type ReconcileOutcome =
   | 'yielded'
   /** `membershipPolicy: 'invite-only'` — auto-bind is off by policy. */
   | 'policy-skip'
+  /**
+   * The policy was not one of {@link MEMBERSHIP_POLICIES} — refused, nothing
+   * bound (#5205). Distinct from `policy-skip`, which means a *valid* policy
+   * said no; this one means the caller's policy value is unusable.
+   */
+  | 'invalid-policy'
   /** No unambiguous target org (multi mode, or single mode not bootstrapped). */
   | 'no-target-org'
   /** An error occurred and was swallowed (never fails user creation). */
@@ -63,7 +90,13 @@ export type ReconcileOutcome =
   | 'skipped';
 
 export interface ReconcileMembershipDeps {
-  /** Deployment membership policy. Default `'auto'` at the call site. */
+  /**
+   * Deployment membership policy. Default `'auto'` at the call site.
+   *
+   * Checked at runtime as well as declared: these functions are exported, so a
+   * JS caller can pass anything. Anything outside {@link MEMBERSHIP_POLICIES}
+   * is refused (`'invalid-policy'`), never coerced to `auto`.
+   */
   policy: MembershipPolicy;
   /**
    * Resolve the organization to bind the user to. Single-org → the default org;
@@ -71,10 +104,56 @@ export interface ReconcileMembershipDeps {
    * `tenancy.defaultOrgId`.
    */
   resolveTargetOrg: () => Promise<string | null>;
-  logger?: { info?: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void };
+  logger?: {
+    info?: (msg: string, meta?: any) => void;
+    warn?: (msg: string, meta?: any) => void;
+    error?: (msg: string, meta?: any) => void;
+  };
 }
 
 const SYSTEM_CTX = { isSystem: true };
+
+/**
+ * Describe a rejected policy value for whoever reads the log, without trusting
+ * it. The declared vocabulary is two short literals, so echoing a *string*
+ * back is the entire point of the message — it is how the reader sees
+ * `'inviteOnly'` where they expected `'invite-only'`. Anything else is a value
+ * that arrived off the type contract, i.e. arbitrary caller data, and a log
+ * line is the wrong place to find out it was an object carrying user fields:
+ * those report as their `typeof` only. Strings are bounded for the same
+ * reason — a policy is never 64 characters long, so anything longer is not a
+ * typo and does not need to be reproduced in full to be diagnosed.
+ */
+function describePolicy(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.length > 64 ? `'${value.slice(0, 64)}…' (truncated)` : `'${value}'`;
+  }
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  return `[${typeof value}]`;
+}
+
+/**
+ * Refuse an off-vocabulary policy the same way from both entry points (#5205):
+ * one message, one log level, one returned description.
+ *
+ * `error`, not `warn`, for the reason #5152 gives at the settings boundary —
+ * nothing looks broken afterwards. The bind simply does not happen, and if
+ * this passed quietly the deployment would either keep auto-binding while an
+ * operator believed it had stopped (the old sign-up behaviour) or stop binding
+ * with no stated cause. Falls back to `warn` only because `error` is optional
+ * on the logger shape and a caller passing a two-method logger should still
+ * hear about it; the message is identical either way.
+ */
+function refuseInvalidPolicy(deps: ReconcileMembershipDeps, meta: Record<string, unknown>): string {
+  const described = describePolicy(deps.policy as unknown);
+  const message =
+    `[membership] refusing to bind: membership policy ${described} is not a recognized value ` +
+    `— expected one of: ${MEMBERSHIP_POLICIES.join(', ')}`;
+  const log = deps.logger?.error ?? deps.logger?.warn;
+  log?.(message, { ...meta, policy: described, expected: MEMBERSHIP_POLICIES });
+  return message;
+}
 
 function genMemberId(): string {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -121,9 +200,16 @@ export async function reconcileMembership(
   engine: any,
   userId: string | undefined,
   deps: ReconcileMembershipDeps,
-): Promise<{ outcome: ReconcileOutcome; organizationId?: string }> {
+): Promise<{ outcome: ReconcileOutcome; organizationId?: string; error?: string }> {
   if (!engine || typeof engine.find !== 'function' || typeof engine.insert !== 'function' || !userId) {
     return { outcome: 'skipped' };
+  }
+  // #5205 — before any policy semantics, is this a policy at all? Testing
+  // `=== 'invite-only'` alone let every other value fall through to the `auto`
+  // branch and bind. The check is not dead code: the type says
+  // `MembershipPolicy`, the export surface says a JS caller can say otherwise.
+  if (!isMembershipPolicy(deps.policy)) {
+    return { outcome: 'invalid-policy', error: refuseInvalidPolicy(deps, { userId }) };
   }
   if (deps.policy === 'invite-only') {
     return { outcome: 'policy-skip' };
@@ -170,7 +256,13 @@ export interface BackfillMembershipsResult {
   scanned: number;
   bound: number;
   skipped: number;
-  reason?: 'policy' | 'no-target-org' | 'engine-unavailable';
+  reason?: 'policy' | 'invalid-policy' | 'no-target-org' | 'engine-unavailable';
+  /**
+   * Present with `reason: 'invalid-policy'` — the refusal message, naming the
+   * offending value. Carried on the result, not only logged, so the diagnosis
+   * survives a caller that passed no logger (#5205).
+   */
+  error?: string;
 }
 
 /**
@@ -189,6 +281,12 @@ export async function backfillMemberships(
   const summary: BackfillMembershipsResult = { scanned: 0, bound: 0, skipped: 0 };
   if (!engine || typeof engine.find !== 'function' || typeof engine.insert !== 'function') {
     return { ...summary, reason: 'engine-unavailable' };
+  }
+  // #5205 — same order, same verdict as the sign-up path. This one already
+  // refused an off-vocabulary value, but reported it as `'policy'`, which
+  // reads as "the deployment's policy said no" and hides a caller bug.
+  if (!isMembershipPolicy(deps.policy)) {
+    return { ...summary, reason: 'invalid-policy', error: refuseInvalidPolicy(deps, { pass: 'backfill' }) };
   }
   if (deps.policy !== 'auto') {
     return { ...summary, reason: 'policy' };
