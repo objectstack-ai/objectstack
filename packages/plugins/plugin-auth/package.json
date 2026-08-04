@@ -33,8 +33,9 @@
     "jose": "^6.2.5"
   },
   "devDependencies": {
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
-    "hono": "^4.12.32",
+    "hono": "^4.12.34",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
