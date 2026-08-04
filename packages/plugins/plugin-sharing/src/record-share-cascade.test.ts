@@ -1148,3 +1148,104 @@ describe('#5190 boot sweep — orphaned share links', () => {
     expect(shareIds(engine)).toEqual([]);
   });
 });
+
+/**
+ * [#5190] The link half on a RULES-BEARING object.
+ *
+ * Every link-cascade case above runs on an object with no sharing rules, which
+ * leaves the one interaction that only exists on the objects carrying the MOST
+ * sharing machinery unpinned: where rules exist, #5102's `bindRuleHooks`
+ * registers its own `beforeDelete` / `afterDelete` under a DIFFERENT hook
+ * package, and both packages read the same stashed row set
+ * ({@link AFFECTED_ROWS_STASH_KEY}). A link cascade that happened to work only
+ * while it was the sole `beforeDelete` writer — or one that let the rule
+ * package's recompute consume the stash first — would pass all of them and
+ * still leak tokens exactly where the risk is highest.
+ *
+ * So this asserts the three revocations on one timeline, from one delete: the
+ * rule grant (#5102), the manual share (#5103) and the capability token
+ * (#5190).
+ */
+describe('#5190 the LINK cascade on a rules-bearing object', () => {
+  let engine: Engine;
+  let sharing: SharingService;
+  let rules: SharingRuleService;
+  let linkService: ShareLinkService;
+  let logger: any;
+
+  beforeEach(async () => {
+    logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    engine = makeEngine();
+    // A rules-bearing object that ALSO opted into link sharing — the realistic
+    // shape, and the one where all three revocation paths meet.
+    engine._schemas.opportunity = {
+      name: 'opportunity',
+      sharingModel: 'private',
+      publicSharing: { enabled: true },
+      fields: { owner_id: {} },
+    };
+    engine._tables.opportunity = [
+      { id: 'opp1', region: 'east', owner_id: 'boss' },
+      { id: 'opp2', region: 'east', owner_id: 'boss' },
+    ];
+    engine._tables.sys_record_share = [];
+    engine._tables.sys_share_link = [];
+    engine._tables.sys_sharing_rule = [{
+      id: 'srule_east',
+      name: 'east_to_alice',
+      label: 'East → Alice',
+      object_name: 'opportunity',
+      criteria_json: JSON.stringify({ region: 'east' }),
+      recipient_type: 'user',
+      recipient_id: 'alice',
+      access_level: 'edit',
+      active: true,
+    }];
+    sharing = new SharingService({ engine: engine as any, logger });
+    rules = new SharingRuleService({ engine: engine as any, sharing, logger });
+    linkService = new ShareLinkService({ engine: engine as any, logger });
+    bindRuleHooks(engine as any, rules, await rules.listRules({ activeOnly: true }, SYS), logger);
+    bindRecordShareCascade(engine as any, sharing, logger, () => linkService);
+  });
+
+  it('revokes the rule grant, the manual share AND the link of the deleted record', async () => {
+    await rules.evaluateRule('srule_east', SYS);
+    expect(shares(engine).filter((r) => r.source === 'rule')).toHaveLength(2);
+    manualShare(engine, 'opportunity', 'opp1', 'carol', 'shr_manual_opp1');
+    shareLink(engine, 'opportunity', 'opp1', 'shl_opp1');
+    shareLink(engine, 'opportunity', 'opp2', 'shl_opp2');
+
+    await engine.simulateDeleteById('opportunity', 'opp1');
+
+    // The token goes with the record…
+    expect(shareLinkIds(engine)).toEqual(['shl_opp2']);
+    // …and so do BOTH share sources, while opp2 keeps everything.
+    expect(shares(engine).every((r) => r.record_id === 'opp2')).toBe(true);
+    expect(shares(engine).map((r) => r.source)).toEqual(['rule']);
+  });
+
+  it('a BOUNDED predicate delete across both hook packages takes every link with it', async () => {
+    await rules.evaluateRule('srule_east', SYS);
+    shareLink(engine, 'opportunity', 'opp1', 'shl_opp1');
+    shareLink(engine, 'opportunity', 'opp2', 'shl_opp2');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateBulkDelete('opportunity', { region: 'east' });
+
+    expect(engine._tables.opportunity).toEqual([]);
+    expect(shareLinkIds(engine)).toEqual([]);
+    // Still ONE set-based statement for the links, even with the rule package
+    // sharing the same stash.
+    expect(engine._deleteCalls.filter((c) => c.object === 'sys_share_link')).toHaveLength(1);
+  });
+
+  it('both hook packages stay bound, and unbinding the cascade leaves the rule hooks', () => {
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE).length).toBeGreaterThan(0);
+    expect(engine.boundFor(RECORD_SHARE_CASCADE_PACKAGE)).toHaveLength(2);
+
+    unbindRecordShareCascade(engine as any);
+
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE).length).toBeGreaterThan(0);
+    expect(engine.boundFor(RECORD_SHARE_CASCADE_PACKAGE)).toHaveLength(0);
+  });
+});
