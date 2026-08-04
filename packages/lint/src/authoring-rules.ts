@@ -128,7 +128,7 @@ import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
-import { lintUniqueDeclarations } from './data-model-rules.js';
+import { lintUniqueDeclarations, lintUnscopedDeclaredIndexes } from './data-model-rules.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -742,9 +742,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.hint,
       })),
   },
-  // #3991 — a column carrying BOTH a field-level `unique: true` and a
-  // single-column declared unique index has two intents, of which exactly one
-  // takes effect (the global index wins; the tenant composite is unreachable).
+  // ADR-0120 D5a — a declared index with bare `unique: true` states no scope
+  // at all (`unique/unscoped-declared-index` — the #4986 trap). Fires on the
+  // spelling alone, no tenancy inference; 17.x warns, protocol 18 rejects the
+  // spelling (#5082).
+  {
+    name: 'lintUnscopedDeclaredIndexes',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ['validate', 'build'],
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    scopeReason:
+      '`os lint` already reports this rule through `lintDataModel`, which calls it directly ahead of ' +
+      'R10 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
+      'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
+    run: (stack) =>
+      lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.path,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // #3991 / ADR-0120 D5b — a column carrying BOTH a field-level `unique` and a
+  // single-column declared unique index states two scopes of which at most one
+  // takes effect (`unique/double-declaration`, the four-quadrant matrix).
   {
     name: 'lintUniqueDeclarations',
     tier: 'advisory',
