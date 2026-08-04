@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Periodic or change-scoped documentation accuracy verification. Pass args.docs = [paths] to scope (e.g. output of scripts/docs-audit/affected-docs.mjs); omit for a full audit of every hand-written doc.',
   phases: [
     { title: 'Scope Preflight', detail: 'resolve every doc path on disk; abort naming any that does not exist' },
-    { title: 'Audit & Fix', detail: 'one agent per doc: read, locate implementation, apply evidence-backed edits' },
+    { title: 'Audit & Fix', detail: 'one agent per doc: read, locate implementation, apply evidence-backed edits — except release-owned pages, which are reviewed read-only and produce findings to file as issues' },
     { title: 'Adversarial Verify', detail: 'second agent re-checks each applied fix against code, repairs regressions' },
   ],
 }
@@ -214,6 +214,37 @@ const ALL_HANDWRITTEN = [
 ]
 // </generated:docs-audit-scope>
 
+// --- Release-owned pages are IN SCOPE but READ-ONLY (#4920) -------------------
+//
+// AGENTS.md "Documentation Guardrails" — the row whose path column is exactly the
+// prefix below — and CLAUDE.md's second ⛔ rule say the same thing:
+//
+//   `content/docs/releases/` | RELEASE-OWNED | Never edit in a code PR.
+//   Release notes are written centrally at release time, compiled from changesets
+//   + the ADR-0087 registries — not accreted a row per PR.
+//
+// This workflow's stated deliverable is an in-place mdx rewrite (see RULES below),
+// so a full audit walked straight into that prohibition: 9 release pages in scope,
+// each handed to an agent told to Edit it, and the follow-up PR from a run was
+// precisely the PR the guardrail exists to stop.
+//
+// The ruling on #4920 was NOT to drop them from scope. Dropping them would leave
+// some of the most-read pages in the docs permanently unaudited, and would create a
+// SECOND definition of "which docs does this workflow cover" alongside the generated
+// block above — #4851 had just finished paying for what happens when one subject has
+// two hand-kept lists. So the scope is unchanged and only the DELIVERABLE forks:
+// findings to file as issues, instead of edits written to disk.
+//
+// The fork has to be decidable inside the workflow VM (no filesystem, no require, no
+// import — see the note on the generated block), which a path prefix is. And the
+// prefix is not a curation of the guardrail, it is the guardrail's own path column
+// copied verbatim, so there is still exactly one definition of "release-owned".
+// `scripts/docs-audit/check-audit-scope.mjs` anchors the two together and goes red if
+// AGENTS.md stops marking this exact path RELEASE-OWNED, if this constant stops
+// matching the row, or if the derived scope stops containing release pages at all.
+const RELEASE_OWNED_PREFIX = 'content/docs/releases/'
+const isReleaseOwned = (doc) => doc.startsWith(RELEASE_OWNED_PREFIX)
+
 // Scope resolution. Omitting `args` entirely is the legitimate "audit
 // everything" invocation; supplying `args` but not a usable `args.docs` array
 // is a CALLER BUG and must say so.
@@ -242,7 +273,15 @@ if (args !== undefined && args !== null) {
   }
 }
 const DOCS = args && Array.isArray(args.docs) && args.docs.length ? args.docs : ALL_HANDWRITTEN
+const WRITABLE_DOCS = DOCS.filter((d) => !isReleaseOwned(d))
+const READONLY_DOCS = DOCS.filter(isReleaseOwned)
 log(`scope: ${DOCS.length} doc(s)${DOCS === ALL_HANDWRITTEN ? ' — FULL audit (no args.docs given)' : ''}`)
+if (READONLY_DOCS.length) {
+  log(
+    `  of which ${READONLY_DOCS.length} release-owned page(s) under ${RELEASE_OWNED_PREFIX} — ` +
+    'audited READ-ONLY: findings only, never edited (AGENTS.md Documentation Guardrails; #4920)',
+  )
+}
 
 // --- Scope preflight: every path in scope must resolve to a real file ---------
 //
@@ -365,6 +404,19 @@ const RULES = `HARD RULES:
 6. Make minimal, precise edits — fix what is wrong, leave correct prose alone.
 7. Verify code samples, CLI commands, API method names, config keys, env vars, file paths, enum values, and links against the actual implementation.`
 
+// The read-only counterpart of RULES, for release-owned pages. Rule 1 of RULES
+// ("Edit the doc FILE IN PLACE … the edits to disk are the real deliverable") is
+// exactly what must not happen here, so this is a separate text rather than RULES
+// with a caveat bolted on — an agent handed both a "you must edit" and a "you must
+// not edit" instruction resolves the contradiction however it likes.
+const READONLY_RULES = `HARD RULES — THIS PAGE IS RELEASE-OWNED AND READ-ONLY:
+1. DO NOT edit, create, move, rename or delete this file or ANY file under ${RELEASE_OWNED_PREFIX}. No Edit, no Write, no shell command that modifies the working tree. These pages are RELEASE-OWNED (AGENTS.md "Documentation Guardrails"): release notes are written centrally at release time, compiled from changesets + the ADR-0087 registries, and a code PR that edits them is the exact PR that guardrail exists to stop. Leaving the file untouched is not a partial result — it is the correct result.
+2. Your deliverable is the FINDING LIST. Each finding gets filed as an issue by the caller of this workflow, by someone who has not read the page and will not redo your research: name the location, state what is wrong, and say what it should say instead.
+3. EVERY finding must be backed by implementation you actually read — cite file:line under packages/. If you cannot find code that contradicts the page, it is NOT a finding. Put the suspicion under 'unresolved' instead; an unresolved item is a real, useful outcome here.
+4. Do not fabricate APIs, flags, paths or features, and do not report wording, tone, formatting or structure preferences. Implementation accuracy only.
+5. A release page is a HISTORICAL record: it describes what shipped in a given version. "The current API differs" is therefore not automatically an error. Classify each finding: 'never-true' (the page was wrong when written), 'no-longer-true' (accurate for its version, but the page states it as present tense / current behaviour and now misleads), or 'ambiguous' (cannot tell without the release's own history). The three want different fixes, and only you have the evidence to tell them apart.
+6. Auto-generated reference docs (content/docs/references/) are out of scope and so is every page outside the target — do not wander.`
+
 // `docExists` is required and reported by the agent that actually opens the file —
 // the preflight above is a separate call path, and #4868's lesson is that a self-check
 // running somewhere other than the real path proves nothing about the real path. It is
@@ -383,6 +435,36 @@ const FIX_LOG_SCHEMA = {
         summary: { type: 'string' }, before: { type: 'string' }, after: { type: 'string' }, evidence: { type: 'string' },
       } } },
     fixCount: { type: 'number' },
+    unresolved: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'string' },
+  },
+}
+
+// The read-only channel's output. Deliberately NOT shaped like FIX_LOG_SCHEMA: there
+// is no `fixesApplied`/`fixCount` to report zero of, because "0 fixes" is the value
+// #4851 showed to be indistinguishable from "nothing was there". A release page's
+// result is a list of findings whose length is the count — one source of truth, no
+// self-reported tally to disagree with it.
+//
+// `filesEdited` is required and must come back false. The VM cannot see the working
+// tree, so this is the agent's own admission — but an agent that admits it edited a
+// release-owned page fails the run by name, which beats discovering the edit in review
+// (or not discovering it).
+const FINDING_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['doc', 'docExists', 'filesEdited', 'implementationFound', 'findings', 'unresolved', 'notes'],
+  properties: {
+    doc: { type: 'string' },
+    docExists: { type: 'boolean' },
+    filesEdited: { type: 'boolean' },
+    implementationFound: { type: 'boolean' },
+    findings: { type: 'array', items: { type: 'object', additionalProperties: false,
+      required: ['kind', 'category', 'location', 'inaccuracy', 'suggestedFix', 'evidence'],
+      properties: {
+        kind: { type: 'string', enum: ['never-true', 'no-longer-true', 'ambiguous'] },
+        category: { type: 'string', enum: ['broken-example', 'inaccurate-api', 'outdated-path', 'outdated-env', 'security-model', 'fabricated-feature', 'broken-link', 'naming-drift', 'enum-drift', 'other'] },
+        location: { type: 'string' }, inaccuracy: { type: 'string' }, suggestedFix: { type: 'string' }, evidence: { type: 'string' },
+      } } },
     unresolved: { type: 'array', items: { type: 'string' } },
     notes: { type: 'string' },
   },
@@ -426,6 +508,39 @@ PROCEDURE:
 A doc with no real inaccuracies should return fixCount 0 — do not invent changes. The edits you write to disk ARE the deliverable.`
 }
 
+function readOnlyReviewPrompt(doc) {
+  return `You are reviewing a single RELEASE-OWNED ObjectStack documentation page for IMPLEMENTATION ACCURACY. This page is audited READ-ONLY: you report, you do not fix.
+
+TARGET DOC (do not modify): ${doc}
+
+${PACKAGE_MAP}
+
+${HOUSE_FACTS}
+
+${READONLY_RULES}
+
+PROCEDURE:
+1. Read the entire doc (${doc}). If that path does not exist, STOP: return docExists
+   false, an empty findings array, and say so in notes. Do NOT substitute a similar
+   path, and do not report "no inaccuracies" — a file you could not open was not
+   reviewed, and the two must never be reported the same way.
+2. For each technical claim — code sample, CLI command, client/server API call,
+   method/type name, config key, enum value, env var, file path, route, link — LOCATE
+   the backing implementation under packages/ (Grep/Glob/Read; ripgrep via Bash is
+   fine) and confirm whether the page matches reality.
+3. Record every contradiction you can evidence as a finding, with its kind
+   (never-true / no-longer-true / ambiguous), where on the page it is, what is wrong,
+   what it should say instead, and the file:line you read. Anything suspected but not
+   evidenced goes under 'unresolved'.
+4. Do NOT edit the file. Return filesEdited false. If you edited it by reflex, revert
+   it and say so in notes — this run will fail on purpose rather than carry an edit to
+   a release-owned page into a PR.
+
+A page with no evidenced inaccuracies returns an empty findings array — do not invent
+findings to look productive. The finding list IS the deliverable; each entry becomes an
+issue.`
+}
+
 function verifyPrompt(doc, fixLog) {
   return `You are the ADVERSARIAL VERIFIER for an implementation-accuracy fix just applied to an ObjectStack doc. Assume the previous agent may have over-corrected or introduced errors.
 
@@ -452,28 +567,84 @@ Return the verdict.`
 }
 
 phase('Audit & Fix')
-log(`Auditing ${DOCS.length} hand-written doc(s) (pipelined: audit -> adversarial verify per doc)`)
+log(
+  `Auditing ${DOCS.length} hand-written doc(s): ${WRITABLE_DOCS.length} editable ` +
+  `(audit -> adversarial verify per doc)` +
+  (READONLY_DOCS.length ? `, ${READONLY_DOCS.length} release-owned (read-only review, findings only)` : ''),
+)
 
+// One pipeline over the whole scope, two deliverables. Routing by `isReleaseOwned`
+// inside the stages — rather than by running two pipelines, or by filtering the
+// release pages out up front — is deliberate: there is no code path here on which a
+// doc in scope produces no result at all, which is the shape a "skip" would take.
 const results = await pipeline(
   DOCS,
-  (doc) => agent(auditPrompt(doc), { label: `audit:${doc.replace('content/docs/', '')}`, phase: 'Audit & Fix', schema: FIX_LOG_SCHEMA }),
-  (fixLog, doc) => {
-    if (!fixLog) return null
-    return agent(verifyPrompt(doc, fixLog), { label: `verify:${doc.replace('content/docs/', '')}`, phase: 'Adversarial Verify', schema: VERDICT_SCHEMA })
-      .then((v) => ({ doc, fixLog, verdict: v }))
+  (doc) => isReleaseOwned(doc)
+    ? agent(readOnlyReviewPrompt(doc), { label: `review:${doc.replace('content/docs/', '')}`, phase: 'Audit & Fix', schema: FINDING_SCHEMA })
+    : agent(auditPrompt(doc), { label: `audit:${doc.replace('content/docs/', '')}`, phase: 'Audit & Fix', schema: FIX_LOG_SCHEMA }),
+  (auditLog, doc) => {
+    if (!auditLog) return null
+    // No adversarial verifier for release-owned pages: the verifier's job is to
+    // re-check APPLIED EDITS and repair over-corrections, and there are none. The
+    // guard against a bad finding is that it must carry file:line evidence and is
+    // read by a human before it becomes an issue.
+    if (isReleaseOwned(doc)) return { doc, readOnly: true, findingLog: auditLog }
+    return agent(verifyPrompt(doc, auditLog), { label: `verify:${doc.replace('content/docs/', '')}`, phase: 'Adversarial Verify', schema: VERDICT_SCHEMA })
+      .then((v) => ({ doc, readOnly: false, fixLog: auditLog, verdict: v }))
   }
 )
 
 const clean = results.filter(Boolean)
-const totalFixes = clean.reduce((n, r) => n + (r.fixLog?.fixCount || 0), 0)
-const totalRepairs = clean.reduce((n, r) => n + (r.verdict?.correctionsMade?.length || 0), 0)
-const totalResidual = clean.reduce((n, r) => n + (r.verdict?.residualInaccuracies?.length || 0), 0)
+const edited = clean.filter((r) => !r.readOnly)
+const reviewed = clean.filter((r) => r.readOnly)
+const totalFixes = edited.reduce((n, r) => n + (r.fixLog?.fixCount || 0), 0)
+const totalRepairs = edited.reduce((n, r) => n + (r.verdict?.correctionsMade?.length || 0), 0)
+const totalResidual = edited.reduce((n, r) => n + (r.verdict?.residualInaccuracies?.length || 0), 0)
+const totalFindings = reviewed.reduce((n, r) => n + (r.findingLog?.findings?.length || 0), 0)
+
+// The read-only channel's headline, emitted BEFORE any of the failure paths below so
+// it survives a failing run. #4920's rejected option was deleting the release pages
+// from scope; a run that says nothing about them is that option, reached by accident.
+// So this line is unconditional whenever release pages are in scope — including when
+// the count is zero, which is a reviewed-and-clean result, not an absence.
+if (READONLY_DOCS.length) {
+  log(`releases (read-only): ${totalFindings} finding(s) — file issues, do not edit`)
+}
+
+// A release page that produced NO result was silently skipped, which is exactly the
+// outcome the read-only channel exists to prevent. `results.filter(Boolean)` above is
+// where such a doc would vanish without a trace, so reconcile against the scope by name.
+const skippedReadOnly = READONLY_DOCS.filter((d) => !reviewed.some((r) => r.doc === d))
+if (skippedReadOnly.length) {
+  throw new Error(
+    `[docs-accuracy-audit] ${skippedReadOnly.length} of ${READONLY_DOCS.length} release-owned ` +
+    'page(s) in scope produced no review result:\n  ' + skippedReadOnly.join('\n  ') +
+    '\n\nThese pages are in scope precisely so they are not skipped (#4920): the audit does ' +
+    'not edit them, it reports findings on them. A run that neither edits nor reports has ' +
+    'dropped them from the audit — the option that ruling rejected. Re-run the workflow.',
+  )
+}
+
+// A release-owned page the agent admits it edited. The edit is already on disk, so the
+// run fails naming the files rather than letting them ride along into a PR — the exact
+// PR AGENTS.md's Documentation Guardrails forbid.
+const illegallyEdited = reviewed.filter((r) => r.findingLog?.filesEdited === true).map((r) => r.doc)
+if (illegallyEdited.length) {
+  throw new Error(
+    `[docs-accuracy-audit] ${illegallyEdited.length} release-owned page(s) were EDITED by their ` +
+    'read-only review agent:\n  ' + illegallyEdited.join('\n  ') +
+    '\n\n`' + RELEASE_OWNED_PREFIX + '` is RELEASE-OWNED (AGENTS.md "Documentation Guardrails"): ' +
+    'release notes are compiled centrally at release time and must never be edited by a code PR. ' +
+    'Revert these files (`git checkout -- <paths>`) before doing anything else with this run; the ' +
+    'findings are still in the result, and belong in issues.',
+  )
+}
 
 // The preflight said every path resolved; the agents that actually opened the files
 // are the authority on whether that was true. If they disagree, the run did NOT audit
 // what it claims to have audited — say so by failing, after logging the work that did
 // land (the edits are already on disk) rather than returning a summary that reads green.
-const ghosts = clean.filter((r) => r.fixLog?.docExists === false).map((r) => r.doc)
+const ghosts = clean.filter((r) => (r.readOnly ? r.findingLog : r.fixLog)?.docExists === false).map((r) => r.doc)
 if (ghosts.length) {
   log(`audited ${clean.length - ghosts.length} doc(s), ${totalFixes} fix(es), ${totalRepairs} verifier repair(s) before failing`)
   throw new Error(
@@ -488,20 +659,51 @@ if (ghosts.length) {
 return {
   docsProcessed: clean.length,
   docsDropped: DOCS.length - clean.length,
-  docsWithChanges: clean.filter((r) => (r.fixLog?.fixCount || 0) > 0 || (r.verdict?.correctionsMade?.length || 0) > 0).length,
+  docsWithChanges: edited.filter((r) => (r.fixLog?.fixCount || 0) > 0 || (r.verdict?.correctionsMade?.length || 0) > 0).length,
   totalFixesApplied: totalFixes,
   totalVerifierRepairs: totalRepairs,
   totalResidualForFollowup: totalResidual,
-  docsMissingVerifier: clean.filter((r) => !r.verdict).map((r) => r.doc),
-  perDoc: clean.map((r) => ({
-    doc: r.doc,
-    fixes: r.fixLog?.fixCount || 0,
-    docExists: r.fixLog?.docExists,
-    implFound: r.fixLog?.implementationFound,
-    confirmed: r.verdict?.confirmed,
-    repairs: r.verdict?.correctionsMade?.length || 0,
-    regressions: r.verdict?.regressionsFound || [],
-    buildSafe: r.verdict?.buildSafe,
-    residual: r.verdict?.residualInaccuracies || [],
-  })),
+  docsMissingVerifier: edited.filter((r) => !r.verdict).map((r) => r.doc),
+  // The release-owned channel, reported separately and in full: its deliverable is not
+  // a diff, it is this list, and it is only worth anything if someone files it.
+  releaseOwnedReadOnly: {
+    prefix: RELEASE_OWNED_PREFIX,
+    docsReviewed: reviewed.length,
+    findings: totalFindings,
+    action: `releases (read-only): ${totalFindings} finding(s) — file issues, do not edit`,
+    why: 'AGENTS.md "Documentation Guardrails": content/docs/releases/ is RELEASE-OWNED — never edited by a code PR. In scope, read-only (#4920).',
+    perDoc: reviewed.map((r) => ({
+      doc: r.doc,
+      docExists: r.findingLog?.docExists,
+      implFound: r.findingLog?.implementationFound,
+      findings: r.findingLog?.findings || [],
+      unresolved: r.findingLog?.unresolved || [],
+      notes: r.findingLog?.notes,
+    })),
+  },
+  // Both channels appear here, in DIFFERENT shapes on purpose: a read-only entry has
+  // no `fixes` key to read as `0`, so it cannot be mistaken for a page that was audited
+  // and found clean.
+  perDoc: clean.map((r) => r.readOnly
+    ? {
+      doc: r.doc,
+      channel: 'read-only',
+      docExists: r.findingLog?.docExists,
+      implFound: r.findingLog?.implementationFound,
+      findings: (r.findingLog?.findings || []).length,
+      unresolved: r.findingLog?.unresolved || [],
+      note: 'release-owned — file issues, do not edit',
+    }
+    : {
+      doc: r.doc,
+      channel: 'edit',
+      fixes: r.fixLog?.fixCount || 0,
+      docExists: r.fixLog?.docExists,
+      implFound: r.fixLog?.implementationFound,
+      confirmed: r.verdict?.confirmed,
+      repairs: r.verdict?.correctionsMade?.length || 0,
+      regressions: r.verdict?.regressionsFound || [],
+      buildSafe: r.verdict?.buildSafe,
+      residual: r.verdict?.residualInaccuracies || [],
+    }),
 }
