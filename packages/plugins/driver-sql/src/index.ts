@@ -34,8 +34,14 @@ export {
   parseIndexDdl,
   uniqueIndexesFromFields,
   INDEX_DRIFT_OPS,
+  // Unique-scope vocabulary + NULL-safe organization key part (ADR-0120 D1/D3)
+  GLOBAL_TENANT,
+  isUniqueScopeDeclared,
+  isOrganizationScopedUnique,
+  organizationKeyPartSql,
 } from './schema-drift.js';
 export type {
+  DeclaredIndexInput,
   ManagedDriftEntry,
   DriftOp,
   DriftCategory,

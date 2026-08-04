@@ -16,6 +16,7 @@
     "@objectstack/example-crm": "workspace:*",
     "@objectstack/example-showcase": "workspace:*",
     "@objectstack/mcp": "workspace:*",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",
