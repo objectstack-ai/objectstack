@@ -13,6 +13,7 @@
 // round trip: sweep → job → worker poll → the same row at `sent`.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { DbQueueAdapter } from '@objectstack/service-queue';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, EMAIL_SEND_QUEUE } from './email-service.js';
@@ -96,8 +97,20 @@ function fakeEngine(opts: EngineOpts = {}) {
       return r;
     },
     async delete(table: string, o: any) {
-      tables.set(table, rowsOf(table).filter((r) => r.id !== o?.where?.id));
-      return { id: o?.where?.id };
+      // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate, like the
+      // other doubles in this package. A fake looser than the engine it stands
+      // in for is how #4434 shipped a dead REST route with its suite green, and
+      // the case a hand-written mirror always drops is the scalar test
+      // (`where: { id: { $in: [...] } }` looks like an id and is not one).
+      const dispatch = assertEngineDeleteDispatch(o);
+      if (dispatch.kind === 'multi') {
+        const survivors = rowsOf(table).filter((r) => !matches(r, o?.where ?? {}));
+        const deleted = rowsOf(table).length - survivors.length;
+        tables.set(table, survivors);
+        return { deleted };
+      }
+      tables.set(table, rowsOf(table).filter((r) => r.id !== dispatch.id));
+      return { id: dispatch.id };
     },
   };
   return engine;
