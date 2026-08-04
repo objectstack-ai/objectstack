@@ -241,6 +241,11 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         // the first that answers a request no route matched. Listed the day it
         // was written, for the same reason the line above was.
         './api-endpoint-step.ts',
+        // [#5092] The endpoint executor maps a delegated pipeline's failure onto
+        // this wire surface — a restatement of `errorFromThrown` outside the
+        // dispatcher class, which is exactly the kind of second copy this scan
+        // exists to keep honest. Listed the day it was written.
+        './endpoint-executor.ts',
     ];
 
     for (const file of MODULES) {
