@@ -937,7 +937,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       content: {
         label: "Contenido",
-        description: "Objetos y API que usa esta app."
+        description: "Asignación del asistente ambiental. Los objetos y endpoints se declaran en el stack, no en la app."
       },
       branding: {
         label: "Marca",
@@ -945,7 +945,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       access_and_sharing: {
         label: "Acceso y uso compartido",
-        description: "Quién puede acceder a esta app y cómo puede incrustarse."
+        description: "Quién puede acceder a esta app. El acceso público y la incrustación son por vista de formulario, no a nivel de app."
       }
     },
     fields: {
@@ -958,9 +958,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción"
-      },
-      version: {
-        label: "Versión"
       },
       icon: {
         label: "Icono",
@@ -981,22 +978,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Áreas",
         helpText: "Agrupa elementos en áreas plegables"
       },
-      homePageId: {
-        label: "ID de página inicial",
-        helpText: "Página de inicio al abrir la app"
-      },
-      mobileNavigation: {
-        label: "Navegación móvil",
-        helpText: "Configuración de barra de pestañas inferior para móvil"
-      },
-      objects: {
-        label: "Permisos de objeto",
-        helpText: "Nombres de objeto que expone esta app"
-      },
-      apis: {
-        label: "API",
-        helpText: "Definiciones de endpoints API"
-      },
       defaultAgent: {
         label: "Agente predeterminado",
         helpText: "Agente de IA para el botón de asistente ambiental"
@@ -1008,18 +989,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiredPermissions: {
         label: "Permisos requeridos",
         helpText: "Permisos necesarios para acceder a esta app"
-      },
-      sharing: {
-        label: "Compartición",
-        helpText: "Control de acceso público/interno/restringido"
-      },
-      embed: {
-        label: "Incrustación",
-        helpText: "Configuración de incrustación iFrame"
-      },
-      aria: {
-        label: "Accesibilidad",
-        helpText: "Etiquetas de accesibilidad"
       }
     }
   },
