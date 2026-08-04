@@ -86,6 +86,46 @@ export type RelationshipResolver = (
   relationshipName: string,
 ) => string | RelationshipTarget | undefined;
 
+/**
+ * Optional probes the compiler consults to reject metadata that is decidable
+ * BEFORE any query runs. Every probe is optional and every one of them is
+ * tiered "cannot answer, do not block" (the same stand-down as
+ * `isRegisteredObject` / `getObjectFieldNames` on `AnalyticsServiceConfig`):
+ * a host without a data engine compiles exactly as it did before.
+ */
+export interface DatasetCompileOptions {
+  /**
+   * [#5115] The datasource `objectName` DECLARES (`object.datasource`), or
+   * `undefined` when nothing authoritative can answer (no data engine, unknown
+   * object).
+   *
+   * With it the compiler can settle at COMPILE time what #5033 could only
+   * report at QUERY time: a dataset whose join crosses datasources declares a
+   * statement no driver can execute, because the analytics engine lowers the
+   * whole dataset into ONE SQL statement on the base object's datasource.
+   *
+   * IMPORTANT — `'default'` is not an answer. In `ObjectQL.getDriver`'s
+   * resolution order an explicit `object.datasource` other than `'default'`
+   * wins outright (step 1); `'default'` is the schema's DEFAULT value and means
+   * only "no explicit binding", after which routing is decided by
+   * `datasourceMapping` rules, the ADR-0057 §3.6 lifecycle split, and the
+   * owning package's `defaultDatasource` — none of which are visible from here.
+   * The compiler therefore treats `'default'`/`undefined` as UNANSWERED. See
+   * {@link compileDataset}.
+   */
+  getObjectDatasource?: (objectName: string) => string | undefined;
+  /**
+   * ADR-0062 D6 — is `objectName` federated (bound to an external datasource)?
+   *
+   * A federated participant is EXEMPT from the cross-datasource rejection:
+   * `NativeSQLStrategy.canHandle` already declines a cube whose base or joined
+   * object is external, so such a dataset is served by the ObjectQL FK-expand
+   * path (two reads, joined in memory) — which crosses datasources by
+   * construction. Rejecting it here would break a path that works today.
+   */
+  isExternalObject?: (objectName: string) => boolean;
+}
+
 /** Map a dataset measure's aggregate to the Cube metric `type`. */
 function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
   // Only reached for non-derived measures, where the spec refinement guarantees
@@ -137,8 +177,70 @@ const joinAlias = (path: string): string => path.replace(/\./g, '__');
 export function compileDataset(
   dataset: Dataset,
   resolver?: RelationshipResolver,
+  options?: DatasetCompileOptions,
 ): CompiledDataset {
   const include = dataset.include ?? [];
+
+  // ── #5115 — cross-datasource joins are rejected HERE, at compile time ──────
+  //
+  // A dataset lowers to ONE SQL statement executed on the base object's
+  // datasource (`plugin.ts` routes raw SQL by object since #5033). So a join
+  // whose target lives on a DIFFERENT datasource is not a query that sometimes
+  // fails — it is metadata that can never execute, and the question "which
+  // datasource is each participant bound to" is fully answerable the moment the
+  // dataset is compiled. #5033 made that failure loud at QUERY time (in front of
+  // whoever opened the dashboard); this gate moves the same verdict to
+  // registration, where the AUTHOR is still holding the metadata.
+  //
+  // Tiering — "cannot answer, do not block": no probe, no answer for the base
+  // object, or no answer for a target ⇒ compile as before and let #5033's
+  // query-time defence report it. A false ALLOW costs a loud runtime error that
+  // already exists; a false REJECT would blank a working dashboard on upgrade,
+  // so this gate fires ONLY on a conflict the metadata itself proves.
+  //
+  // What counts as an ANSWER (deliberately narrow): an EXPLICIT, non-`'default'`
+  // `object.datasource`. That is step 1 of `ObjectQL.getDriver`'s resolution
+  // order and it wins outright, so two objects declaring two different names are
+  // provably in two databases. `'default'` is the schema's default VALUE, not a
+  // routing decision: an object that leaves it alone is still routed by
+  // `datasourceMapping` rules, by the ADR-0057 §3.6 lifecycle split
+  // (audit/telemetry/event → the `telemetry` datasource), or by its package's
+  // `defaultDatasource` — rules this compiler cannot see. Treating `'default'`
+  // as "the primary DB" would reject a dataset whose two objects a mapping rule
+  // in fact lands on the SAME datasource, and would make the verdict depend on
+  // whether the object happened to be Zod-parsed (which materializes the
+  // default) — so `'default'` is read as UNANSWERED.
+  const declaredDatasource = (objectName: string): string | undefined => {
+    const declared = options?.getObjectDatasource?.(objectName);
+    return declared && declared.toLowerCase() !== 'default' ? declared : undefined;
+  };
+  const isExternal = (objectName: string): boolean =>
+    options?.isExternalObject?.(objectName) ?? false;
+  const baseDatasource = declaredDatasource(dataset.object);
+  // Datasource ids are compared case-insensitively: an id differing only in case
+  // is not evidence of two different databases, and an uncertain answer must
+  // not reject.
+  const sameDatasource = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const baseIsFederated = isExternal(dataset.object);
+  const assertSameDatasource = (targetObject: string, path: string): void => {
+    // Judgeable only when the BASE side is placed and non-federated; it is the
+    // side every comparison is made against, so an unplaceable base means no
+    // join can be judged (never reject every join for want of the base).
+    if (!baseDatasource || baseIsFederated) return;
+    if (isExternal(targetObject)) return; // served by the FK-expand path, not by one statement
+    const targetDatasource = declaredDatasource(targetObject);
+    if (!targetDatasource) return; // cannot answer for this target
+    if (sameDatasource(targetDatasource, baseDatasource)) return;
+    throw new Error(
+      `[dataset-compiler] dataset "${dataset.name}" declares a JOIN that crosses datasources: ` +
+      `its base object "${dataset.object}" is on datasource "${baseDatasource}", but the joined ` +
+      `object "${targetObject}" — reached via the \`include\` path "${path}" — is on datasource ` +
+      `"${targetDatasource}". A dataset JOIN cannot cross datasources: the whole dataset is ` +
+      `executed as ONE statement on the base object's datasource, so "${targetObject}" is simply ` +
+      `not there. Fix it by binding both objects to the same datasource, or by dropping "${path}" ` +
+      `from the dataset's \`include\` (and every dimension/measure that references it).`,
+    );
+  };
 
   // Resolve each declared relationship PATH into its ordered join chain, emitting
   // one Cube join per PATH PREFIX (ADR-0071 multi-hop, to-one only). The join
@@ -174,6 +276,9 @@ export function compileDataset(
     for (const seg of segments) {
       prefix = prefix ? `${prefix}.${seg}` : seg;
       const target = resolveHop(fromObject, seg);
+      // #5115 — every hop is a join target in the single statement, so each one
+      // (not just the last segment of a path) must sit on the base datasource.
+      assertSameDatasource(target.object, prefix);
       const alias = joinAlias(prefix);
       if (!joins[alias]) {
         // KEY is the SQL-safe alias; `name` carries the join TABLE; the strategy
