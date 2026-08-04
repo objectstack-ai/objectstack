@@ -87,7 +87,13 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
     rule: 'expression-invalid',
     blindTo: ['lint'],
     stack: withBaseline({
-      objects: [{ name: 'parity_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'Score' } }, validations: [{ name: 'r', expression: 'lead_score > 100' }] }],
+      // The planted defect is the BARE `lead_score` (a record-scoped predicate
+      // binds fields under `record`, so this silently evaluates to null) — not
+      // the key it is written under. Spelled `condition`, which is the only key
+      // `validation.zod.ts` declares: `expression` is one of the four names it
+      // rejects outright, so a fixture using it planted TWO defects and let the
+      // rule under test read a stack `os validate` would never accept (#5017).
+      objects: [{ name: 'parity_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'Score' } }, validations: [{ type: 'script', name: 'r', message: 'Score out of range', condition: 'lead_score > 100' }] }],
     }),
   },
   {
