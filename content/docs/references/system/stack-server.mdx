@@ -9,9 +9,9 @@ description: Stack Server protocol schemas
 
 ## Why this is NOT `HttpServerConfigSchema`
 
-`[system/http-server.zod.ts](/docs/references/system/http-server)` declares nine keys (`port`, `host`, `cors`,
+`[system/http-server.zod.ts](/docs/references/system/http-server)` used to declare nine keys (`port`, `host`,
 
-`requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
+`cors`, `requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
 
 `trustProxy`). #4938 measured them: **none had a runtime reader and none was
 
@@ -37,11 +37,29 @@ consumer. Today that is exactly two:
 
 | `trustProxy` | the same limiter's IP resolution — see below |
 
-The other seven `HttpServerConfigSchema` keys stay unreachable, and their
+The other seven `HttpServerConfigSchema` keys were RETIRED with the shape
 
-enforce-or-remove fate is tracked by #4938. Adding one here without an
+that carried them (#4938, ADR-0049 enforce-or-remove): unreachable *and*
 
-executor re-opens the hole this narrowness exists to close.
+unread, they were the cleanest remove candidate in the ledger, and their
+
+prescriptions now live in the `guidance` maps below — the only place an
+
+author can write a server key is also the only place that has to answer for
+
+one. Adding one here without an executor re-opens the hole this narrowness
+
+exists to close.
+
+`cors` is the registered exception-in-waiting: the 2026-08-04 ruling named it
+
+the FIRST per-key admission candidate for this shape, because embedding
+
+(`example-embed-objectql`) is a real scenario with real pull. When that work
+
+is scheduled it arrives the #4910 way — key and executor in one change — not
+
+by un-retiring a declaration.
 
 ## What `server:` is NOT for
 

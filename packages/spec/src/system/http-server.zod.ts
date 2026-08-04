@@ -1,14 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { HttpMethod, CorsConfigSchema, RateLimitConfigSchema, StaticMountSchema } from '../shared/http.zod';
+import { HttpMethod } from '../shared/http.zod';
+import { lazySchema } from '../shared/lazy-schema';
 
 /**
  * HTTP Server Protocol
- * 
- * Defines the runtime HTTP server configuration and capabilities.
- * Provides abstractions for HTTP server implementations (Express, Fastify, Hono, etc.)
- * 
+ *
+ * Route-registration metadata, middleware declaration and the server-side lifecycle/status vocabulary for HTTP server implementations (Express, Fastify, Hono, etc.)
+ *
  * Architecture alignment:
  * - Kubernetes: Service and Ingress resources
  * - AWS: API Gateway configuration
@@ -16,74 +16,58 @@ import { HttpMethod, CorsConfigSchema, RateLimitConfigSchema, StaticMountSchema 
  */
 
 // ==========================================
-// Server Configuration
+// Server Configuration — RETIRED
 // ==========================================
 
-/**
- * HTTP Server Configuration Schema
- * Core configuration for HTTP server instances
- * 
- * @example
- * {
- *   "port": 3000,
- *   "host": "0.0.0.0",
- *   "cors": {
- *     "enabled": true,
- *     "origins": ["http://localhost:3000"]
- *   },
- *   "compression": true,
- *   "requestTimeout": 30000
- * }
- */
-import { lazySchema } from '../shared/lazy-schema';
-export const HttpServerConfigSchema = lazySchema(() => z.object({
-  /**
-   * Server port number
-   */
-  port: z.number().int().min(1).max(65535).default(3000).describe('Port number to listen on'),
-  
-  /**
-   * Server host address
-   */
-  host: z.string().default('0.0.0.0').describe('Host address to bind to'),
-  
-  /**
-   * CORS configuration
-   */
-  cors: CorsConfigSchema.optional().describe('CORS configuration'),
-  
-  /**
-   * Request handling options
-   */
-  requestTimeout: z.number().int().default(30000).describe('Request timeout in milliseconds'),
-  bodyLimit: z.string().default('10mb').describe('Maximum request body size'),
-  
-  /**
-   * Compression settings
-   */
-  compression: z.boolean().default(true).describe('Enable response compression'),
-  
-  /**
-   * Security headers
-   */
-  security: z.object({
-    helmet: z.boolean().default(true).describe('Enable security headers via helmet'),
-    rateLimit: RateLimitConfigSchema.optional().describe('Global rate limiting configuration'),
-  }).optional().describe('Security configuration'),
-  
-  /**
-   * Static file serving
-   */
-  static: z.array(StaticMountSchema).optional().describe('Static file serving configuration'),
-  
-  /**
-   * Trust proxy settings
-   */
-  trustProxy: z.boolean().default(false).describe('Trust X-Forwarded-* headers'),
-}));
-
-export type HttpServerConfig = z.infer<typeof HttpServerConfigSchema>;
-export type HttpServerConfigInput = z.input<typeof HttpServerConfigSchema>;
+// `HttpServerConfigSchema` / `HttpServerConfig` / `HttpServerConfigInput` and
+// the `HttpServerConfig.create()` helper were REMOVED per ADR-0049
+// enforce-or-remove (#4938). The shape declared nine keys — `port`, `host`,
+// `cors`, `requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
+// `trustProxy` — and it was doubly inert:
+//
+//   1. ZERO runtime readers. No package in any repo (objectstack / cloud /
+//      objectui) ever parsed a document with this schema or read a key off it;
+//      the only non-spec mentions were "Used by:" comments in
+//      `shared/http.zod.ts` pointing back at it.
+//   2. ZERO authoring entry — the condition that made this worse than the
+//      ordinary declared-but-unread defect. `stack.zod.ts` had no `server:`
+//      key, `config-schema.json` had no `HttpServerConfig`, and no settings
+//      manifest carried it, so the configuration `authorable-surface.json`
+//      listed and `content/docs/references/` rendered could not even be
+//      WRITTEN DOWN, let alone take effect.
+//
+// What actually decides these things, and where to configure each:
+//
+// | retired key | the live mechanism |
+// |---|---|
+// | `port` / `host` | the deployment, not the stack — `objectstack serve -p <port>` / `PORT` |
+// | `static` | the transport plugin's `staticMounts` |
+// | `cors` | the transport adapter — `OS_CORS_ORIGIN` / `OS_CORS_CREDENTIALS` / `OS_CORS_MAX_AGE` |
+// | `security.helmet` | the dispatcher plugin's `securityHeaders` (on by default) |
+// | `security.rateLimit` | `defineStack({ server: { security: { rateLimit } } })` — LIVE since #5006 |
+// | `trustProxy` | `defineStack({ server: { trustProxy } })` — LIVE since #5006 |
+// | `requestTimeout` / `bodyLimit` / `compression` | nothing. No seam consumes them; they return with an executor or not at all |
+//
+// Two of the nine were ACTIVATED rather than lost: #5006 mounted
+// `security.rateLimit` and `trustProxy` on the deliberately narrow
+// `StackServerConfigSchema` (`system/stack-server.zod.ts`), which is the one
+// authoring surface for server-level configuration and grows one key at a time,
+// each arriving with its consumer. That schema is `strictObject`, so the other
+// seven keys are rejected BY NAME there with a per-key prescription — which is
+// why this removal needs no `retiredKey()` tombstone: a tombstone is a message
+// to whoever writes the key, and the only place anyone can write it already
+// answers. Route 3 of the retirement playbook ("nothing parses it → neither"),
+// the same shape #4834 / PR #4878 used for the kernel plugin-runtime family.
+//
+// `cors` is the one key with real business pull (`example-embed-objectql`
+// proves embedding is a live scenario), and the 2026-08-04 ruling registered it
+// as the FIRST per-key admission candidate into `server:` — to be admitted the
+// #4910 way, WITH its executor, when the embedding work is scheduled. It is
+// deliberately not parked on the export surface as a dead key in the meantime.
+//
+// `CorsConfigSchema`, `RateLimitConfigSchema` and `StaticMountSchema` stay in
+// `shared/http.zod.ts`: each has other live consumers (`api/router.zod.ts`,
+// `api/endpoint.zod.ts`, `system/stack-server.zod.ts`).
 
 // ==========================================
 // Route Registration
@@ -352,12 +336,9 @@ export type ServerStatus = z.infer<typeof ServerStatusSchema>;
 // Helper Functions
 // ==========================================
 
-/**
- * Helper to create HTTP server configuration
- */
-export const HttpServerConfig = Object.assign(HttpServerConfigSchema, {
-  create: <T extends z.input<typeof HttpServerConfigSchema>>(config: T) => config,
-});
+// The `HttpServerConfig` helper (`Object.assign(HttpServerConfigSchema, {
+// create })`) went with the schema it wrapped — see the retirement note at the
+// top of this file (#4938).
 
 /**
  * Helper to create middleware configuration
