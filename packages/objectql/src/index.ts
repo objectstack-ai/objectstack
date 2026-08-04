@@ -148,6 +148,9 @@ export type {
   LifecycleSettingsLike,
   LifecycleGovernanceAlert,
   LifecycleReapGuard,
+  // [#5195] Consumer-declared floors on settings-driven window overrides.
+  LifecycleRetentionFloor,
+  LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';

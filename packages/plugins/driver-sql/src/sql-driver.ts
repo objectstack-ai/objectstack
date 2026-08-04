@@ -8,7 +8,7 @@
  */
 
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, isGlobalUnique, isUniqueDeclared, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
@@ -30,10 +30,15 @@ import {
   driftKey,
   expectedIndexes,
   fieldHasColumn,
+  GLOBAL_TENANT,
   isIndexDriftOp,
+  isUniqueScopeDeclared,
   legacyUniqueReplacements,
+  normalizeDeclaredIndex,
+  organizationKeyPartSql,
   parseIndexDdl,
   uniqueIndexesFromFields,
+  type DeclaredIndexInput,
   type ManagedDriftEntry,
   type DriftOp,
   type PhysicalIndex,
@@ -97,12 +102,13 @@ function lastIdentifierSegment(raw: string): string {
  */
 const SEQUENCES_TABLE = '_objectstack_sequences';
 
-/**
- * Sentinel tenant_id used when an object has no tenant field (org-less
- * objects like Setup-side singletons). Keeps the (object, tenant, field)
- * primary key non-null.
- */
-const GLOBAL_TENANT = '__global__';
+// GLOBAL_TENANT ('__global__') — the sentinel for the NULL-organization
+// ("platform") bucket — is defined ONCE in schema-drift.ts and imported here:
+// since ADR-0120 D3 it names the same bucket in two subsystems (the autonumber
+// sequence table's tenant key, and the COALESCE organization key part of every
+// organization-scoped unique index), and #3696's root lesson was two
+// subsystems naming one concept differently. Storage stays NULL — see the
+// definition site.
 
 /**
  * Field types whose value is an array or object and must be stored as a JSON
@@ -461,6 +467,293 @@ function unsupportedFilterError(message: string): Error {
   return err;
 }
 
+/**
+ * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
+ * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
+ * `data/filter.zod.ts`), else `null`.
+ *
+ * The predicate deliberately mirrors `@objectstack/formula`'s `resolveValue`
+ * (`matches-filter.ts`): an object, not an array, carrying a `$field` key. The
+ * two execution paths must agree on **what a field reference is**; they differ
+ * only in what they DO with one — the in-memory evaluator resolves it against
+ * the record, this driver refuses it (below). A driver that recognised a
+ * narrower shape than the evaluator would silently bind the remainder as
+ * literal values again, which is precisely the defect being closed.
+ */
+function fieldReferenceOf(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const ref = (value as Record<string, unknown>).$field;
+  return typeof ref === 'string' ? ref : null;
+}
+
+/**
+ * [#5041] `{ $field }` reached a comparison this driver compiles to SQL.
+ *
+ * `FieldReferenceSchema` is declared in the spec and really is PRODUCED —
+ * `compileCelToFilter` emits `{ $field: path }` for a field-to-field comparison
+ * in a CEL permission/RLS rule — but the only implementation in the repo is the
+ * in-memory evaluator. Pushed down to SQL, the reference object was handed to
+ * Knex as a BIND VALUE, so sqlite answered with a bare `TypeError` ("can only
+ * bind numbers, strings, bigints, buffers, and null") carrying no `code` and no
+ * `status` — outside the ADR-0112 envelope every sibling filter refusal in this
+ * driver speaks, and therefore served as an opaque 500-shaped body.
+ *
+ * Refusing loudly is the whole fix here (maintainer adjudication on #5041):
+ * column-to-column compilation is a capability tracked separately, and until it
+ * lands the honest answer to "this filter cannot run on this backend" is the
+ * catalogued `INVALID_FILTER`, not a crash and not a silent wrong answer.
+ */
+function crossFieldComparisonError(field: string, op: string, ref: string, index?: number): Error {
+  const position = index === undefined ? '' : ` at index ${index} of its value list`;
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" compares against another field ` +
+      `({ "$field": "${ref}" })${position}. Cross-field comparison is currently supported ` +
+      `only on the in-memory evaluation path (matchesFilter); it cannot be compiled to SQL, ` +
+      `so this filter cannot be pushed down to the database. Compare against a literal value ` +
+      `instead, or evaluate the rule in memory.`,
+  );
+}
+
+/**
+ * [#5041] Operators whose comparand is a single bound VALUE, in both spellings
+ * this driver accepts — the Filter Protocol `$`-form read by
+ * {@link SqlDriver.applyFilterCondition} and the canonicalised infix form read
+ * by {@link SqlDriver.applyAstComparison}.
+ *
+ * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
+ * ABSENT: an array is their legitimate comparand, and they compile through
+ * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected
+ * (for `$field`), never their arity — the existing descriptive `$between`
+ * refusal stays the one that answers a malformed range.
+ */
+const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+  '=', '==', '!=', '<>', '>', '>=', '<', '<=', 'like', 'ilike',
+]);
+
+/**
+ * Can this value be handed to a driver as a bound parameter at all?
+ *
+ * Same classification the write path applies in `formatInput` — anything that
+ * is not a primitive, a `Date` or a binary buffer is a shape better-sqlite3
+ * refuses outright and the other dialects mangle. (`ArrayBuffer.isView` covers
+ * `Buffer`, which is a `Uint8Array`.)
+ */
+function isBindableComparand(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  const kind = typeof value;
+  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+  return value instanceof Date || ArrayBuffer.isView(value);
+}
+
+/**
+ * [#5041] The one gate every comparison comparand passes before it becomes a
+ * bind parameter, covering both halves of the gap the issue measured:
+ *
+ * 1. **`{ $field }`** — declared, produced, and implemented only in memory.
+ *    Refused wherever it appears, including inside an `$in` / `$nin` / `$between`
+ *    list. The list case matters more than it looks: a `$field` member did not
+ *    even crash — the query compiled, ran, and returned ZERO ROWS. A silent
+ *    wrong answer is what #3948 / #4209 settled is strictly worse than an error
+ *    on a permission-scoped read.
+ *
+ * 2. **The general arm** — a known operator whose comparand is a shape no
+ *    dialect can bind (a plain object, an array where one value belongs). The
+ *    issue noted this branch had no rejection arm at all; measured, every such
+ *    shape produced the same bare `TypeError`. Scoped to
+ *    {@link SCALAR_COMPARAND_OPERATORS} so the legitimate array binds keep
+ *    working untouched.
+ *
+ * Deliberately NOT extended to two neighbouring shapes, both of which return
+ * zero rows today rather than failing to bind: a non-`$field` object MEMBER of
+ * an `$in`/`$nin` list, and the `LIKE` family (`$contains`/`$startsWith`/…),
+ * which stringifies its comparand to `[object Object]`. Those are a different
+ * defect class — a filter applied nonsensically, not one that cannot be applied
+ * — and their direction is fail-closed (they narrow the result set, so they are
+ * not a filter bypass). Widening this guard to cover them would change the
+ * behaviour of paths that do not throw today, beyond what #5041 measured; see
+ * the #5041 PR discussion for the measurement.
+ */
+function assertCompilableComparand(field: string, op: string, value: unknown): void {
+  const ref = fieldReferenceOf(value);
+  if (ref !== null) throw crossFieldComparisonError(field, op, ref);
+
+  if (Array.isArray(value)) {
+    for (const [index, member] of value.entries()) {
+      const memberRef = fieldReferenceOf(member);
+      if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, index);
+    }
+    // An array IS the comparand for the list operators; only a scalar operator
+    // is wrong to receive one, and that falls through to the check below.
+  }
+
+  if (!SCALAR_COMPARAND_OPERATORS.has(op) || isBindableComparand(value)) return;
+
+  throw unsupportedFilterError(
+    `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
+      `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
+      `bound as a SQL parameter. Use a string, number, boolean, null, Date or binary value; ` +
+      `for a list use $in/$nin, and for a range use $between.`,
+  );
+}
+
+/** A short, non-throwing rendering of an offending comparand for the message. */
+function safeShapePreview(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== 'string') return typeof value;
+    return json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    return typeof value;
+  }
+}
+
+/**
+ * [#5134] What a filter node is worth as a boolean, before any SQL is emitted.
+ *
+ * - `'true'`  — matches every row; the compiler emits NO clause for it.
+ * - `'false'` — matches no row; the compiler emits the dialect FALSE constant.
+ * - `'clause'` — carries at least one real predicate; compile it normally.
+ */
+type FilterVerdict = 'true' | 'false' | 'clause';
+
+/**
+ * [#5134] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
+ * declares for every element of `$and`/`$or` and for the operand of `$not`?
+ *
+ * The prototype check is the load-bearing half, not pedantry. The identity
+ * reduction below turns "this node has no predicates" into "matches every row",
+ * so any object whose OWN ENUMERABLE KEYS are empty is read as TRUE. A `Date`,
+ * a `RegExp`, a `Map` or a class instance all satisfy `typeof x === 'object' &&
+ * !Array.isArray(x)` while enumerating to nothing — accepting them would
+ * PROMOTE garbage from "silently ignored" (the old bug) to "matches all rows"
+ * (strictly worse). A filter condition always arrives as JSON or as the output
+ * of `compileCelToFilter`, i.e. a plain object, so requiring one costs nothing
+ * real and makes the reduction total.
+ */
+function isFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** A short type name for an operand the filter compiler refuses. */
+function describeFilterOperand(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  const kind = typeof value;
+  if (kind !== 'object') return kind;
+  const ctor = (value as { constructor?: { name?: string } }).constructor;
+  return ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+}
+
+/**
+ * [#5134] The gate that gives "this group compiled to empty" exactly ONE cause.
+ *
+ * Identity reduction is only sound once an empty compile can mean "the author
+ * wrote an empty group" and nothing else. Before this gate, `$or: [null]`,
+ * `$or: ['x']`, `$or: [[…]]` and `$or: [new Date()]` also produced no clause and
+ * vanished without a trace; reducing on top of that would have turned each of
+ * them into "matches every row". Refusing them here — loudly, in the ADR-0112
+ * envelope every sibling filter refusal in this driver speaks — is what makes
+ * the reduction safe. Same discipline as cloud#1073 on Turso's
+ * `RemoteTransport.buildWhereSQL`.
+ */
+function assertFilterNode(value: unknown, path: string): asserts value is Record<string, unknown> {
+  if (isFilterNode(value)) return;
+  throw unsupportedFilterError(
+    `Filter node at ${path} is a ${describeFilterOperand(value)} (${safeShapePreview(value)}), not a filter ` +
+      `condition object. Every element of "$and"/"$or" and the operand of "$not" must be a plain object of ` +
+      `field constraints (e.g. { "status": "active" }) or nested combinators — @objectstack/spec ` +
+      `FilterConditionSchema declares this position as a FilterCondition. It is refused rather than skipped ` +
+      `because skipping it would silently change which rows match.`,
+  );
+}
+
+/** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
+function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
+  if (Array.isArray(value)) return;
+  throw unsupportedFilterError(
+    `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a ` +
+      `${describeFilterOperand(value)} (${safeShapePreview(value)}). @objectstack/spec FilterConditionSchema ` +
+      `declares "${key}" as FilterCondition[].`,
+  );
+}
+
+/**
+ * [#5134] Reduce one filter node to its boolean verdict, validating shapes on
+ * the way down.
+ *
+ * A node is the AND of its entries, so FALSE dominates, and a node with no
+ * entries at all is TRUE (the empty conjunction) — which is why `{}` is a TRUE
+ * disjunct inside `$or` and why `{ $not: {} }` is FALSE.
+ *
+ * This walks the WHOLE tree without short-circuiting: a `$or: []` sibling must
+ * not stop the walk from reaching — and refusing — a malformed node further
+ * along, or the shape gate would be conditional on evaluation order.
+ *
+ * Deciding structurally, rather than by compiling and then asking Knex whether
+ * anything came out, is deliberate. The old defect WAS an observation of
+ * emptiness ("the group callback added nothing"), and an observation cannot tell
+ * "empty because the author wrote nothing" from "empty because something failed
+ * to compile". A structural verdict has no such blind spot, and it lets the
+ * emitter guarantee that every group it opens receives at least one clause.
+ */
+function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
+  let sawFalse = false;
+  let sawClause = false;
+  for (const [key, value] of Object.entries(node)) {
+    const verdict = reduceFilterKey(key, value, path);
+    if (verdict === 'false') sawFalse = true;
+    else if (verdict === 'clause') sawClause = true;
+  }
+  // AND over the node's keys: FALSE dominates, then a real predicate, else TRUE.
+  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+}
+
+/** [#5134] The verdict of ONE key of a filter node. */
+function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
+  const here = path ? `${path}.${key}` : key;
+
+  if (key === '$and' || key === '$or') {
+    assertFilterNodeList(value, key, here);
+    let sawTrue = false;
+    let sawFalse = false;
+    let sawClause = false;
+    value.forEach((element, index) => {
+      const elementPath = `${here}[${index}]`;
+      assertFilterNode(element, elementPath);
+      const verdict = reduceFilterNode(element, elementPath);
+      if (verdict === 'true') sawTrue = true;
+      else if (verdict === 'false') sawFalse = true;
+      else sawClause = true;
+    });
+    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
+    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). This is the
+    // half the old compile got backwards: it answered the whole table.
+    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
+  }
+
+  if (key === '$not') {
+    assertFilterNode(value, here);
+    const inner = reduceFilterNode(value, here);
+    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
+    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
+  }
+
+  // A field key always contributes a predicate. Note this stays `'clause'` even
+  // for `{ field: {} }` (a field constrained by zero operators), which compiles
+  // to no SQL today. That shape is a SEPARATE divergence tracked in #5240 —
+  // `matchesFilter` and `driver-memory` both answer FALSE for it, this driver's
+  // combinator path answers TRUE, and its own top-level `applyFilters` path
+  // refuses it outright via `assertCompilableComparand` — and picking the winner
+  // is a semantic ruling, not this change's call. Classifying it as `'clause'`
+  // rather than `'true'` is precisely what keeps the identity reduction from
+  // silently ruling on it: the shape compiles exactly as it did before.
+  return 'clause';
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -707,8 +1000,16 @@ export class SqlDriver implements IDataDriver {
   protected logger: {
     warn: (msg: string, meta?: any) => void;
     info?: (msg: string, meta?: any) => void;
+    /**
+     * Durability-degradation channel (see AGENTS.md §Degradation log levels):
+     * used when a constraint the metadata claims is enforced is NOT — e.g. a
+     * NULL-safe unique that could not be (re)built (ADR-0120 D4). Falls back
+     * to `warn` when the injected sink has no `error`.
+     */
+    error?: (msg: string, meta?: any) => void;
   } = {
     warn: (msg, meta) => console.warn(msg, meta ?? ''),
+    error: (msg, meta) => console.error(msg, meta ?? ''),
   };
 
   /** Whether the underlying database is a SQLite variant (sqlite3 or better-sqlite3). */
@@ -2719,7 +3020,7 @@ export class SqlDriver implements IDataDriver {
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
    * branch of {@link initObjects}, scoped to a shard). */
-  protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any> }): Promise<void> {
+  protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     const exists = await this.knex.schema.hasTable(shardName);
     if (!exists) {
@@ -2754,7 +3055,11 @@ export class SqlDriver implements IDataDriver {
         ...idx,
         name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
       }));
-      await this.syncDeclaredIndexes(shardName, perShard, new Set(Object.keys(colInfo)));
+      // Shard bookkeeping is aliased AFTER this method runs, so resolve the
+      // tenant column from the object schema itself — a declared
+      // `unique: 'organization'` index (ADR-0120 D1) must scope identically on
+      // every shard of the base table.
+      await this.syncDeclaredIndexes(shardName, perShard, new Set(Object.keys(colInfo)), this.computeTenantField(obj));
     }
   }
 
@@ -3106,7 +3411,7 @@ export class SqlDriver implements IDataDriver {
       // needs the tenant column to already be there.
       const declaredIndexes = (obj as any).indexes;
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
-        isUniqueDeclared(f?.unique),
+        isUniqueScopeDeclared(f?.unique),
       );
       if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
         const colInfo = await this.knex(tableName).columnInfo();
@@ -3738,7 +4043,7 @@ export class SqlDriver implements IDataDriver {
     physicalColumns: Set<string>,
   ): Promise<ManagedDriftEntry[]> {
     const tenantField = this.resolveTenantField(tableName);
-    return diffManagedIndexes({
+    const entries = diffManagedIndexes({
       table: tableName,
       expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
       // `declaredIndexes` goes to BOTH: it is what the table should have, and
@@ -3748,7 +4053,118 @@ export class SqlDriver implements IDataDriver {
       // Indexes the framework built through raw DDL on this boot are its own to
       // manage — never this differ's to propose dropping (#4884).
       runtimeCreated: this.runtimeCreatedIndexes.get(tableName),
+      // Lets the differ recognise the NULL-safe organization key part as the
+      // sync's own vocabulary (ADR-0120 D3).
+      tenantField,
     });
+    // ADR-0120 D4: the duplicate pre-flight probe decides each NULL-safe
+    // unique op's fate — clean data upgrades the pure tightening to `safe`
+    // (dev autoMigrate may apply it); duplicates block the op with a row
+    // report. Data-dependent, so it runs HERE, not in the pure differ.
+    await this.applyNullSafeUniquePreflight(entries);
+    return entries;
+  }
+
+  /**
+   * ADR-0120 D4 — duplicate pre-flight for NULL-safe organization uniques.
+   *
+   * Probes every index op that would CREATE a unique index whose organization
+   * key part is the NULL-safe COALESCE form, by grouping over that exact key:
+   *
+   *   - `recreate_index` marked `tightenNullSafeOnly` (the bare composite
+   *     tightening into its COALESCE form — same identities, physical fully
+   *     plain): a clean probe recategorises it `safe`, so dev
+   *     `autoMigrate: 'safe'` and a plain `os migrate apply` may apply it; a
+   *     dirty probe keeps it blocked (`destructive` + a re-probe refusal in
+   *     {@link applyIndexDriftOp}) and reports the offending rows.
+   *   - `create_index` for a unique NULL-safe index: a dirty probe demotes the
+   *     default `safe` to blocked with the same row report — the CREATE could
+   *     only fail at apply time otherwise, with a raw driver error naming no
+   *     rows.
+   *
+   * `replace_unique_index` is deliberately NOT probed: the legacy index it
+   * retires is a platform-wide unique, strictly stronger than the NULL-safe
+   * composite, so duplicates in the new key are impossible by construction.
+   */
+  protected async applyNullSafeUniquePreflight(entries: ManagedDriftEntry[]): Promise<void> {
+    for (const d of entries) {
+      const op = d.op;
+      if (op.type !== 'recreate_index' && op.type !== 'create_index') continue;
+      if (!op.unique || !op.nullSafeColumns || op.nullSafeColumns.length === 0) continue;
+      const tighten = op.type === 'recreate_index' && op.tightenNullSafeOnly === true;
+      // A generic unique recreate (columns differ beyond the key-part form)
+      // keeps its pre-ADR-0120 semantics untouched.
+      if (op.type === 'recreate_index' && !tighten) continue;
+
+      let duplicates: Array<{ key: string; rows: number }>;
+      try {
+        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, op.nullSafeColumns);
+      } catch (e: any) {
+        // Probe failure must fail SAFE: without evidence the data is clean the
+        // op may not claim eligibility for auto-apply.
+        this.logger.warn(
+          `[schema-drift] duplicate pre-flight for '${op.indexName}' on '${op.table}' failed — leaving the op gated`,
+          e?.message ?? e,
+        );
+        continue;
+      }
+
+      const signature = d.expected;
+      if (duplicates.length === 0) {
+        if (tighten) {
+          d.category = 'safe';
+          d.severity = 'warning';
+          d.message =
+            `${op.table}: index '${op.indexName}' tightens to ${signature} — the organization key part becomes ` +
+            `NULL-safe (ADR-0120 D3), so rows without an organization are constrained too. The duplicate ` +
+            `pre-flight probe found no conflicting rows: pure tightening, applied by "os migrate apply" ` +
+            `(auto-applied at boot under dev autoMigrate: 'safe').`;
+        }
+        continue;
+      }
+
+      const report = duplicates
+        .slice(0, 5)
+        .map((g) => `(${g.key}) × ${g.rows} rows`)
+        .join('; ');
+      const more = duplicates.length > 5 ? `; …and ${duplicates.length - 5} more group(s)` : '';
+      d.category = 'destructive';
+      d.severity = 'error';
+      d.message =
+        `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
+        `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
+        `${report}${more}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
+        `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`;
+    }
+  }
+
+  /**
+   * Find duplicate groups under a NULL-safe organization unique key: GROUP BY
+   * the exact key the index will enforce — `COALESCE(<org>, '__global__')` for
+   * the NULL-safe parts, the bare column otherwise — HAVING COUNT(*) > 1.
+   * Returns one entry per conflicting group, `key` naming columns and values.
+   */
+  protected async probeNullSafeUniqueDuplicates(
+    table: string,
+    columns: string[],
+    nullSafeColumns: string[],
+  ): Promise<Array<{ key: string; rows: number }>> {
+    const ns = new Set(nullSafeColumns);
+    const q = (id: string) => this.knex.ref(id).toQuery();
+    const parts = columns.map((c) =>
+      ns.has(c) ? `COALESCE(${q(c)}, '${GLOBAL_TENANT}')` : q(c),
+    );
+    const selectList = parts.map((p, i) => `${p} AS k${i}`).join(', ');
+    const groupList = parts.join(', ');
+    const sql =
+      `SELECT ${selectList}, COUNT(*) AS n FROM ${q(table)} ` +
+      `GROUP BY ${groupList} HAVING COUNT(*) > 1 ORDER BY n DESC LIMIT 20`;
+    const res: any = await this.knex.raw(sql);
+    const rows: any[] = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : (res?.rows ?? []);
+    return rows.map((r: any) => ({
+      key: columns.map((c, i) => `${c}=${JSON.stringify(r[`k${i}`])}`).join(', '),
+      rows: Number(r.n ?? r.N ?? 0),
+    }));
   }
 
   /**
@@ -3915,15 +4331,15 @@ export class SqlDriver implements IDataDriver {
    */
   protected async applyIndexDriftOp(op: DriftOp): Promise<boolean> {
     const physicalColumns = new Set(Object.keys(await this.knex(op.table).columnInfo()));
-    const ensure = (name: string, columns: string[], unique: boolean) =>
-      this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique }], physicalColumns);
+    const ensure = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
+      this.syncDeclaredIndexes(op.table, [{ name, fields: columns, unique, nullSafeColumns }], physicalColumns);
 
     switch (op.type) {
       case 'replace_unique_index': {
         // CREATE before DROP: the composite and the legacy index have different
         // names, so uniqueness is never unenforced in between. If the create
         // fails we have not dropped anything yet and the schema is untouched.
-        await ensure(op.createIndexName, op.createColumns, true);
+        await ensure(op.createIndexName, op.createColumns, true, op.nullSafeColumns);
         // …and only drop once the replacement is confirmed present. This is a
         // relaxation, not a removal: if `syncDeclaredIndexes` skipped the create
         // (a column it references is not materialized), dropping the legacy
@@ -3941,20 +4357,85 @@ export class SqlDriver implements IDataDriver {
         return true;
       }
       case 'create_index':
-        await ensure(op.indexName, op.columns, op.unique);
-        return true;
+        await ensure(op.indexName, op.columns, op.unique, op.nullSafeColumns);
+        // Honest applied-reporting: `syncDeclaredIndexes` degrades some
+        // failures (a NULL-safe unique over data that still violates it) into
+        // a loud log instead of a throw, so presence is the only proof.
+        return (await this.getExistingIndexNames(op.table)).has(op.indexName);
       case 'drop_index':
         return await this.dropIndexIfExists(op.table, op.indexName);
-      case 'recreate_index':
+      case 'recreate_index': {
         // Same name on both sides — the drop has to come first, and a UNIQUE
         // target can fail on existing duplicates. That is why this op is
         // categorised destructive when unique (see `diffManagedIndexes`).
+        //
+        // ADR-0120 D4: the NULL-safe tightening re-runs the duplicate
+        // pre-flight HERE, immediately before the drop — the plan-time probe
+        // may be stale, and at no point may a constraint be dropped without
+        // its replacement being creatable. Duplicates → refuse, old index
+        // untouched.
+        const nullSafe = op.unique && (op.nullSafeColumns?.length ?? 0) > 0;
+        if (nullSafe) {
+          const duplicates = await this.probeNullSafeUniqueDuplicates(
+            op.table,
+            op.columns,
+            op.nullSafeColumns!,
+          );
+          if (duplicates.length > 0) {
+            (this.logger.error ?? this.logger.warn)(
+              `[schema-drift] REFUSING to rebuild '${op.indexName}' on '${op.table}' as a NULL-safe unique — ` +
+                `${duplicates.length} duplicate group(s) violate it (e.g. ${duplicates[0].key} × ${duplicates[0].rows} rows). ` +
+                `The existing index is left in place; deduplicate and re-run "os migrate plan" (ADR-0120 D4).`,
+            );
+            return false;
+          }
+        }
         await this.dropIndexIfExists(op.table, op.indexName);
-        await ensure(op.indexName, op.columns, op.unique);
-        return true;
+        try {
+          await ensure(op.indexName, op.columns, op.unique, op.nullSafeColumns);
+        } catch (e) {
+          if (nullSafe) await this.restoreBareIndexAfterFailedTighten(op, e);
+          throw e;
+        }
+        const present = (await this.getExistingIndexNames(op.table)).has(op.indexName);
+        if (!present && nullSafe) await this.restoreBareIndexAfterFailedTighten(op, undefined);
+        return present;
+      }
       default:
         return false;
     }
+  }
+
+  /**
+   * Last-resort restore for the ADR-0120 D4 tightening: the old index is
+   * already dropped and the NULL-safe replacement could not be created (a
+   * write raced the probe, or the dialect refused the expression key). Put the
+   * previous BARE composite back under the same name so the constraint that
+   * existed before the attempt keeps existing — then say, at `error` level,
+   * exactly what is NOT enforced and how to fix it, because from the outside
+   * everything keeps looking normal (the durability-degradation rule).
+   */
+  protected async restoreBareIndexAfterFailedTighten(
+    op: Extract<DriftOp, { type: 'recreate_index' }>,
+    cause: unknown,
+  ): Promise<void> {
+    try {
+      await this.syncDeclaredIndexes(
+        op.table,
+        [{ name: op.indexName, fields: op.columns, unique: op.unique }],
+        new Set(Object.keys(await this.knex(op.table).columnInfo())),
+      );
+    } catch {
+      /* the error below reports the state either way */
+    }
+    const restored = (await this.getExistingIndexNames(op.table)).has(op.indexName);
+    (this.logger.error ?? this.logger.warn)(
+      `[schema-drift] could not create the NULL-safe unique '${op.indexName}' on '${op.table}' after dropping ` +
+        `the old index${restored ? ' — restored the previous bare composite' : ' — AND the restore failed, so the ' +
+        'constraint is currently NOT enforced'}. Rows without an organization are ${restored ? 'still ' : ''}not ` +
+        `constrained (#5030); re-run "os migrate plan" and apply the reported op (ADR-0120 D4).`,
+      (cause as any)?.message ?? cause,
+    );
   }
 
   /** Apply a single drift op in place (Postgres / MySQL). Returns false if unsupported. */
@@ -4269,11 +4750,12 @@ export class SqlDriver implements IDataDriver {
     tableName: string,
     fields: Record<string, any>,
     tenantField: string | null,
-  ): Array<{ name: string; fields: string[]; unique: true }> {
+  ): Array<{ name: string; fields: string[]; unique: true; nullSafeColumns?: string[] }> {
     return uniqueIndexesFromFields(tableName, fields, tenantField).map((i) => ({
       name: i.name,
       fields: i.columns,
       unique: true as const,
+      ...(i.nullSafeColumns ? { nullSafeColumns: i.nullSafeColumns } : {}),
     }));
   }
 
@@ -4341,65 +4823,83 @@ export class SqlDriver implements IDataDriver {
     const fromFields = this.uniqueIndexesFromFields(tableName, fields, tenantField);
     const declared = Array.isArray(declaredIndexes) ? declaredIndexes : [];
     if (fromFields.length === 0 && declared.length === 0) return;
-    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns);
+    // Pass the tenant column through rather than letting `syncDeclaredIndexes`
+    // re-resolve it: every caller of this method already holds the value the
+    // registration recorded, and a declared `unique: 'organization'` index
+    // (ADR-0120 D1) must scope against exactly that column.
+    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField);
   }
 
   /**
    * Materialize declared object-level indexes.
    *
    * - Multi-column and single-column indexes are both supported.
-   * - `unique: true` emits a UNIQUE index. NULL-distinct semantics are the
-   *   default across SQLite/Postgres/MySQL, so multiple NULL rows remain
+   * - `unique: true` / `'global'` emits a UNIQUE index over the column list
+   *   taken VERBATIM — no tenant column is injected. That verbatim behavior is
+   *   the `'global'` arm of the ADR-0120 D1 scope vocabulary (it was the only
+   *   arm before that ADR): a `'global'` declared index already names its
+   *   columns and is frequently platform-wide on purpose (a DNS hostname, a
+   *   reserved slug, an external provider id, every engine dedup key), so
+   *   rewriting it would break real constraints. NULL-distinct semantics are
+   *   the default across SQLite/Postgres/MySQL, so multiple NULL rows remain
    *   allowed while non-NULL duplicates are rejected — matching the
    *   convergence-on-conflict pattern the messaging pipeline relies on.
-   * - The column list is taken VERBATIM — no tenant column is injected here.
-   *   Field-level `unique` is tenancy-scoped upstream in
-   *   {@link uniqueIndexesFromFields}; a declared index already names its
-   *   columns and is frequently platform-wide on purpose (a DNS hostname, a
-   *   reserved slug, an external provider id), so guessing would break it.
+   * - `unique: 'organization'` (ADR-0120 D1/D3) prepends the table's tenant
+   *   column in its NULL-safe form — `COALESCE(tenantField, '__global__')` —
+   *   resolved here at registration, where tenancy is known; with no tenant
+   *   column it degrades to the listed columns (S11). Field-level `unique` is
+   *   scoped upstream in {@link uniqueIndexesFromFields} and arrives here
+   *   pre-resolved (`nullSafeColumns`). Both routes land on
+   *   {@link normalizeDeclaredIndex}, the differ's normalizer, so what the
+   *   sync CREATES and what the differ EXPECTS cannot drift apart.
    * - Idempotent: indexes already present (by deterministic name) are
    *   skipped, and an "already exists" race is absorbed.
    * - Indexes referencing a column that wasn't materialized (e.g. a virtual
    *   `formula` field) are skipped with a warning rather than failing sync.
+   * - A NULL-safe unique whose data already violates it (legacy duplicates the
+   *   void constraint admitted, #5030) is NOT created; the failure is logged
+   *   at `error` (a declared constraint is not enforced — the
+   *   durability-degradation rule) and surfaces as drift with a row report via
+   *   the ADR-0120 D4 pre-flight, instead of failing the whole boot.
    */
   protected async syncDeclaredIndexes(
     tableName: string,
-    indexes: Array<{ name?: string; fields?: string[]; unique?: boolean | 'global' }>,
+    indexes: DeclaredIndexInput[],
     physicalColumns: Set<string>,
+    tenantField?: string | null,
   ): Promise<void> {
     const existing = await this.getExistingIndexNames(tableName);
+    const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
 
     for (const idx of indexes) {
-      const fields = Array.isArray(idx?.fields)
-        ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
-        : [];
-      if (fields.length === 0) continue;
+      const norm = normalizeDeclaredIndex(tableName, idx, resolvedTenantField);
+      if (!norm) continue;
+      const { name, columns, unique } = norm;
+      const nullSafe = new Set(norm.nullSafeColumns ?? []);
 
-      const missing = fields.filter((f) => !physicalColumns.has(f));
+      const missing = columns.filter((f) => !physicalColumns.has(f));
       if (missing.length > 0) {
         this.logger.warn(
           `[sql-driver] skipping declared index on "${tableName}" — column(s) not materialized: ${missing.join(', ')}`,
-          { tableName, fields },
+          { tableName, fields: columns },
         );
         continue;
       }
 
-      const unique = isUniqueDeclared(idx.unique);
-      const name =
-        typeof idx.name === 'string' && idx.name.trim()
-          ? idx.name.trim()
-          : this.buildIndexName(tableName, fields, unique);
-
       if (existing.has(name)) continue;
 
       try {
-        await this.knex.schema.alterTable(tableName, (table) => {
-          if (unique) {
-            table.unique(fields, { indexName: name });
-          } else {
-            table.index(fields, name);
-          }
-        });
+        if (nullSafe.size > 0) {
+          await this.createNullSafeUniqueIndex(tableName, name, columns, nullSafe);
+        } else {
+          await this.knex.schema.alterTable(tableName, (table) => {
+            if (unique) {
+              table.unique(columns, { indexName: name });
+            } else {
+              table.index(columns, name);
+            }
+          });
+        }
         existing.add(name);
       } catch (e: any) {
         const msg = String(e?.message ?? e);
@@ -4407,8 +4907,68 @@ export class SqlDriver implements IDataDriver {
         // different name can race us here — both are benign for our intent
         // (the index exists). Anything else is a real failure.
         if (/already exists|duplicate key name|exists/i.test(msg)) continue;
+        if (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {
+          // Existing rows violate the NULL-safe unique — the #5030 defect made
+          // visible. Do not take the boot down: the declared constraint is not
+          // enforced yet, say so at `error` (from the outside everything looks
+          // normal), and let the D4 drift pre-flight report the exact rows.
+          (this.logger.error ?? this.logger.warn)(
+            `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
+              `violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint ` +
+              `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
+              `for the conflicting rows (ADR-0120 D4).`,
+            msg,
+          );
+          continue;
+        }
         throw e;
       }
+    }
+  }
+
+  /**
+   * Raw DDL for an organization-scoped unique index (ADR-0120 D3): knex's
+   * schema builder cannot express an expression key part, so the CREATE is
+   * spelled out. SQLite and Postgres take the function call as a key part
+   * directly; MySQL requires functional key parts to be parenthesized.
+   *
+   * On a MySQL that predates functional key parts (< 8.0.13) or MariaDB, the
+   * expression form is rejected — degrade to the BARE composite so non-NULL
+   * rows keep their constraint, and say at `error` level exactly what is not
+   * enforced (the NULL-organization bucket) and what fixes it. A silent bare
+   * fallback would re-open #5030 unnamed; failing the boot would brick every
+   * such deployment for every unique field. The drift differ keeps reporting
+   * the tightening for the day the server is upgraded.
+   */
+  protected async createNullSafeUniqueIndex(
+    tableName: string,
+    name: string,
+    columns: string[],
+    nullSafe: ReadonlySet<string>,
+  ): Promise<void> {
+    const q = (id: string) => this.knex.ref(id).toQuery();
+    const parts = columns.map((c) => {
+      if (!nullSafe.has(c)) return q(c);
+      const expr = `COALESCE(${q(c)}, '${GLOBAL_TENANT}')`;
+      return this.isMysql ? `(${expr})` : expr;
+    });
+    const sql = `CREATE UNIQUE INDEX ${q(name)} ON ${q(tableName)} (${parts.join(', ')})`;
+    try {
+      await this.knex.raw(sql);
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      const functionalUnsupported =
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+      if (!functionalUnsupported) throw e;
+      (this.logger.error ?? this.logger.warn)(
+        `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
+          `"${tableName}" over the BARE columns instead. Rows without an organization are NOT constrained ` +
+          `by it (#5030): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
+        msg,
+      );
+      await this.knex.schema.alterTable(tableName, (table) => {
+        table.unique(columns, { indexName: name });
+      });
     }
   }
 
@@ -5216,6 +5776,9 @@ export class SqlDriver implements IDataDriver {
       for (const [key, value] of Object.entries(filters)) {
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
         const column = this.remoteColumn(table, key, key);
+        // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
+        // so it is a comparison emitter too and gets the same gate.
+        assertCompilableComparand(column, '=', value);
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -5381,6 +5944,13 @@ export class SqlDriver implements IDataDriver {
     // driver and driver-memory drifted apart. #3948.
     const opLower = canonicalAstOperator(String(op));
 
+    // #5041 — the array (`[field, op, value]`) spelling reaches Knex through a
+    // different emitter than the Filter Protocol one, and measured identically:
+    // `[['amount', 'gt', { $field: 'budget' }]]` also threw a bare TypeError.
+    // One filter condition gets one answer however it was spelled, so the same
+    // gate runs here, on the RAW value (pre-coercion).
+    assertCompilableComparand(field, opLower, rawValue);
+
     // Value comparisons on a mixed-storage column read it through the CASE; every
     // other operator (null predicates, the LIKE family, a malformed `between`)
     // declines and falls through to the ordinary handling below.
@@ -5480,29 +6050,71 @@ export class SqlDriver implements IDataDriver {
    * dead weight to prune: the method is `protected`, i.e. subclass API, and
    * the flag is the seam an override needs to attach a condition into an OR
    * group. Do not "fix" them by making a branch propagate `'or'` again.
+   *
+   * # Boolean identities (#5134)
+   *
+   * Every combinator is decided by {@link reduceFilterNode} BEFORE anything is
+   * emitted, because Knex renders no SQL for a group that received no clause —
+   * so "the group is empty" and "the group is satisfied" used to compile to the
+   * same query. That is not an identity, it is a dropped clause, and the two
+   * identities point in opposite directions: empty `$and` is TRUE, empty `$or`
+   * is FALSE, and `$not` of an empty (TRUE) group is FALSE. The old code
+   * answered the whole table to all three; `$and` was right only because
+   * "dropped" coincides with TRUE on the AND side.
+   *
+   * The reduction also makes every group this method opens provably NON-EMPTY:
+   * a `'true'` combinator is skipped outright, `'true'` members of a `$and` and
+   * `'false'` members of a `$or` are dropped as their identities, and a node
+   * that reduces to `'false'` never reaches the loop at all. So Knex is never
+   * again in a position to silently discard a group.
    */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
     const table = tableHint ?? this.coercionKey(builder);
 
+    // #5134 — shape-validate the whole tree and decide its boolean value first.
+    // A malformed node throws here, before any identity is applied, so "compiled
+    // to empty" can only ever mean "genuinely empty".
+    const verdict = reduceFilterNode(condition as Record<string, unknown>, 'filter');
+    if (verdict === 'true') return;
+    if (verdict === 'false') {
+      this.applyFalseConstant(builder, logicalOp);
+      return;
+    }
+
     for (const [key, value] of Object.entries(condition)) {
       if (key === '$and' && Array.isArray(value)) {
+        // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
+        // emitting nothing for it is now a decision, not an accident. A FALSE
+        // member cannot reach here: it would have made the node FALSE above.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
         // Attach this group to the parent the way `logicalOp` asks, matching
         // `$or`/`$not` below. Nothing passes 'or' today (the sole caller uses
         // 'and' and no branch propagates 'or' any more), but leaving one of the
         // four combinators deaf to the flag is how the rules drift apart again.
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
-          for (const sub of value) {
+          for (const sub of branches) {
             qb.where((subQb: any) => {
               this.applyFilterCondition(subQb, sub, 'and', table);
             });
           }
         });
       } else if (key === '$or' && Array.isArray(value)) {
+        // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
+        // matches every row instead of quietly compiling to just `(a = ?)`.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
+        // member survives, or the key would have been TRUE/FALSE above.
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
-          for (const sub of value) {
+          for (const sub of branches) {
             // The `orWhere` on THIS line is what OR-s the branches together.
             // The branch body is still compiled with 'and', because every key
             // inside one filter object is AND-ed at every depth (Filter
@@ -5516,13 +6128,18 @@ export class SqlDriver implements IDataDriver {
             });
           }
         });
-      } else if (key === '$not' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      } else if (key === '$not') {
         // Spec LOGICAL_OPERATORS declares `$not` alongside `$and`/`$or`; both
         // driver-mongodb and driver-memory implement it, and CEL `!expr` in a
         // permission/scope rule compiles to `{ $not: {...} }` (cel-to-filter.ts).
         // Without this branch `$not` fell through to the field handler, was
         // treated as a column named "$not", and produced wrong SQL — the same
         // class of silent filter-bypass this fix (issue #2704) closes.
+        //
+        // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
+        // group is FALSE and never reaches here (the node reduced to FALSE), and
+        // a non-node operand was refused by the reduction, so `value` is a node.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
           this.applyFilterCondition(qb, value, 'and', table);
@@ -5535,6 +6152,10 @@ export class SqlDriver implements IDataDriver {
         const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // #5041 — reject a comparand that cannot become a bind parameter
+          // BEFORE any rewrite or coercion touches it, so the message names the
+          // shape the caller actually sent.
+          assertCompilableComparand(field, rawOp, opValue);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -5648,6 +6269,20 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method](field, coerced as any);
       }
     }
+  }
+
+  /**
+   * [#5134] Emit the dialect FALSE constant — a predicate that matches no row.
+   *
+   * `1 = 0` is the spelling already used for this condition on both sides of the
+   * repo: `read-scope-sql.ts` compiles an empty `$in` to it, and Knex itself
+   * renders an empty `whereIn` as `1 = 0`. It is valid on every dialect this
+   * driver targets (unlike a bare `FALSE`, which MySQL accepts but older SQL
+   * Server does not), needs no bindings, and keeps the query a normal SELECT so
+   * `LIMIT`/`ORDER BY`/aggregates all still behave.
+   */
+  private applyFalseConstant(builder: any, logicalOp: 'and' | 'or'): void {
+    builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 0');
   }
 
   // ── Field mapping ───────────────────────────────────────────────────────────

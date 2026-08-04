@@ -108,12 +108,36 @@ const SKIP_OBJECTS = new Set<string>([
   // (2) operational telemetry / plumbing (ADR-0057 — telemetry/transient/event)
   'sys_job',                     // schedule heartbeats (last_run_at churn)
   'sys_job_run',                 // one row per scheduled execution
+  // [#5193, ADR-0057 D5 "stop the amplifier"] `sys_job_queue` is `sys_job_run`'s
+  // sibling — `lifecycle.class: 'transient'` since #5179 — and the highest-volume
+  // table of this family. It is engine-owned plumbing (`managedBy:
+  // 'engine-owned'`, `enable.apiMethods: ['get','list']`), written ONLY by
+  // `DbQueueAdapter` under SYSTEM_CTX, so no row here is a user-attributable,
+  // compliance-relevant change. Every message costs at least three writes —
+  // publish insert, lease `pending→running`, terminal `→completed` (plus a retry
+  // update per failure and the #5192 reaper's periodic DELETE of completed rows)
+  // — and each one mirrored into `sys_audit_log` AND `sys_activity`. Since #5160
+  // routes email through the queue, that is the amplifier on every single mail.
+  'sys_job_queue',               // durable queue/DLQ messages (≥3 writes each)
   'sys_automation_run',          // one row per automation execution
   'sys_notification',            // messaging-owned (ADR-0030); its own lifecycle
   'sys_notification_delivery',
   'sys_notification_receipt',
   'sys_inbox_message',           // per-user fan-out of every notification
   'sys_http_delivery',           // webhook/outbound transport log
+  // [#5202, ADR-0057 D5 — the same gap as #5193, one table over] Also
+  // `lifecycle.class: 'transient'`, and its own object comment settles what the
+  // rows are worth: "an upload session is ephemeral state, **never business
+  // truth**" (ADR-0057 / #2970 item 4). `StorageMetadataStore` is its only
+  // writer — `createSession()` inserts, `updateSession()` runs ONCE PER CHUNK,
+  // and `deleteSession()` (plus the TTL/retention reaper) removes the row — so
+  // an N-chunk upload cost 2 × (1 + N) `sys_audit_log` + `sys_activity` rows,
+  // each with its own `beforeUpdate` snapshot read. Worse per row than the
+  // count suggests: `updateSession()` writes the MERGED FULL record, so every
+  // chunk's diff drags along the `parts` JSON blob that grows with each part.
+  // Deliberately NOT `sys_file`: those rows are mostly permanent business truth
+  // and keep their compliance value, so they stay audited (see #5202).
+  'sys_upload_session',          // chunked-upload progress (1 write per chunk)
   'ai_traces',                   // LLM trace telemetry
 ]);
 

@@ -41,7 +41,17 @@ function makeLogger(): Logger & { error: ReturnType<typeof vi.fn> } {
   } as unknown as Logger & { error: ReturnType<typeof vi.fn> };
 }
 
-/** A minimal, valid `ApiEndpointSchema` input. `authRequired` deliberately omitted. */
+/**
+ * A minimal `ApiEndpointSchema` input that also PASSES the identity-free
+ * publish gates (#5189). `authRequired` is deliberately omitted so the
+ * schema-default tests still have something to prove.
+ *
+ * `objectParams` is not decoration: E7's target gate rejects an
+ * `object_operation` that does not name both `object` and `operation`, and
+ * since #5189 the index applies that gate too — a fixture without it would be
+ * excluded rather than served, which is the correct behaviour and a useless
+ * fixture.
+ */
 function endpoint(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: 'list_tasks',
@@ -49,6 +59,7 @@ function endpoint(over: Record<string, unknown> = {}): Record<string, unknown> {
     method: 'GET',
     type: 'object_operation',
     target: 'showcase_task',
+    objectParams: { object: 'showcase_task', operation: 'find' },
     ...over,
   };
 }
@@ -109,7 +120,14 @@ describe('buildEndpointIndex', () => {
   });
 
   it('preserves an explicit authRequired: false', () => {
-    const index = buildEndpointIndex([endpoint({ authRequired: false })], makeLogger());
+    // The armed budget is not incidental: since #5189 an anonymous endpoint
+    // without one never reaches the index at all (ADR-0121 D6), so this is the
+    // only shape in which "authRequired: false survives the round trip" is
+    // still an observable fact.
+    const index = buildEndpointIndex(
+      [endpoint({ authRequired: false, rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 } })],
+      makeLogger(),
+    );
     expect(index.get('GET /api/v1/apps/showcase/tasks')!.authRequired).toBe(false);
   });
 
@@ -149,6 +167,100 @@ describe('parse failure — loud skip, no collateral damage', () => {
     expect(index.size).toBe(0);
     expect(logger.error).toHaveBeenCalledTimes(3);
     expect(logger.error.mock.calls[0][0]).toContain('<unnamed>');
+  });
+});
+
+describe('#5189 — publish gates re-applied at load (identity-free subset)', () => {
+  it('EXCLUDES an anonymous endpoint with no armed rate limit (ADR-0121 D6) and says so loudly', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex([endpoint({ name: 'open_tasks', authRequired: false })], logger);
+
+    // The whole point: the route is gone, not served anonymously and unmetered.
+    expect(index.size).toBe(0);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [message, , meta] = logger.error.mock.calls[0];
+    expect(message).toContain('open_tasks');
+    expect(message).toContain('WITHOUT passing the');
+    expect(message).toContain('404');
+    expect(message).toContain('Republish');
+    // the gate's own prescription rides along
+    expect(message).toContain('authRequired: false');
+    expect(meta).toMatchObject({ name: 'open_tasks' });
+  });
+
+  it('EXCLUDES a rateLimit that is present but not armed — `enabled` defaults to false', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex(
+      [endpoint({ name: 'open_tasks', authRequired: false, rateLimit: { windowMs: 60000, maxRequests: 100 } })],
+      logger,
+    );
+    expect(index.size).toBe(0);
+    expect(logger.error.mock.calls[0][0]).toContain('meters nothing');
+  });
+
+  it('SERVES an anonymous endpoint that carries an armed budget', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex(
+      [
+        endpoint({
+          name: 'open_tasks',
+          authRequired: false,
+          rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
+        }),
+      ],
+      logger,
+    );
+    expect(index.get('GET /api/v1/apps/showcase/tasks')!.authRequired).toBe(false);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('EXCLUDES the other identity-free gate failures too — one judge, not a D6 special case', () => {
+    for (const bad of [
+      endpoint({ name: 'proxied', type: 'proxy', target: 'https://x.test' }),
+      endpoint({ name: 'no_params', objectParams: undefined }),
+      endpoint({ name: 'mapped', outputMapping: [{ source: 'a', target: 'b', transform: 'upper' }] }),
+      endpoint({ name: 'neg_cache', cacheTtl: -1 }),
+      endpoint({ name: 'post_cache', method: 'POST', cacheTtl: 30 }),
+    ]) {
+      const logger = makeLogger();
+      expect(buildEndpointIndex([bad], logger).size).toBe(0);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('does NOT apply the namespace gate — the matcher has no stack identity to judge it with', () => {
+    // Outside any `apps/<ns>/` carve-out: publish rejects this (it knows the
+    // manifest), the index does not (it does not, and inferring one from the
+    // path being judged would be circular). It is simply unreachable in
+    // practice — the endpoint step only consults paths under that mount.
+    const logger = makeLogger();
+    const index = buildEndpointIndex([endpoint({ name: 'stray', path: '/api/v1/elsewhere' })], logger);
+    expect(index.has('GET /api/v1/elsewhere')).toBe(true);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('excludes a gate-failing item without disturbing the good ones', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex(
+      [endpoint({ name: 'open_tasks', path: '/api/v1/apps/showcase/open', authRequired: false }), endpoint()],
+      logger,
+    );
+    expect([...index.keys()]).toEqual(['GET /api/v1/apps/showcase/tasks']);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a gate-failing item does not take the route from a valid duplicate claimant', () => {
+    const logger = makeLogger();
+    // `a_tasks` would win the lexicographic tie-break — but it never claims,
+    // because it never passes the gates.
+    const index = buildEndpointIndex(
+      [endpoint({ name: 'a_tasks', authRequired: false }), endpoint({ name: 'z_tasks' })],
+      logger,
+    );
+    expect(index.get('GET /api/v1/apps/showcase/tasks')!.name).toBe('z_tasks');
+    // one gate error, and NO duplicate-claim error: there was never a duplicate
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).not.toContain('duplicate endpoint claim');
   });
 });
 

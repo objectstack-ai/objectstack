@@ -357,4 +357,91 @@ describe('overlay index drift on a fresh database (#4884)', () => {
     expect(index.expressions).toEqual(["COALESCE(package_id, '')", 'lower(name)']);
     expect(isSyncReproducibleIndex(index)).toBe(false);
   });
+
+  // ── ADR-0120 D3: the NULL-safe organization key part in the drift reader ──
+
+  describe('NULL-safe organization key part attribution (ADR-0120 D3)', () => {
+    it("attributes COALESCE(organization_id, '__global__') to organization_id in every dialect spelling", () => {
+      for (const sql of [
+        // SQLite: `sqlite_master.sql`, as the sync wrote it.
+        "COALESCE(organization_id, '__global__')",
+        'COALESCE("organization_id", \'__global__\')',
+        // Postgres: `pg_get_indexdef` casts a varchar key part.
+        "COALESCE((organization_id)::text, '__global__'::text)",
+        // MySQL: `information_schema.STATISTICS.EXPRESSION` decorates the
+        // literal with a charset introducer and backslash-escaped quotes.
+        "coalesce(`organization_id`,_utf8mb4\\'__global__\\')",
+      ]) {
+        expect(classifyIndexKeyPart(sql)).toEqual({
+          kind: 'expression',
+          sql,
+          column: 'organization_id',
+        });
+      }
+    });
+
+    it('applyIndexKeyParts records the attributed key part as a NULL-safe column', () => {
+      const index: PhysicalIndex = { name: 'i', columns: [], unique: true };
+      applyIndexKeyParts(index, ["COALESCE(organization_id, '__global__')", 'email']);
+      expect(index.columns).toEqual(['organization_id', 'email']);
+      expect(index.nullSafeColumns).toEqual(['organization_id']);
+    });
+
+    it("isSyncReproducibleIndex: the org key part is the sync's OWN vocabulary — for the tenant column only", () => {
+      const org: PhysicalIndex = { name: 'i', columns: [], unique: true };
+      applyIndexKeyParts(org, ["COALESCE(organization_id, '__global__')", 'email']);
+      expect(isSyncReproducibleIndex(org, 'organization_id')).toBe(true);
+      expect(isSyncReproducibleIndex(org, null)).toBe(false);
+      expect(isSyncReproducibleIndex(org)).toBe(false);
+      // The ADR-0048 overlay key attributes to a NON-tenant column and stays
+      // out — loosening the column scoping to "any attributable COALESCE"
+      // would resurrect the #4884 false orphan on the overlay indexes.
+      const overlay: PhysicalIndex = { name: 'o', columns: [], unique: true };
+      applyIndexKeyParts(overlay, ['type', "COALESCE(package_id, '')"]);
+      expect(isSyncReproducibleIndex(overlay, 'organization_id')).toBe(false);
+    });
+
+    it('the differ compares key-part FORM literal-agnostically: COALESCE ≡ COALESCE, bare ≠ COALESCE', () => {
+      const expected = [
+        {
+          name: 'uniq_t_organization_id_email',
+          columns: ['organization_id', 'email'],
+          unique: true,
+          nullSafeColumns: ['organization_id'],
+        },
+      ];
+      // Physical carries the COALESCE form with a DIFFERENT literal: any
+      // literal folds NULL into one bucket, so it is the same constraint —
+      // zero drift (the #4884 lesson applied to the tenant key part).
+      const physSame: PhysicalIndex = { name: 'uniq_t_organization_id_email', columns: [], unique: true };
+      applyIndexKeyParts(physSame, ["COALESCE(organization_id, '')", 'email']);
+      expect(
+        diffManagedIndexes({
+          table: 't',
+          expected,
+          legacy: [],
+          physical: [physSame],
+          tenantField: 'organization_id',
+        }),
+      ).toEqual([]);
+      // Physical is the bare NULL-distinct composite: a DIFFERENT constraint
+      // (void on NULL-organization rows, #5030) → the D4 tightening op.
+      const physBare: PhysicalIndex = {
+        name: 'uniq_t_organization_id_email',
+        columns: ['organization_id', 'email'],
+        unique: true,
+      };
+      const out = diffManagedIndexes({
+        table: 't',
+        expected,
+        legacy: [],
+        physical: [physBare],
+        tenantField: 'organization_id',
+      });
+      expect(out).toHaveLength(1);
+      expect(out[0].op).toMatchObject({ type: 'recreate_index', tightenNullSafeOnly: true });
+      expect(out[0].expected).toBe("UNIQUE (COALESCE(organization_id, '__global__'), email)");
+      expect(out[0].actual).toBe('UNIQUE (organization_id, email)');
+    });
+  });
 });

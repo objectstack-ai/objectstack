@@ -47,6 +47,32 @@ const manifest = {
       visible: "${data.email_password_enabled !== false}",
     },
 
+    // ADR-0093 D1 — deliberately its OWN group, not a member of
+    // `email_password`: membership is decided for EVERY creation path (email
+    // sign-up, SSO just-in-time provisioning, admin create-user, bulk import),
+    // so hiding it behind `email_password_enabled` would leave an SSO-only
+    // deployment unable to configure the one posture it most needs.
+    {
+      type: 'group',
+      id: 'membership',
+      label: 'Membership',
+      required: false,
+      description: 'What a newly created user joins. Pairs with self-service registration above.',
+    },
+    {
+      type: 'select',
+      key: 'membership_policy',
+      label: 'New user membership',
+      required: false,
+      default: 'auto',
+      options: [
+        { value: 'auto', label: 'Join the default organization automatically' },
+        { value: 'invite-only', label: 'Invitation only — never join automatically' },
+      ],
+      description:
+        'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
+    },
+
     {
       type: 'group',
       id: 'password_policy',

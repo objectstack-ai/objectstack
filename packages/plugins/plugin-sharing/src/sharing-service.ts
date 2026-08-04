@@ -8,8 +8,21 @@ import type {
   SharingExecutionContext,
   ShareAccessLevel,
 } from '@objectstack/spec/contracts';
-import { keysetWalk } from '@objectstack/types';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
+import {
+  deleteRowsForDeletedRecords,
+  sweepOrphanedRowsByRecordExistence,
+  type OrphanShareSweepOptions,
+  type OrphanShareSweepResult,
+} from './record-orphan-cleanup.js';
+
+/**
+ * [#5103] Re-exported from their new home so this module's public surface is
+ * unchanged: #5190 moved the record-existence cleanup MECHANISM into
+ * `record-orphan-cleanup.ts` (`sys_share_link` needs the identical walk), and a
+ * type that moved house is not an API change callers should have to notice.
+ */
+export type { OrphanShareSweepOptions, OrphanShareSweepResult };
 
 /**
  * Shape of the data engine the service actually needs. Kept narrow so
@@ -103,53 +116,12 @@ export interface SharingSecurityProbe {
   ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
 }
 
-/**
- * [#5103] Ids per `$in` on the record-delete cascade's revoke. Mirrors the
- * chunk `SharingRuleService.revokeRuleGrantsForRecords` already uses: a single
- * statement binding a thousand parameters is a portability trap (SQLite's
- * default `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds), and one number
- * for both revoke paths keeps them from drifting.
- */
-const RECORD_SHARE_REVOKE_CHUNK = 200;
-
-/** [#5103] Share rows read per page by the orphan sweep. */
-const ORPHAN_SWEEP_PAGE_SIZE = 500;
-
-/**
- * [#5103] Share rows one sweep will scan before stopping and reporting
- * truncation. The sweep runs on every boot, so it must cost a bounded amount
- * on a table that only grows; the next boot resumes from the start and the
- * rows it did not reach stay reachable by the object-scoped sweep. A cap is
- * not a failure — but an unreported cap turns a partial scan into a false
- * "nothing to clean", which is why {@link OrphanShareSweepResult} carries it.
- */
-const ORPHAN_SWEEP_MAX_ROWS = 50_000;
-
-/** [#5103] Options for {@link SharingService.sweepOrphanedRecordShares}. */
-export interface OrphanShareSweepOptions {
-  /** Restrict the sweep to one object. Default: every object with share rows. */
-  object?: string;
-  /** Share rows per page. Default {@link ORPHAN_SWEEP_PAGE_SIZE}. */
-  batchSize?: number;
-  /** Stop after scanning this many rows. Default {@link ORPHAN_SWEEP_MAX_ROWS}. */
-  max?: number;
-}
-
-/** [#5103] What one {@link SharingService.sweepOrphanedRecordShares} pass did. */
-export interface OrphanShareSweepResult {
-  /** Share rows examined. */
-  scanned: number;
-  /** Share rows revoked because their record no longer exists. */
-  revoked: number;
-  /**
-   * Objects whose existence probe could not be run (unregistered object,
-   * driver error). Their rows were LEFT ALONE — "could not ask" is not
-   * "the record is gone", and only the second one may delete anything.
-   */
-  unresolvedObjects: string[];
-  /** True when {@link OrphanShareSweepOptions.max} stopped the scan early. */
-  truncated: boolean;
-}
+/** [#5103] The table whose orphans this service owns. */
+const RECORD_SHARE_SWEEP_SUBJECT = {
+  table: 'sys_record_share',
+  noun: 'share',
+  issue: '#5103',
+} as const;
 
 export interface SharingServiceOptions {
   engine: SharingEngine;
@@ -816,20 +788,20 @@ export class SharingService implements ISharingService {
    * number of share rows. Returns nothing: counting would need a read the hot
    * delete path should not pay for, and callers that need a count (tests, the
    * sweep) can read the table.
+   *
+   * [#5190] The mechanism now lives in `record-orphan-cleanup.ts`, shared with
+   * `sys_share_link`'s identical cascade. This method keeps the meaning.
    */
   async revokeSharesForDeletedRecords(
     object: string,
     recordIds: readonly string[],
   ): Promise<void> {
-    if (!object || recordIds.length === 0) return;
-    for (let i = 0; i < recordIds.length; i += RECORD_SHARE_REVOKE_CHUNK) {
-      const batch = recordIds.slice(i, i + RECORD_SHARE_REVOKE_CHUNK);
-      await this.engine.delete('sys_record_share', {
-        where: { object_name: object, record_id: { $in: batch } },
-        multi: true,
-        context: SYSTEM_CTX,
-      } as any);
-    }
+    await deleteRowsForDeletedRecords(
+      this.engine,
+      RECORD_SHARE_SWEEP_SUBJECT.table,
+      object,
+      recordIds,
+    );
   }
 
   /**
@@ -864,132 +836,23 @@ export class SharingService implements ISharingService {
    * untouched and is reported in `unresolvedObjects`. "Nothing was queried" is
    * not "nothing matched" — deleting on a failed probe would turn a transient
    * driver error into permanent access loss.
+   *
+   * [#5190] The walk itself lives in `record-orphan-cleanup.ts` — `sys_share_link`
+   * runs the identical one, and a second copy is how two sweeps that must agree
+   * start disagreeing (chunk size, cap, the failed-probe rule).
    */
   async sweepOrphanedRecordShares(
     options?: OrphanShareSweepOptions,
   ): Promise<OrphanShareSweepResult> {
-    const result: OrphanShareSweepResult = {
-      scanned: 0,
-      revoked: 0,
-      unresolvedObjects: [],
-      truncated: false,
-    };
-    const unresolved = new Set<string>();
-    const walk = keysetWalk<any>(
-      (q) => this.engine.find('sys_record_share', {
-        ...q,
-        fields: ['id', 'object_name', 'record_id'],
-        context: SYSTEM_CTX,
-      }),
-      {
-        where: options?.object ? { object_name: options.object } : undefined,
-        pageSize: Math.max(1, options?.batchSize ?? ORPHAN_SWEEP_PAGE_SIZE),
-        max: options?.max ?? ORPHAN_SWEEP_MAX_ROWS,
-      },
+    return sweepOrphanedRowsByRecordExistence(
+      this.engine,
+      RECORD_SHARE_SWEEP_SUBJECT,
+      options,
+      this.logger,
     );
-
-    try {
-      for await (const page of walk.pages()) {
-        result.scanned += page.length;
-
-        // Group the page by object so existence is one probe per object, not
-        // one per row.
-        const byObject = new Map<string, Map<string, string[]>>();
-        for (const row of page) {
-          const objectName = row?.object_name == null ? '' : String(row.object_name);
-          const recordId = row?.record_id == null ? '' : String(row.record_id);
-          const shareId = row?.id == null ? '' : String(row.id);
-          if (!objectName || !recordId || !shareId) continue;
-          const perRecord = byObject.get(objectName) ?? new Map<string, string[]>();
-          const shareIds = perRecord.get(recordId) ?? [];
-          shareIds.push(shareId);
-          perRecord.set(recordId, shareIds);
-          byObject.set(objectName, perRecord);
-        }
-
-        for (const [objectName, perRecord] of byObject) {
-          if (unresolved.has(objectName)) continue;
-          const recordIds = [...perRecord.keys()];
-          let live: Set<string>;
-          try {
-            live = await this.findLiveRecordIds(objectName, recordIds);
-          } catch (err: any) {
-            unresolved.add(objectName);
-            this.logger?.warn?.(
-              '[sharing] orphan share sweep could not check whether records still exist — ' +
-                'its share rows were left in place (they are re-checked on the next sweep)',
-              { object: objectName, error: err?.message },
-            );
-            continue;
-          }
-          const orphanShareIds: string[] = [];
-          for (const [recordId, shareIds] of perRecord) {
-            if (live.has(recordId)) continue;
-            orphanShareIds.push(...shareIds);
-          }
-          if (orphanShareIds.length === 0) continue;
-          await this.deleteSharesByIds(orphanShareIds);
-          result.revoked += orphanShareIds.length;
-        }
-      }
-    } catch (err: any) {
-      this.logger?.warn?.(
-        '[sharing] orphan share sweep stopped early — remaining rows are re-checked on the next sweep',
-        { object: options?.object, error: err?.message, scanned: result.scanned },
-      );
-      result.truncated = true;
-    }
-
-    result.unresolvedObjects = [...unresolved];
-    result.truncated = result.truncated || walk.truncated;
-    if (result.revoked > 0) {
-      this.logger?.warn?.(
-        '[sharing] revoked share rows whose record no longer exists (#5103)',
-        { shares: result.revoked, scanned: result.scanned, object: options?.object },
-      );
-    }
-    return result;
   }
 
   // ── helpers ──────────────────────────────────────────────────────
-
-  /**
-   * [#5103] Which of `recordIds` still exist on `object`. Batched by
-   * {@link RECORD_SHARE_REVOKE_CHUNK} so the `$in` never outgrows a driver's
-   * bind-parameter limit. Throws on a query failure — the caller MUST treat
-   * that as "unknown", never as "none of them exist".
-   */
-  private async findLiveRecordIds(
-    object: string,
-    recordIds: readonly string[],
-  ): Promise<Set<string>> {
-    const live = new Set<string>();
-    for (let i = 0; i < recordIds.length; i += RECORD_SHARE_REVOKE_CHUNK) {
-      const batch = recordIds.slice(i, i + RECORD_SHARE_REVOKE_CHUNK);
-      const rows = await this.engine.find(object, {
-        where: { id: { $in: batch } },
-        fields: ['id'],
-        limit: batch.length,
-        context: SYSTEM_CTX,
-      });
-      for (const row of (rows ?? [])) {
-        if ((row as any)?.id != null) live.add(String((row as any).id));
-      }
-    }
-    return live;
-  }
-
-  /** [#5103] Set-based delete of share rows by id, chunked like the revoke. */
-  private async deleteSharesByIds(shareIds: readonly string[]): Promise<void> {
-    for (let i = 0; i < shareIds.length; i += RECORD_SHARE_REVOKE_CHUNK) {
-      const batch = shareIds.slice(i, i + RECORD_SHARE_REVOKE_CHUNK);
-      await this.engine.delete('sys_record_share', {
-        where: { id: { $in: batch } },
-        multi: true,
-        context: SYSTEM_CTX,
-      } as any);
-    }
-  }
 
   /**
    * [ADR-0057] Resolve the owner-id set for a DEPTH scope. `own`/unset/`org`

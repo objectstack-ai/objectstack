@@ -180,10 +180,10 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     notes: 'Merged into showcase_account by the ObjectQL engine at registerApp (priority overlay).',
   },
   apis: {
-    status: 'waived',
-    reason:
-      'NOT demonstrable: the runtime has no executor for declarative `apis:`. This entry read "demonstrated … executed by the runtime dispatcher (handleApiEndpoint)" until #4936 measured it on a real boot — the two declared endpoints returned a bare 404 (no route was ever mounted for them) while a control request on the same cookie and prefix returned 200, and the dispatcher branch named here called a `matchEndpoint` that no implementation in the repo provided. That made this the exact false-coverage claim Prime Directive #10 forbids, on a surface whose keys include `authRequired`. Per the 2026-08-04 verdict the vocabulary is kept but a non-empty `apis:` is now rejected at publish/validate, so the showcase declares none; src/system/apis/index.ts keeps both definitions commented, ready to restore. HTTP endpoints are still demonstrated the honest way, in code, by src/system/server/recalc-endpoint.ts (the router kind stays waived: code-only). Flip this back to `demonstrated` in the same PR that lands the executor.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5040',
+    status: 'demonstrated',
+    files: ['src/system/apis/index.ts'],
+    notes:
+      'Declarative ApiEndpoint metadata (object_operation + flow targets), MEASURED on a real boot rather than asserted: packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts boots the showcase through the artifact-ingestion path and proves each declared path is matched and executed (the find endpoint answers byte-identically to the built-in /data route for the same operation), that `authRequired` denies anonymous with 401, that `cacheTtl: 30` reaches the wire as Cache-Control on successes only, and that /openapi.json and GET /meta/api describe exactly what is mounted. This entry read "demonstrated … executed by the runtime dispatcher (handleApiEndpoint)" once BEFORE that was true — #4936 measured it and found a bare 404 on every declared path, which is why the waiver stood from #4936 until the #5040 executor landed. It is restored to `demonstrated` only because a real-boot test now fails if any of it stops being true (#5040 E8 / #5112). The `router` kind stays waived: code-only. src/system/server/recalc-endpoint.ts remains the code-mounted HTTP counterpart.',
   },
   connectors: {
     status: 'demonstrated',

@@ -2045,6 +2045,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       body_html: {
         label: "Body (HTML)"
       },
+      headers_json: {
+        label: "Headers (JSON)",
+        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\"."
+      },
+      attachments_json: {
+        label: "Attachments (JSON)",
+        help: "Attachments as a JSON array of { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }, with content base64 in `inline`. Written only when the combined raw size is within the plugin-email budget (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB — ~350 KB of base64 at worst); a larger message is delivered inline and stores nothing here, so the row stays bounded. `storageKey` (out-of-row content) has no producer yet — objectstack#5172."
+      },
       status: {
         label: "Status",
         help: "Lifecycle state — queued by IEmailService.send before transport call",

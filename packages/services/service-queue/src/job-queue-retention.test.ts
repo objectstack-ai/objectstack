@@ -26,9 +26,10 @@
 // the engine.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, LifecycleService } from '@objectstack/objectql';
 import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { DbQueueAdapter, completedRetentionWindowMs } from './db-queue-adapter.js';
+import { QueueServicePlugin } from './queue-service-plugin.js';
 import { lifecycleDurationMs } from './common.js';
 
 const QUEUE_TABLE = 'sys_job_queue';
@@ -65,6 +66,12 @@ function makeFakeEngine() {
     rows(): Row[] {
       return tables.get(QUEUE_TABLE) ?? [];
     },
+    // [#5195] The two members `LifecycleService` needs to sweep through this
+    // fake for real, so the floor can be proven end-to-end rather than
+    // re-mirrored: the object set it iterates, and the driver hook it consults
+    // for space reclaim (none here).
+    registry: { getAllObjects: () => [SysJobQueue as any] },
+    getDriverForObject: () => undefined,
     async find(table: string, opts: any = {}) {
       const t = tables.get(table) ?? [];
       let out = opts.where ? t.filter((r) => matches(r, opts.where)) : [...t];
@@ -307,5 +314,217 @@ describe('declared retention bounds sys_job_queue (#5179)', () => {
 
     expect(seen).toEqual([{ v: 1 }]);
     expect(engine.rows()[0]!.status).toBe('completed');
+  });
+});
+
+// #5195 — the invariant above is enforced against the object's DECLARATION,
+// which the adapter's constructor can read. ADR-0057 P4 also lets an operator
+// override that window at runtime through the `lifecycle` settings namespace,
+// and the constructor cannot see that at all: set
+// `retention_overrides.sys_job_queue.maxAge = '1h'` and completed rows are
+// reaped an hour after they are written while publish keeps dedupping against
+// 24h — duplicate deliveries resume, silently.
+//
+// These run the REAL `LifecycleService` over the REAL `SysJobQueue`
+// declaration, so what is pinned is the two packages agreeing, not this file's
+// idea of either.
+describe('a lifecycle settings override cannot undercut the dedup window (#5195)', () => {
+  const OVERRIDE_1H = { retention_overrides: { [QUEUE_TABLE]: { maxAge: '1h' } } };
+
+  function fakeSettings(values: Record<string, unknown>) {
+    return {
+      async get(_ns: string, key: string) {
+        return key in values
+          ? { value: values[key], source: 'global' }
+          : { value: undefined, source: 'default' };
+      },
+    };
+  }
+
+  function lifecycle(
+    engine: ReturnType<typeof makeFakeEngine>,
+    clock: ReturnType<typeof makeClock>,
+    settings: unknown,
+    logger: { info(m: string): void; warn(m: string): void; error(m: string): void },
+  ) {
+    return new LifecycleService({
+      getEngine: () => engine as any,
+      logger,
+      now: () => clock.ms,
+      getSettings: () => settings as any,
+    });
+  }
+
+  function collectingLogger() {
+    const errors: string[] = [];
+    return {
+      errors,
+      info: () => {},
+      warn: () => {},
+      error: (m: string) => { errors.push(m); },
+    };
+  }
+
+  /** Publish → deliver → age past the override window, then sweep. */
+  async function ageACompletedMessage(
+    engine: ReturnType<typeof makeFakeEngine>,
+    clock: ReturnType<typeof makeClock>,
+  ): Promise<{ adapter: DbQueueAdapter; firstId: string }> {
+    const adapter = new DbQueueAdapter({
+      engine,
+      clock,
+      options: { autoStart: false, pollIntervalMs: 60_000 },
+    });
+    await adapter.subscribe('billing', async () => { /* delivered */ });
+    const firstId = await adapter.publish('billing', { invoice: 7 }, { idempotencyKey: 'inv-7' });
+    await adapter.pollOnce();
+    expect(engine.rows()[0]!.status).toBe('completed');
+    // Past the 1h override, far inside both the 7d declaration and the 24h
+    // dedup window: the exact gap #5195 is about.
+    clock.advance(2 * HOUR);
+    return { adapter, firstId };
+  }
+
+  it('REPRODUCES the bypass when no floor is registered: the row is reaped and the duplicate lands', async () => {
+    const engine = makeFakeEngine();
+    const clock = makeClock(Date.parse('2026-03-01T00:00:00.000Z'));
+    const { adapter, firstId } = await ageACompletedMessage(engine, clock);
+
+    await lifecycle(engine, clock, fakeSettings(OVERRIDE_1H), collectingLogger()).sweep();
+
+    // Nothing kept the reaper off the row the dedup check reads…
+    expect(engine.rows()).toHaveLength(0);
+    // …so the same key publishes again, 2 hours into a 24 hour window.
+    const again = await adapter.publish('billing', { invoice: 7 }, { idempotencyKey: 'inv-7' });
+    expect(again).not.toBe(firstId);
+    expect(engine.rows()).toHaveLength(1);
+  });
+
+  it('rejects the override once the adapter has registered its floor — dedup keeps holding', async () => {
+    const engine = makeFakeEngine();
+    const clock = makeClock(Date.parse('2026-03-01T00:00:00.000Z'));
+    const { adapter, firstId } = await ageACompletedMessage(engine, clock);
+    const logger = collectingLogger();
+
+    const svc = lifecycle(engine, clock, fakeSettings(OVERRIDE_1H), logger);
+    svc.registerRetentionFloor(QUEUE_TABLE, adapter.retentionFloor());
+    const report = await svc.sweep();
+
+    // The declared 7d window runs instead of the 1h override…
+    expect(engine.rows()).toHaveLength(1);
+    expect(report.swept[0]!.cutoff).toBe(new Date(clock.ms - 7 * DAY).toISOString());
+    // …and the re-publish is still deduplicated to the original message.
+    const again = await adapter.publish('billing', { invoice: 7 }, { idempotencyKey: 'inv-7' });
+    expect(again).toBe(firstId);
+    expect(engine.rows()).toHaveLength(1);
+
+    // Loud, with the consequence and both fixes an operator needs.
+    expect(report.floorViolations).toHaveLength(1);
+    expect(report.floorViolations[0]).toMatchObject({
+      object: QUEUE_TABLE,
+      policy: 'retention',
+      scope: 'global',
+      override: '1h',
+      floorMs: DEFAULT_IDEMPOTENCY_WINDOW_MS,
+      declaredBy: 'com.objectstack.service.queue',
+    });
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0]).toContain('duplicate deliveries resume silently');
+    expect(logger.errors[0]).toContain('lifecycle.retention_overrides.sys_job_queue.maxAge');
+    expect(logger.errors[0]).toContain('idempotencyWindowMs');
+  });
+
+  it('a legal override (≥ the dedup window) still takes effect', async () => {
+    const engine = makeFakeEngine();
+    const clock = makeClock(Date.parse('2026-03-01T00:00:00.000Z'));
+    const adapter = new DbQueueAdapter({ engine, clock, options: { autoStart: false } });
+    // 2d: shorter than the declared 7d, longer than the 24h dedup window.
+    const svc = lifecycle(
+      engine,
+      clock,
+      fakeSettings({ retention_overrides: { [QUEUE_TABLE]: { maxAge: '2d' } } }),
+      collectingLogger(),
+    );
+    svc.registerRetentionFloor(QUEUE_TABLE, adapter.retentionFloor());
+
+    const report = await svc.sweep();
+
+    expect(report.floorViolations).toEqual([]);
+    expect(report.swept[0]!.cutoff).toBe(new Date(clock.ms - 2 * DAY).toISOString());
+  });
+
+  it('the floor carries the CONFIGURED idempotency window, not the default', () => {
+    const adapter = new DbQueueAdapter({
+      engine: makeFakeEngine(),
+      options: { autoStart: false, idempotencyWindowMs: 3 * DAY },
+    });
+    // A static key on the object declaration could never say this — the number
+    // is a per-kernel construction option.
+    expect(adapter.idempotencyWindowMs).toBe(3 * DAY);
+    expect(adapter.retentionFloor()).toMatchObject({
+      policy: 'retention',
+      minWindowMs: 3 * DAY,
+      declaredBy: 'com.objectstack.service.queue',
+    });
+
+    const engine = makeFakeEngine();
+    const clock = makeClock(Date.parse('2026-03-01T00:00:00.000Z'));
+    const svc = lifecycle(
+      engine,
+      clock,
+      fakeSettings({ retention_overrides: { [QUEUE_TABLE]: { maxAge: '2d' } } }),
+      collectingLogger(),
+    );
+    svc.registerRetentionFloor(QUEUE_TABLE, adapter.retentionFloor());
+    // 2d clears the 24h default but NOT this adapter's 3d window.
+    return svc.sweep().then((report) => {
+      expect(report.floorViolations).toHaveLength(1);
+      expect(report.floorViolations[0]!.floorMs).toBe(3 * DAY);
+    });
+  });
+
+  it('QueueServicePlugin registers the floor at kernel:ready (the wiring, not just the ability)', async () => {
+    const engine = makeFakeEngine();
+    const clock = makeClock(Date.parse('2026-03-01T00:00:00.000Z'));
+    const svc = lifecycle(engine, clock, fakeSettings(OVERRIDE_1H), collectingLogger());
+
+    const readyHooks: Array<() => Promise<void>> = [];
+    const services = new Map<string, unknown>([
+      ['manifest', { register: () => {} }],
+      ['objectql', engine],
+      ['lifecycle', svc],
+    ]);
+    const ctx: any = {
+      logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      getService: (name: string) => {
+        if (!services.has(name)) throw new Error(`no service '${name}'`);
+        return services.get(name);
+      },
+      registerService: (name: string, s: unknown) => { services.set(name, s); },
+      replaceService: (name: string, s: unknown) => { services.set(name, s); },
+      hook: (name: string, fn: () => Promise<void>) => {
+        if (name === 'kernel:ready') readyHooks.push(fn);
+      },
+    };
+
+    const plugin = new QueueServicePlugin({ adapter: 'db', db: { pollIntervalMs: 60_000 } });
+    await plugin.init(ctx);
+    for (const fn of readyHooks) await fn();
+    await plugin.destroy();
+
+    // An unswept-by-1h row is the observable proof the plugin did the wiring —
+    // the ability to register a floor is worth nothing if nobody calls it.
+    engine.tables.set(QUEUE_TABLE, [{
+      id: 'm_old', queue: 'q', status: 'completed', payload_json: '{}',
+      created_at: new Date(clock.ms - 3 * HOUR).toISOString(),
+    }]);
+    const report = await svc.sweep();
+
+    expect(engine.rows()).toHaveLength(1);
+    expect(report.floorViolations[0]).toMatchObject({
+      object: QUEUE_TABLE,
+      floorMs: DEFAULT_IDEMPOTENCY_WINDOW_MS,
+      declaredBy: 'com.objectstack.service.queue',
+    });
   });
 });

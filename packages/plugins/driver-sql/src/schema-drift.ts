@@ -30,8 +30,67 @@
 
 import { createHash } from 'node:crypto';
 
-import { isAppResolvedDefaultToken, isGlobalUnique, isUniqueDeclared } from '@objectstack/spec/data';
+import { isAppResolvedDefaultToken, isUniqueDeclared } from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
+
+// ───────────────────────────────────────────────────────────────────────
+// Unique-scope vocabulary (ADR-0120)
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Sentinel naming the NULL-organization ("platform") bucket — ADR-0120 D3.
+ *
+ * Every organization-scoped unique index materializes its organization key
+ * part as `COALESCE(organization_id, '__global__')` instead of the raw column:
+ * SQL UNIQUE is NULL-distinct, so the raw column enforced NOTHING on rows
+ * whose organization is NULL — which is every row on a single-tenant stack
+ * (#5030). The COALESCE folds all NULL-organization rows into one bucket,
+ * unique among themselves, without touching the other rows.
+ *
+ * Three invariants, all deliberate (ADR-0120 D3, maintainer-resolved):
+ *  - **Storage stays NULL.** Only the index folds NULL into the bucket; a
+ *    `WHERE organization_id = '__global__'` matches nothing, by design.
+ *  - **The word is the platform's existing name for this bucket** — the
+ *    autonumber sequence table keys global rows by the same sentinel
+ *    (`SqlDriver`'s `GLOBAL_TENANT`), so a constraint-violation error reading
+ *    `(__global__, a@b.com)` says "platform bucket", not "corrupt data".
+ *  - **The token is reserved**: an organization id may never equal it
+ *    (guarded at the organization-creation seam in plugin-auth).
+ */
+export const GLOBAL_TENANT = '__global__';
+
+/**
+ * Driver-side unique-scope vocabulary — ADR-0120 D1.
+ *
+ * `'organization'` is accepted here AHEAD of the spec schema: #4986 lands the
+ * spec/lint token separately, and the merge order is deliberately driver first
+ * so spec-side acceptance never outruns driver-side enforcement. Until then,
+ * spec's `isUniqueDeclared` / `isGlobalUnique` know nothing of
+ * `'organization'`, so these wrappers are the single judgment point inside
+ * driver-sql — every scope decision in this package reads them, never the
+ * spec helpers directly.
+ */
+export function isUniqueScopeDeclared(unique: unknown): boolean {
+  return unique === 'organization' || isUniqueDeclared(unique);
+}
+
+/**
+ * The organization-scoped spellings: field-level `true` (unchanged since
+ * #3696) and the explicit `'organization'` synonym (ADR-0120 D1) — on either
+ * spelling (field-level `unique` or a declared index's `unique`).
+ */
+export function isOrganizationScopedUnique(unique: unknown): boolean {
+  return unique === true || unique === 'organization';
+}
+
+/**
+ * The organization key part of an organization-scoped unique index, spelled
+ * once (ADR-0120 D3). Display/signature form — DDL emission quotes the
+ * identifier per dialect in `SqlDriver.syncDeclaredIndexes`.
+ */
+export function organizationKeyPartSql(column: string): string {
+  return `COALESCE(${column}, '${GLOBAL_TENANT}')`;
+}
 
 export type SqlDialectName = 'sqlite' | 'postgres' | 'mysql' | 'unknown';
 
@@ -77,6 +136,8 @@ export type DriftOp =
       dropIndexNames: string[];
       createIndexName: string;
       createColumns: string[];
+      /** Columns whose key part is the NULL-safe organization form (ADR-0120 D3). */
+      nullSafeColumns?: string[];
     }
   /** Materialize a declared index that has no physical counterpart. */
   | {
@@ -86,6 +147,8 @@ export type DriftOp =
       indexName: string;
       columns: string[];
       unique: boolean;
+      /** Columns whose key part is the NULL-safe organization form (ADR-0120 D3). */
+      nullSafeColumns?: string[];
     }
   /** Drop an index ObjectStack generated that metadata no longer declares. */
   | { type: 'drop_index'; table: string; column?: string; indexName: string }
@@ -101,6 +164,18 @@ export type DriftOp =
       indexName: string;
       columns: string[];
       unique: boolean;
+      /** Columns whose key part is the NULL-safe organization form (ADR-0120 D3). */
+      nullSafeColumns?: string[];
+      /**
+       * ADR-0120 D4: the divergence is EXACTLY the bare organization column
+       * tightening into its NULL-safe COALESCE form — same column identities,
+       * same uniqueness, physical index fully plain. This is the one recreate
+       * whose danger is data-dependent rather than structural, so it goes
+       * through the duplicate pre-flight probe: clean → `safe` (dev
+       * `autoMigrate: 'safe'` may apply it), duplicates found → blocked with a
+       * row report, old index left in place.
+       */
+      tightenNullSafeOnly?: boolean;
     };
 
 /**
@@ -494,6 +569,14 @@ export interface ExpectedIndex {
   name: string;
   columns: string[];
   unique: boolean;
+  /**
+   * Columns (by identity, always a subset of {@link columns}) whose key part
+   * materializes as the NULL-safe organization form
+   * `COALESCE(<column>, '__global__')` rather than the bare column
+   * (ADR-0120 D3). Practically this is the table's tenant column on every
+   * organization-scoped unique. Absent/empty for plain indexes.
+   */
+  nullSafeColumns?: string[];
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -515,8 +598,16 @@ export type IndexKeyPart =
   | { kind: 'expression'; sql: string; column: string | null };
 
 const BARE_IDENTIFIER = /^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_$]*))$/;
-/** A literal any dialect might print inside `COALESCE`, optional `::type` cast included. */
-const SQL_LITERAL = /^(?:'(?:[^']|'')*'|-?\d+(?:\.\d+)?|null|true|false)(?:::[A-Za-z_][A-Za-z0-9_ ."]*)?$/i;
+/**
+ * A literal any dialect might print inside `COALESCE`, optional `::type` cast
+ * included. MySQL's `information_schema.STATISTICS.EXPRESSION` decorates a
+ * string literal with a charset introducer and backslash-escaped quotes
+ * (`_utf8mb4\'__global__\'`), so both decorations are accepted too — the
+ * attribution is deliberately literal-AGNOSTIC (#4884, ADR-0120 D3): what the
+ * literal says never changes which column the key part pins.
+ */
+const SQL_LITERAL =
+  /^(?:(?:_[A-Za-z][A-Za-z0-9]*\s*)?\\?'(?:[^'\\]|''|\\.)*\\?'|-?\d+(?:\.\d+)?|null|true|false)(?:::[A-Za-z_][A-Za-z0-9_ ."]*)?$/i;
 
 /** Unwrap `"x"` / `` `x` `` / `[x]`, or null when `s` is not a single identifier. */
 function matchIdentifier(s: string): string | null {
@@ -695,7 +786,14 @@ export function applyIndexKeyParts(index: PhysicalIndex, rawParts: string[]): vo
       continue;
     }
     (index.expressions ??= []).push(part.sql);
-    if (part.column !== null) index.columns.push(part.column);
+    if (part.column !== null) {
+      index.columns.push(part.column);
+      // An attributable expression is by construction the COALESCE(col,
+      // <literal>) form — record the column so the differ can compare the key
+      // part's FORM, not just its identity (ADR-0120 D3: the NULL-safe
+      // organization key part vs the bare column are different constraints).
+      (index.nullSafeColumns ??= []).push(part.column);
+    }
   }
 }
 
@@ -727,6 +825,15 @@ export interface PhysicalIndex {
    * {@link isSyncReproducibleIndex}.
    */
   expressions?: string[];
+  /**
+   * The columns that expression key parts ATTRIBUTE to — i.e. every key part
+   * of the recognised `COALESCE(col, <literal>)` form contributes its column
+   * here (and to {@link columns}). Lets the differ tell the NULL-safe
+   * organization key part (ADR-0120 D3) apart from the bare column while
+   * staying literal-agnostic. A subset of {@link columns}; absent when every
+   * key part is a plain column.
+   */
+  nullSafeColumns?: string[];
 }
 
 /**
@@ -748,9 +855,23 @@ export interface PhysicalIndex {
  * ObjectStack's `idx_<table>_` naming, and was therefore reported as an orphan
  * to be dropped — i.e. the boot advised destroying a live data-integrity
  * guarantee the same boot had just created.
+ *
+ * Since ADR-0120 D3 the sync's own vocabulary includes ONE expression shape:
+ * the NULL-safe organization key part `COALESCE(<tenantField>, '__global__')`.
+ * An index whose every expression is that form — attributed to the table's
+ * OWN tenant column — is therefore reproducible again (pass `tenantField`).
+ * The attribution is deliberately column-scoped: `COALESCE(package_id, '')`
+ * (the ADR-0048 overlay key) attributes to a non-tenant column and stays out,
+ * exactly as before — loosening this to "any attributable COALESCE" would
+ * resurrect the #4884 false-orphan on the overlay indexes.
  */
-export function isSyncReproducibleIndex(index: PhysicalIndex): boolean {
-  return index.partial !== true && (index.expressions?.length ?? 0) === 0;
+export function isSyncReproducibleIndex(index: PhysicalIndex, tenantField?: string | null): boolean {
+  if (index.partial === true) return false;
+  const expressions = index.expressions?.length ?? 0;
+  if (expressions === 0) return true;
+  if (!tenantField) return false;
+  const nullSafe = index.nullSafeColumns ?? [];
+  return nullSafe.length === expressions && nullSafe.every((c) => c === tenantField);
 }
 
 /**
@@ -768,8 +889,9 @@ export function isSyncReproducibleIndex(index: PhysicalIndex): boolean {
 export function isRuntimeManagedIndex(
   index: PhysicalIndex,
   runtimeCreated?: ReadonlySet<string>,
+  tenantField?: string | null,
 ): boolean {
-  return runtimeCreated?.has(index.name) === true || !isSyncReproducibleIndex(index);
+  return runtimeCreated?.has(index.name) === true || !isSyncReproducibleIndex(index, tenantField);
 }
 
 /**
@@ -780,13 +902,18 @@ export function isRuntimeManagedIndex(
  * create-table, alter-table, SQLite-rebuild and drift-detection paths cannot
  * disagree about what a `unique: true` field is supposed to produce.
  *
- * Scoping rule:
+ * Scoping rule (ADR-0120 D1/D3):
  *   - `unique: 'global'` → single-column `(field)`, platform-wide.
- *   - `unique: true` on a tenant-scoped table → composite `(tenantField,
- *     field)`: unique *within* the tenant, matching the per-tenant autonumber
- *     sequence, the RLS read predicate and the write-path tenant stamp.
- *   - `unique: true` with no tenant column → single-column `(field)`.
- *     Single-tenant deployments therefore see byte-identical DDL to before.
+ *   - `unique: true` / `unique: 'organization'` on a tenant-scoped table →
+ *     composite `(COALESCE(tenantField, '__global__'), field)`: unique
+ *     *within* the organization, matching the per-tenant autonumber sequence,
+ *     the RLS read predicate and the write-path tenant stamp. The organization
+ *     key part is NULL-safe: rows without an organization form one platform
+ *     bucket, unique among themselves — a bare `(tenantField, field)` under
+ *     SQL's NULL-distinct UNIQUE enforced NOTHING on those rows, which on a
+ *     single-tenant stack is every row (#5030).
+ *   - `unique: true` / `'organization'` with no tenant column → single-column
+ *     `(field)`.
  *
  * The tenant column comes FIRST in the composite so the index also serves the
  * `WHERE tenant = ?` prefix scans every tenant-scoped read issues.
@@ -798,37 +925,82 @@ export function uniqueIndexesFromFields(
 ): ExpectedIndex[] {
   const out: ExpectedIndex[] = [];
   for (const [name, field] of Object.entries<any>(fields ?? {})) {
-    if (!isUniqueDeclared(field?.unique)) continue;
+    if (!isUniqueScopeDeclared(field?.unique)) continue;
     // A unique declaration ON the tenant column itself ("one row per tenant")
     // cannot be tenant-scoped — `(organization_id, organization_id)` is not a
     // constraint. Keep it single-column.
-    const scoped = !isGlobalUnique(field.unique) && tenantField != null && tenantField !== name;
+    const scoped =
+      isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name;
     const columns = scoped ? [tenantField, name] : [name];
-    out.push({ name: buildIndexName(table, columns, true), columns, unique: true });
+    out.push({
+      name: buildIndexName(table, columns, true),
+      columns,
+      unique: true,
+      ...(scoped ? { nullSafeColumns: [tenantField] } : {}),
+    });
   }
   return out;
 }
 
-/** Normalize one entry of an object's declared `indexes[]`, or null if unusable. */
+/** The declared-index shape this module normalizes (spec's `IndexSchema` + the driver-side extras). */
+export interface DeclaredIndexInput {
+  name?: string;
+  fields?: string[];
+  /** `'organization'` is the ADR-0120 D1 explicit per-organization scope; see {@link isUniqueScopeDeclared}. */
+  unique?: boolean | 'global' | 'organization';
+  /** Pre-resolved NULL-safe key parts — used by the drift-op apply path, which re-feeds already-normalized shapes. */
+  nullSafeColumns?: string[];
+}
+
+/**
+ * Normalize one entry of an object's declared `indexes[]`, or null if unusable.
+ *
+ * Scope handling (ADR-0120 D1/D3):
+ *   - `unique: true` / `'global'` → the listed columns, VERBATIM — the #3696
+ *     contract, now the `'global'` arm of the explicit vocabulary.
+ *   - `unique: 'organization'` → the organization key part is PREPENDED to the
+ *     listed columns in its NULL-safe form (`COALESCE(tenantField,
+ *     '__global__')`), resolved against the table's tenant column at
+ *     registration — the one place tenancy is knowable. With no tenant column
+ *     the index degrades to the listed columns alone, mirroring field-level
+ *     behavior (S11). A listed column that IS the tenant column is not
+ *     prepended again — its own key part becomes the NULL-safe form instead
+ *     (the hand-written S6 spelling, opted in).
+ */
 export function normalizeDeclaredIndex(
   table: string,
-  idx: { name?: string; fields?: string[]; unique?: boolean | 'global' } | undefined,
+  idx: DeclaredIndexInput | undefined,
+  tenantField?: string | null,
 ): ExpectedIndex | null {
-  const columns = Array.isArray(idx?.fields)
+  const listed = Array.isArray(idx?.fields)
     ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
     : [];
-  if (columns.length === 0) return null;
-  const unique = isUniqueDeclared(idx?.unique);
+  if (listed.length === 0) return null;
+  const unique = isUniqueScopeDeclared(idx?.unique);
+
+  let columns = listed;
+  let nullSafeColumns: string[] | undefined;
+  if (Array.isArray(idx?.nullSafeColumns) && idx.nullSafeColumns.length > 0) {
+    // Already-normalized shape (drift-op apply path) — honour it verbatim.
+    nullSafeColumns = idx.nullSafeColumns.filter((c) => listed.includes(c));
+    if (nullSafeColumns.length === 0) nullSafeColumns = undefined;
+  } else if (idx?.unique === 'organization' && tenantField) {
+    columns = listed.includes(tenantField) ? listed : [tenantField, ...listed];
+    nullSafeColumns = [tenantField];
+  }
+
   const name =
     typeof idx?.name === 'string' && idx.name.trim()
       ? idx.name.trim()
       : buildIndexName(table, columns, unique);
-  return { name, columns, unique };
+  return { name, columns, unique, ...(nullSafeColumns ? { nullSafeColumns } : {}) };
 }
 
 /**
  * The full index set metadata asks for on a table: field-level `unique`
- * (tenancy-aware) plus the object's declared `indexes[]`, taken verbatim.
+ * (tenancy-aware) plus the object's declared `indexes[]` — `'global'`/bare
+ * `true` taken verbatim, `'organization'` scoped through
+ * {@link normalizeDeclaredIndex} (ADR-0120 D1).
  *
  * Indexes referencing a column that was never materialized (a virtual `formula`
  * field, a column an earlier sync skipped) are dropped from the expected set —
@@ -839,13 +1011,13 @@ export function expectedIndexes(args: {
   table: string;
   fields: Record<string, any>;
   tenantField: string | null;
-  declaredIndexes?: Array<{ name?: string; fields?: string[]; unique?: boolean | 'global' }>;
+  declaredIndexes?: DeclaredIndexInput[];
   physicalColumns: Set<string>;
 }): ExpectedIndex[] {
   const { table, fields, tenantField, declaredIndexes, physicalColumns } = args;
   const out = uniqueIndexesFromFields(table, fields, tenantField);
   for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
-    const norm = normalizeDeclaredIndex(table, idx);
+    const norm = normalizeDeclaredIndex(table, idx, tenantField);
     if (norm) out.push(norm);
   }
   return out.filter((i) => i.columns.every((c) => physicalColumns.has(c)));
@@ -895,7 +1067,7 @@ export function legacyUniqueReplacements(args: {
   fields: Record<string, any>;
   tenantField: string | null;
   physicalColumns: Set<string>;
-  declaredIndexes?: Array<{ name?: string; fields?: string[]; unique?: boolean | 'global' }>;
+  declaredIndexes?: DeclaredIndexInput[];
 }): LegacyUniqueReplacement[] {
   const { table, fields, tenantField, physicalColumns, declaredIndexes } = args;
   if (!tenantField) return []; // Nothing was ever mis-scoped on a tenant-less table.
@@ -907,13 +1079,13 @@ export function legacyUniqueReplacements(args: {
   // declared index is named" is answered once, not guessed at twice.
   const declaredNames = new Set(
     (Array.isArray(declaredIndexes) ? declaredIndexes : [])
-      .map((idx) => normalizeDeclaredIndex(table, idx)?.name)
+      .map((idx) => normalizeDeclaredIndex(table, idx, tenantField)?.name)
       .filter((n): n is string => typeof n === 'string'),
   );
   const out: LegacyUniqueReplacement[] = [];
   for (const [name, field] of Object.entries<any>(fields ?? {})) {
-    if (!isUniqueDeclared(field?.unique)) continue;
-    if (isGlobalUnique(field.unique)) continue;
+    if (!isUniqueScopeDeclared(field?.unique)) continue;
+    if (!isOrganizationScopedUnique(field.unique)) continue;
     if (name === tenantField || !physicalColumns.has(name)) continue;
     const legacyNames = legacyUniqueIndexNames(table, name).filter((n) => !declaredNames.has(n));
     if (legacyNames.length === 0) continue;
@@ -921,7 +1093,16 @@ export function legacyUniqueReplacements(args: {
     out.push({
       column: name,
       legacyNames,
-      replacement: { name: buildIndexName(table, columns, true), columns, unique: true },
+      // NULL-safe organization key part (ADR-0120 D3). Still a pure
+      // relaxation to create from under the legacy GLOBAL single-column
+      // unique: any two rows colliding in the new key already collided in the
+      // old one, so the replacement can neither fail nor lose data.
+      replacement: {
+        name: buildIndexName(table, columns, true),
+        columns,
+        unique: true,
+        nullSafeColumns: [tenantField],
+      },
     });
   }
   return out;
@@ -954,9 +1135,32 @@ export function isManagedIndexName(table: string, index: PhysicalIndex): boolean
   return unique && columns.length === 1 && name === `${table}_${columns[0]}_unique`;
 }
 
-/** `(a, b)` UNIQUE vs `(a, b)` — the identity a physical index is compared on. */
-function indexSignature(columns: string[], unique: boolean): string {
-  return `${unique ? 'UNIQUE ' : ''}(${columns.join(', ')})`;
+/**
+ * `UNIQUE (a, b)` vs `(a, b)` — the display form of an index definition. A
+ * NULL-safe organization key part (ADR-0120 D3) renders as its COALESCE form
+ * so plan/warn messages describe the constraint that will actually exist.
+ */
+function indexSignature(
+  columns: string[],
+  unique: boolean,
+  nullSafeColumns?: ReadonlyArray<string> | null,
+): string {
+  const ns = new Set(nullSafeColumns ?? []);
+  const parts = columns.map((c) => (ns.has(c) ? organizationKeyPartSql(c) : c));
+  return `${unique ? 'UNIQUE ' : ''}(${parts.join(', ')})`;
+}
+
+/**
+ * Comparison identity of an index key — the SAME normalization for the
+ * expected and the physical side (ADR-0120 D3; the #4884 lesson). A key
+ * part's FORM matters (`COALESCE(organization_id, …)` is a different
+ * constraint from bare `organization_id`), but the COALESCE literal does not:
+ * any `COALESCE(col, <literal>)` folds NULL into one bucket, so two spellings
+ * of the literal are the same constraint and must not read as drift.
+ */
+function canonicalIndexKey(columns: string[], nullSafeColumns?: ReadonlyArray<string> | null): string {
+  const ns = new Set(nullSafeColumns ?? []);
+  return columns.map((c) => (ns.has(c) ? `coalesce:${c}` : c)).join(',');
 }
 
 /**
@@ -978,8 +1182,14 @@ export function diffManagedIndexes(args: {
    * {@link isRuntimeManagedIndex}.
    */
   runtimeCreated?: ReadonlySet<string>;
+  /**
+   * The table's tenant column, when it has one. Lets the differ recognise the
+   * NULL-safe organization key part as the sync's OWN vocabulary
+   * (ADR-0120 D3) — see {@link isSyncReproducibleIndex}.
+   */
+  tenantField?: string | null;
 }): ManagedDriftEntry[] {
-  const { table, expected, legacy, physical, runtimeCreated } = args;
+  const { table, expected, legacy, physical, runtimeCreated, tenantField } = args;
   const out: ManagedDriftEntry[] = [];
   const byName = new Map(physical.map((p) => [p.name, p]));
   /** Physical index names accounted for — either declared, or already reported. */
@@ -992,7 +1202,7 @@ export function diffManagedIndexes(args: {
     // collide with the legacy spelling be dropped.
     const present = l.legacyNames.filter((n) => {
       const p = byName.get(n);
-      if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated)) return false;
+      if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
       return p.unique && p.columns.length === 1 && p.columns[0] === l.column;
     });
     if (present.length === 0) continue;
@@ -1002,7 +1212,7 @@ export function diffManagedIndexes(args: {
       remoteName: table,
       table,
       column: l.column,
-      expected: indexSignature(l.replacement.columns, true),
+      expected: indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns),
       actual: indexSignature([l.column], true),
       severity: 'warning',
       category: 'safe',
@@ -1013,11 +1223,12 @@ export function diffManagedIndexes(args: {
         dropIndexNames: present,
         createIndexName: l.replacement.name,
         createColumns: l.replacement.columns,
+        ...(l.replacement.nullSafeColumns ? { nullSafeColumns: l.replacement.nullSafeColumns } : {}),
       },
       message:
         `${table}.${l.column}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
-        `tenant reusing the value is rejected on insert (#3696). Replacing it with ${indexSignature(l.replacement.columns, true)} ` +
+        `tenant reusing the value is rejected on insert (#3696). Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
         `is a pure relaxation: run "os migrate apply".`,
     });
   }
@@ -1032,7 +1243,7 @@ export function diffManagedIndexes(args: {
         remoteName: table,
         table,
         column: e.columns[0],
-        expected: indexSignature(e.columns, e.unique),
+        expected: indexSignature(e.columns, e.unique, e.nullSafeColumns),
         actual: '(absent)',
         severity: 'warning',
         category: 'safe',
@@ -1043,14 +1254,22 @@ export function diffManagedIndexes(args: {
           indexName: e.name,
           columns: e.columns,
           unique: e.unique,
+          ...(e.nullSafeColumns ? { nullSafeColumns: e.nullSafeColumns } : {}),
         },
         message:
-          `${table}: metadata declares index '${e.name}' ${indexSignature(e.columns, e.unique)} but the database ` +
+          `${table}: metadata declares index '${e.name}' ${indexSignature(e.columns, e.unique, e.nullSafeColumns)} but the database ` +
           `has no such index — run "os migrate apply" to create it.`,
       });
       continue;
     }
-    if (p.unique === e.unique && p.columns.join(',') === e.columns.join(',')) continue;
+    // Same normalization on BOTH sides (#4884, ADR-0120 D3): column identity
+    // AND key-part form, literal-agnostic on the COALESCE literal.
+    if (
+      p.unique === e.unique &&
+      canonicalIndexKey(p.columns, p.nullSafeColumns) === canonicalIndexKey(e.columns, e.nullSafeColumns)
+    ) {
+      continue;
+    }
     // The framework's own runtime migrations own some declared names — ADR-0048
     // rebuilds `idx_sys_metadata_overlay_active` as a partial UNIQUE over
     // `COALESCE(package_id,'')`, and `sys-metadata.object.ts` says in so many
@@ -1059,18 +1278,32 @@ export function diffManagedIndexes(args: {
     // would replace a stronger index with a weaker one, under a remedy
     // (`recreate_index` → drop first) this differ cannot undo. Not ours to
     // reconcile (#4884).
-    if (isRuntimeManagedIndex(p, runtimeCreated)) continue;
+    if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
     // Same name, different definition. `syncDeclaredIndexes` skips by name, so
     // this never self-heals: it has to be dropped and rebuilt. Tightening to
     // UNIQUE is destructive — the CREATE can fail on existing duplicates, and
     // by then the old index is already gone.
+    //
+    // ADR-0120 D4: ONE redefinition is data-dependent rather than structural —
+    // the bare organization composite tightening into its NULL-safe COALESCE
+    // form (same identities, same uniqueness, physical fully plain). It is
+    // marked so the driver can run the duplicate pre-flight probe on it:
+    // clean → recategorised `safe` (dev autoMigrate may apply); duplicates →
+    // blocked with a row report, the old index left in place.
+    const tightenNullSafeOnly =
+      e.unique &&
+      p.unique &&
+      (e.nullSafeColumns?.length ?? 0) > 0 &&
+      (p.expressions?.length ?? 0) === 0 &&
+      p.partial !== true &&
+      p.columns.join(',') === e.columns.join(',');
     out.push({
       kind: 'index_mismatch',
       remoteName: table,
       table,
       column: e.columns[0],
-      expected: indexSignature(e.columns, e.unique),
-      actual: indexSignature(p.columns, p.unique),
+      expected: indexSignature(e.columns, e.unique, e.nullSafeColumns),
+      actual: indexSignature(p.columns, p.unique, p.nullSafeColumns),
       severity: e.unique ? 'error' : 'warning',
       category: e.unique ? 'destructive' : 'needs_confirm',
       op: {
@@ -1080,13 +1313,19 @@ export function diffManagedIndexes(args: {
         indexName: e.name,
         columns: e.columns,
         unique: e.unique,
+        ...(e.nullSafeColumns ? { nullSafeColumns: e.nullSafeColumns } : {}),
+        ...(tightenNullSafeOnly ? { tightenNullSafeOnly: true } : {}),
       },
-      message:
-        `${table}: index '${e.name}' is ${indexSignature(p.columns, p.unique)} but metadata declares ` +
-        `${indexSignature(e.columns, e.unique)} — the additive sync skips it by name, so it must be rebuilt` +
-        (e.unique
-          ? `. Creating the UNIQUE index can fail on existing duplicates: "os migrate apply --allow-destructive".`
-          : ` via "os migrate apply".`),
+      message: tightenNullSafeOnly
+        ? `${table}: index '${e.name}' is ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} but metadata declares ` +
+          `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} (ADR-0120 D3: the organization key part is NULL-safe, ` +
+          `so rows without an organization are constrained too). Pure tightening — eligibility is decided by the ` +
+          `duplicate pre-flight probe.`
+        : `${table}: index '${e.name}' is ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} but metadata declares ` +
+          `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} — the additive sync skips it by name, so it must be rebuilt` +
+          (e.unique
+            ? `. Creating the UNIQUE index can fail on existing duplicates: "os migrate apply --allow-destructive".`
+            : ` via "os migrate apply".`),
     });
   }
 
@@ -1100,19 +1339,19 @@ export function diffManagedIndexes(args: {
     // an index this differ could not recreate is never proposed for deletion
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
-    if (isRuntimeManagedIndex(p, runtimeCreated)) continue;
+    if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
     out.push({
       kind: 'unmapped_index',
       remoteName: table,
       table,
       column: p.columns[0],
       expected: '(absent)',
-      actual: indexSignature(p.columns, p.unique),
+      actual: indexSignature(p.columns, p.unique, p.nullSafeColumns),
       severity: 'warning',
       category: 'destructive',
       op: { type: 'drop_index', table, column: p.columns[0], indexName: p.name },
       message:
-        `${table}: index '${p.name}' ${indexSignature(p.columns, p.unique)} carries ObjectStack's generated naming ` +
+        `${table}: index '${p.name}' ${indexSignature(p.columns, p.unique, p.nullSafeColumns)} carries ObjectStack's generated naming ` +
         `but matches no declared index (orphaned) — "os migrate apply --allow-destructive" to drop it.`,
     });
   }

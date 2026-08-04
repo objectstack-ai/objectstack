@@ -15,6 +15,21 @@
 
 export * from './contract.zod';
 export * from './endpoint.zod';
+// [#5189, #5040 E7b] The per-endpoint publish gates. #5111 kept this module
+// package-internal because its only consumer was `ObjectStackDefinitionSchema`,
+// one file away. #5189 proved the stack schema is NOT the only door: a
+// `MetadataManager.publishPackage` / `metadata.register()` / Studio write mints
+// an `api` item without ever parsing a stack, and ADR-0121 D6 (anonymous
+// endpoints must carry an armed budget) has no runtime counterpart to catch it.
+// The gate therefore becomes public so the metadata layer can reuse the SAME
+// criteria at publish and at index-build time — one judge, three doors, rather
+// than a second implementation that drifts.
+export {
+    validateApiEndpointDeclarations,
+    identityFreeEndpointGateFailure,
+    type EndpointGateIssue,
+    type EndpointGateIdentity,
+} from './endpoint-publish-gate';
 export * from './discovery.zod';
 export * from './events.zod';
 export * from './realtime-shared.zod';

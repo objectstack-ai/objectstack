@@ -1897,7 +1897,22 @@ export class AuthManager {
           // deployment is provisioned in single-org mode. Resolution order:
           // `OS_MULTI_ORG_ENABLED` (default `'false'` → single-org /
           // per-env runtime).
-          beforeCreateOrganization: async () => {
+          beforeCreateOrganization: async ({ organization }: any = {}) => {
+            // [ADR-0120 D3] `'__global__'` is the platform's name for the
+            // NULL-organization bucket: the autonumber sequence table keys
+            // org-less rows by it, and every organization-scoped unique index
+            // folds NULL into it via `COALESCE(organization_id, '__global__')`.
+            // An organization minted with that token as its id (or slug — the
+            // only caller-controllable identifier here) would collide with the
+            // platform bucket, so the token is reserved at this seam.
+            if (organization?.id === '__global__' || organization?.slug === '__global__') {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('BAD_REQUEST', {
+                message:
+                  "'__global__' is reserved for the platform (no-organization) bucket " +
+                  '(ADR-0120 D3) and cannot be used as an organization id or slug.',
+              });
+            }
             if (!resolveMultiOrgEnabled()) {
               const { APIError } = await import('better-auth/api');
               throw new APIError('FORBIDDEN', {
@@ -2659,6 +2674,26 @@ export class AuthManager {
     if (this.auth && !patch.authInstance) {
       this.auth = null;
     }
+  }
+
+  /**
+   * ADR-0093 D1 — the deployment's membership policy **as it stands right now**.
+   *
+   * The ONE source both membership paths read (#5152):
+   *   - sign-up: the reconciler composed into `user.create.after` (below);
+   *   - backfill: `AuthPlugin`'s ADR-0093 D6 pass over pre-existing member-less
+   *     users, which used to read the plugin's CONSTRUCTOR options instead.
+   *
+   * That split mattered because `this.config` is what {@link applyConfigPatch}
+   * targets: once `auth.membership_policy` became a platform setting, the
+   * constructor options stopped being current the moment an admin saved the
+   * form. Sign-up would honour the new policy while the backfill kept running
+   * the old one — and the backfill binds in BULK. Read the policy through here,
+   * never off a captured option, so a settings change reaches both without a
+   * restart.
+   */
+  getMembershipPolicy(): MembershipPolicy {
+    return this.config.membershipPolicy ?? 'auto';
   }
 
   /**
@@ -3647,7 +3682,9 @@ export class AuthManager {
     const membershipReconciler = async (user: any) => {
       try {
         await reconcileMembership(this.config.dataEngine, user?.id, {
-          policy: this.config.membershipPolicy ?? 'auto',
+          // #5152 — read through the accessor, not `this.config` directly: it is
+          // the single source the backfill path reads too.
+          policy: this.getMembershipPolicy(),
           resolveTargetOrg: async () => {
             const tenancy = this.config.getTenancy?.();
             // Single-org → default org; multi-org → none (invite/JIT own it).
