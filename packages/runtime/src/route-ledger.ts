@@ -278,14 +278,17 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '`<prefix>/apps/<namespace>/<subpath>` and therefore not enumerable here. Served by neither '
       + 'the domain registry nor the dispatch() if-chain: dispatcher-plugin installs an '
       + '`IHttpServer.setFallbackHandler` (Hono `app.notFound`) that runs only after every registered '
-      + 'route has missed, probes `metadata.matchEndpoint` for paths under this prefix, and — as of '
-      + '#5090 — answers 501 NOT_IMPLEMENTED on a match. EXECUTION IS NOT WIRED: target dispatch and '
-      + 'the authRequired / rateLimit / cacheTtl / mapping keys land with #5040 E4–E5. A miss (or an '
-      + 'occupant of the metadata slot with no matchEndpoint) writes nothing, leaving the transport\'s '
-      + '404/405 answer untouched. Structurally unreachable today: a non-empty `apis:` is rejected at '
-      + 'publish until the #5040 E7 flip, so nothing can be declared for this seam to match. No SDK '
-      + 'surface — app-declared endpoints are an external-integration channel (ADR-0121 D3), called by '
-      + 'the integrator\'s own client, not by `@objectstack/client`',
+      + 'route has missed, and for paths under this prefix resolves the request\'s environment + '
+      + 'identity, probes `metadata.matchEndpoint`, and on a match runs the full chain (#5040 E5b): '
+      + 'the policy keys authRequired / rateLimit / cacheTtl (E4), then target delegation (E5) — '
+      + '`object_operation` through the same `callData` as /data, `flow` through the automation '
+      + 'service. `script` / `proxy` targets and the inputMapping / outputMapping keys are NOT '
+      + 'executed and answer 501. A miss (or an occupant of the metadata slot with no matchEndpoint, '
+      + 'or a multi-tenant request that resolves to no environment) writes nothing, leaving the '
+      + 'transport\'s 404/405 answer untouched. Structurally unreachable today: a non-empty `apis:` '
+      + 'is rejected at publish until the #5040 E7 flip, so nothing can be declared for this seam to '
+      + 'match. No SDK surface — app-declared endpoints are an external-integration channel '
+      + '(ADR-0121 D3), called by the integrator\'s own client, not by `@objectstack/client`',
   },
 
   // ── misc legacy ───────────────────────────────────────────────────────────

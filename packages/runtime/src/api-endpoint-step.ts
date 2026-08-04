@@ -19,36 +19,46 @@
  *
  * ## What it does today, and what it does not
  *
- * Today it answers **501 NOT_IMPLEMENTED** on a match. That is the honest
- * report of the state of the executor: the endpoint IS declared and IS matched,
- * and the thing that would run it lands in 17.x (#5040 E5). It is also
- * structurally unreachable — a non-empty `apis:` is rejected at publish /
- * validate until the E7 flip — so no deployment can observe it; the tests below
- * drive `matchEndpoint` through a stub, exactly as #5040 §5 prescribes for
- * every E-series unit that lands before the flip.
+ * On a match it runs the WHOLE chain: policies (#5040 E4) and then target
+ * execution (#5040 E5), wired together here by E5b. It is still structurally
+ * unreachable — a non-empty `apis:` is rejected at publish / validate until the
+ * E7 flip — so no deployment can observe it; the tests drive `matchEndpoint`
+ * through a stub, exactly as #5040 §5 prescribes for every E-series unit that
+ * lands before the flip.
  *
- * ## The policy chain (#5040 E4) now runs between the match and the answer
+ * ## The chain, in the one order it can run in
  *
  * `authRequired` / `rateLimit` / `cacheTtl` are enforced by
  * {@link applyEndpointPolicies}, in the order #5040 §3 fixes, whenever the
  * caller supplies a {@link EndpointPolicyContext}. A denial (401 / 429) is the
- * answer; a pass still ends in the 501 below, because the thing that would run
- * the endpoint is E5.
+ * answer. A pass reaches {@link executeEndpointTarget} — and NOTHING else can:
+ * the execution call sits INSIDE the post-policy branch, which is unreachable
+ * without a policy context and short-circuited by a denial. "Wired the executor,
+ * forgot the policies" is therefore not a mistake a future change can make by
+ * omission; there is nowhere else to put the call.
  *
- * That ordering is structural, not stylistic: execution lands INSIDE the
- * post-policy branch, which is unreachable without a policy context. Wiring an
- * executor without wiring policies is therefore not something a future change
- * can do by forgetting — it would have nowhere to put the call.
+ * `verdict.responseHeaders` (the `Cache-Control` computed from `cacheTtl`) is
+ * merged into SUCCESS answers only. An error answer never carries it: the
+ * header describes a body the caller should be willing to reuse, and telling a
+ * client to cache a 401 / 429 / 500 for a minute is worse than saying nothing.
  *
- * What it does NOT do yet, so nobody reads more into it than is here:
- * `inputMapping` / `outputMapping` and target execution — `object_operation`
- * via `callData`, `flow` via the automation service (E5).
+ * What it does NOT do, so nobody reads more into it than is here:
+ * `inputMapping` / `outputMapping` (declared, still unread — #5040's E7 gate
+ * must not flip before they are, or the two keys sit in the "declared, legal,
+ * ignored" state this program exists to end).
  */
 
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IMetadataService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { apiErrorResponse } from './error-envelope.js';
 import { applyEndpointPolicies, type EndpointPolicyContext } from './endpoint-policy.js';
+import {
+    buildEndpointExecutionContext,
+    executeEndpointTarget,
+    type EndpointExecutionRequest,
+    type EndpointExecutorDeps,
+} from './endpoint-executor.js';
 
 /**
  * The platform's single reserved carve-out segment for app-declared endpoints
@@ -94,16 +104,42 @@ export interface AppEndpointStepAnswer {
     status: number;
     body: unknown;
     /**
-     * Headers that are part of THIS answer and must be written with it — today
-     * only `Retry-After` on a rate-limit denial, where the header carries the
-     * one piece of information the client needs to behave.
+     * Headers that are part of THIS answer and must be written with it:
+     * `Retry-After` on a rate-limit denial (the one piece of information a
+     * throttled client needs to behave), and `Cache-Control` on a SUCCESSFUL
+     * execution result (from `cacheTtl`).
      *
-     * Note what is NOT here: the `Cache-Control` computed from `cacheTtl`. It
-     * describes a successful response body that does not exist yet, and telling
-     * a client to cache a 501 would be worse than saying nothing. It stays on
-     * the policy verdict until execution lands (#5040 E5).
+     * The asymmetry is deliberate and enforced below — `Cache-Control` rides
+     * only on a success, never on an error answer.
      */
     headers?: Record<string, string>;
+}
+
+/**
+ * The execution wiring: everything the step needs to RUN a matched endpoint,
+ * resolved by the caller on the request's own kernel.
+ *
+ * Nothing here is looked up by this module. That is what keeps the "which
+ * kernel / which environment" question in the one place that already answers it
+ * (`HttpDispatcher.resolveRequestScope`, called by the dispatch seam) instead of
+ * growing a second, weaker copy in a consumer.
+ */
+export interface AppEndpointExecutionInput {
+    /** The request as the fallback seam sees it — body and `remoteAddress` included. */
+    request: EndpointExecutionRequest;
+    /** The `callData` binding and the `automation` slot occupant. */
+    deps: EndpointExecutorDeps;
+    /**
+     * The identity envelope the dispatcher resolved for this request, or
+     * `undefined` for anonymous. Threaded into every delegated call so RLS/FLS
+     * and the ADR-0049 exposure gate apply exactly as on the built-in route
+     * (#5040 §4's red line; #4936 is what its absence looks like).
+     */
+    executionContext?: ExecutionContext;
+    /** Environment scoping for service resolution. */
+    environmentId?: string;
+    /** Environment-scoped data driver, when the host resolved one. */
+    dataDriver?: unknown;
 }
 
 export interface AppEndpointStepInput {
@@ -126,14 +162,22 @@ export interface AppEndpointStepInput {
      * headers and peer address, the principal lookup, the endpoint limiter
      * registry, `trustProxy`.
      *
-     * Optional ONLY because the dispatch seam that calls this step does not
-     * thread it yet — that plumbing lands with the executor wiring (#5040 E5),
-     * which is the same change that needs the request body and the environment
-     * anyway. Omitting it does not open anything: the terminal answer without a
-     * policy context is the 501 below, so no request can be SERVED unpoliced,
-     * and execution can only be added on the far side of the chain.
+     * The real dispatch seam ALWAYS threads it (#5040 E5b), so the branch that
+     * answers without one is unreachable in the composed runtime — pinned by
+     * the integration test rather than deleted, because the honest report is
+     * cheap and a direct caller of this module (a test, a future host) can still
+     * omit it. Omitting it does not open anything: the terminal answer without a
+     * policy context is a 501, so no request can be SERVED unpoliced, and
+     * execution lives strictly on the far side of the chain.
      */
     policy?: EndpointPolicyContext;
+    /**
+     * Execution wiring (#5040 E5b). Threaded by the same seam that threads
+     * {@link policy}; without it a policed request that PASSED still ends in a
+     * 501 that says so, which is the honest answer for a host that mounted the
+     * step but wired no executor.
+     */
+    execution?: AppEndpointExecutionInput;
 }
 
 /**
@@ -167,15 +211,14 @@ export async function runAppEndpointStep(
     if (!match) return undefined;
 
     if (!input.policy) {
-        // No policy context threaded yet (see `AppEndpointStepInput.policy`).
-        // The answer is the same 501 this seam has always given, and the hint
-        // says which keys were NOT evaluated — a report that is wrong about
-        // what ran is worse than no report.
+        // No policy context threaded (see `AppEndpointStepInput.policy`). The
+        // answer is the 501 this seam gave before anything was wired, and the
+        // hint says which keys were NOT evaluated — a report that is wrong
+        // about what ran is worse than no report.
         return notImplemented(match, method, path,
-            'The mounting seam is in place; execution (target dispatch, mappings) lands with #5040 E5. This '
-            + 'request reached the step without a policy context, so authRequired / rateLimit / cacheTtl were '
-            + 'not evaluated — nothing was served either. Until the E7 flip a non-empty `apis:` is rejected at '
-            + 'publish, so no reachable deployment can produce this answer.');
+            'This request reached the step without a policy context, so authRequired / rateLimit / cacheTtl '
+            + 'were not evaluated — and nothing was executed either. The composed runtime always threads one '
+            + '(#5040 E5b), so reaching this answer means a host mounted the step by hand and omitted it.');
     }
 
     const verdict = await applyEndpointPolicies({ ...input.policy, endpoint: match.endpoint, method });
@@ -188,18 +231,53 @@ export async function runAppEndpointStep(
     }
 
     // ── Everything past this line has been through the policy chain ──────
-    // This is where target execution lands (#5040 E5), and it is the ONLY place
-    // it can land: the branch is unreachable without a policy context, and the
-    // deny above short-circuits before it. `verdict.responseHeaders` carries the
-    // `Cache-Control` that the executor's success answer should apply — it is
-    // deliberately not applied to the 501 (see `AppEndpointStepAnswer.headers`).
-    return notImplemented(match, method, path,
-        'Policies (authRequired / rateLimit / cacheTtl) were enforced and this request passed them; target '
-        + 'execution lands with #5040 E5. Until the E7 flip a non-empty `apis:` is rejected at publish, so no '
-        + 'reachable deployment can produce this answer.');
+    // The ONLY place execution can be called from: this branch is unreachable
+    // without a policy context, and a denial short-circuits before it.
+    if (!input.execution) {
+        return notImplemented(match, method, path,
+            'Policies (authRequired / rateLimit / cacheTtl) were enforced and this request passed them, but no '
+            + 'execution wiring was supplied, so the target was not run. The composed runtime always supplies '
+            + 'it (#5040 E5b).');
+    }
+
+    const { request, deps, executionContext, environmentId, dataDriver } = input.execution;
+    const answer = await executeEndpointTarget(
+        buildEndpointExecutionContext({
+            request,
+            match,
+            ...(executionContext !== undefined ? { executionContext } : {}),
+            ...(environmentId !== undefined ? { environmentId } : {}),
+            ...(dataDriver !== undefined ? { dataDriver } : {}),
+        }),
+        deps,
+    );
+
+    // `Cache-Control` (from `cacheTtl`) applies to a SUCCESS and nothing else.
+    // `executeEndpointTarget` never throws — a delegated failure is already an
+    // error answer here — so the status is the whole test, and an endpoint whose
+    // execution failed cannot hand the client a cache directive for the failure.
+    const isSuccess = answer.status < 400;
+    const headers = {
+        ...(answer.headers ?? {}),
+        ...(isSuccess ? verdict.responseHeaders : {}),
+    };
+    return {
+        status: answer.status,
+        body: answer.body,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    };
 }
 
-/** The one 501 body this step answers with, whichever branch produced it. */
+/**
+ * The 501 for a match this step was not given enough to serve.
+ *
+ * Both callers are INCOMPLETE-WIRING branches, not feature gaps: the composed
+ * runtime threads both a policy context and execution wiring, so neither is
+ * reachable through `dispatcher-plugin` (pinned in
+ * `dispatcher-plugin.endpoint-fallback.integration.test.ts`). They stay because
+ * this module is callable directly, and answering an honest "nothing ran"
+ * beats pretending — or crashing on a missing collaborator.
+ */
 function notImplemented(
     match: ApiEndpointMatch,
     method: string,
@@ -210,8 +288,8 @@ function notImplemented(
         code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
         httpStatus: 501,
         message:
-            `Declarative endpoint '${match.endpoint.name}' claims ${method} ${path}, but the endpoint `
-            + 'executor is not enabled in this build. It lands in 17.x (#5040).',
+            `Declarative endpoint '${match.endpoint.name}' claims ${method} ${path}, but the caller of the `
+            + 'endpoint step supplied no wiring to serve it with (#5040).',
         extra: { hint },
     });
 }

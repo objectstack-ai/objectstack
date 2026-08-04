@@ -25,6 +25,7 @@ import {
     appEndpointMountPrefix,
     isAppEndpointPath,
     runAppEndpointStep,
+    type AppEndpointExecutionInput,
 } from './api-endpoint-step.js';
 import {
     createEndpointRateLimiterRegistry,
@@ -123,7 +124,7 @@ describe('the step writes nothing unless a declaration owns the request', () => 
     });
 });
 
-describe('a match answers 501 until the executor lands (#5040 E5)', () => {
+describe('a match with no wiring answers an honest 501', () => {
     it('reports NOT_IMPLEMENTED in the declared error envelope', async () => {
         const { service } = matcherFor([TASKS]);
         const answer = await step('/api/v1/apps/showcase/tasks', 'GET', service);
@@ -136,7 +137,7 @@ describe('a match answers 501 until the executor lands (#5040 E5)', () => {
         // Names the endpoint it matched and says plainly that nothing ran —
         // "matched but not executed" must never read as "executed and empty".
         expect(body.error.message).toContain('showcase_tasks');
-        expect(body.error.message).toContain('not enabled');
+        expect(body.error.message).toContain('no wiring');
         expect(String(body.error.hint)).toContain('#5040');
     });
 
@@ -264,5 +265,132 @@ describe('the policy chain runs between the match and the answer', () => {
         expect(answer?.status).toBe(501);
         expect(seen).toEqual([{ cookie: 'session=abc' }]);
         expect([...entries.keys()]).toEqual([endpointBucketKey('showcase_tasks', 'principal:usr_7')]);
+    });
+});
+
+/**
+ * Execution, wired to the far side of the policy chain (#5040 E5b / #5129).
+ *
+ * The delegation itself is `endpoint-executor.test.ts`'s subject; what is
+ * asserted here is the JOIN — that a passing request reaches the executor with
+ * the request's own coordinates and identity, that a denial never does, and
+ * that `cacheTtl`'s header lands on a success and on nothing else.
+ */
+describe('execution runs on the far side of the policy chain', () => {
+    const OPEN: ApiEndpoint = ApiEndpointSchema.parse({ ...TASKS, name: 'showcase_open', authRequired: false });
+
+    const limiters = () => createEndpointRateLimiterRegistry({ resolveCache: async () => undefined });
+
+    /** Records every delegated `callData` call and answers with a stub result. */
+    function callDataSpy(result: unknown = { object: 'showcase_task', records: [], total: 0 }) {
+        const calls: unknown[][] = [];
+        return {
+            calls,
+            fn: async (...args: unknown[]) => { calls.push(args); return result; },
+        };
+    }
+
+    const wiredStep = (
+        endpoints: ApiEndpoint[],
+        execution: Partial<AppEndpointExecutionInput> & { deps: AppEndpointExecutionInput['deps'] },
+        policy: Partial<EndpointPolicyContext> = {},
+        method = 'GET',
+    ) => runAppEndpointStep({
+        method,
+        path: endpoints[0]!.path,
+        prefix: '/api/v1',
+        metadataService: matcherFor(endpoints).service as never,
+        policy: { limiters: limiters(), ...policy },
+        execution: {
+            request: {
+                method,
+                path: endpoints[0]!.path,
+                query: { limit: '5' },
+                headers: { 'x-caller': 'integration' },
+                body: undefined,
+            },
+            ...execution,
+        },
+    });
+
+    it('delegates a passing request with the request\'s own identity envelope', async () => {
+        const spy = callDataSpy();
+        const executionContext = { userId: 'usr_7', isSystem: false } as never;
+        const answer = await wiredStep([OPEN], {
+            deps: { callData: spy.fn as never },
+            executionContext,
+            environmentId: 'env_1',
+            dataDriver: { driver: true },
+        });
+
+        expect(answer?.status).toBe(200);
+        expect(answer?.body).toEqual({
+            success: true,
+            data: { object: 'showcase_task', records: [], total: 0 },
+            meta: undefined,
+        });
+        // The identity envelope, the driver and the scope ride on the delegated
+        // call — #5040 §4's red line, and the exact thing #4936's dead branch
+        // dropped (it would have read as `system`, RLS bypassed).
+        expect(spy.calls).toEqual([[
+            'query',
+            { object: 'showcase_task', query: { limit: '5' } },
+            { driver: true },
+            'env_1',
+            executionContext,
+        ]]);
+    });
+
+    it('puts the cacheTtl Cache-Control on a SUCCESS answer', async () => {
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+        const answer = await wiredStep([cached], { deps: { callData: callDataSpy().fn as never } });
+
+        expect(answer?.status).toBe(200);
+        expect(answer?.headers).toEqual({ 'Cache-Control': 'private, max-age=30' });
+    });
+
+    it('never puts it on an ERROR answer, however the failure arose', async () => {
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+        // A delegated pipeline that throws — the executor maps it to a 4xx/5xx
+        // answer, and a client must not be told to reuse a failure for 30s.
+        const answer = await wiredStep([cached], {
+            deps: { callData: async () => { throw { statusCode: 404, message: 'no such object' }; } },
+        });
+
+        expect(answer?.status).toBe(404);
+        expect(answer?.headers).toBeUndefined();
+
+        // Same for a declaration this runtime does not execute (501 from the
+        // executor's own `unsupported` arm, not from the no-wiring branch).
+        const proxied = ApiEndpointSchema.parse({
+            ...OPEN, name: 'showcase_proxy', type: 'proxy', target: 'https://example.invalid', cacheTtl: 30,
+        });
+        const unsupported = await wiredStep([proxied], { deps: { callData: async () => ({}) } });
+        expect(unsupported?.status).toBe(501);
+        expect(unsupported?.headers).toBeUndefined();
+        expect(String((unsupported!.body as { error: { message: string } }).error.message)).toContain('proxy');
+    });
+
+    it('never reaches the executor when a policy denied the request', async () => {
+        const spy = callDataSpy();
+        // `TASKS` keeps the default `authRequired: true`; the caller is anonymous.
+        const answer = await wiredStep([TASKS], { deps: { callData: spy.fn as never } });
+
+        expect(answer?.status).toBe(401);
+        expect(spy.calls, 'the executor ran for a request the policy chain denied').toEqual([]);
+    });
+
+    it('answers an honest 501 when a caller wired policies but no executor', async () => {
+        const answer = await runAppEndpointStep({
+            method: 'GET',
+            path: OPEN.path,
+            prefix: '/api/v1',
+            metadataService: matcherFor([OPEN]).service as never,
+            policy: { limiters: limiters() },
+        });
+        expect(answer?.status).toBe(501);
+        const hint = String((answer!.body as { error: { hint: unknown } }).error.hint);
+        expect(hint).toContain('enforced');
+        expect(hint).toContain('no execution wiring');
     });
 });

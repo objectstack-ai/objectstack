@@ -14,7 +14,10 @@ import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from 
 // `import * as actionExec from './action-execution.js'` was dropped in #4936:
 // the dispatcher's own `callData` delegate was its last consumer here, and the
 // delegate died with the `handleApiEndpoint` branch. The domain modules import
-// `action-execution` for themselves.
+// `action-execution` for themselves. What came back in #5040 E5b is the TYPE
+// only — `actionExecutionDeps` hands the endpoint step the same `deps` object
+// every domain already passes to `callData`, without this file calling it.
+import type { ActionExecutionDeps } from './action-execution.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -286,6 +289,108 @@ export class HttpDispatcher {
      */
     isMultiTenantHost(): boolean {
         return !!this.kernelResolver;
+    }
+
+    /**
+     * Resolve the per-request ENVIRONMENT, kernel and identity envelope — the
+     * step {@link dispatch} performs before any handler runs, extracted so a
+     * caller that serves from OUTSIDE the route pipeline gets the SAME answers
+     * rather than a lookalike.
+     *
+     * It mutates `context` in place, exactly as it always did inside
+     * `dispatch()`: the host's resolver writes `environmentId` (+ `dataDriver`),
+     * the identity step writes `executionContext`, and `this.kernel` is swapped
+     * to the kernel this request is served from.
+     *
+     * ## Its one out-of-band caller (#5040 E5b)
+     *
+     * The declarative-endpoint step runs in the transport's
+     * `setFallbackHandler` seam, which `dispatch()` deliberately never sees
+     * (#5090 keeps unmatched requests out of the dispatch pipeline). But that
+     * step DELEGATES into `callData` and the automation service, so it needs
+     * precisely what a `/data` request has: the request's kernel, its
+     * environment, its driver, and its `ExecutionContext`. Restating this block
+     * there would be a second, weaker identity resolution — and #4936 is the
+     * record of what a data call with no `ExecutionContext` does: it reads as
+     * the system principal with RLS bypassed.
+     *
+     * `cleanPath` is the dispatcher's cleaned route path (trailing slash
+     * trimmed). It feeds URL parsing hints and the MCP-only OAuth decision
+     * below, nothing else.
+     */
+    async resolveRequestScope(context: HttpProtocolContext, cleanPath: string): Promise<void> {
+        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
+        // The host's KernelResolver owns the whole step: it resolves the
+        // request to an environment (hostname / header / session / defaults —
+        // strategy lives in the cloud distribution), SETS
+        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
+        // serve from. The dispatcher only contributes parsing hints. No
+        // resolver registered → single-environment: every request serves from
+        // `defaultKernel` with no environment context.
+        this.prepareResolverHints(context, cleanPath);
+        if (this.kernelResolver) {
+            this.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+        } else {
+            this.kernel = this.defaultKernel;
+        }
+
+        // Touch scope for TTL/LRU tracking in shared-kernel mode
+        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
+            this.scopeManager.touch(context.environmentId);
+        }
+
+        // ── Identity Resolution (RBAC/RLS/FLS context) ──
+        // Resolve once per request; SecurityPlugin middleware reads
+        // ctx.userId/roles/permissions/tenantId via opCtx.context.
+        try {
+            context.executionContext = await this.timedResolveExecutionContext({
+                getService: (n: string) => this.resolveService(n, context.environmentId),
+                // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
+                // `resolveService('objectql', envId)` factory can return a different
+                // instance that doesn't see THIS env's rows (the gotcha
+                // `handleActions` works around) — which made the api-key lookup miss
+                // `sys_api_key` on the MCP path and reject valid keys with 401, while
+                // REST accepted them (rest-server resolves identity via
+                // `kernel.getServiceAsync('objectql')`). Resolving off `this.kernel`
+                // keeps REST + MCP identity resolution aligned; falls back to the
+                // scoped path when the kernel can't hand back an objectql directly.
+                getQl: async () => {
+                    const k: any = this.kernel;
+                    if (k && typeof k.getServiceAsync === 'function') {
+                        const ql = await k.getServiceAsync('objectql').catch(() => undefined);
+                        if (ql && (ql.registry || typeof ql.find === 'function')) return ql;
+                    }
+                    return this.getObjectQLService(context.environmentId);
+                },
+                request: context.request,
+                // OAuth 2.1 access tokens are honoured ONLY on the MCP
+                // surface (#2698): their coarse tool-family scopes are
+                // enforced at MCP tool dispatch, which other routes don't do.
+                // Matches the plain and `/projects/:id`-scoped route forms
+                // (the scoped prefix is stripped only by the caller, later).
+                acceptOAuthAccessToken: /^(?:\/projects\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
+            });
+        } catch {
+            // anonymous request — leave executionContext undefined
+        }
+    }
+
+    /**
+     * The action-execution facilities — the `deps` argument
+     * `action-execution.callData(deps, …)` takes — bound to this dispatcher's
+     * per-request kernel.
+     *
+     * Every live data path already calls `callData` with exactly this object;
+     * it reaches them as part of {@link DomainHandlerDeps} because they are
+     * domain modules. The declarative-endpoint step is not a domain module (it
+     * serves from the fallback seam, outside `dispatch()`), so it needs the same
+     * object by a name it can ask for. Exposing the NARROW `ActionExecutionDeps`
+     * view rather than the whole dispatcher-facility contract is the point: the
+     * endpoint executor may look services up and run data calls, and nothing
+     * else.
+     */
+    get actionExecutionDeps(): ActionExecutionDeps {
+        return this.domainDeps;
     }
 
     /**
@@ -1471,60 +1576,7 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
-        // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
-        // The host's KernelResolver owns the whole step: it resolves the
-        // request to an environment (hostname / header / session / defaults —
-        // strategy lives in the cloud distribution), SETS
-        // `context.environmentId` (+ `dataDriver`), and returns the kernel to
-        // serve from. The dispatcher only contributes parsing hints. No
-        // resolver registered → single-environment: every request serves from
-        // `defaultKernel` with no environment context.
-        this.prepareResolverHints(context, cleanPath);
-        if (this.kernelResolver) {
-            this.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
-        } else {
-            this.kernel = this.defaultKernel;
-        }
-
-        // Touch scope for TTL/LRU tracking in shared-kernel mode
-        if (this.scopeManager && context.environmentId && context.environmentId !== 'platform') {
-            this.scopeManager.touch(context.environmentId);
-        }
-
-        // ── Identity Resolution (RBAC/RLS/FLS context) ──
-        // Resolve once per request; SecurityPlugin middleware reads
-        // ctx.userId/roles/permissions/tenantId via opCtx.context.
-        try {
-            context.executionContext = await this.timedResolveExecutionContext({
-                getService: (n: string) => this.resolveService(n, context.environmentId),
-                // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
-                // `resolveService('objectql', envId)` factory can return a different
-                // instance that doesn't see THIS env's rows (the gotcha
-                // `handleActions` works around) — which made the api-key lookup miss
-                // `sys_api_key` on the MCP path and reject valid keys with 401, while
-                // REST accepted them (rest-server resolves identity via
-                // `kernel.getServiceAsync('objectql')`). Resolving off `this.kernel`
-                // keeps REST + MCP identity resolution aligned; falls back to the
-                // scoped path when the kernel can't hand back an objectql directly.
-                getQl: async () => {
-                    const k: any = this.kernel;
-                    if (k && typeof k.getServiceAsync === 'function') {
-                        const ql = await k.getServiceAsync('objectql').catch(() => undefined);
-                        if (ql && (ql.registry || typeof ql.find === 'function')) return ql;
-                    }
-                    return this.getObjectQLService(context.environmentId);
-                },
-                request: context.request,
-                // OAuth 2.1 access tokens are honoured ONLY on the MCP
-                // surface (#2698): their coarse tool-family scopes are
-                // enforced at MCP tool dispatch, which other routes don't do.
-                // Matches the plain and `/projects/:id`-scoped route forms
-                // (the scoped prefix is stripped only later, below).
-                acceptOAuthAccessToken: /^(?:\/projects\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
-            });
-        } catch {
-            // anonymous request — leave executionContext undefined
-        }
+        await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──
         // Block a gated session (expired password / required MFA) from
