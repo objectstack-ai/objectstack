@@ -227,8 +227,17 @@ export type FilterCondition = {
   
   /** Logical OR - at least one condition must be true */
   $or?: FilterCondition[];
-  
-  /** Logical NOT - negates the condition */
+
+  /**
+   * Logical NOT - negates the condition, **NULL-safely** (#5146).
+   *
+   * A row whose compared column is NULL does NOT satisfy the negated condition
+   * and IS returned. In SQL terms the operand is negated as
+   * `NOT (…) OR col IS NULL` rather than as a bare `NOT (…)`.
+   *
+   * See {@link FilterConditionSchema} for why this is part of the contract
+   * rather than each backend's own choice.
+   */
   $not?: FilterCondition;
 };
 
@@ -242,6 +251,51 @@ export type FilterCondition = {
  * `z.input`, so the authoring surface underneath goes unchecked. Nothing here
  * carries a `.default()` or a `.transform()`, so input and output are the same
  * type and the second argument is simply the first.
+ *
+ * ## `$not` is NULL-safe (#5146, maintainer ruling 2026-08-04)
+ *
+ * **A row whose compared column is NULL does NOT satisfy the negated condition
+ * and IS returned** — `NOT (…) OR col IS NULL`, not a bare `NOT (…)`.
+ *
+ * This is written down here because it was not, and the omission had a cost.
+ * The schema declared `$not` beside `$and` / `$or` and said nothing about what
+ * it MEANS, so each backend answered from its own host language: the SQL
+ * compilers negated in three-valued logic (`NULL = 'won'` is UNKNOWN,
+ * `NOT UNKNOWN` is UNKNOWN, a `WHERE` keeps only TRUE) and dropped every
+ * NULL-column row, while `driver-memory` and `formula` evaluated in ordinary
+ * two-valued JS (`undefined !== 'won'`) and returned them. One declared
+ * operator, two answers, chosen by which driver happened to run the query.
+ *
+ * That is a permission defect, not a rounding difference. A CEL `!expr` in an
+ * RLS rule lowers to `{ $not: {…} }` (`packages/formula/src/cel-to-filter.ts`),
+ * so the SAME read scope admitted a different set of rows per backend. #5146
+ * ruled the two-valued answer canonical: it is the majority, and nobody writing
+ * `!(stage == 'won')` expects rows with no stage to be hidden by it.
+ *
+ * Note the guard belongs on each LEAF inside the negation, not hoisted next to
+ * the `$not`: a top-level `NOT (…) OR col IS NULL` re-admits rows that satisfy
+ * a nested `$or` through a different branch, which widens the scope. Following
+ * each operator's own answer for a missing value is also what keeps `$ne` /
+ * `$nin` from being widened — `{ $not: { stage: { $ne: 'won' } } }` still means
+ * "the column IS that value".
+ *
+ * Conformance status, honestly: `driver-sql` (PR #5296), `driver-sqlite-wasm`,
+ * `driver-memory`, `formula` and `driver-mongodb` answer this way today.
+ * `read-scope-sql` and the analytics `filter-normalizer`, both in
+ * `packages/services/service-analytics`, still emit a bare `NOT (…)` and are
+ * tracked by #5297 — declaring the rule here is what makes that gap a tracked
+ * bug instead of an invisible one, per Prime Directive #10.
+ *
+ * ## Deliberately NOT declared here
+ *
+ * The boolean identities of the EMPTY combinators (`{ $and: [] }` = TRUE,
+ * `{ $or: [] }` = FALSE, `{ $not: {} }` = FALSE) are implemented by the four
+ * drivers but are NOT yet stated as contract, because two backends answer them
+ * by refusing the filter instead — see the note in
+ * `filter-logic-conformance.ts`. Likewise `{ field: {} }` (a field constrained
+ * by zero operators), which #5240 ruled must be REJECTED but which no backend
+ * gates yet. Declaring either before it is enforced everywhere would be exactly
+ * the `declared ≠ enforced` shape this file exists to prevent.
  */
 export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> = z.lazy(() =>
   z.record(z.string(), z.unknown()).and(
