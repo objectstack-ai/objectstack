@@ -246,6 +246,10 @@ export const zhCN: TranslationData = {
           title: '邮箱与密码',
           description: '控制本地邮箱/密码登录与自助注册。',
         },
+        membership: {
+          title: '成员归属',
+          description: '新建用户加入什么。与上方的自助注册成对配置。',
+        },
         password_policy: {
           title: '密码策略',
           description: '由认证提供商在注册和重置密码时强制的长度限制。',
@@ -275,6 +279,14 @@ export const zhCN: TranslationData = {
         email_password_enabled: { label: '启用邮箱/密码登录' },
         signup_enabled: { label: '允许自助注册' },
         require_email_verification: { label: '要求邮箱验证' },
+        membership_policy: {
+          label: '新用户的成员归属',
+          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建工作区、接受邀请、被管理员添加，或由 SSO 即时开通。',
+          options: {
+            auto: '自动加入默认组织',
+            'invite-only': '仅限邀请——绝不自动加入',
+          },
+        },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },
         password_reject_breached: {

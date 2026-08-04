@@ -85,6 +85,10 @@ export const jaJP: TranslationData = {
           title: 'メールとパスワード',
           description: 'ローカルのメール/パスワードサインインとセルフサービス登録を制御します。',
         },
+        membership: {
+          title: 'メンバーシップ',
+          description: '新しく作成されたユーザーが所属する先。上のセルフサービス登録と対になる設定です。',
+        },
         password_policy: {
           title: 'パスワードポリシー',
           description: 'サインアップおよびパスワードリセット時に認証プロバイダーが強制する長さ制限。',
@@ -115,6 +119,14 @@ export const jaJP: TranslationData = {
         email_password_enabled: { label: 'メール/パスワードログインを有効化' },
         signup_enabled: { label: 'セルフサービス登録を許可' },
         require_email_verification: { label: 'メール確認を必須にする' },
+        membership_policy: {
+          label: '新規ユーザーのメンバーシップ',
+          help: '「自動」はすべての新規ユーザーをこのデプロイの既定組織に紐付けます。「招待のみ」では、ワークスペースの作成、招待の承諾、管理者による追加、SSO のジャストインタイムプロビジョニングといった明示的な行為によってのみメンバーシップが付与されます。',
+          options: {
+            auto: '既定の組織に自動的に参加',
+            'invite-only': '招待のみ — 自動では参加しない',
+          },
+        },
         password_min_length: { label: 'パスワードの最小文字数' },
         password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },
         password_reject_breached: {
