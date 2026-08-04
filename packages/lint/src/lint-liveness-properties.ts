@@ -197,6 +197,15 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'email_template', key: 'emailTemplates' },
   { type: 'mapping', key: 'mappings' },
   { type: 'translation', key: 'translations' },
+  // #4956 — dashboard joins the list the moment its ledger first warns on
+  // anything, which is exactly the rule the comment above states. Drilling
+  // `widgets` produced five warned keys (`colorVariant`, `actionUrl`,
+  // `actionType`, `actionIcon`, `aria`), all under `widgets[]`; `getNested`
+  // fans a dotted path out over an array level, so `widgets.colorVariant`
+  // checks every widget on the dashboard. Registering it here is not optional
+  // bookkeeping: without it the ledger would be newly correct and newly
+  // silent, which is the shape this lint exists to prevent.
+  { type: 'dashboard', key: 'dashboards' },
 ];
 
 /**

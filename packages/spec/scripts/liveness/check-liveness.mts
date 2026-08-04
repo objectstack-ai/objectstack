@@ -19,6 +19,15 @@
 // (object / record / array-of-object) may be drilled into via `"children"` so e.g.
 // `permission.objects.allowCreate` stays distinguishable from a blanket `objects`.
 //
+// A container that is NOT drilled inherits its parent's single verdict for every
+// key beneath it, and that inheritance must be DECLARED, not assumed: it is
+// recorded in the shrink-only `drill.mts` baseline, counted in every run, and a
+// new one fails the gate. `dashboard.widgets` rode on an undeclared inheritance
+// for 22 keys while asserting in prose that they were "classified in the
+// DashboardWidgetSchema subtree" — a subtree that never existed — which is how
+// `widgets[].responsive` survived an inert-key sweep that removed its own
+// sibling. See drill.mts (#4956).
+//
 // BOTH DIRECTIONS. Schema → ledger catches an undeclared property (UNCLASSIFIED).
 // Ledger → schema catches the reverse: a row that outlived its property, which
 // went unchecked until #4080 mapped the asymmetry (a strict removal takes the key
@@ -46,6 +55,7 @@
 //   tsx check-liveness.mts --json                 # machine-readable report
 //   tsx check-liveness.mts --stale-verification   # print the re-verification worklist
 //   tsx check-liveness.mts --stale-verification=90  # ...with a custom staleness threshold
+//   tsx check-liveness.mts --undrilled            # print the undrilled-container worklist
 
 process.env.OS_EAGER_SCHEMAS = '1';
 
@@ -72,6 +82,13 @@ import {
 } from './verification.mts';
 import { checkEvidence } from './evidence.mts';
 import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
+import {
+  STALE_UNDRILLED_GUIDANCE,
+  UNDRILLED_GUIDANCE,
+  parseUndrilledBaseline,
+  reconcileContainerCoverage,
+  type ContainerCoverage,
+} from './drill.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -275,6 +292,13 @@ const report: any = {
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
   ungoverned: [] as string[], // a REGISTERED metadata type absent from both GOVERNED and PENDING_GOVERNANCE
   stalePending: [] as string[], // a PENDING_GOVERNANCE row for a type that is now governed / no longer registered
+  undrilledNew: [] as string[], // a container riding on inheritance that the baseline does not record (see drill.mts)
+  undrilledStale: [] as string[], // a baseline row whose container now drills / is no longer a container
+  undrilled: [] as Array<{ key: string; childKeys: string[] }>, // the recorded inheritance population — a worklist, not a failure
+  undrilledChildKeys: 0, // how many child keys ride on those blanket verdicts
+  brokenDeferrals: [] as string[], // a declared deferral whose target is missing, drifted, or double-declared
+  deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
+  deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
   evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
@@ -348,6 +372,10 @@ function scanOrphanProofs() {
   }
 }
 
+// Containers the walk classified with ONE blanket verdict — reconciled against
+// the shrink-only baseline after the walk (drill.mts).
+const observedContainers: ContainerCoverage[] = [];
+
 for (const type of GOVERNED) {
   const ledger = loadLedger(type);
   const props = ledger.props || {};
@@ -385,6 +413,12 @@ for (const type of GOVERNED) {
     } else {
       const status = led?.status || markerStatus(description);
       if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${key}`); continue; }
+      // One verdict standing in for a whole subtree. Legal, but it must be
+      // declared rather than inherited by default — record it for the
+      // post-walk reconcile (drill.mts, #4956).
+      const cs = childShape(node);
+      const childKeys = cs ? Object.keys(cs) : [];
+      if (childKeys.length > 0) observedContainers.push({ key: `${type}/${key}`, childKeys });
       classify(type, key, status, led, cat);
     }
   }
@@ -393,6 +427,55 @@ for (const type of GOVERNED) {
 
 scanOrphanProofs();
 
+// ── container coverage: is every blanket verdict a DECLARED one? ──
+// The gate's third direction (#4956). Schema → ledger catches an undeclared
+// property; ledger → schema catches a row that outlived its property; this
+// catches a row that silently covers a subtree nobody classified.
+const undrilledBaselineFile = join(here, 'undrilled-containers.baseline.json');
+const undrilledBaseline = parseUndrilledBaseline(
+  JSON.parse(readFileSync(undrilledBaselineFile, 'utf8')),
+);
+
+/**
+ * Resolve a deferral target to the keys CLASSIFIED there, or `null` if it does
+ * not exist. Two forms, both real coordinates rather than prose:
+ *   `field`      — a governed type root; its walked top-level keys all carry a
+ *                  verdict (the type is governed, so the forward pass proved it).
+ *   `view/list`  — a drilled ledger coordinate; its `children` keys are verdicts.
+ * Anything else dangles, which is the failure this resolution exists to produce.
+ */
+function classifiedKeysAt(target: string): readonly string[] | null {
+  if (!target.includes('/')) {
+    if (!GOVERNED.includes(target)) return null;
+    try {
+      return topProps(target).map((p) => p.key);
+    } catch { return null; }
+  }
+  const [type, prop] = target.split('/');
+  if (!GOVERNED.includes(type)) return null;
+  const children = loadLedger(type).props?.[prop]?.children;
+  return children ? Object.keys(children) : null;
+}
+
+const coverage = reconcileContainerCoverage({
+  observed: observedContainers,
+  baseline: undrilledBaseline.containers,
+  deferred: undrilledBaseline.deferred,
+  classifiedKeysAt,
+});
+report.undrilledNew = coverage.undeclared.map(
+  (c) => `${c.key} — one verdict covers ${c.childKeys.length} unclassified child key(s): ${c.childKeys.join(', ')}`,
+);
+report.undrilledStale = coverage.stale;
+report.brokenDeferrals = coverage.brokenDeferrals;
+const deferredKeys = new Set(undrilledBaseline.deferred.map((d) => d.container));
+report.undrilled = observedContainers
+  .filter((c) => !coverage.undeclared.some((u) => u.key === c.key) && !deferredKeys.has(c.key))
+  .map((c) => ({ key: c.key, childKeys: [...c.childKeys] }));
+report.undrilledChildKeys = coverage.inheritedChildKeys;
+report.deferredContainers = undrilledBaseline.deferred.map((d) => `${d.container} → ${d.to}`);
+report.deferredChildKeys = coverage.deferredChildKeys;
+
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
 // A MALFORMED value does fail: it silently disables the staleness check for
@@ -400,6 +483,7 @@ scanOrphanProofs();
 const staleDaysArg = args.find((a) => a.startsWith('--stale-verification'));
 const staleDays = Number(staleDaysArg?.split('=')[1]) || DEFAULT_STALE_DAYS;
 const showWorklist = staleDaysArg !== undefined;
+const showUndrilled = args.includes('--undrilled');
 report.verification = buildVerificationReport(verificationEntries, { staleDays });
 
 // ── coverage: is every REGISTERED metadata type accounted for? ──
@@ -426,7 +510,10 @@ const failed =
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
   report.ungoverned.length > 0 ||
-  report.stalePending.length > 0;
+  report.stalePending.length > 0 ||
+  report.undrilledNew.length > 0 ||
+  report.undrilledStale.length > 0 ||
+  report.brokenDeferrals.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -491,6 +578,29 @@ if (asJson) {
     console.log('');
     ORPHAN_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
+  if (report.undrilledNew.length) {
+    console.log(`\n✗ ${report.undrilledNew.length} UNDECLARED container inheritance — a blanket verdict covers keys nothing classified:`);
+    report.undrilledNew.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    UNDRILLED_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.undrilledStale.length) {
+    console.log(`\n✗ ${report.undrilledStale.length} stale undrilled-container row(s) — the gap is already closed:`);
+    report.undrilledStale.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    STALE_UNDRILLED_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.brokenDeferrals.length) {
+    console.log(`\n✗ ${report.brokenDeferrals.length} broken deferral(s) — a "classified elsewhere" claim that does not resolve:`);
+    report.brokenDeferrals.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   This is the #4956 claim itself, caught. A deferral is only allowed because\n' +
+      '   the gate RESOLVES it: the target must exist (a governed type, or a drilled\n' +
+      '   `type/prop` coordinate) and classify exactly this container\'s child keys.\n' +
+      '   Point it at the real coordinate, drill the container, or move it to the\n' +
+      '   `containers` list and admit the keys are classified nowhere.',
+    );
+  }
   // ── re-verification clock ──
   const v = report.verification!;
   if (v.errors.length) {
@@ -514,6 +624,26 @@ if (asJson) {
   } else if (v.stale.length || v.unverified.length) {
     console.log('  run with --stale-verification[=days] for the worklist.');
   }
+  // ── container coverage: how much rides on inheritance? ──
+  // Printed every run, pass or fail. The gate used to say "all properties are
+  // classified" while hundreds of child keys had never been asked about; a
+  // count nobody can see is the same silence that produced #4956.
+  console.log(
+    `\ncontainer coverage: ${report.undrilled.length} container entr(ies) carry a blanket verdict over ` +
+    `${report.undrilledChildKeys} child key(s) that are classified NOWHERE; ` +
+    `${report.deferredContainers.length} more defer ${report.deferredChildKeys} key(s) to a coordinate that ` +
+    'DOES classify them (resolved, not asserted). Both recorded in ' +
+    'scripts/liveness/undrilled-containers.baseline.json — shrink-only.',
+  );
+  if (showUndrilled) {
+    console.log('\n  resolved deferrals (classified, just not here):');
+    report.deferredContainers.forEach((s: string) => console.log(`    ${s}`));
+    console.log('\n  undrilled worklist — classified nowhere; drill the divergent ones first:');
+    report.undrilled.forEach((c: { key: string; childKeys: string[] }) =>
+      console.log(`    ${c.key.padEnd(34)} ${c.childKeys.length} key(s): ${c.childKeys.join(', ')}`));
+  } else if (report.undrilled.length) {
+    console.log('  run with --undrilled for the worklist.');
+  }
   const pendingCount = Object.keys(PENDING_GOVERNANCE).length;
   if (pendingCount) {
     console.log(
@@ -522,10 +652,21 @@ if (asJson) {
     );
   }
   if (!failed) {
+    // Deliberately qualified. The old wording — "all governed-type properties
+    // are classified" — was the instrument's own false claim: it counted a
+    // blanket container verdict as one classified property and said nothing
+    // about the keys underneath, which is exactly how #4956 stayed invisible.
     console.log(
-      '\n✓ all governed-type properties are classified, every registered type is governed or ' +
-      'explicitly pending, no ledger row outlives its property, and all bound high-risk proofs resolve.',
+      '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
+      'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
+      'every container inheritance is declared, and all bound high-risk proofs resolve.',
     );
+    if (report.undrilledChildKeys) {
+      console.log(
+        `  (not a completeness claim about the ${report.undrilledChildKeys} child key(s) under the ` +
+        'declared blanket verdicts above — those are recorded, not classified.)',
+      );
+    }
   }
 }
 process.exit(failed ? 1 : 0);

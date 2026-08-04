@@ -132,6 +132,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'performSeedWrite',
         "A seed write's post-write roll-up summary recompute was swallowed — the rows landed, but a persisted summary column now disagrees with the detail rows it summarizes and nothing recomputes it, while every row counter and `success` still read clean (#4998, framework#3147).",
     ],
+    [
+        'dropPromotedDraftRow',
+        "A published draft was never drained — the active row is correct, but the `state='draft'` row is still in `sys_metadata`, so Studio/Setup keeps showing unpublished changes that do not exist and the next publish promotes the same stale body again (#4981).",
+    ],
 ]);
 
 /** Log levels that are ACCEPTABLE inside a durability-guarding catch. */
