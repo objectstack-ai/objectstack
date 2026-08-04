@@ -24,6 +24,7 @@ export const esES: TranslationData = {
         smtp: { title: 'SMTP' },
         api_key: { title: 'Clave de API' },
         from_address: { title: 'Dirección de remitente' },
+        delivery: { title: 'Entrega', description: 'Cómo se entrega el correo saliente al proveedor.' },
       },
       keys: {
         provider: {
@@ -45,6 +46,12 @@ export const esES: TranslationData = {
         api_key: { label: 'Clave de API' },
         from_email: { label: 'Correo del remitente', help: 'Ejemplo: no-reply@example.com' },
         from_name: { label: 'Nombre del remitente' },
+        queue_delivery: {
+          label: 'Entrega mediante cola duradera',
+          help: 'Entrega cada mensaje a la cola de trabajos en lugar de enviarlo en línea, de modo que una '
+            + 'entrega fallida se reintenta con retroceso y sobrevive a un reinicio. Requiere la capacidad de '
+            + 'cola con un adaptador duradero. "Enviar correo de prueba" siempre envía en línea.',
+        },
       },
       actions: {
         test: { label: 'Enviar correo de prueba' },

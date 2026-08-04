@@ -143,6 +143,58 @@ describe('resolveEmailCapabilityArg', () => {
       .toThrow(/log \/ resend \/ postmark \/ smtp/);
   });
 
+  // ── durable queue delivery (#5160) ───────────────────────────────────────
+
+  it('leaves queueDelivery unset when nothing declares it', () => {
+    // Absent, not `false`: the plugin's boot gate fires on an explicit `true`,
+    // and an option nobody wrote should not appear in what it is constructed
+    // with at all.
+    expect(resolveEmailCapabilityArg({}, {})).not.toHaveProperty('options.queueDelivery');
+  });
+
+  it('reads OS_EMAIL_QUEUE_ENABLED as the boolean feature flag it is', () => {
+    // `_ENABLED` + default-off is the Prime Directive #9 shape for a boolean
+    // flag; a bare `OS_EMAIL_QUEUE` would read as a config value (a queue
+    // name), which is the naming trap that rule exists to close.
+    for (const on of ['1', 'true', 'TRUE', 'yes', 'on']) {
+      expect(resolveEmailCapabilityArg({}, { OS_EMAIL_QUEUE_ENABLED: on }).options.queueDelivery, on)
+        .toBe(true);
+    }
+    for (const off of ['0', 'false', 'no', '']) {
+      expect(resolveEmailCapabilityArg({}, { OS_EMAIL_QUEUE_ENABLED: off }).options.queueDelivery, off)
+        .toBe(false);
+    }
+  });
+
+  it('accepts the same declaration from objectstack.config.ts, with env winning', () => {
+    expect(resolveEmailCapabilityArg({ queueDelivery: true }, {}).options.queueDelivery).toBe(true);
+    expect(
+      resolveEmailCapabilityArg({ queueDelivery: true }, { OS_EMAIL_QUEUE_ENABLED: 'false' })
+        .options.queueDelivery,
+    ).toBe(false);
+  });
+
+  it('does not decide here whether the declaration can be honoured', () => {
+    // No kernel exists at this point, so no service registry can be read. The
+    // plugin asserts a durable queue on `kernel:ready` — reading a registry
+    // that is still filling and recording the verdict is the failure mode
+    // AGENTS.md names. All this function does is carry the declaration.
+    expect(() => resolveEmailCapabilityArg({}, {
+      OS_EMAIL_QUEUE_ENABLED: 'true', OS_EMAIL_PROVIDER: 'log',
+    })).not.toThrow();
+  });
+
+  it('does not add a second retry knob for the queue', () => {
+    // One "retry" concept, one config. `OS_EMAIL_RETRIES` drives the inline
+    // loop or becomes the queue's attempt budget — never both, so the two
+    // layers cannot multiply into 5x5 connections.
+    const { options } = resolveEmailCapabilityArg({}, {
+      OS_EMAIL_QUEUE_ENABLED: 'true', OS_EMAIL_RETRIES: '4',
+    });
+    expect(options).toMatchObject({ queueDelivery: true, retries: 4 });
+    expect(Object.keys(options).filter((k) => /retr|attempt/i.test(k))).toEqual(['retries']);
+  });
+
   it('still derives the fallback from-address and template context', () => {
     const { options } = resolveEmailCapabilityArg({}, { OS_APP_NAME: 'Acme CRM' }, 'ignored');
     expect(options.defaultTemplateContext).toMatchObject({ appName: 'Acme CRM' });

@@ -94,6 +94,20 @@ const manifest = {
       description: 'Example: no-reply@example.com' },
     { type: 'text', key: 'from_name', label: 'From name', required: false, default: 'ObjectStack' },
 
+    // Delivery mode (framework#5160). Off by default: turning it on changes
+    // what `send()` returns (`queued` instead of `sent`/`failed`), so it is
+    // an opt-in, never a silent upgrade.
+    { type: 'group', id: 'delivery', label: 'Delivery', required: false,
+      description: 'How outbound mail is handed to the provider.' },
+    { type: 'toggle', key: 'queue_delivery', label: 'Durable queue delivery', required: false,
+      default: false,
+      description: 'Hand each message to the job queue (sys_job_queue) instead of sending it inline. '
+        + 'Sends return as soon as the message is recorded, and a delivery that fails is retried with '
+        + 'backoff by a worker — so it survives a restart — reaching the dead-letter queue only after the '
+        + 'attempts are exhausted. Requires the queue capability with a durable adapter; without one, mail '
+        + 'is still sent inline and the server logs why. "Send test email" below always sends inline, so it '
+        + 'can still report the provider\'s own answer.' },
+
     { type: 'action_button', id: 'test', label: 'Send test email', required: false, icon: 'Send',
       handler: { kind: 'http', method: 'POST', url: '/api/settings/mail/test' } },
   ],

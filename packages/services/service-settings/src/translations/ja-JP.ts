@@ -24,6 +24,7 @@ export const jaJP: TranslationData = {
         smtp: { title: 'SMTP' },
         api_key: { title: 'API キー' },
         from_address: { title: '差出人アドレス' },
+        delivery: { title: '配信方法', description: '送信メールをプロバイダーに渡す方法。' },
       },
       keys: {
         provider: {
@@ -45,6 +46,12 @@ export const jaJP: TranslationData = {
         api_key: { label: 'API キー' },
         from_email: { label: '差出人アドレス', help: '例: no-reply@example.com' },
         from_name: { label: '差出人名' },
+        queue_delivery: {
+          label: '永続キュー配信',
+          help: '各メッセージをインライン送信ではなくジョブキューに渡します。配信に失敗してもワーカーが'
+            + 'バックオフ付きで再試行し、再起動後も失われません。永続アダプターを備えたキュー機能が必要です。'
+            + '「テストメール送信」は常にインラインで送信します。',
+        },
       },
       actions: {
         test: { label: 'テストメール送信' },

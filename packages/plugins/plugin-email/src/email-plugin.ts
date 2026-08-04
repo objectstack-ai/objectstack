@@ -6,9 +6,19 @@ import type {
   IEmailTransport,
   EmailAddress,
   IMetadataService,
+  IQueueService,
+  QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
 import { SysEmail, SysEmailTemplate } from '@objectstack/platform-objects/audit';
-import { EmailService, LogTransport, type EmailPersistence, type TemplateLoader, type EmailTemplateRow } from './email-service.js';
+import {
+  EmailService,
+  LogTransport,
+  EMAIL_SEND_QUEUE,
+  type EmailPersistence,
+  type EmailQueueDelivery,
+  type TemplateLoader,
+  type EmailTemplateRow,
+} from './email-service.js';
 import {
   makeTransport,
   SmtpTransport,
@@ -66,6 +76,60 @@ export interface EmailServicePluginOptions {
   seedTemplates?: boolean;
   /** Additional templates seeded alongside the built-ins. */
   templates?: EmailTemplate[];
+  /**
+   * Deliver through the durable `queue` service instead of inline (#5160).
+   * Default false — inline delivery, unchanged.
+   *
+   * When `true`, `send()` persists the `sys_email` row, publishes an
+   * `email.send.async` job referencing it, and returns `status: 'queued'`
+   * straight away; a worker delivers the row and finalizes it in place, and
+   * `retries` becomes the queue's attempt budget (`retries + 1` attempts,
+   * exponentially backed off, then DLQ) instead of an in-process loop.
+   *
+   * Declaring it `true` here — the constructor / `OS_EMAIL_QUEUE_ENABLED`
+   * channel — is a DEPLOYMENT declaration, so a boot that cannot honour it
+   * fails rather than starting half-configured (#5132 precedent). The
+   * settings-page toggle is the opposite trade: it degrades to inline
+   * delivery and says so, because one save must not stop the mail.
+   */
+  queueDelivery?: boolean;
+}
+
+/**
+ * Backoff applied to queued deliveries: 1s, 2s, 4s … capped at 5 minutes.
+ *
+ * Deliberately unlike the inline loop's 2s ceiling — an SMTP host that just
+ * rejected a connection is rarely ready 2s later, and the whole point of
+ * moving the retry into `sys_job_queue` is that waiting minutes costs nothing
+ * (no process is held open across it).
+ */
+const QUEUE_DELIVERY_BACKOFF: QueueBackoffPolicy = {
+  type: 'exponential',
+  delayMs: 1000,
+  maxDelayMs: 5 * 60_000,
+};
+
+/**
+ * Resolve a queue service that can actually carry a durable email job, or
+ * `undefined`.
+ *
+ * The presence of a service named `queue` is NOT the question. `ObjectKernel`
+ * pre-injects an in-memory fallback for `queue` on every boot that lacks a
+ * queue plugin (`createMemoryQueue`), and that fallback delivers synchronously,
+ * un-awaited, with no durability, no retry and no DLQ. Publishing to it would
+ * let `send()` answer `queued` for a message nothing can ever retry — the
+ * declared-but-not-delivered gap #5087 closed for transports, re-opened one
+ * layer over. It labels itself for exactly this purpose
+ * (`__serviceInfo.status === 'degraded'`, ADR-0076 D12), so read the label.
+ */
+export function resolveDurableQueue(getService: (name: string) => unknown): IQueueService | undefined {
+  let queue: any;
+  try { queue = getService('queue'); } catch { return undefined; }
+  if (!queue || typeof queue.publish !== 'function' || typeof queue.subscribe !== 'function') {
+    return undefined;
+  }
+  if (queue.__serviceInfo?.status === 'degraded') return undefined;
+  return queue as IQueueService;
 }
 
 /**
@@ -98,6 +162,14 @@ export class EmailServicePlugin implements Plugin {
   private unsubscribeTemplates?: () => void;
   /** SMTP transport currently in use, if any — closed in dispose(). */
   private liveSmtp?: SmtpTransport;
+  /**
+   * The `mail` settings page's override of `options.queueDelivery`.
+   * `undefined` means no operator has touched the toggle (the manifest
+   * default still resolves it), so the constructor declaration stands —
+   * the same "is this value SELECTED or merely defaulted?" reading
+   * `applyMailSettings` already applies to `provider`.
+   */
+  private queueDeliveryFromSettings?: boolean;
 
   constructor(options: EmailServicePluginOptions = {}) {
     this.options = options;
@@ -179,7 +251,7 @@ export class EmailServicePlugin implements Plugin {
       try {
         const settings = ctx.getService<any>('settings');
         if (settings && typeof settings.createClient === 'function') {
-          const applySettings = async () => {
+          const applySettings = async (phase: 'boot' | 'saved' = 'boot') => {
             try {
               const payload = await settings.getNamespace('mail');
               const values: Record<string, unknown> = {};
@@ -188,16 +260,16 @@ export class EmailServicePlugin implements Plugin {
                 values[k] = v?.value;
                 if (v?.source) sources[k] = String(v.source);
               }
-              this.applyMailSettings(values, sources, ctx);
+              this.applyMailSettings(values, sources, ctx, phase);
             } catch (err: any) {
               ctx.logger.warn('EmailServicePlugin: failed to apply mail settings: ' + (err?.message ?? err));
             }
           };
-          await applySettings();
+          await applySettings('boot');
           // Subscribe to namespace changes; rebuild on every update.
           if (typeof settings.subscribe === 'function') {
             settings.subscribe('mail', () => {
-              void applySettings();
+              void applySettings('saved');
             });
             ctx.logger.info('EmailServicePlugin: bound to settings:changed for namespace=mail');
           }
@@ -303,7 +375,10 @@ export class EmailServicePlugin implements Plugin {
               }
 
               try {
-                const result = await target.send({
+                // ALWAYS inline, never the queue (#5160). The operator pressed
+                // a button and is waiting for the SMTP server's own answer;
+                // "queued" would be the same non-answer #5087 removed here.
+                const result = await target.sendInline({
                   to,
                   from: merged.from_email ? {
                     address: String(merged.from_email),
@@ -387,6 +462,12 @@ export class EmailServicePlugin implements Plugin {
       this.service.setTemplateLoader(templateLoader);
       ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
 
+      // Re-apply the delivery mode now that persistence exists: queue
+      // delivery references a `sys_email` row, so it is only meaningful once
+      // there is somewhere to write one. (`applyMailSettings` above may
+      // already have set the flag; this recomputes the same answer.)
+      this.applyQueueDelivery(ctx);
+
       // ── sys_email OUTBOX DRAIN (afterInsert) ─────────────────────────
       // Apps that can only `api.write` (e.g. sandboxed action bodies, which
       // expose no `api.email`) cannot reach the email service directly — the
@@ -446,24 +527,101 @@ export class EmailServicePlugin implements Plugin {
         ctx.logger.info('EmailServicePlugin: sys_email outbox drain hook installed');
       }
 
-      // Bind 'email.send.async' queue subscriber for durable, retry-on-failure delivery.
-      // Producers: `queue.publish('email.send.async', sendInput, { maxAttempts: 5, backoff: {...} })`
-      // The queue handles retry / DLQ via sys_job_queue.
+      // ── 'email.send.async' SUBSCRIBER ────────────────────────────────
+      // The consuming half of queue delivery (#5160). The canonical payload
+      // is `{ rowId }` — the id of a `sys_email` row `send()` already
+      // persisted — and the worker finalizes THAT row in place.
+      //
+      // It used to be `svc.send(msg.data)`, which inserted a brand-new
+      // sys_email row on every delivery: a message the queue retried 5 times
+      // left 5 rows, four of them permanently `failed`, none of them carrying
+      // the true attempt count. One message is one row; `attempt_count`
+      // accumulates on it across redeliveries.
       try {
         const queue: any = ctx.getService<any>('queue');
         if (queue && typeof queue.subscribe === 'function' && this.service) {
           const svc = this.service;
-          await queue.subscribe('email.send.async', async (msg: any) => {
-            const result = await svc.send(msg.data);
+          await queue.subscribe(EMAIL_SEND_QUEUE, async (msg: any) => {
+            const data = msg?.data;
+            const rowId = typeof data?.rowId === 'string' && data.rowId ? data.rowId : '';
+            // `msg.attempts` is 1-based for the CURRENT delivery, so the
+            // attempts already spent on this row is one fewer.
+            const priorAttempts = Math.max(0, Number(msg?.attempts ?? 1) - 1);
+
+            if (!rowId) {
+              // Migration window: producers written against the pre-#5160
+              // subscriber publish a raw SendEmailInput. Deliver it inline —
+              // routing it through `send()` while queue mode is on would
+              // re-publish the very message being consumed.
+              const legacy = await svc.sendInline(data);
+              if (legacy.status === 'failed') throw new Error(legacy.error ?? 'email send failed');
+              return;
+            }
+
+            const rows = await (engine as any).find('sys_email', {
+              where: { id: rowId },
+              limit: 1,
+              context: SYSTEM_CTX,
+            });
+            const row = Array.isArray(rows) ? rows[0] : (rows as any)?.data?.[0];
+            if (!row) {
+              // Do NOT throw: no number of retries makes a deleted row
+              // reappear, and burning the attempt budget only moves the same
+              // dead job to the DLQ later. Report it — a send that was
+              // accepted and can never be delivered is a durability loss, and
+              // it will look like nothing happened at all.
+              ctx.logger.error(
+                `EmailServicePlugin: sys_email row '${rowId}' referenced by an ${EMAIL_SEND_QUEUE} job no longer `
+                + 'exists — that message will NEVER be delivered and the caller was already told it was queued. '
+                + 'Fix: stop deleting sys_email rows in `queued` state (it is an append-only log), or drain the '
+                + 'queue before purging.',
+              );
+              return;
+            }
+            // Already delivered — a duplicate delivery (lease expiry, a
+            // second worker) must not send the mail twice.
+            if (row.status === 'sent' || row.message_id) return;
+
+            // maxAttempts: 1 — the QUEUE owns retrying. Letting the row loop
+            // retry underneath it would multiply the two budgets together.
+            const result = await svc.deliverPersistedRow(row, { maxAttempts: 1, priorAttempts });
             if (result.status === 'failed') {
               // Force the queue to retry / DLQ by throwing
               throw new Error(result.error ?? 'email send failed');
             }
           });
-          ctx.logger.info('EmailServicePlugin: subscribed to email.send.async queue');
+          ctx.logger.info(`EmailServicePlugin: subscribed to ${EMAIL_SEND_QUEUE} queue`);
         }
       } catch (err) {
-        ctx.logger.warn('EmailServicePlugin: email.send.async subscription failed', err as any);
+        ctx.logger.warn(`EmailServicePlugin: ${EMAIL_SEND_QUEUE} subscription failed`, err as any);
+      }
+
+      // ── CONSTRUCTOR / CLI GATE (#5160, #5132 precedent) ──────────────
+      // `queueDelivery: true` from the constructor (or OS_EMAIL_QUEUE_ENABLED)
+      // is a deployment declaration: this server was told to make mail
+      // delivery survive its own restart. If it cannot, the honest answer is a
+      // failed boot, not a server that looks configured and silently retries
+      // in-process — the same judgement #5132 made for a provider that cannot
+      // deliver.
+      //
+      // Asserted HERE, at kernel:ready, and not in `init()`: during Phase 1
+      // the queue provider may simply not have registered yet, and the
+      // kernel's own core-service fallbacks are injected only after that
+      // phase. A verdict recorded then would be contradicted by the same boot
+      // (AGENTS.md — "never record a verdict the boot can still contradict").
+      if (this.options.queueDelivery === true) {
+        const blocker = this.queueDeliveryBlocker(ctx, !!persistence);
+        if (blocker) {
+          throw new Error(
+            `EmailServicePlugin: queueDelivery is enabled but ${blocker}, so mail would keep being delivered `
+            + 'inline — a send that fails would be retried only in this process and lost if it dies, which is '
+            + 'the durability this option was switched on to get. Fix: mount the queue capability backed by a '
+            + 'durable adapter (@objectstack/service-queue over an ObjectQL engine, which upgrades to the '
+            + 'sys_job_queue DbQueueAdapter)'
+            + (persistence ? '' : ' and leave sys_email persistence on (`persist` must not be false)')
+            + ', or set OS_EMAIL_QUEUE_ENABLED=false / omit `queueDelivery` to declare inline delivery.',
+          );
+        }
       }
 
       // Seed built-in + user-provided templates (upsert by name+locale).
@@ -492,6 +650,57 @@ export class EmailServicePlugin implements Plugin {
       // no-op class this closes, #3461.)
       await this.bootDeclaredTemplates(ctx, engine);
     });
+  }
+
+  /**
+   * Effective delivery mode: the settings toggle when an operator has set
+   * one, otherwise the constructor / CLI declaration.
+   */
+  private queueDeliveryEnabled(): boolean {
+    return this.queueDeliveryFromSettings ?? this.options.queueDelivery === true;
+  }
+
+  /**
+   * Build the wiring handed to {@link EmailService}. `resolve` is a thunk on
+   * purpose: `QueueServicePlugin` swaps its in-memory placeholder for the
+   * `sys_job_queue`-backed adapter during `kernel:ready`, so a handle captured
+   * now would publish into the discarded one for the life of the process
+   * (AGENTS.md — "resolve where it is used, not where you start").
+   */
+  private makeQueueDelivery(ctx: PluginContext): EmailQueueDelivery {
+    return {
+      resolve: () => resolveDurableQueue((name) => ctx.getService(name)),
+      // ONE retry budget, shared by both modes. `retries` already means
+      // "extra attempts after the first" for inline delivery; queued, the
+      // same number becomes the queue's total attempt cap. A second knob
+      // here would let the two layers disagree, and nesting a row-level
+      // loop inside a queue-level one would multiply them.
+      maxAttempts: Math.max(1, (this.options.retries ?? 0) + 1),
+      backoff: QUEUE_DELIVERY_BACKOFF,
+    };
+  }
+
+  /** Push the effective delivery mode onto the running service. */
+  private applyQueueDelivery(ctx: PluginContext): void {
+    if (!this.service) return;
+    this.service.setQueueDelivery(
+      this.queueDeliveryEnabled() ? this.makeQueueDelivery(ctx) : undefined,
+    );
+  }
+
+  /**
+   * Why queue delivery cannot be honoured right now, or `undefined` when it
+   * can. Phrased as a sentence fragment for both gates to embed.
+   */
+  private queueDeliveryBlocker(ctx: PluginContext, hasPersistence: boolean): string | undefined {
+    if (!hasPersistence) {
+      return 'sys_email persistence is disabled (`persist: false`), so a queued job would have no row to deliver';
+    }
+    if (!resolveDurableQueue((name) => ctx.getService(name))) {
+      return 'no durable queue service is registered (the kernel\'s in-memory fallback delivers synchronously '
+        + 'with no durability, retry or DLQ, so it cannot carry this)';
+    }
+    return undefined;
   }
 
   /**
@@ -613,8 +822,42 @@ export class EmailServicePlugin implements Plugin {
     values: Record<string, unknown>,
     sources: Record<string, string>,
     ctx: PluginContext,
+    phase: 'boot' | 'saved' = 'boot',
   ): void {
     if (!this.service) return;
+
+    // ── Delivery mode (#5160) ────────────────────────────────────────
+    // Handled before every early `return` below, so a provider that cannot
+    // be built does not also strand the delivery mode at its old value.
+    // Only an operator-SELECTED value overrides the constructor declaration;
+    // the manifest default (`source: 'default'`) is not a decision anyone
+    // made, and treating it as one would let a settings page nobody opened
+    // silently switch off a mode the deployment declared.
+    if ((sources.queue_delivery ?? 'default') !== 'default') {
+      this.queueDeliveryFromSettings = values.queue_delivery === true
+        || String(values.queue_delivery).toLowerCase() === 'true';
+    }
+    this.applyQueueDelivery(ctx);
+    if (this.queueDeliveryEnabled() && phase === 'saved') {
+      // Reported on a SAVE, not at boot: at boot the queue provider may
+      // simply not have registered yet, and a verdict recorded then is one
+      // this very boot can contradict. After a save the registry is settled
+      // and this is the operator's immediate feedback. Inline delivery
+      // continues either way — this save must not stop the mail, so what is
+      // lost is durability, not delivery, and the line says which.
+      const blocker = this.queueDeliveryBlocker(ctx, !!this.service.options.persistence);
+      if (blocker) {
+        ctx.logger.error(
+          `EmailServicePlugin: "durable queue delivery" is ON but ${blocker} — mail is still being SENT, `
+          + 'inline, but a failed send is retried only in this process and lost if it dies (no sys_job_queue '
+          + 'job, no DLQ). Fix: mount the queue capability with a durable adapter '
+          + '(@objectstack/service-queue over an ObjectQL engine), or turn the toggle off so inline delivery '
+          + 'is the declared intent.',
+        );
+      } else {
+        ctx.logger.info('EmailServicePlugin: durable queue delivery enabled from mail settings.');
+      }
+    }
 
     const fromEmail = typeof values.from_email === 'string' ? values.from_email : undefined;
     const fromName = typeof values.from_name === 'string' ? values.from_name : undefined;

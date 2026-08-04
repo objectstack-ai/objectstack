@@ -1472,6 +1472,12 @@ importers:
         specifier: ^9.0.3
         version: 9.0.3
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/service-queue':
+        specifier: workspace:*
+        version: link:../../services/service-queue
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../../services/service-settings

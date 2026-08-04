@@ -14,10 +14,18 @@
  * endpoints. `EMAIL_TRANSPORT_PROVIDERS` is the machine-readable form.
  */
 
-export { EmailServicePlugin } from './email-plugin.js';
+export { EmailServicePlugin, resolveDurableQueue } from './email-plugin.js';
 export type { EmailServicePluginOptions } from './email-plugin.js';
-export { LogTransport, normalizeMessage, formatAddress } from './email-service.js';
-export type { EmailServiceOptions, TemplateLoader, EmailTemplateRow, EmailPersistence } from './email-service.js';
+export { LogTransport, normalizeMessage, formatAddress, EMAIL_SEND_QUEUE } from './email-service.js';
+export type {
+  EmailServiceOptions,
+  TemplateLoader,
+  EmailTemplateRow,
+  EmailPersistence,
+  EmailQueueDelivery,
+  EmailSendQueuePayload,
+  DeliverAttemptOptions,
+} from './email-service.js';
 export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,
