@@ -46,6 +46,12 @@ import {
   buildAdminPluginSchema,
   buildPhoneNumberPluginSchema,
 } from './auth-schema-config.js';
+import {
+  createHostUsableJwksReader,
+  probeEd25519Support,
+  protectGetSessionJwtHook,
+  resolveJwtSigningAlgorithm,
+} from './jwt-key-algorithm.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -736,6 +742,17 @@ export class AuthManager {
   // was skipped so core auth stays up (feature key → error message). Rebuilt
   // by every buildPluginList() run; see addOptionalPlugin().
   private degradedFeatures = new Map<string, string>();
+
+  // #3585 — "can this host do Ed25519?", asked of WebCrypto once per manager.
+  // Memoized because the answer is a fixed property of the runtime, not of a
+  // registry that is still filling: nothing can register Ed25519 support later
+  // in the boot, so caching the verdict cannot go stale (contrast the
+  // startup-registry-verdict rule in AGENTS.md, which is about the opposite
+  // case).
+  private ed25519ProbeResult?: Promise<boolean>;
+  // Emitted at most once per instance build: a host that cannot sign says so on
+  // the first /get-session failure, not on every request.
+  private jwtSigningFailureReported = false;
 
   /**
    * Result of the dev-only admin seed (set by `AuthPlugin.maybeSeedDevAdmin`
@@ -1554,13 +1571,113 @@ export class AuthManager {
   }
 
   /**
-   * Optional auth features skipped by the last plugin-list build because
-   * their better-auth plugin threw during initialization. Empty when the
-   * instance is healthy (or not built yet). Keys match the
-   * `AuthPluginConfig` flag names (`oidcProvider`, `sso`, `scim`, …).
+   * Optional auth features that are not working on this instance. Empty when
+   * the instance is healthy (or not built yet). Reset by every plugin-list
+   * build.
+   *
+   * Most keys match the `AuthPluginConfig` flag names (`oidcProvider`, `sso`,
+   * `scim`, …) and mean "the better-auth plugin threw during initialization
+   * and was skipped" (see addOptionalPlugin). One key is finer-grained:
+   * `jwtSigning` is recorded at REQUEST time when the jwt plugin constructed
+   * fine but could not actually sign (#3585) — the plugin's endpoints are
+   * mounted, they just cannot mint a token.
    */
   getDegradedAuthFeatures(): Array<{ feature: string; error: string }> {
     return Array.from(this.degradedFeatures, ([feature, error]) => ({ feature, error }));
+  }
+
+  /**
+   * Construct better-auth's `jwt` plugin with an algorithm this host can
+   * actually use, and with the `/get-session` header hook made non-fatal.
+   *
+   * Two independent defects are closed here; see `jwt-key-algorithm.ts` for
+   * the full analysis of better-auth's key selection.
+   *
+   * 1. **Algorithm choice.** better-auth defaults to EdDSA/Ed25519, which
+   *    `crypto.subtle.generateKey` rejects on hosts without it (WebContainer).
+   *    We probe the capability once and pin `keyPairConfig` explicitly.
+   * 2. **Existing EdDSA keys.** `resolveSigningKey` falls back to *any* stored
+   *    key when none matches the configured algorithm, so a deployment that
+   *    already minted an EdDSA key would still die in `importJWK` after the
+   *    fallback. On a host without Ed25519 we install better-auth's
+   *    `adapter.getJwks` keyring seam so unusable keys are not offered at all
+   *    and a fresh ES256 key is minted instead. Rows are hidden, never
+   *    deleted — moving back to a host with Ed25519 restores them.
+   *
+   * Belt-and-braces, on every host: a signing failure degrades the
+   * `set-auth-jwt` header instead of 500ing `/get-session`.
+   */
+  private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
+    if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
+    const { keyPairConfig, ed25519Supported } = await resolveJwtSigningAlgorithm(
+      () => this.ed25519ProbeResult!,
+    );
+
+    if (!ed25519Supported) {
+      // Functional, not durability: the deployment is fully operational on
+      // ES256. Worth one line because it changes what /jwks publishes and what
+      // `alg` issued tokens carry, which an operator debugging a relying party
+      // otherwise cannot correlate to anything.
+      console.warn(
+        `[AuthManager] This host's WebCrypto has no Ed25519 (crypto.subtle.generateKey({name:'Ed25519'}) fails), ` +
+          `so JWTs are signed with ${keyPairConfig.alg} instead of better-auth's default EdDSA. ` +
+          `Any existing EdDSA key in sys_jwks is hidden from the JWKS on this host — it cannot be imported here — ` +
+          `and a fresh ${keyPairConfig.alg} key is minted on first use. The rows are not deleted.`,
+      );
+    }
+
+    const jwtPlugin = jwt({
+      schema: buildJwtPluginSchema(),
+      jwks: { keyPairConfig },
+      // The keyring override is installed ONLY on a host that needs it, so a
+      // normal deployment runs better-auth's stock read path with no
+      // ObjectStack code in it and nothing to regress.
+      ...(ed25519Supported
+        ? {}
+        : { adapter: { getJwks: createHostUsableJwksReader() } }),
+    });
+
+    const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
+      this.reportJwtSigningFailure(error, keyPairConfig.alg),
+    );
+    if (!protectedHook) {
+      // The guard could not attach — better-auth moved or renamed the hook.
+      // Say so rather than shipping a build that looks protected and is not.
+      console.error(
+        '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
+          '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
+          'instead of degrading to a missing set-auth-jwt header. See objectstack#3585 and re-check ' +
+          'the better-auth version in better-auth-schema-parity.test.ts.',
+      );
+    }
+
+    return jwtPlugin;
+  }
+
+  /**
+   * Record + announce a `/get-session` JWT signing failure exactly once.
+   *
+   * Functional degradation (AGENTS.md degradation-log-levels): nothing that
+   * claimed to persist was lost, the session itself is valid and returned
+   * normally — only the optional `set-auth-jwt` enrichment header is missing.
+   * It is logged at `error` rather than `warn` for the same reason
+   * addOptionalPlugin does: an auth feature the deployment asked for is not
+   * delivering, and the operator has to act.
+   */
+  private reportJwtSigningFailure(error: unknown, alg: string): void {
+    const message = (error as any)?.message ?? String(error);
+    this.degradedFeatures.set('jwtSigning', message);
+    if (this.jwtSigningFailureReported) return;
+    this.jwtSigningFailureReported = true;
+    console.error(
+      `[AuthManager] JWT signing failed with alg "${alg}", so /get-session responses carry no ` +
+        `set-auth-jwt header and OIDC/MCP token issuance will not work. The session itself is valid — ` +
+        `sign-in and cookie auth are unaffected. Common causes: this host's WebCrypto cannot use the ` +
+        `algorithm of the key in sys_jwks, or OS_AUTH_SECRET changed since the key was encrypted. ` +
+        `Set OS_OIDC_PROVIDER_ENABLED=false if this deployment does not need to act as an IdP. ` +
+        `Cause: ${message}`,
+      error,
+    );
   }
 
   /**
@@ -1589,6 +1706,11 @@ export class AuthManager {
    */
   private async buildPluginList(): Promise<any[]> {
     this.degradedFeatures.clear();
+    // Same lifecycle as degradedFeatures: an operator who fixes the cause and
+    // triggers a rebuild gets a fresh verdict, and a fresh log line if it is
+    // still broken. (The Ed25519 probe itself is NOT reset — it is a property
+    // of the runtime, which a rebuild cannot change.)
+    this.jwtSigningFailureReported = false;
     const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
     const plugins: any[] = [];
 
@@ -2172,7 +2294,7 @@ export class AuthManager {
       // automatically — it is otherwise an internal implementation detail
       // and forcing every consumer to opt in would be poor DX.
       const { jwt } = await import('better-auth/plugins');
-      const jwtPlugin = jwt({ schema: buildJwtPluginSchema() });
+      const jwtPlugin = await this.buildJwtPlugin(jwt);
 
       const { oauthProvider } = await import('@better-auth/oauth-provider');
       const dcr = resolveDcrEnabled(pluginConfig);
