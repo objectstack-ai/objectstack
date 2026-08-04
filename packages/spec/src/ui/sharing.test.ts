@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SharingConfigSchema,
-  EmbedConfigSchema,
   type SharingConfig,
-  type EmbedConfig,
 } from './sharing.zod';
 
 // ---------------------------------------------------------------------------
@@ -61,54 +59,11 @@ describe('SharingConfigSchema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// EmbedConfigSchema
-// ---------------------------------------------------------------------------
-describe('EmbedConfigSchema', () => {
-  it('should accept empty config with defaults', () => {
-    const config: EmbedConfig = EmbedConfigSchema.parse({});
-    expect(config.enabled).toBe(false);
-    expect(config.width).toBe('100%');
-    expect(config.height).toBe('600px');
-    expect(config.showHeader).toBe(true);
-    expect(config.showNavigation).toBe(false);
-    expect(config.responsive).toBe(true);
-    expect(config.allowedOrigins).toBeUndefined();
-  });
-
-  it('should accept full embed config', () => {
-    const config = EmbedConfigSchema.parse({
-      enabled: true,
-      allowedOrigins: ['https://example.com', 'https://partner.com'],
-      width: '800px',
-      height: '500px',
-      showHeader: false,
-      showNavigation: true,
-      responsive: false,
-    });
-
-    expect(config.enabled).toBe(true);
-    expect(config.allowedOrigins).toEqual(['https://example.com', 'https://partner.com']);
-    expect(config.width).toBe('800px');
-    expect(config.height).toBe('500px');
-    expect(config.showHeader).toBe(false);
-    expect(config.showNavigation).toBe(true);
-    expect(config.responsive).toBe(false);
-  });
-
-  it('should accept config with only origin restrictions', () => {
-    const config = EmbedConfigSchema.parse({
-      enabled: true,
-      allowedOrigins: ['https://mysite.com'],
-    });
-    expect(config.allowedOrigins).toEqual(['https://mysite.com']);
-  });
-
-  it('should accept empty allowedOrigins array', () => {
-    const config = EmbedConfigSchema.parse({
-      enabled: true,
-      allowedOrigins: [],
-    });
-    expect(config.allowedOrigins).toEqual([]);
-  });
-});
+// `EmbedConfigSchema` had a describe block here until #5015 removed the schema
+// (ADR-0049 enforce-or-remove — no carrier key anywhere, unreachable from every
+// metadata root, zero parse outside this file; its would-be carrier `App.embed`
+// was itself retired in 17.0.0). Its absence is pinned by symbol identity in
+// `notification-embed-retirement.test.ts`, not by the silence here.
+//
+// `SharingConfigSchema` above is deliberately untouched — it is a LIVE door
+// (`FormViewSchema.sharing`, read by `rest-server.ts`). One file, two verdicts.
