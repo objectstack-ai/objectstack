@@ -287,13 +287,29 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
       (driver as any).logger = { warn: (msg: string, meta: any) => warnSpy.push({ msg, meta }) };
       // The tenant-audit warning only fires in multi-tenant mode (single-tenant
       // stacks now always have an organization_id column but no isolation).
-      (driver as any)._multiTenantMode = true;
-      await driver.initObjects(objects);
+      //
+      // [#5262] Configured through the real knob rather than by poking the old
+      // `_multiTenantMode` memo, which no longer exists: `SqliteWasmDriver
+      // extends SqlDriver`, and that memo froze a process-level fact into a
+      // per-instance verdict, so the gate now resolves the tenancy posture live
+      // on every call. Setting the env exercises the same resolution a real
+      // deployment does — and unlike the old poke it cannot silently stop
+      // meaning anything, because a wrong posture makes the assertion fail
+      // rather than quietly disabling the branch under test. Restored in the
+      // `finally` below. Mirrors the same fix in driver-sql's suite.
+      const priorPosture = process.env.OS_TENANCY_POSTURE;
+      process.env.OS_TENANCY_POSTURE = 'isolated';
+      try {
+        await driver.initObjects(objects);
 
-      await driver.create('account', { id: 'x1', organization_id: 'org_a', name: 'X1' });
-      await driver.create('account', { id: 'x2', organization_id: 'org_a', name: 'X2' });
-      // Second create on same object:op should NOT add another warn (throttle).
-      expect(warnSpy.filter(w => w.meta?.op === 'create')).toHaveLength(1);
+        await driver.create('account', { id: 'x1', organization_id: 'org_a', name: 'X1' });
+        await driver.create('account', { id: 'x2', organization_id: 'org_a', name: 'X2' });
+        // Second create on same object:op should NOT add another warn (throttle).
+        expect(warnSpy.filter(w => w.meta?.op === 'create')).toHaveLength(1);
+      } finally {
+        if (priorPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = priorPosture;
+      }
     });
 
     it('does not warn when bypassTenantAudit is set', async () => {
@@ -301,13 +317,28 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
       const warnSpy: any[] = [];
       driver = new SqliteWasmDriver({ filename: ':memory:' });
       (driver as any).logger = { warn: (msg: string, meta: any) => warnSpy.push({ msg, meta }) };
-      await driver.initObjects(objects);
-      await driver.create(
-        'account',
-        { id: 'x1', organization_id: 'org_a', name: 'X1' },
-        { bypassTenantAudit: true } as any,
-      );
-      expect(warnSpy).toHaveLength(0);
+      // [#5262] A walled posture is a PRECONDITION of this assertion, not
+      // decoration. Without it the audit returns at the multi-tenant gate and
+      // `warnSpy` is empty no matter what `bypassTenantAudit` does — the test
+      // passed while proving nothing about the flag it names. (That was equally
+      // true before this change, where the absent `_multiTenantMode` memo
+      // resolved to single-org; the sibling test above happened to poke the memo
+      // and this one never did.) With the posture set, the flag is the only
+      // thing that can keep the log quiet.
+      const priorPosture = process.env.OS_TENANCY_POSTURE;
+      process.env.OS_TENANCY_POSTURE = 'isolated';
+      try {
+        await driver.initObjects(objects);
+        await driver.create(
+          'account',
+          { id: 'x1', organization_id: 'org_a', name: 'X1' },
+          { bypassTenantAudit: true } as any,
+        );
+        expect(warnSpy).toHaveLength(0);
+      } finally {
+        if (priorPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = priorPosture;
+      }
     });
   });
 });

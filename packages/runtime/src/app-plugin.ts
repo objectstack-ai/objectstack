@@ -2,7 +2,8 @@
 
 import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
 import { assertProtocolCompat } from '@objectstack/metadata-core';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
@@ -1042,7 +1043,7 @@ export class AppPlugin implements Plugin {
              // step. So we skip it. Single-tenant deployments keep the
              // legacy behaviour: seed immediately at boot so there's
              // always demo data without needing an org insert.
-             const multiTenant = resolveMultiOrgEnabled();
+             const multiTenant = this.organizationWallActive(ctx);
              if (this.skipSeedData) {
                  // #3917: this boot exists to READ metadata (os migrate
                  // plan/apply). It must not write to the target database.
@@ -1203,6 +1204,49 @@ export class AppPlugin implements Plugin {
     }
 
     /**
+     * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
+     * FORCE for this boot? The judge for both seeder decisions below.
+     *
+     * ⛔ Never `resolveMultiOrgEnabled()`. ADR-0105 D1 demoted that boolean to a
+     * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
+     * deployment configured the documented way (`OS_TENANCY_POSTURE=isolated|group`,
+     * legacy boolean unset). Both seeder sites then took the single-tenant branch
+     * on a fully walled deployment and inline-seeded exactly the NULL-organization
+     * rows their own comments exist to avoid — rows that sit behind the wall
+     * unreadable and need a separate claim step. Third recurrence of the shape
+     * (cloud#1020, #5233).
+     *
+     * EFFECTIVE, not requested — and this site is the reason the distinction is
+     * worth the extra hop. What these decisions actually turn on is "will the
+     * per-org replay run instead of me?", and that replay is the enterprise
+     * `@objectstack/organizations` middleware on `sys_organization` insert. On a
+     * DEGRADED boot (a wall requested, the enterprise runtime absent, operator
+     * opted in via `OS_ALLOW_DEGRADED_TENANCY`) that middleware does not exist,
+     * so keying on the REQUEST would skip the inline seed in favour of a replay
+     * that can never happen — a stack with no seed data at all. The `tenancy`
+     * service reports the posture in force (`single` + `degraded` there), which
+     * makes the seeded rows land inline, exactly as they should on a deployment
+     * with no wall to isolate them behind.
+     *
+     * AppPlugin starts in kernel Phase 2 and plugin-auth registers `tenancy` in
+     * Phase 1, so the service is present on any real boot; the fallback covers
+     * lean embeddings that mount AppPlugin without plugin-auth, where the
+     * requested posture is the best fact available. Read live per call — never
+     * cached — so nothing freezes a verdict a later boot phase can still change.
+     */
+    private organizationWallActive(ctx: PluginContext): boolean {
+        try {
+            const tenancy = ctx.getService?.('tenancy') as
+                | { posture?: TenancyPosture }
+                | undefined;
+            if (tenancy?.posture) return postureEnforcesWall(tenancy.posture);
+        } catch {
+            /* service registry has no `tenancy` — fall through */
+        }
+        return postureEnforcesWall(resolveTenancyPosture());
+    }
+
+    /**
      * 15.1 third-party eval — dev hot-reload of a NEW object registered its
      * metadata (and, via ObjectQL's `metadata:reloaded` hook, created its
      * table) but its seeds never ran: the seed pipeline in `start()` only
@@ -1225,7 +1269,12 @@ export class AppPlugin implements Plugin {
         const hook = (ctx as any).hook;
         if (typeof hook !== 'function') return;
         if (process.env.NODE_ENV !== 'development') return;
-        if (resolveMultiOrgEnabled()) return;
+        // Same judge as the inline seed above, for the same reason — see
+        // `organizationWallActive`. Keying this on the demoted boolean installed
+        // the hot-reload seeder on posture-only walled dev stacks, where every
+        // row it wrote for a newly-registered object landed with a NULL
+        // organization (#5262).
+        if (this.organizationWallActive(ctx)) return;
 
         const knownObjects = new Set<string>(
             (Array.isArray(this.bundle.objects) ? this.bundle.objects : [])

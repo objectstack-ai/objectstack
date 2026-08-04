@@ -40,6 +40,36 @@ interface InjectableApp {
   request(input: string, init?: RequestInit): Promise<Response>;
 }
 
+/**
+ * [#5261] Stand-in for the cloud-private `@objectstack/organizations` runtime,
+ * mounted by `bootStack({ multiTenant: 'posture-only' })`.
+ *
+ * It registers the `org-scoping` service and nothing else. That single fact is
+ * what the open core reads to decide whether a REQUESTED organization wall can
+ * actually stand (`TenancyService.probeIsolation` → `posture` / `degraded`,
+ * ADR-0093 D5), so registering it turns a degraded deployment into a
+ * non-degraded `isolated` one from every consumer's point of view.
+ *
+ * ⛔ It stamps no `organization_id` and scopes no query — it is the deployment's
+ * POSTURE, not its WALL. See `BootOptions.multiTenant` for what that permits and
+ * what it must never be used to claim.
+ *
+ * `supportedPostures` is declared (ADR-0105 D12) so the stand-in entitles the
+ * same set a runtime predating that seam does, rather than accidentally
+ * exercising the narrowed-entitlement path.
+ */
+class SimulatedOrgScopingPlugin {
+  readonly name = 'com.objectstack.verify.simulated-org-scoping';
+  readonly version = '1.0.0';
+  readonly type = 'standard';
+  readonly providesServices = ['org-scoping'];
+  readonly supportedPostures = ['group', 'isolated'] as const;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async init(ctx: any): Promise<void> {
+    ctx.registerService('org-scoping', this);
+  }
+}
+
 const API_PREFIX = '/api/v1';
 const DEFAULT_ADMIN_EMAIL = 'admin@objectos.ai';
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
@@ -102,8 +132,34 @@ export interface BootOptions {
    * Also REQUESTS the `isolated` tenancy posture (ADR-0105 D1) for the boot,
    * unless the caller already set `OS_TENANCY_POSTURE` — mounting the plugin
    * entitles a walled posture but no longer activates one by itself.
+   *
+   * ## `'posture-only'` — a stand-in, for proving org LIFECYCLE without isolation
+   *
+   * `multiTenant: 'posture-only'` boots the same shape but registers a built-in
+   * stand-in for the `org-scoping` service instead of requiring the cloud-private
+   * enterprise package. The `tenancy` service then resolves a real, NON-DEGRADED
+   * `isolated` posture, which is what posture-gated seams key on — above all
+   * `POST /auth/organization/create`, which since #5261 refuses whenever the
+   * EFFECTIVE posture has no organization wall.
+   *
+   * ⛔ **It performs no tenant isolation whatsoever.** Nothing stamps
+   * `organization_id`, nothing scopes a query. It makes the deployment's POSTURE
+   * true, not its WALL. A fixture that asserts one tenant cannot read another's
+   * rows and boots this way would assert nothing and pass — the constant-false
+   * capability probe of #4700 wearing the opposite mask. Cross-tenant isolation
+   * has exactly one honest proof in this repo: `multiTenant: true` with the real
+   * `@objectstack/organizations` installed, which is why those gates SKIP here
+   * (see `test/enterprise-organizations.ts`) instead of pretending.
+   *
+   * Use it only where the organization wall is the PRECONDITION of the thing
+   * under test rather than the thing itself — `org-create-default-team`
+   * (#3624: better-auth's default-team insert must not 500) is the case it was
+   * built for. Before #5261 that fixture opened the route by flipping
+   * `OS_MULTI_ORG_ENABLED` after boot and leaning on the gate's live env read;
+   * the gate now reads the tenancy service, so the honest way to open it is to
+   * simulate the deployment that legitimately has it open.
    */
-  multiTenant?: boolean;
+  multiTenant?: boolean | 'posture-only';
   /**
    * Root directory of the **host app** being verified — the one whose
    * `node_modules` carries the optional packages it declares (currently the
@@ -286,7 +342,15 @@ export async function bootStack(
   // ordering for `OS_MULTI_ORG_ENABLED`. `multiTenant` is an explicit opt-in,
   // so a missing package is a hard, actionable error — not a silent
   // single-org downgrade that would flip the fixture's RLS posture.
-  if (opts.multiTenant) {
+  if (opts.multiTenant === 'posture-only') {
+    // See BootOptions.multiTenant: activates the POSTURE, never the WALL.
+    // Registered in the enterprise plugin's own slot so every downstream probe
+    // (SecurityPlugin's strip decision, the `tenancy` service's `isolationActive`,
+    // `requiresService: 'org-scoping'` nav gating) sees one consistent answer —
+    // a stack where half the layers believe the wall is up would be a worse lie
+    // than either honest posture.
+    await kernel.use(new SimulatedOrgScopingPlugin());
+  } else if (opts.multiTenant) {
     // #4700: this used a bare `import()`, which Node ESM resolves against the
     // IMPORTER's realpath — `packages/verify`, inside the framework workspace.
     // `@objectstack/organizations` is cloud-private and only ever lives in the

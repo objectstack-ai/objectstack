@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
-import { resolveMultiOrgEnabled, resolveSearchPinyinEnabled } from '@objectstack/types';
+import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
@@ -731,8 +732,29 @@ export class SchemaRegistry {
     if (options.multiTenant !== undefined) {
       this.multiTenant = options.multiTenant;
     } else {
-      // Mirror the SecurityPlugin / CLI banner default (env-driven, off by default).
-      this.multiTenant = resolveMultiOrgEnabled();
+      // Mirror the SecurityPlugin / CLI wiring: key off the deployment's
+      // resolved tenancy POSTURE (env-driven, single-org by default).
+      //
+      // [ADR-0105 D1 / #5262] ⛔ Never `resolveMultiOrgEnabled()`. That boolean
+      // was DEMOTED to a back-compat input of `resolveTenancyPosture()`, so it
+      // reads `false` on a deployment configured the documented way
+      // (`OS_TENANCY_POSTURE=isolated|group`, legacy boolean unset) — and this
+      // registry then disagreed with SecurityPlugin about the same deployment:
+      // the security layer compiled a Layer 0 wall that filters every read by
+      // `organization_id`, while the schema layer left that column UNINDEXED
+      // because it believed the stack was single-org. Third recurrence of the
+      // shape (cloud#1020, #5233).
+      //
+      // REQUESTED posture, deliberately — not the `tenancy` service's effective
+      // answer. This class is constructed below the kernel (no service registry
+      // to ask), and the fact it needs is "will anything ever filter by
+      // organization_id here", which the request settles: a degraded boot
+      // (ADR-0093 D5) that later gains the enterprise runtime must already have
+      // the index. The two errors are not symmetric — a spare index on a
+      // single-org stack is dead weight, a missing one on a walled stack is a
+      // full scan on the hottest predicate in the system — so this fails toward
+      // provisioning it.
+      this.multiTenant = postureEnforcesWall(resolveTenancyPosture());
     }
 
     // Pinyin-search companion column (#2486). Env-driven like multiTenant;

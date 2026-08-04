@@ -241,12 +241,18 @@ export interface AnalyticsServiceConfig {
    * [#5033] The datasource `objectName` is bound to, or `undefined` when it
    * rides the default one (or nothing authoritative can answer).
    *
-   * Diagnostics only — it never selects a driver (that is `engine.execute`'s
-   * `object` key, which the `plugin.ts` bridge now passes). It exists so that
-   * when a dataset's SQL references a table that is NOT on the datasource its
-   * base object routed to, the failure can name the actual cause — *table X is
-   * not on datasource Y* — instead of the misleading "backing object …
-   * is unavailable" that a cross-datasource join used to produce.
+   * It never selects a driver (that is `engine.execute`'s `object` key, which
+   * the `plugin.ts` bridge now passes). It exists so that when a dataset's SQL
+   * references a table that is NOT on the datasource its base object routed to,
+   * the failure can name the actual cause — *table X is not on datasource Y* —
+   * instead of the misleading "backing object … is unavailable" that a
+   * cross-datasource join used to produce.
+   *
+   * [#5115] The same probe now also gates COMPILATION: `registerDataset` hands
+   * it to `compileDataset`, which rejects a dataset whose join crosses
+   * datasources before any query is ever built. Absence keeps the pre-#5115
+   * behaviour exactly ("cannot answer, do not block") — the query-time
+   * diagnostic above stays as the backstop.
    */
   getObjectDatasource?: (objectName: string) => string | undefined;
   /**
@@ -380,8 +386,13 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isRegisteredObject?: AnalyticsServiceConfig['isRegisteredObject'];
   /** [#4437] Field-name probe gating measure source-field resolution. */
   private readonly getObjectFieldNames?: AnalyticsServiceConfig['getObjectFieldNames'];
-  /** [#5033] Diagnostics-only datasource probe for the missing-source triage. */
+  /**
+   * [#5033] Datasource probe for the missing-source triage — and, since #5115,
+   * for the compile-time cross-datasource join gate in `compileDataset`.
+   */
   private readonly getObjectDatasource?: AnalyticsServiceConfig['getObjectDatasource'];
+  /** ADR-0062 D6 — federated-object probe (strategy routing + #5115's gate). */
+  private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   readonly cubeRegistry: CubeRegistry;
@@ -404,6 +415,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
     this.getObjectDatasource = config.getObjectDatasource;
+    this.isExternalObject = config.isExternalObject;
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -581,7 +593,13 @@ export class AnalyticsService implements IAnalyticsService {
    * compiled dataset.
    */
   registerDataset(dataset: Dataset): CompiledDataset {
-    const compiled = compileDataset(dataset, this.relationshipResolver);
+    // #5115 — the datasource/federation probes turn a cross-datasource join
+    // from a query-time explosion into a registration-time rejection. Both are
+    // optional and tiered "cannot answer, do not block" inside the compiler.
+    const compiled = compileDataset(dataset, this.relationshipResolver, {
+      getObjectDatasource: this.getObjectDatasource,
+      isExternalObject: this.isExternalObject,
+    });
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);
     return compiled;

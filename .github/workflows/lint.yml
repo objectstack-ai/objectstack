@@ -260,6 +260,23 @@ jobs:
       - name: Release-notes drift guard
         run: pnpm check:release-notes
 
+      # Release-body limit guard (#4900). The GitHub Releases API rejects any
+      # body over 125,000 characters, and @objectstack/spec's changelog section
+      # for one v17 RC is ~343,000 — so the release step 422'd after npm had
+      # already published, took `published` down with it, and silently lost the
+      # runtime image. scripts/release-github-releases.mjs now builds those
+      # bodies; this runs its --self-test, which feeds the REAL oversized
+      # section out of packages/spec/CHANGELOG.md through the real code path and
+      # asserts the result fits, still links the full entry, closes any code
+      # fence the cut opened, and splits no surrogate pair. It also covers the
+      # properties the failure taught us to want: every package in the fixed
+      # group gets a release, a re-run updates instead of 422-ing on
+      # `already_exists`, and one package's rejection no longer abandons the
+      # rest — @objectstack/spec keeps its release, which is where ADR-0087 D4's
+      # spec-changes.json is attached.
+      - name: Release-body limit guard
+        run: pnpm check:release-body
+
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
       # greps for it. One did open — every PR gate sat on Node 20 (EOL

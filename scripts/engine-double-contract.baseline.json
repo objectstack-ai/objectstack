@@ -25,6 +25,13 @@
   ],
   "entries": [
     {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "MEASURED (#5206): the devDependency route this ledger's other metadata-protocol entries prescribe is CYCLIC, re-measured on this branch rather than cited. @objectstack/objectql depends on @objectstack/metadata-protocol in `dependencies` (`workspace:*`), so the reverse edge was added, `pnpm install` run, and turbo refused the graph outright — `WARNING Circular package dependency detected: @objectstack/objectql, @objectstack/metadata-protocol` / `x Cyclic dependency detected: @objectstack/objectql#build, @objectstack/metadata-protocol#build` (turbo 2.10.7, `turbo run build --filter=@objectstack/metadata-protocol --dry`) — then the edge and lockfile were reverted. Same cycle, same measurement method as the #4867 and #4981 entries below; this is the sixth metadata-protocol file to hit the route those entries already recorded as closed. The fake's delete was probed by replacing it with a throw: it IS exercised (the promote drops the published draft row) and only ever as `{ where: { id } }`, a scalar by-id delete routed through SysMetadataRepository.delete, so removing the method to escape the scan was not available either. But that is an argument about this file, not about the contract, so the entry stays DEBT rather than EXEMPT per this ledger's own rule.",
+      "closes": "sink assertEngineDeleteDispatch into a package BOTH sides already depend on — tracked as #4987 — then open the fake's delete with it; the devDependency route is closed by the cycle above, for this file and for the five sibling metadata-protocol entries alike"
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
