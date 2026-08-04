@@ -695,6 +695,301 @@ describe('LifecycleService.sweep — governance (P4)', () => {
   });
 });
 
+// #5195 — ADR-0057 P4 lets an operator override any object's window through the
+// `lifecycle` settings namespace, and until this the only validation on that
+// override was "does it parse". That is a side door around #5179's invariant:
+// `DbQueueAdapter` dedups `sys_job_queue` publishes against terminal rows by
+// `created_at`, checks at CONSTRUCTION that its idempotency window is ≤ the
+// object's DECLARED retention — and never sees a settings override. Set
+// `maxAge: '1h'` and the rows the dedup check reads are reaped an hour after
+// they are written, so duplicate deliveries resume with nothing in any log.
+//
+// A consumer now registers the shortest window its contract survives; an
+// override below it is rejected (not clamped) and the declared window runs.
+// Nothing here names sys_job_queue: the mechanism is the deliverable, the queue
+// is only its first caller (pinned end-to-end in @objectstack/service-queue).
+describe('LifecycleService — retention floors (#5195)', () => {
+  const FLOOR_MS = 24 * 3_600_000; // 24h, the queue's default dedup window
+
+  const floor = (over: Partial<Parameters<LifecycleService['registerRetentionFloor']>[1]> = {}) => ({
+    policy: 'retention' as const,
+    minWindowMs: FLOOR_MS,
+    declaredBy: 'com.example.consumer',
+    consequence: 'the consumer silently re-accepts work it already did.',
+    remedy: 'raise the override to ≥ 24h, or shorten the consumer window.',
+    ...over,
+  });
+
+  const QUEUE_LIKE: LifecycleObjectLike = {
+    name: 'app_work_queue',
+    lifecycle: { class: 'transient', retention: { maxAge: '7d', onlyWhen: { status: 'done' } } } as any,
+  };
+
+  function fakeSettings(values: Record<string, unknown>, tenantValues: Record<string, Record<string, unknown>> = {}) {
+    return {
+      async get(_ns: string, key: string, ctx?: Record<string, unknown>) {
+        const tenantId = ctx?.tenantId as string | undefined;
+        if (tenantId && tenantValues[tenantId] && key in tenantValues[tenantId]) {
+          return { value: tenantValues[tenantId][key], source: 'tenant' };
+        }
+        if (key in values) return { value: values[key], source: 'global' };
+        return { value: undefined, source: 'default' };
+      },
+    };
+  }
+
+  it('rejects a global override below the floor and keeps enforcing the declared window', async () => {
+    const error = vi.fn();
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '1h' } } });
+    const svc = service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), error },
+    });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    // The 1h override never reaches the delete: rows still live 7d, so the
+    // consumer's 24h dedup window still has rows to dedup against.
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('7d') }, status: 'done' });
+    expect(report.swept[0].cutoff).toBe(isoCutoff('7d'));
+
+    // …and it is loud: machine-readable on the report, `error` in the log,
+    // carrying the consequence AND the fix (AGENTS.md degradation rule).
+    expect(report.floorViolations).toEqual([{
+      object: 'app_work_queue',
+      policy: 'retention',
+      scope: 'global',
+      override: '1h',
+      offendingMs: 3_600_000,
+      floorMs: FLOOR_MS,
+      declaredBy: 'com.example.consumer',
+      appliedMs: 7 * 86_400_000,
+    }]);
+    expect(error).toHaveBeenCalledTimes(1);
+    const line = error.mock.calls[0]![0] as string;
+    expect(line).toContain('REJECTED');
+    expect(line).toContain('com.example.consumer');
+    expect(line).toContain('Consequence:');
+    expect(line).toContain('Fix:');
+  });
+
+  it('a legal override (≥ the floor) still wins over the declared window', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    // 2d: shorter than the declared 7d, longer than the 24h floor — exactly the
+    // environment tuning P4 exists for. The floor bounds overrides, it does not
+    // abolish them.
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '2d' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('2d') }, status: 'done' });
+    expect(report.floorViolations).toEqual([]);
+  });
+
+  it('an override exactly AT the floor is legal (the bound is ≥, not >)', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '24h' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('24h') }, status: 'done' });
+    expect(report.floorViolations).toEqual([]);
+  });
+
+  it('an object with no registered floor is untouched — 1h still applies', async () => {
+    const { engine, deletes } = captureEngine([
+      QUEUE_LIKE,
+      { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any },
+    ]);
+    const settings = fakeSettings({
+      retention_overrides: { app_work_queue: { maxAge: '1h' }, sys_job_run: { maxAge: '1h' } },
+    });
+    const svc = service(engine, { getSettings: () => settings });
+    // Floor on ONE object only.
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    const forObject = (name: string) => deletes.find((d) => d.object === name)!;
+    expect(forObject('app_work_queue').where.created_at.$lt).toBe(isoCutoff('7d'));
+    // No floor ⇒ P4 is unchanged: an aggressive override is the operator's call.
+    expect(forObject('sys_job_run').where.created_at.$lt).toBe(isoCutoff('1h'));
+    expect(report.floorViolations.map((v) => v.object)).toEqual(['app_work_queue']);
+  });
+
+  it('floors a TENANT-scoped override too — the same door one scope down', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    (engine as any).find = async (object: string) =>
+      object === 'sys_organization' ? [{ id: 'org_fast' }] : [];
+    const settings = fakeSettings(
+      {},
+      { org_fast: { retention_overrides: { app_work_queue: { maxAge: '1h' } } } },
+    );
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    // The tenant pass falls back to the window that DID pass the floor (7d),
+    // so no tenant can shorten its way past another package's contract.
+    expect(deletes[0].where).toEqual({
+      created_at: { $lt: isoCutoff('7d') },
+      organization_id: 'org_fast',
+      status: 'done',
+    });
+    expect(report.floorViolations).toHaveLength(1);
+    expect(report.floorViolations[0]!.scope).toBe('tenant:org_fast');
+  });
+
+  it('a retention floor does not reject a ttl override (policies are separate windows)', async () => {
+    const { engine, deletes } = captureEngine([
+      { name: 'app_session', lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '7d' } } as any },
+    ]);
+    const settings = fakeSettings({ retention_overrides: { app_session: { expireAfter: '1h' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_session', floor()); // policy: 'retention'
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where).toEqual({ expires_at: { $lt: isoCutoff('1h') } });
+    expect(report.floorViolations).toEqual([]);
+
+    // The same floor declared for `ttl` DOES bite.
+    const second = captureEngine([
+      { name: 'app_session', lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '7d' } } as any },
+    ]);
+    const ttlSvc = service(second.engine, { getSettings: () => settings });
+    ttlSvc.registerRetentionFloor('app_session', floor({ policy: 'ttl' }));
+    const ttlReport = await ttlSvc.sweep();
+    expect(second.deletes[0].where).toEqual({ expires_at: { $lt: isoCutoff('7d') } });
+    expect(ttlReport.floorViolations[0]!.policy).toBe('ttl');
+  });
+
+  it('the strictest of several registered floors governs', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '2d' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor()); // 24h — 2d clears it
+    svc.registerRetentionFloor('app_work_queue', floor({
+      minWindowMs: 3 * 86_400_000,
+      declaredBy: 'com.example.slow-consumer',
+    })); // 3d — 2d does not
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where.created_at.$lt).toBe(isoCutoff('7d'));
+    expect(report.floorViolations[0]!.declaredBy).toBe('com.example.slow-consumer');
+  });
+
+  it('re-registering the same (object, policy, declaredBy) replaces rather than accumulates', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '2d' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor({ minWindowMs: 3 * 86_400_000 }));
+    // A reconstructed adapter re-registers with a lowered window; the stale
+    // stricter floor must not linger and keep rejecting a now-legal override.
+    svc.registerRetentionFloor('app_work_queue', floor({ minWindowMs: 3_600_000 }));
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where.created_at.$lt).toBe(isoCutoff('2d'));
+    expect(report.floorViolations).toEqual([]);
+  });
+
+  it('reports a DECLARED window below the floor, and still enforces it', async () => {
+    const error = vi.fn();
+    const { engine, deletes } = captureEngine([
+      { name: 'app_work_queue', lifecycle: { class: 'transient', retention: { maxAge: '6h' } } as any },
+    ]);
+    const svc = service(engine, { logger: { ...silentLogger(), error } });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    // Refusing to reap would trade a broken consumer contract for the
+    // unbounded table #5179 closed — so the declaration still runs, loudly.
+    expect(deletes[0].where.created_at.$lt).toBe(isoCutoff('6h'));
+    expect(report.floorViolations).toEqual([{
+      object: 'app_work_queue',
+      policy: 'retention',
+      scope: 'global',
+      offendingMs: 6 * 3_600_000,
+      floorMs: FLOOR_MS,
+      declaredBy: 'com.example.consumer',
+      appliedMs: 6 * 3_600_000,
+    }]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]![0]).toContain('declared retention window');
+  });
+
+  it('logs a standing violation once, but reports it on every sweep', async () => {
+    const error = vi.fn();
+    const { engine } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '1h' } } });
+    const svc = service(engine, { getSettings: () => settings, logger: { ...silentLogger(), error } });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const first = await svc.sweep();
+    const second = await svc.sweep();
+
+    // Hourly repetition of an unchanged misconfiguration is what trains people
+    // to skim `error` — the report stays complete regardless.
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(first.floorViolations).toHaveLength(1);
+    expect(second.floorViolations).toHaveLength(1);
+  });
+
+  it('falls back to warn when the logger has no error method', async () => {
+    const warn = vi.fn();
+    const { engine } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: '1h' } } });
+    const svc = service(engine, {
+      getSettings: () => settings,
+      logger: { info: () => {}, warn, debug: () => {} },
+    });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    await svc.sweep();
+
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('REJECTED'))).toBe(true);
+  });
+
+  it('refuses a malformed floor at registration — an unactionable rejection helps nobody', () => {
+    const { engine } = captureEngine([QUEUE_LIKE]);
+    const svc = service(engine);
+    expect(() => svc.registerRetentionFloor('app_work_queue', floor({ minWindowMs: 0 })))
+      .toThrow(/positive finite minWindowMs/);
+    expect(() => svc.registerRetentionFloor('app_work_queue', floor({ minWindowMs: Number.NaN })))
+      .toThrow(/positive finite minWindowMs/);
+    expect(() => svc.registerRetentionFloor('app_work_queue', floor({ policy: 'forever' as any })))
+      .toThrow(/policy 'retention' or 'ttl'/);
+    expect(() => svc.registerRetentionFloor('app_work_queue', floor({ consequence: '' })))
+      .toThrow(/declaredBy, consequence and remedy/);
+    expect(() => svc.registerRetentionFloor('app_work_queue', floor({ remedy: '' })))
+      .toThrow(/declaredBy, consequence and remedy/);
+    expect(() => svc.registerRetentionFloor('', floor())).toThrow(/requires an object name/);
+  });
+
+  it('an unparseable override still keeps the declared window and is not a floor violation', async () => {
+    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
+    const settings = fakeSettings({ retention_overrides: { app_work_queue: { maxAge: 'forever' } } });
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('app_work_queue', floor());
+
+    const report = await svc.sweep();
+
+    expect(deletes[0].where.created_at.$lt).toBe(isoCutoff('7d'));
+    expect(report.floorViolations).toEqual([]);
+  });
+});
+
 describe('LifecycleService timers', () => {
   it('start() sweeps after the initial delay and then on the interval; stop() disarms', async () => {
     vi.useFakeTimers();

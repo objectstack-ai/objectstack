@@ -197,6 +197,51 @@ retried next sweep). Rules:
   dir), skipping `completed` sessions and vetoing on abort failure so the
   session's already-uploaded parts don't leak.
 
+#### Amendment (#5195): retention floors — a consumer's lower bound on a P4 override
+
+P4 (§3.2, below) lets an operator override any object's window per environment
+and per tenant through the `lifecycle` settings namespace. Until #5195 the only
+validation on that override was *does it parse*, and a window is not only an
+operator's decision: other code can depend on rows still being there.
+
+`sys_job_queue` is the worked example. `DbQueueAdapter` dedups publishes by
+comparing a terminal row's `created_at` against its idempotency window, so the
+dedup check only means anything while that row exists; #5179 made the ordering
+an invariant by refusing, at construction, an idempotency window longer than
+the object's **declared** retention. A settings override the constructor cannot
+see (`retention_overrides.sys_job_queue.maxAge = '1h'`) walks straight around
+it: completed rows are reaped an hour after they are written, publish keeps
+dedupping against 24h, and duplicate deliveries resume with **nothing in any
+log** — a one-day-old enforced invariant with a side door.
+
+So a consumer may register a **retention floor** at runtime
+(`lifecycle.registerRetentionFloor(object, floor)`) declaring the shortest
+window its own contract survives, plus the consequence and the fix. Rules:
+
+- An override — global **or** tenant-scoped — below the floor is **rejected**,
+  not clamped: the declared window keeps running, exactly as an unparseable
+  override already resolves ("never fail open into no bound at all"). Clamping
+  would enforce a third number written in neither the declaration nor the
+  settings, and that number would move whenever an unrelated package changed
+  its floor.
+- The rejection is **`error`-level and says both halves** — what silently
+  breaks below the floor and which two settings make it legal — because the
+  failure it prevents leaves the system looking entirely healthy. It is also
+  on the sweep report (`floorViolations`), machine-readable, every sweep.
+- Floors are **runtime wiring, not spec surface**, for the same reason reap
+  guards are, plus one of their own: the queue's floor *is*
+  `DbQueueAdapterOptions.idempotencyWindowMs`, a per-kernel construction
+  option, so a static key on the object's `lifecycle` block could only ever be
+  a second copy of it that drifts. A declaration says how long rows are kept; a
+  floor says how short a *consumer* can survive them being kept — different
+  authors, different lifetimes.
+- The floor also covers the declaration itself: a declared window below a
+  registered floor is reported the same way, and still enforced — refusing to
+  reap would trade a broken consumer contract for the unbounded table #5179
+  just closed.
+- First consumer: `sys_job_queue` (service-queue), floored at the adapter's
+  configured idempotency window.
+
 ### 3.4 Reclaim — driver space hygiene
 
 SQLite driver defaults to `auto_vacuum=INCREMENTAL` (shipped P0); the Reaper

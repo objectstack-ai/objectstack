@@ -44,6 +44,22 @@ export function completedRetentionWindowMs(): number {
   return lifecycleDurationMs(maxAge);
 }
 
+/**
+ * [#5195] The shape `LifecycleService.registerRetentionFloor()` accepts.
+ *
+ * Restated here rather than imported: `@objectstack/objectql` is a
+ * devDependency of this package on purpose (the queue must not drag the engine
+ * into every install), and the registration is duck-typed at the call site the
+ * same way the storage service's reap guards are.
+ */
+export interface QueueRetentionFloor {
+  policy: 'retention';
+  minWindowMs: number;
+  declaredBy: string;
+  consequence: string;
+  remedy: string;
+}
+
 export interface DbQueueAdapterOptions {
   /** Polling interval for the worker loop (ms, default 1000) */
   pollIntervalMs?: number;
@@ -145,6 +161,48 @@ export class DbQueueAdapter implements IQueueService {
         + 'retention (both windows are measured from `created_at`).',
       );
     }
+  }
+
+  /** The configured dedup window (ms) — the number the floor below is made of. */
+  get idempotencyWindowMs(): number {
+    return this.opts.idempotencyWindowMs;
+  }
+
+  /**
+   * [#5195] The retention floor `sys_job_queue` must satisfy for this adapter's
+   * dedup contract to mean anything, handed to `LifecycleService`
+   * (`registerRetentionFloor`) by `QueueServicePlugin`.
+   *
+   * The constructor check above only reads the object's **declaration**. ADR-0057
+   * P4 lets an operator override that window per environment/tenant through the
+   * `lifecycle` settings namespace, which the constructor cannot see: set
+   * `lifecycle.retention_overrides.sys_job_queue.maxAge = '1h'` and completed
+   * rows vanish an hour after they are written while publish keeps dedupping
+   * against a 24h window — duplicate deliveries resume, with nothing in any log.
+   * Registering the floor is what closes that door, and it carries the number
+   * this adapter was actually CONSTRUCTED with rather than a static copy of the
+   * default (a per-kernel option cannot live in the object's declaration).
+   */
+  retentionFloor(): QueueRetentionFloor {
+    const ms = this.opts.idempotencyWindowMs;
+    // Settings are authored as ADR-0057 duration literals, not milliseconds, so
+    // the remedy quotes one the operator can paste — rounded UP, since a
+    // rounded-down literal would be rejected by the very floor it is meant to
+    // satisfy.
+    const literal = `${Math.ceil(ms / 3_600_000)}h`;
+    return {
+      policy: 'retention',
+      minWindowMs: ms,
+      declaredBy: 'com.objectstack.service.queue',
+      consequence:
+        `DbQueueAdapter dedups sys_job_queue publishes by comparing created_at against its ${ms}ms `
+        + 'idempotency window, so a shorter retention deletes the very rows that check reads — '
+        + 'duplicate deliveries resume silently, with nothing in any log.',
+      remedy:
+        `set lifecycle.retention_overrides.sys_job_queue.maxAge to '${literal}' or longer, or lower `
+        + "QueueServicePlugin's db.idempotencyWindowMs to the window you actually want (both are measured "
+        + 'from created_at).',
+    };
   }
 
   // ── IQueueService ────────────────────────────────────────────────

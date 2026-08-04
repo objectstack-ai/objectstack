@@ -2,6 +2,11 @@
   "//": "ADR anchors — see scripts/check-adr-anchors.mjs. Each entry pins the ADR ids that MUST stay referenced in a file whose behaviour an accepted ADR decided. Add an entry when an ADR's decision is realized in code that would look arbitrary (or wrong) to someone reading the file alone.",
   "anchors": [
     {
+      "file": "packages/objectql/src/lifecycle/lifecycle-service.ts",
+      "adrs": ["ADR-0057"],
+      "invariant": "ADR-0057 P4 settings overrides are bounded from below by consumer-registered retention floors (§3.3 amendment, #5195). An override under a floor — global or tenant-scoped — is REJECTED, never clamped to the floor: the declared window is the one fallback, the same resolution an unparseable override already gets, and a clamp would enforce a third number written in neither the declaration nor the settings. Floors are runtime wiring, not spec surface, for the reap-guard reason plus one of their own — the first floor IS `DbQueueAdapterOptions.idempotencyWindowMs`, a per-kernel construction option a static `lifecycle` key could only copy and drift from. The rejection is `error`-level with consequence and fix because what it prevents (duplicate delivery on a reaped dedup row) leaves the system looking healthy."
+    },
+    {
       "file": "packages/objectql/src/validation/rule-validator.ts",
       "adrs": ["ADR-0057", "ADR-0058"],
       "invariant": "A declared field lock is the SERVER's to enforce (ADR-0057 D10 — the client grid is courtesy). A `readonlyWhen` whose predicate names a scope root the write path could not bind resolves to LOCKED, not to \"not locked\": \"could not check\" must never read as \"allowed\" on a field the author declared frozen. This narrows ADR-0058 D5's fail-soft tier deliberately and only for that case — a merely BROKEN predicate (undeclared key, null overload, parse fault, throw) still fails open, and requiredWhen / option visibleWhen are untouched."
