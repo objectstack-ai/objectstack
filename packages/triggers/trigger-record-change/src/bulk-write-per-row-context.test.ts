@@ -42,7 +42,19 @@ import { describe, it, expect } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+
+/**
+ * `registerObject` is the engine registry's TEST-time seam and is not part of
+ * `EngineSchemaRegistryView` (the `objectql` slot's published registry
+ * contract, which is read-only plus package lifecycle). Narrowed structurally
+ * rather than through `any`, so the slot lookup itself stays fully contracted
+ * (#4127/#4251) and only this one member is asserted.
+ */
+type TestObjectRegistry = {
+  registerObject(schema: unknown, packageId?: string, namespace?: string): void;
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -107,11 +119,12 @@ async function bootStack() {
   await kernel.use(new RecordChangeTriggerPlugin());
   await kernel.bootstrap();
 
-  const objectql = kernel.getService('objectql') as any;
-  const data = kernel.getService('data') as any;
+  const objectql = kernel.getService<IObjectQLEngine>('objectql');
+  const data = kernel.getService<IDataEngine>('data');
   const automation = kernel.getService<AutomationEngine>('automation');
+  const registry = objectql.registry as unknown as TestObjectRegistry;
   objectql.registerDriver(makeDriver(), true);
-  objectql.registry.registerObject({
+  registry.registerObject({
     name: 'task', label: 'Task',
     fields: {
       title: { name: 'title', label: 'Title', type: 'text' },
@@ -122,7 +135,7 @@ async function bootStack() {
   // Where the flow leaves its trace: one row per firing, carrying the bindings
   // it saw. Writing to a DIFFERENT object keeps the assertion clean of the
   // trigger's own re-entrancy guard.
-  objectql.registry.registerObject({
+  registry.registerObject({
     name: 'task_audit', label: 'Task audit',
     fields: {
       task_title: { name: 'task_title', label: 'Task', type: 'text' },
