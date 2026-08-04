@@ -156,7 +156,6 @@ interface WidgetManifest {
 
   dependencies?: { name: string; version?: string; url?: string }[];
   aria?: AriaProps;             // ARIA accessibility attributes
-  performance?: PerformanceConfig;
 }
 ```
 
@@ -306,7 +305,14 @@ aria:
 
 ## Performance
 
-Performance tuning is supplied through the shared `PerformanceConfig` schema (`packages/spec/src/ui/responsive.zod.ts`) on the manifest's `performance` field. Use it for options such as virtualization and lazy rendering for widgets that handle large datasets.
+The widget manifest carries **no** performance block. Virtualization for large datasets is configured on the **view**, not on the widget: set the boolean `virtualScroll` on a list-shaped view (`ListViewSchema` in `packages/spec/src/ui/view.zod.ts`). That is the only virtual-scrolling switch objectui reads.
+
+<Callout type="warn">
+  `widget.performance` was removed in `@objectstack/spec` 17.0.0 (#3896 audit
+  close-out) — it was authorable but no renderer or runtime ever read it. The key
+  is now refused at parse time, so a manifest that still carries it fails
+  validation: delete it and use the view's `virtualScroll` instead.
+</Callout>
 
 ## Theme
 
