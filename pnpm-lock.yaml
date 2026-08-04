@@ -1375,6 +1375,9 @@ importers:
         specifier: ^6.2.5
         version: 6.2.7
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

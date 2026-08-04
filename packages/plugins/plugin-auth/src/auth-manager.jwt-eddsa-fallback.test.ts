@@ -12,6 +12,7 @@
 // if the fallback did not reach jose, these tests would 500 like the bug report.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 
 const createMemoryEngine = () => {
@@ -71,6 +72,14 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async delete(name: string, q: any = {}) {
+      // [#4550] Pinned to ObjectQL.delete's own dispatch predicate rather than a
+      // hand-written approximation of it: a fake that accepts a call the real
+      // engine refuses is how #4434 shipped a dead REST route with its suite
+      // green. better-auth's adapter only ever deletes by scalar id
+      // (`objectql-adapter.ts` — `delete`/`deleteMany`/`consumeOne` all resolve
+      // the row first, then call `delete(object, { where: { id } })`), so this
+      // assertion is what proves that stays true as the pipeline evolves.
+      assertEngineDeleteDispatch(q);
       const table = rows(name);
       const keep = table.filter((r) => !matches(r, q.where));
       tables.set(name, keep);

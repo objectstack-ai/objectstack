@@ -105,8 +105,8 @@
       "file": "packages/plugins/plugin-auth/src/auth-manager.optional-plugin-isolation.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/plugin-auth does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#3585): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/plugin-auth's devDependencies when the sibling auth-manager.jwt-eddsa-fallback.test.ts was pinned, so what is left here is a one-line pin. Deferred only because #3585's PR is a JWT-algorithm fix and flipping an unmeasured suite red belongs in its own PR, not because anything structural stands in the way.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/plugins/plugin-reports/src/report-export-axis.test.ts",
