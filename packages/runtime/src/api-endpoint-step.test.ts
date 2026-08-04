@@ -18,6 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
+import type { CounterStore } from '@objectstack/plugin-auth';
 
 import {
     APP_ENDPOINT_SEGMENT,
@@ -25,6 +26,11 @@ import {
     isAppEndpointPath,
     runAppEndpointStep,
 } from './api-endpoint-step.js';
+import {
+    createEndpointRateLimiterRegistry,
+    endpointBucketKey,
+    type EndpointPolicyContext,
+} from './endpoint-policy.js';
 
 /** A declared endpoint in the ADR-0121 D1 shape, defaults materialized. */
 const TASKS: ApiEndpoint = ApiEndpointSchema.parse({
@@ -141,5 +147,122 @@ describe('a match answers 501 until the executor lands (#5040 E5)', () => {
         // trimming and case folding, and a second, weaker copy in the consumer
         // is how two spellings of "the same path" start to disagree.
         expect(calls).toEqual([{ path: '/api/v1/apps/showcase/tasks', method: 'GET' }]);
+    });
+
+    it('names the keys it did NOT evaluate when no policy context was threaded', async () => {
+        // Truthfulness of the report is the point: this seam's whole job today
+        // is telling an operator what did and did not happen.
+        const { service } = matcherFor([TASKS]);
+        const answer = await step('/api/v1/apps/showcase/tasks', 'GET', service);
+        const hint = String((answer!.body as { error: { hint: unknown } }).error.hint);
+        expect(hint).toContain('not evaluated');
+        expect(hint).toContain('authRequired');
+        expect(answer!.headers).toBeUndefined();
+    });
+});
+
+/**
+ * The policy chain, seen from the step (#5040 E4 / #5091).
+ *
+ * The module-level cases live in `endpoint-policy.test.ts`; what is asserted
+ * here is the WIRING — that the chain runs between the match and the answer,
+ * that a denial short-circuits (no 501, no execution slot reached), and that a
+ * pass still ends in the 501 until E5 lands.
+ */
+describe('the policy chain runs between the match and the answer', () => {
+    /** An endpoint that is open to anonymous callers unless a case says otherwise. */
+    const OPEN: ApiEndpoint = ApiEndpointSchema.parse({
+        ...TASKS, name: 'showcase_open', authRequired: false,
+    });
+
+    function policyContext(overrides: Partial<EndpointPolicyContext> = {}): EndpointPolicyContext {
+        const entries = new Map<string, unknown>();
+        const store: CounterStore = {
+            get: async <T,>(key: string) => entries.get(key) as T | undefined,
+            set: async (key: string, value: unknown) => { entries.set(key, value); },
+        };
+        return {
+            limiters: createEndpointRateLimiterRegistry({ resolveCache: async () => store }),
+            ...overrides,
+        };
+    }
+
+    const policedStep = (endpoints: ApiEndpoint[], policy: EndpointPolicyContext, method = 'GET') =>
+        runAppEndpointStep({
+            method,
+            path: endpoints[0]!.path,
+            prefix: '/api/v1',
+            metadataService: matcherFor(endpoints).service as never,
+            policy,
+        });
+
+    it('answers 401 instead of 501 when the endpoint requires auth and the caller has none', async () => {
+        const answer = await policedStep([TASKS], policyContext());
+        expect(answer?.status).toBe(401);
+        const body = answer!.body as { success: boolean; error: Record<string, unknown> };
+        expect(body.error.code).toBe('UNAUTHENTICATED');
+        // The 501 is NOT also emitted: a denial is the answer, not a stage.
+        expect(JSON.stringify(body)).not.toContain('NOT_IMPLEMENTED');
+    });
+
+    it('answers 429 with the Retry-After header once the endpoint budget is spent', async () => {
+        const limited = ApiEndpointSchema.parse({
+            ...OPEN, name: 'showcase_limited', rateLimit: { enabled: true, windowMs: 1_000, maxRequests: 1 },
+        });
+        const policy = policyContext();
+
+        expect((await policedStep([limited], policy))?.status).toBe(501);   // within budget
+        const over = await policedStep([limited], policy);
+
+        expect(over?.status).toBe(429);
+        // The header rides on the ANSWER, so the transport writes it with the
+        // body — a 429 whose Retry-After got lost tells a client nothing.
+        expect(over?.headers).toEqual({ 'Retry-After': '1' });
+        expect((over!.body as { error: { code: string } }).error.code).toBe('RATE_LIMIT_EXCEEDED');
+    });
+
+    it('reaches the 501 only after the chain passed, and says so', async () => {
+        const answer = await policedStep([OPEN], policyContext());
+        expect(answer?.status).toBe(501);
+        const hint = String((answer!.body as { error: { hint: unknown } }).error.hint);
+        expect(hint).toContain('enforced');
+        expect(hint).toContain('#5040');
+    });
+
+    it('never puts the cacheTtl header on the 501 — but the verdict still carries it', async () => {
+        // Exposure, not application: `Cache-Control` describes a successful body
+        // that does not exist yet (execution is E5), and telling a client to
+        // cache a 501 for 30s would be worse than saying nothing. The header
+        // lives on the policy verdict, which is what the executor will read —
+        // asserted directly in `endpoint-policy.test.ts`.
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+        const answer = await policedStep([cached], policyContext());
+        expect(answer?.status).toBe(501);
+        expect(answer?.headers).toBeUndefined();
+    });
+
+    it('resolves the caller once and keys the endpoint bucket with it', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const entries = new Map<string, unknown>();
+        const store: CounterStore = {
+            get: async <T,>(k: string) => entries.get(k) as T | undefined,
+            set: async (k: string, v: unknown) => { entries.set(k, v); },
+        };
+        const limited = ApiEndpointSchema.parse({
+            ...TASKS, name: 'showcase_tasks', rateLimit: { enabled: true, windowMs: 1_000, maxRequests: 5 },
+        });
+
+        const answer = await policedStep([limited], {
+            limiters: createEndpointRateLimiterRegistry({ resolveCache: async () => store }),
+            headers: { cookie: 'session=abc' },
+            remoteAddress: '203.0.113.9',
+            resolvePrincipalId: async (headers) => { seen.push(headers); return 'usr_7'; },
+        });
+
+        // Authenticated, so the 401 gate passes and the bucket keys by principal
+        // rather than by address — one lookup serving both.
+        expect(answer?.status).toBe(501);
+        expect(seen).toEqual([{ cookie: 'session=abc' }]);
+        expect([...entries.keys()]).toEqual([endpointBucketKey('showcase_tasks', 'principal:usr_7')]);
     });
 });
