@@ -123,6 +123,35 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     // a skill bundles tools; an empty list is a valid starting point.
     tools: [],
   },
+  // [#5271] Declarative HTTP endpoint (ADR-0121). Seeded rather than left to
+  // the create form because the two mistakes an author (very often an AI one —
+  // ADR-0033) makes here are both structural, and both are fixed by starting
+  // from a complete shape:
+  //
+  //  1. THE PATH CARVE-OUT. `ApiEndpointSchema.path` only requires a leading
+  //     slash, but ADR-0121 D1 confines a declared path to
+  //     `/api/v1/apps/<manifest.namespace>/<subpath>` and publish rejects
+  //     anything else. The namespace segment is DERIVED from stack identity
+  //     (D2), so no static literal can be right — `example_namespace` is a
+  //     deliberate placeholder the author replaces, and its shape is the part
+  //     that teaches. A blank form invites `/api/v1/customers`, which parses
+  //     and is then refused.
+  //  2. THE TARGET HALVES. `type: 'object_operation'` needs BOTH
+  //     `objectParams.object` and `objectParams.operation` or the publish gate
+  //     refuses it as unservable; seeding the pair means a create round-trips.
+  //
+  // `authRequired` is deliberately omitted: it DEFAULTS to `true`, and letting
+  // the default do the work is what makes the safe shape the effortless one
+  // (the seed must never be the thing that teaches `authRequired: false`,
+  // which ADR-0121 D6 pairs with a mandatory armed `rateLimit`).
+  api: {
+    name: 'new_api_endpoint',
+    path: '/api/v1/apps/example_namespace/new-endpoint',
+    method: 'GET',
+    type: 'object_operation',
+    target: PLACEHOLDER_OBJECT,
+    objectParams: { object: PLACEHOLDER_OBJECT, operation: 'find' },
+  },
   email_template: {
     name: 'new_email_template',
     label: 'New Email Template',

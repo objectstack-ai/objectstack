@@ -282,13 +282,19 @@ describe('SysMetadataRepository', () => {
 
     // ── runtime-create gate: plugin-registered types must be accepted ───
     //
-    // Regression: types like `theme`, `api`, `connector`, `webhook` are
+    // Regression: types like `theme`, `connector`, `webhook` are
     // not in DEFAULT_METADATA_TYPE_REGISTRY — they are registered at
     // runtime by plugins. The listing endpoint (protocol.getMetaTypes())
     // synthesises descriptors with `allowRuntimeCreate: true` for them,
     // so the admin UI advertises them as writable. The repo gate must
     // agree, otherwise the UI 403s on save. Previously the gate keyed
     // off the static registry only and rejected all 9+ such types.
+    //
+    // [#5271] `api` was one of the two specimens here and has been REPLACED
+    // by `webhook`, not re-spelled: `api` now HAS a static registry entry
+    // (`allowRuntimeCreate: true`), so it satisfies `assertAllowed` through
+    // the first branch and would have kept this test green while proving
+    // nothing about the "no static entry" fall-through it is named for.
 
     it('put accepts plugin-registered type with intent=runtime-only (theme)', async () => {
         const result = await repo.put(
@@ -299,10 +305,30 @@ describe('SysMetadataRepository', () => {
         expect(result.version).toMatch(/^sha256:/);
     });
 
-    it('put accepts plugin-registered type with intent=runtime-only (api)', async () => {
+    it('put accepts plugin-registered type with intent=runtime-only (webhook)', async () => {
+        const result = await repo.put(
+            { org: 'org_alpha', type: 'webhook', name: 'my_webhook' },
+            { name: 'my_webhook', url: 'https://e.example/x', events: ['x.created'] },
+            { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
+        );
+        expect(result.version).toMatch(/^sha256:/);
+    });
+
+    it('put accepts statically-registered `api` with intent=runtime-only (#5271)', async () => {
+        // The other half of the same gate: `api` graduated INTO the registry
+        // with `allowRuntimeCreate: true`, so the repository door it already
+        // had must stay open. `assertAllowed` is a TYPE gate — the body shape
+        // is judged by `saveMetaItem`'s 422, one layer up.
         const result = await repo.put(
             { org: 'org_alpha', type: 'api', name: 'my_api' },
-            { name: 'my_api', path: '/x', method: 'GET' },
+            {
+                name: 'my_api',
+                path: '/api/v1/apps/alpha/tasks',
+                method: 'GET',
+                type: 'object_operation',
+                target: 'alpha_task',
+                objectParams: { object: 'alpha_task', operation: 'find' },
+            },
             { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
         );
         expect(result.version).toMatch(/^sha256:/);

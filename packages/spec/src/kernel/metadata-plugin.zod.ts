@@ -113,6 +113,30 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // code contributions: plugin `contributes.routes` + declarative `apis:`
   // (router), `defineStack({ functions })` + `contributes.functions`
   // (function), and the plugin/service registry itself (service).
+  //
+  // [#5271, part of #5206] `api` is the ONE declarative endpoint ITEM kind, and
+  // it is NOT a reversal of the `router` retirement above: `router` was retired
+  // as a KIND because its delivered forms (`contributes.routes`, imperative
+  // `http.server` mounts) are code contributions. A single `ApiEndpoint` — a
+  // stable URL plus a policy layer over an existing pipeline — is a declarative
+  // artifact, and it passes all three clauses of ADR-0088's admission test:
+  //   1. INDEPENDENT LIFECYCLE — the endpoint matcher indexes, invalidates and
+  //      re-judges one stored `api` item at a time (`buildEndpointIndex`,
+  //      `MetadataManager.ENDPOINT_METADATA_TYPE`).
+  //   2. DECLARATIVE GOVERNABILITY — `allowRuntimeCreate: true` plus file
+  //      patterns (see the registry entry below).
+  //   3. A REAL CONSUMER — #5040's E-series executor serves them and
+  //      `/openapi.json` describes them; #5040 E8 proves it on a real boot.
+  // ADR-0088's own `router` row already anticipated this: "the endpoint
+  // executor is being built under #5040, after which declarative `apis:`
+  // becomes a third, real delivered form".
+  //
+  // The kind was live long before it was declared — artifact ingest has mapped
+  // `defineStack({ apis })` → `api` items (`ARTIFACT_FIELD_TO_TYPE`) all along,
+  // so this entry closes the MIRROR of `declared ≠ enforced`: enforced but
+  // undeclared. Until #5271 the type resolved no schema, so `saveMetaItem`
+  // stored ANY JSON under it unvalidated (#5206).
+  'api',         // Declarative HTTP endpoints (ApiEndpointSchema, ADR-0121)
   // #4616: the canonical schema is `EmailTemplateDefinitionSchema`
   // (`system/email-template.zod.ts`), which is what `BUILTIN_METADATA_TYPE_SCHEMAS`
   // resolves this kind to. This comment used to name `EmailTemplateSchema` — the
@@ -685,6 +709,55 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // RUNTIME-CREATED (ADR-0062/0088): produced by the datasource Sync wizard —
   // a derived snapshot; packages never ship one (it would be stale on arrival).
   { type: 'external_catalog', label: 'External Catalog', filePatterns: ['**/*.external-catalog.ts', '**/*.external-catalog.yml', '**/*.external-catalog.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 6, domain: 'system' },
+  // [#5271, part of #5206] `api` — declarative HTTP endpoints (ADR-0121).
+  //
+  // WHY THE FLAGS ARE THESE VALUES (the decision this entry records):
+  //
+  // `allowRuntimeCreate: true` is NOT a new grant — it WRITES DOWN what the
+  // runtime already did. Until this entry existed, `api` had no static registry
+  // row, and both write gates treat a type with no row as runtime-creatable on
+  // purpose: `isRuntimeCreateAllowed` (metadata-protocol `protocol.ts`) and
+  // `assertAllowed` (`sys-metadata-repository.ts`) each fall through with
+  // "types with NO static registry entry are synthesised by `getMetaTypes()`
+  // with allowRuntimeCreate: true, so the write gate must agree" — and both
+  // name `api` in that comment. So `PUT /api/v1/meta/api/:name` accepted
+  // writes; it just accepted them UNVALIDATED. Declaring `true` here keeps the
+  // authorization verdict byte-identical and changes exactly one thing: the
+  // body must now satisfy `ApiEndpointSchema` (422 `invalid_metadata`).
+  //
+  // The alternative — CODE-ONLY (`allowRuntimeCreate: false` +
+  // `allowOrgOverride: false`, the `job` / `agent` shape) — was considered and
+  // rejected on the evidence:
+  //   • it would REMOVE a door rather than validate one, turning today's 200
+  //     into a 403 for every runtime author, which is a contract change no
+  //     issue in this chain asked for;
+  //   • #5086 (PR #5263) refuses code-only types BEFORE persistence, draft and
+  //     active alike — so `api` DRAFTS would become impossible, and #5206's
+  //     step 2 (the `publishPackageDrafts` endpoint gate, PR #5279) would have
+  //     nothing left to gate;
+  //   • ADR-0121's ruling is "publish REJECTS" with a named-key prescription
+  //     (D1/D2/D6), which presupposes an author who could write the draft.
+  //     "Rejected at publish" is not "refused at authoring".
+  //
+  // `allowOrgOverride: false` (also unchanged from today's effective value): an
+  // endpoint is an OUTWARD URL contract owned by the declaring package. A
+  // per-org fork could move `path`, flip `authRequired` or drop `rateLimit` on
+  // the publisher's own URL, and ADR-0005 defaults this flag to false precisely
+  // so that opt-in is deliberate. Same posture as `datasource`.
+  //
+  // `supportsOverlay: false` — there is no merge semantic for an endpoint;
+  // `executionPinned: false` — an endpoint DELEGATES (ADR-0121 D5), and the
+  // pinned artifact is the target `flow`, which carries `executionPinned: true`
+  // itself. `loadOrder: 92` is after `flow` (80), so a flow-typed endpoint's
+  // target already exists when the endpoint registers.
+  //
+  // ⚠️ The registry is the authority on WHO MAY WRITE; it is not the endpoint
+  // publish gate. `validateApiEndpointDeclarations` / `identityFreeEndpointGateFailure`
+  // (`api/endpoint-publish-gate.ts`) remain the ONE judge of what is servable —
+  // run at publish (stack schema, `publishPackage`, `publishPackageDrafts`) and
+  // again at load (`buildEndpointIndex`). This entry adds a SHAPE check in
+  // front of them, never a second opinion about servability.
+  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
