@@ -121,6 +121,7 @@ import { validateVisibilityPredicates } from './validate-visibility-predicates.j
 import { validateSecurityPosture } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
+import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -820,6 +821,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'not new wiring. Recorded as pending rather than done, because a rule that has never run at a '
       + 'door should not claim it.',
     run: (stack) => validateSharingRuleEnforceability(stack),
+  },
+  // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
+  // which had never been wired to anything: `isSupportedRlsExpression` existed
+  // solely so an authoring command could reject a predicate the runtime drops,
+  // and no authoring command called it. An unlowerable
+  // `rowLevelSecurity[].using` is DROPPED by `RLSCompiler` and — when it is the
+  // only applicable policy — replaced by `RLS_DENY_FILTER`, so the policy reads
+  // as an authorization and behaves as a blanket refusal. Same construction as
+  // the sharing-rule entry: the verdict is the runtime's own function, reached
+  // through `@objectstack/formula` (where #4983 hoisted it), never a model of it.
+  {
+    name: 'validateRlsPredicateEnforceability',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-rls-predicate-enforceability.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'P2 (#4463): the rule reads `stack.permissions[]`, a stack-wide collection the per-write snapshot '
+      + 'does not carry, and P1 gates `flow` alone. It is otherwise snapshot-ready — it needs no other '
+      + 'collection — so widening it is a `runtimeTypes: [\'permission_set\']` edit once the gate builds '
+      + 'that snapshot, not new wiring. Recorded as pending rather than done, because a rule that has '
+      + 'never run at a door should not claim it.',
+    run: (stack) => validateRlsPredicateEnforceability(stack),
   },
 ];
 

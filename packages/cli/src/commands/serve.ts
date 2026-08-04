@@ -1990,6 +1990,24 @@ export default class Serve extends Command {
         // (env-native auth IS the membership — ADR-0024 D9) by setting
         // `api.enforceProjectMembership: false`. Undefined → dispatcher default.
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
+        // [#4910] The stack's top-level `server:` block — deliberately narrow:
+        // only keys with a consumer are declared, and both of these have one in
+        // the dispatcher's inbound rate limiter. Read here, next to `api:`, for
+        // the same reason that one is: this is the single place the authored
+        // stack is turned into plugin configuration.
+        //
+        // NOTE the budget is deliberately NOT validated here. An unusable one
+        // (`maxRequests: 0`) throws out of `createInboundRateLimitMiddleware`
+        // during the dispatcher plugin's `init()`, which the kernel runs at
+        // BOOTSTRAP — outside the optional-plugin `catch` below, which only
+        // guards the `import`/`use` registration. So a nonsense budget fails the
+        // boot with a prescriptive message instead of silently disarming the
+        // limiter or, worse, silently dropping the whole dispatcher.
+        const serverConfig = (config as any).server ?? {};
+        const rateLimitConfig = {
+            ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
+            trustProxy: serverConfig.trustProxy === true,
+        };
         // [#3963] Anonymous access to object data is denied unconditionally —
         // there is no `api.requireAuth` opt-out any more (auth is a kernel
         // concern; every legitimately session-less surface derives its own narrow
@@ -2038,6 +2056,7 @@ export default class Serve extends Command {
               scoping: { enableProjectScoping, projectResolution },
               enforceProjectMembership,
               observability,
+              rateLimit: rateLimitConfig,
             }),
           );
           trackPlugin('Dispatcher');

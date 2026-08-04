@@ -4,7 +4,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { FieldMasker } from './field-masker.js';
-import { RLSCompiler, RLS_DENY_FILTER, isSupportedRlsExpression } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+// #4983 — `isSupportedRlsExpression` now lives in @objectstack/formula, and its
+// SHAPE unit tests moved with it (`formula/src/rls-predicate.test.ts`). What
+// stays here is the consumer-side half: that this compiler's drop / warn /
+// fail-closed behaviour really is what that predicate describes.
+import { isSupportedRlsExpression } from '@objectstack/formula';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS } from '@objectstack/spec/security';
 
@@ -3039,30 +3044,35 @@ describe('RLSCompiler', () => {
 // ADR-0056 D4 — RLS predicates that won't compile must not vanish in silence
 // ---------------------------------------------------------------------------
 describe('RLSCompiler D4 — uncompilable predicates are surfaced', () => {
-  it('isSupportedRlsExpression accepts the compilable shapes', () => {
-    // Legacy SQL-ish subset (bridged `=`/`IN`).
-    expect(isSupportedRlsExpression('owner_id = current_user.id')).toBe(true);
-    expect(isSupportedRlsExpression('owner = current_user.email')).toBe(true);
-    expect(isSupportedRlsExpression("status = 'published'")).toBe(true);
-    expect(isSupportedRlsExpression('id IN (current_user.org_user_ids)')).toBe(true);
-    expect(isSupportedRlsExpression('1 = 1')).toBe(true);
-    // ADR-0058: the canonical compiler lowers a broader pushdown subset, so the
-    // shape gate now (correctly) reports these as enforceable — `==`/`!=`,
-    // comparisons, and CEL compound predicates all compile to a FilterCondition.
-    expect(isSupportedRlsExpression('owner == current_user.id')).toBe(true);   // `==`
-    expect(isSupportedRlsExpression('amount > 100')).toBe(true);               // comparison
-    expect(isSupportedRlsExpression('region != null')).toBe(true);             // null check
-    expect(isSupportedRlsExpression('a == 1 && b == 2')).toBe(true);           // CEL compound
-  });
-
-  it('isSupportedRlsExpression rejects genuinely non-pushdownable shapes', () => {
-    // These cannot lower to a FilterCondition for ANY input, so the gate must
-    // reject them (ADR-0055 / ADR-0056 D4) — they fail closed at runtime.
-    expect(isSupportedRlsExpression('a = current_user.id AND b = 1')).toBe(false); // SQL AND ≠ CEL && (unparseable)
-    expect(isSupportedRlsExpression('amount + 1 > 2')).toBe(false);                // arithmetic
-    expect(isSupportedRlsExpression('id IN (SELECT id FROM users)')).toBe(false);  // subquery
-    expect(isSupportedRlsExpression('record.a.b == 1')).toBe(false);              // cross-object traversal
-    expect(isSupportedRlsExpression('')).toBe(false);
+  /**
+   * The consumer-side statement the hoist (#4983) has to keep true: whatever
+   * `isSupportedRlsExpression` says about a predicate is what THIS compiler
+   * does with it. The shape assertions themselves moved to
+   * `@objectstack/formula`'s `rls-predicate.test.ts`; re-asserting them here
+   * would be a copy of the tests to go with the copy of the code we refused to
+   * make. This one runs the corpus through the real compiler instead, which is
+   * the claim `@objectstack/lint`'s new authoring gate relies on: `false` here
+   * means the runtime drops the policy and warns.
+   */
+  it('the compiler DROPS exactly the predicates isSupportedRlsExpression rejects', () => {
+    const corpus = [
+      // supported — compile to a FilterCondition against a populated context
+      'owner_id = current_user.id',
+      'owner_id == current_user.id',
+      "status = 'published'",
+      'id IN (current_user.org_user_ids)',
+      // unsupported — no input can lower these
+      'amount + 1 > 2',
+      'id IN (SELECT id FROM users)',
+      'record.a.b == 1',
+      'a = current_user.id AND b = 1',
+    ];
+    const userCtx = { id: 'u1', status: 'published', org_user_ids: ['u1'] } as Record<string, unknown>;
+    for (const source of corpus) {
+      const compiler = new RLSCompiler();
+      const compiled = compiler.compileExpression(source, userCtx) !== null;
+      expect({ source, compiled }).toEqual({ source, compiled: isSupportedRlsExpression(source) });
+    }
   });
 
   it('WARNS (does not silently drop) an unsupported-shape policy', () => {
