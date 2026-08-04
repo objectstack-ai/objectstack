@@ -265,6 +265,25 @@ describe('[#4971] formatZodError expands invalid_union branches', () => {
     expect(formatted).toContain('✗ b:');
   });
 
+  it('caps a wide tie and says how many branches it did not print', () => {
+    // Five disjoint shapes, none closer than the others: every branch reports
+    // the same stray key plus its own missing required. Three are rendered and
+    // the remainder is stated rather than dropped in silence.
+    const union = z.union([
+      z.strictObject({ a: z.string() }),
+      z.strictObject({ b: z.string() }),
+      z.strictObject({ c: z.string() }),
+      z.strictObject({ d: z.string() }),
+      z.strictObject({ e: z.string() }),
+    ]);
+    const formatted = formatZodError(union.safeParse({ bogus: 1 }).error!);
+
+    expect(formatted).toContain('… and 2 more branches rejected this value');
+    expect(formatted.match(/bogus/g)?.length).toBe(1);
+    expect(formatted).toContain('✗ c:');
+    expect(formatted).not.toContain('✗ d:');
+  });
+
   // The conservative half of the contract: when NO branch has anything to say
   // beyond "that is the wrong kind of value", the expansion adds N lines of
   // noise for zero prescription. Primitive unions are the commonest union in
