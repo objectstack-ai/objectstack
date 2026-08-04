@@ -57,10 +57,21 @@ export {
   bindRecordShareCascade,
   unbindRecordShareCascade,
   objectCanCarryRecordShares,
+  objectCanCarryShareLinks,
   orphanShareSweepQueue,
   RECORD_SHARE_CASCADE_PACKAGE,
   type CascadeEngine,
+  type ShareLinkCascade,
 } from './record-share-cascade.js';
+export {
+  deleteRowsForDeletedRecords,
+  sweepOrphanedRowsByRecordExistence,
+  ORPHAN_SWEEP_PAGE_SIZE,
+  ORPHAN_SWEEP_MAX_ROWS,
+  RECORD_SCOPED_DELETE_CHUNK,
+  type OrphanCleanupEngine,
+  type OrphanSweepSubject,
+} from './record-orphan-cleanup.js';
 export {
   parseCriteria,
   isMatchAllCriteria,
