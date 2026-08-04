@@ -24,6 +24,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/plugin-sharing": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

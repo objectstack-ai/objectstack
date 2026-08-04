@@ -814,7 +814,28 @@ const step17: MigrationStep = {
     + 'not the shape. `ResponsiveConfig` stays exported and stays live on '
     + '`page.components[].responsive`, which objectui `useResponsiveConfig` genuinely reads, so '
     + 'no import breaks and authors who need breakpoint behaviour today have somewhere real to '
-    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.',
+    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.\n\n'
+    + 'Finally it CONVERGES `dashboard.widgets[].compareTo` (#5011) — the one entry in this step '
+    + 'that is not a removal but a vocabulary merge, and the one whose defect was worst-shaped. '
+    + 'The widget declared three arms with confident TSDoc; the analytics executor implements one '
+    + 'contract, `DatasetSelection.compareTo` = `{ kind, dimension? }`, which has no `offset` in '
+    + 'it. On the ADR-0021 dataset path the two string arms were DROPPED by the renderer (a '
+    + 'comparison silently absent from a widget whose author asked for one) and `{ offset }` was '
+    + 'forwarded into that contract with no dimension, so the executor threw '
+    + '`compareTo requires a timeDimension "undefined"` and errored the whole widget. All three '
+    + 'arms worked on the legacy inline chart path. Same key, two fates — and the failing one was '
+    + 'the path the spec itself calls canonical, which is why this ranks above an ordinary '
+    + 'declared-but-unread key: the documentation was actively teaching a shape that crashes. '
+    + 'The widget now declares the executor\'s own words, so `declared = enforced` holds by '
+    + 'construction with no second vocabulary left to drift. `dimension` is optional and resolved '
+    + 'by the EXECUTOR (one dated time dimension → that one; zero or several → a loud error '
+    + 'naming the candidates), which is a producer-side resolution rule, not the consumer-side '
+    + 'tolerance PD #12 forbids. The bare strings and `{ offset: \'1y\' }` replay mechanically; '
+    + 'every other `{ offset }` duration is a semantic TODO below, because `previousPeriod` '
+    + 'shifts by the resolved window\'s own length and rewriting `7d` into it would change which '
+    + 'rows the comparison counts. The converged slot is also union-free, which is not cosmetic: '
+    + 'zod collapses a failed union into one bare `Invalid input` and #5014 showed that curated '
+    + 'guidance inside a union arm never reaches the author at all.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -855,8 +876,33 @@ const step17: MigrationStep = {
     'hook-body-crypto-hash-removed',
     'connector-rate-limit-config-removed',
     'dashboard-widget-responsive-removed',
+    'dashboard-widget-compareto-converged',
   ],
   semantic: [
+    {
+      id: 'dashboard-widget-compareto-offset',
+      surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
+      replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+      reason:
+        'The widget declared three comparison arms; the analytics executor implements one shape, '
+        + '`{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset '
+        + 'path — the spec\'s single author-facing analytics shape — `{ offset }` was forwarded '
+        + 'verbatim into that contract and threw `compareTo requires a timeDimension "undefined"`, '
+        + 'taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). '
+        + "The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every "
+        + 'other duration has NO faithful target: `previousPeriod` shifts by the length of whatever '
+        + "window the widget's filter resolves to, which equals `7d` only when that window happens "
+        + 'to be seven days long. Rewriting mechanically would silently change which rows the '
+        + 'comparison column counts — a wrong number rather than a missing one, which is strictly '
+        + 'worse and exactly the class this convergence exists to end. Re-stating the intended '
+        + 'window is a judgment about the presentation, not a transform.',
+      acceptanceCriteria:
+        'No dashboard widget declares `compareTo.offset`. Each former offset comparison states its '
+        + "window on the widget's `filter` and compares with `compareTo: { kind: 'previousPeriod' }` "
+        + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
+        + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
+        + '`<measure>__compare` column over the window its author intended.',
+    },
     {
       id: 'job-retry-policy-constraints-tightened',
       surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',

@@ -1342,7 +1342,7 @@ export const SalesDashboard: Dashboard = {
       options: { icon: 'DollarSign' },   // the measure's own `format` drives the number
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
-      compareTo: 'previousPeriod',
+      compareTo: { kind: 'previousPeriod' },
       actionType: 'url', actionUrl: '/objects/opportunity?filter=open',
     },
 
@@ -1355,7 +1355,7 @@ export const SalesDashboard: Dashboard = {
       title: 'Revenue — This Year vs Last',
       dataset: 'order_metrics', dimensions: ['closed_at'], values: ['total_sum'],
       filter: { closed_at: { $gte: '{current_year_start}', $lte: '{current_year_end}' } },
-      compareTo: 'previousYear',
+      compareTo: { kind: 'previousYear' },
       layout: { x: 3, y: 0, w: 9, h: 4 },
     },
   ],
@@ -1373,16 +1373,32 @@ Set `compareTo` on any data-bound widget to add a second query against a
 shifted time window. The renderer derives the comparison automatically;
 no second `filter` is required.
 
-| Value | Behaviour |
-|:--|:--|
-| `'previousPeriod'` | Inspect the widget `filter` for date-macro tokens (`{current_month_start}`, `{last_7_days}`, …) and shift the window back by one period of the same kind. |
-| `'previousYear'`   | Shift the resolved filter window back by one calendar year. |
-| `{ offset: '7d' }` | Shift by an explicit duration. Units: `d` (days), `w` (weeks), `M` (months), `y` (years). |
+`compareTo` is `{ kind, dimension? }` — the same shape the analytics executor
+reads (`DatasetSelection.compareTo`), so what a widget declares is exactly what
+runs. There is no second widget-side vocabulary.
+
+| Key | Value | Behaviour |
+|:--|:--|:--|
+| `kind` | `'previousPeriod'` | The equal-length window immediately before the resolved one. |
+| `kind` | `'previousYear'` | The same window shifted back one calendar year. |
+| `dimension` | dimension name, **optional** | Which time dimension's window to shift. Omit it when the selection dates exactly one — the executor resolves it. With zero or several it errors, naming the candidates; it never guesses. |
+
+```typescript
+compareTo: { kind: 'previousPeriod' }                            // one dated dimension
+compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
+```
+
+> **Removed in v17 (#5011):** the bare strings `compareTo: 'previousPeriod'` /
+> `'previousYear'` and the `{ offset: '7d' | '1M' | '1y' }` arm. The strings and
+> `{ offset: '1y' }` are rewritten for you by `os migrate meta --from 16`; any
+> other `offset` duration has no faithful target — state the window on the
+> widget's `filter` and compare it with `{ kind: 'previousPeriod' }`, which
+> shifts by that window's own length.
 
 * **Metric widgets** — the prior-period value renders as a small caption
   beneath the headline number, alongside a green/red delta arrow and an
   i18n trend label resolved from the comparison kind (e.g. `vs previous
-  period`, `vs previous year`, `vs previous 7d`). Authors should *not*
+  period`, `vs previous year`). Authors should *not*
   hand-author `options.trend` when `compareTo` is set; the renderer wins
   and overwrites it.
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
@@ -1392,23 +1408,24 @@ no second `filter` is required.
   bars). Override per-series with `series.dashArray` / `series.opacity`.
 * **Pie / donut / funnel** — `compareTo` is silently ignored; there is no
   meaningful "two-period" composition for part-of-whole charts.
-* **Requirements** — `compareTo` is a no-op when the filter contains no
-  resolvable date macros and no global `dateRange` is configured. The
-  shifted query reuses the original `filter` shape and replaces only the
-  date-bound clauses.
+* **Requirements** — a comparison needs a **dated window** to shift. When the
+  selection carries no time dimension with a date range (no resolvable date
+  macro in the widget `filter`, no dashboard `dateRange`), the executor says so
+  rather than rendering a silently empty comparison column. The shifted query
+  reuses the original `filter` shape and replaces only the date-bound clauses.
 
 ```typescript
 // Metric — WoW delta (binds the task_metrics dataset; filter = runtimeFilter)
 { id: 'done_this_week', type: 'metric', dataset: 'task_metrics', values: ['task_count'],
   filter: { assignee: '{current_user_id}', status: 'done',
             completed_at: { $gte: '{week_start}' } },
-  compareTo: 'previousPeriod' }
+  compareTo: { kind: 'previousPeriod' } }
 
 // Bar — YoY overlay on a stable category set
 { id: 'headcount_by_dept', type: 'bar', dataset: 'employee_metrics',
   dimensions: ['department'], values: ['headcount'],
   filter: { status: { $ne: 'terminated' } },
-  compareTo: 'previousYear' }
+  compareTo: { kind: 'previousYear' } }
 ```
 
 ### Server-side date bucketing — `dateGranularity` (ADR-0021)
@@ -1436,7 +1453,7 @@ defineDataset({
 { id: 'signed_by_month', type: 'line',
   dataset: 'contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
   filter: { signed_date: { $gte: '{12_months_ago}' } },
-  compareTo: 'previousYear' }
+  compareTo: { kind: 'previousYear' } }
 ```
 
 ### Drilldown

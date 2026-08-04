@@ -302,6 +302,91 @@ describe('SharingService.canEdit', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// [#4647] Modify All Data on the WRITE gates.
+//
+// The reported contradiction: `security/explain` answered `allowed: true` for a
+// Modify-All holder against an OWNERLESS row of a `private` object ("ownership
+// and sharing checks are skipped"), while the write path returned 403 — because
+// these gates never asked about the bypass, and the `__writeScope === 'org'`
+// proxy they leaned on is checked only AFTER `matchesOwnerScope` has already
+// refused a NULL `owner_id`. Ruling (2026-08-04): Modify All Data means an
+// admin edits any record regardless of ownership, so the gate asks — through
+// the SAME `hasWriteBypass` predicate explain reports.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#4647] SharingService write gates consult Modify All Data', () => {
+  const OWNERLESS_ID = 'a_orphan';
+  let engine: ReturnType<typeof makeFakeEngine>;
+  /** Counts probe calls so "asked LAST, never on the fast path" is a fact, not a hope. */
+  let probeCalls: number;
+
+  const withBypass = (held: boolean) => {
+    probeCalls = 0;
+    return new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => { probeCalls++; return held; },
+      }),
+    });
+  };
+
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    probeCalls = 0;
+    engine._tables.account = [
+      // The seed-shaped row: the platform ownership column is NULL.
+      { id: OWNERLESS_ID, name: 'Seeded', owner_id: null },
+      { id: 'a1', name: 'Acme', owner_id: 'alice' },
+    ];
+  });
+
+  it('canEdit admits a Modify All holder on an OWNERLESS private record', async () => {
+    expect(await withBypass(true).canEdit('account', OWNERLESS_ID, { userId: 'admin' })).toBe(true);
+  });
+
+  it('canDelete admits a Modify All holder on an OWNERLESS private record', async () => {
+    expect(await withBypass(true).canDelete('account', OWNERLESS_ID, { userId: 'admin' })).toBe(true);
+  });
+
+  it("a principal WITHOUT the modify bit stays excluded (View All Data is not a write bypass)", async () => {
+    const svc = withBypass(false); // what hasWriteBypass answers for a view-only set
+    expect(await svc.canEdit('account', OWNERLESS_ID, { userId: 'auditor' })).toBe(false);
+    expect(await svc.canDelete('account', OWNERLESS_ID, { userId: 'auditor' })).toBe(false);
+  });
+
+  it('a throwing probe fails CLOSED — a broken security service never widens a write', async () => {
+    const svc = new SharingService({
+      engine,
+      securityService: () => ({ hasWriteBypass: async () => { throw new Error('boom'); } }),
+    });
+    expect(await svc.canEdit('account', OWNERLESS_ID, { userId: 'admin' })).toBe(false);
+    expect(await svc.canDelete('account', OWNERLESS_ID, { userId: 'admin' })).toBe(false);
+  });
+
+  it('no security service at all (no plugin-security) degrades to owner-only', async () => {
+    const svc = new SharingService({ engine });
+    expect(await svc.canEdit('account', OWNERLESS_ID, { userId: 'admin' })).toBe(false);
+    expect(await svc.canDelete('account', OWNERLESS_ID, { userId: 'admin' })).toBe(false);
+  });
+
+  it('the probe is asked LAST — ownership and an edit share never pay for it', async () => {
+    const svc = withBypass(true);
+    expect(await svc.canEdit('account', 'a1', { userId: 'alice' })).toBe(true); // owner
+    expect(probeCalls, 'owner fast-path does not probe').toBe(0);
+
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' }, { isSystem: true });
+    expect(await svc.canEdit('account', 'a1', { userId: 'bob' })).toBe(true); // share
+    expect(probeCalls, 'share branch does not probe either').toBe(0);
+
+    expect(await svc.canEdit('account', OWNERLESS_ID, { userId: 'admin' })).toBe(true);
+    expect(probeCalls, 'only the otherwise-denied path probes').toBe(1);
+  });
+});
+
 describe('[ADR-0111 D3] SharingService.canDelete — the verb boundary', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;

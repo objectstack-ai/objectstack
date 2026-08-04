@@ -52,11 +52,14 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
   it('keeps the presentation-scope filter (runtimeFilter) and compareTo', () => {
     const w = DashboardWidgetSchema.parse({
       id: 'won', type: 'metric', dataset: 'sales', values: ['revenue'],
-      filter: { stage: 'closed_won' }, compareTo: 'previousPeriod',
+      // #5011: `compareTo` is the executor's `{ kind, dimension? }` contract.
+      // The bare string this used to assert is retired — see
+      // `dashboard-compareto.test.ts` for the prescription it now raises.
+      filter: { stage: 'closed_won' }, compareTo: { kind: 'previousPeriod' },
       layout: { x: 0, y: 0, w: 3, h: 2 },
     });
     expect(w.filter).toEqual({ stage: 'closed_won' });
-    expect(w.compareTo).toBe('previousPeriod');
+    expect(w.compareTo).toEqual({ kind: 'previousPeriod' });
   });
 
   it('rejects a widget with no dataset', () => {

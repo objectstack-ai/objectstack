@@ -5,20 +5,26 @@ import type { Dashboard } from '@objectstack/spec/ui';
 /**
  * Pipeline Dashboard — aggregate view of the sales pipeline.
  *
- * Demonstrates period-over-period comparison via `compareTo`:
+ * Demonstrates period-over-period comparison via `compareTo`, whose shape is
+ * `{ kind, dimension? }` — the same contract the analytics executor reads
+ * (`DatasetSelection.compareTo`). Every widget below omits `dimension`:
+ * `opportunity_metrics` dates exactly one dimension (`close_date`), so the
+ * executor resolves it. Name it explicitly (`{ kind: 'previousYear', dimension:
+ * 'close_date' }`) only on a dataset that dates more than one — the executor
+ * refuses to guess, and says which candidates it found.
  *
- * - **Won This Quarter** — metric with `compareTo: 'previousPeriod'`. The
- *   filter uses `{current_quarter_start}` / `{current_quarter_end}`, so
+ * - **Won This Quarter** — metric with `compareTo: { kind: 'previousPeriod' }`.
+ *   The filter uses `{current_quarter_start}` / `{current_quarter_end}`, so
  *   the renderer issues a parallel aggregate for Q-1 and shows a delta
  *   labelled "vs last quarter".
- * - **Avg Deal Size YoY** — metric with `compareTo: 'previousYear'` to
- *   compare against the same window one year prior.
+ * - **Avg Deal Size YoY** — metric with `compareTo: { kind: 'previousYear' }`
+ *   to compare against the same window one year prior.
  * - **Pipeline Trend (12 months)** — line chart with
- *   `categoryGranularity: 'month'` bucketing and a `compareTo: 'previousYear'`
- *   overlay, rendered as a dashed muted series on top of the current
- *   12-month trend.
+ *   `categoryGranularity: 'month'` bucketing and a
+ *   `compareTo: { kind: 'previousYear' }` overlay, rendered as a dashed muted
+ *   series on top of the current 12-month trend.
  * - **Opportunities by Stage** — bar chart with
- *   `compareTo: 'previousPeriod'` to overlay the prior quarter.
+ *   `compareTo: { kind: 'previousPeriod' }` to overlay the prior quarter.
  * - **Pipeline by Industry** — pie chart without `compareTo`
  *   (pie / donut / funnel ignore overlays even if set).
  */
@@ -52,7 +58,7 @@ export const PipelineDashboard: Dashboard = {
           $lte: '{current_quarter_end}',
         },
       },
-      compareTo: 'previousPeriod',
+      compareTo: { kind: 'previousPeriod' },
       dataset: 'opportunity_metrics',
       values: ['total_amount'],
       options: { format: 'currency', currency: 'USD' },
@@ -70,7 +76,7 @@ export const PipelineDashboard: Dashboard = {
           $lte: '{current_year_end}',
         },
       },
-      compareTo: 'previousYear',
+      compareTo: { kind: 'previousYear' },
       dataset: 'opportunity_metrics',
       values: ['avg_amount'],
       options: { format: 'currency', currency: 'USD' },
@@ -86,7 +92,7 @@ export const PipelineDashboard: Dashboard = {
       filter: {
         close_date: { $gte: '{1_years_ago}', $lte: '{today}' },
       },
-      compareTo: 'previousYear',
+      compareTo: { kind: 'previousYear' },
       dataset: 'opportunity_metrics',
       dimensions: ['close_date'],
       values: ['opp_count'],
@@ -112,7 +118,7 @@ export const PipelineDashboard: Dashboard = {
           $lte: '{current_quarter_end}',
         },
       },
-      compareTo: 'previousPeriod',
+      compareTo: { kind: 'previousPeriod' },
       dataset: 'opportunity_metrics',
       dimensions: ['stage'],
       values: ['opp_count'],

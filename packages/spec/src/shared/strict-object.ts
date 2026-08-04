@@ -129,6 +129,23 @@ export interface StrictObjectOptions {
    * keys here keeps the suggestion useful on the extended surface.
    */
   extraKeys?: readonly string[];
+  /**
+   * Prescriptions for a retired **value form** of this slot — a scalar that
+   * used to be legal where an object is now required. Keyed by the exact
+   * authored value and dispatched on `issue.input`, so only the spelling that
+   * really was legal gets the retirement text and every other wrong type keeps
+   * zod's own message (the `HookBodyCapability` / `object.managedBy: 'system'`
+   * precedent — telling the author of `previosPeriod` that their value "was
+   * removed" would misinform).
+   *
+   * `guidance` cannot reach this case: it is consulted for
+   * `unrecognized_keys`, which never fires when the input is not an object at
+   * all. Without this hook a slot that converged from `'previousPeriod'` to
+   * `{ kind: 'previousPeriod' }` rejects the old spelling with the bare
+   * `Invalid input: expected object, received string` — loud, but carrying
+   * none of the upgrade the author needs. Added for #5011.
+   */
+  retiredForms?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -137,7 +154,7 @@ export interface StrictObjectOptions {
  * list read from `shape` rather than transcribed alongside it.
  */
 export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
-  const { surface, history, aliases, guidance, extraKeys = [] } = options;
+  const { surface, history, aliases, guidance, extraKeys = [], retiredForms } = options;
 
   // The error map is built on FIRST USE, not at construction.
   //
@@ -159,8 +176,17 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
   // than making each of them prove it is not in a loop. Same shape as the
   // deferred map `data/object.zod.ts` already carries for its TDZ problem.
   let build: z.core.$ZodErrorMap | undefined;
-  const error: z.core.$ZodErrorMap = (issue) =>
-    (build ??= strictUnknownKeyError({
+  const error: z.core.$ZodErrorMap = (issue) => {
+    // A retired VALUE FORM is rejected before the unknown-key map is even
+    // consulted: `issue.code` here is `invalid_type` (the input is not an
+    // object), so `strictUnknownKeyError` would return undefined and zod's
+    // bare "expected object, received string" would be all the author sees.
+    if (retiredForms && issue.code === 'invalid_type') {
+      const prescription =
+        typeof issue.input === 'string' ? retiredForms[issue.input] : undefined;
+      if (prescription) return prescription;
+    }
+    return (build ??= strictUnknownKeyError({
       surface,
       // Declared-but-unwritable keys (tombstones) are excluded — see
       // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
@@ -174,6 +200,7 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
       aliases,
       guidance,
     }))(issue);
+  };
 
   return z.object(shape, { error }).strict();
 }

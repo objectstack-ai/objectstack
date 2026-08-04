@@ -200,11 +200,11 @@ const withTotals = txns.map((t) => ({ ...t, running_total: (runningTotal += t.am
 
 ### Period-over-Period
 
-For dashboard widgets, use the higher-level `compareTo:
-'previousPeriod' | 'previousYear' | { offset }` field on the widget
-schema (see *objectstack-ui* → *Period-over-period — `compareTo`*).
-The renderer issues the shifted query for you and aligns the result
-bucket-for-bucket with `categoryGranularity`. For ad-hoc comparisons,
+For dashboard widgets, use the higher-level
+`compareTo: { kind: 'previousPeriod' | 'previousYear', dimension? }` field on
+the widget schema (see *objectstack-ui* → *Period-over-period — `compareTo`*).
+The runtime issues the shifted query for you and aligns the result
+bucket-for-bucket with the dataset dimension's `dateGranularity`. For ad-hoc comparisons,
 run two date-bucketed aggregations (see *Date-Bucketed Grouping* above)
 over the two periods and join the buckets in app code.
 

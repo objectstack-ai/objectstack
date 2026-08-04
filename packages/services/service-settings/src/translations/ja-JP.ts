@@ -28,11 +28,13 @@ export const jaJP: TranslationData = {
       keys: {
         provider: {
           label: 'プロバイダー',
+          help: 'このサーバーが実際に配信できるプロバイダーのみを表示しています。'
+            + 'SendGrid と Amazon SES は SMTP として設定します。',
           options: {
             smtp: 'SMTP',
-            sendgrid: 'SendGrid',
-            ses: 'Amazon SES',
+            resend: 'Resend',
             postmark: 'Postmark',
+            log: '送信しない(ログのみ — 実際には配信されません)',
           },
         },
         smtp_host: { label: 'ホスト', help: '例: smtp.example.com' },

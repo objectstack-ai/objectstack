@@ -102,7 +102,7 @@ Dashboard header action
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action for the widget action button |
 | **actionIcon** | `string` | optional | Icon identifier for the widget action button |
 | **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
-| **compareTo** | `'previousPeriod' \| 'previousYear' \| { offset: string }` | optional | Period-over-period comparison window |
+| **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
 | **values** | `string[]` | ✅ | Measure names — Y (at least one) |

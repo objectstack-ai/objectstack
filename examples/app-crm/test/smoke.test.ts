@@ -132,23 +132,27 @@ describe('Pipeline dashboard', () => {
     );
   });
 
-  it('uses `compareTo: previousPeriod` for the current-quarter KPI', () => {
+  it('uses `compareTo: { kind: previousPeriod }` for the current-quarter KPI', () => {
     const w: any = byId.get('won_this_quarter');
-    expect(w.compareTo).toBe('previousPeriod');
+    // #5011: `compareTo` is the executor's own `{ kind, dimension? }` shape.
+    // `dimension` is omitted deliberately — `opportunity_metrics` dates exactly
+    // one dimension, so the executor resolves it (and would error, naming the
+    // candidates, if it could not).
+    expect(w.compareTo).toEqual({ kind: 'previousPeriod' });
     expect(w.filter.close_date.$gte).toBe('{current_quarter_start}');
     expect(w.filter.close_date.$lte).toBe('{current_quarter_end}');
   });
 
-  it('uses `compareTo: previousYear` for the YoY KPI', () => {
+  it('uses `compareTo: { kind: previousYear }` for the YoY KPI', () => {
     const w: any = byId.get('avg_deal_size_yoy');
-    expect(w.compareTo).toBe('previousYear');
+    expect(w.compareTo).toEqual({ kind: 'previousYear' });
     expect(w.filter.close_date.$gte).toBe('{current_year_start}');
     expect(w.filter.close_date.$lte).toBe('{current_year_end}');
   });
 
   it('uses a YoY `previousYear` compareTo on the trend chart', () => {
     const w: any = byId.get('pipeline_trend_90d');
-    expect(w.compareTo).toBe('previousYear');
+    expect(w.compareTo).toEqual({ kind: 'previousYear' });
     expect(w.type).toBe('line');
     // ADR-0021 single-form: the date axis is a dataset dimension (its monthly
     // bucketing lives on the dataset's close_date dimension, not the widget).
@@ -160,9 +164,9 @@ describe('Pipeline dashboard', () => {
     expect((byId.get('pipeline_by_industry') as any).compareTo).toBeUndefined();
   });
 
-  it('uses `compareTo: previousPeriod` on the Opportunities by Stage bar chart', () => {
+  it('uses `compareTo: { kind: previousPeriod }` on the Opportunities by Stage bar chart', () => {
     const w: any = byId.get('opportunities_by_stage');
-    expect(w.compareTo).toBe('previousPeriod');
+    expect(w.compareTo).toEqual({ kind: 'previousPeriod' });
     expect(w.type).toBe('bar');
   });
 
