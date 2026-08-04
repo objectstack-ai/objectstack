@@ -2,16 +2,26 @@
 # ADR-0087 D4 — build the release `spec-changes.json` (the registry projection
 # joined with the api-surface diff against the PREVIOUSLY PUBLISHED spec — the
 # ADR-0059 §3 gate artifact, reused instead of discarded) and attach it to the
-# `@objectstack/spec@<version>` GitHub Release created by the changesets action.
+# `@objectstack/spec@<version>` GitHub Release.
+#
+# The Release itself is created by scripts/release-github-releases.mjs, which
+# must run BEFORE this script — `gh release upload` needs something to upload
+# onto (#4900).
 #
 # Inputs (env):
-#   PUBLISHED  — the changesets action's `publishedPackages` JSON array
-#   GH_TOKEN   — token for `gh release upload`
+#   PUBLISHED        — the changesets action's `publishedPackages` JSON array
+#   RELEASE_VERSION  — fallback for the recovery publish path, which produces no
+#                      such JSON; the fixed group releases every package at one
+#                      version, so spec's version is that version
+#   GH_TOKEN         — token for `gh release upload`
 set -euo pipefail
 
-new_version=$(jq -r '.[] | select(.name=="@objectstack/spec") | .version' <<<"${PUBLISHED}")
+new_version=$(jq -r '.[] | select(.name=="@objectstack/spec") | .version' <<<"${PUBLISHED:-[]}")
 if [ -z "${new_version}" ] || [ "${new_version}" = "null" ]; then
-  echo "::error::@objectstack/spec missing from publishedPackages — cannot attach spec-changes.json"
+  new_version="${RELEASE_VERSION:-}"
+fi
+if [ -z "${new_version}" ]; then
+  echo "::error::@objectstack/spec version unknown (neither publishedPackages nor RELEASE_VERSION) — cannot attach spec-changes.json"
   exit 1
 fi
 

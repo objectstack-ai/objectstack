@@ -240,20 +240,16 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
     expect(conditionWarnings()).toEqual([]);
   });
 
-  it('a delete-shaped context evaluates `previous` against the pre-image', async () => {
-    const calls: string[] = [];
-    const { logger, conditionWarnings } = captureLogger();
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true', ['beforeDelete']),
-      (async () => { calls.push('ran'); }) as any,
-      { logger },
-    );
-
-    await wrapped(makeCtx({ event: 'beforeDelete', input: { id: 't1', options: {} } } as any));
-
-    expect(calls).toEqual(['ran']);
-    expect(conditionWarnings()).toEqual([]);
-  });
+  // [#5272] The delete-shaped case that used to live here hand-built
+  // `previous` on the context and asserted the wrapper read it. It passed
+  // against an engine that never produced one — `delete()` assigned
+  // `hookContext.previous` nowhere, so the pin was a green light for behaviour
+  // that did not exist, and the real failure (every single-record delete with
+  // a `previous.*` condition rejected under #4775) sat behind it. Its
+  // replacement drives a real `engine.delete()` end to end — see
+  // '[#5272] a single-record delete binds `previous` through the real engine'
+  // at the bottom of this file. Nothing about the wrapper needed fixing; the
+  // producer did, so that is where the test now looks.
 
   it('a context with no engine still binds `previous` (merge only, no materialisation)', async () => {
     const calls: string[] = [];
@@ -501,5 +497,192 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
     // rides along on it.
     expect(plainCost).toBe(1);
     expect(prevCost).toBe(plainCost);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#5272] The DELETE side of the same contract, through a real engine.
+ *
+ * `HookContext.previous` is documented "for update/delete", and #5038 made a
+ * predicate bulk delete bind each doomed row's pre-image on its per-row
+ * `afterDelete`. The single-record path bound nothing at all, so it was
+ * strictly worse than the bulk one and every delete-side `previous.*`
+ * condition was rejected by #4775's fail-loud — through the generic branch,
+ * which reads like an author typo.
+ *
+ * Every case below goes insert → real `engine.delete()` → assert what the hook
+ * was handed. A hand-built context cannot answer any of these questions: it
+ * asserts what the test author already wrote down.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#5272] a single-record delete binds `previous` through the real engine', () => {
+  async function bootDelete(hooks: Hook[]) {
+    const engine = new ObjectQL();
+    const mem = makeMemoryDriver();
+    engine.registerDriver(mem.driver, true);
+    await engine.init();
+    engine.registry.registerObject(taskObject as any);
+    const warn = vi.fn();
+    bindHooksToEngine(engine, hooks, {
+      packageId: 'app:showcase',
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+    });
+    return {
+      engine,
+      reads: mem.reads,
+      conditionWarnings: () =>
+        warn.mock.calls.filter(([msg]) => String(msg).includes('condition evaluation failed')),
+    };
+  }
+
+  const observer = (event: string, sink: Array<Record<string, unknown> | undefined>): Hook => ({
+    name: `observe_${event}`,
+    object: 'hook_task',
+    events: [event],
+    priority: 90,
+    handler: (ctx: any) => { sink.push(ctx.previous); },
+  } as unknown as Hook);
+
+  it('hands `beforeDelete` the stored pre-image', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const { engine } = await bootDelete([observer('beforeDelete', seen)]);
+
+    const row: any = await engine.insert('hook_task', { title: 'Ship it', status: 'done', done: true });
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    expect(seen).toHaveLength(1);
+    // The row as the database held it — not `undefined`, and not the bare
+    // `{ id }` the delete's `input` carries.
+    expect(seen[0]).toEqual({ id: row.id, title: 'Ship it', status: 'done', done: true });
+  });
+
+  it('hands `afterDelete` the same pre-image — by then the row is gone', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const { engine } = await bootDelete([observer('afterDelete', seen)]);
+
+    const row: any = await engine.insert('hook_task', { title: 'Ship it', status: 'done', done: true });
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    // The pre-image is taken BEFORE the delete precisely because this is the
+    // only moment it exists: the row is unreadable now.
+    expect(await engine.findOne('hook_task', { where: { id: row.id } })).toBeFalsy();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({ id: row.id, title: 'Ship it', status: 'done', done: true });
+  });
+
+  it('evaluates a `previous.*` delete-side condition instead of rejecting the delete (#4775)', async () => {
+    // The issue's own example: a legal, contract-shaped transition hook. Before
+    // the fix `previous` was unbound on every single-record delete, so this
+    // condition was unevaluable and #4775 failed the whole operation — with the
+    // generic `Unknown variable: previous`, which reads as a misspelling.
+    const audited: string[] = [];
+    const { engine, conditionWarnings } = await bootDelete([{
+      name: 'audit_completed_task_deletion',
+      object: 'hook_task',
+      events: ['afterDelete'],
+      priority: 90,
+      condition: "previous.status == 'done'",
+      handler: (ctx: any) => { audited.push(String(ctx.input?.id ?? '?')); },
+    } as unknown as Hook]);
+
+    const done: any = await engine.insert('hook_task', { title: 'Shipped', status: 'done', done: true });
+    const open: any = await engine.insert('hook_task', { title: 'Draft', status: 'todo', done: false });
+
+    // Neither delete is rejected, and the condition SELECTS: it fires for the
+    // completed task and not for the open one.
+    await expect(engine.delete('hook_task', { where: { id: done.id } } as any)).resolves.toBeDefined();
+    await expect(engine.delete('hook_task', { where: { id: open.id } } as any)).resolves.toBeDefined();
+
+    expect(audited).toEqual([done.id]);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('is TOTAL over declared fields on a delete too — an unwritten column reads as null', async () => {
+    // Same materialisation the update side gets: `done` was never written, so
+    // the driver's row has no such key. `previous.done` must read as the
+    // materialised null rather than aborting the condition.
+    const audited: string[] = [];
+    const { engine, conditionWarnings } = await bootDelete([{
+      name: 'audit_incomplete_deletion',
+      object: 'hook_task',
+      events: ['beforeDelete'],
+      priority: 90,
+      condition: 'previous.done != true',
+      handler: (ctx: any) => { audited.push(String(ctx.input?.id ?? '?')); },
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'Untouched', status: 'todo' });
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    expect(audited).toEqual([row.id]);
+    expect(conditionWarnings()).toEqual([]);
+  });
+
+  it('does not leak materialised nulls into what the delete hook observes', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const { engine } = await bootDelete([{
+      name: 'observe_previous_on_delete',
+      object: 'hook_task',
+      events: ['afterDelete'],
+      priority: 90,
+      condition: 'previous.archived == null',
+      handler: (ctx: any) => { seen.push(ctx.previous); },
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'Ship it', status: 'todo' });
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    expect(seen).toHaveLength(1);
+    // `archived` is declared and was materialised for the condition; the
+    // engine's own pre-image must not have gained a column the row never had.
+    expect(Object.keys(seen[0] as object).sort()).toEqual(['id', 'status', 'title']);
+  });
+
+  it('reads the pre-image ONCE for both phases', async () => {
+    // The cost guardrail: `beforeDelete` and `afterDelete` share one read, and
+    // it is the SAME read the roll-up summary path used to make separately.
+    const before: Array<Record<string, unknown> | undefined> = [];
+    const after: Array<Record<string, unknown> | undefined> = [];
+    const { engine, reads } = await bootDelete([
+      observer('beforeDelete', before),
+      observer('afterDelete', after),
+    ]);
+
+    const row: any = await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const baseline = reads.findOne;
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    expect(reads.findOne - baseline).toBe(1);
+    expect(before[0]).toEqual(after[0]);
+  });
+
+  it('reads nothing at all when the object has no delete-side hook', async () => {
+    // Demand-driven, exactly like update()'s prior-row gate: an object nobody
+    // observes on delete pays for no pre-image.
+    const { engine, reads } = await bootDelete([{
+      name: 'update_only_guard',
+      object: 'hook_task',
+      events: ['afterUpdate'],
+      priority: 100,
+      condition: 'record.status == "todo"',
+      handler: () => {},
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const baseline = reads.findOne;
+    await engine.delete('hook_task', { where: { id: row.id } } as any);
+
+    expect(reads.findOne - baseline).toBe(0);
+  });
+
+  it('leaves `previous` UNBOUND when the row is not there — nothing is fabricated', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const { engine } = await bootDelete([observer('beforeDelete', seen)]);
+
+    await engine.delete('hook_task', { where: { id: 'never_existed' } } as any);
+
+    // `{}` or `null` here would let `previous.status == "done"` answer for a
+    // record nobody read. Absent stays absent (#4649/#4775).
+    expect(seen).toEqual([undefined]);
   });
 });

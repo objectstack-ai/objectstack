@@ -42,7 +42,8 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
@@ -55,6 +56,37 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
 /** Best-effort manifest id from a registry package entry (shape varies). */
 function manifestIdOf(p: any): string | undefined {
     return p?.manifest?.id ?? p?.id ?? p?.manifest?.name ?? undefined;
+}
+
+/**
+ * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
+ * FORCE for this boot? Both seeding decisions in this plugin key off it.
+ *
+ * ⛔ Never `resolveMultiOrgEnabled()`. ADR-0105 D1 demoted that boolean to a
+ * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
+ * deployment configured the documented way (`OS_TENANCY_POSTURE=isolated|group`,
+ * legacy boolean unset) — and a marketplace install on such a deployment wrote
+ * its sample rows with NO `organization_id` at all, landing them outside the
+ * wall every subsequent read applies. Same shape as cloud#1020 and #5233.
+ *
+ * EFFECTIVE, not requested. Both call sites ask "is the per-org replay going to
+ * own this seeding instead of me?", and that replay is the enterprise
+ * `@objectstack/organizations` middleware on `sys_organization` insert. On a
+ * DEGRADED boot that middleware is absent, so deferring to it would strand the
+ * data permanently; the `tenancy` service reports the posture in force
+ * (`single` there), which correctly hands the work back to the inline path.
+ *
+ * Falls back to the requested posture when no `tenancy` service is registered
+ * (a lean embedding without plugin-auth). Read live — never cached.
+ */
+function organizationWallActive(ctx: PluginContext): boolean {
+    try {
+        const tenancy = ctx.getService?.('tenancy') as { posture?: TenancyPosture } | undefined;
+        if (tenancy?.posture) return postureEnforcesWall(tenancy.posture);
+    } catch {
+        /* no `tenancy` service registered — fall through */
+    }
+    return postureEnforcesWall(resolveTenancyPosture());
 }
 
 export interface MarketplaceInstallLocalPluginConfig {
@@ -233,8 +265,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             : [];
         if (datasets.length === 0) return;
         if (entry.sampleDataPurged === true) return;
-        if (resolveMultiOrgEnabled()) {
-            ctx.logger?.info?.(`[MarketplaceInstallLocal] multi-tenant — sample-data heal for ${entry.manifestId} left to per-org replay`);
+        if (organizationWallActive(ctx)) {
+            ctx.logger?.info?.(`[MarketplaceInstallLocal] organization wall active — sample-data heal for ${entry.manifestId} left to per-org replay`);
             return;
         }
 
@@ -981,7 +1013,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // writes tenant-scoped rows the same way AppPlugin's
         // single-tenant branch + SecurityPlugin's per-org replay do.
         if (opts.seedNow && datasets.length > 0) {
-            const multiTenant = resolveMultiOrgEnabled();
+            // See `organizationWallActive` — the wall in FORCE, not the demoted
+            // boolean. This one is the write path: judged wrong, the install's
+            // rows are inserted with no `organization_id` on a walled
+            // deployment, i.e. behind the wall and unreadable by every caller
+            // the wall applies to (#5262).
+            const multiTenant = organizationWallActive(ctx);
             try {
                 const ql: any = ctx.getService('objectql');
                 let metadata: any;

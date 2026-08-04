@@ -3959,6 +3959,140 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * The nine theme token groups that were EMITTED and read by nobody (#5021,
+ * ADR-0049).
+ *
+ * The distinguishing fact, and the reason #3494 could not reach these: that
+ * round's criterion was "the theme engine never emits a variable for this key",
+ * which retired `spacing` / `breakpoints` / `density` / `wcagContrast` and five
+ * more. These eight keys pass that test — objectui's `generateThemeVars` walks
+ * every one of them and puts `--font-size-*`, `--font-weight-*`,
+ * `--line-height-*`, `--letter-spacing-*`, `--duration-*`, `--timing-*`,
+ * `--z-*`, `--font-heading` and `--font-mono` on the document, exactly as
+ * declared. What does not exist is a READER: measured against objectui `main`
+ * on 2026-08-04, all nine groups have zero consumers across `packages/**`,
+ * while `--font-sans`, `--radius*`, `--shadow*` and the colour variables come
+ * back live in the same run. So the author's type scale was real CSS that
+ * styled nothing.
+ *
+ * A CSS custom property is genuinely weaker evidence than a spec key here — a
+ * tenant's own stylesheet CAN read a variable the platform ignores — and that
+ * is precisely why the prescription is `customVars` rather than a bare "sorry".
+ * `customVars` emits `--<key>: <value>` verbatim, so every one of these
+ * variables is reproducible byte for byte. The retirement removes a semantic
+ * vocabulary the platform never honoured; it removes no capability.
+ *
+ * ⚠️ This STRIPS rather than rewriting into `customVars`, and that is the
+ * deliberate half of the design. A mechanical rewrite is possible (stringify
+ * the numbers, reconstruct `--z-<key>` / `--timing-<key>` names) and was
+ * rejected: it would hand back ~25 `customVars` entries that still nothing
+ * reads, converting a dead semantic slot into a dead literal one and making the
+ * retirement invisible — the #4583 shape. The notice tells the author exactly
+ * which keys went and the tombstone tells them where to put back the ones they
+ * actually consume, which is a decision only they can make. Measured input to
+ * that choice: `examples/**` and `apps/**` author ZERO of these keys today (the
+ * showcase's two themes declare `colors` only), so there is no in-repo body of
+ * authored config a rewrite would have saved.
+ *
+ * `retiredFromLoadPath`: the schema tombstones each key with its prescription,
+ * so a live parse rejects loudly and only `os migrate meta --from 16` rewrites
+ * sources. Absorbing these at load would let an author keep believing they had
+ * configured a type scale.
+ */
+const themeInertTokenScalesRemoved: MetadataConversion = {
+  id: 'theme-inert-token-scales-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface:
+    'theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight'
+    + ' / theme.typography.letterSpacing / theme.typography.fontFamily.heading'
+    + ' / theme.typography.fontFamily.mono / theme.animation / theme.zIndex',
+  summary:
+    "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', "
+    + "'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed "
+    + '(#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, '
+    + '--letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono '
+    + 'faithfully, and no first-party component or stylesheet has ever read one. '
+    + 'Re-declare any variable you actually consume under customVars, which emits it verbatim)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'themes', (theme, path) => {
+      let next = stripKeys(theme, ['animation', 'zIndex'], emit, path);
+
+      // `typography` is one level down, and `fontFamily` two — `stripKeys` is
+      // top-level only, so each nesting level is walked explicitly and
+      // copy-on-write is preserved at every level (an untouched theme keeps its
+      // identity, which is what `mapCollection` tests for).
+      const typography = next.typography;
+      if (typography && typeof typography === 'object' && !Array.isArray(typography)) {
+        const typo = typography as Record<string, unknown>;
+        let nextTypo = stripKeys(
+          typo,
+          ['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing'],
+          emit,
+          `${path}.typography`,
+        );
+
+        const fontFamily = nextTypo.fontFamily;
+        if (fontFamily && typeof fontFamily === 'object' && !Array.isArray(fontFamily)) {
+          const nextFamily = stripKeys(
+            fontFamily as Record<string, unknown>,
+            ['heading', 'mono'],
+            emit,
+            `${path}.typography.fontFamily`,
+          );
+          if (nextFamily !== fontFamily) nextTypo = { ...nextTypo, fontFamily: nextFamily };
+        }
+
+        if (nextTypo !== typo) next = { ...next, typography: nextTypo };
+      }
+
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      themes: [
+        {
+          name: 'corporate',
+          label: 'Corporate',
+          colors: { primary: '#7C3AED' },
+          typography: {
+            fontFamily: { base: 'Inter, sans-serif', heading: 'Georgia, serif', mono: 'ui-monospace' },
+            fontSize: { base: '1rem', lg: '1.125rem' },
+            fontWeight: { normal: 400, bold: 700 },
+            lineHeight: { normal: '1.5' },
+            letterSpacing: { wide: '0.025em' },
+          },
+          animation: { duration: { fast: '150ms' }, timing: { ease: 'cubic-bezier(0.4, 0, 0.2, 1)' } },
+          zIndex: { modal: 1050 },
+        },
+        // A theme that authored none of them keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'minimal', label: 'Minimal', colors: { primary: '#000000' } },
+      ],
+    },
+    after: {
+      themes: [
+        {
+          name: 'corporate',
+          label: 'Corporate',
+          colors: { primary: '#7C3AED' },
+          // `fontFamily` SURVIVES with `base` alone: it is the one font-family
+          // key with a live consumer (`--font-sans`). The block is not removed,
+          // only narrowed — which is why the fixture keeps it rather than
+          // dropping `typography` wholesale.
+          typography: { fontFamily: { base: 'Inter, sans-serif' } },
+        },
+        { name: 'minimal', label: 'Minimal', colors: { primary: '#000000' } },
+      ],
+    },
+    // One notice per KEY, not per stop and not per theme: eight keys authored
+    // on the first theme, zero on the second.
+    expectedNotices: 8,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -4008,6 +4142,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     objectEnableTrashMruRemoved,
     hookBodyCryptoHashRemoved,
     connectorRateLimitConfigRemoved,
+    themeInertTokenScalesRemoved,
   ],
 };
 
