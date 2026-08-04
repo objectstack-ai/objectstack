@@ -149,6 +149,14 @@ export class MetadataManager implements IMetadataService {
   private listCache = new Map<string, { ts: number; items: unknown[] }>();
   private static readonly LIST_CACHE_TTL_MS = 30_000;
 
+  // [#5108] Loader names whose read failure has already been reported at
+  // `error` by `list()`. AGENTS.md → "Degradation log levels": say it once, at
+  // the first degradation — `list()` is hot enough that one line per failed
+  // read would bury the one line that matters. Cleared when the loader answers
+  // again, so a second outage is reported again. Same once-only discipline as
+  // `DatabaseLoader.schemaFailureReported`.
+  private readonly loaderReadFailureReported = new Set<string>();
+
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
@@ -536,8 +544,9 @@ export class MetadataManager implements IMetadataService {
             items.set(itemAny.name, item);
           }
         }
+        this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        this.logger.warn(`Loader ${loader.contract.name} failed to loadMany ${type}`, { error: e });
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
@@ -545,6 +554,60 @@ export class MetadataManager implements IMetadataService {
     this.cacheListResult(type, result);
     return result;
   }
+
+  /**
+   * Report — at `error`, once per outage episode — that a loader could not be
+   * read while serving {@link list}.
+   *
+   * [#5108] This branch used to be dead for the loader that matters. Before
+   * #5108 `DatabaseLoader` caught its own read failures and answered `[]`, so
+   * `list()` received a *successful empty read* and never entered this `catch`
+   * at all: an unreachable `sys_metadata` and "this environment declares no
+   * `permission`" produced byte-identical results with not one line logged.
+   * With the loader rethrowing everything but the benign not-provisioned case,
+   * this is where the outage finally becomes speakable.
+   *
+   * `error`, not `warn`, per AGENTS.md → "Degradation log levels". Apply its
+   * one question — *does the system still look normal from outside while
+   * something it claims to know has not actually landed?* — and the answer is
+   * yes: `list()` still returns, callers still get an array, nothing 500s, and
+   * the set they gate on is quietly short. Which way that cuts depends on the
+   * consumer, and both ways are silent (#3935 is the fail-open precedent).
+   *
+   * Said **once** per loader, and un-said on recovery, because `list()` is a
+   * hot path — one line per outage, not one per read.
+   *
+   * Deliberately does NOT rethrow: `list()` is the best-effort listing seam and
+   * must keep serving what the reachable loaders hold. The strict counterpart
+   * for callers whose answer is a security decision is `listForIndex()` (no
+   * `catch`, feeding `matchEndpoint`) and {@link loadDiagnosed} (ADR-0110 D3)
+   * for the singular read — both of which only became honest for
+   * `DatabaseLoader` with the same #5108 change.
+   */
+  private reportLoaderReadFailure(loaderName: string, type: string, error: unknown): void {
+    if (this.loaderReadFailureReported.has(loaderName)) return;
+    this.loaderReadFailureReported.add(loaderName);
+    this.logger.error(
+      `[MetadataManager] Loader \`${loaderName}\` could NOT be read (first failure seen while listing \`${type}\`) — ` +
+        `every list served from now on is a PARTIAL set presented as a complete one, and the server keeps reporting healthy. ` +
+        `Consumers that gate on a declared set (permissions, sharing rules, policies, api endpoints) will read the ` +
+        `declarations this loader holds as "never declared" — which grants or locks out depending on the consumer, silently either way. ` +
+        `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists. ` +
+        `The read is retried on the next list once the ${MetadataManager.LIST_CACHE_TTL_MS}ms list cache lapses, so a transient ` +
+        `cause recovers on its own and the recovery is logged.`,
+      error instanceof Error ? error : undefined,
+      { loader: loaderName, type, error },
+    );
+  }
+
+  /** Un-say {@link reportLoaderReadFailure} once the loader answers again. */
+  private reportLoaderReadRecovered(loaderName: string): void {
+    if (!this.loaderReadFailureReported.delete(loaderName)) return;
+    this.logger.info(
+      `[MetadataManager] Loader \`${loaderName}\` is readable again — listings are complete once more.`,
+    );
+  }
+
   private cacheListResult(type: string, items: unknown[]): void {
     this.listCache.set(type, { ts: Date.now(), items });
   }
@@ -565,7 +628,7 @@ export class MetadataManager implements IMetadataService {
    * Enumerate stored items of `type` for an index build — like {@link list},
    * but a store that cannot be read THROWS instead of contributing nothing.
    *
-   * [#5089] `list()` deliberately warn-logs and skips a failing loader so a
+   * [#5089] `list()` deliberately logs a failing loader and skips it so a
    * partially-available metadata plane still serves what it can. That posture
    * is wrong for `matchEndpoint`: its `undefined` becomes an HTTP 404, and a
    * store outage that silently yields "zero declarations" would turn every
@@ -577,10 +640,14 @@ export class MetadataManager implements IMetadataService {
    * is `list()`'s failure posture inverted for the one caller whose answer is
    * a security/availability decision rather than a best-effort listing.
    *
-   * ⚠️ This surfaces only failures a loader actually reports. `DatabaseLoader`
-   * currently swallows its own read errors into `[]` (#5108), so a DB outage is
-   * invisible even here — that is a defect in the loader, not a reason to
-   * soften this seam.
+   * This surfaces only failures a loader actually reports — which, since
+   * #5108, includes `DatabaseLoader`: it used to swallow its own read errors
+   * into `[]`, making a DB outage invisible even here. It now rethrows every
+   * read failure except the benign "table not provisioned yet", so this seam
+   * holds against the real datasource-backed loader and not just the memory /
+   * remote ones. (`database-loader.test.ts` pins that end to end: a broken
+   * driver behind a real `DatabaseLoader` makes `matchEndpoint` reject rather
+   * than answer a 404-shaped `undefined`.)
    */
   private async listForIndex(type: string): Promise<unknown[]> {
     const items = new Map<string, unknown>();

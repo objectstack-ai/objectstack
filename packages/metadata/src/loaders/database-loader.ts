@@ -665,6 +665,59 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   // ==========================================
+  // Read-failure classification (#5108)
+  // ==========================================
+
+  /**
+   * Decide what a failed READ against {@link tableName} means, and rethrow
+   * unless it is the ONE benign reason.
+   *
+   * #5108 (rule from #4632; same shape as #4728 and #4825) — discriminate by
+   * error TYPE. Every read method below used to `catch {}` into its own empty
+   * value: `load` → `null`, `loadMany` → `[]`, `exists` → `false`, `stat` →
+   * `null`, `list` → `[]`. That made a database the metadata plane cannot
+   * reach **indistinguishable** from an environment where nothing of that type
+   * was ever declared — and it erased the failure *inside the loader*, so
+   * neither `MetadataManager`'s own `try/catch` degradation branches nor
+   * {@link import('../metadata-manager.js').MetadataManager.loadDiagnosed}
+   * (ADR-0110 D3, whose whole purpose is to tell a miss from an outage) could
+   * report anything. Nowhere on the chain was there a line saying the read
+   * failed.
+   *
+   * Why that is worse than a noisy error: every consumer that gates on a
+   * *declared set* — permissions, sharing rules, policies, endpoint
+   * declarations — reads the empty answer as "the author declared none". Some
+   * then fail open (grant), some fail closed (lock out); both look healthy
+   * from outside. This is the AGENTS.md → "Degradation log levels" shape the
+   * repo has already paid for twice, one layer up from #4825.
+   *
+   * Exactly one failure reason is benign: `sys_metadata` has not been
+   * provisioned yet. There are then genuinely no rows, so "nothing declared"
+   * IS the truth, and a first boot must not explode. Every other reason —
+   * connection drop, timeout, insufficient privileges, malformed query — means
+   * the rows may well be there and simply were not seen.
+   *
+   * Classification is conservative in the same direction as
+   * {@link isMissingTableError} itself: an unrecognised error is NOT benign.
+   * A false "benign" silently mis-answers a security question; a false "real"
+   * costs one loud error.
+   *
+   * @param error The value thrown by `_find` / `_findOne` / `_count`.
+   * @throws The underlying driver error, unchanged — deliberately, matching
+   *         {@link nextEventSeq}. The loader does not log it: the caller owns
+   *         the consequence and is the only layer that knows what an
+   *         incomplete answer costs it (`MetadataManager.list()` reports it at
+   *         `error`; `listForIndex()`/`matchEndpoint` let it propagate so an
+   *         outage can never be served as a 404).
+   * @returns normally ONLY for the benign case, licensing the caller to answer
+   *          with its empty value.
+   */
+  private rethrowUnlessTableUnprovisioned(error: unknown): void {
+    if (isMissingTableError(error)) return;
+    throw error;
+  }
+
+  // ==========================================
   // MetadataLoader Interface Implementation
   // ==========================================
 
@@ -718,7 +771,11 @@ export class DatabaseLoader implements MetadataLoader {
         etag: record.checksum,
         loadTime: Date.now() - startTime,
       };
-    } catch {
+    } catch (error) {
+      this.rethrowUnlessTableUnprovisioned(error);
+      // Benign only: the table is not provisioned, so there is no row. Not
+      // cached — `ensureSchema()` retries, and a `null` memoized here would
+      // outlive the provisioning that fixes it.
       return {
         data: null,
         loadTime: Date.now() - startTime,
@@ -748,7 +805,9 @@ export class DatabaseLoader implements MetadataLoader {
 
       this.loadManyCache?.set(type, result);
       return result;
-    } catch {
+    } catch (error) {
+      this.rethrowUnlessTableUnprovisioned(error);
+      // Benign only: no table, therefore no items of this type. Not cached.
       return [];
     }
   }
@@ -768,7 +827,9 @@ export class DatabaseLoader implements MetadataLoader {
       });
 
       return count > 0;
-    } catch {
+    } catch (error) {
+      this.rethrowUnlessTableUnprovisioned(error);
+      // Benign only: no table, therefore the item genuinely does not exist.
       return false;
     }
   }
@@ -805,7 +866,9 @@ export class DatabaseLoader implements MetadataLoader {
       };
       this.statCache?.set(key, stats);
       return stats;
-    } catch {
+    } catch (error) {
+      this.rethrowUnlessTableUnprovisioned(error);
+      // Benign only: no table, therefore nothing to stat. Not cached.
       return null;
     }
   }
@@ -830,7 +893,9 @@ export class DatabaseLoader implements MetadataLoader {
 
       this.listCache?.set(type, names);
       return names;
-    } catch {
+    } catch (error) {
+      this.rethrowUnlessTableUnprovisioned(error);
+      // Benign only: no table, therefore no names. Not cached.
       return [];
     }
   }
