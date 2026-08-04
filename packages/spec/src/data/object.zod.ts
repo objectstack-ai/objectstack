@@ -301,7 +301,7 @@ export const ObjectCapabilities = z.object({
  *
  * Closing it is still the right end state, but it is gated on the producer
  * being fixed first (contract-first: the drift is in the copy, not here), and
- * on an ADR-0049 answer for `type`/`partial` — neither is read by any driver
+ * on an ADR-0049 answer for `type`/`partial` (#5247 / #5248) — neither is read by any driver
  * (`syncDeclaredIndexes` in `driver-sql` consumes `name`/`fields`/`unique`
  * only), so pointing an author at `partial` today would be a guidance entry
  * that claims more than the platform delivers (ledger finding 18).

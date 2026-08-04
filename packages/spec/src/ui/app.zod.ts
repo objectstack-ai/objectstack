@@ -168,6 +168,9 @@ const actionDefUnknownKeyError = strictUnknownKeyError({
  * nothing while making a shape fragment look load-bearing (#4583: *"a
  * precisely-validated dead slot is the more convincing lie"*).
  *
+ * The `Class` cell it should carry is an OPEN question (#5249): the ledger's
+ * enumerated vocabulary has no word for a shape that is neither a door nor dead.
+ *
  * Pinned in `app-strictness-batch19.test.ts`, including the mechanism itself
  * (`.extend()` inherits posture, `...shape` does not) and a guard that fails if
  * any branch ever stops rejecting unknown keys — which is the one change that
