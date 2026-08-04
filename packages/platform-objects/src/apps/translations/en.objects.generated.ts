@@ -2051,7 +2051,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments_json: {
         label: "Attachments (JSON)",
-        help: "Attachments as a JSON array of { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }, with content base64 in `inline`. Written only when the combined raw size is within the plugin-email budget (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB — ~350 KB of base64 at worst); a larger message is delivered inline and stores nothing here, so the row stays bounded. `storageKey` (out-of-row content) has no producer yet — objectstack#5172."
+        help: "Attachments as a JSON array of { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey?, contentReclaimedAt? }. Content up to the plugin-email budget (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB combined raw — ~350 KB of base64 at worst) is base64 in `inline`; larger content goes to the file-storage capability and the element carries `storageKey` instead, so the row stays bounded either way. filename/contentType/size/hash are PERMANENT audit evidence; out-of-row content is a delivery artifact and is deleted a grace window after the row reaches a terminal state, at which point `storageKey` is replaced by `contentReclaimedAt`."
       },
       status: {
         label: "Status",
