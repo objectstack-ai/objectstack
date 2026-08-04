@@ -66,7 +66,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
         const { engine, runs, register } = failingFlowEngine({
             strategy: 'retry',
             maxRetries: 2,
-            retryDelayMs: 0,
+            backoffMs: 0,
         });
         register();
 
@@ -82,7 +82,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
         const { engine, runs, register } = failingFlowEngine({
             strategy: 'retry',
             maxRetries: 1,
-            retryDelayMs: 0,
+            backoffMs: 0,
         });
         register();
 
@@ -92,7 +92,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
     });
 
     it("refuses `strategy: 'retry'` with no maxRetries instead of guessing a count", () => {
-        const { register } = failingFlowEngine({ strategy: 'retry', retryDelayMs: 0 });
+        const { register } = failingFlowEngine({ strategy: 'retry', backoffMs: 0 });
 
         // The pre-#4247 outcomes were "registers, never retries" (schema route)
         // and "registers, retries 3×" (direct route). Now it is neither: the
@@ -102,7 +102,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
     });
 
     it("refuses `strategy: 'retry'` with an explicit maxRetries: 0 — that is `'fail'`", () => {
-        const { register } = failingFlowEngine({ strategy: 'retry', maxRetries: 0, retryDelayMs: 0 });
+        const { register } = failingFlowEngine({ strategy: 'retry', maxRetries: 0, backoffMs: 0 });
 
         expect(register).toThrow(/maxRetries/);
     });
@@ -111,7 +111,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
         const { engine, runs, register } = failingFlowEngine({
             strategy: 'fail',
             maxRetries: 0,
-            retryDelayMs: 0,
+            backoffMs: 0,
             backoffMultiplier: 1,
             maxRetryDelayMs: 0,
             jitter: false,
@@ -128,7 +128,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
         const { engine, register } = failingFlowEngine({
             strategy: 'retry',
             maxRetries: 1,
-            retryDelayMs: 0,
+            backoffMs: 0,
         });
         register();
 
@@ -141,7 +141,7 @@ describe('#4247 — the retry count comes from the flow, not from the engine', (
         expect(stored?.errorHandling).toMatchObject({
             strategy: 'retry',
             maxRetries: 1,
-            retryDelayMs: 0,
+            backoffMs: 0,
             backoffMultiplier: 1,
             maxRetryDelayMs: 30000,
             jitter: false,

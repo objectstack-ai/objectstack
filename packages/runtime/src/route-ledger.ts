@@ -102,7 +102,17 @@ export const LEGACY_CHAIN_PREFIXES = [
   '/mcp/skill',
   '/mcp',
   '/actions',
-  '/openapi.json',
+  // `/openapi.json` was REMOVED in #5093 (closing #5078). It was pinned here
+  // for a `dispatch()` branch that duck-typed a `generateOpenApi` method
+  // nothing implements, over a path nothing routes into `dispatch()` — dead
+  // twice over, and deleted with the branch. The route is real and healthy;
+  // `packages/rest` owns it end to end (`rest-server.ts`, and the row in
+  // `rest-route-ledger.ts` that describes it truthfully). Leaving the prefix
+  // pinned here would have made THIS list say "a branch of the if-chain"
+  // about something that is not one — the same way the row's note said the
+  // route "falls through when metadata service lacks a generator" when in
+  // fact no generator has ever existed. That is the failure #5078 was filed
+  // about; a list is not allowed to lie in the same PR that stops one.
   // `/__api-endpoint` (the `handleApiEndpoint` catch-all for metadata-declared
   // `apis:`) was REMOVED in #4936. It never named a mounted route: the branch
   // it stood for resolved a `matchEndpoint` method no implementation in this
@@ -292,7 +302,17 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   },
 
   // ── misc legacy ───────────────────────────────────────────────────────────
-  { route: 'GET /openapi.json', domain: '/openapi.json', disposition: 'server-only', note: 'docs tooling; falls through when metadata service lacks a generator' },
+  // `GET /openapi.json` removed in #5093 (closing #5078). This ledger
+  // enumerates the routes THIS package's dispatcher serves, and after the dead
+  // `generateOpenApi` branch was deleted it serves none at that path. The route
+  // itself is alive and owned by `packages/rest` — see the `GET
+  // /api/v1/openapi.json` row in `packages/rest/src/rest-route-ledger.ts`,
+  // which is the one place that describes it. The removed note here claimed the
+  // path "falls through when metadata service lacks a generator", implying a
+  // generator sometimes exists; none ever has, in this repo or its two
+  // siblings, so the row was 100% fall-through wearing a conditional. Per
+  // ADR-0076 §4 a machine-readable surface must not lie, and per §1 a path has
+  // one owner: do not re-add a row (or a dispatcher branch) for this path.
   // `* (unmatched)` / `/__api-endpoint` removed in #4936 — see LEGACY_CHAIN_PREFIXES
   // above. It was the ledger's only row for a surface nothing served; an
   // unmatched path now falls to the semantic 404 with no pretence otherwise.

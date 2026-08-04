@@ -572,12 +572,12 @@ describe('FlowSchema - errorHandling', () => {
       errorHandling: {
         strategy: 'retry',
         maxRetries: 3,
-        retryDelayMs: 2000,
+        backoffMs: 2000,
       },
     });
     expect(result.errorHandling?.strategy).toBe('retry');
     expect(result.errorHandling?.maxRetries).toBe(3);
-    expect(result.errorHandling?.retryDelayMs).toBe(2000);
+    expect(result.errorHandling?.backoffMs).toBe(2000);
   });
 
   it('should default errorHandling strategy to fail', () => {
@@ -649,7 +649,7 @@ describe('FlowSchema - errorHandling', () => {
 
     it("keeps maxRetries: 0 legal under 'fail' and 'continue' — they never read it", () => {
       for (const strategy of ['fail', 'continue'] as const) {
-        const result = retryFlow({ strategy, maxRetries: 0, retryDelayMs: 0, backoffMultiplier: 1 });
+        const result = retryFlow({ strategy, maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 });
         expect(result.success, `${strategy} should accept a spelled-out block`).toBe(true);
       }
     });
@@ -663,7 +663,7 @@ describe('FlowSchema - errorHandling', () => {
       expect(result.data!.errorHandling).toMatchObject({
         strategy: 'retry',
         maxRetries: 2,
-        retryDelayMs: 1000,
+        backoffMs: 1000,
         backoffMultiplier: 1,
         maxRetryDelayMs: 30000,
         jitter: false,
@@ -709,7 +709,7 @@ describe('FlowSchema - errorHandling', () => {
       errorHandling: {
         strategy: 'retry',
         maxRetries: 5,
-        retryDelayMs: 1000,
+        backoffMs: 1000,
         backoffMultiplier: 2,
         maxRetryDelayMs: 30000,
         jitter: true,
@@ -1382,13 +1382,33 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(issue!.message).toContain('`cancelActivity` → `interrupting`');
     });
 
-    it('errorHandling: `backoffMs` is the sibling retry policy\'s converged spelling (#4661)', () => {
-      const issue = unknownKeyIssue(FlowSchema, {
+    it('errorHandling: `backoffMs` is now ACCEPTED — it is the converged spelling (#4964)', () => {
+      // This assertion used to be its exact inverse: the block demanded
+      // `retryDelayMs` and rejected `backoffMs`, so an author who had read
+      // `shared/retry-policy.zod.ts` (where `retryDelayMs` is tombstoned and
+      // `backoffMs` prescribed) was rejected for learning the canonical word.
+      // Both surfaces now build from `retryPolicyShape()`.
+      const result = FlowSchema.safeParse({
         ...minimalFlow,
         errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 5000 },
       });
-      expect(issue!.message).toContain("flow's `errorHandling` block");
-      expect(issue!.message).toContain('`backoffMs` → `retryDelayMs`');
+      expect(result.success).toBe(true);
+      expect(result.data!.errorHandling!.backoffMs).toBe(5000);
+    });
+
+    it('errorHandling: `retryDelayMs` is the tombstone and carries the rename (#4964)', () => {
+      const result = FlowSchema.safeParse({
+        ...minimalFlow,
+        errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 5000 },
+      });
+      expect(result.success).toBe(false);
+      const message = JSON.stringify(result.error!.issues);
+      expect(message).toContain('was removed in @objectstack/spec 17.0.0');
+      expect(message).toContain('backoffMs');
+      // The prescription must name THIS surface, not only the two #4661 knew
+      // about — naming a scope narrower than the truth is what let this
+      // divergence read as reviewed for a whole release.
+      expect(message).toContain('flow.errorHandling');
     });
 
     it('errorHandling: `maxAttempts` gets the off-by-one, not a rename', () => {
@@ -1426,7 +1446,7 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       const flow = FlowSchema.parse({
         ...minimalFlow,
         errorHandling: {
-          strategy: 'retry', maxRetries: 2, retryDelayMs: 10, backoffMultiplier: 2,
+          strategy: 'retry', maxRetries: 2, backoffMs: 10, backoffMultiplier: 2,
           maxRetryDelayMs: 100, jitter: true,
         },
       });

@@ -253,6 +253,12 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         // dispatcher class, which is exactly the kind of second copy this scan
         // exists to keep honest. Listed the day it was written.
         './endpoint-executor.ts',
+        // [#5137] The endpoint MAPPING keys refuse a declaration this runtime
+        // cannot serve (`transform`, an unusable path, colliding targets) with a
+        // body of their own — an eighth way onto this wire surface, and one
+        // whose whole reason for existing is that the alternative was silence.
+        // Listed the day it was written.
+        './api-mapping.ts',
     ];
 
     for (const file of MODULES) {

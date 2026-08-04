@@ -102,3 +102,108 @@ describe('RetryPolicySchema — converged shape', () => {
     expect(() => RetryPolicySchema.parse({ maxRetries: 11 })).toThrow();
   });
 });
+
+/**
+ * The assertion class that would have caught #4964 and #4962 — and the reason
+ * it did not exist before them.
+ *
+ * #4661 converged the two declarations that shared an exported NAME, because
+ * that is the question `check:dual-source-exports` asks. It cannot ask "how
+ * many shapes does this one CONCEPT have?", so the two encodings with no
+ * exported name at all — `Flow.errorHandling` and `ETLPipeline.retry`, both
+ * anonymous inline `z.object`s — were outside its vision by construction, and
+ * a surviving dialect after a completed convergence reads as reviewed-and-kept
+ * rather than missed.
+ *
+ * This block asks the concept-level question directly, against the four
+ * surfaces that carry a retry policy. It is deliberately a PARSE comparison
+ * rather than a source or `.shape` inspection: it is blind to how a surface
+ * obtains the contract (spread, reference, or — the failure it exists to
+ * catch — a fresh hand-copied key list), and sees only whether an author gets
+ * the same keys and the same numbers on all four.
+ *
+ * Adding a fifth retry surface without wiring `retryPolicyShape()` fails here.
+ */
+describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () => {
+  const POLICY_KEYS = ['maxRetries', 'backoffMs', 'backoffMultiplier', 'maxRetryDelayMs', 'jitter'];
+  const POLICY_DEFAULTS = {
+    maxRetries: 0, backoffMs: 1000, backoffMultiplier: 1, maxRetryDelayMs: 30000, jitter: false,
+  };
+
+  const minimalFlow = {
+    name: 'f', label: 'F', type: 'autolaunched' as const,
+    nodes: [{ id: 'n1', type: 'start', label: 'S' }], edges: [],
+  };
+  const minimalPipeline = {
+    name: 'p', label: 'P',
+    source: { type: 'api' as const, connector: 'sf', config: {} },
+    destination: { type: 'database' as const, connector: 'pg', config: {} },
+  };
+
+  /** The parsed retry region of each surface, given an EMPTY authored block. */
+  const surfaces = (): ReadonlyArray<readonly [string, Record<string, unknown>]> => [
+    ['job.retryPolicy / try_catch retry', RetryPolicySchema.parse({}) as Record<string, unknown>],
+    [
+      'flow.errorHandling',
+      Automation.FlowSchema.parse({ ...minimalFlow, errorHandling: {} }).errorHandling as Record<string, unknown>,
+    ],
+    [
+      'etlPipeline.retry',
+      Automation.ETLPipelineSchema.parse({ ...minimalPipeline, retry: {} }).retry as Record<string, unknown>,
+    ],
+  ];
+
+  it('declares the same key set everywhere (modulo flow-only `strategy`)', () => {
+    for (const [label, parsed] of surfaces()) {
+      // `strategy` selects WHETHER the policy runs; it is not part of it.
+      const keys = Object.keys(parsed).filter((k) => k !== 'strategy').sort();
+      expect(keys, `${label} must carry exactly the converged key set`).toEqual([...POLICY_KEYS].sort());
+    }
+  });
+
+  it('applies the same defaults everywhere — including the opt-in count of 0', () => {
+    // The half no gate can see: `authorable-surface.json` compares key sets and
+    // a default is not a key. `ETLPipeline.retry` defaulted the count to 3
+    // until #4962 while every sibling defaulted 0, and nothing failed.
+    for (const [label, parsed] of surfaces()) {
+      for (const [key, value] of Object.entries(POLICY_DEFAULTS)) {
+        expect(parsed[key], `${label}.${key} must default to ${value}`).toBe(value);
+      }
+    }
+  });
+
+  it('retires the two pre-17 spellings wherever they were legal', () => {
+    // `retryDelayMs` (automation base delay) and `maxAttempts` (the ETL count).
+    // Both tombstoned rather than deleted, so the rejection carries the rename
+    // instead of a bare "unrecognized key" — or, on the non-strict surfaces, a
+    // silent strip back to the default.
+    const flowRetired = Automation.FlowSchema.safeParse({
+      ...minimalFlow, errorHandling: { strategy: 'retry', maxRetries: 2, retryDelayMs: 500 },
+    });
+    expect(flowRetired.success).toBe(false);
+    expect(JSON.stringify(flowRetired.error!.issues)).toMatch(/backoffMs/);
+
+    const etlRetired = Automation.ETLPipelineSchema.safeParse({
+      ...minimalPipeline, retry: { maxAttempts: 3 },
+    });
+    expect(etlRetired.success).toBe(false);
+    expect(JSON.stringify(etlRetired.error!.issues)).toMatch(/maxRetries/);
+  });
+
+  it('accepts a policy authored once and pasted onto any surface', () => {
+    // The whole point, stated as the author experiences it: learn the words on
+    // one surface, write them on any other. Before #4964 this exact object was
+    // REJECTED by `flow.errorHandling` (which demanded `retryDelayMs`) and by
+    // `ETLPipeline.retry` (which demanded `maxAttempts` and declared none of
+    // the last three keys).
+    const policy = {
+      maxRetries: 3, backoffMs: 5000, backoffMultiplier: 2, maxRetryDelayMs: 60000, jitter: true,
+    };
+
+    expect(RetryPolicySchema.safeParse(policy).success).toBe(true);
+    expect(Automation.FlowSchema.safeParse({
+      ...minimalFlow, errorHandling: { strategy: 'retry', ...policy },
+    }).success).toBe(true);
+    expect(Automation.ETLPipelineSchema.safeParse({ ...minimalPipeline, retry: policy }).success).toBe(true);
+  });
+});

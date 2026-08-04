@@ -21,6 +21,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
@@ -607,6 +608,15 @@ export const FlowSchema = lazySchema(() => z.object({
   /**
    * Error Handling Strategy.
    *
+   * The retry knobs are the converged `RetryPolicySchema` contract, shared with
+   * `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
+   * `retry` (#4661 + #4964 — see `shared/retry-policy.zod.ts`). Until 17 this
+   * block spelled the base delay `retryDelayMs` while the converged policy
+   * spelled it `backoffMs`, so an author who read the newer file and brought
+   * the word here had it silently stripped (pre-批 11) or rejected (post-批 11)
+   * — being punished for learning the canonical spelling. `strategy` stays
+   * here: it selects *whether* the policy runs, it is not part of the policy.
+   *
    * **These defaults are the only defaults** (#4247). The engine reads the
    * parsed block field-by-field with no fallback of its own — `retryExecution`
    * used to carry `errorHandling.maxRetries ?? 3` beside a schema that said
@@ -625,17 +635,19 @@ export const FlowSchema = lazySchema(() => z.object({
       // Every one of these is a real, in-repo spelling of the same knob on a
       // NEIGHBOURING retry surface — which is what makes this table an
       // empirical claim rather than a guess about typos:
-      //   `shared/retry-policy.zod.ts` (#4661, job.retryPolicy + a try_catch
-      //     node's `retry`) → `backoffMs`, and it TOMBSTONED `retryDelayMs`
-      //     as "the automation-side spelling", so an author who learned the
-      //     converged word and brings it here is being punished for reading
-      //     the newer file.
       //   `integration/connector.zod.ts` RetryConfig → `initialDelayMs`,
       //     `maxDelayMs`.
       // `retries`/`attempts` are the plain-English forms; `onError` is n8n's
       // word for the strategy switch.
-      backoffMs: 'retryDelayMs',
-      initialDelayMs: 'retryDelayMs',
+      //
+      // `backoffMs` was HERE until #4964, pointing at `retryDelayMs` — i.e.
+      // this table used to punish an author for having read the newer file
+      // (`shared/retry-policy.zod.ts` tombstoned `retryDelayMs` as "the
+      // automation-side spelling" in #4661, and then this surface still
+      // demanded it). The alias is gone because the divergence is gone: the
+      // block now builds from `retryPolicyShape()`, `backoffMs` IS the key,
+      // and `retryDelayMs` is the tombstone that arrives with it.
+      initialDelayMs: 'backoffMs',
       maxDelayMs: 'maxRetryDelayMs',
       retries: 'maxRetries',
       attempts: 'maxRetries',
@@ -661,20 +673,39 @@ export const FlowSchema = lazySchema(() => z.object({
     },
     history:
       'Until #4001 these were dropped silently — the block still parsed, so a retry budget ' +
-      'or backoff the author configured was replaced by this block\'s defaults without a word.',
+      'or backoff the author configured was replaced by this block\'s defaults without a word. ' +
+      'Since #4964 the retry keys are the converged `RetryPolicySchema` contract, so a spelling ' +
+      'learned on `job.retryPolicy` or a `try_catch` node\'s `retry` is correct here too.',
   }, {
     strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe('How to handle node execution errors'),
-    // Default 0 = "no retries", which is the right reading for the two
-    // strategies that never retry. Under `strategy: 'retry'` it would instead
-    // mean "retry, zero times" — refused below rather than defaulted to some
-    // count, because a retry re-runs the WHOLE flow (CRUD side effects and
-    // all) and nobody should have that number picked for them.
-    maxRetries: z.number().int().min(0).max(10).default(0)
-      .describe("Number of retry attempts. Read only under strategy: 'retry', which requires >= 1"),
-    retryDelayMs: z.number().int().min(0).default(1000).describe('Delay between retries in milliseconds'),
-    backoffMultiplier: z.number().min(1).default(1).describe('Multiplier for exponential backoff between retries'),
-    maxRetryDelayMs: z.number().int().min(0).default(30000).describe('Maximum delay between retries in milliseconds'),
-    jitter: z.boolean().default(false).describe('Add random jitter to retry delay to avoid thundering herd'),
+
+    // ── The retry policy itself: ONE declaration (#4964) ────────────────
+    // `maxRetries` / `backoffMs` / `backoffMultiplier` / `maxRetryDelayMs` /
+    // `jitter`, plus the `retryDelayMs` tombstone, all arrive from
+    // `shared/retry-policy.zod.ts`. Before #4964 they were hand-copied here,
+    // and the copy had drifted in exactly one word — this block spelled the
+    // base delay `retryDelayMs` where the converged policy spells it
+    // `backoffMs`. Every other key, bound and default already matched, which
+    // is what made the divergence so durable: it looked reviewed.
+    //
+    // The spread is what keeps that from happening again. A key added to the
+    // policy lands on all four surfaces at once, instead of on the ones
+    // whoever added it happened to grep for.
+    ...retryPolicyShape(),
+
+    // The ONE site-specific override, and it is prose only — same type, same
+    // bounds, same default, all still single-sourced above. `.describe()`
+    // lands in `content/docs/references/`, and the flow surface has a reading
+    // the other three do not: the count is read only under `strategy:
+    // 'retry'`, where the `superRefine` below then requires >= 1 (#4247).
+    // Default 0 = "no retries" is the right reading for the two strategies
+    // that never retry; under `'retry'` it would mean "retry, zero times",
+    // refused below rather than defaulted to some count, because a retry
+    // re-runs the WHOLE flow (CRUD side effects and all) and nobody should
+    // have that number picked for them.
+    maxRetries: retryPolicyShape().maxRetries
+      .describe("Retry attempts after the initial one. Read only under strategy: 'retry', which requires >= 1; 0 (the default) means no retry."),
+
     // `fallbackNodeId` REMOVED (#3896 audit close-out): the engine routes
     // unrecoverable errors via per-node FAULT EDGES, never this — an author
     // who configured a fallback here had none.

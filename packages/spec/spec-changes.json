@@ -279,8 +279,8 @@
         "toMajor": 17
       },
       {
-        "surface": "flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
-        "to": "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+        "surface": "flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
+        "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
         "conversionId": "retry-policy-converged",
         "toMajor": 17
       },
@@ -393,6 +393,13 @@
         "migrationId": "job-retry-policy-constraints-tightened",
         "toMajor": 17,
         "rationale": "The converged RetryPolicy (#4661) keeps the automation side's bounds, which the job side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay that SHRINKS on each attempt — retrying a failing dependency ever faster, which is the opposite of backoff and was never a shape the engine meant to offer. Both now fail at parse time with the bound named, rather than being silently reinterpreted. Choosing the replacement count (or accepting the cap) is the author's call."
+      },
+      {
+        "surface": "etlPipeline.retry.maxAttempts (and any count above 10)",
+        "replacement": "maxRetries, same number — plus an explicit count if you relied on the old default of 3",
+        "migrationId": "etl-retry-converged-onto-retry-policy",
+        "toMajor": 17,
+        "rationale": "An ETL pipeline's `retry` was a THIRD retry vocabulary that #4661's convergence never reached, because that pass was driven by duplicated exported NAMES and this block is an anonymous inline object (#4962). It now carries the shared `RetryPolicySchema` contract, which changes three things with no single lossless rewrite between them. The rename `maxAttempts` → `maxRetries` IS lossless and the tombstone performs it — both keys counted the retries AFTER the initial attempt, so the number does not change, and subtracting one (correct for `integration/connector.zod.ts`'s identically-spelled `RetryConfig.maxAttempts`, which includes the first attempt) would silently run one attempt fewer than asked. What needs a human: the count now DEFAULTS TO 0 instead of 3, so a pipeline that wrote `retry: {}` or omitted the count bought three silent re-runs and now buys none. That is deliberate and the business case is the destination — an ETL destination is a foreign system by definition, and an implicit retry against a non-idempotent one is a duplicate write (a second invoice, a second export, a second webhook). Retrying is now something an author states and thereby claims idempotency for. The shared contract also caps `maxRetries` at 10, which this block never did; clamping a larger budget would silently halve a number its author chose, so it fails at parse with the bound named instead."
       },
       {
         "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",
@@ -934,8 +941,8 @@
           "toMajor": 17
         },
         {
-          "surface": "flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
-          "to": "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+          "surface": "flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier",
+          "to": "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
           "conversionId": "retry-policy-converged",
           "toMajor": 17
         },
@@ -978,6 +985,13 @@
           "migrationId": "job-retry-policy-constraints-tightened",
           "toMajor": 17,
           "rationale": "The converged RetryPolicy (#4661) keeps the automation side's bounds, which the job side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay that SHRINKS on each attempt — retrying a failing dependency ever faster, which is the opposite of backoff and was never a shape the engine meant to offer. Both now fail at parse time with the bound named, rather than being silently reinterpreted. Choosing the replacement count (or accepting the cap) is the author's call."
+        },
+        {
+          "surface": "etlPipeline.retry.maxAttempts (and any count above 10)",
+          "replacement": "maxRetries, same number — plus an explicit count if you relied on the old default of 3",
+          "migrationId": "etl-retry-converged-onto-retry-policy",
+          "toMajor": 17,
+          "rationale": "An ETL pipeline's `retry` was a THIRD retry vocabulary that #4661's convergence never reached, because that pass was driven by duplicated exported NAMES and this block is an anonymous inline object (#4962). It now carries the shared `RetryPolicySchema` contract, which changes three things with no single lossless rewrite between them. The rename `maxAttempts` → `maxRetries` IS lossless and the tombstone performs it — both keys counted the retries AFTER the initial attempt, so the number does not change, and subtracting one (correct for `integration/connector.zod.ts`'s identically-spelled `RetryConfig.maxAttempts`, which includes the first attempt) would silently run one attempt fewer than asked. What needs a human: the count now DEFAULTS TO 0 instead of 3, so a pipeline that wrote `retry: {}` or omitted the count bought three silent re-runs and now buys none. That is deliberate and the business case is the destination — an ETL destination is a foreign system by definition, and an implicit retry against a non-idempotent one is a duplicate write (a second invoice, a second export, a second webhook). Retrying is now something an author states and thereby claims idempotency for. The shared contract also caps `maxRetries` at 10, which this block never did; clamping a larger budget would silently halve a number its author chose, so it fails at parse with the bound named instead."
         },
         {
           "surface": "flow.errorHandling.maxRetries (under strategy: 'retry')",

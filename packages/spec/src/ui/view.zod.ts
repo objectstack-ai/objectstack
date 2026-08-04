@@ -231,6 +231,40 @@ export function normalizeFilterOperator(op: unknown): string {
  * Standardized filter condition used in list views, tabs, and page-level filters.
  * Uses a declarative array-of-objects format: [{ field, operator, value }].
  *
+ * ⚠️ [#5114] Deliberately still STRIP — an earlier wave closed this shape, and
+ * that closure is REVERTED here because it 422'd a live console path.
+ *
+ * **Wire-contaminated.** The filter builder objectui renders stamps
+ * `id: crypto.randomUUID()` on every row it creates
+ * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
+ * filter is read back into the builder —
+ * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
+ * validates the PUT body and then persists the AUTHORED body verbatim, so that
+ * `id` is on the wire and in the store. Closed, this shape turned every filter
+ * write carrying one into a 422 — measured on all three paths, including the
+ * flattened personalization overlay that is the body the console actually PUTs.
+ *
+ * The mechanism is the part worth carrying to the next block, and it is NOT what
+ * the `ViewMetadataSchema` union's own comment implies: that union re-opens its
+ * flattened members with `.strip()` so Studio's round-trip aux keys ride along —
+ * but **`.strip()` does not recurse**, any more than `.strict()` does. It
+ * re-opens the TOP level only, so a nested block closed here is still reached
+ * through that member and a console-stamped key inside it becomes a 422
+ * regardless of the member's posture. Same finding as `ListView.sort` at #4001
+ * 批 18 (#5070), one block over.
+ *
+ * `id` was NOT declared to make the rejection go away. It is a React list key,
+ * not protocol: declaring it would put a UI artifact on the authorable surface
+ * and tell an AI author to generate a UUID for a filter rule — a `??` fallback
+ * wearing a schema. The real close is #5074's authoring/wire split applied to
+ * this block (an authoring variant that rejects `id`, a wire variant that
+ * tolerates it, and a re-opening that can REACH a nested block); #5074's scope
+ * addendum names this site. Until then the shape stays open rather than
+ * half-closed against the platform's own writes.
+ *
+ * Recorded in three places: this JSDoc, `view-filter-rule-wire-id.test.ts`, and
+ * the `ui/` row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+ *
  * @example
  * ```ts
  * filter: [
@@ -240,10 +274,7 @@ export function normalizeFilterOperator(op: unknown): string {
  * ]
  * ```
  */
-export const ViewFilterRuleSchema = lazySchema(() => strictObject({
-  surface: 'this view filter rule',
-  history: VIEW_HISTORY,
-}, {
+export const ViewFilterRuleSchema = lazySchema(() => z.object({
   /** Field name to filter on */
   field: z.string().describe('Field name to filter on'),
   /**

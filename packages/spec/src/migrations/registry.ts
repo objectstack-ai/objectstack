@@ -693,6 +693,30 @@ const step17: MigrationStep = {
     + 'the pre-17 numbers into every existing `job.retryPolicy` that omitted them. Deployed '
     + 'stacks therefore keep their exact behaviour; what changes is only what a NEWLY authored '
     + 'omission means.\n\n'
+    + 'That convergence then had to be finished twice more, and WHY it was incomplete is the '
+    + 'part worth carrying forward (#4964, #4962). It was driven by the dual-source instrument, '
+    + 'which asks "how many declarations publish the same exported NAME?" — so it could not see '
+    + 'the two encodings of the identical policy that have no exported name at all, being '
+    + 'anonymous inline blocks nested in a bigger schema: `flow.errorHandling` and '
+    + '`ETLPipeline.retry`. The instrument was not broken and answered its own question exactly; '
+    + 'that question was simply not "how many shapes does this ONE concept have?", which is what '
+    + 'everybody read off it. The cost of the gap is concrete and falls on the author who did the '
+    + 'right thing: `shared/retry-policy.zod.ts` tombstoned `retryDelayMs` and told them to write '
+    + '`backoffMs`, and `flow.errorHandling` then rejected `backoffMs` and demanded `retryDelayMs` '
+    + '— reading the newer file was punished. Both blocks now build from one shared shape. '
+    + '`flow.errorHandling` costs nothing beyond the same `retryDelayMs` → `backoffMs` rename '
+    + '(every other key, bound and default already matched, which is exactly why it looked '
+    + 'reviewed), and the conversion covers it. `ETLPipeline.retry` costs a rename of the COUNT '
+    + '— `maxAttempts` → `maxRetries`, same number, do NOT subtract one: that adjustment belongs '
+    + "to `integration/connector.zod.ts`'s identically-spelled `RetryConfig.maxAttempts`, which "
+    + 'INCLUDES the first attempt — plus the same default flip (3 → 0) and three keys it never '
+    + 'had (`backoffMultiplier` / `maxRetryDelayMs` / `jitter`, so a nightly warehouse pipeline '
+    + 'can stop retrying flat, uncapped and unjittered every 60s). The ETL half gets a tombstone '
+    + 'and no conversion step, deliberately: an ETL pipeline is not a `defineStack` collection '
+    + 'and `etl.zod.ts` has no parse site in any of the three repos, so there is no stored '
+    + 'document to walk and a step for it would advertise coverage it does not have. Nothing '
+    + 'deployed moves; the migration surface is empty and this is the cheapest this convergence '
+    + 'will ever be.\n\n'
     + 'The same enforce-or-remove pass reaches the event vocabulary: `DataEventType` drops '
     + '`data.field.changed` (#4673). It had no producer anywhere — the engine emits '
     + '`data.record.{created,updated,deleted}` and, since #4639, `data.records.{updated,'
@@ -921,6 +945,36 @@ const step17: MigrationStep = {
         + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
         + 'retry re-runs the handler with its writes and callouts. No job fails to register '
         + 'with the retry-policy bound prescription.',
+    },
+    {
+      id: 'etl-retry-converged-onto-retry-policy',
+      surface: 'etlPipeline.retry.maxAttempts (and any count above 10)',
+      replacement: 'maxRetries, same number — plus an explicit count if you relied on the old default of 3',
+      reason:
+        'An ETL pipeline\'s `retry` was a THIRD retry vocabulary that #4661\'s convergence never '
+        + 'reached, because that pass was driven by duplicated exported NAMES and this block is an '
+        + 'anonymous inline object (#4962). It now carries the shared `RetryPolicySchema` contract, '
+        + 'which changes three things with no single lossless rewrite between them. The rename '
+        + '`maxAttempts` → `maxRetries` IS lossless and the tombstone performs it — both keys '
+        + 'counted the retries AFTER the initial attempt, so the number does not change, and '
+        + 'subtracting one (correct for `integration/connector.zod.ts`\'s identically-spelled '
+        + '`RetryConfig.maxAttempts`, which includes the first attempt) would silently run one '
+        + 'attempt fewer than asked. What needs a human: the count now DEFAULTS TO 0 instead of 3, '
+        + 'so a pipeline that wrote `retry: {}` or omitted the count bought three silent re-runs '
+        + 'and now buys none. That is deliberate and the business case is the destination — an ETL '
+        + 'destination is a foreign system by definition, and an implicit retry against a '
+        + 'non-idempotent one is a duplicate write (a second invoice, a second export, a second '
+        + 'webhook). Retrying is now something an author states and thereby claims idempotency for. '
+        + 'The shared contract also caps `maxRetries` at 10, which this block never did; clamping '
+        + 'a larger budget would silently halve a number its author chose, so it fails at parse '
+        + 'with the bound named instead.',
+      acceptanceCriteria:
+        'No ETL pipeline declares `retry.maxAttempts`; every one that wants retries declares '
+        + '`maxRetries` >= 1 explicitly (the number carried over unchanged from `maxAttempts`), and '
+        + 'every pipeline that was relying on the old implicit 3 has either written `maxRetries: 3` '
+        + 'or been re-decided against the duplicate-write risk at its destination. No count exceeds '
+        + '10. Pipelines that want the old flat 60s backoff state `backoffMs: 60000` explicitly, '
+        + 'since the shared default is 1000.',
     },
     {
       id: 'flow-retry-max-retries-required',

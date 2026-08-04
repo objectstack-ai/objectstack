@@ -42,10 +42,28 @@
  * header describes a body the caller should be willing to reuse, and telling a
  * client to cache a 401 / 429 / 500 for a minute is worse than saying nothing.
  *
- * What it does NOT do, so nobody reads more into it than is here:
- * `inputMapping` / `outputMapping` (declared, still unread — #5040's E7 gate
- * must not flip before they are, or the two keys sit in the "declared, legal,
- * ignored" state this program exists to end).
+ * ## The mapping keys, and why they apply exactly here (#5040 E5c)
+ *
+ * `inputMapping` / `outputMapping` (`api-mapping.ts`) are applied by this
+ * module, on the two sides of the delegation:
+ *
+ *  - **`inputMapping` after the policy pass, before delegation.** It projects
+ *    the request the executor sees, so a mapping can never buy a caller past
+ *    `authRequired` or the rate limiter — and `endpoint-executor.ts` stays a
+ *    pure delegator that does not know mappings exist.
+ *  - **`outputMapping` on the SUCCESS body only.** An error answer is never
+ *    remapped: a projection that could reshape a 401 / 429 / 500 into data
+ *    would be able to disguise a failure as a result, and no declaration should
+ *    have that power. This is the same asymmetry `Cache-Control` has above, for
+ *    the same reason.
+ *
+ * A declaration this runtime cannot serve (`transform`, an unusable path,
+ * colliding targets) is refused BEFORE the target runs — including
+ * `outputMapping`, which is validated pre-delegation so a broken projection
+ * cannot let a `create` insert a record and then fail to answer. With neither
+ * key declared, the request and the answer pass through byte for byte, by
+ * reference: an endpoint that declares no mapping is served exactly as E5b
+ * served it.
  */
 
 import { DispatcherErrorCode } from '@objectstack/spec/api';
@@ -53,6 +71,11 @@ import type { ApiEndpointMatch, IMetadataService } from '@objectstack/spec/contr
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { apiErrorResponse } from './error-envelope.js';
 import { applyEndpointPolicies, type EndpointPolicyContext } from './endpoint-policy.js';
+import {
+    applyInputMapping,
+    applyOutputMapping,
+    mappingDeclarationRejection,
+} from './api-mapping.js';
 import {
     buildEndpointExecutionContext,
     executeEndpointTarget,
@@ -241,9 +264,26 @@ export async function runAppEndpointStep(
     }
 
     const { request, deps, executionContext, environmentId, dataDriver } = input.execution;
+
+    // ── inputMapping: project the request the executor will see ──────────
+    // Nothing has been delegated yet, so a declaration this runtime cannot
+    // serve is refused before it can have an effect. With no declaration the
+    // caller's own request object rides on unchanged, by reference.
+    const mappedBody = applyInputMapping(match.endpoint, request.body);
+    if (!mappedBody.ok) return mappedBody.rejection;
+    const mappedRequest = mappedBody.value === request.body
+        ? request
+        : { ...request, body: mappedBody.value };
+
+    // `outputMapping` is judged HERE, not after the result arrives: a broken
+    // projection must not be able to let a `create` insert its record and then
+    // refuse to answer with it.
+    const outputRejection = mappingDeclarationRejection(match.endpoint, 'outputMapping');
+    if (outputRejection) return outputRejection;
+
     const answer = await executeEndpointTarget(
         buildEndpointExecutionContext({
-            request,
+            request: mappedRequest,
             match,
             ...(executionContext !== undefined ? { executionContext } : {}),
             ...(environmentId !== undefined ? { environmentId } : {}),
@@ -256,14 +296,26 @@ export async function runAppEndpointStep(
     // `executeEndpointTarget` never throws — a delegated failure is already an
     // error answer here — so the status is the whole test, and an endpoint whose
     // execution failed cannot hand the client a cache directive for the failure.
+    // `outputMapping` rides on exactly the same test, and for a stronger reason:
+    // a projection applied to an error body could disguise the failure as data.
     const isSuccess = answer.status < 400;
+    let body = answer.body;
+    if (isSuccess) {
+        const mapped = applyOutputMapping(match.endpoint, answer.body);
+        // Unreachable: the identical verdict was taken before delegation, above.
+        // Restated rather than asserted away, so a future reordering of these
+        // two lines cannot turn a refusal into a silently unmapped answer.
+        if (!mapped.ok) return mapped.rejection;
+        body = mapped.value;
+    }
+
     const headers = {
         ...(answer.headers ?? {}),
         ...(isSuccess ? verdict.responseHeaders : {}),
     };
     return {
         status: answer.status,
-        body: answer.body,
+        body,
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
 }
