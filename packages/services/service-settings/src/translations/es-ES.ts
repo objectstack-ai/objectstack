@@ -85,6 +85,10 @@ export const esES: TranslationData = {
           title: 'Correo y contraseña',
           description: 'Controla el inicio de sesión local con correo/contraseña y el registro de autoservicio.',
         },
+        membership: {
+          title: 'Pertenencia',
+          description: 'A qué se une un usuario recién creado. Complementa el registro de autoservicio anterior.',
+        },
         password_policy: {
           title: 'Política de contraseñas',
           description: 'Límites de longitud que el proveedor de autenticación exige en el registro y el restablecimiento de contraseña.',
@@ -115,6 +119,14 @@ export const esES: TranslationData = {
         email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
         signup_enabled: { label: 'Permitir registro de autoservicio' },
         require_email_verification: { label: 'Requerir verificación de correo' },
+        membership_policy: {
+          label: 'Pertenencia de los usuarios nuevos',
+          help: 'La opción automática vincula cada usuario nuevo a la organización predeterminada del despliegue. «Solo por invitación» concede la pertenencia únicamente mediante un acto explícito: crear un espacio de trabajo, aceptar una invitación, que un administrador lo añada o el aprovisionamiento just-in-time por SSO.',
+          options: {
+            auto: 'Unirse automáticamente a la organización predeterminada',
+            'invite-only': 'Solo por invitación: nunca se une automáticamente',
+          },
+        },
         password_min_length: { label: 'Longitud mínima de contraseña' },
         password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },
         password_reject_breached: {

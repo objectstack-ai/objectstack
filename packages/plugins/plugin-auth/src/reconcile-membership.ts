@@ -28,7 +28,25 @@
 
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 
-export type MembershipPolicy = 'auto' | 'invite-only';
+/**
+ * The closed vocabulary of deployment membership policies (ADR-0093 D1).
+ *
+ * Exported as a runtime value, not just a type, because the policy also
+ * arrives from the `auth.membership_policy` platform setting — an untyped
+ * boundary (a stored row, or an `OS_AUTH_MEMBERSHIP_POLICY` env value that
+ * never passes through the settings service's option-table validation). The
+ * binding in `auth-plugin.ts` checks against THIS list and rejects anything
+ * else loudly rather than coercing it, so only these two values can ever
+ * reach a reconciler.
+ */
+export const MEMBERSHIP_POLICIES = ['auto', 'invite-only'] as const;
+
+export type MembershipPolicy = (typeof MEMBERSHIP_POLICIES)[number];
+
+/** Type guard over {@link MEMBERSHIP_POLICIES}. */
+export function isMembershipPolicy(value: unknown): value is MembershipPolicy {
+  return (MEMBERSHIP_POLICIES as readonly string[]).includes(value as string);
+}
 
 export type ReconcileOutcome =
   /** Inserted a `sys_member` row binding the user to the target org. */

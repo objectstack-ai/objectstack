@@ -35,6 +35,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { ApiEndpointSchema, normalizeEndpointPath } from './endpoint.zod';
+import { identityFreeEndpointGateFailure, validateApiEndpointDeclarations } from './endpoint-publish-gate';
 
 const manifest = {
   id: 'com.example.apis',
@@ -495,5 +496,72 @@ describe('[#5111] the `ApiEndpoint` vocabulary itself is untouched', () => {
     // Guards the guard: the vocabulary must still be a real schema, not an
     // `any` that would make the assertions above meaningless.
     expect(() => ApiEndpointSchema.parse({ name: 'Bad Name', path: 'no-slash' })).toThrow();
+  });
+});
+
+// ============================================================================
+// [#5189 / #5040 E7b] The identity-free subset, for consumers holding one
+// stored endpoint and no stack.
+// ============================================================================
+
+describe('identityFreeEndpointGateFailure — the same judge, minus stack identity', () => {
+  it('passes an endpoint that passes the full gates', () => {
+    expect(identityFreeEndpointGateFailure(ApiEndpointSchema.parse(validObjectEndpoint))).toBeUndefined();
+  });
+
+  it('still refuses D6 — the gate with no runtime counterpart, and the reason #5189 exists', () => {
+    const failure = identityFreeEndpointGateFailure(
+      ApiEndpointSchema.parse({ ...validObjectEndpoint, cacheTtl: undefined, authRequired: false }),
+    );
+    expect(failure).toBeDefined();
+    expect(failure!.path).toEqual(['rateLimit']);
+    expect(failure!.message).toContain('authRequired: false');
+    expect(failure!.message).toContain('enabled: true');
+  });
+
+  it('accepts an anonymous endpoint whose budget is ARMED', () => {
+    expect(
+      identityFreeEndpointGateFailure(
+        ApiEndpointSchema.parse({
+          ...validObjectEndpoint,
+          cacheTtl: undefined,
+          authRequired: false,
+          rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('still refuses the target, mapping and policy gates', () => {
+    const cases: Array<[Record<string, unknown>, (string | number)[]]> = [
+      [{ type: 'proxy', target: 'https://x.test', objectParams: undefined }, ['type']],
+      [{ objectParams: { object: 'showcase_task' } }, ['objectParams']],
+      [{ outputMapping: [{ source: 'a', target: 'b', transform: 'upper' }] }, ['outputMapping', 0, 'transform']],
+      [{ cacheTtl: -1 }, ['cacheTtl']],
+    ];
+    for (const [over, path] of cases) {
+      const failure = identityFreeEndpointGateFailure(
+        ApiEndpointSchema.parse({ ...validObjectEndpoint, ...over }),
+      );
+      expect(failure).toBeDefined();
+      // Paths are relative to the ENDPOINT, not to a stack's `apis:` array.
+      expect(failure!.path).toEqual(path);
+    }
+  });
+
+  it('does NOT judge the namespace — that gate needs a manifest this caller does not have', () => {
+    // The full gate rejects this path under `namespace: 'showcase'`; the
+    // identity-free subset cannot, and must not pretend to.
+    const stray = ApiEndpointSchema.parse({ ...validObjectEndpoint, path: '/api/v1/elsewhere' });
+    expect(identityFreeEndpointGateFailure(stray)).toBeUndefined();
+    expect(validateApiEndpointDeclarations([stray], { namespace: 'showcase' })).toHaveLength(1);
+  });
+
+  it('does NOT judge uniqueness — a single endpoint has no siblings to collide with', () => {
+    const one = ApiEndpointSchema.parse(validObjectEndpoint);
+    expect(identityFreeEndpointGateFailure(one)).toBeUndefined();
+    expect(identityFreeEndpointGateFailure(one)).toBeUndefined();
+    // …while the full gate still catches the pair.
+    expect(validateApiEndpointDeclarations([one, one], { namespace: 'showcase' })).toHaveLength(1);
   });
 });

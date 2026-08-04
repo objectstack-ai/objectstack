@@ -33,6 +33,7 @@ genuinely requires their call.
 |---|---|---|
 | `label:<name>` | backlog filter label; `label:all` = every open unassigned issue | `pm:queue` |
 | `repo:<owner/name>` | which repo's **backlog** to scan (the target repo per issue comes from `repo:*` labels — see "Multi-repo coordination") | `objectstack-ai/objectstack` |
+| `epic:#<n>` | 队列 = 父 issue #n 的子树(open 未认领 sub-issue,每轮重读)— 见「Epic 子树车道」 | — |
 | `batch:<n>` | max developer agents in flight at once | `3` |
 | `rounds:<n>` | stop after N rounds | until queue empty |
 | `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | `subagent` |
@@ -51,6 +52,7 @@ write state only through these signals:
 | label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
 | label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
 | label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
+| label `pm:epic`(on a parent)| 整棵子树已委托给登记在册的 epic PM(登记表 #4604)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
 
@@ -93,6 +95,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — do not dispatch, do not nag; restart condition in the hold comment" || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" || true
+  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (registry #4604) — other PMs never dispatch into its subtree" || true
 done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
@@ -405,6 +408,62 @@ with the number of PMs, and a red queue blocks every lane at once. Queue
 health is therefore a shared duty — a PM that notices a flake fixes or files
 it rather than re-queuing past it, whichever lane it came from.
 
+## Epic 子树车道(大任务委托专职 PM)
+
+Domain lanes 按「修复落点的包」**横向**切分;epic 车道是**纵向**的第二种切法:
+一个大开发(父 issue + 一批 sub-issue)整体委托给一个专职 PM 会话,从立项跟到
+收尾。两者组合使用,不互斥:epic 内的 sub-issue 照常在分诊时打 `domain:*`
+标签(标签是共享路由信息,全局在飞检查要读它),但**认领权属于 epic PM**,
+不属于域 PM。
+
+**启动**:`/pm-dispatch epic:#<n>`。队列定义 = 父 issue #n 的 open、未认领
+sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条就是衍生任务的
+吸收机制:开发中新挂到父单下的 sub-issue,下一轮自动进入队列,零新标签、
+零额外登记。
+
+**委托信号(标签 + 登记成对落地,同 label discipline)**:
+
+- 父 issue 打 `pm:epic`,同时在登记表(#4604)登记:会话 ID、父 issue 号、
+  **声明的文件领地**(packages/目录清单,同一份也写进父 issue 正文)。缺一半
+  就是 label discipline 禁止的过夜半状态。
+- 其它 PM(主 backlog / 域 PM)的候选获取(step 1)**跳过 `pm:epic` 父单的
+  整棵子树** —— 这是该标签的第一消费点;第二消费点是登记表,第三是收尾流程。
+- epic 与非 epic 工作的**文件相交**由既有机制兜住:epic PM 的每条认领评论
+  照常声明「文件面」,所有 PM 的全局在飞检查照常读它。epic 不豁免任何一条
+  认领纪律(assign + claim comment + race check 全套照做)。
+- 触 `packages/spec` 的 sub-issue 照常受「shared contract surfaces have one
+  owner」约束 —— epic 委托不改变 spec 的单一所有者。
+
+**衍生问题三分法。** epic 开发中冒出的每个新问题,用一个判据分流:
+**「不修它,epic 的验收标准过不过得去?」**
+
+| 类型 | 判据 | 去向 | 谁派发 |
+|:--|:--|:--|:--|
+| in-scope 衍生 | 不修则 epic 验收不过 | 挂为父单 sub-issue(原生) | epic PM,下轮自动入队 |
+| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进主 backlog(查重先行,`finding` 分诊纪律照旧) | 主/域 PM;epic 不吸收 |
+| 触 spec / 公共契约 | 无论是否阻塞 epic | 按跨分片转移协议转主 PM 队列,epic 侧 sub-issue 写 `Blocked-by:` | 主 PM |
+
+第一行防「衍生项没人管、epic 烂尾」;第二行防「epic 无限膨胀吞掉整个仓」;
+第三行维持契约面的单一调度权。发现分诊轮的**归挂限定在 epic 内同样成立**:
+仅有依赖关系、不属完成范围的,独立立单 + `Blocked-by:`,不得借 sub-issue
+自动入队的通道把未分诊的东西塞进池子。每次分流留一行审计评论(「分流:
+in-scope,验收依据 …」),维护者可否决。
+
+**进度视图。** epic PM 每轮在父 issue 维护一份 checklist 汇总评论
+(sub-issue → 状态 → PR),待决项单独列出。维护者只看父单一个入口;决策
+本身仍锚在具体 sub-issue 上(step 8 不变),父单只汇总、不承载分析。
+
+**收尾与僵尸回收。** 最后一个 sub-issue 关闭 → epic PM 在父单留总结评论、
+关闭父单、摘 `pm:epic`、登记表注销 —— 四步是一组,缺一步就是过夜半状态。
+僵尸判据:登记在册但整棵子树 ~48h 无任何认领/分支/PR 动静 → 主 PM 在登记表
+评论询问,再静默一窗后摘 `pm:epic` 收回子树;子树内仍在飞的认领按认领协议
+由原认领者跟完(stale-claim reclaim 的既有规则逐单适用)。
+
+**残余风险(如实声明)。** epic 领地与其它车道的文件相交靠「声明 + 全局
+在飞检查」防,不是机械保证;撞上了由合并队列兜底(代价是返工,不是脏数据)。
+这与 domain lanes 的风险形状相同,epic 车道没有更差 —— 但也没有更好,所以
+领地声明写得越窄越诚实,越宽越要在登记表里说明为什么。
+
 ## The round loop
 
 ### 0. Backlog sweep — classification is a standing duty, not a request
@@ -460,7 +519,10 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
 List open issues matching the filter, excluding anything assigned or labeled
 `needs-user-decision`. **Open sub-issues of a matching parent are candidates
 too** — they inherit the parent's queue membership and need no label of their
-own. Read each candidate's full body **and its comments — all of them,
+own. **Exception: a parent carrying `pm:epic`** — its whole subtree belongs
+to the registered epic PM, and no other PM treats those sub-issues as
+candidates(见「Epic 子树车道」;没有这条排除,本句的自动继承会让两个 PM
+抢同一批子任务). Read each candidate's full body **and its comments — all of them,
 before the issue can even be a candidate.** A comment may record that half
 the work already shipped (#4075's step 1 had been merged for three days;
 the claim went out without reading the comment that said so). Comments are

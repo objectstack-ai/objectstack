@@ -135,6 +135,10 @@ export const en: TranslationData = {
           title: 'Email and password',
           description: 'Control local email/password sign-in and self-service registration.',
         },
+        membership: {
+          title: 'Membership',
+          description: 'What a newly created user joins. Pairs with self-service registration above.',
+        },
         password_policy: {
           title: 'Password policy',
           description: 'Length bounds enforced by the auth provider on sign-up and password reset.',
@@ -153,6 +157,14 @@ export const en: TranslationData = {
         email_password_enabled: { label: 'Enable email/password login' },
         signup_enabled: { label: 'Allow self-service registration' },
         require_email_verification: { label: 'Require email verification' },
+        membership_policy: {
+          label: 'New user membership',
+          help: 'Automatic binds every new user to the default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, an admin adding them, or SSO just-in-time provisioning.',
+          options: {
+            auto: 'Join the default organization automatically',
+            'invite-only': 'Invitation only — never join automatically',
+          },
+        },
         password_min_length: { label: 'Minimum password length' },
         password_max_length: { label: 'Maximum password length', help: 'Guards against denial-of-service via very long password hashing.' },
         session_expiry_days: { label: 'Session lifetime (days)', help: 'A session expires this many days after sign-in.' },
