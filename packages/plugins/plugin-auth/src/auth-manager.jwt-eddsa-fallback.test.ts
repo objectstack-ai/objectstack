@@ -75,10 +75,17 @@ const createMemoryEngine = () => {
       // [#4550] Pinned to ObjectQL.delete's own dispatch predicate rather than a
       // hand-written approximation of it: a fake that accepts a call the real
       // engine refuses is how #4434 shipped a dead REST route with its suite
-      // green. better-auth's adapter only ever deletes by scalar id
-      // (`objectql-adapter.ts` — `delete`/`deleteMany`/`consumeOne` all resolve
-      // the row first, then call `delete(object, { where: { id } })`), so this
-      // assertion is what proves that stays true as the pipeline evolves.
+      // green.
+      //
+      // Measured, so the claim stays honest: the paths this file drives
+      // (sign-up → get-session → /jwks) never reach a delete today, so this
+      // line cannot currently flip the suite red. It is a forward guard. What
+      // it guards is that better-auth's adapter only ever deletes by SCALAR id
+      // — `objectql-adapter.ts`'s `delete`/`deleteMany`/`consumeOne` each
+      // resolve the row first, then call `delete(object, { where: { id } })` —
+      // so the day an upgrade routes a session/verification purge through here
+      // as a bare predicate, this fails in a unit test instead of 500ing on a
+      // real server.
       assertEngineDeleteDispatch(q);
       const table = rows(name);
       const keep = table.filter((r) => !matches(r, q.where));
