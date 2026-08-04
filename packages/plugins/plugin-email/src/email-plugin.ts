@@ -605,6 +605,16 @@ export class EmailServicePlugin implements Plugin {
     if (provider === 'smtp') {
       const smtp = smtpOptionsFromMailSettings(values);
       if (!smtp.host) {
+        // The settings page carries no host — but the boot may already have
+        // built one from OS_EMAIL_SMTP_* / providerOptions, in which case
+        // SMTP mail IS being delivered and there is nothing to report.
+        if (this.service.options.transport instanceof SmtpTransport) {
+          ctx.logger.info(
+            'EmailServicePlugin: mail settings carry no SMTP host — keeping the SMTP transport configured '
+            + 'at boot (OS_EMAIL_SMTP_HOST / providerOptions).',
+          );
+          return;
+        }
         const selected = (sources.provider ?? 'default') !== 'default';
         const line = "EmailServicePlugin: provider='smtp' but no SMTP host is configured — the previous "
           + 'transport is kept and NO mail is delivered over SMTP. Fix: set Settings → Mail → Host '

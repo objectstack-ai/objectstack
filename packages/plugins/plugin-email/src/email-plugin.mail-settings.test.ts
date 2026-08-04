@@ -199,6 +199,19 @@ describe('applyMailSettings — provider=smtp that cannot be built', () => {
     expect(line).toMatch(/Settings → Mail → Host|OS_MAIL_SMTP_HOST/);
   });
 
+  it('keeps a boot-configured SMTP transport when the settings page carries no host', async () => {
+    // The deployment shape this feature enables: SMTP set through
+    // OS_EMAIL_SMTP_* at boot, settings page never touched. Mail IS being
+    // delivered, so there is nothing to report — an error here would be a
+    // false alarm on every start.
+    const { service, ctx } = await boot(
+      { provider: { value: 'smtp', source: 'global' } },
+      { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } },
+    );
+    expect((transportOf(service) as SmtpTransport).describe()).toMatchObject({ host: 'smtp.boot.test' });
+    expect(ctx.logger.error).not.toHaveBeenCalled();
+  });
+
   it('does not shout on the out-of-the-box default (provider never configured)', async () => {
     const { service, ctx } = await boot({});
     expect(transportOf(service)).toBeInstanceOf(LogTransport);
