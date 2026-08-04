@@ -5,7 +5,7 @@ import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { MemoryQueueAdapter } from './memory-queue-adapter.js';
 import type { MemoryQueueAdapterOptions } from './memory-queue-adapter.js';
 import { DbQueueAdapter } from './db-queue-adapter.js';
-import type { DbQueueAdapterOptions } from './db-queue-adapter.js';
+import type { DbQueueAdapterOptions, LifecycleFloorRegistrar } from './db-queue-adapter.js';
 
 /**
  * Configuration options for the QueueServicePlugin.
@@ -130,14 +130,19 @@ export class QueueServicePlugin implements Plugin {
 
   /**
    * [#5195] Register the adapter's retention floor with the platform
-   * LifecycleService. Duck-typed and best-effort, exactly like the storage
-   * service's reap guards: a kernel without a lifecycle service has no sweeper
-   * either, so there is no override for anything to bypass.
+   * LifecycleService. Best-effort: a kernel without a lifecycle service has no
+   * sweeper either, so there is no override for anything to bypass.
+   *
+   * The lookup is typed to {@link LifecycleFloorRegistrar} — the slot's
+   * contract as this package consumes it — rather than erased to `any`
+   * (#4127/#4251). The `typeof … === 'function'` probe stays because the method
+   * is genuinely optional (a lifecycle service predating floors), but it is now
+   * a check the compiler can see rather than one `any` was hiding.
    */
   private registerRetentionFloor(ctx: PluginContext, adapter: DbQueueAdapter): void {
-    let lifecycle: any;
+    let lifecycle: LifecycleFloorRegistrar | undefined;
     try {
-      lifecycle = ctx.getService<any>('lifecycle');
+      lifecycle = ctx.getService<LifecycleFloorRegistrar>('lifecycle');
     } catch {
       lifecycle = undefined;
     }

@@ -49,8 +49,8 @@ export function completedRetentionWindowMs(): number {
  *
  * Restated here rather than imported: `@objectstack/objectql` is a
  * devDependency of this package on purpose (the queue must not drag the engine
- * into every install), and the registration is duck-typed at the call site the
- * same way the storage service's reap guards are.
+ * into every install), so its types are not available to this package's
+ * consumers at build time.
  */
 export interface QueueRetentionFloor {
   policy: 'retention';
@@ -58,6 +58,27 @@ export interface QueueRetentionFloor {
   declaredBy: string;
   consequence: string;
   remedy: string;
+}
+
+/**
+ * [#5195] The `lifecycle` slot's contract as THIS package consumes it — the one
+ * method `QueueServicePlugin` calls, and nothing else.
+ *
+ * Declared rather than erased to `any` at the lookup (#4127/#4251): `any` would
+ * switch off checking on the single call that carries the floor, so a rename or
+ * a changed argument order in `LifecycleService.registerRetentionFloor` would
+ * compile here and fail at runtime inside a `try` that logs and continues —
+ * i.e. the floor would silently not exist, which is precisely the silent
+ * bypass #5195 exists to close.
+ *
+ * `registerRetentionFloor` is **optional** on purpose, and that optionality is
+ * the honest part of the contract: a kernel may carry a lifecycle service that
+ * predates floors, so the runtime `typeof … === 'function'` probe below is a
+ * real check and the type says so, instead of an `any` that hides both the
+ * check and the call.
+ */
+export interface LifecycleFloorRegistrar {
+  registerRetentionFloor?(object: string, floor: QueueRetentionFloor): void;
 }
 
 export interface DbQueueAdapterOptions {
