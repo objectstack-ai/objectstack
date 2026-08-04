@@ -6,7 +6,12 @@
  * it"), plus the clean-stack fixture that must stay silent.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
+import { ObjectStackSchema } from '@objectstack/spec';
+import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { ObjectPermissionSchema, PermissionSetSchema } from '@objectstack/spec/security';
 import {
   SECURITY_FLS_UNQUALIFIED_KEY,
   validateSecurityPosture,
@@ -64,10 +69,17 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(rulesOf({ objects: [{ name: 'sys_thing' }, { name: 'custom', isSystem: true }] })).toEqual([]);
   });
 
-  it('honors sharingModel nested under security.*', () => {
+  // Was: "honors sharingModel nested under security.*". There is no such
+  // envelope and there never was — `ObjectSchema` declares the OWD dials flat
+  // and is strict, so `objects[].security` is REFUSED by name, not stripped.
+  // The fallback that test pinned could not run for any stack an author can
+  // ship; all it did was advertise an authorization surface that does not
+  // exist (#5017). Schema evidence: the "undeclared keys are the schema's job"
+  // block at the end of this file.
+  it('does not read an OWD nested under a `security` envelope — no such key', () => {
     expect(
       rulesOf({ objects: [{ name: 'ok_obj', security: { sharingModel: 'private' } }] }),
-    ).toEqual([]);
+    ).toEqual([SECURITY_OWD_UNSET]);
   });
 
   // ── Rule: security-owd-alias (ADR-0090 D4) ───────────────────────────
@@ -463,6 +475,396 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
         },
         { nowMs: NOW },
       ),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * ── The structural meta-guard (#4992 pattern, #5009/#5018 shape) — #5017 ─────
+ *
+ * #4984 removed the `??` alias reads from a sharing rule's fields; #5009
+ * removed four more one file over. #5017 found two of the same shape HERE, and
+ * one of them was the worst of the family: `obj.security?.sharingModel`, a
+ * fallback onto an object-level `security` envelope that **does not exist** —
+ * in the security linter, where the next reader is most likely to believe it.
+ *
+ * These guards pin the PROPERTY that made those reads removable, so the next
+ * one fails before review rather than after:
+ *
+ * 1. **Declared-key guard** — every key this rule reads off a stack, object,
+ *    field, permission set, permission entry, app, position, book or seed must
+ *    appear in that surface's own Zod `.shape`. Scanning the SOURCE rather than
+ *    the behaviour is deliberate: an unreachable branch has no behaviour to
+ *    assert on, which is exactly the problem.
+ *
+ * 2. **Reachability guard** — every `findings.push` site must be reached by a
+ *    fixture the schema raises no `unrecognized_keys` issue on.
+ *
+ *    Note the criterion, which is NOT #5018's flat `safeParse` success, and the
+ *    difference is this rule's whole point. It is registered `input: 'parsed'`
+ *    but documented to run pre-parse too, so that `os lint` can answer a value
+ *    the zod gate would reject — with a better message (`sharingModel: 'read'`
+ *    is `invalid_value`, and rule `security-owd-alias` exists to name the
+ *    canonical replacement). Demanding a fully-parsing fixture would delete
+ *    four legitimate rules. A rejected KEY is a different animal from a
+ *    rejected VALUE: a key the schema does not declare cannot reach this rule
+ *    on the parsed path at all, and its presence in the source asserts that an
+ *    authoring surface exists. So the corpus below is allowed to carry values
+ *    the schema refuses, and never a key it refuses.
+ *
+ * Scope: BOTH guards cover the whole rule (all fifteen `findings.push` sites,
+ * every receiver except the two named in `NOT_SCHEMA_RECEIVERS` below).
+ */
+const RULE_SOURCE = readFileSync(new URL('./validate-security-posture.ts', import.meta.url), 'utf8');
+
+/** The rule's CODE — comments stripped, since the guards scan reads, not prose. */
+const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+/** Distinct property names read off `receiver` in the rule's code. */
+function keysReadOff(receiver: string): string[] {
+  const re = new RegExp(`\\b${receiver}\\??\\.([A-Za-z_$][\\w$]*)`, 'g');
+  return [...new Set([...RULE_CODE.matchAll(re)].map((m) => m[1]))].sort();
+}
+
+/**
+ * The declared keys of a schema, unwrapping the optional / array / record /
+ * lazy / union layers between a collection and its element.
+ *
+ * A union answers the UNION of its members' keys, which is the right reading:
+ * a validation rule or a field is exactly one variant, and a key any variant
+ * declares is a key some author can legitimately write.
+ *
+ * `lazySchema` wraps schemas in a Proxy whose target is a FUNCTION, so the
+ * `typeof` guard has to admit both — miss that and every lazily-built schema
+ * silently answers "declares nothing", which would make this guard vacuous.
+ */
+function shapeKeysOf(schema: unknown, depth = 0): string[] {
+  const s = schema as { shape?: Record<string, unknown>; _def?: Record<string, unknown>; unwrap?: () => unknown };
+  if (!s || (typeof s !== 'object' && typeof s !== 'function') || depth > 12) return [];
+  if (s.shape) return Object.keys(s.shape);
+  const d = (s._def ?? {}) as Record<string, unknown>;
+  if (d.type === 'union' && Array.isArray(d.options)) {
+    return [...new Set((d.options as unknown[]).flatMap((o) => shapeKeysOf(o, depth + 1)))];
+  }
+  const getter = d.getter as (() => unknown) | undefined;
+  for (const next of [d.innerType, d.element, d.valueType, getter?.(), d.in, d.out]) {
+    const r = shapeKeysOf(next, depth + 1);
+    if (r.length) return r;
+  }
+  if (typeof s.unwrap === 'function') return shapeKeysOf(s.unwrap(), depth + 1);
+  return [];
+}
+
+/**
+ * Receivers whose keys are NOT a spec `.shape`, and why. Kept as an explicit,
+ * reasoned list rather than "whatever the table forgot": a receiver that drops
+ * out of the table silently is how an undeclared read gets back in.
+ */
+const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
+  rec: 'a seed RECORD — its keys are COLUMNS of `sys_user_position` / `sys_user_permission_set` (ADR-0091), not keys of a metadata schema.',
+  md: "this file's own `firstMasterDetailField` return type, not an authored surface.",
+};
+
+const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
+  {
+    receiver: 'stack',
+    expected: ['apps', 'books', 'data', 'objects', 'permissions', 'positions'],
+    declaredBy: 'ObjectStackSchema',
+    keys: () => Object.keys(ObjectStackSchema.shape),
+  },
+  {
+    receiver: 'obj',
+    // `security` is absent, and that is the #5017 fix: `ObjectSchema` declares
+    // the OWD dials FLAT and has no `security` envelope to nest them under.
+    expected: ['actions', 'externalSharingModel', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    declaredBy: 'ObjectSchema',
+    keys: () => Object.keys(ObjectSchema.shape),
+  },
+  { receiver: 'o', expected: ['name'], declaredBy: 'ObjectSchema', keys: () => Object.keys(ObjectSchema.shape) },
+  {
+    receiver: 'ps',
+    expected: ['fields', 'isDefault', 'label', 'name', 'objects'],
+    declaredBy: 'PermissionSetSchema',
+    keys: () => Object.keys(PermissionSetSchema.shape),
+  },
+  // `reference_to` is absent — the other half of the #5017 fix.
+  { receiver: 'def', expected: ['reference'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  { receiver: 'f', expected: ['label', 'name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  {
+    receiver: 'p',
+    expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],
+    declaredBy: 'ObjectPermissionSchema',
+    keys: () => shapeKeysOf(ObjectPermissionSchema),
+  },
+  {
+    receiver: 'wildcard',
+    expected: ['modifyAllRecords', 'viewAllRecords'],
+    declaredBy: 'ObjectPermissionSchema',
+    keys: () => shapeKeysOf(ObjectPermissionSchema),
+  },
+  {
+    receiver: 'action',
+    expected: ['label', 'name'],
+    declaredBy: 'ObjectSchema.actions[]',
+    keys: () => shapeKeysOf(ObjectSchema.shape.actions),
+  },
+  {
+    receiver: 'app',
+    expected: ['label', 'name'],
+    declaredBy: 'ObjectStackSchema.apps[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.apps),
+  },
+  {
+    receiver: 'pos',
+    expected: ['label', 'name'],
+    declaredBy: 'ObjectStackSchema.positions[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.positions),
+  },
+  {
+    receiver: 'book',
+    expected: ['label', 'name'],
+    declaredBy: 'ObjectStackSchema.books[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.books),
+  },
+  {
+    receiver: 'audience',
+    expected: ['permissionSet'],
+    declaredBy: 'books[].audience',
+    keys: () => shapeKeysOf((shapeOf(ObjectStackSchema.shape.books) as Record<string, unknown>).audience),
+  },
+  {
+    receiver: 'seed',
+    expected: ['object', 'records'],
+    declaredBy: 'ObjectStackSchema.data[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.data),
+  },
+];
+
+/** The `.shape` object itself (not just its keys) of a wrapped collection. */
+function shapeOf(schema: unknown, depth = 0): Record<string, unknown> {
+  const s = schema as { shape?: Record<string, unknown>; _def?: Record<string, unknown>; unwrap?: () => unknown };
+  if (!s || (typeof s !== 'object' && typeof s !== 'function') || depth > 12) return {};
+  if (s.shape) return s.shape;
+  const d = (s._def ?? {}) as Record<string, unknown>;
+  const getter = d.getter as (() => unknown) | undefined;
+  for (const next of [d.innerType, d.element, d.valueType, getter?.(), d.in, d.out]) {
+    const r = shapeOf(next, depth + 1);
+    if (Object.keys(r).length) return r;
+  }
+  if (typeof s.unwrap === 'function') return shapeOf(s.unwrap(), depth + 1);
+  return {};
+}
+
+describe('validateSecurityPosture — reads only keys the spec declares (meta-test, #5017)', () => {
+  it.each(READ_SURFACES)('every key read off `$receiver` is declared by $declaredBy', (surface) => {
+    const read = keysReadOff(surface.receiver);
+    // Exact match, so ADDING a read (or renaming a loop variable, which would
+    // silently disarm the scan) forces a deliberate visit to this table.
+    expect(read).toEqual(surface.expected);
+    const declared = surface.keys();
+    expect(declared.length, `${surface.declaredBy} resolved to no keys — the guard would be vacuous`).toBeGreaterThan(0);
+    expect(read.filter((k) => !declared.includes(k))).toEqual([]);
+  });
+
+  it('covers every receiver in the source that is not explicitly excused', () => {
+    // Without this, a NEW receiver (a new loop variable over a new collection)
+    // would carry undeclared reads with nothing to notice — the table only
+    // guards what the table lists.
+    const receivers = [...new Set([...RULE_CODE.matchAll(/\b([a-z][\w$]*)\??\.[A-Za-z_$]/g)].map((m) => m[1]))];
+    const tabled = new Set([...READ_SURFACES.map((s) => s.receiver), ...Object.keys(NOT_SCHEMA_RECEIVERS)]);
+    // Locals whose "keys" are JS methods / this file's own plumbing, not metadata.
+    const PLUMBING = new Set([
+      'findings', 'objects', 'permissionSets', 'privateObjects', 'grantedObjects', 'stackSetNames',
+      'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
+    ]);
+    expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
+  });
+});
+
+/**
+ * ── The two surfaces this rule deliberately does NOT read (#5017) ───────────
+ *
+ * Each is pinned against the schema fact that makes it unreachable, so "put
+ * the fallback back, just in case" fails a test with the evidence attached
+ * rather than passing quietly.
+ */
+const MANIFEST = { id: 'security_probe', name: 'security_probe', version: '1.0.0', type: 'app' } as const;
+
+/** Does the schema refuse any KEY in this stack (as opposed to any VALUE)? */
+function unrecognizedKeysIn(stack: unknown): string[] {
+  const result = ObjectStackSchema.safeParse(stack);
+  if (result.success) return [];
+  return result.error.issues
+    .filter((i) => i.code === 'unrecognized_keys')
+    .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
+}
+
+describe('validateSecurityPosture — undeclared keys are the schema’s job, not this rule’s (#5017)', () => {
+  it('there is no `objects[].security` envelope: the OWD dials are declared FLAT', () => {
+    const objectKeys = Object.keys(ObjectSchema.shape);
+    expect(objectKeys).not.toContain('security');
+    expect(objectKeys).toEqual(expect.arrayContaining(['sharingModel', 'externalSharingModel', 'publicSharing']));
+
+    // And `ObjectSchema` is strict, so this is not a silent strip: a stack
+    // nesting the OWD under `security` is REFUSED, by name.
+    expect(
+      unrecognizedKeysIn({
+        manifest: MANIFEST,
+        objects: [{ name: 'ok_obj', label: 'OK', fields: { a: { type: 'text', label: 'A' } }, security: { sharingModel: 'private' } }],
+      }).join(' '),
+    ).toMatch(/Unrecognized key\(s\) on this object: `security`/);
+
+    // So the lint reads `sharingModel` and nothing else. An author who nested
+    // it gets `security-owd-unset` from here (the OWD really is unset on the
+    // only key that carries one) and a named refusal from the schema — instead
+    // of a silent all-clear from a fallback onto a surface that is not there.
+    expect(rulesOf({ objects: [{ name: 'ok_obj', security: { sharingModel: 'private' } }] })).toEqual([
+      SECURITY_OWD_UNSET,
+    ]);
+    expect(rulesOf({ objects: [{ name: 'ok_obj', sharingModel: 'private' }] })).toEqual([]);
+  });
+
+  it('`fields[].reference_to` is a rejected alias of `reference`', () => {
+    const fieldKeys = Object.keys(FieldSchema.shape);
+    expect(fieldKeys).toContain('reference');
+    expect(fieldKeys).not.toContain('reference_to');
+    expect(
+      unrecognizedKeysIn({
+        manifest: MANIFEST,
+        objects: [
+          {
+            name: 'child', label: 'Child', sharingModel: 'controlled_by_parent',
+            fields: { parent_ref: { type: 'master_detail', label: 'Parent', reference_to: 'parent_obj' } },
+          },
+        ],
+      }).join(' '),
+    ).toMatch(/Unrecognized key\(s\) on this field: `reference_to`/);
+
+    // The finding still fires either way — `reference_to` only ever fed the
+    // master's NAME into the message. On the canonical spelling that name is
+    // there; on the rejected one the rule now says "master_detail" without a
+    // target, and the schema says which key to fix.
+    const withAlias = validateSecurityPosture({
+      objects: [{ name: 'child', sharingModel: 'private', fields: [{ name: 'p', type: 'master_detail', reference_to: 'parent_obj' }] }],
+      permissions: [{ name: 'ps', objects: { other: { allowRead: true } } }],
+    }).filter((f) => f.rule === SECURITY_MASTER_DETAIL_UNGRANTED);
+    expect(withAlias).toHaveLength(1);
+    expect(withAlias[0].message).not.toContain('parent_obj');
+
+    const withCanonical = validateSecurityPosture({
+      objects: [{ name: 'child', sharingModel: 'private', fields: [{ name: 'p', type: 'master_detail', reference: 'parent_obj' }] }],
+      permissions: [{ name: 'ps', objects: { other: { allowRead: true } } }],
+    }).filter((f) => f.rule === SECURITY_MASTER_DETAIL_UNGRANTED);
+    expect(withCanonical).toHaveLength(1);
+    expect(withCanonical[0].message).toContain('"parent_obj"');
+  });
+});
+
+/**
+ * ── Reachability: every branch is reachable without an undeclared key ────────
+ */
+function pushedRuleIds(): string[] {
+  const sites = RULE_CODE.split('findings.push({').slice(1);
+  return sites.map((block, i) => {
+    const ruleConst = /rule:\s*([A-Z_][A-Z0-9_]*)/.exec(block)?.[1];
+    if (!ruleConst) throw new Error(`findings.push site #${i} has no literal \`rule:\` — the guard cannot map it`);
+    const id = RULE_IDS[ruleConst];
+    if (!id) throw new Error(`findings.push site #${i} emits unknown rule id \`${ruleConst}\``);
+    return id;
+  });
+}
+
+const RULE_IDS: Record<string, string> = {
+  SECURITY_OWD_UNSET,
+  SECURITY_OWD_ALIAS,
+  SECURITY_EXTERNAL_WIDER,
+  SECURITY_WILDCARD_VAMA,
+  SECURITY_ANCHOR_HIGH_PRIVILEGE,
+  SECURITY_ROLE_WORD,
+  SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
+  SECURITY_PRIVATE_NO_READSCOPE,
+  SECURITY_MASTER_DETAIL_UNGRANTED,
+  SECURITY_FLS_UNQUALIFIED_KEY,
+  SECURITY_GRANT_EXPIRED_AT_AUTHORING,
+  SECURITY_DELEGATION_MISSING_REASON,
+};
+
+const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
+const objectFixture = (extra: Record<string, unknown>) => ({ label: 'X', fields: TEXT_FIELD, ...extra });
+
+/**
+ * One fixture per rule. Every one is a full stack put through
+ * `unrecognizedKeysIn` below — values the schema refuses are allowed (that is
+ * what half these rules are FOR), keys it refuses are not.
+ */
+const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown> }> = [
+  { label: 'owd-unset', stack: { objects: [objectFixture({ name: 'leave_request' })] } },
+  { label: 'owd-alias (retired value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'read' })] } },
+  { label: 'owd-alias (non-canonical value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'nonsense' })] } },
+  { label: 'owd-alias (external retired value)', stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'full' })] } },
+  {
+    label: 'external-wider',
+    stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'public_read_write' })] },
+  },
+  { label: 'fls-unqualified-key', stack: { permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { budget: { readable: true } } }] } },
+  { label: 'wildcard-vama', stack: { permissions: [{ name: 'ps', label: 'PS', objects: { '*': { viewAllRecords: true } } }] } },
+  {
+    label: 'anchor-high-privilege',
+    stack: { permissions: [{ name: 'ps', label: 'PS', isDefault: true, objects: { '*': { modifyAllRecords: true } } }] },
+  },
+  { label: 'role-word (identifier)', stack: { objects: [objectFixture({ name: 'user_role', sharingModel: 'private' })] } },
+  { label: 'role-word (label)', stack: { objects: [objectFixture({ name: 'user_duty', label: 'User Role', sharingModel: 'private' })] } },
+  {
+    label: 'book-audience-unknown-set',
+    stack: { books: [{ name: 'guide', label: 'Guide', slug: 'guide', groups: [], audience: { permissionSet: 'nobody_declares_this' } }] },
+  },
+  {
+    label: 'private-no-readscope',
+    stack: {
+      objects: [objectFixture({ name: 'todo', sharingModel: 'private' })],
+      permissions: [{ name: 'ps', label: 'PS', objects: { todo: { allowRead: true } } }],
+    },
+  },
+  {
+    label: 'master-detail-ungranted',
+    stack: {
+      objects: [
+        objectFixture({
+          name: 'line_item', sharingModel: 'controlled_by_parent',
+          fields: { parent_ref: { type: 'master_detail', label: 'Parent', reference: 'invoice' } },
+        }),
+      ],
+      permissions: [{ name: 'ps', label: 'PS', objects: { invoice: { allowRead: true } } }],
+    },
+  },
+  {
+    label: 'grant-expired-at-authoring',
+    stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
+  },
+  {
+    label: 'delegation-missing-reason',
+    stack: { data: [{ object: 'sys_user_permission_set', records: [{ user_id: 'u1', permission_set: 'ps', delegated_from: 'u2' }] }] },
+  },
+];
+
+describe('validateSecurityPosture — every branch is reachable without an undeclared key (meta-test, #5017)', () => {
+  it.each(REACHABILITY_CORPUS)('$label: the fixture uses only keys the spec declares', ({ stack }) => {
+    expect(unrecognizedKeysIn({ manifest: MANIFEST, ...stack })).toEqual([]);
+  });
+
+  it('maps every `findings.push` site in the source', () => {
+    expect(pushedRuleIds()).toHaveLength(15);
+  });
+
+  it('reaches every `findings.push` site from that corpus', () => {
+    const emitted = new Set(
+      REACHABILITY_CORPUS.flatMap(({ stack }) =>
+        validateSecurityPosture(stack, { nowMs: Date.parse('2026-07-10T12:00:00Z') }).map((f) => f.rule),
+      ),
+    );
+    expect(
+      [...new Set(pushedRuleIds())].filter((id) => !emitted.has(id)),
+      'a branch no key-legal stack can reach must be deleted, not kept "just in case" (#5017)',
     ).toEqual([]);
   });
 });
