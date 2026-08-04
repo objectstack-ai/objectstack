@@ -1,5 +1,72 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * SDUI component prop schemas — the declarative shape of every `page:*`,
+ * `record:*`, `element:*`, `nav:*` and `ai:*` node a page can carry.
+ *
+ * ## ⛔ These 29 sites are `no gate`, NOT a pending `.strict()` batch (#4001 批 17)
+ *
+ * Do not sweep `strictObject` across this file. It was scheduled as the #4001
+ * campaign's largest remaining `ui/` block and the measurement came back
+ * negative: **nothing parses these schemas**, so `.strict()` here would enforce
+ * exactly nothing while spending a v17 breaking change to produce what #4583
+ * calls *"a precisely validated dead slot — the more convincing lie"*.
+ *
+ * `.strict()` is a property of a PARSE. Three independent measurements, each
+ * with its controls green in the same run (2026-08-04):
+ *
+ * 1. **The carrier is an open bag.** `PageComponentSchema.properties` is
+ *    `z.record(z.string(), z.unknown())` (`page.zod.ts`). `PageComponentSchema`
+ *    itself has been `.strict()` since ADR-0089 D3a — but **strictness does not
+ *    recurse**, so it closes the component node's own keys and leaves everything
+ *    under `properties` unchecked. Nothing dispatches `ComponentPropsMap` by
+ *    `type`.
+ * 2. **BFS-unreachable.** From all 24 metadata-type roots plus `defineStack`'s
+ *    `ObjectStackSchema`, over a 6899-node closure built with `build-schemas.ts`'s
+ *    own `zodChildSchemas` / `zodShapeOf` (the #4650 walk), all 52 targets here
+ *    (21 exported schemas + every one of `ComponentPropsMap`'s 31 entries) come
+ *    back UNREACHABLE — while `PageSchema`, `PageComponentSchema`,
+ *    `PageRegionSchema`, `ThemeSchema`, `ChartConfigSchema` and
+ *    `ResponsiveConfigSchema` all resolve `root-graph` in that same run, and 批 13's
+ *    measured no-door shapes stay unreachable. The walk stops at `properties`.
+ * 3. **No production parse.** Across `objectstack`, `objectui` and `cloud`, every
+ *    `.parse()` / `.safeParse()` on anything in this file is inside this file's
+ *    own unit tests. `objectui` mirrors the props as hand-written React
+ *    interfaces and imports only the inferred TYPES; `cloud` references none.
+ *    `react-blocks.ts` uses `Object.keys(ComponentPropsMap)` for type names only —
+ *    its `REACT_BLOCKS[].schema` entries all point at view/chart schemas.
+ *
+ * Empirically, through the live door (`definePage()` IS `PageSchema.parse()`): on
+ * the example corpus an undeclared key written inside `components[].properties`
+ * parses clean and is RETAINED on 10/10 pages, while the same key one level out
+ * — a sibling of `properties` — is rejected on 10/10. The negative control is
+ * what makes the first number mean something.
+ *
+ * ## Why this is `no gate` and not `no door` (批 13 vs 批 15)
+ *
+ * The vocabulary here is ALIVE — this is not dead surface to retire under
+ * ADR-0049. Authors write these keys on real pages, and objectui's
+ * `SchemaRenderer` hoists `properties` onto the node and spreads every key that
+ * is not on its fixed metadata deny-list straight into the React component. So
+ * a misspelled key is neither rejected nor dropped: it reaches the renderer and
+ * is ignored there. That is the ADR-0078 failure mode, one layer below where
+ * this campaign can reach.
+ *
+ * The contract-first fix is therefore to WIRE THE PARSE at the carrier's own
+ * gate, not to close schemas nobody calls — filed as **#5068**, which also
+ * records the two constraints that stop it being a drive-by: `type` is an open
+ * union (unregistered types like `record:line_items` are authored in the wild),
+ * and real pages already author shapes these schemas do not declare
+ * (`record:details` `sections[].fields[]` / `hideFields[]`, the record picker's
+ * `labelField` — see `packages/lint/src/validate-page-field-bindings.ts`, which
+ * has documented the untyped bag all along).
+ *
+ * When #5068 lands, this file becomes `authorable` and the ratchet applies. The
+ * verdict is pinned in `component.test.ts` and in the `ui/` tables of
+ * `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
+ * together or none.
+ */
+
 import { z } from 'zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { ViewFilterRuleSchema } from './view.zod';
