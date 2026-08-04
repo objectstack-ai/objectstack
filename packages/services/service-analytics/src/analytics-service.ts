@@ -93,6 +93,44 @@ function isMissingSourceError(err: unknown): boolean {
 }
 
 /**
+ * #5033 — the relation a missing-source error NAMES, when it names one.
+ *
+ * `isMissingSourceError` answers "is something missing"; this answers "what".
+ * The distinction decides whether the widget may degrade: a dataset whose OWN
+ * backing table is absent is a kernel that never mounted the object (degrade —
+ * that is the case the graceful path exists for), while a dataset whose
+ * *joined* table is absent on the datasource the base object routed to is a
+ * cross-datasource dataset, i.e. a topology error that must be reported as
+ * itself instead of hiding behind "backing object … is unavailable".
+ *
+ * Returns the bare relation name (schema/database qualifiers stripped —
+ * `mydb.crm_account` → `crm_account`; Prime Directive #6 makes object name =
+ * table name, so the result is comparable to a dataset's `object`), or
+ * `undefined` when the driver's phrasing carries no name. Unparseable ⇒ the
+ * caller keeps today's degradation, never a louder guess.
+ */
+function missingSourceRelation(err: unknown): string | undefined {
+  const msg = String((err as { message?: unknown })?.message ?? err ?? '');
+  const patterns = [
+    /no such table:\s*[`"'[]?([A-Za-z0-9_$.]+)/i,                        // sqlite / libsql
+    /relation\s+[`"']?([A-Za-z0-9_$.]+)[`"']?\s+does not exist/i,        // postgres
+    /table\s+[`"']?([A-Za-z0-9_$.]+)[`"']?\s+doesn't exist/i,            // mysql
+    /(?:object|table)\s+[`"']([A-Za-z0-9_$.]+)[`"']\s+is not registered/i, // framework
+    /unknown object:?\s*[`"']?([A-Za-z0-9_$.]+)/i,
+    /[`"']([A-Za-z0-9_$.]+)[`"']\s+is not a registered object/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(msg);
+    if (m?.[1]) {
+      const parts = m[1].split('.').filter(Boolean);
+      const bare = parts[parts.length - 1];
+      if (bare) return bare;
+    }
+  }
+  return undefined;
+}
+
+/**
  * [#4437] A name that is a plain column/table identifier and nothing else.
  * Anything with a dot, a paren, whitespace or an operator is a SQL EXPRESSION
  * (or a cross-object reference) whose parts this layer cannot attribute to a
@@ -199,6 +237,18 @@ export interface AnalyticsServiceConfig {
    * `StrategyContext.isExternalObject`.
    */
   isExternalObject?: (objectName: string) => boolean;
+  /**
+   * [#5033] The datasource `objectName` is bound to, or `undefined` when it
+   * rides the default one (or nothing authoritative can answer).
+   *
+   * Diagnostics only — it never selects a driver (that is `engine.execute`'s
+   * `object` key, which the `plugin.ts` bridge now passes). It exists so that
+   * when a dataset's SQL references a table that is NOT on the datasource its
+   * base object routed to, the failure can name the actual cause — *table X is
+   * not on datasource Y* — instead of the misleading "backing object …
+   * is unavailable" that a cross-datasource join used to produce.
+   */
+  getObjectDatasource?: (objectName: string) => string | undefined;
   /**
    * [#3867] Is `name` a registered object in this kernel's schema registry?
    *
@@ -330,6 +380,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isRegisteredObject?: AnalyticsServiceConfig['isRegisteredObject'];
   /** [#4437] Field-name probe gating measure source-field resolution. */
   private readonly getObjectFieldNames?: AnalyticsServiceConfig['getObjectFieldNames'];
+  /** [#5033] Diagnostics-only datasource probe for the missing-source triage. */
+  private readonly getObjectDatasource?: AnalyticsServiceConfig['getObjectDatasource'];
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   readonly cubeRegistry: CubeRegistry;
@@ -351,6 +403,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
+    this.getObjectDatasource = config.getObjectDatasource;
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -608,14 +661,44 @@ export class AnalyticsService implements IAnalyticsService {
     // that never mounted the audit object) must render as "no data" — NOT
     // crash the widget with a 500. Datasets were the one read surface that
     // hard-failed on a missing source.
+    //
+    // #5033 — that leniency is scoped to the dataset's OWN source. Once the raw-SQL
+    // bridge routes by object (`plugin.ts`), a dataset that JOINS across datasources
+    // fails on the base object's datasource with the JOINED table missing. Reporting
+    // that as "backing object … is unavailable" would be the misleading old shape
+    // wearing a new cause: the base table is right there, and the widget would keep
+    // rendering the confident `0` this issue is about. So triage by WHICH relation
+    // the driver named, and let a cross-datasource dataset fail loudly.
     let result: AnalyticsResult;
     try {
       result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
       if (isMissingSourceError(err)) {
+        const missing = missingSourceRelation(err);
+        const detail = String((err as Error)?.message ?? err);
+        // A named relation that is NOT the dataset's own object is a joined table.
+        // If that object IS registered in this kernel, it exists — just not on the
+        // datasource this query ran against: a topology error, not an absence.
+        // (`isRegisteredObject` absent / unable to answer ⇒ treat as registered,
+        // the same "cannot answer, do not block" tiering it carries elsewhere;
+        // here the honest report is the loud one, since the base table resolved.)
+        const joined = missing && missing.toLowerCase() !== dataset.object.toLowerCase() ? missing : undefined;
+        if (joined && (this.isRegisteredObject?.(joined) ?? true)) {
+          const baseDs = this.getObjectDatasource?.(dataset.object);
+          const joinedDs = this.getObjectDatasource?.(joined);
+          const where = baseDs ? `datasource "${baseDs}"` : 'the default datasource';
+          const joinedWhere = joinedDs ? `datasource "${joinedDs}"` : 'the default datasource';
+          throw new Error(
+            `[Analytics] dataset "${dataset.name}" cannot be executed as one statement: table "${joined}" ` +
+            `is not on ${where}, which is where its base object "${dataset.object}" lives — ` +
+            `"${joined}" is registered on ${joinedWhere}. A dataset JOIN cannot cross datasources. ` +
+            `Fix it by binding both objects to the same datasource, or by dropping the cross-datasource ` +
+            `relationship from the dataset's \`include\`/dimensions. (driver said: ${detail})`,
+          );
+        }
         this.logger.warn(
           `[Analytics] dataset "${dataset.name}" backing object "${dataset.object}" is unavailable ` +
-          `(${String((err as Error)?.message ?? err)}); returning an empty result instead of failing the widget`,
+          `(${detail}); returning an empty result instead of failing the widget`,
         );
         return { rows: [], fields: [], totals: [] };
       }
