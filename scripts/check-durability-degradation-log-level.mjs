@@ -128,6 +128,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'writeRecord',
         'A seed record was not written — the row is simply absent (or, on the upsert/update path, still holds its pre-seed contents) while the load moves on to the next record (#4729).',
     ],
+    [
+        'performSeedWrite',
+        "A seed write's post-write roll-up summary recompute was swallowed — the rows landed, but a persisted summary column now disagrees with the detail rows it summarizes and nothing recomputes it, while every row counter and `success` still read clean (#4998, framework#3147).",
+    ],
 ]);
 
 /** Log levels that are ACCEPTABLE inside a durability-guarding catch. */
@@ -289,6 +293,54 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
         return { levels, rethrows };
     };
 
+    /**
+     * Does this statement ALWAYS leave by throwing?
+     *
+     * Deliberately conservative — only the shapes whose control flow is
+     * unambiguous. Anything it cannot prove counts as "may complete normally",
+     * which errs toward judging the seam rather than excusing it.
+     */
+    const alwaysThrows = (stmt) => {
+        if (ts.isThrowStatement(stmt)) return true;
+        if (ts.isBlock(stmt)) return stmt.statements.some(alwaysThrows);
+        if (ts.isIfStatement(stmt)) {
+            return (
+                !!stmt.elseStatement &&
+                alwaysThrows(stmt.thenStatement) &&
+                alwaysThrows(stmt.elseStatement)
+            );
+        }
+        return false;
+    };
+
+    /**
+     * Does this catch have a path that RECOVERS instead of propagating?
+     *
+     * A rethrow is only an excuse when the catch propagates on EVERY path: then
+     * the failure reaches the caller and nothing is being degraded here. A
+     * catch that rethrows on one branch and RETURNS a substitute on another is
+     * two different seams sharing one block, and the recovery branch is a
+     * degradation like any other — it must be loud or it is exactly the silent
+     * data loss #4632 is about.
+     *
+     * Missing this cost a whole round: seed-loader's `writeRecoveringSummary`
+     * recovers an `ERR_SUMMARY_RECOMPUTE` (the rows landed; re-writing would
+     * duplicate) and rethrows everything else. Because the block contained a
+     * `throw`, the old rule excused it wholesale — registering its callee in
+     * `DURABILITY_CRITICAL_CALLEES` produced a ledger entry that could never
+     * fire, i.e. protection that reads as real and enforces nothing (#4998).
+     */
+    const catchRecovers = (block) => {
+        let sawReturn = false;
+        walkSameTick(block, (child) => {
+            if (ts.isReturnStatement(child)) sawReturn = true;
+        });
+        // A `return` is an explicit recovery: the caller gets a value, not the
+        // failure. With no return, the catch still recovers by falling off the
+        // end — unless one of its top-level statements always throws.
+        return sawReturn || !block.statements.some(alwaysThrows);
+    };
+
     walkAll(sf, (node) => {
         if (!ts.isTryStatement(node) || !node.catchClause) return;
 
@@ -307,6 +359,8 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
 
         // 2. How does the catch respond?
         const { levels, rethrows } = collectResponse(node.catchClause.block);
+        // Only an UNCONDITIONAL rethrow excuses the seam — see catchRecovers().
+        const propagatesAlways = rethrows && !catchRecovers(node.catchClause.block);
 
         const loud = levels.filter((l) => LOUD_LEVELS.has(l.level));
         const quiet = levels.filter((l) => QUIET_LEVELS.has(l.level));
@@ -316,13 +370,14 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
             callee: guarded[0].callee,
             calleeLine: guarded[0].line,
             catchLine: lineOf(node.catchClause),
-            rethrows,
+            rethrows: propagatesAlways,
+            partialRethrow: rethrows && !propagatesAlways,
             loud: loud.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
             quiet: quiet.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
         };
         seams.push(seam);
 
-        if (rethrows || loud.length > 0) return;
+        if (propagatesAlways || loud.length > 0) return;
 
         findings.push({
             ...seam,
@@ -359,7 +414,9 @@ function run({ list = false } = {}) {
         for (const s of seams) {
             const verdict = s.rethrows
                 ? 'rethrows'
-                : s.loud.length > 0
+                : s.partialRethrow && s.loud.length > 0
+                  ? `recovers on one branch, loud (${s.loud.join(', ')})`
+                  : s.loud.length > 0
                   ? `loud (${s.loud.join(', ')})`
                   : s.quiet.length > 0
                     ? `QUIET (${s.quiet.join(', ')})`
@@ -465,6 +522,55 @@ function selfTest() {
                 class P { async f(ctx: any, driver: any, obj: any) {
                     try { await driver.syncSchema('t', obj); }
                     catch (e) { ctx.logger.warn('context'); throw e; }
+                } }`,
+            expectViolation: false,
+        },
+        {
+            // #4998: a catch that RECOVERS on one branch and rethrows on the
+            // other is two seams in one block. The rethrow covers the branch
+            // that propagates; it says nothing about the branch that returns a
+            // substitute value, and that branch is a degradation like any
+            // other. Excusing the whole block on the presence of a `throw`
+            // made a DURABILITY_CRITICAL_CALLEES entry for such a seam
+            // unfireable — a ledger line that looks like protection and
+            // enforces nothing.
+            name: 'flags: catch that recovers on one branch (rethrowing on the other) and logs warn',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try { return await driver.syncSchema('t', obj); }
+                    catch (e: any) {
+                        if (e.code === 'RECOVERABLE') {
+                            ctx.logger.warn('recovered; state may be stale');
+                            return e.written;
+                        }
+                        throw e;
+                    }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            name: 'passes: the same partial-recovery shape logging error',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try { return await driver.syncSchema('t', obj); }
+                    catch (e: any) {
+                        if (e.code === 'RECOVERABLE') {
+                            ctx.logger.error('CONSEQUENCE: stale; FIX: re-run', e);
+                            return e.written;
+                        }
+                        throw e;
+                    }
+                } }`,
+            expectViolation: false,
+        },
+        {
+            name: 'passes: catch that rethrows from inside a conditional and never recovers',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); }
+                    catch (e: any) {
+                        if (e.code === 'A') { throw e; } else { throw new Error('B'); }
+                    }
                 } }`,
             expectViolation: false,
         },

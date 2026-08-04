@@ -355,6 +355,30 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
   referencesDropped: z.number().int().min(0).default(0)
     .describe('Reference fields dropped from records that were still written'),
 
+  /**
+   * Number of persisted roll-up summary values left STALE by this dataset's
+   * writes — "wrote the rows, broke the aggregate".
+   *
+   * A roll-up summary is a DERIVED value that lives as a persisted column on
+   * the PARENT record. When a seed write lands but its post-write recompute
+   * exhausts its retries (`ERR_SUMMARY_RECOMPUTE`, framework#3147) the detail
+   * rows are correct and the column that summarizes them is not, so the two
+   * disagree in the database. Nothing self-heals: the value stays wrong until
+   * some later write happens to touch the same parent, and after a seed there
+   * may never be one.
+   *
+   * The rows themselves DID land and are deliberately not re-written (that
+   * would duplicate them), so `errored` must not move and
+   * `inserted + updated + skipped + errored` still reconciles against `total`
+   * — the same reasoning that gave `referencesDropped` its own counter one
+   * layer down. Without this counter the condition was observable only as a
+   * single log line: no caller could detect it programmatically, and the load
+   * reported a clean `success: true` over a summary column that was wrong
+   * (framework#4998).
+   */
+  summariesStale: z.number().int().min(0).default(0)
+    .describe('Roll-up summary values left stale by writes for this dataset'),
+
   /** Reference resolution errors for this object */
   errors: z.array(ReferenceResolutionErrorSchema).default([])
     .describe('Reference resolution errors'),
@@ -418,6 +442,18 @@ export const SeedLoaderResultSchema = lazySchema(() => z.object({
      */
     totalReferencesDropped: z.number().int().min(0).default(0)
       .describe('Total reference fields dropped from written records'),
+
+    /**
+     * Total persisted roll-up summary values left stale by the load — "wrote
+     * the rows, broke the aggregate". See `SeedLoadResult.summariesStale`.
+     *
+     * Non-zero means at least one summary column in the database now
+     * disagrees with the detail rows it summarizes, even though `success` is
+     * `true` and every row counter reads clean — `success` answers "did the
+     * rows land", and they did.
+     */
+    totalSummariesStale: z.number().int().min(0).default(0)
+      .describe('Total roll-up summary values left stale across the load'),
 
     /** Number of circular dependency chains detected */
     circularDependencyCount: z.number().int().min(0).describe('Circular dependency chains detected'),

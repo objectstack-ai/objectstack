@@ -133,6 +133,21 @@ export class SeedLoaderService implements ISeedLoaderService {
    * seeds (those stay intentionally global/cross-tenant).
    */
   private fallbackOrgId?: string;
+  /**
+   * Roll-up summary values left stale so far in the CURRENT {@link load} —
+   * bumped by {@link reportStaleSummaries}, sampled by {@link loadDataset}
+   * around each dataset so every result entry reports only its own share
+   * (two datasets may target the same object, so keying by object name would
+   * double-count).
+   *
+   * An instance field for the same reason {@link fallbackOrgId} is one: the
+   * write path that discovers this is several private methods below the point
+   * the per-dataset counters live, and threading a callback through
+   * `writeRecord` would put plumbing in five call sites to carry one number.
+   * Reset per `load`; datasets are loaded strictly sequentially (`for … await`),
+   * so the sampling is exact.
+   */
+  private summariesStale = 0;
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -158,6 +173,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     const config = this.resolveEnvConfig(request.config, request.seeds);
     const allErrors: ReferenceResolutionError[] = [];
     const allResults: SeedLoadResult[] = [];
+    // Per-load counter — a service instance can be reused across loads.
+    this.summariesStale = 0;
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path), BUSINESS seed rows
@@ -347,6 +364,14 @@ export class SeedLoaderService implements ISeedLoaderService {
      * still reconciles against `total`. See framework#3932.
      */
     let referencesDropped = 0;
+    /**
+     * Roll-up summaries this dataset leaves stale — sampled as a delta on the
+     * per-load counter (see {@link SeedLoaderService.summariesStale}) rather
+     * than tracked locally, because the write that discovers it is several
+     * methods down. Datasets load sequentially, so the delta is exactly this
+     * dataset's share even when two datasets target the same object.
+     */
+    const summariesStaleAtStart = this.summariesStale;
     const errors: ReferenceResolutionError[] = [];
 
     // Ensure the object's record map exists
@@ -432,14 +457,14 @@ export class SeedLoaderService implements ISeedLoaderService {
                 // Partial-success batch: per-row verdicts, hooks fire once.
                 // On ERR_SUMMARY_RECOMPUTE, writeRecoveringSummary hands back
                 // e.written — which for insertMany IS the outcome array.
-                freshOutcomes = await this.writeRecoveringSummary(() => engineInsertMany(objectName, toInsert, opts));
+                freshOutcomes = await this.writeRecoveringSummary(objectName, () => engineInsertMany(objectName, toInsert, opts));
               } else {
                 // Legacy whole-array insert: any bad row throws the batch, and
                 // bulkWrite's per-row degradation (writeOne) sorts it out. A
                 // lone row keeps the historical bare-record insert() shape.
                 const recs = toInsert.length === 1
-                  ? [await this.writeRecoveringSummary(() => this.engine.insert(objectName, toInsert[0], opts))]
-                  : await this.writeRecoveringSummary(() => this.engine.insert(objectName, toInsert, opts));
+                  ? [await this.writeRecoveringSummary(objectName, () => this.engine.insert(objectName, toInsert[0], opts))]
+                  : await this.writeRecoveringSummary(objectName, () => this.engine.insert(objectName, toInsert, opts));
                 freshOutcomes = (recs as any[]).map((r) => ({ ok: true, record: r }));
               }
               lastBatchUncertain = false;
@@ -470,7 +495,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 if (hit) return hit; // already committed by a prior attempt
               }
             }
-            return this.writeRecoveringSummary(() => this.engine.insert(objectName, row, opts));
+            return this.writeRecoveringSummary(objectName, () => this.engine.insert(objectName, row, opts));
           },
         },
       );
@@ -853,7 +878,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
             try {
-              await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts)));
+              await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, opts)));
               updated++;
             } catch (err: any) {
               errored++;
@@ -903,6 +928,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       referencesResolved,
       referencesDeferred,
       referencesDropped,
+      summariesStale: this.summariesStale - summariesStaleAtStart,
       errors,
     };
   }
@@ -1220,35 +1246,104 @@ export class SeedLoaderService implements ISeedLoaderService {
   private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
 
   /**
+   * The engine write {@link writeRecoveringSummary} guards, as a NAMED callee.
+   *
+   * Extracted for the same reason {@link writeDeferredReference} is:
+   * `scripts/check-durability-degradation-log-level.mjs` recognises a guarded
+   * `try` by the callee names it finds in the block and deliberately does not
+   * descend into nested function bodies, so the `fn()` parameter this used to
+   * call directly was invisible to it — no ledger entry could ever have
+   * matched. `performSeedWrite` is listed in that script's
+   * `DURABILITY_CRITICAL_CALLEES`, which is what makes the `logger.error`
+   * below enforced rather than merely written down (#4998; the rule is #4632).
+   */
+  private async performSeedWrite<T>(fn: () => Promise<T>): Promise<T> {
+    return await fn();
+  }
+
+  /**
    * Run an engine write; if it fails ONLY because a post-write roll-up summary
    * recompute exhausted its retries (framework#3147, `code`
-   * 'ERR_SUMMARY_RECOMPUTE'), the record WAS written — treat it as a warning
-   * and return the written value rather than re-writing (which would
-   * duplicate). Matched by `code` so we needn't import objectql (which depends
-   * on this package — importing back would cycle). Any other error propagates.
+   * 'ERR_SUMMARY_RECOMPUTE'), the record WAS written — return the written
+   * value rather than re-writing (which would duplicate). Matched by `code` so
+   * we needn't import objectql (which depends on this package — importing back
+   * would cycle). Any other error propagates.
    *
-   * Left at `warn` by #4729 deliberately, and the reasoning is filed rather
-   * than settled here: this is the one degradation in the file that is NOT
-   * counted as an error (the load still reports `success: true`), so it falls
-   * outside that issue's "count and level must agree" criterion — but a stale
-   * roll-up column IS persisted data disagreeing with the rows it summarizes,
-   * which is arguably the #4632 class. Whether it should become `error`,
-   * counted, or stay as-is is #4998 (needs a maintainer's call, since it
-   * changes what a SUCCESSFUL seed prints).
+   * The RECOVERY is unchanged; what it costs is now reported honestly (#4998).
+   * A roll-up summary is a persisted DERIVED column on the parent record, so
+   * exhausting its recompute retries leaves the database internally
+   * inconsistent — detail rows say one thing, the column that summarizes them
+   * says another — and nothing recomputes it until some later write touches
+   * the same parent, which after a seed may never happen. That is the #4632
+   * durability class exactly ("persisted state and runtime state disagree
+   * while everything looks normal"), so it logs at `error` naming the
+   * consequence and the remedy.
+   *
+   * It is also COUNTED, into `SeedLoadResult.summariesStale` /
+   * `summary.totalSummariesStale`, because a log line is not something a
+   * caller can branch on. `success` deliberately stays `true`: the rows landed,
+   * and every consumer of this result treats `success: false` as "the write
+   * failed" — the protocol seed-apply surface returns it with an EMPTY errors
+   * array, the runtime boot banner prints a "0 dropped record(s)" line, and the
+   * package/marketplace installers fail an install that in fact wrote every
+   * row. The new counter carries the signal instead.
    */
-  private async writeRecoveringSummary<T>(fn: () => Promise<T>): Promise<T> {
+  private async writeRecoveringSummary<T>(objectName: string, fn: () => Promise<T>): Promise<T> {
     try {
-      return await fn();
+      return await this.performSeedWrite(fn);
     } catch (e: any) {
       if (e?.code === 'ERR_SUMMARY_RECOMPUTE') {
-        this.logger.warn(
-          '[SeedLoader] roll-up summary recompute failed after retries; records were written (summary values may be stale)',
-          { failures: Array.isArray(e.failures) ? e.failures.length : undefined },
-        );
+        this.reportStaleSummaries(objectName, e);
         return e.written as T;
       }
       throw e;
     }
+  }
+
+  /**
+   * Count and announce the roll-up summaries a recovered write left stale.
+   *
+   * Split out of {@link writeRecoveringSummary}'s catch so the counting and the
+   * `error` line are one unit: raising the level without counting was half the
+   * #4998 defect, and counting without raising the level was the other half.
+   */
+  private reportStaleSummaries(objectName: string, e: SummaryRecomputeLike): void {
+    const failures = Array.isArray(e.failures) ? e.failures : [];
+    // One entry per parent record whose summary field could not be recomputed.
+    // If the producer sent no usable list we still KNOW at least one summary is
+    // stale — the error code says so — and counting 0 would restore exactly the
+    // invisibility this counter exists to remove.
+    const staleCount = failures.length || 1;
+    const columns = [...new Set(
+      failures
+        .filter(f => f?.parentObject && f?.field)
+        .map(f => `${f.parentObject}.${f.field}`),
+    )];
+    this.summariesStale += staleCount;
+    this.logger.error(
+      `[SeedLoader] roll-up summary recompute FAILED after retries while seeding ${objectName} — ` +
+      `${staleCount} persisted summary value(s) on ` +
+      `${columns.length > 0 ? columns.join(', ') : 'the parent record(s)'} now hold STALE values: ` +
+      `they disagree with the detail rows they summarize, and nothing recomputes them on its own. ` +
+      `The seeded rows themselves WERE written and are deliberately NOT re-written (that would ` +
+      `duplicate them), so this load still reports success: true with every row counter clean — ` +
+      `the machine-readable trace is summariesStale on this object's result ` +
+      `(summary.totalSummariesStale for the load). Fix the recompute error below and re-run the ` +
+      `seed, or trigger any write on the affected parent record(s) to force a recompute. ` +
+      `Cause: ${e?.message ?? 'unknown'}`,
+      e instanceof Error ? e : undefined,
+      {
+        object: objectName,
+        summariesStale: staleCount,
+        summaryColumns: columns,
+        failures: failures.map(f => ({
+          parentObject: f?.parentObject,
+          parentId: f?.parentId,
+          field: f?.field,
+          error: f?.error instanceof Error ? f.error.message : f?.error,
+        })),
+      },
+    );
   }
 
   private async writeRecord(
@@ -1263,7 +1358,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     switch (mode) {
       case 'insert': {
-        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
+        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
@@ -1275,7 +1370,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (this.isNoOpReplay(record, existing)) {
           return { action: 'skipped', id };
         }
-        await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
+        await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
         return { action: 'updated', id };
       }
 
@@ -1285,10 +1380,10 @@ export class SeedLoaderService implements ISeedLoaderService {
           if (this.isNoOpReplay(record, existing)) {
             return { action: 'skipped', id };
           }
-          await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
+          await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
           return { action: 'updated', id };
         } else {
-          const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
+          const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
           return { action: 'inserted', id: this.extractId(result) };
         }
       }
@@ -1297,18 +1392,18 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (existing) {
           return { action: 'skipped', id: this.extractId(existing) };
         }
-        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
+        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       case 'replace': {
         // Replace mode: just insert (caller should have cleared the table)
-        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
+        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
 
       default: {
-        const result = await this.writeRecoveringSummary(() => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
+        const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };
       }
     }
@@ -1751,6 +1846,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         totalReferencesResolved: 0,
         totalReferencesDeferred: 0,
         totalReferencesDropped: 0,
+        totalSummariesStale: 0,
         circularDependencyCount: 0,
         durationMs,
       },
@@ -1774,6 +1870,11 @@ export class SeedLoaderService implements ISeedLoaderService {
       totalReferencesResolved: results.reduce((sum, r) => sum + r.referencesResolved, 0),
       totalReferencesDeferred: results.reduce((sum, r) => sum + r.referencesDeferred, 0),
       totalReferencesDropped: results.reduce((sum, r) => sum + (r.referencesDropped ?? 0), 0),
+      // No `?? 0`: every result entry is built by `loadDataset`, which always
+      // populates `summariesStale`. A consumer never needs the fallback either
+      // — the field is declared with `.default(0)`, so it survives a parse of a
+      // payload written before it existed (#4998).
+      totalSummariesStale: results.reduce((sum, r) => sum + r.summariesStale, 0),
       circularDependencyCount: graph.circularDependencies.length,
       durationMs,
     };
@@ -1794,6 +1895,27 @@ export class SeedLoaderService implements ISeedLoaderService {
 // ==========================================================================
 // Internal Types
 // ==========================================================================
+
+/**
+ * Structural view of objectql's `SummaryRecomputeError` (framework#3147).
+ *
+ * Declared here rather than imported because objectql depends on THIS package,
+ * so importing it back would cycle — the same reason the error is matched by
+ * `code` instead of `instanceof`. Every field is optional: this describes an
+ * object that crossed a package boundary as `unknown`, and the reader
+ * ({@link SeedLoaderService.reportStaleSummaries}) is what decides what to do
+ * when a field is missing.
+ */
+interface SummaryRecomputeLike {
+  message?: string;
+  failures?: Array<{
+    childObject?: string;
+    parentObject?: string;
+    parentId?: string;
+    field?: string;
+    error?: unknown;
+  }>;
+}
 
 interface DeferredUpdate {
   objectName: string;

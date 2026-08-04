@@ -151,6 +151,7 @@ Result of loading a single dataset
 | **referencesResolved** | `integer` | ✅ | References resolved via externalId |
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
 | **referencesDropped** | `integer` | ✅ | Reference fields dropped from records that were still written |
+| **summariesStale** | `integer` | ✅ | Roll-up summary values left stale by writes for this dataset |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | Reference resolution errors |
 
 

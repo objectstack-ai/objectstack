@@ -3810,6 +3810,7 @@
     "data/SeedLoadResult:referencesDropped",
     "data/SeedLoadResult:referencesResolved",
     "data/SeedLoadResult:skipped",
+    "data/SeedLoadResult:summariesStale",
     "data/SeedLoadResult:total",
     "data/SeedLoadResult:updated",
     "data/SeedLoaderConfig:batchSize",
