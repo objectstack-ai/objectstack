@@ -547,9 +547,9 @@ function isBindableComparand(value: unknown): boolean {
  * 1. **`{ $field }`** — declared, produced, and implemented only in memory.
  *    Refused wherever it appears, including inside an `$in` / `$nin` / `$between`
  *    list. The list case matters more than it looks: a `$field` member did not
- *    even crash, it compiled to `where amount in ('[object Object]')`-shaped
- *    nonsense and returned ZERO ROWS — a silent wrong answer, which #3948 /
- *    #4209 settled is strictly worse than an error on a scoped read.
+ *    even crash — the query compiled, ran, and returned ZERO ROWS. A silent
+ *    wrong answer is what #3948 / #4209 settled is strictly worse than an error
+ *    on a permission-scoped read.
  *
  * 2. **The general arm** — a known operator whose comparand is a shape no
  *    dialect can bind (a plain object, an array where one value belongs). The
@@ -558,12 +558,15 @@ function isBindableComparand(value: unknown): boolean {
  *    {@link SCALAR_COMPARAND_OPERATORS} so the legitimate array binds keep
  *    working untouched.
  *
- * Deliberately NOT extended to the `LIKE` family: `$contains`/`$startsWith`/…
- * stringify their comparand, so an object there compiles and runs (matching
- * nothing) rather than failing to bind. That is a separate defect class —
- * a filter that is applied nonsensically, not one that cannot be applied — and
- * widening this guard to cover it would change behaviour beyond what #5041
- * measured. Filed separately.
+ * Deliberately NOT extended to two neighbouring shapes, both of which return
+ * zero rows today rather than failing to bind: a non-`$field` object MEMBER of
+ * an `$in`/`$nin` list, and the `LIKE` family (`$contains`/`$startsWith`/…),
+ * which stringifies its comparand to `[object Object]`. Those are a different
+ * defect class — a filter applied nonsensically, not one that cannot be applied
+ * — and their direction is fail-closed (they narrow the result set, so they are
+ * not a filter bypass). Widening this guard to cover them would change the
+ * behaviour of paths that do not throw today, beyond what #5041 measured; see
+ * the #5041 PR discussion for the measurement.
  */
 function assertCompilableComparand(field: string, op: string, value: unknown): void {
   const ref = fieldReferenceOf(value);
