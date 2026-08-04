@@ -3,11 +3,9 @@ import {
   NotificationTypeSchema,
   NotificationSeveritySchema,
   NotificationPositionSchema,
-  NotificationActionSchema,
   type NotificationType,
   type NotificationSeverity,
   type NotificationPosition,
-  type NotificationAction,
 } from './notification.zod';
 
 describe('NotificationTypeSchema', () => {
@@ -52,39 +50,19 @@ describe('NotificationPositionSchema', () => {
   });
 });
 
-describe('NotificationActionSchema', () => {
-  it('should accept a valid action', () => {
-    const action: NotificationAction = { label: 'Undo', action: 'undo', variant: 'primary' };
-    const result = NotificationActionSchema.parse(action);
-    expect(result.label).toBe('Undo');
-    expect(result.action).toBe('undo');
-    expect(result.variant).toBe('primary');
-  });
-
-  it('should default variant to primary', () => {
-    const result = NotificationActionSchema.parse({ label: 'Retry', action: 'retry' });
-    expect(result.variant).toBe('primary');
-  });
-
-  it('should reject missing label', () => {
-    expect(() => NotificationActionSchema.parse({ action: 'undo' })).toThrow();
-  });
-
-  it('should reject missing action', () => {
-    expect(() => NotificationActionSchema.parse({ label: 'Undo' })).toThrow();
-  });
-});
+// `NotificationActionSchema` had a describe block here until #5015 removed the
+// schema (ADR-0049 enforce-or-remove — no carrier key, unreachable from every
+// metadata root, zero parse outside this file). Its absence is pinned by symbol
+// identity in `notification-embed-retirement.test.ts`, not by the silence here.
 
 describe('Type exports', () => {
   it('should have valid type exports', () => {
     const type: NotificationType = 'toast';
     const severity: NotificationSeverity = 'info';
     const position: NotificationPosition = 'top_right';
-    const action: NotificationAction = { label: 'OK', action: 'confirm', variant: 'primary' };
     expect(type).toBeDefined();
     expect(severity).toBeDefined();
     expect(position).toBeDefined();
-    expect(action).toBeDefined();
   });
 
   // Pin: this module no longer declares the bare Notification(Config) names.

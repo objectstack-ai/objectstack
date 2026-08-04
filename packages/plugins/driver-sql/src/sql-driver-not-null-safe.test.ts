@@ -266,11 +266,18 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
       await expect(ids({ $not: [] })).rejects.toThrow(/filter\.\$not/);
     });
 
-    it('a field constrained by zero operators is still not ruled on (#5240)', async () => {
-      // `{ stage: {} }` compiles to no SQL; guarding it would have turned that
-      // into a live `IS NULL` and decided #5240 from here.
-      expect(await ids({ $not: { stage: {} } })).toEqual(ALL);
-      expect(sqlFor({ $not: { stage: {} } })).toBe('select `id` from `deal`');
+    it('a field constrained by zero operators is REFUSED, not rewritten (#5240)', async () => {
+      // Was: `{ stage: {} }` compiled to no SQL, and this suite pinned that it
+      // stayed that way — `nullGuardForFieldSpec` deliberately answered `'none'`
+      // for an empty spec so the NULL-safe rewrite would not RULE on #5240 by
+      // turning a shape that emits nothing into a live `IS NULL`.
+      //
+      // #5240 has since been ruled: the shape is refused in all four backends.
+      // The refusal fires on the #5134 validation walk, which runs BEFORE this
+      // rewrite, so the empty spec no longer reaches `nullGuardForFieldSpec` at
+      // all and the branch that protected it is gone.
+      await expect(ids({ $not: { stage: {} } })).rejects.toThrow(/zero operators/);
+      expect(() => sqlFor({ $not: { stage: {} } })).toThrow(/zero operators/);
     });
   });
 });

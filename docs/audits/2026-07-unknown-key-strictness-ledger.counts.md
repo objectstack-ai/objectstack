@@ -22,17 +22,17 @@ regenerate.
 |---|---|
 | Triaged directories | 5 |
 | Object sites in them | 454 |
-| Still-open (strip) sites | 199 |
-| Files carrying at least one | 31 |
+| Still-open (strip) sites | 195 |
+| Files carrying at least one | 29 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 15 |
+| authorable — the ruling's forced scope | 11 |
 | unresolved — needs a per-schema verdict | 33 |
-| wire / open — out of forced scope | 104 |
-| no door — no carrier, ADR-0049 territory | 16 |
+| wire / open — out of forced scope | 106 |
+| no door — no carrier, ADR-0049 territory | 14 |
 | no gate — carrier live, no parse | 31 |
 
 ## Posture, per triaged directory
@@ -43,12 +43,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 170 | 112 | 5 | 0 | 53 |
+| `ui/` | 170 | 116 | 5 | 0 | 49 |
 | `data/` | 162 | 54 | 1 | 0 | 107 |
 | `automation/` | 75 | 49 | 0 | 0 | 26 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **454** | **249** | **6** | **0** | **199** |
+| **total** | **454** | **253** | **6** | **0** | **195** |
 
 ## File-level triage — site counts
 
@@ -68,13 +68,12 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `dashboard.zod.ts` | 11 |
 | `dataset.zod.ts` | 4 |
 | `i18n.zod.ts` | 6 |
-| `notification.zod.ts` | 1 |
 | `page.zod.ts` | 7 |
 | `report.zod.ts` | 3 |
 | `responsive.zod.ts` | 4 |
-| `sharing.zod.ts` | 2 |
+| `sharing.zod.ts` | 1 |
 | `theme.zod.ts` | 6 |
-| `view.zod.ts` | 51 |
+| `view.zod.ts` | 53 |
 | `widget.zod.ts` | 9 |
 | **total** | **170** |
 
@@ -156,7 +155,7 @@ over it is here.
 
 ### `ui/` — open
 
-**53 strip of 170**, in 8 file(s).
+**49 strip of 170**, in 6 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -164,18 +163,16 @@ over it is here.
 | `chart.zod.ts` | 2 | 8 |
 | `component.zod.ts` | 29 | 29 |
 | `i18n.zod.ts` | 5 | 6 |
-| `notification.zod.ts` | 1 | 1 |
-| `sharing.zod.ts` | 1 | 2 |
-| `view.zod.ts` | 5 | 51 |
+| `view.zod.ts` | 3 | 53 |
 | `widget.zod.ts` | 9 | 9 |
-| **total** | **53** | **170** |
+| **total** | **49** | **170** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 6 |
+| authorable — the ruling's forced scope | 2 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 0 |
-| no door — no carrier, ADR-0049 territory | 16 |
+| wire / open — out of forced scope | 2 |
+| no door — no carrier, ADR-0049 territory | 14 |
 | no gate — carrier live, no parse | 31 |
 
 ### `data/` — open

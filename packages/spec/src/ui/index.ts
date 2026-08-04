@@ -35,7 +35,16 @@ export * from './widget.zod';
 export * from './component.zod';
 export * from './react-blocks';
 export * from './theme.zod';
+// `notification.zod` still exports the three presentation enums
+// (`NotificationType` / `NotificationSeverity` / `NotificationPosition`);
+// `NotificationActionSchema` / `NotificationAction` were REMOVED at #5015 per
+// ADR-0049 enforce-or-remove — no carrier key, unreachable from every metadata
+// root, zero parse. See the block in that module.
 export * from './notification.zod';
+// `sharing.zod` still exports the LIVE `SharingConfigSchema` (carried by
+// `FormViewSchema.sharing`; `rest-server.ts` gates the anonymous form routes on
+// it). `EmbedConfigSchema` / `EmbedConfig` were REMOVED at #5015 per ADR-0049 —
+// one file, two verdicts. See the block in that module.
 export * from './sharing.zod';
 
 // ---------------------------------------------------------------------------

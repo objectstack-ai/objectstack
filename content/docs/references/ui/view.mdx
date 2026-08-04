@@ -16,8 +16,8 @@ Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GroupingConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GroupingConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -813,6 +813,73 @@ This schema accepts one of the following structures:
 
 ---
 
+
+---
+
+
+---
+
+## ViewItemWire
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **viewKind** | `'list'` | ✅ |  |
+| **config** | `{ name?: string; label?: string; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | ✅ | List-family view configuration. |
+| **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
+| **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
+| **label** | `string` | optional | Display label (supports i18n). |
+| **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
+| **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
+| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `string` | optional | Owner user id — set when `scope` is `personal`. |
+| **hidden** | `boolean` | optional | Hidden from the switcher (per-user / per-org declutter). |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
+| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **viewKind** | `'form'` | ✅ |  |
+| **config** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | ✅ | Form view configuration. |
+| **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
+| **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
+| **label** | `string` | optional | Display label (supports i18n). |
+| **isDefault** | `boolean` | optional | Whether this is the object's default view in the switcher. |
+| **order** | `integer` | optional | Sort order within the object's view switcher / left rail. |
+| **scope** | `Enum<'package' \| 'shared' \| 'personal'>` | optional | Identity layer (defaults to `package` for source-loaded views). |
+| **owner** | `string` | optional | Owner user id — set when `scope` is `personal`. |
+| **hidden** | `boolean` | optional | Hidden from the switcher (per-user / per-org declutter). |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **isPinned** | `boolean` | optional | Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored). |
+| **sortOrder** | `integer` | optional | Studio round-trip: position within the switcher (per-user state, written by the console — not authored). |
 
 ---
 

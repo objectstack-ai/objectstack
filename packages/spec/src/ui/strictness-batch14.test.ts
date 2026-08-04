@@ -12,9 +12,13 @@
  *
  * 1. **Closure** — each newly-strict shape rejects an undeclared key and the
  *    rejection is USEFUL (names the surface, echoes the key, prescribes).
- * 2. **No-door pins** — for `NotificationActionSchema` / `EmbedConfigSchema`,
- *    an assertion that goes RED the moment either gains a carrier key, which is
- *    the event that would make this batch's "do not tighten" verdict wrong.
+ * 2. **The split's surviving half** — the importer instrument that told the two
+ *    apart, plus the live-carrier pin for `SharingConfigSchema`. This used to be
+ *    a pair of no-door pins over `NotificationActionSchema` / `EmbedConfigSchema`
+ *    that would go RED if either gained a carrier key; #5015 answered that
+ *    verdict as ADR-0049 REMOVE and both shapes are gone, so the absence pins
+ *    live in `notification-embed-retirement.test.ts` where they can actually
+ *    fail. See the block's own header for why they are not restated here.
  * 3. **Prescription integrity** — every alias target this batch added is a key
  *    the schema really accepts (ledger finding 12: *never suggest a key the
  *    schema cannot accept*), checked by parsing the prescribed key, not by
@@ -30,8 +34,7 @@ import ts from 'typescript';
 import { z } from 'zod';
 
 import { ActionParamSchema, ActionSchema as ActionSchemaForAudit } from './action.zod';
-import { NotificationActionSchema } from './notification.zod';
-import { SharingConfigSchema, EmbedConfigSchema } from './sharing.zod';
+import { SharingConfigSchema } from './sharing.zod';
 import { ReportSortSchema, JoinedReportBlockSchema, ReportSchema as ReportSchemaForAudit } from './report.zod';
 import {
   DatasetDimensionSchema,
@@ -485,55 +488,76 @@ function importersOf(targetRel: string): string[] {
   return out.sort();
 }
 
-describe('批 14 — the two no-door shapes stay unclosed, and say so', () => {
+describe('批 14 — the file that split, after #5015 retired its dead half', () => {
+  // ── What this block is now, and why it is not just deleted ────────────────
+  //
+  // 批 14 measured eleven strip sites and reclassified two — `NotificationAction`
+  // and `EmbedConfig` — as `no door`, pinning them here so the verdict would go
+  // RED if either ever gained a carrier key. #5015 answered that verdict the
+  // other way: ADR-0049 enforce-or-remove, ruled REMOVE, and both shapes are
+  // gone.
+  //
+  // Their ABSENCE pins moved to `notification-embed-retirement.test.ts`, which
+  // asserts it by resolved symbol identity across every public entry. They are
+  // deliberately NOT restated here as `expect(names).toEqual([])`: with the
+  // schemas deleted, such an assertion passes because nothing is produced rather
+  // than because the logic holds — a pin that cannot fail is worse than none,
+  // since it reads as coverage (the trap PR #5046 documented).
+  //
+  // What survives here is the half that is still about a LIVE shape: the
+  // instrument that told the two apart in the first place, and the carrier pin
+  // for `SharingConfigSchema`. That carrier is the whole reason this file was
+  // the ledger's first one-row-two-verdicts case, so losing it with the dead
+  // half would delete the evidence for the surviving verdict.
+
   it('the importer pin sees all three import forms and does not confuse same-named modules', () => {
     // Self-test first: an assertion about "who imports X" is worthless if the
     // matcher only knows one spelling. `ui/i18n.zod` is imported with
     // `import … from` by several ui modules AND re-exported by the barrel with
     // `export * from`.
     const i18n = importersOf('ui/i18n.zod');
-    expect(i18n).toContain('ui/index.ts');            // export * from
-    expect(i18n).toContain('ui/notification.zod.ts'); // import … from
+    expect(i18n).toContain('ui/index.ts');   // export * from
+    expect(i18n).toContain('ui/view.zod.ts'); // import … from
     expect(i18n.length).toBeGreaterThan(2);
 
     // And the discriminating case: two `sharing.zod` modules exist. Resolution,
-    // not substring matching, is what keeps them apart.
+    // not substring matching, is what keeps them apart — a substring test
+    // miscredits `stack.zod.ts` and `security/index.ts` to the UI module.
     expect(importersOf('security/sharing.zod')).toContain('stack.zod.ts');
     expect(importersOf('ui/sharing.zod')).not.toContain('stack.zod.ts');
   });
 
-  it('ui/notification.zod has exactly one importer — the barrel. Nothing can carry NotificationAction', () => {
-    expect(importersOf('ui/notification.zod')).toEqual(['ui/index.ts']);
-  });
-
-  it('ui/sharing.zod is imported by the barrel and view.zod — which carries SharingConfig, NOT EmbedConfig', () => {
+  it('SharingConfig keeps the live carrier that made this file split (#5015 took the other half)', () => {
+    // The carrier is specific, and that asymmetry IS the 批 14 reclassification:
+    // the form view names `SharingConfigSchema`. `EmbedConfigSchema` was named by
+    // nothing, which is what #5015 acted on.
     expect(importersOf('ui/sharing.zod')).toEqual(['ui/index.ts', 'ui/view.zod.ts']);
-    // The carrier is specific, and that asymmetry IS the reclassification: the
-    // form view names `SharingConfigSchema`, and no module anywhere names
-    // `EmbedConfigSchema`. Pin the symbol, not the file.
-    const namesEmbed = specModules()
-      .filter((f) => !f.endsWith('sharing.zod.ts'))
-      .filter((f) => /\bEmbedConfigSchema\b/.test(fs.readFileSync(f, 'utf8')))
-      .map((f) => path.relative(SPEC_SRC, f).split(path.sep).join('/'));
-    expect(namesEmbed).toEqual([]);
     expect(fs.readFileSync(path.join(SPEC_SRC, 'ui/view.zod.ts'), 'utf8'))
       .toContain('SharingConfigSchema');
   });
 
-  it('both stay strip — a precisely-validated dead slot is the more convincing lie (#4583)', () => {
-    // Closing either would spend a v17 breaking change on a shape nothing
-    // parses. If someone closes one, this fails and points at the ledger row.
-    expect(NotificationActionSchema.safeParse({ label: 'Undo', action: 'undo', bogus: 1 }).success)
+  it('the surviving door is still CLOSED — the retirement did not relax 批 14', () => {
+    // The one assertion in this block that exercises behaviour rather than
+    // topology. `SharingConfigSchema` was tightened by 批 14 and must stay
+    // tightened: removing its dead sibling from the same file is exactly the
+    // kind of edit that could take the strictness with it.
+    const rejected = SharingConfigSchema.safeParse({ enabled: true, bogus: 1 });
+    expect(rejected.success).toBe(false);
+    // Positive control in the same run: a declared key still parses, so the
+    // rejection above is about `bogus` and not about the shape being broken.
+    expect(SharingConfigSchema.safeParse({ enabled: true, allowAnonymous: true }).success)
       .toBe(true);
-    expect(EmbedConfigSchema.safeParse({ enabled: true, bogus: 1 }).success).toBe(true);
   });
 
-  it('their prose records the verdict where the next reader will look', () => {
+  it('both modules record the retirement where the next reader will look', () => {
     const notification = fs.readFileSync(path.join(SPEC_SRC, 'ui/notification.zod.ts'), 'utf8');
     const sharing = fs.readFileSync(path.join(SPEC_SRC, 'ui/sharing.zod.ts'), 'utf8');
     for (const source of [notification, sharing]) {
-      expect(source).toContain('NO AUTHORING DOOR');
-      expect(source).toContain('#4001 批 14');
+      expect(source).toContain('#5015');
+      expect(source).toContain('ADR-0049');
     }
+    // The surviving module still explains its own live door, so a later reader
+    // does not mistake the whole file for retired surface.
+    expect(sharing).toContain('live authoring door');
   });
 });
