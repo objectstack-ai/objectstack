@@ -230,6 +230,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             if (unhidden.length > 0) (result as any).unhiddenApps = unhidden;
                         }
                     } catch (e: any) {
+                        // #4754 — ADR-0045's visibility flip is a metadata WRITE
+                        // riding on someone else's success. The drafts are already
+                        // promoted, so this route answers 200 either way, and
+                        // `unhideError` lands in a response body no operator reads.
+                        // That is the #4669 shape exactly: the write did not land,
+                        // the runtime looks completely healthy, and the loss only
+                        // surfaces later as "I published it but the app isn't
+                        // there". So it is reported at `error` (AGENTS.md →
+                        // "Degradation log levels"), not swallowed.
+                        const logger = deps.logger ?? console;
+                        logger.error(
+                            `[Packages] publish-drafts: the ADR-0045 visibility flip FAILED for package '${id}' — its drafts ARE ` +
+                            `published and live, but every hidden app bound to it is still STORED with \`hidden: true\`, so those ` +
+                            `apps stay invisible in the launcher while the publish reports success. Nothing retries this flip. ` +
+                            `Re-run POST /packages/${id}/publish-drafts once the cause below is resolved (it is idempotent), or ` +
+                            `unhide one app directly via PUT /meta/app/<name> with \`{"hidden": false}\`. Cause: ` +
+                            `${e?.message ?? String(e)}`,
+                        );
                         (result as any).unhideError = e?.message ?? 'visibility flip failed';
                     }
                     // A publish promoted drafts to active (or unhid an additive
