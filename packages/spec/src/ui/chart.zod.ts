@@ -10,9 +10,12 @@ import { strictObject } from '../shared/strict-object';
 // closed; two are deliberately left open with the reason recorded, because
 // closing them would gate nothing.
 //
-// ⚠️ Nothing above this block may be a `/** */` comment: `build-docs.ts`'s
+// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
 // `getFileDescription()` publishes the module's FIRST doc block as the
-// reference page's description (#3746 trap 1). Hence `//`.
+// reference page's description (#3746 trap 1). Hence `//`. Note you cannot
+// safely spell that token out here either — see the longer note in
+// `theme.zod.ts`, where quoting it inside a `//` line silently emptied the
+// published page description.
 //
 // CLOSED (real door, three measurements, 2026-08-03):
 //   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
@@ -300,16 +303,20 @@ export const ChartAnnotationSchema = lazySchema(() => strictObject(
  *     on a dashboard widget, the renderer's segment drill under the widget's
  *     `options` bag, which is `passthrough` precisely so renderer-only
  *     capabilities have a declared home.
- *
- *     ⚠️ This paragraph said "Migration: `drillDown`" from #3752 until #4001
- *     批 15, and **`drillDown` is not a key this protocol declares anywhere** —
- *     it is an untyped `(schema as any).drillDown` read inside objectui's
- *     `ObjectChart`. Promoting that sentence into a strict rejection message
- *     would have handed an author the platform's authority for a key the very
- *     same gate then rejects: the ledger's finding 7 for the third time. The
- *     underlying gap — a live renderer capability with no spec declaration —
- *     is filed, not fixed here.
  */
+// ⚠️ Kept OUT of the doc comment above on purpose — `build-docs.ts` publishes
+// that block to the public reference page, and the following is a note to the
+// next maintainer, not protocol documentation (the #3746 trap, in its subtler
+// form: not the file's FIRST block, but internal prose inside a published one).
+//
+// That `clickAction` paragraph read "Migration: `drillDown`" from #3752 until
+// #4001 批 15, and **`drillDown` is not a key this protocol declares
+// anywhere** — it is an untyped `(schema as any).drillDown` read inside
+// objectui's `ObjectChart`. Promoting that sentence into the strict rejection
+// message below would have handed an author the platform's authority for a key
+// the very same gate then rejects: the ledger's finding 7, third occurrence.
+// The underlying gap — a live renderer capability with no spec declaration —
+// is filed, not fixed here.
 export const ChartInteractionSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart interaction block',
