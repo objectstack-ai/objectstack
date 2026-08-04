@@ -46,6 +46,43 @@ const LAYOUT_ONLY_TYPES = new Set([
   'action_button',
 ]);
 
+/**
+ * Specifier types whose stored value must be a member of the declared
+ * `options` table.
+ *
+ * THE list is the spec's, not a judgement call made here: `SpecifierSchema`'s
+ * superRefine (`settings-manifest.zod.ts`) rejects a manifest that authors one
+ * of exactly these three types without a non-empty `options`. So "the types
+ * that must declare an option table" and "the types whose value is checked
+ * against it" name the same set — declared IS enforced, with no third list to
+ * drift. `radio` and `multiselect` have no producer manifest today; they are
+ * covered anyway because the alternative is that the first manifest to author
+ * one silently re-opens this exact hole.
+ */
+const OPTION_BEARING_TYPES = new Set(['select', 'radio', 'multiselect']);
+
+/**
+ * The declared option values, in string form.
+ *
+ * String form because a stored value has been through JSON (and, over the REST
+ * boundary, a form post): an option declared `value: 30` is legitimately read
+ * back as `'30'`, and rejecting that would be enforcing the transport rather
+ * than the enumeration. Same rule the record validator applies to
+ * `select`/`multiselect` field options (objectui#2729).
+ */
+function declaredOptionValues(options: unknown): string[] {
+  if (!Array.isArray(options)) return [];
+  const out: string[] = [];
+  for (const opt of options) {
+    if (!opt || typeof opt !== 'object') continue;
+    const v = (opt as Record<string, unknown>).value;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out.push(String(v));
+    }
+  }
+  return out;
+}
+
 interface RegisteredManifest {
   manifest: SettingsManifest;
   /** Resolved specifier scopes for fast lookup. */
@@ -613,8 +650,19 @@ export class SettingsService {
    *   is (switching provider must validate that provider's fields).
    * - `required` + visible + empty → rejected.
    * - `pattern` (text fields) + non-empty value that mismatches → rejected.
+   * - `options` (`select`/`radio`/`multiselect`) + non-empty value outside
+   *   the declared table → rejected (`invalid_option`).
    * - All-null patches (namespace reset) and unparseable visibility
    *   expressions skip validation rather than block the write.
+   *
+   * The TOUCH gate is what keeps the options check from being a regression
+   * for existing workspaces: a value that pre-dates a manifest's current
+   * option table (a `mail.provider` of `sendgrid`, retired in #5094) only
+   * fails the patch that writes that key. A patch changing `from_name`
+   * alone is not rejected because a stale `provider` sits in the store —
+   * otherwise every workspace carrying historical drift would be locked out
+   * of its own settings page, unable to edit anything, which is worse than
+   * the gap this closes.
    */
   private async validatePatch(
     namespace: string,
@@ -679,6 +727,58 @@ export class SettingsService {
         });
         continue;
       }
+
+      // A `select`/`radio`/`multiselect` value must be a member of the option
+      // table the manifest declares. Until this check existed the `options`
+      // list was a front-end convention only — the console dropdown emitted
+      // legal values, but `PUT /api/settings/:ns` accepted any string at all,
+      // so a script, a migration or AI-authored bootstrap code could write
+      // `provider: 'sendgrid'` into a namespace that has no such provider and
+      // the write would succeed silently, leaving each consumer to improvise.
+      if (!empty && OPTION_BEARING_TYPES.has(type)) {
+        const allowed = declaredOptionValues(spec.options);
+        // A manifest with no option table cannot say what is legal. The spec
+        // refuses that shape at parse time, but `registerManifest` takes
+        // manifests as given (no Zod pass), so skip rather than reject every
+        // write to a hand-built manifest — same leniency the unparseable
+        // `visible` and invalid `pattern` branches already take.
+        if (allowed.length > 0) {
+          // `multiselect` stores an array, `select`/`radio` a scalar; both are
+          // checked element-wise against the one table. A scalar arriving at a
+          // multiselect is wrapped rather than rejected — policing the value's
+          // SHAPE is a different constraint (`invalid_type`) with a different
+          // owner, and inventing it here would reject writes this change was
+          // never asked to touch.
+          const picked = Array.isArray(value) ? value : [value];
+          // `findIndex`, not `find`: a `find` returning `undefined` cannot say
+          // whether nothing was rejected or whether the rejected element WAS
+          // `undefined` — and the latter would slip through the check.
+          const at = picked.findIndex((v) => !allowed.includes(String(v)));
+          if (at !== -1) {
+            const offending = picked[at];
+            // An option value is not a secret, but `encrypted` is authorable on
+            // any specifier — so never echo the rejected value for a key whose
+            // contents are held encrypted, in a message that lands in logs.
+            const secret = reg.encryptedKeys.has(key);
+            const got = secret ? '' : ` Received '${String(offending)}'.`;
+            errors.push({
+              field: key,
+              code: 'invalid_option',
+              message: `${label} must be one of: ${allowed.join(', ')}.${got}`,
+              label,
+              // The allowed set as a discrete constraint, so a client composes
+              // its own sentence instead of parsing ours (`FieldError.
+              // constraint`, ADR-0114). Key and comma-joined form are the ones
+              // the spec's own `{ allowed: 'draft, sent' }` example documents
+              // and the record validator already emits for this same code.
+              constraint: { allowed: allowed.join(', ') },
+              ...(secret ? {} : { value: String(offending) }),
+            });
+            continue;
+          }
+        }
+      }
+
       if (!empty && typeof spec.pattern === 'string' && typeof value === 'string') {
         let re: RegExp | undefined;
         try {
