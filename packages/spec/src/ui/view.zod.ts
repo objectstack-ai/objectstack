@@ -89,16 +89,46 @@ export type { HttpMethodType } from '../shared/http.zod';
  * 3. 'value': Static Data - Hardcoded data array
  */
 export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', [
-  z.object({
+  strictObject({
+    surface: 'this `object` data source',
+    history: VIEW_HISTORY,
+    // `objectName` is the canonical spelling on the QUERY surface
+    // (`data/query.zod.ts`); the view data source names it `object`, and an
+    // author moving between the two writes the neighbouring word rather than a
+    // typo edit distance could reach.
+    // NOT aliased: a bare `name`. It is a real key on the view ITEM
+    // (`ViewItemSchema.name`), so an author who wrote it here may have meant
+    // the view's name, not the object's — and this campaign's own finding 7 is
+    // that a confidently wrong prescription is worse than none.
+    aliases: { objectName: 'object' },
+  }, {
     provider: z.literal('object'),
     object: z.string().describe('Target object name'),
   }),
-  z.object({
+  strictObject({
+    surface: 'this `api` data source',
+    history: VIEW_HISTORY,
+    // The HTTP verbs are the request BLOCKS' business (`read`/`write` each hold
+    // an `HttpRequestSchema`), so an author who put the whole request inline is
+    // pointed at the block that owns it rather than at a near-miss key.
+    guidance: {
+      url: 'Set the URL inside the request block: `read: { url, method }` (or `write: { … }`) — the data source itself declares only `read` / `write`.',
+      method: 'Set the method inside the request block: `read: { url, method }` (or `write: { … }`).',
+      fetch: 'Use `read` for the fetch request and `write` for the submit request.',
+      submit: 'Use `write` for the submit request (and `read` for the fetch request).',
+    },
+  }, {
     provider: z.literal('api'),
     read: HttpRequestSchema.optional().describe('Configuration for fetching data'),
     write: HttpRequestSchema.optional().describe('Configuration for submitting data (for forms/editable tables)'),
   }),
-  z.object({
+  strictObject({
+    surface: 'this `value` data source',
+    history: VIEW_HISTORY,
+    // `data`/`rows`/`records` are the words the surrounding surfaces use for a
+    // row set; on this provider the static array is `items`.
+    aliases: { data: 'items', rows: 'items', records: 'items', values: 'items' },
+  }, {
     provider: z.literal('value'),
     items: z.array(z.unknown()).describe('Static data array'),
   }),
@@ -108,7 +138,14 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
    * ObjectQL object. Powers the metadata editor, action input dialogs,
    * and any Form that is not bound to a CRUD object.
    */
-  z.object({
+  strictObject({
+    surface: 'this `schema` data source',
+    history: VIEW_HISTORY,
+    // `schemaId` and `schema` are one key apart in prose but not in edit
+    // distance, and the pair is genuinely confusable: one NAMES a schema the
+    // server resolves, the other INLINES it.
+    aliases: { type: 'schemaId', metadataType: 'schemaId', jsonSchema: 'schema' },
+  }, {
     provider: z.literal('schema'),
     /** Schema identifier (e.g. metadata type name "report"). Resolved at runtime against /meta entries. */
     schemaId: z.string().describe('Schema identifier — typically the metadata type name'),
@@ -511,7 +548,19 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
   label: I18nLabelSchema.optional().describe('Display label override (defaults to the field label)'),
   type: z.enum(['select', 'multi-select', 'boolean', 'date-range', 'text']).optional()
     .describe('Filter control type. Omit to infer from the field definition'),
-  options: z.array(z.object({
+  options: z.array(strictObject({
+    surface: 'this user filter option',
+    history: VIEW_HISTORY,
+    // Measured against the renderer that consumes these entries
+    // (objectui `plugin-list/src/UserFilters.tsx` — `ResolvedOption`): it
+    // declares exactly `label` / `value` / `color` plus a `count` it COMPUTES
+    // from a data snapshot on every render. `count` is therefore not an
+    // authoring key — an authored one is overwritten before it is read, which
+    // is why it gets a wrong-layer prescription instead of being declared.
+    guidance: {
+      count: 'Per-option record counts are computed from the data, not authored. Set `showCount: true` on the filter FIELD to display them.',
+    },
+  }, {
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
     label: I18nLabelSchema.describe('Option label'),
     color: z.string().optional().describe('Option color token/hex'),
@@ -533,20 +582,47 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * @see Airtable Interface → "User filters" panel (Elements: tabs / dropdowns)
  */
 /**
- * Deliberately left STRIP by #4001, pending its own verification.
+ * Still STRIP after #4001 批 18 — the verification 批 6e asked for was DONE,
+ * and it turned up a blocker that is not a strictness question.
  *
- * `tabs` and `showAllRecords` are valid on a PAGE's user filters and not on an
- * object list view's (ADR-0047), and `object-list-view.test.ts` asserts they are
- * dropped here rather than rejected. That is the "correct on a neighbouring
- * surface" shape this campaign usually answers with a `guidance` entry — so the
- * likely right end state is a rejection saying "tabs are page-only" rather than
- * a silent drop.
+ * ## What 批 6e asked, and the answer
  *
- * Not done here because it is a behaviour change with a real consumer question
- * behind it: something may pass a page-shaped userFilters block through this
- * schema deliberately, relying on the strip to narrow it. The campaign's own
- * rule is verify-then-enforce, and this batch did not verify it. Left as the one
- * open shape in this file, named rather than quietly skipped.
+ * 批 6e left this open pending "does anything rely on the strip to NARROW a
+ * page-shaped block?". It does, and the relier is in this file:
+ * {@link ObjectUserFiltersSchema} is `UserFiltersSchema.omit({ tabs,
+ * showAllRecords })`, and `.omit()` inherits the base's posture. Closing this
+ * base therefore flips `object-list-view.test.ts`'s pin from "drops the
+ * page-only keys" to "rejects" them. That flip is CORRECT and wanted: the CLI
+ * lint (`packages/lint/src/validate-list-view-mode.ts`) already reports a
+ * `tabs`-carrying `userFilters` on an object view, so today the two doors
+ * disagree — the bespoke guard warns while the schema silently drops. Closing
+ * makes them agree. On its own this would have shipped in this batch.
+ *
+ * ## The blocker: `allowAddTab` is a live capability the spec never declared
+ *
+ * objectui's renderer reads `config.allowAddTab` and renders an "add tab"
+ * control from it (`packages/plugin-list/src/UserFilters.tsx:182` and `:742`);
+ * its own `UserFiltersSchema` declares the key. The spec's does not.
+ *
+ * That gap is not inert, because the metadata write path does NOT persist
+ * `parsed.data`: `saveMetaItem` validates with `safeParse` and then stores the
+ * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survive
+ * (`metadata-protocol/src/protocol.ts`, "Validation policy"). So an authored
+ * `allowAddTab` is stripped from the parse RESULT, which is discarded — and the
+ * stored document keeps it, and the renderer reads it. **The capability works
+ * today.** Closing this shape turns that working config into a 422.
+ *
+ * So closing here would not convert a silent failure into a loud one — the
+ * campaign's whole warrant. It would REMOVE a shipped capability. The fix is to
+ * decide whether `allowAddTab` is promoted into this schema (objectui's own
+ * drift guard, `types/src/__tests__/list-view-spec-parity.test.ts`, routes
+ * exactly this choice to a human: "promote it upstream, or add it to
+ * SANCTIONED_LOCAL with a rationale") or is rejected on purpose. That is an
+ * additive protocol decision, not a strictness one, and this campaign's rule
+ * after #5022 is that a capability question is filed, never guessed.
+ *
+ * ⚠️ Do NOT close this shape without resolving `allowAddTab` first — the
+ * rejection would name a key the author was right to write.
  */
 export const UserFiltersSchema = lazySchema(() => z.object({
   // `toggle` is DEPRECATED (ADR-0047 §3.4a): it overlaps `tabs` (presets) and
@@ -648,7 +724,14 @@ export const GanttQuickFilterSchema = lazySchema(() => strictObject({
   label: z.string().optional().describe('Trigger label (falls back to the field label)'),
   options: z.array(z.union([
     z.string(),
-    z.object({
+    strictObject({
+      surface: 'this gantt quick-filter option',
+      history: VIEW_HISTORY,
+      // Sibling contract: the user-filter option entry two blocks up spells the
+      // display text `label` and the stored value `value`. Gantt's entry is the
+      // same pair minus `color`, so the same near-misses apply.
+      aliases: { text: 'label', title: 'label', name: 'label', key: 'value', id: 'value' },
+    }, {
       value: z.union([z.string(), z.number()]),
       label: z.string().optional(),
     }),
@@ -688,7 +771,17 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   // Hover tooltip + quick filters.
   tooltipFields: z.array(z.union([
     z.string(),
-    z.object({ field: z.string(), label: z.string().optional() }),
+    strictObject({
+      surface: 'this gantt tooltip field',
+      history: VIEW_HISTORY,
+      // ⚠️ The PARENT (`GanttConfigSchema`) is deliberately `.passthrough()` so
+      // renderer-ahead knobs reach plugin-gantt. That openness is the parent's
+      // and does NOT recurse: this entry is a closed `{ field, label }` pair,
+      // which is exactly the shape objectui's `GanttView` tooltip resolver
+      // reads. Closing the entry inside an open parent is the nested hole 批 13
+      // found on `responsive` — strictness is per object, not per subtree.
+      aliases: { name: 'field', fieldName: 'field', text: 'label', title: 'label' },
+    }, { field: z.string(), label: z.string().optional() }),
   ])).optional().describe('Fields to surface in the hover tooltip, in display order'),
   quickFilters: z.array(GanttQuickFilterSchema).optional().describe('Multi-select filter dropdowns rendered above the chart'),
   autoZoomToFilter: z.boolean().optional().describe('When true (default), filtering zooms the range to the filtered tasks'),
@@ -829,6 +922,35 @@ export const ListViewSchema = lazySchema(() => strictObject({
    * renderer in objectui#2601 — kept covered by a live fixture). Removal will
    * go through its own deprecation cycle; do not drop it here.
    */
+  /**
+   * ⚠️ [#4001 批 18] Deliberately still STRIP — reverted after the closed
+   * version broke a live console path, which is the finding rather than a
+   * setback.
+   *
+   * This batch closed it (with `direction → order`, the #4721 alias for the
+   * identical tuple — `{ field, direction: 'desc' }` parsed to
+   * `{ field, order: 'asc' }`, a silently REVERSED sort). The full suite then
+   * failed one case: `view-metadata-schema.test.ts` pins
+   * `sort: [{ id, field, order }]` as *"the exact shape normalizeViewMetadata
+   * persists on a console column-sort PUT"*, and `id` is a UI row identity
+   * objectui stamps per row (`components/src/custom/sort-builder.tsx:68`,
+   * `:94` — `crypto.randomUUID()`), persisted verbatim because `saveMetaItem`
+   * stores the original body.
+   *
+   * The mechanism is worth stating, because it governs every nested block in
+   * this file and is NOT what the union's comment implies: `ViewMetadataSchema`
+   * rescues Studio's round-trip keys with `.strip()` on its flattened members —
+   * but **`.strip()` does not recurse** any more than `.strict()` does. It
+   * re-opens the TOP level only, so a nested block closed here is still reached
+   * through that member and a console-stamped key inside it becomes a 422.
+   *
+   * `id` was NOT declared to make the rejection go away. It is a React list key,
+   * not protocol: declaring it would put a UI artifact on the authorable surface
+   * and tell an AI author to generate one. The real end state is the same
+   * authoring/wire split filed as #5074, applied one level down — until then
+   * this shape stays open rather than half-closed against the platform's own
+   * writes.
+   */
   sort: z.union([
     z.string(), //Legacy "field desc"
     z.array(z.object({
@@ -909,7 +1031,20 @@ export const ListViewSchema = lazySchema(() => strictObject({
   virtualScroll: z.boolean().optional().describe('Enable virtual scrolling for large datasets'),
 
   /** Conditional Formatting */
-  conditionalFormatting: z.array(z.object({
+  conditionalFormatting: z.array(strictObject({
+    surface: 'this conditional formatting rule',
+    history: VIEW_HISTORY,
+    // `visibleWhen` is the ADR-0089 spelling for a predicate on view/page, so
+    // an author borrowing it here is using a neighbouring surface's correct
+    // word — the `visibleWhen → visible` category #3746 named, not a typo.
+    aliases: { when: 'condition', expression: 'condition', visibleWhen: 'condition', rule: 'condition', styles: 'style', css: 'style' },
+    // `rowColor` is a real, DIFFERENT capability on the same view; pointing a
+    // colour-only author at the block that already does it beats making them
+    // hand-write a style map.
+    guidance: {
+      color: 'Row colouring by field value has its own block — see `rowColor` on this list view. To set a CSS colour from a predicate, put it in `style`: `{ condition, style: { color: "#b91c1c" } }`.',
+    },
+  }, {
     condition: ExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
     style: z.record(z.string(), z.string()).describe('CSS styles to apply when condition is true'),
   })).optional().describe('Conditional formatting rules for list rows'),
@@ -939,7 +1074,19 @@ export const ListViewSchema = lazySchema(() => strictObject({
   allowPrinting: z.boolean().optional().describe('Allow users to print the view'),
 
   /** Empty State */
-  emptyState: z.object({
+  emptyState: strictObject({
+    surface: 'this empty state',
+    history: VIEW_HISTORY,
+    // `description`/`text`/`subtitle` are the words the neighbouring empty-state
+    // vocabularies use for the secondary line; here it is `message`.
+    aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
+    // The add-record entry point is a real, separate block on this same view —
+    // an author wiring a CTA into the empty state is reaching for it.
+    guidance: {
+      action: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
+      button: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
+    },
+  }, {
     title: I18nLabelSchema.optional(),
     message: I18nLabelSchema.optional(),
     icon: z.string().optional(),
@@ -977,6 +1124,27 @@ export const ListViewSchema = lazySchema(() => strictObject({
  * Still `lazySchema`-wrapped: splitting the literal out of the exported schema's
  * factory would otherwise have moved its construction back to module load, which
  * is the allocation `lazySchema` exists to defer.
+ */
+/**
+ * [#4001 批 18] Deliberately NOT converted to `strictObject` — and the ledger
+ * row for this site is a measurement artifact, not open surface.
+ *
+ * Two independent reasons, both verified rather than assumed:
+ *
+ * 1. **The posture here was never the live one.** This base is module-private
+ *    and has exactly ONE consumer, {@link FormFieldSchema}, which applies
+ *    `.strict()` after extending it (ADR-0089 D3a). An unknown form-field key
+ *    is already rejected at the only door; the ledger reads `strip` because it
+ *    counts the BASE, and the base is not a door.
+ * 2. **It already carries a bespoke error map.** The `{ error:
+ *    strictVisibilityError }` below is the ADR-0089 map that resolves the
+ *    `visibleWhen` / `visibility` pair. Converting would mean re-expressing
+ *    that map as `guidance` and re-proving the `.transform()` — a refactor of
+ *    working, tested behaviour rather than a strictness change. Same call the
+ *    note on {@link FormSectionSchema} records, for the same family of shape.
+ *
+ * The nested `keyField` block below IS converted: strictness does not recurse,
+ * so a closed parent said nothing about it.
  */
 const FormFieldBaseSchema = lazySchema(() => z.object({
   /** Field name (snake_case) */
@@ -1035,7 +1203,15 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
    *
    * See ADR-0007 (record form field type).
    */
-  keyField: z.object({
+  keyField: strictObject({
+    surface: 'this record key field',
+    history: VIEW_HISTORY,
+    // The enclosing form field IS strict (ADR-0089 D3a `.strict()` on
+    // `FormFieldSchema`), but strictness does not recurse — this nested block
+    // kept dropping keys silently inside a closed parent, the same nested hole
+    // 批 13 measured on `responsive`.
+    aliases: { key: 'field', name: 'field', pattern: 'regex', placeHolder: 'placeholder', help: 'helpText', hint: 'helpText' },
+  }, {
     field: z.string().default('name').describe('Property name that holds the key inside each item (defaults to "name")'),
     label: I18nLabelSchema.optional().describe('Display label for the key column'),
     placeholder: I18nLabelSchema.optional().describe('Placeholder when entering a new key'),
@@ -1272,7 +1448,18 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * derived from the child object's metadata (override via
    * `relationshipField` / `columns`).
    */
-  subforms: z.array(z.object({
+  subforms: z.array(strictObject({
+    surface: 'this subform',
+    history: VIEW_HISTORY,
+    // `object` is the word every OTHER block on this surface uses for an object
+    // name (`ViewDataSchema.object`, `ViewItemSchema.object`), so writing it
+    // here is an author being consistent — not making a typo.
+    aliases: {
+      object: 'childObject', childObjectName: 'childObject', child: 'childObject',
+      foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
+      fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
+    },
+  }, {
     childObject: z.string().describe('Child object whose records are entered inline'),
     relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected when omitted)'),
     columns: z.array(z.any()).optional().describe('Editable grid columns (derived from the child object when omitted)'),
@@ -1303,19 +1490,54 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * - `continue` — reset the form so another response can be entered
    * - `next-record` — advance to the next record (internal queues only)
    */
-  submitBehavior: z.union([
-    z.object({
+  // ⚠️ `discriminatedUnion`, not `union` — deliberately, and it is the closing
+  // that forces the choice. A plain `z.union` of four STRICT members reports a
+  // bad key as `invalid_union` carrying four sub-errors, one per member, and
+  // #5014 measured that the renderers flatten those to a bare "Invalid input" —
+  // so the prescription this campaign exists to deliver would never reach the
+  // author. Discriminating on the `kind` literal that is already there picks
+  // the ONE intended member and reports its message verbatim. No input changes
+  // shape: every member already required its own `kind` literal.
+  submitBehavior: z.discriminatedUnion('kind', [
+    strictObject({
+      surface: 'this `thank-you` submit behavior',
+      history: VIEW_HISTORY,
+      aliases: { heading: 'title', text: 'message', body: 'message', description: 'message' },
+    }, {
       kind: z.literal('thank-you'),
       title: z.string().optional(),
       message: z.string().optional(),
     }),
-    z.object({
+    strictObject({
+      surface: 'this `redirect` submit behavior',
+      history: VIEW_HISTORY,
+      // `delay` / `delayMS` are one keystroke and one capital from `delayMs`;
+      // the unit is in the name, so a bare `delay` is genuinely ambiguous and
+      // gets pointed at the spelled-out key rather than silently dropped.
+      aliases: { delay: 'delayMs', delayMS: 'delayMs', timeout: 'delayMs', to: 'url', href: 'url', target: 'url' },
+    }, {
       kind: z.literal('redirect'),
       url: z.string(),
       delayMs: z.number().int().min(0).optional(),
     }),
-    z.object({ kind: z.literal('continue') }),
-    z.object({ kind: z.literal('next-record') }),
+    strictObject({
+      surface: 'this `continue` submit behavior',
+      history: VIEW_HISTORY,
+      // `continue` resets the form and takes no options; an author configuring
+      // confirmation text wanted the `thank-you` kind instead.
+      guidance: {
+        title: 'The `continue` behavior takes no options — it just resets the form. For a confirmation panel use `{ kind: "thank-you", title, message }`.',
+        message: 'The `continue` behavior takes no options — it just resets the form. For a confirmation panel use `{ kind: "thank-you", title, message }`.',
+      },
+    }, { kind: z.literal('continue') }),
+    strictObject({
+      surface: 'this `next-record` submit behavior',
+      history: VIEW_HISTORY,
+      guidance: {
+        title: 'The `next-record` behavior takes no options — it advances to the next record. For a confirmation panel use `{ kind: "thank-you", title, message }`.',
+        message: 'The `next-record` behavior takes no options — it advances to the next record. For a confirmation panel use `{ kind: "thank-you", title, message }`.',
+      },
+    }, { kind: z.literal('next-record') }),
   ]).optional().describe('Post-submit behavior'),
 
   /**
@@ -1649,6 +1871,39 @@ function viewItemBaseShape() {
  * });
  * ```
  */
+/**
+ * [#4001 批 18] Both arms stay STRIP — measured `wire`, not unfinished work.
+ *
+ * This shape looks purely authorable ({@link defineViewItem} parses it, and
+ * objectui's create form validates its build output against it), which is why
+ * the ledger carried it as `authorable (p)`. It is also the FIRST member of
+ * {@link ViewMetadataSchema}, the schema `saveMetaItem` validates every
+ * persisted `view` body against — and that second role is a wire role.
+ *
+ * Traced end to end rather than inferred. objectui's "pin this view" control
+ * calls `dataSource.updateView(object, id, { isPinned })`
+ * (`app-shell/src/views/ObjectView.tsx:882`), and `updateView`
+ * (`data-objectstack/src/index.ts:2801`) GETs the stored item and PUTs
+ * `{ ...current, ...partial }`. For a standalone ViewItem record `current`
+ * carries `viewKind` AND `config`, so the merged body matches THIS member —
+ * the flattened-overlay members are excluded by their `config: z.undefined()`
+ * guard — and it arrives carrying `isPinned`, which this shape does not
+ * declare. Today it is stripped from the discarded parse result and the save
+ * succeeds. Closed, pinning a saved view would 422.
+ *
+ * That is the same "auxiliary Studio round-trip keys ride along" contract the
+ * two flattened members are explicitly `.strip()` for, reaching one member
+ * further than the block comment below realised. It is finding 16's
+ * `.extend()`/union trap in its most expensive form: the strictness of a union
+ * member is decided by a consumer none of this file's authoring doors mention.
+ *
+ * ⚠️ Closing this needs a DESIGN decision, not a posture flip: the authoring
+ * door (`defineViewItem`, Studio's create form) genuinely wants strict, and the
+ * metadata door genuinely needs the aux keys through. Splitting them — a strict
+ * authoring schema plus a `.strip()`-reopened wire member, exactly how
+ * `ListViewSchema` / `FormViewSchema` are already handled below — is one shape;
+ * leaving one lenient schema is another. Filed rather than guessed.
+ */
 export const ViewItemSchema = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
     z.object({
@@ -1714,9 +1969,22 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 //      record/container can never be rescued by this lenient branch.
 //
 // Auxiliary Studio round-trip keys (`isPinned`, `sortOrder`, …) ride along on
-// every shape: all four members strip-parse (no `.strict()`), so an unknown
-// top-level key never 422s — matching the "persist the payload verbatim"
-// contract in `saveMetaItem` (it validates but stores the original item).
+// the shapes Studio actually round-trips, matching the "persist the payload
+// verbatim" contract in `saveMetaItem` (it validates but stores the original
+// item). ⚠️ [#4001 批 18] The line that used to stand here said "all four
+// members strip-parse (no `.strict()`)". That was true when it was written and
+// is now false in one direction and load-bearing in the other — measured:
+//
+//   • member 2 (the container) IS strict. `ViewSchema` was closed by an earlier
+//     batch, so `{ list: …, isPinned: true }` 422s. Not a regression: nothing
+//     sends it. `updateView` unwraps a container to its inner list config
+//     (`if (current?.list) current = current.list`) before merging, so a
+//     container body never reaches this union carrying an aux key.
+//   • members 1, 3 and 4 must keep stripping, and only 3 and 4 say so in code.
+//     Member 1 is the one `updateView` hits for a standalone ViewItem record —
+//     see the note on `ViewItemSchema`.
+//
+// Anyone closing a member here must re-run that trace, not re-read this comment.
 
 /**
  * Optional identity + structural-guard fields layered onto the two "flattened

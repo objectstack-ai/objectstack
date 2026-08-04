@@ -31,7 +31,13 @@ describe('updateManyData — per-row droppedFields + context threading (#3455)',
       }
       return { id: options.where.id, title: data.title };
     });
-    const engine = { registry: { getObject: () => SCHEMA }, update, findOne: vi.fn(async () => null) };
+    // [#5088] `findOne` is the existence probe the by-id bulk write faces now
+    // run before the write, so it has to answer from the same row set this
+    // fixture pretends to update — existence must mean one thing in a harness.
+    // (It answered a flat `null` while nothing called it; a row that does not
+    // exist is now correctly refused before `engine.update`.)
+    const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id, title: 'stored' }));
+    const engine = { registry: { getObject: () => SCHEMA }, update, findOne };
     const p = new ObjectStackProtocolImplementation(engine as any);
 
     const ctx = { userId: 'u1' };
@@ -176,7 +182,10 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
       options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
       return { id: options.where.id };
     });
-    const engine = { registry: { getObject: () => SCHEMA }, update, insert: vi.fn(), findOne: vi.fn() };
+    // [#5088] See the updateManyData fixture above: `findOne` is now the
+    // existence probe in front of the write, so it must answer for `rec-1`.
+    const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id }));
+    const engine = { registry: { getObject: () => SCHEMA }, update, insert: vi.fn(), findOne };
     const p = new ObjectStackProtocolImplementation(engine as any);
 
     const res: any = await p.batchData({

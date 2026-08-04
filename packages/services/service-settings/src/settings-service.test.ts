@@ -235,7 +235,27 @@ describe('SettingsService — runAction', () => {
     svc.registerAction('mail', 'test', mailTestActionHandler);
     await svc.setMany('mail', { provider: 'smtp', smtp_host: 'smtp.x', from_email: 'a@b.com' });
     const r = await svc.runAction('mail', 'test', null);
-    expect(r.ok).toBe(true);
+    // The handler ran and read the saved values (it echoes the provider) —
+    // but this built-in is the FALLBACK, mounted only when no email plugin
+    // is present, so it cannot send and must not claim it did (#5087). The
+    // real sending handler is registered by @objectstack/plugin-email.
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.message).toContain('provider=smtp');
+    expect(r.message).toMatch(/NO test message was sent/);
+  });
+
+  it('the fallback mail/test handler still rejects an incomplete config', async () => {
+    // `setMany` already refuses to SAVE provider=smtp without a host, so the
+    // incomplete state can only arrive through the env door — which is exactly
+    // where it must still be caught.
+    const svc = new SettingsService({ env: { OS_MAIL_PROVIDER: 'smtp' } });
+    svc.registerManifest(mailSettingsManifest);
+    svc.registerAction('mail', 'test', mailTestActionHandler);
+    await svc.setMany('mail', { from_email: 'a@b.com' });
+    const r = await svc.runAction('mail', 'test', null);
+    expect(r).toMatchObject({ ok: false, severity: 'error' });
+    expect(r.message).toContain('SMTP host is required');
   });
 
   it('catches handler exceptions', async () => {

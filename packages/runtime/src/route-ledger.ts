@@ -13,9 +13,15 @@
  * exist. A new route therefore lands with an explicit, reviewed disposition or
  * not at all.
  *
- * SCOPE. Dispatcher (`http-dispatcher.ts`) routes only, expressed as
+ * SCOPE. Dispatcher (`http-dispatcher.ts`) routes, expressed as
  * dispatcher-internal `cleanPath` patterns (prepend `/api/v1` for the wire
- * path). The REST server (`@objectstack/rest`) mounts a second, larger surface
+ * path) — plus, since #5090, the surfaces `dispatcher-plugin.ts` mounts on the
+ * host `IHttpServer` WITHOUT going through `dispatch()`, pinned in
+ * {@link NON_DISPATCH_MOUNT_PREFIXES}. There is exactly one of those (the
+ * declarative-endpoint fallback seam) and it is listed for the same reason
+ * everything else here is: a route surface this package serves and nobody
+ * reviewed the SDK disposition of is precisely what #3528 was.
+ * The REST server (`@objectstack/rest`) mounts a second, larger surface
  * (search, forms, reports, sharing rules, …) that the client also reaches;
  * that surface has its own ledger + guard since #3587 —
  * `packages/rest/src/rest-route-ledger.ts`. A third surface — services that
@@ -105,6 +111,23 @@ export const LEGACY_CHAIN_PREFIXES = [
   // non-empty `apis:` is now rejected at publish/validate instead. When the
   // executor lands (#5040) it re-enters this file as a REAL mount, not a
   // catch-all placeholder.
+] as const;
+
+/**
+ * Prefixes this package serves from OUTSIDE `dispatch()` — mounted by
+ * `dispatcher-plugin.ts` straight onto the host `IHttpServer`, so neither the
+ * domain registry nor {@link LEGACY_CHAIN_PREFIXES} can enumerate them.
+ *
+ * One member, and it is a seam rather than a route table: `/apps` is the
+ * platform's reserved carve-out for metadata-declared endpoints (ADR-0121 D1),
+ * reached through the `setFallbackHandler` seam — see the ledger row.
+ * Deliberately NOT folded into `LEGACY_CHAIN_PREFIXES`: that list means
+ * "branches of the `dispatch()` if-chain not yet lifted into the registry", and
+ * this is not one. A pinned list whose name stops describing its contents is
+ * how a ledger note goes quietly false (#5078).
+ */
+export const NON_DISPATCH_MOUNT_PREFIXES = [
+  '/apps',
 ] as const;
 
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
@@ -247,6 +270,23 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /actions/:object/:action/:recordId', domain: '/actions', disposition: 'sdk', client: 'actions.invoke',
     note: 'client sends recordId in the body — both server shapes honor it' },
   { route: 'POST /actions/global/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal' },
+
+  // ── apps (declarative endpoints — the mount seam, NOT a dispatch() route) ──
+  // Read this row literally; it describes what is WIRED, not what is planned.
+  { route: '* /apps/**', domain: '/apps', disposition: 'dynamic',
+    note: 'ADR-0121 D1 reserved carve-out for metadata-declared `apis:` endpoints, whose paths are '
+      + '`<prefix>/apps/<namespace>/<subpath>` and therefore not enumerable here. Served by neither '
+      + 'the domain registry nor the dispatch() if-chain: dispatcher-plugin installs an '
+      + '`IHttpServer.setFallbackHandler` (Hono `app.notFound`) that runs only after every registered '
+      + 'route has missed, probes `metadata.matchEndpoint` for paths under this prefix, and — as of '
+      + '#5090 — answers 501 NOT_IMPLEMENTED on a match. EXECUTION IS NOT WIRED: target dispatch and '
+      + 'the authRequired / rateLimit / cacheTtl / mapping keys land with #5040 E4–E5. A miss (or an '
+      + 'occupant of the metadata slot with no matchEndpoint) writes nothing, leaving the transport\'s '
+      + '404/405 answer untouched. Structurally unreachable today: a non-empty `apis:` is rejected at '
+      + 'publish until the #5040 E7 flip, so nothing can be declared for this seam to match. No SDK '
+      + 'surface — app-declared endpoints are an external-integration channel (ADR-0121 D3), called by '
+      + 'the integrator\'s own client, not by `@objectstack/client`',
+  },
 
   // ── misc legacy ───────────────────────────────────────────────────────────
   { route: 'GET /openapi.json', domain: '/openapi.json', disposition: 'server-only', note: 'docs tooling; falls through when metadata service lacks a generator' },
