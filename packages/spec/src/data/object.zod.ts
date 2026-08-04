@@ -13,6 +13,7 @@ import { ExpressionInputSchema, TemplateExpressionInputSchema, type Expression, 
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
@@ -274,6 +275,36 @@ export const ObjectCapabilities = z.object({
  *   type: "btree",
  *   unique: true
  * }
+ *
+ * ## ⛔ Deliberately still `.strip()` — #4001 批 20 held this one site
+ *
+ * Every other inner block of this file was closed in that batch. This one was
+ * NOT, and the reason is a measured live defect rather than an unfinished
+ * to-do, so please do not "finish the job" by adding `strictObject` here.
+ *
+ * The console's embedded index editor
+ * (`objectui` → `metadata-admin/EmbeddedItemEditor.tsx`, `FALLBACK_SCHEMAS.index`)
+ * ships its own hand-copied JSON-Schema for this shape — the framework does not
+ * publish one, because `index` is an embedded-only sub-type with no metadata
+ * type of its own. That copy has drifted:
+ *
+ *   - it offers **`where`** for the partial-index predicate; this schema
+ *     declares **`partial`**;
+ *   - it offers **`brin`** in the algorithm enum, which this schema does not.
+ *
+ * The editor splices its form output into `object.indexes[]` and PUTs the whole
+ * object, and `saveMetaItem` keeps the body verbatim while validating it. So
+ * today an admin who fills in "Partial-index predicate" gets a clean save and a
+ * key that this schema silently drops on every later parse — and closing this
+ * shape would turn that same click into a 422 on a control the console itself
+ * renders (the #5114 class).
+ *
+ * Closing it is still the right end state, but it is gated on the producer
+ * being fixed first (contract-first: the drift is in the copy, not here), and
+ * on an ADR-0049 answer for `type`/`partial` (#5247 / #5248) — neither is read by any driver
+ * (`syncDeclaredIndexes` in `driver-sql` consumes `name`/`fields`/`unique`
+ * only), so pointing an author at `partial` today would be a guidance entry
+ * that claims more than the platform delivers (ledger finding 18).
  */
 export const IndexSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Index name (auto-generated if not provided)'),
@@ -409,7 +440,33 @@ export function isTenancyDisabled(schema: unknown): boolean {
  * Pair with the object's `requiredPermissions` (D3) to additionally gate access
  * on holding a capability.
  */
-export const ObjectAccessConfigSchema = lazySchema(() => z.object({
+export const ObjectAccessConfigSchema = lazySchema(() => strictObject({
+  surface: "this object's `access` block",
+  history:
+    'Until #4001 these were dropped silently — the block still parsed, so an object the ' +
+    'author declared `private` shipped `public`: covered by every `\'*\'` wildcard grant, ' +
+    'with no signal that the posture had been discarded.',
+  aliases: {
+    visibility: 'default',
+    posture: 'default',
+    defaultAccess: 'default',
+  },
+  guidance: {
+    // Wrong-layer, not typos: both are real TOP-LEVEL object keys, and both
+    // are the neighbouring half of the same access story — so edit distance
+    // would never reach them and a bare rejection would read as "no such
+    // concept" when the concept exists one level up.
+    sharingModel:
+      '`sharingModel` is the object-wide default record visibility (OWD) and is a ' +
+      'TOP-LEVEL object key, not an `access` key — write it beside `access`, not inside ' +
+      'it. `access.default` decides wildcard-GRANT coverage; `sharingModel` decides ' +
+      'record visibility between users (ADR-0090).',
+    requiredPermissions:
+      '`requiredPermissions` is a TOP-LEVEL object key (ADR-0066 D3) — it gates access on ' +
+      'the caller HOLDING a capability, which is a different axis from `access.default` ' +
+      '(whether a wildcard grant covers this object at all). Pair them, side by side.',
+  },
+}, {
   default: z.enum(['public', 'private']).default('public')
     .describe('Default exposure posture: public (covered by wildcard grants) | private (needs explicit grant; exempt from wildcard RLS).'),
 }));
@@ -480,11 +537,70 @@ export const LIFECYCLE_DURATION_REGEX = /^\d+(h|d|w|y)$/;
 const lifecycleDuration = (what: string) =>
   z.string().regex(LIFECYCLE_DURATION_REGEX, `${what} must be a duration literal like '6h', '14d', '12w' or '7y'`);
 
-export const LifecycleSchema = lazySchema(() => z.object({
+export const LifecycleSchema = lazySchema(() => strictObject({
+  surface: "this object's `lifecycle` block",
+  history:
+    'Until #4001 these were dropped silently — the block still parsed, so a bounding ' +
+    'policy written one level too high left the object with NO policy at all. ADR-0057 ' +
+    "§3.5's own refine then passed, because the key it looks for was never there.",
+  aliases: { rotation: 'storage' },
+  guidance: {
+    // The dominant failure on this block is FLATTENING: every one of these is a
+    // real key of a real sub-block, written one level too high. Edit distance
+    // cannot help — the key is spelled correctly, it is just in the wrong
+    // object — and the §3.5 refine makes the mistake worse than inert: a
+    // flattened `maxAge` leaves `retention` absent, so a non-`record` class is
+    // then rejected as unbounded and the author is told about the wrong key.
+    maxAge:
+      '`maxAge` belongs to the retention block, one level down: ' +
+      "`retention: { maxAge: '30d' }`. Written here it is not read, and a non-`record` " +
+      'class with no `retention`/`ttl`/`storage` is rejected as unbounded (ADR-0057 §3.5).',
+    expireAfter:
+      '`expireAfter` belongs to the TTL block, one level down: ' +
+      "`ttl: { field: 'expires_at', expireAfter: '1d' }`.",
+    field:
+      '`field` belongs to the TTL block, one level down — it names the timestamp the TTL ' +
+      "is measured from: `ttl: { field: 'expires_at', expireAfter: '1d' }`.",
+    after:
+      '`after` belongs to the archive block, one level down: ' +
+      "`archive: { after: '7y', to: 'cold_store' }` — and ADR-0057 requires it to EQUAL " +
+      '`retention.maxAge`.',
+    to:
+      '`to` belongs to the archive block, one level down — it names the cold-storage ' +
+      "datasource: `archive: { after: '7y', to: 'cold_store' }`.",
+    keep:
+      '`keep` belongs to the archive block, one level down — it is how long COLD rows are ' +
+      'kept. The HOT window is `retention.maxAge`.',
+    strategy:
+      '`strategy` belongs to the storage block, one level down: ' +
+      "`storage: { strategy: 'rotation', shards: 7, unit: 'day' }`.",
+    shards:
+      '`shards` belongs to the storage block, one level down: ' +
+      "`storage: { strategy: 'rotation', shards: 7, unit: 'day' }`.",
+    unit:
+      '`unit` belongs to the storage block, one level down: ' +
+      "`storage: { strategy: 'rotation', shards: 7, unit: 'day' }`.",
+  },
+}, {
   class: LifecycleClassSchema.describe(
     'Persistence contract: record (business truth, permanent) | audit (compliance ledger) | telemetry (high-freq log) | transient (ephemeral state) | event (bus messages).',
   ),
-  retention: z.object({
+  retention: strictObject({
+    surface: "this object's `lifecycle.retention` block",
+    history:
+      'Until #4001 these were dropped silently — the retention window still parsed, so a ' +
+      'row filter written under the wrong key reaped rows the author had meant to exempt.',
+    aliases: { filter: 'onlyWhen', where: 'onlyWhen', when: 'onlyWhen', age: 'maxAge' },
+    guidance: {
+      expireAfter:
+        '`expireAfter` is a `ttl` key, not a retention key. Retention reaps by AGE from ' +
+        '`created_at` (`maxAge`); TTL expires each row relative to a timestamp field you ' +
+        'name (`ttl.field`). Pick the one that matches how the rows die.',
+      keep:
+        '`keep` is an `archive` key — how long COLD rows survive. The hot window is ' +
+        '`retention.maxAge`.',
+    },
+  }, {
     maxAge: lifecycleDuration('retention.maxAge').describe('Rows older than this (by created_at) are deleted by the Reaper — or archived first when `archive` is set.'),
     onlyWhen: z.record(
       z.string(),
@@ -498,16 +614,52 @@ export const LifecycleSchema = lazySchema(() => z.object({
       'Row filter the retention applies to — per-field equality or {$in: [...]} (e.g. { status: { $in: ["completed", "failed"] } }). Rows OUTSIDE the filter are retained regardless of age: for tables that interleave live workflow state with terminal history (sys_automation_run). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
     ),
   }).optional().describe('Age-based retention window enforced by the LifecycleService Reaper.'),
-  ttl: z.object({
+  ttl: strictObject({
+    surface: "this object's `lifecycle.ttl` block",
+    history:
+      'Until #4001 these were dropped silently — the TTL block still parsed, so rows the ' +
+      'author expected to auto-expire lived forever.',
+    aliases: { expiresAfter: 'expireAfter', after: 'expireAfter', timestampField: 'field', on: 'field' },
+    guidance: {
+      maxAge:
+        '`maxAge` is a `retention` key, not a TTL key. TTL measures from the timestamp ' +
+        'field named in `ttl.field`; retention measures AGE from `created_at`. For ' +
+        "age-based reaping write `retention: { maxAge: '30d' }` instead.",
+    },
+  }, {
     field: z.string().describe('Timestamp field the TTL is measured from (e.g. created_at, expires_at).'),
     expireAfter: lifecycleDuration('ttl.expireAfter').describe('Rows expire this long after `field` and are deleted by the Reaper.'),
   }).optional().describe('Per-row TTL auto-expiry (transient/event classes).'),
-  storage: z.object({
+  storage: strictObject({
+    surface: "this object's `lifecycle.storage` block",
+    history:
+      'Until #4001 these were dropped silently — the rotation block still parsed, so a ' +
+      'telemetry table declared as rotating kept every shard it ever cut.',
+    aliases: { count: 'shards', interval: 'unit', period: 'unit', granularity: 'unit' },
+    guidance: {
+      maxAge:
+        '`maxAge` is a `retention` key. Rotation does not reap by age — it retains ' +
+        '`shards` × `unit` of history and DROPs the oldest shard whole. Set the window ' +
+        'with `shards`/`unit`, or use `retention` instead of rotation.',
+    },
+  }, {
     strategy: z.literal('rotation').describe('Time-shard the table; rotate by DROPping the oldest shard (O(1) reclaim).'),
     shards: z.number().int().min(2).describe('Number of shards retained; total window = shards × unit.'),
     unit: z.enum(['day', 'week', 'month']).describe('Time width of one shard.'),
   }).optional().describe('Physical storage strategy for high-frequency telemetry (LifecycleService Rotator).'),
-  archive: z.object({
+  archive: strictObject({
+    surface: "this object's `lifecycle.archive` block",
+    history:
+      'Until #4001 these were dropped silently — the archive block still parsed, so audit ' +
+      'rows were reaped hot with no cold copy ever written.',
+    aliases: { datasource: 'to', target: 'to', destination: 'to', retain: 'keep' },
+    guidance: {
+      maxAge:
+        '`maxAge` is a `retention` key. The archive boundary is `archive.after`, and ' +
+        'ADR-0057 requires the two to be EQUAL — the hot window ends exactly where the ' +
+        'archive begins, so declare `retention.maxAge` and `archive.after` with the same value.',
+    },
+  }, {
     after: lifecycleDuration('archive.after').describe('Rows older than this are copied to the archive datasource before hot deletion.'),
     to: z.string().describe('Target datasource name for cold storage. When it is not registered, the Archiver skips (audit rows are then retained, never dropped unarchived).'),
     keep: lifecycleDuration('archive.keep').optional().describe('How long archived rows are kept in cold storage (undefined = forever).'),
@@ -594,7 +746,46 @@ export const LifecycleSchema = lazySchema(() => z.object({
  * ]
  * ```
  */
-export const ObjectFieldGroupSchema = lazySchema(() => z.object({
+export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
+  surface: 'this field group',
+  history:
+    'Until #4001 these were dropped silently — the group still parsed AND still rendered, ' +
+    'which is the worst version of the failure: the section appeared, so the author had ' +
+    'every reason to believe the setting they wrote had been applied.',
+  aliases: {
+    title: 'label',
+    name: 'key',
+    id: 'key',
+    help: 'description',
+    helpText: 'description',
+  },
+  guidance: {
+    // Membership is declared the OTHER WAY ROUND, and this is the single most
+    // likely thing an author reaches for here — a group that lists its fields
+    // is what every other layout system in this space looks like.
+    fields:
+      '`fields` does not live on a group — membership is declared on the FIELD, pointing ' +
+      "back: `fields: { email: { type: 'email', group: 'contact_info' } }`. The group " +
+      'declares only its `key`, `label` and presentation; `deriveFieldGroupLayout` ' +
+      '(ADR-0085 §5) does the assembly.',
+    order:
+      '`order` is not a group key — ARRAY ORDER is display order. `fieldGroups: [...]` ' +
+      'renders top to bottom, so move the entry rather than numbering it.',
+    expanded:
+      '`expanded` is not a group key — use the `collapse` enum: ' +
+      "`collapse: 'expanded'` (collapsible, starts open), `'collapsed'` (starts closed), " +
+      "or `'none'` (always open, no toggle).",
+    // Tombstone: this key really did exist here, briefly, reading nothing.
+    visibleWhen:
+      '`visibleWhen` was REMOVED from field groups (ADR-0085 / ADR-0049 enforce-or-remove) ' +
+      '— it existed here briefly with no consumer on any surface, so it never gated ' +
+      'anything. Gate the individual fields, or assign a Page for per-surface control.',
+    visibleOn:
+      '`visibleOn` is not a field-group key — group-level visibility predicates were ' +
+      'removed under ADR-0085 / ADR-0049 (nothing evaluated them). Gate the individual ' +
+      'fields, or assign a Page.',
+  },
+}, {
   /** Group key — referenced by `Field.group` to assign a field to this group. Must be snake_case. */
   key: z.string().regex(/^[a-z_][a-z0-9_]*$/, {
     message: 'Field group key must be lowercase snake_case (e.g., "contact_info", "billing", "system")',
@@ -672,7 +863,38 @@ export type ObjectFieldGroupInput = z.input<typeof ObjectFieldGroupSchema>;
  * has `schemaMode !== 'managed'`") is enforced at metadata-load time, not
  * in this schema, because the datasource may live in another artefact.
  */
-export const ObjectExternalBindingSchema = z.object({
+export const ObjectExternalBindingSchema = strictObject({
+  surface: "this object's `external` binding (ADR-0015)",
+  history:
+    'Until #4001 these were dropped silently — the binding still parsed, so a federated ' +
+    'object bound to the wrong remote table, or shipped read-only after the author had ' +
+    'explicitly asked for writes.',
+  aliases: {
+    table: 'remoteName',
+    tableName: 'remoteName',
+    remoteTable: 'remoteName',
+    schema: 'remoteSchema',
+    columns: 'columnMap',
+    skipColumns: 'ignoreColumns',
+    excludeColumns: 'ignoreColumns',
+  },
+  guidance: {
+    // The mirror image of `datasource.zod.ts`'s own `writable → allowWrites`
+    // alias. ADR-0015 makes writes a DOUBLE opt-in, so the two spellings are
+    // both correct — each on the other layer — and an author who learned one
+    // will write it here. Getting this wrong fails open-looking: the object
+    // stays read-only and nothing says why.
+    allowWrites:
+      '`allowWrites` is the DATASOURCE-level gate (`datasource.external.allowWrites`). ' +
+      'The per-object opt-in is spelled `writable: true`. ADR-0015 requires BOTH — set ' +
+      '`writable` here and `allowWrites` on the datasource; either one alone leaves the ' +
+      'object read-only.',
+    schemaMode:
+      '`schemaMode` is a DATASOURCE key, not an object key — an object becomes external ' +
+      "by being routed to a datasource whose `schemaMode !== 'managed'`. This block only " +
+      'describes the remote binding once that is true.',
+  },
+}, {
   remoteName: z.string().optional()
     .describe('Remote table/view name. Defaults to object.name.'),
   remoteSchema: z.string().optional()
@@ -947,7 +1169,55 @@ const ObjectSchemaBase = z.object({
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
    */
-  userActions: z.object({
+  userActions: strictObject({
+    surface: "this object's `userActions` block",
+    history:
+      'Until #4001 these were dropped silently — the block still parsed, so an affordance ' +
+      'the author meant to hide stayed on the toolbar, and the `managedBy`-derived ' +
+      'default silently won.',
+    aliases: {
+      export: 'exportCsv',
+      csvExport: 'exportCsv',
+      exportcsv: 'exportCsv',
+      new: 'create',
+      add: 'create',
+      insert: 'create',
+      update: 'edit',
+      remove: 'delete',
+      destroy: 'delete',
+    },
+    guidance: {
+      // Wrong-LAYER, and the trap is that the key name is right somewhere else.
+      // `ui/view.zod.ts` declares its own `userActions` with a completely
+      // disjoint vocabulary (sort/search/filter/refresh/rowHeight/
+      // addRecordForm/editInline/buttons), so an author who learned that block
+      // writes these here and gets a shape that has never heard of them.
+      sort:
+        '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
+        'name and nothing else. The object block governs CRUD affordances ' +
+        '(create/import/edit/delete/exportCsv); toolbar controls ' +
+        '(sort/search/filter/refresh/rowHeight/editInline) live on the view.',
+      search:
+        '`search` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
+        'only — put toolbar controls on the view that renders the records.',
+      filter:
+        '`filter` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
+        'only — put toolbar controls on the view that renders the records.',
+      editInline:
+        '`editInline` is a VIEW `userActions` key. The object-level `edit` flag decides ' +
+        'whether editing is offered AT ALL; how it is offered (inline vs form) is the ' +
+        "view's call.",
+      clone:
+        '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
+        'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
+      read:
+        '`userActions` toggles WRITE affordances only; there is no read toggle. Read ' +
+        'access is governed by permissions (`requiredPermissions`) and `access.default`.',
+      view:
+        '`userActions` toggles WRITE affordances only; there is no view toggle. ' +
+        'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
+    },
+  }, {
     create: z.boolean().optional().describe('Show generic "New" button.'),
     import: z.boolean().optional().describe('Show CSV import wizard entry.'),
     edit: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
@@ -993,7 +1263,34 @@ const ObjectSchemaBase = z.object({
   systemFields: z
     .union([
       z.literal(false),
-      z.object({
+      strictObject({
+        surface: "this object's `systemFields` block",
+        history:
+          'Until #4001 these were dropped silently — the block still parsed, so an ' +
+          'opt-out the author wrote had no effect and the registry injected the column ' +
+          'anyway.',
+        aliases: {
+          organization: 'tenant',
+          org: 'tenant',
+          tenancy: 'tenant',
+          organizationId: 'tenant',
+          auditFields: 'audit',
+          timestamps: 'audit',
+        },
+        guidance: {
+          // The field doc above this block names `owner` while the shape has
+          // never declared it — so an author following the prose lands exactly
+          // here. `ownership` is the real, enforced lever.
+          owner:
+            '`owner` is not a `systemFields` key — `owner_id` injection is governed by the ' +
+            "object-level `ownership` property (`ownership: 'none'` skips it; " +
+            "`'user'`/`'org'` choose the principal). `systemFields` controls only `tenant` " +
+            '(organization_id) and `audit` (created_at/created_by/updated_at/updated_by).',
+          ownership:
+            '`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it ' +
+            'beside `systemFields`. It, not this block, decides whether `owner_id` is injected.',
+        },
+      }, {
         tenant: z.boolean().optional().describe('Inject the organization_id column. Default true (the column is always provisioned; the multi-tenant flag governs only its index).'),
         audit: z.boolean().optional().describe('Inject the audit columns (created_at/created_by/updated_at/updated_by). Default true.'),
       }),
@@ -1117,7 +1414,33 @@ const ObjectSchemaBase = z.object({
    * precedence over the field-change summary for the same update. Consumed by
    * `@objectstack/plugin-audit` audit-writers (enforce-or-remove, ADR-0049).
    */
-  activityMilestones: z.array(z.object({
+  activityMilestones: z.array(strictObject({
+    surface: 'this activity milestone',
+    history:
+      'Until #4001 these were dropped silently — the milestone still parsed, so a ' +
+      'mis-keyed template shipped a timeline row with the wrong text, or the milestone ' +
+      'never fired at all.',
+    aliases: {
+      message: 'summary',
+      template: 'summary',
+      text: 'summary',
+      title: 'summary',
+      to: 'value',
+      watch: 'field',
+      activityType: 'type',
+    },
+    guidance: {
+      from:
+        '`from` is not a milestone key — a milestone fires on transition INTO `value`, ' +
+        'whatever the previous value was. There is no from-state filter here; when the ' +
+        'TRANSITION itself must be constrained, declare a `state_machine` rule in ' +
+        '`validations` (ADR-0020), which is where the legal transition table lives.',
+      when:
+        '`when` is not a milestone key — the trigger is structural: `field` transitions ' +
+        'INTO `value`. For a conditional timeline row, gate it with a `state_machine` ' +
+        'rule in `validations` or a hook.',
+    },
+  }, {
     field: z.string().describe('Field to watch (typically a status/stage select).'),
     value: z.string().describe('The value the field must transition INTO to fire the milestone.'),
     summary: z.string().describe('Activity summary template; {field} tokens interpolate the record value. e.g. "Deal won: {name}".'),
@@ -1259,7 +1582,34 @@ const ObjectSchemaBase = z.object({
    *
    * @see packages/plugins/plugin-sharing/src/share-link-service.ts
    */
-  publicSharing: z.object({
+  publicSharing: strictObject({
+    surface: "this object's `publicSharing` policy",
+    history:
+      'Until #4001 these were dropped silently — the policy still parsed, so a redaction ' +
+      'list or an expiry cap the author wrote was never applied to the links the platform ' +
+      'went on to issue. On a policy whose whole job is to be restrictive, a silently ' +
+      'dropped key fails OPEN.',
+    aliases: {
+      audiences: 'allowedAudiences',
+      permissions: 'allowedPermissions',
+      redact: 'redactFields',
+      redacted: 'redactFields',
+      maxExpiry: 'maxExpiryDays',
+      expiryDays: 'maxExpiryDays',
+      condition: 'eligibility',
+    },
+    guidance: {
+      sharingModel:
+        '`sharingModel` governs PRINCIPAL-based sharing (specific users / teams / roles) ' +
+        'and is a TOP-LEVEL object key, not a `publicSharing` key. `publicSharing` is the ' +
+        'separate opt-in for opaque share LINKS — an object may declare both, and they ' +
+        'do not constrain each other.',
+      externalSharingModel:
+        '`externalSharingModel` is a TOP-LEVEL object key (ADR-0090 D11) — the OWD for ' +
+        'external portal/partner principals. Link sharing is this block; principal-based ' +
+        'external access is that key, one level up.',
+    },
+  }, {
     /** Master switch. When false (default), no share links can be issued for this object. */
     enabled: z.boolean().default(false).describe('Allow records of this object to be published via share link'),
     /**
@@ -1914,7 +2264,43 @@ export type ObjectOwnership = z.infer<typeof ObjectOwnershipEnum>;
  * }]
  * ```
  */
-export const ObjectExtensionSchema = lazySchema(() => z.object({
+export const ObjectExtensionSchema = lazySchema(() => strictObject({
+  surface: 'this object extension',
+  history:
+    'Until #4001 these were dropped silently — the extension still parsed and still ' +
+    'registered, so fields or rules an author meant to merge into someone else\'s object ' +
+    'simply never arrived, on a surface where the target is owned by another package and ' +
+    'the absence is easy to blame on precedence.',
+  aliases: {
+    object: 'extend',
+    objectName: 'extend',
+    target: 'extend',
+    name: 'extend',
+    extends: 'extend',
+    order: 'priority',
+  },
+  guidance: {
+    // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
+    // (extend / fields / label / pluralLabel / description / validations /
+    // indexes / priority) onto the extension def. Anything else is not
+    // "unsupported yet" — there is no slot for it to arrive through.
+    actions:
+      '`actions` cannot be contributed through an object extension — the merge carries ' +
+      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
+      "Declare a top-level action with `objectName: '<target>'`; `defineStack()` attaches " +
+      'it to the object.',
+    hooks:
+      '`hooks` cannot be contributed through an object extension — declare a top-level ' +
+      'hook bound to the target object instead.',
+    listViews:
+      '`listViews` cannot be contributed through an object extension — declare a ' +
+      'top-level `view` bound to the target object instead.',
+    fieldGroups:
+      '`fieldGroups` cannot be contributed through an object extension — the merge does ' +
+      'not carry them. Add the fields here and declare the groups on the owning object, ' +
+      'or assign a Page for the layout.',
+  },
+}, {
   /** The target object name (FQN) to extend */
   extend: z.string().describe('Target object name (FQN) to extend'),
   

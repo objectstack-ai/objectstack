@@ -148,6 +148,34 @@ const actionDefUnknownKeyError = strictUnknownKeyError({
     'the entry dispatched a different action than the author declared.',
 });
 
+/**
+ * Shared shape of every navigation item — spread into the nine branches below.
+ *
+ * ## ⛔ Deliberately still `.strip()` — #4001 批 19 measured it and left it alone
+ *
+ * This is `ui/app.zod.ts`'s last open site, and it is NOT unfinished work.
+ * The ledger held it as `verify` on the assumption that the branches
+ * `.extend()` this base, which would make closing it inherit down into all
+ * nine (finding 16 — the trap that turned `view`'s Studio round-trip overlay
+ * into a 422). They do not: they spread `...BaseNavItemSchema.shape`, and a
+ * spread copies the per-key schemas into a FRESH `z.object` whose posture is
+ * its own. Nothing inherits from here, in either direction.
+ *
+ * And every branch already applies its own `.strict()` with the curated
+ * `navItemUnknownKeyError`, so every key this base contributes is ALREADY
+ * gated at all nine doors. This schema is module-private and is never parsed —
+ * `.strict()` is a property of a PARSE, so closing it would enforce exactly
+ * nothing while making a shape fragment look load-bearing (#4583: *"a
+ * precisely-validated dead slot is the more convincing lie"*).
+ *
+ * The `Class` cell it should carry is an OPEN question (#5249): the ledger's
+ * enumerated vocabulary has no word for a shape that is neither a door nor dead.
+ *
+ * Pinned in `app-strictness-batch19.test.ts`, including the mechanism itself
+ * (`.extend()` inherits posture, `...shape` does not) and a guard that fails if
+ * any branch ever stops rejecting unknown keys — which is the one change that
+ * would make this verdict need re-taking.
+ */
 const BaseNavItemSchema = z.object({
   /** Unique identifier for the item */
   id: SnakeCaseIdentifierSchema.describe('Unique identifier for this navigation item (lowercase snake_case)'),
