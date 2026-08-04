@@ -279,18 +279,33 @@ export const IndexSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Index name (auto-generated if not provided)'),
   fields: z.array(z.string()).describe('Fields included in the index'),
   type: z.enum(['btree', 'hash', 'gin', 'gist', 'fulltext']).optional().default('btree').describe('Index algorithm type'),
-  // A DECLARED index is materialized over exactly the columns listed in
-  // `fields` — no tenant column is injected, unlike field-level `unique`
-  // (#3696). The distinction is deliberate: field-level `unique` has no syntax
-  // for a composite, so its default had to carry the tenant scope; here the
-  // author already spells the columns out, and many declared indexes are
-  // legitimately platform-wide (a DNS hostname, a reserved slug, an external
-  // provider id). Tenant-scoped declared indexes are written explicitly and
-  // always have been — `fields: ['organization_id', 'code']`.
+  // Unique scope on a DECLARED index (ADR-0120 D1, amending #3696):
   //
-  // `'global'` is accepted as a synonym of `true` so a schema can state the
-  // intent in one vocabulary across both spellings; it changes nothing here.
-  unique: UniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness. Materialized over exactly `fields` — no tenant column is injected; list the tenant column explicitly for a per-tenant index. 'global' is a synonym of true, for symmetry with field-level `unique`"),
+  //   - `'global'` — the VERBATIM contract: materialized over exactly the
+  //     columns listed in `fields`, no organization column injected. Correct
+  //     for genuinely installation-wide reservations (a DNS hostname, a
+  //     reserved slug, an external provider id, every engine dedup key).
+  //   - `'organization'` — one holder per organization: the driver prepends
+  //     the organization key part to the listed columns at REGISTRATION,
+  //     where tenancy is known (authoring-time inference is impossible —
+  //     `organization_id` is kernel-injected, not authored). The key part is
+  //     NULL-safe — `COALESCE(organization_id, '__global__')` (ADR-0120 D3,
+  //     #5030): NULL-organization rows form one platform bucket instead of
+  //     escaping the constraint under SQL's NULL-distinct semantics.
+  //     Materialization lands with #5030's driver PR. On an object with no
+  //     organization column it degrades to the listed columns alone,
+  //     mirroring field-level behavior.
+  //   - bare `true` — the DEPRECATED positional spelling of `'global'`
+  //     (today's verbatim behavior, unchanged). It is the spelling whose
+  //     meaning was encoded by position — the #4986 trap — so 17.x warns
+  //     (lint `unique/unscoped-declared-index`) and protocol 18 rejects it
+  //     with a prescriptive error (#5082). State the scope.
+  //
+  // The old advice "spell a per-tenant index as
+  // `fields: ['organization_id', 'code']`" survives as valid legacy input,
+  // but new code says `unique: 'organization'` — the hand-written composite
+  // is NOT NULL-safe (#5030).
+  unique: UniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
   partial: z.string().optional().describe('Partial index condition (SQL WHERE clause for conditional indexes)'),
 }));
 

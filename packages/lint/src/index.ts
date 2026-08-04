@@ -459,7 +459,13 @@ export {
   VIEW_REF_FORM_TARGET_KIND,
 } from './lint-view-refs.js';
 
-export { lintUniqueDeclarations, lintDataModel, UNIQUE_DOUBLE_DECLARATION } from './data-model-rules.js';
+export {
+  lintUniqueDeclarations,
+  lintUnscopedDeclaredIndexes,
+  lintDataModel,
+  UNIQUE_DOUBLE_DECLARATION,
+  UNIQUE_UNSCOPED_DECLARED_INDEX,
+} from './data-model-rules.js';
 export type { LintIssue, Severity } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────

@@ -742,9 +742,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.hint,
       })),
   },
-  // #3991 — a column carrying BOTH a field-level `unique: true` and a
-  // single-column declared unique index has two intents, of which exactly one
-  // takes effect (the global index wins; the tenant composite is unreachable).
+  // #3991 / ADR-0120 D5a+D5b — the uniqueness-declaration pair: a column
+  // carrying BOTH a field-level `unique` and a single-column declared unique
+  // index states two scopes of which at most one takes effect
+  // (`unique/double-declaration`), and a declared index with bare
+  // `unique: true` states no scope at all (`unique/unscoped-declared-index` —
+  // the #4986 trap; protocol 18 rejects the spelling, #5082).
   {
     name: 'lintUniqueDeclarations',
     tier: 'advisory',
