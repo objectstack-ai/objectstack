@@ -462,9 +462,11 @@ export {
 export {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
+  lintLegacyOrganizationComposites,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
+  UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
 } from './data-model-rules.js';
 export type { LintIssue, Severity } from './data-model-rules.js';
 

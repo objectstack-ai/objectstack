@@ -215,7 +215,10 @@ What kind of data?
 {
   type: 'email',
   required: true,
-  unique: true,
+  // State the scope (ADR-0120): 'organization' = one holder per organization
+  // (NULL-safe), 'global' = one across the whole installation. Bare `true` at
+  // field level still means 'organization' and stays valid.
+  unique: 'organization',
 }
 ```
 

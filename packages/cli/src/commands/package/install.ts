@@ -71,6 +71,17 @@ export default class PackageInstall extends Command {
       env: 'OS_CLOUD_TIMEOUT_MS',
       default: 120_000,
     }),
+    // [ADR-0120 D5e] The installer's answer to the `isolated`-posture question.
+    // Deliberately NOT default-on and deliberately not named `--force`: it
+    // records an affirmative fact ("these constraints are genuinely
+    // platform-wide") into the install manifest, where `os doctor` can later
+    // show who affirmed it and when.
+    'confirm-global-uniques': Flags.boolean({
+      description:
+        "Confirm this app's installation-wide (`unique: 'global'`) constraints are genuinely platform-wide when "
+        + "installing into an 'isolated'-posture runtime (ADR-0120 D5e). Recorded in the install manifest; asked once.",
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -151,6 +162,7 @@ export default class PackageInstall extends Command {
 
       // ---- Install ---------------------------------------------------------
       printStep(`Installing ${label} into ${runtime}...`);
+      if (flags['confirm-global-uniques']) body.confirmGlobalUniques = true;
       const res = await this.request(`${runtime}/api/v1/marketplace/install-local`, {
         method: 'POST',
         headers: {
@@ -161,6 +173,23 @@ export default class PackageInstall extends Command {
       }, flags.timeout);
 
       if (!res.ok) {
+        // [ADR-0120 D5e] The `isolated`-posture stop. Rendered as its own case
+        // rather than a bare "Install failed (409)": the whole point of the gate
+        // is that the installer READS the list and decides per index, so the
+        // list has to survive the trip through the CLI intact.
+        if (res.body?.error?.code === 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED') {
+          printError('Install stopped — installation-wide unique constraints need a decision (ADR-0120 D5e)');
+          console.log('');
+          for (const line of String(res.body.error.message).split('\n')) {
+            console.log(`  ${line}`);
+          }
+          console.log('');
+          console.log('  Confirm them as genuinely platform-wide:');
+          console.log(`    os package install ${args.package} --confirm-global-uniques`);
+          console.log("  …or edit the app's metadata to `unique: 'organization'` and rebuild.");
+          this.exit(1);
+          return;
+        }
         if (res.status === 401) {
           printError(
             'The runtime rejected the call as unauthenticated. Pass --email/--password ' +

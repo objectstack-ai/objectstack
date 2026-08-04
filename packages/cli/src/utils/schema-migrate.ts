@@ -46,6 +46,13 @@ export interface SchemaStack {
    */
   pendingSchemaWork: PendingSchemaWork[];
   /**
+   * Every object the booted stack knows about — the set the plan is computed
+   * against, including objects that arrived from installed packages rather than
+   * this project's `objectstack.config.ts`. Read by the ADR-0120 D5e
+   * unique-scope advisory; best-effort (`[]` when no ObjectQL service composed).
+   */
+  allObjects: () => any[];
+  /**
    * Perform the deferred sync — call only once the operator has confirmed the
    * plan. Returns the work it actually ran (`[]` when nothing was deferred).
    */
@@ -206,6 +213,24 @@ export async function bootSchemaStack(
     managedTableCount,
     kernel,
     pendingSchemaWork,
+    /**
+     * Every object this booted stack knows about — the same set the plan is
+     * computed against.
+     *
+     * Exposed for the ADR-0120 D5e advisory in `os migrate plan`: the advisory
+     * must describe the objects the migration is actually planning for, not a
+     * re-read of `objectstack.config.ts`, which on a runtime serving installed
+     * marketplace packages is a strict subset. Best-effort — a stack with no
+     * ObjectQL service reports none, and the advisory then simply says nothing.
+     */
+    allObjects: (): any[] => {
+      try {
+        const ql: any = (kernel as any).getService?.('objectql');
+        return ql?.registry?.getAllObjects?.() ?? [];
+      } catch {
+        return [];
+      }
+    },
     flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
       ? await driver.flushDeferredSchemaDdl()
       : []),

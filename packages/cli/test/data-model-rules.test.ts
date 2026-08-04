@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes } from '@objectstack/lint';
+import { lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
 import { lintConfig } from '../src/commands/lint';
 
 const rulesOf = (issues: { rule: string }[]) => issues.map((i) => i.rule);
@@ -445,5 +445,116 @@ describe('lintUniqueDeclarations — double declaration, four scope quadrants (#
     ]));
     expect(issues.map((i) => i.message.match(/"([^"]+)"/)?.[1]).sort())
       .toEqual(['crm_contact.email', 'crm_lead.email', 'crm_lead.sku']);
+  });
+});
+
+// ADR-0120 D5c — the S6 legacy hand-written organization composite. The
+// vocabulary now has a word for what these indexes were always trying to say,
+// and the respelling is also what closes their NULL hole (#5030).
+describe('lintLegacyOrganizationComposites — S6 respelling nudge (ADR-0120 D5c)', () => {
+  const RULE = 'unique/legacy-organization-composite';
+  const legacy = (issues: { rule: string }[]) => issues.filter((i) => i.rule === RULE);
+
+  it('returns [] for empty input', () => {
+    expect(lintLegacyOrganizationComposites([])).toEqual([]);
+    expect(lintLegacyOrganizationComposites(undefined as any)).toEqual([]);
+  });
+
+  it('warns on a declared unique that lists organization_id, and explains the NULL hole', () => {
+    const issues = lintLegacyOrganizationComposites([
+      {
+        name: 'sys_team',
+        fields: { name: { type: 'text' }, organization_id: { type: 'text' } },
+        indexes: [{ fields: ['name', 'organization_id'], unique: true }],
+      },
+    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rule).toBe(RULE);
+    expect(issues[0].severity).toBe('warning'); // advisory forever — zero forced drift
+    expect(issues[0].path).toBe('objects[0].indexes[0]');
+    expect(issues[0].message).toContain('#5030');
+    expect(issues[0].message).toContain('NULL-distinct');
+    expect(issues[0].fix).toContain("unique: 'organization'");
+    // The respelling keeps `fields` — the driver makes the LISTED column
+    // NULL-safe in place rather than prepending a second key part.
+    expect(issues[0].fix).toContain('keep `fields` exactly as they are');
+    // …and it is honest that opting in is a real migration, not a free rename.
+    expect(issues[0].fix).toContain('recreate_index');
+    expect(issues[0].fix).toContain('pre-flight');
+  });
+
+  it('fires on the explicit `global` spelling too — the scope is still wrong for the shape', () => {
+    const issues = legacy(lintLegacyOrganizationComposites([
+      {
+        name: 'sys_business_unit',
+        fields: {},
+        indexes: [{ name: 'uk_bu', fields: ['code', 'organization_id'], unique: 'global' }],
+      },
+    ]));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'uk_bu'");
+  });
+
+  it("stays quiet once respelled to 'organization' — that IS the fix", () => {
+    expect(lintLegacyOrganizationComposites([
+      {
+        name: 'sys_team',
+        fields: {},
+        indexes: [{ fields: ['name', 'organization_id'], unique: 'organization' }],
+      },
+    ])).toEqual([]);
+  });
+
+  it('stays quiet for composites that do not list the organization column, and for non-uniques', () => {
+    expect(lintLegacyOrganizationComposites([
+      {
+        name: 'crm_case',
+        fields: {},
+        indexes: [
+          { fields: ['department', 'code'], unique: true },      // R11's business, not R12's
+          { fields: ['organization_id', 'created_at'] },          // not unique at all
+          { fields: ['organization_id', 'status'], unique: false },
+        ],
+      },
+    ])).toEqual([]);
+  });
+
+  it('stays quiet for a unique on the organization column ALONE — not a composite', () => {
+    // There is no per-organization reading to recover: `'organization'` on an
+    // index whose only column IS the organization column would say nothing.
+    expect(lintLegacyOrganizationComposites([
+      { name: 'org_settings', fields: {}, indexes: [{ fields: ['organization_id'], unique: true }] },
+    ])).toEqual([]);
+  });
+
+  it("honors a declared tenancy.tenantField spelling", () => {
+    const issues = legacy(lintLegacyOrganizationComposites([
+      {
+        name: 'legacy_thing',
+        tenancy: { tenantField: 'tenant_ref' },
+        fields: {},
+        indexes: [
+          { fields: ['code', 'tenant_ref'], unique: true },
+          // organization_id is NOT this object's tenant column — no finding
+          { fields: ['code2', 'organization_id'], unique: true },
+        ],
+      },
+    ]));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'tenant_ref'");
+  });
+
+  it('surfaces through lintDataModel (os lint), exactly once', () => {
+    const objs = [{
+      name: 'sys_member',
+      fields: {},
+      indexes: [{ fields: ['organization_id', 'user_id'], unique: true }],
+    }];
+    expect(has(lintDataModel(objs), RULE)).toBe(true);
+    expect(lintDataModel(objs).filter((i) => i.rule === RULE)).toHaveLength(1);
+    // R11 fires on the same index for the OTHER reason (unstated scope) — the
+    // two rules are complementary, not duplicates: R11 says "say which scope",
+    // R12 says "the shape tells me which one you meant".
+    expect(has(lintDataModel(objs), 'unique/unscoped-declared-index')).toBe(true);
   });
 });
