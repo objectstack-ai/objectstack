@@ -101,10 +101,6 @@ export class NodeMetadataManager extends MetadataManager {
     const fileName = parts[parts.length - 1];
     const name = path.basename(fileName, path.extname(fileName));
 
-    // We can't access private watchCallbacks from parent.
-    // We need a protected method to trigger watch event or access it.
-    // OPTION: Add a method `triggerWatchEvent` to MetadataManager
-    
     let data: any = undefined;
     if (eventType !== 'deleted') {
       try {
@@ -126,6 +122,37 @@ export class NodeMetadataManager extends MetadataManager {
       data,
       timestamp: new Date().toISOString(),
     };
+
+    // [#5218] Invalidate BEFORE announcing. A file event is a *foreign write*
+    // in the precise sense {@link MetadataManager.invalidateForForeignWrite}
+    // means: it did not come through this manager's write API, so — unlike
+    // `register()` / `unregister()` — nothing has refreshed the caches on its
+    // behalf. `load()` above is a pure read (it delegates to `loadDiagnosed`,
+    // which only walks the loaders), so before this call the handler left both
+    // `listCache` and `registry` holding the pre-change state.
+    //
+    // Without it, editing `rootDir/view/x.json` left the two read surfaces
+    // contradicting each other for up to LIST_CACHE_TTL_MS (30s): `get()` saw
+    // the new file because it falls through to the FilesystemLoader, while
+    // `list()` — REST `/api/v1/metadata/:type`, the Studio left rail,
+    // `listViews()` — kept serving the pre-change set. Worse, the HMR/SSE
+    // consumers woken by the event answer it by re-reading through `list()`,
+    // so the wake-up handed back exactly the stale data it was announcing.
+    // Same defect shape as #5109 (cluster peer) with a different trigger; this
+    // reuses that fix's helper rather than re-deriving it.
+    //
+    // Ordering is the same discipline every other write path in the base class
+    // keeps (`register` / `unregister` / `applyRepoEvent` / the cluster
+    // subscriber all invalidate, then announce): a watcher must never be able
+    // to observe the event and the pre-event cache at the same time.
+    //
+    // The registry entry goes too, not just the list cache. FS-loaded items
+    // never enter the registry, so there is usually nothing to delete — but
+    // when a same-named entry was previously written by `register()` /
+    // `registerInMemory()` it SHADOWS the loader in both `get()` and `list()`,
+    // and dropping the list cache alone would leave that stale copy answering
+    // forever. Deleted, never pre-filled from `data`, per the helper's contract.
+    this.invalidateForForeignWrite(type, name);
 
     this.notifyWatchers(type, event);
   }

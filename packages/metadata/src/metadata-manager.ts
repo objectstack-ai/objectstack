@@ -2036,14 +2036,18 @@ export class MetadataManager implements IMetadataService {
    * we did not perform ourselves has just invalidated, so the next read falls
    * through to the source of truth.
    *
-   * The two callers are the manager's two *foreign-write* seams — the
-   * repository watch loop ({@link applyRepoEvent}) and the cluster peer replay
-   * in {@link attachClusterPubSub}. Both learn about a write that landed
-   * somewhere else (the repo head; another node's `sys_metadata`) and hold
-   * caches that the write silently aged out. Local writes do not come through
-   * here: `register()` / `unregister()` / `registerInMemory()` update the
-   * registry to the value they just wrote and call `invalidateListCache()`
-   * themselves.
+   * The callers are the manager's *foreign-write* seams — the repository watch
+   * loop ({@link applyRepoEvent}), the cluster peer replay in
+   * {@link attachClusterPubSub}, and — since #5218 — `NodeMetadataManager`'s
+   * chokidar handler, which is why this is `protected` rather than `private`.
+   * All three learn about a write that landed somewhere else (the repo head;
+   * another node's `sys_metadata`; an editor writing `rootDir/view/x.json`) and
+   * hold caches that the write silently aged out. A file event qualifies on
+   * exactly the definition that matters here: it did not come through this
+   * manager's write API, so nothing has updated the caches on its behalf.
+   * Local writes do not come through here: `register()` / `unregister()` /
+   * `registerInMemory()` update the registry to the value they just wrote and
+   * call `invalidateListCache()` themselves.
    *
    * **Delete, do not pre-fill.** Even when the event carries a body we drop the
    * registry entry rather than writing the body into it: the body reaching us
@@ -2052,7 +2056,9 @@ export class MetadataManager implements IMetadataService {
    * a definition we did not load. Lazy invalidation is the safer default —
    * `get()` then falls through to the loaders / repository, which is where the
    * truth is. (This paragraph is the rationale `applyRepoEvent` carried since
-   * ADR-0008 PR-6; #5109 extended the same choice to the cluster path.)
+   * ADR-0008 PR-6; #5109 extended the same choice to the cluster path, #5218 to
+   * the filesystem watcher — where "the truth" is the file chokidar just
+   * reported, served by the `FilesystemLoader` the registry entry was shadowing.)
    *
    * `name` is optional because `MetadataWatchEvent.name` is: a nameless event
    * cannot address a registry entry, so it invalidates the list cache only.
@@ -2060,7 +2066,7 @@ export class MetadataManager implements IMetadataService {
    * artefacts (code-owned datasources, ADR-0015 Addendum) that no loader can
    * restore — an unrecoverable loss in exchange for a guess.
    */
-  private invalidateForForeignWrite(type: string, name?: string): void {
+  protected invalidateForForeignWrite(type: string, name?: string): void {
     if (name) {
       const typeStore = this.registry.get(type);
       if (typeStore) {
