@@ -2051,7 +2051,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments_json: {
         label: "附件（JSON）",
-        help: "附件的 JSON 数组，元素形状为 { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }，内容以 base64 存放在 `inline` 中。仅当附件合计原始大小在 plugin-email 的预算内（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES，256 KiB —— 最坏约 350 KB 的 base64）时才写入；超出上限的邮件改走内联投递，此列不落任何内容，因此行体积有界。`storageKey`（行外内容）目前还没有生产者 —— 见 objectstack#5172。"
+        help: "附件的 JSON 数组，元素形状为 { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey?, contentReclaimedAt? }。在 plugin-email 预算（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES，合计原始大小 256 KiB —— 最坏约 350 KB 的 base64）以内的内容以 base64 存放在 `inline`；超出的内容存入 file-storage 能力，元素改为携带 `storageKey`，因此两种情况下行体积都有界。filename/contentType/size/hash 是**永久**审计证据；行外内容属于投递工件，在行到达终态并经过宽限窗后被删除，届时 `storageKey` 由 `contentReclaimedAt` 取代。"
       },
       status: {
         label: "状态",

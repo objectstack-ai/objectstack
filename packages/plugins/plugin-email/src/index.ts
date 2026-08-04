@@ -14,7 +14,7 @@
  * endpoints. `EMAIL_TRANSPORT_PROVIDERS` is the machine-readable form.
  */
 
-export { EmailServicePlugin, resolveDurableQueue } from './email-plugin.js';
+export { EmailServicePlugin, resolveDurableQueue, resolveAttachmentStore } from './email-plugin.js';
 export type { EmailServicePluginOptions } from './email-plugin.js';
 export { LogTransport, normalizeMessage, formatAddress, EMAIL_SEND_QUEUE } from './email-service.js';
 export type {
@@ -25,16 +25,47 @@ export type {
   EmailQueueDelivery,
   EmailSendQueuePayload,
   DeliverAttemptOptions,
+  RowToNormalizedOptions,
 } from './email-service.js';
 export {
   SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
   encodeAttachmentsForRow,
   decodeAttachmentsFromRow,
+  decodeAttachmentsFromRowAsync,
+  readAttachmentColumn,
+  materializeAttachment,
+  collectAttachmentParts,
+  storageKeysInColumn,
+  withContentReclaimed,
   encodeHeadersForRow,
   decodeHeadersFromRow,
   type PersistedEmailAttachment,
   type EncodedAttachments,
+  type AttachmentSource,
+  type AttachmentPart,
+  type CollectedAttachments,
 } from './sys-email-payload.js';
+export {
+  EMAIL_ATTACHMENT_KEY_PREFIX,
+  EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+  EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
+  attachmentStorageKey,
+  offloadAttachmentsToStorage,
+  deleteAttachmentKeys,
+  fetchAttachmentContent,
+  type EmailAttachmentStore,
+  type EmailAttachmentStorage,
+  type EmailAttachmentReclaimPayload,
+  type AttachmentOffload,
+} from './attachment-storage.js';
+export {
+  reclaimAttachmentContent,
+  RECLAIM_OBJECT,
+  TERMINAL_EMAIL_STATUSES,
+  type AttachmentReclaimEngine,
+  type AttachmentReclaimOutcome,
+  type ReclaimAttachmentContentOptions,
+} from './attachment-reclaim.js';
 export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,

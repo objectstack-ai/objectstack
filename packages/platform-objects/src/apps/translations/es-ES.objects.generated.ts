@@ -2051,7 +2051,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments_json: {
         label: "Adjuntos (JSON)",
-        help: "Adjuntos como un array JSON de { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }, con el contenido en base64 en `inline`. Solo se escribe cuando el tamaño bruto combinado está dentro del presupuesto de plugin-email (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB — ~350 KB de base64 en el peor caso); un mensaje mayor se entrega en línea y aquí no se almacena nada, de modo que la fila permanece acotada. `storageKey` (contenido fuera de la fila) todavía no tiene productor — objectstack#5172."
+        help: "Adjuntos como un array JSON de { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey?, contentReclaimedAt? }. El contenido que cabe en el presupuesto de plugin-email (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB brutos combinados — ~350 KB de base64 en el peor caso) va en base64 en `inline`; el contenido mayor se guarda en la capacidad file-storage y el elemento lleva `storageKey` en su lugar, de modo que la fila permanece acotada en ambos casos. filename/contentType/size/hash son evidencia de auditoría PERMANENTE; el contenido fuera de la fila es un artefacto de entrega y se elimina tras un periodo de gracia una vez que la fila alcanza un estado terminal, momento en el que `storageKey` se sustituye por `contentReclaimedAt`."
       },
       status: {
         label: "Estado",

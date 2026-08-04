@@ -19,9 +19,20 @@ import {
   encodeAttachmentsForRow,
   encodeHeadersForRow,
   decodeAttachmentsFromRow,
+  decodeAttachmentsFromRowAsync,
   decodeHeadersFromRow,
+  storageKeysInColumn,
   type EncodedAttachments,
 } from './sys-email-payload.js';
+import {
+  EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+  EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
+  deleteAttachmentKeys,
+  fetchAttachmentContent,
+  offloadAttachmentsToStorage,
+  type EmailAttachmentReclaimPayload,
+  type EmailAttachmentStorage,
+} from './attachment-storage.js';
 
 /**
  * Queue topic durable email delivery is published to and consumed from
@@ -86,6 +97,19 @@ export interface DeliverAttemptOptions {
    * accumulates across queue redeliveries instead of resetting to 1.
    */
   priorAttempts?: number;
+}
+
+/**
+ * Reconstructing a `sys_email` row into a sendable message needs the
+ * `file-storage` capability once a row's attachments live out of it (#5172),
+ * and that is asynchronous — hence this async twin of {@link rowToNormalized}.
+ *
+ * `fetchContent` absent ⇒ a row that needs storage fails, loudly, exactly as
+ * it does through the synchronous entry point. It is never optional in the
+ * sense of "skip the attachment".
+ */
+export interface RowToNormalizedOptions {
+  fetchContent?: (storageKey: string) => Promise<Buffer>;
 }
 
 /**
@@ -189,6 +213,44 @@ function splitAddresses(v: unknown): string[] {
  * Throws when the row lacks the minimum fields needed to send.
  */
 export function rowToNormalized(row: Record<string, any>): NormalizedEmailMessage {
+  const msg = rowEnvelope(row);
+  // Headers and attachments (#5177). Both decoders return `undefined` for a
+  // row that simply has no such column — every row written before #5177 — and
+  // THROW for a column that is present but does not describe what it claims
+  // to. Throwing here is the point: the caller (`deliverPersistedRow`) turns
+  // it into a `failed` row carrying the reason, which is strictly better than
+  // handing the transport a message with an attachment quietly missing.
+  //
+  // A row whose attachments live in storage (#5172) also throws here: this
+  // entry point cannot fetch, and "cannot fetch" must never quietly become
+  // "send it without". Use {@link rowToNormalizedAsync} where a fetch is
+  // possible.
+  const attachments = decodeAttachmentsFromRow(row.attachments_json);
+  if (attachments) msg.attachments = attachments;
+  return msg;
+}
+
+/**
+ * {@link rowToNormalized}, able to fetch out-of-row attachment content
+ * (#5172).
+ *
+ * The two share ONE validator (`readAttachmentColumn`) and one verifier
+ * (`materializeAttachment`), so a storage-backed attachment is checked against
+ * `size` and `hash` exactly as an in-row one is — a backend that returns a
+ * truncated object is as unacceptable as a truncated column.
+ */
+export async function rowToNormalizedAsync(
+  row: Record<string, any>,
+  opts?: RowToNormalizedOptions,
+): Promise<NormalizedEmailMessage> {
+  const msg = rowEnvelope(row);
+  const attachments = await decodeAttachmentsFromRowAsync(row.attachments_json, opts?.fetchContent);
+  if (attachments) msg.attachments = attachments;
+  return msg;
+}
+
+/** Everything a row says about a message except its attachments. */
+function rowEnvelope(row: Record<string, any>): NormalizedEmailMessage {
   const to = splitAddresses(row.to_addresses);
   if (to.length === 0) throw new Error('VALIDATION_FAILED: row has no to_addresses');
   const from = String(row.from_address ?? '').trim();
@@ -212,16 +274,8 @@ export function rowToNormalized(row: Record<string, any>): NormalizedEmailMessag
   const bcc = splitAddresses(row.bcc_addresses);
   if (bcc.length > 0) msg.bcc = bcc;
   if (row.reply_to) msg.replyTo = String(row.reply_to);
-  // Headers and attachments (#5177). Both decoders return `undefined` for a
-  // row that simply has no such column — every row written before #5177 — and
-  // THROW for a column that is present but does not describe what it claims
-  // to. Throwing here is the point: the caller (`deliverPersistedRow`) turns
-  // it into a `failed` row carrying the reason, which is strictly better than
-  // handing the transport a message with an attachment quietly missing.
   const headers = decodeHeadersFromRow(row.headers_json);
   if (headers) msg.headers = headers;
-  const attachments = decodeAttachmentsFromRow(row.attachments_json);
-  if (attachments) msg.attachments = attachments;
   return msg;
 }
 
@@ -309,6 +363,19 @@ export interface EmailServiceOptions {
    * inline delivery (the default, unchanged).
    */
   queueDelivery?: EmailQueueDelivery;
+  /**
+   * Out-of-row attachment content through the `file-storage` capability
+   * (#5172). Set ⇒ a message whose attachments exceed
+   * {@link SYS_EMAIL_ATTACHMENT_LIMIT_BYTES} can still be queued, with its
+   * content in storage and a reference on the row. Unset (or unresolvable) ⇒
+   * such a message keeps falling back to inline delivery, whole, and the
+   * fallback says why.
+   *
+   * Only ever consulted in queue mode: out-of-row content exists to make
+   * DURABLE delivery possible, and inline delivery already has the message in
+   * memory.
+   */
+  attachmentStorage?: EmailAttachmentStorage;
 }
 
 /**
@@ -350,6 +417,15 @@ export class EmailService implements IEmailService {
    * (AGENTS.md — "say it once, at the first degradation").
    */
   private queueDegradationReported = false;
+
+  /**
+   * Set once an attachment OFFLOAD failure has been reported, so a flapping
+   * storage backend states the degradation at its first message instead of on
+   * every one. Re-armed by {@link setQueueDelivery} /
+   * {@link setAttachmentStorage}, i.e. whenever the operator changes the
+   * configuration this verdict was about.
+   */
+  private attachmentStorageDegradationReported = false;
 
   constructor(public options: EmailServiceOptions) {
     if (!options.transport) throw new Error('EmailService: transport is required');
@@ -394,6 +470,17 @@ export class EmailService implements IEmailService {
   setQueueDelivery(queueDelivery: EmailQueueDelivery | undefined): void {
     this.options.queueDelivery = queueDelivery;
     this.queueDegradationReported = false;
+    this.attachmentStorageDegradationReported = false;
+  }
+
+  /**
+   * Wire (or unwire) out-of-row attachment storage on a running service
+   * (#5172). Re-arms the one-shot degradation report, so mounting storage
+   * after a complaint is allowed to complain again if it still cannot work.
+   */
+  setAttachmentStorage(attachmentStorage: EmailAttachmentStorage | undefined): void {
+    this.options.attachmentStorage = attachmentStorage;
+    this.attachmentStorageDegradationReported = false;
   }
 
   /**
@@ -440,14 +527,30 @@ export class EmailService implements IEmailService {
     // reports that as its own degradation, below), so base64-ing a large
     // attachment for nobody is pure cost on the path that opted out of
     // persistence.
-    const encodedAttachments: EncodedAttachments = this.options.persistence
+    let encodedAttachments: EncodedAttachments = this.options.persistence
       ? encodeAttachmentsForRow(normalized.attachments)
       : { kind: 'none' };
 
+    // The row id is minted BEFORE the offload because the storage key embeds
+    // it (`sys_email/attachments/<rowId>/…`) and the content must be in place
+    // before the row that references it is inserted. The other order — insert,
+    // then upload, then patch the row — would make a `queued` row observable
+    // while it under-describes its own message, which the boot sweep would
+    // then deliver stripped.
+    const id = newId();
+
+    // ── OUT-OF-ROW ATTACHMENT CONTENT (#5172) ──────────────────────────────
+    // Over the in-row budget, in queue mode, with the file-storage capability
+    // mounted: the content goes to storage and the row carries a reference, so
+    // this message gets the same durability as every other. Anything missing
+    // here leaves `over-limit` standing — inline delivery, whole, with the
+    // reason attached to the one line the operator sees.
+    if (allowQueue && encodedAttachments.kind === 'over-limit') {
+      encodedAttachments = await this.offloadAttachments(id, normalized, encodedAttachments);
+    }
+
     // `undefined` ⇒ every statement below is the pre-#5160 inline path.
     const queue = allowQueue ? this.resolveQueueForSend(encodedAttachments) : undefined;
-
-    const id = newId();
     const headersJson = encodeHeadersForRow(normalized.headers);
     const baseRow: Record<string, any> = {
       id,
@@ -467,7 +570,9 @@ export class EmailService implements IEmailService {
       // prevent. Over-limit attachments store NOTHING (see the verdict
       // above), so the row stays bounded.
       ...(headersJson !== undefined ? { headers_json: headersJson } : {}),
-      ...(encodedAttachments.kind === 'inline' ? { attachments_json: encodedAttachments.json } : {}),
+      ...(encodedAttachments.kind === 'inline' || encodedAttachments.kind === 'storage'
+        ? { attachments_json: encodedAttachments.json }
+        : {}),
       ...(input.relatedObject ? { related_object: input.relatedObject } : {}),
       ...(input.relatedId ? { related_id: input.relatedId } : {}),
       ...(input.sentBy ? { sent_by: input.sentBy } : {}),
@@ -491,6 +596,14 @@ export class EmailService implements IEmailService {
         }
       }
       const rowId = persistedId ?? id;
+      const storageKeys = encodedAttachments.kind === 'storage' ? encodedAttachments.keys : [];
+      if (persistedId === undefined && storageKeys.length > 0) {
+        // Content was uploaded for a row that does not exist. No row will ever
+        // reference these bytes, so nothing will ever reclaim them either —
+        // delete them here rather than create the one orphan class this design
+        // is built to make impossible.
+        await this.discardOrphanedAttachmentContent(storageKeys, 'the sys_email row could not be persisted');
+      }
       if (queue) {
         // Queue mode delivers the ROW, so a row that never landed leaves the
         // job with nothing to reference. Deliver inline instead of publishing
@@ -506,7 +619,11 @@ export class EmailService implements IEmailService {
           return { id: rowId, status: 'queued' };
         }
       }
-      return await this.deliverNormalized(rowId, normalized);
+      // Inline delivery of a message whose content IS in storage (the publish
+      // failed, or queue mode is off for this send): the in-memory message is
+      // still whole, so the mail goes out — and the content still has to be
+      // reclaimed afterwards, which is why the keys travel with the delivery.
+      return await this.deliverNormalized(rowId, normalized, undefined, storageKeys);
     } finally {
       this.managedRowIds.delete(id);
     }
@@ -548,7 +665,10 @@ export class EmailService implements IEmailService {
         `EmailService: queue delivery skipped for one message — its attachments total `
         + `${encodedAttachments.totalBytes} bytes, over the ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}-byte limit a `
         + 'sys_email row carries, so the message was delivered inline (in-process retries only) rather than '
-        + 'queued without them. Out-of-row storage for large attachments is objectstack#5172.',
+        + 'queued without them. Content that large is queueable through the file-storage capability (#5172), '
+        + `but ${encodedAttachments.storageDetail ?? 'that path was not attempted for this message'}. `
+        + 'Fix: mount the file-storage capability (@objectstack/service-storage) so large attachments are '
+        + 'stored out of the row and the message can be delivered durably.',
       );
       return undefined;
     }
@@ -573,6 +693,88 @@ export class EmailService implements IEmailService {
       return undefined;
     }
     return queue;
+  }
+
+  /**
+   * Try to move an over-budget message's attachment content out of the row and
+   * into the `file-storage` capability (#5172).
+   *
+   * Returns a `storage` verdict on success, and the ORIGINAL `over-limit`
+   * verdict — annotated with why — on every failure. That asymmetry is the
+   * maintainer's ruling made mechanical: a message the platform cannot store
+   * out of row is delivered **inline, whole, loudly**, never queued against a
+   * row that does not carry it.
+   */
+  private async offloadAttachments(
+    rowId: string,
+    normalized: NormalizedEmailMessage,
+    overLimit: Extract<EncodedAttachments, { kind: 'over-limit' }>,
+  ): Promise<EncodedAttachments> {
+    // Storage-backed content only pays for itself when there is a row to
+    // reference it AND a durable queue to deliver that row. Without either,
+    // uploading would buy nothing and still cost an upload: the message is
+    // about to be delivered inline from memory, and the two degradations that
+    // led here are already reported by `resolveQueueForSend`.
+    if (!this.options.persistence || !this.options.queueDelivery) return overLimit;
+    if (!this.options.queueDelivery.resolve()) return overLimit;
+
+    const storage = this.options.attachmentStorage?.resolve();
+    if (!storage) {
+      return {
+        ...overLimit,
+        storageDetail: 'no file-storage capability is mounted, so there is nowhere to put the content',
+      };
+    }
+
+    const offloaded = await offloadAttachmentsToStorage(normalized.attachments, rowId, storage);
+    if (offloaded.kind === 'storage') {
+      return {
+        kind: 'storage',
+        json: offloaded.json,
+        keys: offloaded.keys,
+        totalBytes: offloaded.totalBytes,
+      };
+    }
+
+    // Storage IS mounted and it did not work. Unlike "not configured", this is
+    // a fault: the durability the operator paid for is not in force while
+    // everything else looks normal, so it is stated at `error`, once.
+    this.reportAttachmentStorageDegradation(offloaded.detail);
+    return { ...overLimit, storageDetail: offloaded.detail };
+  }
+
+  /**
+   * Delete attachment content that no row will ever reference.
+   *
+   * Reported at `error` when it cannot be deleted: bytes that were meant to be
+   * temporary have silently become permanent, in a bucket somebody pays for,
+   * with nothing left pointing at them.
+   */
+  private async discardOrphanedAttachmentContent(keys: string[], because: string): Promise<void> {
+    const storage = this.options.attachmentStorage?.resolve();
+    if (!storage) return;
+    const { failed } = await deleteAttachmentKeys(storage, keys);
+    if (failed.length === 0) return;
+    this.options.logger?.error?.(
+      `EmailService: ${failed.length} attachment storage object(s) were uploaded but ${because}, and they could `
+      + 'not be deleted again: '
+      + failed.map((f) => `'${f.key}' (${f.error})`).join('; ')
+      + '. Nothing references those bytes and nothing will ever reclaim them. Fix: delete them by hand under '
+      + 'the sys_email/attachments/ prefix, and check why the file-storage backend is refusing deletes.',
+    );
+  }
+
+  /** State an attachment-offload degradation once, at `error`. See {@link reportQueueDegradation}. */
+  private reportAttachmentStorageDegradation(detail: string): void {
+    if (this.attachmentStorageDegradationReported) return;
+    this.attachmentStorageDegradationReported = true;
+    this.options.logger?.error?.(
+      `EmailService: a message's attachments could not be stored out of row — ${detail}. The message was `
+      + 'still SENT, inline and whole, but it did not get durable queue delivery: a failure would be retried '
+      + 'only in this process and lost if it dies. Fix: check the file-storage capability '
+      + '(@objectstack/service-storage — credentials, bucket, disk), or accept inline delivery for messages '
+      + `with attachments over ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES} bytes.`,
+    );
   }
 
   /**
@@ -659,6 +861,7 @@ export class EmailService implements IEmailService {
     rowId: string,
     normalized: NormalizedEmailMessage,
     opts?: DeliverAttemptOptions,
+    reclaimKeys?: string[],
   ): Promise<SendEmailResult> {
     // Defaults reproduce the pre-#5160 loop exactly.
     const maxAttempts = Math.max(1, opts?.maxAttempts ?? (this.options.retries ?? 0) + 1);
@@ -675,6 +878,7 @@ export class EmailService implements IEmailService {
           sent_at: new Date().toISOString(),
           attempt_count: priorAttempts + attempt,
         });
+        await this.scheduleAttachmentReclaim(rowId, reclaimKeys);
         return { id: rowId, status, messageId };
       } catch (err: any) {
         lastError = err;
@@ -690,7 +894,63 @@ export class EmailService implements IEmailService {
       error: errMessage,
       attempt_count: priorAttempts + maxAttempts,
     });
+    await this.scheduleAttachmentReclaim(rowId, reclaimKeys);
     return { id: rowId, status: 'failed', error: errMessage };
+  }
+
+  /**
+   * Schedule reclamation of this row's out-of-row attachment content, one
+   * grace window from now (#5172).
+   *
+   * Published on EVERY terminal transition, `sent` and `failed` alike, with a
+   * per-row idempotency key so the retries of one message collapse onto the
+   * first job rather than each arming their own. `failed` is included because
+   * `failed` is not the end of anything by itself — the queue re-delivers such
+   * a row — and the job re-reads the row before it deletes, so an early
+   * schedule can only ever be re-armed, never act early.
+   *
+   * The keys ride in the PAYLOAD. That is what makes a later row deletion
+   * (retention, purge) reclaim the content instead of orphaning it — see
+   * `attachment-reclaim.ts`.
+   */
+  private async scheduleAttachmentReclaim(rowId: string, keys: string[] | undefined): Promise<void> {
+    if (!keys || keys.length === 0) return;
+    const queue = this.options.queueDelivery?.resolve();
+    if (!queue) {
+      this.options.logger?.error?.(
+        `EmailService: ${keys.length} attachment storage object(s) for sys_email row '${rowId}' cannot be `
+        + 'scheduled for reclamation — no durable queue service is available now, although one was when the '
+        + 'content was stored. Those bytes will stay in the file-storage backend until they are deleted by '
+        + 'hand. Fix: keep @objectstack/service-queue (over an ObjectQL engine) mounted for the life of the '
+        + 'process, then delete leftovers under the sys_email/attachments/ prefix.',
+      );
+      return;
+    }
+    try {
+      await queue.publish<EmailAttachmentReclaimPayload>(
+        EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+        { rowId, keys },
+        {
+          delay: EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
+          // One row, one reclaim job: every retry of a message finalizes the
+          // row again, and each of those would otherwise arm its own copy.
+          idempotencyKey: `sys_email_attachments:${rowId}`,
+          // A reclaim that cannot run is a byte leak, not a lost message, so
+          // it gets a real budget and then the DLQ, where it is visible.
+          maxAttempts: 5,
+          retries: 4,
+          backoff: { type: 'exponential', delayMs: 60_000, maxDelayMs: 60 * 60_000 },
+          metadata: { object: 'sys_email', rowId },
+        },
+      );
+    } catch (err: any) {
+      this.options.logger?.error?.(
+        `EmailService: could not publish the attachment-reclaim job for sys_email row '${rowId}' `
+        + `(${String(err?.message ?? err)}). Its ${keys.length} storage object(s) will stay in the backend `
+        + 'until deleted by hand. Fix: check the durable queue service, then delete leftovers under the '
+        + 'sys_email/attachments/ prefix.',
+      );
+    }
   }
 
   /**
@@ -712,9 +972,17 @@ export class EmailService implements IEmailService {
   ): Promise<SendEmailResult> {
     const rowId = String(row?.id ?? '');
     if (!rowId) throw new Error('deliverPersistedRow: row.id is required');
+    // Keys read from the ROW, so a row delivered by the queue worker (which
+    // never saw the send) still schedules its own content's reclamation.
+    const reclaimKeys = storageKeysInColumn(row.attachments_json);
     let normalized: NormalizedEmailMessage;
     try {
-      normalized = rowToNormalized(row);
+      // Async because a row's attachments may live in the file-storage
+      // capability (#5172). A fetch that fails — outage, deleted object, no
+      // capability mounted at all — throws and lands the row at `failed` with
+      // the reason, which is the whole point: an unfetchable attachment must
+      // never become a message delivered without it.
+      normalized = await rowToNormalizedAsync(row, { fetchContent: this.attachmentFetcher() });
     } catch (err: any) {
       const errMessage = String(err?.message ?? err ?? 'invalid row').slice(0, 1000);
       await this.updateRow(rowId, {
@@ -724,7 +992,20 @@ export class EmailService implements IEmailService {
       });
       return { id: rowId, status: 'failed', error: errMessage };
     }
-    return this.deliverNormalized(rowId, normalized, opts);
+    return this.deliverNormalized(rowId, normalized, opts, reclaimKeys);
+  }
+
+  /**
+   * A fetcher for out-of-row attachment content, or `undefined` when no
+   * storage capability is mounted.
+   *
+   * `undefined` is NOT a permission to skip the attachment: the decoder turns
+   * it into a refusal naming the key it could not read.
+   */
+  private attachmentFetcher(): ((storageKey: string) => Promise<Buffer>) | undefined {
+    const storage = this.options.attachmentStorage?.resolve();
+    if (!storage) return undefined;
+    return (storageKey: string) => fetchAttachmentContent(storage, storageKey);
   }
 
   private async updateRow(id: string, patch: Record<string, any>): Promise<void> {

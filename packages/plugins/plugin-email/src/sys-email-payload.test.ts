@@ -211,16 +211,20 @@ describe('a column that lies is rejected, never partially delivered', () => {
     ]))).toThrow(/carries no content/);
   });
 
-  it('rejects a storageKey-only attachment and names the issue that will implement it', () => {
+  // #5172 gave `storageKey` a producer AND a reader, but the reader is the
+  // ASYNC decoder — this synchronous one has no capability to fetch with. It
+  // still refuses rather than dropping the attachment, and now names the
+  // missing capability instead of the issue that was going to add it.
+  it('rejects a storageKey-only attachment, naming the capability it would need', () => {
     expect(decodeAtt(JSON.stringify([
       { filename: 'a.txt', size: 2, hash: sha('hi'), contentForm: 'buffer', storageKey: 'blob/abc' },
-    ]))).toThrow(/objectstack#5172/);
+    ]))).toThrow(/no file-storage capability to fetch it from/);
   });
 
   it('rejects truncated content (size disagrees)', () => {
     const [item] = JSON.parse(column([{ filename: 'a.txt', content: 'hello' }]));
     item.inline = Buffer.from('he').toString('base64');
-    expect(decodeAtt(JSON.stringify([item]))).toThrow(/decodes to 2 byte\(s\) but the row records size 5/);
+    expect(decodeAtt(JSON.stringify([item]))).toThrow(/is 2 byte\(s\) but the row records size 5/);
   });
 
   it('rejects rewritten content (hash disagrees)', () => {
