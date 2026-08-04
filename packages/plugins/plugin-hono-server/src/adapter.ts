@@ -8,6 +8,7 @@ import {
     RouteHandler,
     Middleware
 } from '@objectstack/core';
+import type { Context } from 'hono';
 import { currentPerfTiming } from '@objectstack/observability';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
@@ -99,6 +100,24 @@ function readRemoteAddress(c: any): string | undefined {
 }
 
 /**
+ * The matched route's path parameters, or `{}` when there is no matched route.
+ *
+ * `c.req.param()` reads the router's match result, and in the `notFound` hook
+ * there ISN'T one — Hono throws `Cannot read properties of undefined` rather
+ * than returning empty (verified against hono 4.12, `HonoRequest.param` →
+ * `#getAllDecodedParams`). The fallback seam (#5090) runs handlers in exactly
+ * that context, so the read is guarded here rather than at one call site: an
+ * unmatched request HAS no path params, which is `{}`, not a crash.
+ */
+function readRouteParams(c: any): Record<string, string> {
+    try {
+        return c?.req?.param?.() ?? {};
+    } catch {
+        return {};
+    }
+}
+
+/**
  * Hono Implementation of IHttpServer
  */
 export class HonoHttpServer implements IHttpServer {
@@ -117,6 +136,14 @@ export class HonoHttpServer implements IHttpServer {
     private middlewares: Array<{ path?: string; handler: Middleware }> = [];
     /** Whether the Hono middleware that runs {@link middlewares} is mounted. */
     private middlewareSeamInstalled = false;
+    /**
+     * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
+     * `undefined` when no consumer installed one. Exactly one — installing
+     * again REPLACES, per the contract.
+     */
+    private fallbackHandler: RouteHandler | undefined;
+    /** Whether the Hono `notFound` hook that runs {@link unmatchedResponse} is mounted. */
+    private notFoundSeamInstalled = false;
 
     constructor(
         private port: number = 3000,
@@ -134,158 +161,218 @@ export class HonoHttpServer implements IHttpServer {
     // internal helper to convert standard handler to Hono handler
     private wrap(handler: RouteHandler) {
         return async (c: any) => {
-            let body: any = {};
+            const { response } = await this.runHandler(c, handler);
+            return response ?? c.json({ error: 'No response from handler' }, 500);
+        };
+    }
 
-            // Ambient per-request timing collector — present only when the
-            // Server-Timing / perf-tuning middleware established one for this
-            // request. All marks below are no-ops otherwise (zero overhead).
-            const _perf = currentPerfTiming();
-            const _endParse = _perf?.start('parse', 'Body parse');
+    /**
+     * Run ONE {@link RouteHandler} against a Hono context and report what it
+     * produced: a `Response` when it answered (buffered or streamed), `null`
+     * when it wrote nothing, plus whether it threw.
+     *
+     * ## Why this is its own method (#5090)
+     *
+     * Two call sites now drive a `RouteHandler`: {@link wrap} (a registered
+     * route) and the `notFound` seam ({@link installNotFoundSeam}, for the
+     * handler installed by {@link setFallbackHandler}). The contract on
+     * `IHttpServer.setFallbackHandler` promises the fallback a FULLY POPULATED
+     * `IHttpRequest` — `req.body` included, parsed by content-type exactly as a
+     * route handler gets it — and the only way to promise that credibly is for
+     * both paths to build the request with the same code. A second, parallel
+     * request-builder for the fallback is how the two would drift into
+     * disagreeing about, say, `application/octet-stream`.
+     *
+     * The two callers differ only in what they make of "wrote nothing":
+     * a route handler that answers nothing is a bug (500), while a FALLBACK
+     * that answers nothing is the documented way to say "not mine" and leaves
+     * the adapter's standard unmatched answer in place.
+     */
+    private async runHandler(
+        c: any,
+        handler: RouteHandler,
+    ): Promise<{ response: Response | null; failed: boolean }> {
+        let body: any = {};
 
-            const contentType = c.req.header('content-type') ?? '';
-            const isOctetStream = contentType.includes('application/octet-stream');
+        // Ambient per-request timing collector — present only when the
+        // Server-Timing / perf-tuning middleware established one for this
+        // request. All marks below are no-ops otherwise (zero overhead).
+        const _perf = currentPerfTiming();
+        const _endParse = _perf?.start('parse', 'Body parse');
 
-            // Try to parse JSON body first if content-type is JSON
-            if (contentType.includes('application/json')) {
-                try {
-                    body = await c.req.json();
-                } catch(e) {
-                    // If JSON parsing fails, try parseBody
-                    try {
-                        body = await c.req.parseBody();
-                    } catch(e2) {}
-                }
-            } else if (!isOctetStream) {
-                // For non-JSON / non-binary content types, use parseBody
-                // (Skipping for octet-stream so the raw stream stays consumable
-                //  via `req.rawBody()` for binary uploads.)
+        const contentType = c.req.header('content-type') ?? '';
+        const isOctetStream = contentType.includes('application/octet-stream');
+
+        // Try to parse JSON body first if content-type is JSON
+        if (contentType.includes('application/json')) {
+            try {
+                body = await c.req.json();
+            } catch(e) {
+                // If JSON parsing fails, try parseBody
                 try {
                     body = await c.req.parseBody();
-                } catch(e) {}
+                } catch(e2) {}
             }
+        } else if (!isOctetStream) {
+            // For non-JSON / non-binary content types, use parseBody
+            // (Skipping for octet-stream so the raw stream stays consumable
+            //  via `req.rawBody()` for binary uploads.)
+            try {
+                body = await c.req.parseBody();
+            } catch(e) {}
+        }
 
-            _endParse?.();
+        _endParse?.();
 
-            const rawHeaders = c.req.header();
-            // Fetch API `Request` objects don't expose the `Host` header
-            // (it's a forbidden header — derived from the URL by the
-            // transport). Hostname-based routing in REST/dispatcher
-            // depends on it, so we backfill from `c.req.url`.
-            if (!rawHeaders.host) {
-                try {
-                    const u = new URL(c.req.url);
-                    if (u.host) rawHeaders.host = u.host;
-                } catch { /* non-URL request, leave headers as-is */ }
+        const rawHeaders = c.req.header();
+        // Fetch API `Request` objects don't expose the `Host` header
+        // (it's a forbidden header — derived from the URL by the
+        // transport). Hostname-based routing in REST/dispatcher
+        // depends on it, so we backfill from `c.req.url`.
+        if (!rawHeaders.host) {
+            try {
+                const u = new URL(c.req.url);
+                if (u.host) rawHeaders.host = u.host;
+            } catch { /* non-URL request, leave headers as-is */ }
+        }
+
+        const req = {
+            params: readRouteParams(c),
+            query: c.req.query(),
+            body,
+            headers: rawHeaders,
+            method: c.req.method,
+            path: c.req.path,
+            rawBody: async () => {
+                const ab = await c.req.arrayBuffer();
+                return Buffer.from(ab);
+            },
+            /**
+             * The transport's own peer address (`IHttpRequest.remoteAddress`)
+             * — the unforgeable half of caller identification, never a
+             * header. The middleware seam has always populated it; handlers
+             * did not, so the one contract had two shapes depending on which
+             * seam you entered through. Filled here (#5090) so every
+             * `IHttpRequest` this adapter builds carries the same members,
+             * which is what lets `setFallbackHandler`'s contract promise a
+             * FULLY populated request without qualification. `undefined` on
+             * a runtime that exposes no socket — consumers must degrade
+             * deliberately, never substitute a header.
+             */
+            remoteAddress: readRemoteAddress(c),
+        };
+
+        let capturedResponse: any;
+        let streamController: ReadableStreamDefaultController | null = null;
+        let streamEncoder: TextEncoder | null = null;
+        let streamHeaders: Record<string, string> = {};
+        let isStreaming = false;
+        let streamClosed = false;
+
+        // The unused stream is always created (see below) and may be closed
+        // from two places — `res.end()` and the post-handler cleanup — so
+        // guard against the double-close that crashes the event loop with
+        // `ERR_INVALID_STATE: Controller is already closed`.
+        const closeStream = () => {
+            if (streamController && !streamClosed) {
+                streamClosed = true;
+                try { streamController.close(); } catch { /* already closed */ }
             }
+        };
 
-            const req = {
-                params: c.req.param(),
-                query: c.req.query(),
-                body,
-                headers: rawHeaders,
-                method: c.req.method,
-                path: c.req.path,
-                rawBody: async () => {
-                    const ab = await c.req.arrayBuffer();
-                    return Buffer.from(ab);
-                },
-            };
-
-            let capturedResponse: any;
-            let streamController: ReadableStreamDefaultController | null = null;
-            let streamEncoder: TextEncoder | null = null;
-            let streamHeaders: Record<string, string> = {};
-            let isStreaming = false;
-            let streamClosed = false;
-
-            // The unused stream is always created (see below) and may be closed
-            // from two places — `res.end()` and the post-handler cleanup — so
-            // guard against the double-close that crashes the event loop with
-            // `ERR_INVALID_STATE: Controller is already closed`.
-            const closeStream = () => {
-                if (streamController && !streamClosed) {
-                    streamClosed = true;
-                    try { streamController.close(); } catch { /* already closed */ }
+        const res = {
+            json: (data: any) => {
+                // `serialize` Server-Timing span — JSON-encoding the body is
+                // the one adapter-owned cost between "handler done" and
+                // "bytes on the wire". No-op when perf-tuning is off.
+                const endSerialize = _perf?.start('serialize', 'Response serialize');
+                capturedResponse = c.json(data);
+                endSerialize?.();
+            },
+            send: (data: string | Uint8Array | ArrayBuffer | Buffer) => {
+                if (data instanceof Uint8Array || data instanceof ArrayBuffer || (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(data))) {
+                    const body = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer.slice((data as Uint8Array).byteOffset, (data as Uint8Array).byteOffset + (data as Uint8Array).byteLength);
+                    capturedResponse = c.body(body as ArrayBuffer);
+                } else {
+                    capturedResponse = c.html(data as string);
                 }
-            };
+            },
+            status: (code: number) => { c.status(code); return res; },
+            header: (name: string, value: string) => {
+                c.header(name, value);
+                streamHeaders[name] = value;
+                return res;
+            },
+            write: (chunk: string | Uint8Array) => {
+                isStreaming = true;
+                if (streamController && streamEncoder) {
+                    const data = typeof chunk === 'string' ? streamEncoder.encode(chunk) : chunk;
+                    streamController.enqueue(data);
+                }
+            },
+            end: () => {
+                // Body-less response (e.g. 204 No Content) honoring any
+                // status already set via `res.status()`. A null body avoids
+                // the undici "Invalid response status code 204" thrown when
+                // an empty *string* body is paired with a null-body status.
+                if (!isStreaming && capturedResponse === undefined) {
+                    capturedResponse = c.body(null);
+                }
+                closeStream();
+            },
+        };
 
-            const res = {
-                json: (data: any) => {
-                    // `serialize` Server-Timing span — JSON-encoding the body is
-                    // the one adapter-owned cost between "handler done" and
-                    // "bytes on the wire". No-op when perf-tuning is off.
-                    const endSerialize = _perf?.start('serialize', 'Response serialize');
-                    capturedResponse = c.json(data);
-                    endSerialize?.();
+        // Create a streaming response wrapper — if handler calls res.write(),
+        // we return a ReadableStream; otherwise fall back to capturedResponse.
+        const streamPromise = new Promise<{ response: Response | null; failed: boolean }>((resolve) => {
+            const stream = new ReadableStream({
+                start(controller) {
+                    streamController = controller;
+                    streamEncoder = new TextEncoder();
                 },
-                send: (data: string | Uint8Array | ArrayBuffer | Buffer) => {
-                    if (data instanceof Uint8Array || data instanceof ArrayBuffer || (typeof Buffer !== 'undefined' && Buffer.isBuffer?.(data))) {
-                        const body = data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer.slice((data as Uint8Array).byteOffset, (data as Uint8Array).byteOffset + (data as Uint8Array).byteLength);
-                        capturedResponse = c.body(body as ArrayBuffer);
-                    } else {
-                        capturedResponse = c.html(data as string);
-                    }
-                },
-                status: (code: number) => { c.status(code); return res; },
-                header: (name: string, value: string) => {
-                    c.header(name, value);
-                    streamHeaders[name] = value;
-                    return res;
-                },
-                write: (chunk: string | Uint8Array) => {
-                    isStreaming = true;
-                    if (streamController && streamEncoder) {
-                        const data = typeof chunk === 'string' ? streamEncoder.encode(chunk) : chunk;
-                        streamController.enqueue(data);
-                    }
-                },
-                end: () => {
-                    // Body-less response (e.g. 204 No Content) honoring any
-                    // status already set via `res.status()`. A null body avoids
-                    // the undici "Invalid response status code 204" thrown when
-                    // an empty *string* body is paired with a null-body status.
-                    if (!isStreaming && capturedResponse === undefined) {
-                        capturedResponse = c.body(null);
-                    }
-                    closeStream();
-                },
-            };
-
-            // Create a streaming response wrapper — if handler calls res.write(),
-            // we return a ReadableStream; otherwise fall back to capturedResponse.
-            const streamPromise = new Promise<Response | null>((resolve) => {
-                const stream = new ReadableStream({
-                    start(controller) {
-                        streamController = controller;
-                        streamEncoder = new TextEncoder();
-                    },
-                });
-
-                // Run the handler; once it's done, check if streaming was used
-                const _endHandler = _perf?.start('handler', 'Route handler');
-                const result = handler(req as any, res as any);
-                const done = result instanceof Promise ? result : Promise.resolve(result);
-                done.then(() => {
-                    _endHandler?.();
-                    if (isStreaming) {
-                        resolve(new Response(stream, {
-                            status: 200,
-                            headers: streamHeaders,
-                        }));
-                    } else {
-                        // Not streaming — close the unused stream and return null
-                        closeStream();
-                        resolve(null);
-                    }
-                }).catch((err) => {
-                    _endHandler?.();
-                    closeStream();
-                    resolve(null);
-                });
             });
 
-            const streamResponse = await streamPromise;
-            return streamResponse ?? capturedResponse ?? c.json({ error: 'No response from handler' }, 500);
+            // Run the handler; once it's done, check if streaming was used.
+            //
+            // `Promise.try`-shaped on purpose: invoking the handler inside
+            // this executor means a SYNCHRONOUS throw would reject the
+            // promise instead of resolving it, while an async rejection
+            // lands in `.catch` below — the same failure reported two
+            // different ways depending on whether the handler happened to
+            // be `async`. That asymmetry was survivable while the only
+            // consumer was `wrap` (both ended as a 500, with different
+            // bodies); it is not survivable for the `notFound` seam, whose
+            // hook MUST return a Response — Hono answers a rejected
+            // notFound with its own opaque error page, so a throwing
+            // fallback could neither be reported nor declined (#5090).
+            const _endHandler = _perf?.start('handler', 'Route handler');
+            const done = (async () => handler(req as any, res as any))();
+            done.then(() => {
+                _endHandler?.();
+                if (isStreaming) {
+                    resolve({
+                        response: new Response(stream, {
+                            status: 200,
+                            headers: streamHeaders,
+                        }),
+                        failed: false,
+                    });
+                } else {
+                    // Not streaming — close the unused stream and return null
+                    closeStream();
+                    resolve({ response: null, failed: false });
+                }
+            }).catch((_err) => {
+                _endHandler?.();
+                closeStream();
+                resolve({ response: null, failed: true });
+            });
+        });
+
+        const outcome = await streamPromise;
+        return {
+            response: outcome.response ?? capturedResponse ?? null,
+            failed: outcome.failed,
         };
     }
 
@@ -324,6 +411,115 @@ export class HonoHttpServer implements IHttpServer {
         }
         if (methods.has('GET')) methods.add('HEAD');
         return Array.from(methods).sort();
+    }
+
+    /**
+     * Install the LAST-RESORT handler — see the CONTRACT on
+     * `IHttpServer.setFallbackHandler` in `@objectstack/spec/contracts`
+     * (#5040 §1-C). This implementation honours it as follows:
+     *
+     *  1. **Only after every registered route has missed.** It is mounted on
+     *     Hono's `app.notFound` hook — NEVER as a `/*` route. Hono runs
+     *     `notFound` only when its router matched no handler, so a fallback is
+     *     structurally incapable of shadowing a registered route and carries
+     *     ZERO registration-order dependency (ADR-0076 D11: one route, one
+     *     owner, by construction rather than by convention). Empirically
+     *     confirmed against this Hono version in `fallback-seam.test.ts`,
+     *     including the case the design flagged as a risk (#5040 §7-1): a
+     *     METHOD mismatch on an existing path routes to the same `notFound`
+     *     sink, so the fallback sees those too — and declining to answer leaves
+     *     the 405 below intact.
+     *  2. **`req.body` IS readable.** Nothing consumed the request stream —
+     *     no route handler ran — so {@link runHandler} parses it by
+     *     content-type exactly as it does for a route. That is the whole
+     *     reason this seam exists and `use()` middleware cannot serve: the
+     *     middleware contract explicitly does NOT populate `body`.
+     *  3. **Replacement, not a chain.** One handler; calling again replaces it.
+     *     The Hono hook is mounted once (idempotent) and reads the field per
+     *     request, so replacing never re-mounts and can never stack.
+     *  4. **A handler that writes nothing leaves the standard answer.** See
+     *     {@link unmatchedResponse} — the 404/405 semantics this interface
+     *     documents are produced there, after the fallback declines.
+     */
+    setFallbackHandler(handler: RouteHandler): void {
+        this.fallbackHandler = handler;
+        this.installNotFoundSeam();
+    }
+
+    /**
+     * Mount the single Hono `notFound` hook that produces this adapter's
+     * unmatched-request answer, running {@link fallbackHandler} first when one
+     * is installed. Idempotent.
+     *
+     * WHY THE ADAPTER OWNS THIS (#5090). The 405/404 answer used to be written
+     * by `HonoServerPlugin.start()` calling `getRawApp().notFound(...)` itself.
+     * `app.notFound` is LAST-CALL-WINS (verified, not assumed), so with the
+     * fallback seam added there would have been two writers of one hook and the
+     * survivor would depend on plugin start order — the loser silently losing
+     * either the fallback or the 405. One hook, one owner: the plugin now calls
+     * this method instead, the two behaviours COMPOSE inside it, and
+     * `setFallbackHandler` may be called at any moment, before or after.
+     *
+     * A bare `HonoHttpServer` (no plugin, e.g. cloud's serverless entrypoints)
+     * still gets Hono's own 404 unless it calls this — or installs a fallback,
+     * which mounts the seam for it.
+     */
+    installNotFoundSeam(): void {
+        if (this.notFoundSeamInstalled) return;
+        const app = this.app as unknown as { notFound?: (h: (c: Context) => unknown) => void };
+        // Feature-detected rather than assumed: `getRawApp()` is an escape
+        // hatch and a host may hand back something Hono-shaped but not Hono.
+        if (typeof app.notFound !== 'function') return;
+        this.notFoundSeamInstalled = true;
+
+        app.notFound(async (c: any) => {
+            const handler = this.fallbackHandler;
+            if (handler) {
+                const { response, failed } = await this.runHandler(c, handler);
+                if (response) return response;
+                if (failed) {
+                    // Prefer failing to falling back: a fallback that THREW is
+                    // a broken consumer, and reporting its failure as this
+                    // adapter's ordinary 404 would hide it behind the most
+                    // unremarkable status on the wire.
+                    return c.json({ error: 'Fallback handler failed' }, 500);
+                }
+                // Wrote nothing — the documented way to say "not mine". Fall
+                // through to the standard answer, unchanged.
+            }
+            return this.unmatchedResponse(c);
+        });
+    }
+
+    /**
+     * This adapter's standard answer for a request that matched no route —
+     * the `IHttpServer` unmatched-request CONTRACT (#3607 / ADR-0076 OQ#10),
+     * validated across adapters by `@objectstack/http-conformance`.
+     *
+     * Hono routes a method mismatch to the SAME `notFound` sink as a genuinely
+     * missing path, so a `POST` to a `PUT`-only route (e.g. the metadata save
+     * endpoint, see #2684) would otherwise return an opaque
+     * `{ error: 'Not found' }` 404 with no hint that the path exists under
+     * another verb. We re-match the request path against the registered route
+     * patterns: if it lines up with routes under other methods, answer `405
+     * Method Not Allowed` with an accurate `Allow` header so callers can
+     * self-correct. A path that matches nothing stays a 404. This is
+     * framework-wide — every registered endpoint benefits, not just metadata.
+     */
+    private unmatchedResponse(c: any) {
+        const allowed = this.allowedMethodsForPath(c.req.path);
+        if (allowed.length > 0 && !allowed.includes(c.req.method)) {
+            c.header('Allow', allowed.join(', '));
+            return c.json({
+                error: 'Method Not Allowed',
+                code: 'METHOD_NOT_ALLOWED',
+                message: `${c.req.method} is not supported for ${c.req.path}. Allowed: ${allowed.join(', ')}.`,
+                method: c.req.method,
+                path: c.req.path,
+                allowed,
+            }, 405);
+        }
+        return c.json({ error: 'Not found' }, 404);
     }
 
     /**
