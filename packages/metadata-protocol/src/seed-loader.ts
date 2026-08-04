@@ -39,8 +39,9 @@ const ALL_SEED_ENVS: readonly SeedEnv[] = ['prod', 'dev', 'test'];
  * `NODE_ENV` is this repo's ONE established environment source — `os start`
  * defaults it to `production`, `os dev` / `serve --dev` set `development`,
  * vitest sets `test`, and every other environment-sensitive behaviour here
- * (auto-DDL, the api-registry production guard, the sqlite step-down, the
- * hot-reload seeder) already branches on it. Seeds reuse it rather than
+ * (auto-DDL, the sqlite step-down, the hot-reload seeder) already branches on
+ * it — the api-registry production guard this list used to cite went with the
+ * ApiRegistry retirement (#4939). Seeds reuse it rather than
  * minting an `OS_SEED_ENV`, which would only trade one declared-but-unset key
  * for another.
  *

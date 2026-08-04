@@ -63,7 +63,6 @@ await kernel.bootstrap();
 | `Plugin` | interface | Plugin contract (`init`, `start`, `stop`, lifecycle hooks). |
 | `PluginContext` | interface | `{ logger, registerService, getService, eventBus, kernel }`. |
 | `ObjectLogger` | class | Structured logger over pino; swappable backends. |
-| `ApiRegistry` | class | Runtime route registry (consumed by `@objectstack/rest`). |
 | `QA` | namespace | Built-in kernel self-tests. |
 | `PackageManager` | class | Per-package DI namespace resolver. |
 

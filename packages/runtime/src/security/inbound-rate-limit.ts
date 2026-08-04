@@ -15,8 +15,9 @@
  *
  * This module is the connective tissue the maintainer adjudicated on
  * 2026-08-03: a NARROW authorable `server:` key (Q1=B), server-level only
- * (Q2=B — endpoint-level `rateLimit` stays knowingly unwired, tracked by
- * #4936), keyed principal-first with IP fallback and forwarded headers believed
+ * (Q2=B — endpoint-level `rateLimit` stays knowingly unwired, now tracked by
+ * #5040, the endpoint-executor build that #4936 chartered), keyed
+ * principal-first with IP fallback and forwarded headers believed
  * only under an explicit `trustProxy` (Q3=C), counting in the kernel cache with
  * an announced per-process fallback (Q4=B / ADR-0069 D2).
  *
