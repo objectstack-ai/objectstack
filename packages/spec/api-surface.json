@@ -3125,6 +3125,7 @@
     "envelopeViolations (function)",
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
+    "normalizeEndpointPath (function)",
     "readServiceSelfInfo (function)",
     "standardErrorCodeForHttpStatus (function)"
   ],
@@ -3565,6 +3566,7 @@
     "AnalyticsQueryInput (type)",
     "AnalyticsResult (interface)",
     "AnalyticsStrategy (interface)",
+    "ApiEndpointMatch (interface)",
     "ApprovalActionAttachment (interface)",
     "ApprovalActionKind (type)",
     "ApprovalActionRow (interface)",
