@@ -608,6 +608,152 @@ function safeShapePreview(value: unknown): string {
   }
 }
 
+/**
+ * [#5134] What a filter node is worth as a boolean, before any SQL is emitted.
+ *
+ * - `'true'`  — matches every row; the compiler emits NO clause for it.
+ * - `'false'` — matches no row; the compiler emits the dialect FALSE constant.
+ * - `'clause'` — carries at least one real predicate; compile it normally.
+ */
+type FilterVerdict = 'true' | 'false' | 'clause';
+
+/**
+ * [#5134] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
+ * declares for every element of `$and`/`$or` and for the operand of `$not`?
+ *
+ * The prototype check is the load-bearing half, not pedantry. The identity
+ * reduction below turns "this node has no predicates" into "matches every row",
+ * so any object whose OWN ENUMERABLE KEYS are empty is read as TRUE. A `Date`,
+ * a `RegExp`, a `Map` or a class instance all satisfy `typeof x === 'object' &&
+ * !Array.isArray(x)` while enumerating to nothing — accepting them would
+ * PROMOTE garbage from "silently ignored" (the old bug) to "matches all rows"
+ * (strictly worse). A filter condition always arrives as JSON or as the output
+ * of `compileCelToFilter`, i.e. a plain object, so requiring one costs nothing
+ * real and makes the reduction total.
+ */
+function isFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** A short type name for an operand the filter compiler refuses. */
+function describeFilterOperand(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  const kind = typeof value;
+  if (kind !== 'object') return kind;
+  const ctor = (value as { constructor?: { name?: string } }).constructor;
+  return ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+}
+
+/**
+ * [#5134] The gate that gives "this group compiled to empty" exactly ONE cause.
+ *
+ * Identity reduction is only sound once an empty compile can mean "the author
+ * wrote an empty group" and nothing else. Before this gate, `$or: [null]`,
+ * `$or: ['x']`, `$or: [[…]]` and `$or: [new Date()]` also produced no clause and
+ * vanished without a trace; reducing on top of that would have turned each of
+ * them into "matches every row". Refusing them here — loudly, in the ADR-0112
+ * envelope every sibling filter refusal in this driver speaks — is what makes
+ * the reduction safe. Same discipline as cloud#1073 on Turso's
+ * `RemoteTransport.buildWhereSQL`.
+ */
+function assertFilterNode(value: unknown, path: string): asserts value is Record<string, unknown> {
+  if (isFilterNode(value)) return;
+  throw unsupportedFilterError(
+    `Filter node at ${path} is a ${describeFilterOperand(value)} (${safeShapePreview(value)}), not a filter ` +
+      `condition object. Every element of "$and"/"$or" and the operand of "$not" must be a plain object of ` +
+      `field constraints (e.g. { "status": "active" }) or nested combinators — @objectstack/spec ` +
+      `FilterConditionSchema declares this position as a FilterCondition. It is refused rather than skipped ` +
+      `because skipping it would silently change which rows match.`,
+  );
+}
+
+/** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
+function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
+  if (Array.isArray(value)) return;
+  throw unsupportedFilterError(
+    `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a ` +
+      `${describeFilterOperand(value)} (${safeShapePreview(value)}). @objectstack/spec FilterConditionSchema ` +
+      `declares "${key}" as FilterCondition[].`,
+  );
+}
+
+/**
+ * [#5134] Reduce one filter node to its boolean verdict, validating shapes on
+ * the way down.
+ *
+ * A node is the AND of its entries, so FALSE dominates, and a node with no
+ * entries at all is TRUE (the empty conjunction) — which is why `{}` is a TRUE
+ * disjunct inside `$or` and why `{ $not: {} }` is FALSE.
+ *
+ * This walks the WHOLE tree without short-circuiting: a `$or: []` sibling must
+ * not stop the walk from reaching — and refusing — a malformed node further
+ * along, or the shape gate would be conditional on evaluation order.
+ *
+ * Deciding structurally, rather than by compiling and then asking Knex whether
+ * anything came out, is deliberate. The old defect WAS an observation of
+ * emptiness ("the group callback added nothing"), and an observation cannot tell
+ * "empty because the author wrote nothing" from "empty because something failed
+ * to compile". A structural verdict has no such blind spot, and it lets the
+ * emitter guarantee that every group it opens receives at least one clause.
+ */
+function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
+  let sawFalse = false;
+  let sawClause = false;
+  for (const [key, value] of Object.entries(node)) {
+    const verdict = reduceFilterKey(key, value, path);
+    if (verdict === 'false') sawFalse = true;
+    else if (verdict === 'clause') sawClause = true;
+  }
+  // AND over the node's keys: FALSE dominates, then a real predicate, else TRUE.
+  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+}
+
+/** [#5134] The verdict of ONE key of a filter node. */
+function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
+  const here = path ? `${path}.${key}` : key;
+
+  if (key === '$and' || key === '$or') {
+    assertFilterNodeList(value, key, here);
+    let sawTrue = false;
+    let sawFalse = false;
+    let sawClause = false;
+    value.forEach((element, index) => {
+      const elementPath = `${here}[${index}]`;
+      assertFilterNode(element, elementPath);
+      const verdict = reduceFilterNode(element, elementPath);
+      if (verdict === 'true') sawTrue = true;
+      else if (verdict === 'false') sawFalse = true;
+      else sawClause = true;
+    });
+    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
+    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). This is the
+    // half the old compile got backwards: it answered the whole table.
+    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
+  }
+
+  if (key === '$not') {
+    assertFilterNode(value, here);
+    const inner = reduceFilterNode(value, here);
+    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
+    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
+  }
+
+  // A field key always contributes a predicate. Note this stays `'clause'` even
+  // for `{ field: {} }` (a field constrained by zero operators), which compiles
+  // to no SQL today. That shape is a SEPARATE divergence tracked in #5240 —
+  // `matchesFilter` and `driver-memory` both answer FALSE for it, this driver's
+  // combinator path answers TRUE, and its own top-level `applyFilters` path
+  // refuses it outright via `assertCompilableComparand` — and picking the winner
+  // is a semantic ruling, not this change's call. Classifying it as `'clause'`
+  // rather than `'true'` is precisely what keeps the identity reduction from
+  // silently ruling on it: the shape compiles exactly as it did before.
+  return 'clause';
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -5904,29 +6050,71 @@ export class SqlDriver implements IDataDriver {
    * dead weight to prune: the method is `protected`, i.e. subclass API, and
    * the flag is the seam an override needs to attach a condition into an OR
    * group. Do not "fix" them by making a branch propagate `'or'` again.
+   *
+   * # Boolean identities (#5134)
+   *
+   * Every combinator is decided by {@link reduceFilterNode} BEFORE anything is
+   * emitted, because Knex renders no SQL for a group that received no clause —
+   * so "the group is empty" and "the group is satisfied" used to compile to the
+   * same query. That is not an identity, it is a dropped clause, and the two
+   * identities point in opposite directions: empty `$and` is TRUE, empty `$or`
+   * is FALSE, and `$not` of an empty (TRUE) group is FALSE. The old code
+   * answered the whole table to all three; `$and` was right only because
+   * "dropped" coincides with TRUE on the AND side.
+   *
+   * The reduction also makes every group this method opens provably NON-EMPTY:
+   * a `'true'` combinator is skipped outright, `'true'` members of a `$and` and
+   * `'false'` members of a `$or` are dropped as their identities, and a node
+   * that reduces to `'false'` never reaches the loop at all. So Knex is never
+   * again in a position to silently discard a group.
    */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
     const table = tableHint ?? this.coercionKey(builder);
 
+    // #5134 — shape-validate the whole tree and decide its boolean value first.
+    // A malformed node throws here, before any identity is applied, so "compiled
+    // to empty" can only ever mean "genuinely empty".
+    const verdict = reduceFilterNode(condition as Record<string, unknown>, 'filter');
+    if (verdict === 'true') return;
+    if (verdict === 'false') {
+      this.applyFalseConstant(builder, logicalOp);
+      return;
+    }
+
     for (const [key, value] of Object.entries(condition)) {
       if (key === '$and' && Array.isArray(value)) {
+        // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
+        // emitting nothing for it is now a decision, not an accident. A FALSE
+        // member cannot reach here: it would have made the node FALSE above.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
         // Attach this group to the parent the way `logicalOp` asks, matching
         // `$or`/`$not` below. Nothing passes 'or' today (the sole caller uses
         // 'and' and no branch propagates 'or' any more), but leaving one of the
         // four combinators deaf to the flag is how the rules drift apart again.
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
-          for (const sub of value) {
+          for (const sub of branches) {
             qb.where((subQb: any) => {
               this.applyFilterCondition(subQb, sub, 'and', table);
             });
           }
         });
       } else if (key === '$or' && Array.isArray(value)) {
+        // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
+        // matches every row instead of quietly compiling to just `(a = ?)`.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
+        // member survives, or the key would have been TRUE/FALSE above.
+        const branches = value.filter(
+          (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
+        );
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
         (builder as any)[method]((qb: any) => {
-          for (const sub of value) {
+          for (const sub of branches) {
             // The `orWhere` on THIS line is what OR-s the branches together.
             // The branch body is still compiled with 'and', because every key
             // inside one filter object is AND-ed at every depth (Filter
@@ -5940,13 +6128,18 @@ export class SqlDriver implements IDataDriver {
             });
           }
         });
-      } else if (key === '$not' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      } else if (key === '$not') {
         // Spec LOGICAL_OPERATORS declares `$not` alongside `$and`/`$or`; both
         // driver-mongodb and driver-memory implement it, and CEL `!expr` in a
         // permission/scope rule compiles to `{ $not: {...} }` (cel-to-filter.ts).
         // Without this branch `$not` fell through to the field handler, was
         // treated as a column named "$not", and produced wrong SQL — the same
         // class of silent filter-bypass this fix (issue #2704) closes.
+        //
+        // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
+        // group is FALSE and never reaches here (the node reduced to FALSE), and
+        // a non-node operand was refused by the reduction, so `value` is a node.
+        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
           this.applyFilterCondition(qb, value, 'and', table);
@@ -6076,6 +6269,20 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method](field, coerced as any);
       }
     }
+  }
+
+  /**
+   * [#5134] Emit the dialect FALSE constant — a predicate that matches no row.
+   *
+   * `1 = 0` is the spelling already used for this condition on both sides of the
+   * repo: `read-scope-sql.ts` compiles an empty `$in` to it, and Knex itself
+   * renders an empty `whereIn` as `1 = 0`. It is valid on every dialect this
+   * driver targets (unlike a bare `FALSE`, which MySQL accepts but older SQL
+   * Server does not), needs no bindings, and keeps the query a normal SELECT so
+   * `LIMIT`/`ORDER BY`/aggregates all still behave.
+   */
+  private applyFalseConstant(builder: any, logicalOp: 'and' | 'or'): void {
+    builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 0');
   }
 
   // ── Field mapping ───────────────────────────────────────────────────────────

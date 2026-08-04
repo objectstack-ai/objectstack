@@ -2340,6 +2340,19 @@ describe('UserFiltersSchema (ADR-0047)', () => {
     expect(() => UserFiltersSchema.parse({ element: 'sidebar' })).toThrow();
   });
 
+  it('should accept allowAddTab on the tabs element (#5073 — promoted from objectui)', () => {
+    const uf = UserFiltersSchema.parse({
+      element: 'tabs',
+      allowAddTab: true,
+      tabs: [{ name: 'mine', label: 'Mine', filter: [] }],
+    });
+    expect(uf.allowAddTab).toBe(true);
+  });
+
+  it('should reject an unknown key (#5073 — this shape is closed)', () => {
+    expect(() => UserFiltersSchema.parse({ element: 'dropdown', allowAddTabb: true })).toThrow();
+  });
+
   it('should attach to ListViewSchema.userFilters', () => {
     const view = ListViewSchema.parse({
       type: 'grid',

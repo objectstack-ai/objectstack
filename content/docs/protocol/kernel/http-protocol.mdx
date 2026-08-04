@@ -1036,16 +1036,139 @@ is the declared budget multiplied by the number of nodes.
 <Callout type="warn">
 **Not implemented, deliberately named rather than implied.** ObjectStack does **not**
 emit `X-RateLimit-Limit` / `-Remaining` / `-Reset` headers on successful responses —
-only `Retry-After` on a 429. And the per-endpoint `rateLimit` key on
-`ApiEndpointSchema` is **not wired to anything**; declaring it changes nothing today.
-It travels with the declarative `apis:` surface as a whole: since
-[#4936](https://github.com/objectstack-ai/objectstack/issues/4936) that surface has no
-executor and a **non-empty `apis:` is rejected at publish/validate**, so the key cannot
-be reached at all. Wiring it is part of the endpoint executor, tracked by
-[#5040](https://github.com/objectstack-ai/objectstack/issues/5040).
+only `Retry-After` on a 429. That is still true of every budget on the platform,
+including the per-endpoint one below.
 (The second spelling this callout used to name, `ApiEndpointRegistrationSchema`, was
 retired outright in [#4939](https://github.com/objectstack-ai/objectstack/issues/4939).)
 </Callout>
+
+The **per-endpoint** `rateLimit` on `ApiEndpointSchema` is a second, independent budget.
+Between [#4936](https://github.com/objectstack-ai/objectstack/issues/4936) and protocol
+17 it was unreachable — that surface had no executor and a non-empty `apis:` was
+rejected outright — but the executor shipped with
+[#5040](https://github.com/objectstack-ai/objectstack/issues/5040) and the key is now
+enforced. Endpoint buckets are keyed in their own namespace, so an endpoint budget and
+the `server.security.rateLimit` budget above meter separately rather than sharing a
+counter. See the next section.
+
+## Declarative Endpoints (`apis:`)
+
+A stack can declare an HTTP endpoint as **metadata** instead of writing a handler:
+
+<Callout type="warn">
+**Declared endpoints are LIVE from protocol 17.** An `apis:` block written against an
+older major changes meaning without changing a byte — what used to be inert
+documentation becomes an execution entry point. Before upgrading, work through the
+`declarative-apis-endpoints-live` entry of the protocol upgrade guide; it is a security
+review, not a rename.
+</Callout>
+
+{/* os:check */}
+```typescript
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: {
+    id: 'acme-crm',
+    name: 'Acme CRM',
+    version: '1.0.0',
+    type: 'app',
+    // REQUIRED to declare `apis:` — the URL carve-out is derived from it, and
+    // there is deliberately no fallback that derives it from `manifest.id`.
+    namespace: 'acme',
+  },
+  apis: [
+    {
+      name: 'acme_lead_feed',
+      // `/api/v1/apps/<manifest.namespace>/<subpath>` — only the subpath is yours.
+      path: '/api/v1/apps/acme/leads',
+      method: 'GET',
+      summary: 'Lead feed',
+      type: 'object_operation',
+      target: 'acme_lead',
+      objectParams: { object: 'acme_lead', operation: 'find' },
+      // Defaults to `true`. Omitting it is safe; see the policy table below.
+      authRequired: true,
+      // Seconds. GET-only, and only ever on a successful answer.
+      cacheTtl: 30,
+    },
+  ],
+});
+```
+
+### How a request is served
+
+Declared endpoints are **not registered routes**. They run in the dispatcher's
+unmatched-request seam, which is what makes it structurally impossible for a
+declaration to shadow a built-in route:
+
+1. **Match** — the request path must be under `<prefix>/apps/`, and `METHOD` + path
+   (one trailing slash trimmed) must hit exactly one declaration.
+2. **Policy chain** — `rateLimit` → `authRequired` → `cacheTtl`, in that order. Metering
+   runs *before* the auth gate on purpose: the traffic that most needs a budget
+   (credential stuffing, scraping) is exactly the traffic that ends in a 401, so a denied
+   request still spends a token.
+3. **Delegation** — a request that passed is executed by the **same pipelines the
+   built-in routes use**, under the caller's own execution context, so RLS/FLS and the
+   exposure gate apply identically. A declared endpoint is a stable URL plus a policy
+   layer over an existing pipeline, never a second execution dialect.
+
+| Endpoint declares | Answer |
+|:---|:---|
+| `type: 'object_operation'` | delegated to the same `callData` binding that serves `/api/v1/data/{object}` — byte-identical `data` |
+| `type: 'flow'` | delegated to the same automation pipeline as `POST /api/v1/automation/{name}/trigger` |
+| `authRequired: true` (or omitted) + anonymous caller | `401` `UNAUTHENTICATED`, the same envelope every seam answers |
+| `rateLimit` armed and exhausted | `429` + `Retry-After`, never with a cache directive |
+| `cacheTtl: 30` on a successful GET | `Cache-Control: private, max-age=30` — `private` is a security rule, not tuning: any response can be RLS-trimmed |
+| `cacheTtl: 0` | `Cache-Control: no-store` |
+| an error answer (401/429/5xx) | never carries `Cache-Control`, and `outputMapping` is never applied to it |
+
+### What an unmatched request answers
+
+The endpoint seam **writes nothing** when it does not match, so it changes no existing
+answer. Both of these are the transport's own bare 404, byte for byte:
+
+```http
+GET /api/v1/apps/acme/no-such-endpoint   →  404  {"error":"Not found"}
+GET /api/v1/no-such-route                →  404  {"error":"Not found"}
+```
+
+A **method mismatch on a declared path is also a 404**, not `405` + `Allow`:
+
+```http
+POST /api/v1/apps/acme/leads   →  404  {"error":"Not found"}
+```
+
+That is a consequence of the seam, not an inconsistency — nothing registered a route for
+that path, so there is no method set to report. A registered route still answers `405`
+when it exists and the verb does not fit — that contract is unchanged.
+
+### The five publish gates
+
+A declaration this runtime cannot serve is **rejected at publish**, naming the endpoint,
+the key and the fix — never parsed into silence. `objectstack validate` (or `os build`)
+runs the same gates your publish path does:
+
+| Gate | Rejects |
+|:---|:---|
+| **Namespace** (ADR-0121 D1/D2) | a `path` outside `/api/v1/apps/<manifest.namespace>/<subpath>`, or a stack declaring `apis:` with no explicit `manifest.namespace` |
+| **Supported target** | `type: 'script'` / `'proxy'` (neither executes in 17.x), an `object_operation` missing `objectParams.object` or `.operation`, a `flow` naming no `target` |
+| **Mapping** | a mapping `transform` (there is no transformation registry), an unusable dot path (empty segment, `__proto__`), two entries writing the same target path, or `inputMapping` on a `find` / `get` / `delete` operation that never reads a body |
+| **Policy** | `authRequired: false` without `rateLimit.enabled: true` (ADR-0121 D6), an unusable armed budget, a negative `cacheTtl`, or `cacheTtl` on a non-GET method |
+| **Uniqueness** | two endpoints in one stack claiming the same `METHOD` + path |
+
+<Callout type="warn">
+**`authRequired: false` is the one answer that cannot be taken back.** It defaults to
+`true`, so omitting it is safe; an explicit `false` is the only thing that opens an
+unauthenticated execution entry point, and ADR-0121 D6 pairs it with an **armed** budget
+— `rateLimit.enabled` itself defaults to `false`, so writing only `windowMs` /
+`maxRequests` declares a budget that meters nothing. The gate checks
+`enabled === true`, not the key's presence.
+</Callout>
+
+`inputMapping` / `outputMapping` **move and rename fields by dot path, and nothing more**
+— `inputMapping` projects the request body before delegation (so it can never buy a
+caller past the policy chain), `outputMapping` projects a successful response body only.
 
 ## Best Practices
 

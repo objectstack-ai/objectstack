@@ -613,49 +613,64 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * @see Airtable Interface → "User filters" panel (Elements: tabs / dropdowns)
  */
 /**
- * Still STRIP after #4001 批 18 — the verification 批 6e asked for was DONE,
- * and it turned up a blocker that is not a strictness question.
+ * CLOSED at **#5073** — the last shape #4001 批 18 left open in this file, and
+ * the one that needed a protocol decision before strictness could touch it.
  *
- * ## What 批 6e asked, and the answer
+ * ## Why it could not just be closed (the 批 18 blocker)
+ *
+ * objectui's renderer reads `config.allowAddTab` and renders an "add tab"
+ * affordance from it (`packages/plugin-list/src/UserFilters.tsx:182` and
+ * `:742`); its own `UserFiltersSchema` declared the key. The spec's did not —
+ * and the difference between the two shapes was *exactly* that one key.
+ *
+ * That gap was not inert, because the metadata write path does NOT persist
+ * `parsed.data`: `saveMetaItem` validates with `safeParse` and then stores the
+ * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survive
+ * (`metadata-protocol/src/protocol.ts`, "Validation policy"). So an authored
+ * `allowAddTab` was stripped only from the parse RESULT, which is discarded —
+ * the stored document kept it and the renderer read it. **The capability
+ * worked.** Closing the shape without declaring the key would have converted a
+ * working, shipped config into a 422 whose message named a key the author was
+ * right to write — this campaign's finding 7 (the platform's own authority
+ * steering an author into deleting something that worked), not the silent-strip
+ * defect the campaign exists to kill.
+ *
+ * ## The resolution: promote, then close (maintainer adjudication, 2026-08-04)
+ *
+ * `allowAddTab` is DECLARED here (additive), so the capability is discoverable
+ * from the contract — JSON Schema, Studio's SchemaForm and an AI author all see
+ * it, instead of it living only in one React file. Then the shape closes, in
+ * the same change, so there is no intermediate state where the key is declared
+ * but neighbours still vanish silently. Rejected alternative: judging it an
+ * objectui-only extension (`SANCTIONED_LOCAL`), which would have made
+ * `packages/spec` and objectui two sources of truth for one contract — the
+ * fork #2231's derive-by-reference unification exists to prevent (PD#12).
+ *
+ * ⚠️ Scope of the promotion: `allowAddTab` declares that the tab bar RENDERS an
+ * add-tab affordance. The button objectui renders today carries no click
+ * handler, so it is presentational — filed against the renderer as #5236, and
+ * deliberately NOT written into the `.describe()`, because a contract that
+ * promises "end users can add presets" would be advertising a capability the
+ * runtime does not deliver (PD#10).
+ *
+ * ## What closing flips, and why that flip is wanted (批 6e's question)
  *
  * 批 6e left this open pending "does anything rely on the strip to NARROW a
  * page-shaped block?". It does, and the relier is in this file:
  * {@link ObjectUserFiltersSchema} is `UserFiltersSchema.omit({ tabs,
- * showAllRecords })`, and `.omit()` inherits the base's posture. Closing this
- * base therefore flips `object-list-view.test.ts`'s pin from "drops the
+ * showAllRecords, allowAddTab })`, and `.omit()` inherits the base's posture,
+ * so closing this base flips `object-list-view.test.ts`'s pin from "drops the
  * page-only keys" to "rejects" them. That flip is CORRECT and wanted: the CLI
  * lint (`packages/lint/src/validate-list-view-mode.ts`) already reports a
- * `tabs`-carrying `userFilters` on an object view, so today the two doors
- * disagree — the bespoke guard warns while the schema silently drops. Closing
- * makes them agree. On its own this would have shipped in this batch.
- *
- * ## The blocker: `allowAddTab` is a live capability the spec never declared
- *
- * objectui's renderer reads `config.allowAddTab` and renders an "add tab"
- * control from it (`packages/plugin-list/src/UserFilters.tsx:182` and `:742`);
- * its own `UserFiltersSchema` declares the key. The spec's does not.
- *
- * That gap is not inert, because the metadata write path does NOT persist
- * `parsed.data`: `saveMetaItem` validates with `safeParse` and then stores the
- * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survive
- * (`metadata-protocol/src/protocol.ts`, "Validation policy"). So an authored
- * `allowAddTab` is stripped from the parse RESULT, which is discarded — and the
- * stored document keeps it, and the renderer reads it. **The capability works
- * today.** Closing this shape turns that working config into a 422.
- *
- * So closing here would not convert a silent failure into a loud one — the
- * campaign's whole warrant. It would REMOVE a shipped capability. The fix is to
- * decide whether `allowAddTab` is promoted into this schema (objectui's own
- * drift guard, `types/src/__tests__/list-view-spec-parity.test.ts`, routes
- * exactly this choice to a human: "promote it upstream, or add it to
- * SANCTIONED_LOCAL with a rationale") or is rejected on purpose. That is an
- * additive protocol decision, not a strictness one, and this campaign's rule
- * after #5022 is that a capability question is filed, never guessed.
- *
- * ⚠️ Do NOT close this shape without resolving `allowAddTab` first — the
- * rejection would name a key the author was right to write.
+ * `tabs`-carrying `userFilters` on an object view, so the two doors used to
+ * disagree — the bespoke guard warning while the schema silently dropped.
+ * Closing makes them agree. See {@link ObjectUserFiltersSchema} for why that
+ * inheritance is not left bare.
  */
-export const UserFiltersSchema = lazySchema(() => z.object({
+export const UserFiltersSchema = lazySchema(() => strictObject({
+  surface: 'these user filters',
+  history: VIEW_HISTORY,
+}, {
   // `toggle` is DEPRECATED (ADR-0047 §3.4a): it overlaps `tabs` (presets) and
   // `dropdown` (per-field values) without adding expressive power, needs
   // per-field defaultValues to be useful, and authoring tooling no longer
@@ -669,6 +684,8 @@ export const UserFiltersSchema = lazySchema(() => z.object({
     .describe('Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema'),
   showAllRecords: z.boolean().optional()
     .describe('Show an "All records" tab before the presets (tabs element)'),
+  allowAddTab: z.boolean().optional()
+    .describe('Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets'),
 }).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
@@ -1635,16 +1652,41 @@ export const FormViewSchema = lazySchema(() => strictObject({
  *
  * A {@link UserFiltersSchema} restricted to the styles that make sense on an object
  * list view: `dropdown` (per-field value chips — the Airtable "quick filter" pills)
- * and the deprecated `toggle`. The `tabs` element and its `showAllRecords` companion
- * are OMITTED because an object view's saved-view switcher (`ViewTabBar`) already owns
- * the tab-bar role — a `tabs` user-filter would render a second, conflicting tab bar.
- * Need named presets on an object? Use `listViews` (each becomes a segmented tab).
+ * and the deprecated `toggle`. The `tabs` element and its two companions
+ * (`showAllRecords`, `allowAddTab`) are OMITTED because an object view's saved-view
+ * switcher (`ViewTabBar`) already owns the tab-bar role — a `tabs` user-filter would
+ * render a second, conflicting tab bar. Need named presets on an object? Use
+ * `listViews` (each becomes a segmented tab).
+ *
+ * ## Why this carries its OWN error map instead of inheriting the base's (#5073)
+ *
+ * The shape is still DERIVED — `.omit()` off {@link UserFiltersSchema}, so a key
+ * added upstream flows in rather than being re-transcribed (#2231). What is not
+ * inherited is the unknown-key message, and that is deliberate: `.omit()` keeps the
+ * base's `strictObject` error map, whose `knownKeys` were read from the base's shape
+ * — which still contains the three omitted keys. Measured before this was written:
+ * an author who typed `tab` on an object view got *"Did you mean `tab` → `tabs`?"*,
+ * a suggestion to write the one key this surface refuses, and a bare `tabs` was
+ * rejected with no prescription at all. Both are the campaign's finding 7 — the fix
+ * signposting the way into the failure it exists to kill — and #5073 is the change
+ * that turned these keys from silently-dropped into rejected, so the message is this
+ * change's own responsibility. Rebuilding the map over the OMITTED shape drops the
+ * three keys out of the suggestion pool, and `guidance` gives each the pointer the
+ * CLI lint (`packages/lint/src/validate-list-view-mode.ts`) already carries.
  */
-export const ObjectUserFiltersSchema = lazySchema(() =>
-  UserFiltersSchema.omit({ tabs: true, showAllRecords: true }).extend({
-    element: z.enum(['dropdown', 'toggle']).default('dropdown')
-      .describe('Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets.'),
-  }));
+export const ObjectUserFiltersSchema = lazySchema(() => strictObject({
+  surface: 'these object user filters',
+  history: VIEW_HISTORY,
+  guidance: {
+    tabs: '`tabs` presets are page-only: an object view\'s tab bar is its saved-view switcher (ViewTabBar), and a second one would collide. Define each preset as a named entry under the object\'s `listViews` instead — every one renders as a segmented tab.',
+    showAllRecords: '`showAllRecords` configures the page-only `tabs` element. On an object view the default list view already is the "all records" entry; use `listViews` for the named presets beside it.',
+    allowAddTab: '`allowAddTab` configures the page-only `tabs` element. An object view\'s tab bar is the saved-view switcher (ViewTabBar), which owns its own add control.',
+  },
+}, {
+  ...UserFiltersSchema.omit({ tabs: true, showAllRecords: true, allowAddTab: true }).shape,
+  element: z.enum(['dropdown', 'toggle']).default('dropdown')
+    .describe('Filter control style on object views: "dropdown" (per-field value chips). "toggle" is deprecated. "tabs" is page-only — use `listViews` for named presets.'),
+}));
 
 /**
  * ADR-0047 "views" mode — an object's default list + named list views.

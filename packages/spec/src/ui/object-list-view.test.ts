@@ -23,15 +23,36 @@ describe('ObjectListViewSchema (ADR-0047 "views" mode)', () => {
     expect((parsed as { userFilters?: unknown }).userFilters).toMatchObject(uf);
   });
 
-  it('drops the page-only tabs/showAllRecords keys from a dropdown userFilters', () => {
-    const parsed = ObjectListViewSchema.parse({
+  it('REJECTS the page-only tabs/showAllRecords/allowAddTab keys on a dropdown userFilters', () => {
+    // Flipped from "drops" at #5073, and the flip is the point: until then the
+    // schema silently discarded these while the CLI lint
+    // (`packages/lint/src/validate-list-view-mode.ts`) reported them — two
+    // doors disagreeing about the same config. They now agree.
+    const r = ObjectListViewSchema.safeParse({
       ...base,
-      userFilters: { element: 'dropdown', tabs: [{ name: 'mine', label: 'Mine', filter: [] }], showAllRecords: true },
+      userFilters: {
+        element: 'dropdown',
+        tabs: [{ name: 'mine', label: 'Mine', filter: [] }],
+        showAllRecords: true,
+        allowAddTab: true,
+      },
     } as never);
-    const parsedUf = (parsed as { userFilters?: Record<string, unknown> }).userFilters!;
-    expect(parsedUf).not.toHaveProperty('tabs');
-    expect(parsedUf).not.toHaveProperty('showAllRecords');
-    expect(parsedUf.element).toBe('dropdown');
+    expect(r.success).toBe(false);
+    const msg = JSON.stringify(r.error?.issues ?? []);
+    expect(msg).toContain('tabs');
+    expect(msg).toContain('showAllRecords');
+    expect(msg).toContain('allowAddTab');
+  });
+
+  it('…and the rejection prescribes `listViews`, the thing an object view actually uses', () => {
+    // A page-only key has a right answer on an object view, so a bare
+    // "unrecognized key" would be a correct refusal that still leaves the
+    // author guessing — the failure mode #5073 was filed to avoid.
+    const r = ObjectListViewSchema.safeParse({
+      ...base,
+      userFilters: { element: 'dropdown', tabs: [{ name: 'mine', label: 'Mine', filter: [] }] },
+    } as never);
+    expect(JSON.stringify(r.error?.issues ?? [])).toContain('listViews');
   });
 
   it('rejects a tabs-element userFilters (page-only, would collide with ViewTabBar)', () => {

@@ -1059,6 +1059,46 @@ describe('retired dead keys carry prescriptions (#4001)', () => {
       navigation: [{ id: 'nav_home', label: 'Home', type: 'object', objectName: 'account' }],
     })).not.toThrow();
   });
+
+  // #5238 (#5040 E9) — the `apis` tombstone redirects to `defineStack({ apis })`,
+  // so it also has to be TRUE about what that surface does. It used to add "which
+  // is ALSO not executable in v17 (#4936) … until the endpoint executor ships",
+  // and the executor shipped: an author following the prescription today would be
+  // told to move a declaration to a place the same sentence calls dead, and would
+  // reasonably keep serving the route from handler code instead.
+  //
+  // The assertions below are deliberately two-sided. Asserting only the presence
+  // of the new words would keep passing if the retired claim were re-added
+  // underneath them, and asserting only the absence would pass on an empty
+  // string — the vacuity the surrounding pins exist to avoid.
+  describe('the `apis` prescription tracks the executor (#5238)', () => {
+    const prescription = (): string => {
+      const result = AppSchema.safeParse({ name: 'app_x', label: 'X', apis: [] });
+      expect(result.success).toBe(false);
+      return result.error!.issues.map((i) => i.message).join('\n');
+    };
+
+    it('states the stack-level surface EXECUTES, and where the endpoint may live', () => {
+      const messages = prescription();
+      expect(messages).toContain('defineStack({ apis })');
+      expect(messages).toContain('EXECUTES from protocol 17');
+      // The one edit an author moving a declaration up must make (ADR-0121 D1/D2).
+      expect(messages).toContain('/api/v1/apps/<manifest.namespace>/<subpath>');
+      // The key whose wrong answer is unrecoverable, plus its D6 obligation.
+      expect(messages).toContain('`authRequired` defaults to `true`');
+      expect(messages).toContain('enabled: true');
+      // Where the full security review lives — one source of truth, not a copy.
+      expect(messages).toContain('declarative-apis-endpoints-live');
+    });
+
+    it('no longer tells the author that stack-level `apis:` is rejected', () => {
+      const messages = prescription();
+      expect(messages).not.toContain('not executable in v17');
+      expect(messages).not.toContain('until the endpoint executor ships');
+      // The historical fact stays: #4936 happened, and the prescription says so.
+      expect(messages).toContain('#4936');
+    });
+  });
 });
 
 // #4001 (app step, PR B) — the app shell is `.strict()`, and the nav-item

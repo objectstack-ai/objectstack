@@ -284,6 +284,38 @@ import type { Field, ServiceObject, QueryAST } from '@objectstack/spec/data';
 import type { View } from '@objectstack/spec/ui';
 ```
 
+### Declarative Endpoints (`apis:`)
+
+Declared on the **stack** (`defineStack({ apis })`), live from protocol 17 — each entry
+is gated at publish and, once it passes, serves real traffic. Full contract:
+[HTTP API → Declarative Endpoints](/docs/protocol/kernel/http-protocol).
+
+| Rule | Value |
+|:---|:---|
+| **Path shape** | `/api/v1/apps/<manifest.namespace>/<subpath>` — only the subpath is yours (ADR-0121 D1) |
+| **Namespace** | must be declared **explicitly** as `manifest.namespace`; never derived from `manifest.id` (D2) |
+| **Types that execute** | `object_operation` (needs `objectParams.object` + `.operation`) and `flow` (needs `target`). `script` / `proxy` are rejected at publish |
+| **`authRequired`** | defaults to `true` — **omitting it is safe**. An explicit `false` is the only thing that opens anonymous access |
+| **`authRequired: false`** | REQUIRES an armed budget, `rateLimit: { enabled: true, windowMs, maxRequests }` (ADR-0121 D6) — `enabled` itself defaults to `false`, so a budget without it meters nothing |
+| **`cacheTtl`** | seconds, GET-only, applied to successful answers only (`Cache-Control: private, max-age=<ttl>`) |
+
+{/* os:check */}
+```typescript
+import type { ApiEndpointInput } from '@objectstack/spec/api';
+
+// With `manifest: { namespace: 'acme', … }` on the same stack.
+export const leadFeed: ApiEndpointInput = {
+  name: 'acme_lead_feed',
+  path: '/api/v1/apps/acme/leads',   // /api/v1/apps/<namespace>/<subpath>
+  method: 'GET',
+  type: 'object_operation',
+  target: 'acme_lead',
+  objectParams: { object: 'acme_lead', operation: 'find' },
+  // `authRequired` omitted → defaults to true (a session is required).
+  cacheTtl: 30,
+};
+```
+
 ## Search Tips
 
 - **By Feature**: "How do I model relationships?" → [Field Protocol](/docs/references/data/field) → `lookup` or `master_detail` types

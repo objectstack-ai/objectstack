@@ -65,13 +65,25 @@ baked into the artifact.
 
 Related: #4910 (this seam), #4937 (the limiter that documented an execution
 
-chain it never had), #4936 (the declarative `apis:` surface: vocabulary kept,
+chain it never had), #4936 (the declarative `apis:` surface as it stood while
 
-a non-empty array rejected until an executor exists) and #5040 (that
+nothing executed it: vocabulary kept, a non-empty array rejected outright) and
 
-executor, which wires endpoint-level `rateLimit` — still unwired today),
+#5040 — the executor that ended that state. From protocol 17 a declared
 
-ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
+endpoint is LIVE behind five per-endpoint publish gates, and its own
+
+`rateLimit` is enforced by the endpoint policy chain against a bucket keyed in
+
+a separate namespace, so an endpoint budget and the server-level budget
+
+declared here meter INDEPENDENTLY rather than sharing a counter. The upgrade
+
+checklist for that flip is the `declarative-apis-endpoints-live` entry of the
+
+protocol upgrade guide. ADR-0069 D2 (shared counters), ADR-0049 (enforce or
+
+remove).
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/stack-server.zod.ts`
