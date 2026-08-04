@@ -23,6 +23,15 @@ export const REGEN_ARTIFACTS = Object.freeze([
   { path: 'packages/spec/spec-changes.json', gen: 'gen:spec-changes', check: 'check:spec-changes' },
   { path: 'docs/protocol-upgrade-guide.md', gen: 'gen:upgrade-guide', check: 'check:upgrade-guide' },
   { path: 'packages/spec/authorable-surface.json', gen: 'gen:schema', check: 'check:authorable-surface' },
+  // The deletion gate's in-tree anchor (#5235). Same generator, same sorted-array
+  // shape, same conflict — two branches that each refreshed it differ on the
+  // `baseRev` header and on whatever main added in between, and the resolution is
+  // always "recompute from the merged tree's merge base", never a text merge.
+  // Unlike its neighbours a stale copy of this one is NOT an error (on `main` the
+  // merge base is HEAD, so the file necessarily trails its own surface by one
+  // PR) — `check:authorable-surface` proves it AUTHENTIC rather than current, and
+  // `gen:schema` is still what restores it.
+  { path: 'packages/spec/authorable-surface.base.json', gen: 'gen:schema', check: 'check:authorable-surface' },
   { path: 'packages/spec/json-schema.manifest.json', gen: 'gen:schema', check: 'check:authorable-surface' },
   // `gen:api-surface` reads the BUILT `dist/*.d.ts`, never the source. On a
   // stale dist it does not fail — it emits a *plausible* surface missing every
