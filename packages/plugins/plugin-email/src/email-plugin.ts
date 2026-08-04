@@ -582,7 +582,7 @@ export class EmailServicePlugin implements Plugin {
    * default of `smtp`, no host anywhere) is reported as the information it
    * is, while an OPERATOR-selected SMTP with no host is an error. Escalating
    * both would print an error on every fresh dev boot and train everyone to
-   * skim errors — the failure mode AGENTS.md' degradation-log-level section
+   * skim errors — the failure mode AGENTS.md's degradation-log-level section
    * warns about.
    *
    * Env-locked fields (handled in SettingsService.get) still resolve
