@@ -89,12 +89,18 @@ describe('[#4936] non-empty `apis:` is rejected at publish/validate', () => {
     expect(message).toMatch(/vocabulary is deliberately KEPT/);
   });
 
-  it('does NOT name #4936 as the tracking pointer (it closes with this change)', () => {
+  it('points at exactly ONE issue URL, and it is the OPEN one', () => {
+    // #4936 closes with this change, so it may appear only as the decision's
+    // provenance ("(#4936)"), never as a link an upgrading author is invited to
+    // follow for status. #5040 — the executor card — is the live tracker, and
+    // it must be the only URL in the string. This is the assertion the test
+    // above cannot make: "contains 5040" stays true even if a stale
+    // `issues/4936` link were sitting next to it.
     const result = ObjectStackDefinitionSchema.safeParse({ manifest, apis: [validEndpoint] });
     const message = result.success ? '' : JSON.stringify(result.error.issues);
-    // #4936 may appear as the DECISION's provenance; what must not happen is
-    // it standing in as the live tracker with no #5040 alongside it.
-    expect(message).toMatch(/issues\/5040/);
+    const urls = [...message.matchAll(/issues\/(\d+)/g)].map((m) => m[1]);
+    expect(urls.length, 'the prescription must carry a tracking link').toBeGreaterThan(0);
+    expect([...new Set(urls)]).toEqual(['5040']);
   });
 
   it('accepts an EMPTY `apis:` — the key stays declared and parseable', () => {
