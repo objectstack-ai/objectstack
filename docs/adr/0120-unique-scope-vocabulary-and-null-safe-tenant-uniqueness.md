@@ -13,9 +13,11 @@
 
 Uniqueness on this platform materializes in exactly two physical shapes — the verbatim
 column list ("one holder across the whole installation") and the organization composite
-("one holder per organization") — which together carry three business boundaries:
-installation-wide, per-organization, and the posture-dependent customer-company
-(§Posture portability). But the authoring surface expresses the choice through
+("one holder per organization") — and the vocabulary names exactly those two
+boundaries. (A third, posture-resolved boundary word was designed and **rejected** —
+maintainer ruling: too easy for AI authors to confuse; the rare scenario it served is
+handled at the deployment seam instead. See Alternatives and §Posture portability.)
+But the authoring surface expresses the choice through
 *position*: field-level `unique: true` means per-organization, a declared index means
 installation-wide. An author who does not know the convention writes a declared
 `{ fields: ['name'], unique: true }` on an organization-scoped object, intends
@@ -30,7 +32,7 @@ the per-organization meaning **NULL-safe**:
 
 | # | Decision | One line |
 |---|---|---|
-| D1 | Scope is said, not inferred | `unique: 'global' \| 'organization' \| 'company'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
+| D1 | Scope is said, not inferred | `unique: 'global' \| 'organization'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
 | D2 | Stored metadata converts losslessly | ADR-0087 D2 entry rewrites declared-index `unique: true → 'global'` — byte-identical physical shape, **zero drift** |
 | D3 | Per-tenant unique survives NULL | tenant key part materializes as `COALESCE(tenantField, '')` (ADR-0048 canonical form) — fixes #5030 for field-level and new `'organization'` indexes alike |
 | D4 | Tightening migrates through ceremony | `recreate_index` drift + duplicate pre-flight in `os migrate plan`; auto-apply only on a clean probe |
@@ -48,7 +50,7 @@ binding on every decision here: **app metadata is posture-portable.** The same a
 package must run unmodified under every tenancy posture — `single | group | isolated`
 (ADR-0105 D1) — and under database-per-customer deployment (an environment-level
 choice invisible to metadata); the author states the *business boundary* of a
-constraint (per-organization / company-wide / installation-wide) — never the posture,
+constraint (per-organization vs installation-wide) — never the posture,
 which the author cannot know. See §Posture portability below.
 
 ## Context
@@ -125,9 +127,9 @@ portable-app author this ADR serves:
   (`tenancy.strategy` was retired saying exactly this); invisible to metadata.
 
 An authorable `'tenant'` would read differently under each sense. The vocabulary
-therefore uses the product's own nouns: **`'organization'`** (the boundary is the
-organizations feature, whatever the physical topology) and **`'company'`** (the
-customer-company that installed the app — see D1). Rules: the abbreviation `'org'` is
+therefore uses the product's own noun: **`'organization'`** (the boundary is the
+organizations feature, whatever the physical topology), plus **`'global'`** for the
+whole installation. Rules: the abbreviation `'org'` is
 not accepted (the platform spells it out — `organization_id`); `'tenant'` is not
 accepted as an alias (PD #12 — one contract, no dialects; the schema's rejection
 message for it names `'organization'`). Prose in this ADR says *per-organization* for
@@ -158,7 +160,7 @@ review gap to be raised on the PR.)
 | S11 | Tenancy-less objects — `tenancy` disabled or `managedBy: 'better-auth'` (no tenant column) | all spellings | single-column / listed columns | unchanged; `'organization'` degrades to listed columns alone, exactly as field-level `true` already does | unchanged |
 | S12 | Non-unique indexes (`unique: false` / omitted), `partial`, index `type` | verbatim | n/a | untouched — this ADR governs *unique scope* only; `'organization'` composes with `partial` (both key-part forms already parse, #4884) | n/a |
 | S13 | **Posture-portable app package** — one metadata app, deployed under `single`, `group`, and `isolated` postures (and db-per-customer environments) | field `true` (void on single-org, #5030) or hand-written org composite (author must know the convention *and* the posture trap) | varies by posture; `single`: **void** | `'organization'` for per-org rules — states the business boundary, not the posture | **correct under every posture** — per-org under `group`/`isolated`, deployment-wide under `single` (§Posture portability) |
-| S14 | **Company-wide rule in a portable app** — material code / chart of accounts unique across the whole customer company (集团) | inexpressible portably: `'global'`-style verbatim is right under `group` but crosses customers under `isolated`; org composite is right under `isolated` but per-subsidiary under `group` | whichever the author guessed — wrong under the other posture | `'company'` — posture-resolved at registration (D1) | group: group-wide · isolated: per-customer-org · single: deployment-wide — **no posture guess** |
+| S14 | **Company-wide rule in a portable app** — material code / chart of accounts unique across the whole customer company (集团) | inexpressible portably: verbatim is right under `group` but crosses customers under `isolated`; org composite is right under `isolated` but per-subsidiary under `group` | whichever the author guessed — wrong under the other posture | `'global'` (right for the `single`/`group` family the scenario lives in); under `isolated` the deployment seam surfaces it as an explicit decision — confirm or rewrite to `'organization'` (AI-authored install adjustment, §Posture portability) | `single`/`group`: company-wide ✓ · `isolated`: never lands silently — decided at install, not guessed at authoring |
 
 Two properties of this table are the ADR's acceptance criteria:
 
@@ -179,59 +181,63 @@ author can decide the *business rule* — which boundary a value is unique withi
 because that question has a posture-independent phrasing. The author cannot decide,
 and must never be asked to encode, the posture the app will be deployed into.
 
-Three business boundaries cover the inventory, and only two of them are
-posture-invariant *physically* — which is exactly why the third must exist as a word
-rather than as author guesswork:
+Both words are posture-invariant *physically* — the same declaration materializes the
+same way everywhere:
 
 | Declaration | `single` | `group` (集团 — one corporate family, many orgs, one DB) | `isolated` (租户隔离 — orgs are separate customers) |
 |:---|:---|:---|:---|
 | `'organization'` | one D3 bucket → deployment-wide | unique within each subsidiary/plant org | unique within each customer org |
-| `'company'` — the customer-company that installed the app | = installation → verbatim columns | = the group → verbatim columns (group-wide) | = the organization → D3 org-composite |
-| `'global'` — the whole installation, unconditionally | = installation | = the group (same as `'company'` here) | **crosses customers** — correct only for infra/dedup keys and genuinely platform-wide reservations (hostnames, external ids); an app business rule almost never means this |
+| `'global'` — the whole installation, unconditionally | = installation | = the group (the whole corporate family) | **crosses customers** — correct only for infra/dedup keys and genuinely platform-wide reservations (hostnames, external ids); an app business rule almost never means this |
 
-The rows to read twice:
+The residual, and its deliberate special handling:
 
-- **"Unique across the whole company" is posture-VARIANT**: under `group` it means
-  the installation; under `isolated` it means one organization. Neither
-  `'organization'` nor `'global'` expresses it portably — an ISV app declaring a
-  group-wide material code with `'global'` would, deployed under `isolated`, leak a
-  uniqueness wall across unrelated customers (and become a cross-customer existence
-  oracle, S10). `'company'` names the boundary; the driver resolves the shape at
-  registration, where the posture is known — the same resolution point D1 already
-  uses for the organization column.
+- **"Unique across the whole company" is posture-VARIANT** (S14): under `group` it
+  means the installation; under `isolated` it means one organization. A third,
+  posture-resolved word (`'company'`) was designed for it and **rejected** —
+  maintainer ruling: it is the one word that cannot be used without first
+  understanding the posture spectrum, exactly the cognitive load an AI-authored
+  vocabulary must not carry, and the scenario (an ISV app with company-wide keys
+  shipping across both posture families) is rare (Alternatives #6). Instead: the
+  author writes `'global'` — correct for the `single`/`group` family the scenario
+  lives in — and the `isolated` deployment seam catches the mismatch below.
 - **`'global'` is physically posture-invariant but not *safety*-invariant**: under
-  `isolated`, a `'global'` unique on an app business object is almost always a
-  mis-scoped `'company'`. `os doctor` / `os migrate plan` surface it as an advisory
-  under that posture (never a boot warning — #4884 discipline).
+  `isolated`, a `'global'` unique on an app business object is almost always meant
+  company-wide, not cross-customer — deployed there it both over-constrains and
+  becomes a cross-customer existence oracle (S10). `os doctor` / `os migrate plan`
+  surface every such index as an explicit decision point under that posture (never a
+  boot warning — #4884 discipline): confirm it as genuinely platform-wide, or
+  rewrite it to `'organization'` as an install-time, AI-authored metadata
+  adjustment. The benign mirror direction — `'organization'` under `group`
+  constraining per-subsidiary rather than group-wide — is under-constraint within
+  one company, carries no leak, and is left to the app's install notes.
 
 **Posture transitions are rare, and deliberately not automated** (maintainer ruling,
 #4986). A deployment's posture is chosen at setup and effectively never changes; when
 it does (an acquisition merges `isolated` customers into a `group`; a `single`
 customer enables `group`), that is a planned re-platforming event, not something the
-runtime should handle behind anyone's back. The vocabulary's whole obligation to that
-event is to make the **target state well-defined and the diff trustworthy**: after a
-posture change, `'company'` indexes re-resolve at the next registration and the
-difference surfaces as *ordinary* D4 drift — `recreate_index` ops gated by the
-duplicate pre-flight — with nothing transition-specific built or maintained.
-Executing the move is an explicit migration task, and per ADR-0087's operating
-assumption the migrator is an AI agent: it reads the `os migrate plan` output —
-including the probe's duplicate report, e.g. two merging companies holding the same
-material code — writes the upgrade script, and applies it deliberately. (`single` →
-`group` happens to be a zero-op diff — same shapes; a fact, not a promise the suite
-must keep re-proving.)
+runtime should handle behind anyone's back. With the two-word vocabulary this is now
+trivially cheap: **no index shape reads the posture, so a posture change has zero
+automatic schema consequences.** What changes is the advisory picture — `'global'`
+uniques on app objects become decision points under `isolated` (above), and any scope
+rewrites the new posture calls for surface as ordinary D4 drift (`recreate_index`
+gated by the duplicate pre-flight, e.g. two merging companies holding the same
+material code). Executing the move is an explicit migration task, and per ADR-0087's
+operating assumption the migrator is an AI agent: it reads the `os doctor` /
+`os migrate plan` output, writes the upgrade script, and applies it deliberately.
 
 Corollary for acceptance: the conformance suite boots the **same fixture app** under
 all three postures and asserts each S-row's enforcement in each — posture portability
 is tested, not assumed. Transitions get exactly one smoke assertion: a posture flip
-yields an ordinary D4 plan, duplicate-gated and never auto-applied — the trustworthy
-input the AI-authored upgrade script depends on. No transition matrix beyond that.
+by itself emits zero drift ops, and the `isolated`-posture advisory lists a seeded
+`'global'` business unique — the listing an AI-authored deployment adjustment starts
+from. No transition matrix beyond that.
 
 ## Decisions
 
 ### D1 — Scope is an explicit vocabulary on both spellings
 
-`UniqueScopeSchema` becomes `boolean | 'global' | 'organization' | 'company'`, shared
-by field-level `unique` and `IndexSchema.unique`:
+`UniqueScopeSchema` becomes `boolean | 'global' | 'organization'`, shared by
+field-level `unique` and `IndexSchema.unique`:
 
 - **Field-level**: `true` keeps meaning tenant-scoped (unchanged since #3696 — it is
   documented, unambiguous, and ubiquitous; churning every schema for symmetry would be
@@ -242,20 +248,15 @@ by field-level `unique` and `IndexSchema.unique`:
   (D3 form) to the listed columns at registration, where tenancy is known — same shape
   family as field-level composites. On an object with no tenant column, `'organization'`
   degrades to the listed columns alone, mirroring field-level behavior (S11).
-- **`'company'` — the posture-resolved boundary** (§Posture portability): "unique
-  within the customer-company that installed the app". Resolved at registration,
-  where the posture is known: under `single` and `group` it materializes as the
-  verbatim/single-column shape (`'global'`-form — the installation *is* the company);
-  under `isolated` it materializes as the organization composite (D3 form — the
-  organization *is* the company). It owns no third physical shape; it is a
-  posture-resolved selection between the two existing ones; a posture change (rare
-  and always a deliberate re-platforming, §Posture portability) surfaces the
-  re-resolution as ordinary D4 drift for an explicitly-run migration. This is the
-  word that keeps ISV apps
-  portable across `group` and `isolated` deployments (S14) — without it, "company-wide
-  unique" is expressible only by guessing the posture.
+- **Deliberately no third word.** A posture-resolved `'company'` boundary ("unique
+  within the customer-company that installed the app") was designed and **rejected**
+  by maintainer ruling: it would be the one word in the vocabulary that cannot be
+  used without first understanding the posture spectrum — exactly the cognitive load
+  an AI-authored surface must not carry — for a scenario (S14) that is rare. The
+  scenario is handled at the deployment seam instead (§Posture portability;
+  Alternatives #6 records the full design).
 
-  All three words name business boundaries, never postures — the same declaration is
+  Both words name business boundaries, never postures — the same declaration is
   correct under every deployment shape, which is what lets one app package serve all
   of them.
 
@@ -336,8 +337,8 @@ planner asserts that invariant.
 
 a. **New rule `unique/unscoped-declared-index`** (lint + `os validate` publish gate):
    a declared index with bare `unique: true`. 17.x: warning with the prescriptive fix
-   ("state `'global'` (installation-wide, today's behavior), `'organization'` (one per
-   organization), or `'company'` (one per customer company, posture-resolved)").
+   ("state `'global'` (installation-wide, today's behavior) or `'organization'` (one
+   per organization)").
    Protocol 18: error. Needs no tenancy or posture knowledge — it fires on the
    spelling, which is what makes it the first gate in this saga that can actually run
    at authoring time.
@@ -419,13 +420,13 @@ existence-oracle property (#3696) extends to declared composites (S10).
 - `'organization'` on declared indexes makes the driver's normalize path tenancy-aware for
   declared indexes for the first time; the drift reader's COALESCE handling (#4884)
   must be exercised for tenant key parts too (new tests in D6.6).
-- `'company'` introduces the platform's first posture-resolved physical shape: the
-  registration path must read the tenancy posture, and a posture change — rare, and
-  always a deliberate re-platforming — acquires schema consequences it never had
-  before, surfaced as ordinary D4 drift for an explicitly-run (AI-authored)
-  migration rather than automated away. The alternative — authors guessing the
-  posture — is the trap S14 documents; the coupling is real, and is why the
-  resolution lives at the one point (registration) that already knows the posture.
+- The vocabulary stays at two words by ruling, and the cost is recorded honestly:
+  the company-wide-in-a-portable-app scenario (S14) is not expressible in metadata
+  alone. The dangerous direction (`'global'` deployed under `isolated`) is caught at
+  the deployment seam as an explicit decision point; the benign direction
+  (`'organization'` under `group` constraining per-subsidiary rather than
+  group-wide) carries no leak and is left to the app's install notes. Cheaper than a
+  posture-resolved third word every author must understand first.
 - Protocol 18 is the earliest point at which bare `true` can be rejected; until then
   the trap is warned, not closed. Accepting a full major of warning-only is the price
   of not breaking third-party authors mid-major (ADR-0059/0087 discipline).
@@ -455,6 +456,20 @@ orthogonal (S12).
    meaningful together (`unique: true, scope: 'organization'`) reintroduce a positional trap
    (what does `scope` alone mean?) and double the surface the conversion must carry.
    One key, one statement.
+6. **A third, posture-resolved scope word (`'company'`)** — designed in a draft round
+   of this ADR and rejected by maintainer ruling. The design: "unique within the
+   customer-company that installed the app", resolved at registration to the verbatim
+   shape under `single`/`group` (the installation is the company) and to the
+   organization composite under `isolated` (the organization is the company); no
+   third physical shape, full S14 portability for ISV apps with company-wide keys.
+   Rejected because it is the one word that cannot be used without first
+   understanding the ADR-0105 posture spectrum — the highest-cognitive-load token in
+   an AI-authored vocabulary, and the likeliest to be confused with `'organization'`
+   — while the scenario it serves is rare and has a deployment-seam answer
+   (§Posture portability): author `'global'`, decide explicitly at `isolated`
+   install. Recorded here per PD #13 so the next author finds the analysis, not just
+   the absence; reopening it needs a superseding ADR, and the deployment-seam
+   mechanism is the bar it must beat.
 
 ## Acceptance tests (definition of done for the implementing wave)
 
@@ -463,11 +478,10 @@ orthogonal (S12).
   validate — no silent third state.
 - Posture portability (S13/S14): one fixture app booted under all three postures
   (`single | group | isolated`); every unique declaration's enforcement asserted in
-  each, including `'company'` resolving to the verbatim shape under `single`/`group`
-  and to the org composite under `isolated`. Transitions: one smoke assertion only —
-  a posture flip yields an ordinary D4 plan, duplicate-gated and never auto-applied
-  (the input for an AI-authored upgrade script, §Posture portability); no transition
-  matrix.
+  each. One smoke assertion pins that a posture flip by itself emits zero drift ops
+  (no shape reads the posture), and one that the `isolated`-posture doctor/plan
+  advisory lists a seeded `'global'` business unique — the listing an AI-authored
+  deployment adjustment starts from (§Posture portability). No transition matrix.
 - Matrix invariant 2: expected-index output for the S4/S5/S6 corpus is byte-identical
   before/after D2 on an untouched database (drift plan is empty).
 - The #5030 probe, as a permanent regression test, on both single-tenant and
@@ -493,11 +507,9 @@ orthogonal (S12).
    to declared-but-unenforced behavior, not a contract change) or hold it for 18 with
    the rest? Landing in 17.x means single-tenant stacks get real constraints a major
    earlier; holding means one migration wave instead of two.
-4. **The `'company'` token name**: `'company'` (this draft) vs `'group'` (matches the
-   ADR-0105 posture noun, but misleads under `isolated`, where no group exists and the
-   boundary is one organization) vs `'customer'`. The draft prefers `'company'`
-   because it names the boundary from the app's point of view — the customer-company
-   that installed it — which is the reading that stays true under every posture.
-5. **Where the `isolated`-posture advisory for `'global'` business uniques lives**:
-   `os doctor` + `os migrate plan` (this draft) — lint cannot see posture, and boot
-   warnings are banned by the #4884 discipline. Confirm, or name another surface.
+4. **How loud the `isolated`-posture decision point for `'global'` business uniques
+   is**: `os doctor` + `os migrate plan` advisory (this draft), or a harder
+   install-time confirm gate when an app carrying `'global'` uniques on non-`sys`
+   objects is installed into an `isolated` environment. Lint cannot see posture, and
+   boot warnings are banned (#4884). The harder gate is what would make the S14
+   special handling loud rather than advisory — confirm which.
