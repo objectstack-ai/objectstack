@@ -88,9 +88,9 @@ describe('SettingsService — encryption round-trip', () => {
   it('persists encrypted=true values via crypto adapter', async () => {
     const svc = new SettingsService({ env: {}, crypto: new NoopCryptoAdapter() });
     svc.registerManifest(mailSettingsManifest);
-    await svc.setMany('mail', { provider: 'sendgrid', api_key: 'sg-secret-123', from_email: 'a@b.com' });
+    await svc.setMany('mail', { provider: 'resend', api_key: 're-secret-123', from_email: 'a@b.com' });
     const ns = await svc.getNamespace('mail');
-    expect(ns.values.api_key.value).toBe('sg-secret-123');
+    expect(ns.values.api_key.value).toBe('re-secret-123');
     expect(ns.values.api_key.source).toBe('global');
   });
 });
@@ -138,7 +138,7 @@ describe('SettingsService — audit sink', () => {
       audit: { record: (e) => events.push(e) },
     });
     svc.registerManifest(mailSettingsManifest);
-    await svc.setMany('mail', { provider: 'sendgrid', api_key: 'top-secret', from_email: 'a@b.com' });
+    await svc.setMany('mail', { provider: 'resend', api_key: 'top-secret', from_email: 'a@b.com' });
     const apiKeyEvent = events.find((e) => e.key === 'api_key');
     expect(apiKeyEvent).toBeTruthy();
     expect(apiKeyEvent.encrypted).toBe(true);

@@ -32,11 +32,13 @@ export const en: TranslationData = {
       keys: {
         provider: {
           label: 'Provider',
+          help: 'Only providers this server can actually deliver through are listed. '
+            + 'SendGrid and Amazon SES are configured as SMTP.',
           options: {
             smtp: 'SMTP',
-            sendgrid: 'SendGrid',
-            ses: 'Amazon SES',
+            resend: 'Resend',
             postmark: 'Postmark',
+            log: 'None (log only — no real delivery)',
           },
         },
         smtp_host: { label: 'Host', help: 'Example: smtp.example.com' },
