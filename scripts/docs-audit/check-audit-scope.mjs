@@ -2,10 +2,14 @@
 // Keep the `docs-accuracy-audit` workflow's default scope list DERIVED from the
 // filesystem instead of hand-kept — and fail loudly the moment the two disagree.
 //
+// It also holds the second half of that scope's contract (#4920): `content/docs/
+// releases/**` is IN the scope but is a READ-ONLY target, and this script is what
+// keeps that true — see "release-owned pages" below.
+//
 // Usage:
 //   node scripts/docs-audit/check-audit-scope.mjs              # verify; exit 1 naming every drifted entry
 //   node scripts/docs-audit/check-audit-scope.mjs --write      # regenerate the block in place
-//   node scripts/docs-audit/check-audit-scope.mjs --self-test  # pin the parser/renderer/differ (no repo state needed)
+//   node scripts/docs-audit/check-audit-scope.mjs --self-test  # pin the parser/renderer/differ + the read-only routing
 //
 // ## Why this exists (#4851)
 //
@@ -50,11 +54,39 @@
 // `--write` regenerates the inline block from that derivation, so the array is a
 // generated artifact that happens to live inside a hand-written file. Hand-editing
 // it is never necessary and this check will reject it.
+//
+// ## Release-owned pages: in scope, read-only (#4920)
+//
+// The derived scope contains `content/docs/releases/**`, and AGENTS.md's Documentation
+// Guardrails forbid a code PR from editing those pages at all. The audit workflow's
+// deliverable is an in-place mdx rewrite, so for those 9 pages the two rules collided
+// head-on: a full audit produced exactly the PR the guardrail exists to stop.
+//
+// The ruling was to keep them in scope and fork the DELIVERABLE — the workflow reviews
+// them read-only and emits findings to file as issues. Excluding them instead would
+// have created a second definition of "docs this workflow covers" next to the generated
+// block, and #4851 is the bill for one subject with two hand-kept lists.
+//
+// That leaves three things that can quietly break, so this script checks all three:
+//
+//   1. the guardrail itself moves or is reworded in AGENTS.md, and the workflow keeps
+//      protecting a path nothing declares any more;
+//   2. the workflow's `RELEASE_OWNED_PREFIX` stops matching that guardrail's path;
+//   3. the routing is refactored away, and release pages silently rejoin the editable
+//      channel — the failure with no symptom until a PR edits a release note.
+//
+// (3) is checked by RUNNING the workflow against stub agents and inspecting which
+// prompt and schema each doc actually gets, not by grepping for a keyword: a check
+// that reads source text would pass on any refactor that keeps the words and drops
+// the behaviour. `--self-test` then mutates the routing out of an in-memory copy and
+// requires that check to go red, because a guard nobody has ever seen fail is a guard
+// nobody has tested (#4868).
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createContext, runInContext } from 'node:vm';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: HERE })
@@ -62,15 +94,19 @@ const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: H
   .trim();
 
 const WORKFLOW_REL = '.claude/workflows/docs-accuracy-audit.js';
+const AGENTS_REL = 'AGENTS.md';
 const BEGIN = '// <generated:docs-audit-scope>';
 const END = '// </generated:docs-audit-scope>';
 
-const args = process.argv.slice(2);
+/**
+ * The release-owned boundary — the path column of AGENTS.md's RELEASE-OWNED guardrail
+ * row, verbatim. Not a curation of it: `assertGuardrailAnchored` fails if AGENTS.md
+ * stops declaring exactly this, so the rule and its enforcement cannot drift apart.
+ */
+export const RELEASE_OWNED_PREFIX = 'content/docs/releases/';
+export const isReleaseOwned = (doc) => doc.startsWith(RELEASE_OWNED_PREFIX);
 
-if (args.includes('--self-test')) {
-  selfTest();
-  process.exit(0);
-}
+const args = process.argv.slice(2);
 
 // --- block extraction / rendering -------------------------------------------
 
@@ -193,10 +229,213 @@ function deriveDocs() {
   return docs;
 }
 
+// --- release-owned pages: the rule, the constant, the routing ----------------
+
+/**
+ * AGENTS.md must still declare exactly this path RELEASE-OWNED. The workflow's
+ * read-only fork is an ENFORCEMENT of that row; if the row is renamed, moved or
+ * softened, the enforcement is protecting a rule that no longer says what it is
+ * quoting, and that must be noticed here rather than by a reader years later.
+ */
+export function findGuardrailRow(agentsMd) {
+  return (
+    agentsMd
+      .split('\n')
+      .find((line) => line.includes(`\`${RELEASE_OWNED_PREFIX}\``) && line.includes('RELEASE-OWNED')) ?? null
+  );
+}
+
+/** The prefix the workflow actually routes on. */
+export function parseReleaseOwnedPrefix(source) {
+  const m = source.match(/const RELEASE_OWNED_PREFIX = '([^']*)'/);
+  if (!m) {
+    throw new Error(
+      `${WORKFLOW_REL}: no \`const RELEASE_OWNED_PREFIX = '...'\` declaration. That constant is ` +
+        `how the workflow tells release-owned pages (read-only, findings only) from editable ones; ` +
+        `without it every page in scope is editable, including ${RELEASE_OWNED_PREFIX}** — the ` +
+        `collision #4920 was filed for. Restore it.`,
+    );
+  }
+  return m[1];
+}
+
+/**
+ * Run the workflow the way it really runs — free globals, stub agents — and report
+ * what each doc in scope was actually handed.
+ *
+ * The workflow body uses top-level `await` and a top-level `return`, so its runner
+ * evaluates it as a function body with `log`/`phase`/`agent`/`pipeline`/`args` supplied
+ * as globals; `export const meta` is lifted out separately. This mirrors that shape
+ * closely enough to exercise the real routing expressions, which is the point — the
+ * alternative, matching source text, cannot tell a working fork from a dead one.
+ */
+async function runWorkflow(source, { workflowArgs, respond }) {
+  const logs = [];
+  const calls = [];
+  const context = createContext({
+    console: { log() {}, error() {} },
+    args: workflowArgs,
+    budget: { remaining: () => Number.POSITIVE_INFINITY },
+    workflow: {},
+    log: (m) => logs.push(String(m)),
+    phase: () => {},
+    parallel: async (items, fn) => Promise.all(items.map(fn)),
+    // Two-stage pipeline, sequential: order does not matter to any assertion here and
+    // sequencing keeps a failing case readable.
+    pipeline: async (items, stage1, stage2) => {
+      const out = [];
+      for (const item of items) out.push(await stage2(await stage1(item), item));
+      return out;
+    },
+    agent: async (prompt, opts = {}) => {
+      calls.push({ prompt, ...opts });
+      return respond({ prompt, ...opts });
+    },
+  });
+  const body = source.replace(/^export const meta =/m, 'const meta =');
+  try {
+    const result = await runInContext(`(async () => {\n${body}\n})()`, context, {
+      filename: WORKFLOW_REL,
+    });
+    return { result, logs, calls, error: null };
+  } catch (e) {
+    return { result: null, logs, calls, error: e };
+  }
+}
+
+/** A minimal object satisfying a workflow schema's `required` list. */
+function stubFor(schema, overrides = {}) {
+  const bools = { docExists: true, implementationFound: true, buildSafe: true, filesEdited: false };
+  const out = {};
+  for (const key of schema?.required ?? []) {
+    const type = schema.properties?.[key]?.type;
+    out[key] =
+      type === 'string' ? '' : type === 'number' ? 0 : type === 'array' ? [] : type === 'boolean' ? bools[key] ?? true : {};
+  }
+  return { ...out, ...overrides };
+}
+
+/** Echo the preflight's own path list back as fully present. */
+function preflightResponse(prompt) {
+  const head = prompt.lastIndexOf('PATHS (');
+  const paths = prompt
+    .slice(prompt.indexOf('\n', head) + 1)
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return { command: 'stub', present: paths, missing: [] };
+}
+
+const PROBE_EDITABLE = 'content/docs/api/index.mdx';
+const PROBE_RELEASE = `${RELEASE_OWNED_PREFIX}v9.mdx`;
+
+/**
+ * Every way the read-only channel can be broken, checked by observing a real run.
+ * Returns a list of human-readable problems; empty means the fork is intact.
+ */
+export async function checkReadOnlyRouting(source) {
+  const problems = [];
+  const docs = [PROBE_EDITABLE, PROBE_RELEASE];
+  const audits = (calls) => calls.filter((c) => c.phase === 'Audit & Fix');
+
+  // 1. Routing: which prompt and which schema does each doc get?
+  const run = await runWorkflow(source, {
+    workflowArgs: { docs },
+    respond: ({ prompt, phase, schema }) =>
+      phase === 'Scope Preflight' ? preflightResponse(prompt) : stubFor(schema, { doc: '' }),
+  });
+  if (run.error) {
+    problems.push(`the workflow threw on a clean two-doc run: ${run.error.message}`);
+    return problems;
+  }
+
+  const seen = audits(run.calls);
+  if (seen.length !== docs.length) {
+    problems.push(`expected ${docs.length} audit-phase agent(s), saw ${seen.length}`);
+    return problems;
+  }
+  const releaseCall = seen.find((c) => String(c.label).includes('releases/'));
+  const editableCall = seen.find((c) => !String(c.label).includes('releases/'));
+
+  if (!releaseCall) {
+    problems.push(`${PROBE_RELEASE} was handed to no audit-phase agent at all — a page in scope that produces nothing has been dropped from the audit, which is the outcome #4920 rejected`);
+  } else {
+    // The editable channel's rule 1 is "Edit the doc FILE IN PLACE"; its presence in a
+    // release page's prompt IS the bug, whatever else the prompt says.
+    if (releaseCall.prompt.includes('Edit the doc FILE IN PLACE')) {
+      problems.push(`${PROBE_RELEASE} was given the EDITABLE audit prompt ("Edit the doc FILE IN PLACE") — release notes are RELEASE-OWNED and must never be edited by a code PR (AGENTS.md; #4920)`);
+    }
+    if (!releaseCall.prompt.includes('READ-ONLY') || !releaseCall.prompt.includes(`DO NOT edit`)) {
+      problems.push(`${PROBE_RELEASE}'s prompt does not tell the agent the page is read-only`);
+    }
+    // The schema is the structural half: a read-only channel that still reports
+    // `fixesApplied` is one Edit call away from writing to a release page.
+    const req = releaseCall.schema?.required ?? [];
+    if (req.includes('fixesApplied') || !req.includes('filesEdited')) {
+      problems.push(`${PROBE_RELEASE} was given the edit-log schema (fixesApplied), not the finding schema (filesEdited)`);
+    }
+  }
+
+  if (!editableCall) {
+    problems.push(`${PROBE_EDITABLE} was handed to no audit-phase agent`);
+  } else if (!editableCall.prompt.includes('Edit the doc FILE IN PLACE')) {
+    problems.push(`${PROBE_EDITABLE} lost the editable audit prompt — the read-only fork must not swallow ordinary docs`);
+  }
+
+  // 2. The run summary must SAY so. A silent read-only channel is indistinguishable
+  //    from having excluded the pages, which is the option that was rejected.
+  const headline = 'releases (read-only): 0 finding(s) — file issues, do not edit';
+  if (!run.logs.some((l) => l.includes(headline))) {
+    problems.push(`no run-summary line "${headline}" — findings on release pages have to be visible enough to file, or the audit of those pages produced nothing anyone can act on`);
+  }
+  const readOnly = run.result?.releaseOwnedReadOnly;
+  if (!readOnly || readOnly.docsReviewed !== 1) {
+    problems.push(`the result's releaseOwnedReadOnly section did not report the 1 release page reviewed (got ${JSON.stringify(readOnly?.docsReviewed)})`);
+  }
+  const entry = (run.result?.perDoc ?? []).find((d) => d.doc === PROBE_RELEASE);
+  if (!entry || entry.channel !== 'read-only') {
+    problems.push(`${PROBE_RELEASE} is not marked channel:"read-only" in perDoc (got ${JSON.stringify(entry?.channel)})`);
+  } else if ('fixes' in entry) {
+    problems.push(`${PROBE_RELEASE}'s perDoc entry carries a \`fixes\` count — a read-only page reporting "0 fixes" reads exactly like an audited-and-clean one (#4851)`);
+  }
+
+  // 3. No result at all for a release page must FAIL the run, not shrink the summary.
+  const skipped = await runWorkflow(source, {
+    workflowArgs: { docs },
+    respond: ({ prompt, phase, schema, label }) =>
+      phase === 'Scope Preflight'
+        ? preflightResponse(prompt)
+        : String(label).includes('releases/')
+          ? null
+          : stubFor(schema, { doc: '' }),
+  });
+  if (!skipped.error || !/produced no review result/.test(skipped.error.message)) {
+    problems.push('a release page whose review returned nothing did not fail the run — it was silently dropped from the summary instead');
+  }
+
+  // 4. An agent that admits it edited a release page must fail the run by name.
+  const edited = await runWorkflow(source, {
+    workflowArgs: { docs },
+    respond: ({ prompt, phase, schema, label }) =>
+      phase === 'Scope Preflight'
+        ? preflightResponse(prompt)
+        : stubFor(schema, { doc: '', filesEdited: String(label).includes('releases/') }),
+  });
+  if (!edited.error || !edited.error.message.includes(PROBE_RELEASE)) {
+    problems.push('a read-only agent reporting filesEdited:true did not fail the run naming the page — an edit to a release note would ride into the PR unannounced');
+  }
+
+  return problems;
+}
+
 // --- main --------------------------------------------------------------------
 
 try {
-  main();
+  if (args.includes('--self-test')) {
+    await selfTest();
+    process.exit(0);
+  }
+  await main();
 } catch (e) {
   // A structural failure (markers gone, list unparseable, derivation empty) is a
   // RED result with a readable reason — never a stack trace, and never a pass.
@@ -204,7 +443,7 @@ try {
   process.exit(1);
 }
 
-function main() {
+async function main() {
   const workflowPath = join(REPO_ROOT, WORKFLOW_REL);
   const source = readFileSync(workflowPath, 'utf8');
   const derived = deriveDocs();
@@ -230,6 +469,7 @@ function main() {
     console.log(
       `✓ docs-accuracy-audit scope is in sync with content/docs/: ${listed.length} hand-written doc(s).`,
     );
+    await checkReleaseOwned(source, derived);
     return;
   }
 
@@ -264,6 +504,66 @@ function main() {
   process.exit(1);
 }
 
+/**
+ * The release-owned half of the contract: the rule still says it, the workflow still
+ * encodes the same path, the pages are still in scope, and the read-only fork still
+ * works on a real run.
+ */
+async function checkReleaseOwned(source, derived) {
+  const guardrail = findGuardrailRow(readFileSync(join(REPO_ROOT, AGENTS_REL), 'utf8'));
+  if (!guardrail) {
+    console.error(
+      `✗ ${AGENTS_REL}: no Documentation Guardrails row marking \`${RELEASE_OWNED_PREFIX}\` RELEASE-OWNED.\n\n` +
+        `  ${WORKFLOW_REL} routes that exact prefix down a read-only channel BECAUSE of that row\n` +
+        `  (#4920). If the guardrail moved, was renamed or was softened, the workflow is now\n` +
+        `  enforcing a rule the repo no longer states — update both together, in that order.\n`,
+    );
+    process.exit(1);
+  }
+
+  const prefix = parseReleaseOwnedPrefix(source);
+  if (prefix !== RELEASE_OWNED_PREFIX) {
+    console.error(
+      `✗ ${WORKFLOW_REL}: RELEASE_OWNED_PREFIX is "${prefix}", but ${AGENTS_REL} marks\n` +
+        `  "${RELEASE_OWNED_PREFIX}" RELEASE-OWNED. The workflow would review the wrong set of pages\n` +
+        `  read-only — and edit the release notes it no longer recognises.\n`,
+    );
+    process.exit(1);
+  }
+
+  // The pages must still BE in scope. Zero of them is not "nothing to protect": it is
+  // option A from #4920 (exclude releases from the audit), which was rejected — the
+  // most-read pages in the docs would go permanently unaudited, silently.
+  const inScope = derived.filter(isReleaseOwned);
+  if (!inScope.length) {
+    console.error(
+      `✗ no ${RELEASE_OWNED_PREFIX}** page is in the audit scope.\n\n` +
+        `  Release pages are meant to be IN scope and READ-ONLY (#4920): audited, never edited,\n` +
+        `  findings filed as issues. An empty set means either the pages moved, or they were\n` +
+        `  excluded from the scope — the option that ruling rejected, because it leaves the\n` +
+        `  most-read pages in the docs unaudited with nothing to say so.\n`,
+    );
+    process.exit(1);
+  }
+
+  const problems = await checkReadOnlyRouting(source);
+  if (problems.length) {
+    console.error(`✗ ${WORKFLOW_REL}: the read-only channel for ${RELEASE_OWNED_PREFIX}** is broken.\n`);
+    for (const p of problems) console.error(`    - ${p}`);
+    console.error(
+      `\n  Observed by running the workflow against stub agents. Release notes are RELEASE-OWNED\n` +
+        `  (${AGENTS_REL}: "${guardrail.trim().slice(0, 96)}…"); the audit reviews them and reports,\n` +
+        `  it never edits them (#4920).\n`,
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    `✓ release-owned pages are in scope and read-only: ${inScope.length} page(s) under ` +
+      `${RELEASE_OWNED_PREFIX} review-only (findings → issues, never edited).`,
+  );
+}
+
 // --- self-test ---------------------------------------------------------------
 
 /**
@@ -272,7 +572,7 @@ function main() {
  * no repo state — so a regression here fails on its own PR rather than being
  * discovered the next time a directory is renamed.
  */
-function selfTest() {
+async function selfTest() {
   let failed = 0;
   let total = 0;
   const check = (label, want, got) => {
@@ -340,6 +640,77 @@ function selfTest() {
   );
   check('a renamed directory shows up on BOTH sides', 1, renamed.dead.length);
   check('…and its new home is flagged as unlisted', 1, renamed.unlisted.length);
+
+  // --- release-owned pages: in scope, read-only (#4920) ----------------------
+  //
+  // The predicate and the guardrail parser are hermetic. The three cases after them
+  // deliberately are NOT: they run the REAL workflow, because the thing being pinned
+  // is that release pages take the read-only fork on the real path, and a fixture
+  // proves nothing about that (#4868 — a self-check running somewhere other than the
+  // real path proves nothing about the real path).
+  check('the prefix routes release pages', [true, true], [
+    isReleaseOwned('content/docs/releases/v9.mdx'),
+    isReleaseOwned('content/docs/releases/index.mdx'),
+  ]);
+  check('…and nothing else', [false, false, false], [
+    isReleaseOwned('content/docs/api/index.mdx'),
+    // Neither a sibling directory whose name merely starts the same way…
+    isReleaseOwned('content/docs/releases-notes/v9.mdx'),
+    // …nor a page that only mentions releases deeper in its path.
+    isReleaseOwned('content/docs/deployment/releases/v9.mdx'),
+  ]);
+  check(
+    'the AGENTS.md guardrail row is found by path + RELEASE-OWNED',
+    true,
+    findGuardrailRow('| `content/docs/releases/` | **RELEASE-OWNED** | ❌ Never edit in a code PR. |') !== null,
+  );
+  check(
+    'a row that no longer says RELEASE-OWNED is not the guardrail',
+    null,
+    findGuardrailRow('| `content/docs/releases/` | generated | see the release process |'),
+  );
+  throws(
+    'a workflow without the prefix constant throws',
+    () => parseReleaseOwnedPrefix('const ALL_HANDWRITTEN = []'),
+    'no `const RELEASE_OWNED_PREFIX',
+  );
+
+  const workflowSource = readFileSync(join(REPO_ROOT, WORKFLOW_REL), 'utf8');
+
+  // (1) Still in scope. #4920's rejected option was deleting these pages from the
+  //     audit; that would show up right here, as an empty list.
+  check(
+    'release pages are still IN the audit scope',
+    true,
+    parseBlock(workflowSource).filter(isReleaseOwned).length > 0,
+  );
+
+  // (2) …and routed read-only, observed on a real run of the workflow.
+  check('release pages take the read-only channel', [], await checkReadOnlyRouting(workflowSource));
+
+  // (3) Mutations. A guard that has never been seen to fail is a guard nobody has
+  //     tested — so break the fork two ways in memory and require each to go red.
+  const mutants = [
+    // The fork itself: every doc becomes editable, release notes included.
+    ['routing removed', 'doc.startsWith(RELEASE_OWNED_PREFIX)', 'false'],
+    // The fork survives but says nothing, which reads exactly like the pages having
+    // been excluded — the outcome the ruling rejected.
+    ['read-only headline removed', 'releases (read-only): ${totalFindings} finding(s)', 'audited ${totalFindings} page(s)'],
+  ];
+  for (const [label, from, to] of mutants) {
+    total++;
+    const mutated = workflowSource.replace(from, to);
+    if (mutated === workflowSource) {
+      console.error(`  ✗ mutation "${label}" did not apply — it cannot prove anything. Update the mutation to match the current source.`);
+      failed++;
+      continue;
+    }
+    const problems = await checkReadOnlyRouting(mutated);
+    if (!problems.length) {
+      console.error(`  ✗ mutation "${label}": checkReadOnlyRouting stayed GREEN with the read-only channel broken`);
+      failed++;
+    }
+  }
 
   if (failed) {
     console.error(`\n✗ check-audit-scope self-test failed (${failed} case(s)).`);

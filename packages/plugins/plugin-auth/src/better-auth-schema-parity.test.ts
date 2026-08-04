@@ -265,3 +265,66 @@ describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parit
     }
   }
 });
+
+/**
+ * Upgrade tripwires for the #3585 fix.
+ *
+ * `AuthManager.buildJwtPlugin` reaches into two things better-auth does not
+ * version as public API: the EdDSA default it applies when `keyPairConfig` is
+ * absent, and the `/get-session` `after` hook whose handler is wrapped so a
+ * signing failure cannot 500 the session path. Both are pinned here so a
+ * better-auth bump that moves either one fails a fast unit test instead of a
+ * production login.
+ */
+describe('better-auth jwt plugin contract (#3585)', () => {
+  it('still defaults to EdDSA/Ed25519 — the reason the fallback exists', async () => {
+    // If this ever fails because better-auth changed its default to something
+    // universally supported, the probe is no longer load-bearing and
+    // buildJwtPlugin can be simplified. Read utils.mjs `generateExportedKeyPair`
+    // before deleting anything.
+    const { generateExportedKeyPair } = (await import(
+      'better-auth/plugins/jwt'
+    )) as unknown as {
+      generateExportedKeyPair: (o?: unknown) => Promise<{ alg: string; cfg: { crv?: string } }>;
+    };
+    const generated = await generateExportedKeyPair(undefined);
+    expect(generated.alg).toBe('EdDSA');
+    expect(generated.cfg.crv).toBe('Ed25519');
+  });
+
+  it('honours an explicit ES256 keyPairConfig', async () => {
+    const { generateExportedKeyPair } = (await import(
+      'better-auth/plugins/jwt'
+    )) as unknown as {
+      generateExportedKeyPair: (o?: unknown) => Promise<{ alg: string }>;
+    };
+    const generated = await generateExportedKeyPair({ jwks: { keyPairConfig: { alg: 'ES256' } } });
+    expect(generated.alg).toBe('ES256');
+  });
+
+  it('still exposes exactly one /get-session after-hook for the guard to wrap', () => {
+    const plugin = jwt({ schema: buildJwtPluginSchema() }) as unknown as {
+      hooks?: { after?: Array<{ matcher?: (c: { path?: string }) => boolean; handler?: unknown }> };
+    };
+    const after = plugin.hooks?.after ?? [];
+    const getSessionHooks = after.filter((h) => h.matcher?.({ path: '/get-session' }));
+
+    expect(getSessionHooks).toHaveLength(1);
+    expect(typeof getSessionHooks[0]!.handler).toBe('function');
+    // Not matched for other paths — the guard must not silently wrap unrelated
+    // hooks if the matcher is ever broadened.
+    expect(after.filter((h) => h.matcher?.({ path: '/sign-in/email' }))).toHaveLength(0);
+  });
+
+  it('exposes the adapter.getJwks keyring seam the ES256 fallback relies on', () => {
+    // The seam is what lets a host without Ed25519 hide keys it cannot import,
+    // so resolveSigningKey's any-algorithm `getLatestKey()` fallback cannot
+    // hand it a stored EdDSA key. Removing the option would silently reinstate
+    // the crash for existing deployments.
+    const getJwks = async () => [];
+    const plugin = jwt({ schema: buildJwtPluginSchema(), adapter: { getJwks } } as never) as {
+      options?: { adapter?: { getJwks?: unknown } };
+    };
+    expect(plugin.options?.adapter?.getJwks).toBe(getJwks);
+  });
+});

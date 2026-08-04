@@ -234,8 +234,13 @@ export default defineStack({
   },
   jobs: allJobs,
   emailTemplates: allEmails,
-  // Declarative REST endpoints (object_operation + flow) — the metadata
-  // counterpart of the code-mounted recalc endpoint (see src/system/apis/).
+  // Declarative REST endpoints — SUSPENDED and therefore EMPTY (#4936). The
+  // two definitions this used to carry are preserved, commented, in
+  // src/system/apis/index.ts with the full rationale: the surface parsed
+  // perfectly and executed nothing, so a non-empty `apis:` is now rejected at
+  // publish/validate. The code-mounted recalc endpoint
+  // (src/system/server/recalc-endpoint.ts) is the working path meanwhile; the
+  // executor that makes this key usable again is tracked by #5040.
   apis: allApis,
   // Declarative `connectors:` — both kinds (ADR-0097): provider-bound
   // INSTANCES (StatusApiConnector via `rest`; StatusOpenApiConnector via

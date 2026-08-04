@@ -7,6 +7,11 @@
       "invariant": "A declared field lock is the SERVER's to enforce (ADR-0057 D10 — the client grid is courtesy). A `readonlyWhen` whose predicate names a scope root the write path could not bind resolves to LOCKED, not to \"not locked\": \"could not check\" must never read as \"allowed\" on a field the author declared frozen. This narrows ADR-0058 D5's fail-soft tier deliberately and only for that case — a merely BROKEN predicate (undeclared key, null overload, parse fault, throw) still fails open, and requiredWhen / option visibleWhen are untouched."
     },
     {
+      "file": "packages/objectql/src/hook-wrappers.ts",
+      "adrs": ["ADR-0058", "ADR-0112"],
+      "invariant": "An unevaluable hook `condition` ABORTS the operation (ADR-0058's write-path addendum, #4775) — `onError` never sees it and cannot soften it back into a silent skip. On a predicate (`multi: true`) bulk write the rejection must name the LIMITATION, not the author: ADR-0058's bulk-write addendum declares per-row evaluation the contract (#5038), so this rejection is a dated stopgap and its message says so. The discriminator is `limitation`, deliberately NOT `code` — ADR-0112 makes `error.code` a closed wire vocabulary and the REST layer promotes a thrown error's `.code` onto the envelope, so naming it `code` would mint an unregistered wire code by side effect."
+    },
+    {
       "file": "packages/spec/src/identity/membership-role.ts",
       "adrs": ["ADR-0090", "ADR-0108"],
       "invariant": "The membership-role vocabulary is CLOSED and framework-owned (owner/admin/delegated_admin/member). Capability travels through positions, never through `sys_member.role`."

@@ -60,10 +60,15 @@ const BASE = 'http://localhost:9';
 interface Pattern { verb: string; source: string; route: string; re: RegExp }
 
 /**
- * `(unmatched)` is the `__api-endpoint` catch-all: metadata-declared custom
- * endpoints, whose route set exists only at runtime. Treating it as a pattern
- * would match every URL and make this whole suite vacuous, so it is excluded
- * — the one ledger row this guard deliberately cannot use.
+ * A `(unmatched)` row would match every URL and make this whole suite vacuous,
+ * so it is excluded here and re-asserted absent below ("guard the guard").
+ *
+ * The one row that ever had this shape — the `__api-endpoint` catch-all for
+ * metadata-declared `apis:` — was REMOVED in #4936, because nothing served it:
+ * the branch behind it called a `matchEndpoint` no implementation provided.
+ * The exclusion stays as a standing rule, not as a description of a live row:
+ * the endpoint executor is being built (#5040), and if it ever re-enters the
+ * ledger it must arrive as enumerated routes, never as a catch-all.
  */
 const UNUSABLE_ROWS = new Set(['* (unmatched)']);
 

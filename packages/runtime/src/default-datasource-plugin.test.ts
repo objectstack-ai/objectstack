@@ -228,6 +228,66 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     expect(disconnects).toBe(0);
   }, BOOT_TIMEOUT);
 
+  it('registers the default driver TWICE with the same instance, and says nothing about it (#4773)', async () => {
+    // The round trip this pins: DefaultDatasourcePlugin.init() connects the
+    // driver through DatasourceConnectionService (registerDriver, isDefault:
+    // true), then republishes THAT instance as the `driver.<name>` kernel
+    // service, and ObjectQLPlugin.start()'s `driver.*` discovery loop bridges
+    // it straight back in (registerDriver, isDefault: false). Every boot logged
+    // `WARN Driver already registered, skipping` for it — a no-anomaly line in
+    // the boot diagnostics of every single `pnpm dev`.
+    //
+    // Both halves are asserted on purpose: the warning count alone would stay
+    // green if the second registration simply stopped happening, which is a
+    // different change with different consequences (the `driver.*` bridge is
+    // what a pre-built DriverPlugin relies on).
+    const { ObjectQL } = await import('@objectstack/objectql');
+    const registrations: Array<{ name: string; instance: unknown; isDefault: boolean }> = [];
+    const originalRegister = ObjectQL.prototype.registerDriver;
+    ObjectQL.prototype.registerDriver = function (driver: any, isDefault = false) {
+      registrations.push({ name: driver?.name, instance: driver, isDefault });
+      return originalRegister.call(this, driver, isDefault);
+    };
+    // ObjectLogger writes straight to `process.stdout` in Node (console is only
+    // its browser fallback), and `serve`'s boot-quiet window intercepts exactly
+    // this stream — so this is the same bytes the `⚠ Boot diagnostics` block
+    // replays. Capturing `console.warn` instead would see nothing and pass
+    // vacuously.
+    const stdoutLines: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout as any).write = (chunk: any, ...rest: any[]) => {
+      stdoutLines.push(String(chunk));
+      return (originalWrite as any)(chunk, ...rest);
+    };
+
+    const kernel = await assemble({});
+    try {
+      await kernel.bootstrap();
+      const engine = kernel.getService<IDataEngine>('data');
+      const defaultName = engine.getDefaultDriverName!()!;
+
+      // (a) it really is registered twice, with ONE object — object identity,
+      // not merely an equal configuration.
+      const forDefault = registrations.filter((r) => r.name === defaultName);
+      expect(forDefault).toHaveLength(2);
+      expect(forDefault[0]!.isDefault).toBe(true);
+      expect(forDefault[1]!.isDefault).toBe(false);
+      expect(forDefault[1]!.instance).toBe(forDefault[0]!.instance);
+      // …and the second leg is the `driver.*` service bridge, same instance again.
+      expect(kernel.getService(`driver.${defaultName}`)).toBe(engine.getDriverByName!(defaultName));
+
+      // (b) that round trip is silent — no boot-diagnostics warning.
+      const driverWarns = stdoutLines.filter(
+        (l) => /\bWARN\b/.test(l) && /already registered|Driver name collision/i.test(l),
+      );
+      expect(driverWarns).toEqual([]);
+    } finally {
+      (process.stdout as any).write = originalWrite;
+      ObjectQL.prototype.registerDriver = originalRegister;
+      try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
+    }
+  }, BOOT_TIMEOUT);
+
   it("rejects an app bundle that declares a datasource named 'default' (host-reserved name)", async () => {
     const kernel = await assemble({
       bundle: {

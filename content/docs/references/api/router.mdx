@@ -16,12 +16,24 @@ Classifies routes for middleware application and security policies.
 ## TypeScript Usage
 
 ```typescript
-import { RouteCategory, RouteDefinitionSchema, RouterConfigSchema } from '@objectstack/spec/api';
-import type { RouteCategory, RouteDefinition, RouterConfig } from '@objectstack/spec/api';
+import { ConflictResolutionStrategy, RouteCategory, RouteDefinitionSchema, RouterConfigSchema } from '@objectstack/spec/api';
+import type { ConflictResolutionStrategy, RouteCategory, RouteDefinition, RouterConfig } from '@objectstack/spec/api';
 
 // Validate data
-const result = RouteCategory.parse(data);
+const result = ConflictResolutionStrategy.parse(data);
 ```
+
+---
+
+## ConflictResolutionStrategy
+
+### Allowed Values
+
+* `error`
+* `priority`
+* `first-wins`
+* `last-wins`
+
 
 ---
 

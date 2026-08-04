@@ -39,8 +39,10 @@
  * baked into the artifact.
  *
  * Related: #4910 (this seam), #4937 (the limiter that documented an execution
- * chain it never had), #4936 (`apis:` endpoint-level `rateLimit`, still
- * unwired), ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
+ * chain it never had), #4936 (the declarative `apis:` surface: vocabulary kept,
+ * a non-empty array rejected until an executor exists) and #5040 (that
+ * executor, which wires endpoint-level `rateLimit` — still unwired today),
+ * ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
  */
 
 import { z } from 'zod';

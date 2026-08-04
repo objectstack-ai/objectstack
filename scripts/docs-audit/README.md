@@ -119,6 +119,48 @@ and each audit agent reports `docExists` from the read path itself, so a preflig
 was wrong cannot be laundered into a green summary. The gate covers the default list,
 the preflight covers the caller's list, and the read path checks both.
 
+### Release-owned pages are in scope, and read-only (#4920)
+
+The derived scope contains `content/docs/releases/**` (9 pages), and AGENTS.md's
+Documentation Guardrails forbid a code PR from editing those pages at all. Since the
+audit's deliverable is an in-place mdx rewrite, a full audit used to walk straight into
+that prohibition — and open exactly the PR the guardrail exists to stop.
+
+They are **not** excluded. Excluding them would leave some of the most-read pages in the
+docs permanently unaudited, and would put a second definition of "docs this workflow
+covers" next to the generated block — #4851 is the bill for one subject with two
+hand-kept lists. Instead the **deliverable** forks, on a path prefix (`content/docs/
+releases/`, which is the guardrail's own path column, decidable inside the workflow VM):
+
+| | editable docs | release-owned pages |
+|:--|:--|:--|
+| prompt | audit + **fix in place** | review, **never edit** |
+| output schema | `fixesApplied` / `fixCount` | `findings[]` + `filesEdited` |
+| adversarial verifier | yes — re-checks applied edits | n/a, nothing was applied |
+| deliverable | the diff | findings → **file as issues** |
+
+Each finding carries `kind` (`never-true` / `no-longer-true` / `ambiguous` — a release
+page is a historical record, so "the current API differs" is not automatically an
+error), where on the page it is, what it should say instead, and `file:line` evidence.
+The run summary reports them under `releaseOwnedReadOnly` and logs
+`releases (read-only): N finding(s) — file issues, do not edit`.
+
+Three failure modes are made loud rather than silent, because "audited nothing" and
+"audited, found nothing" must never look alike:
+
+- a release page whose review returns **no result** fails the run by name — that is the
+  exclusion option arrived at by accident;
+- a review agent reporting `filesEdited: true` fails the run naming the file to revert;
+- the read-only headline is logged whenever release pages are in scope, **including at
+  zero findings** (reviewed-and-clean is a result, absence is not).
+
+`pnpm check:docs-audit-scope` enforces the whole contract: AGENTS.md must still mark
+that exact path RELEASE-OWNED, the workflow's `RELEASE_OWNED_PREFIX` must still match
+that row, the scope must still contain release pages, and the fork must still work —
+checked by **running** the workflow against stub agents and inspecting which prompt and
+schema each doc gets, not by grepping for a keyword. `--self-test` then mutates the fork
+out of an in-memory copy and requires that check to go red.
+
 ## 2. CI gate — `.github/workflows/docs-drift-check.yml`
 
 On any PR that touches `packages/**`, runs `affected-docs.mjs` against the base branch
@@ -141,7 +183,9 @@ Workflow({ name: 'docs-accuracy-audit' })
 ```
 
 It edits files in place (frontmatter preserved, no moves) and returns a per-doc log of
-fixes, verifier repairs, and residual items that couldn't be confirmed against code.
+fixes, verifier repairs, and residual items that couldn't be confirmed against code —
+**except** for `content/docs/releases/**`, which is reviewed read-only and returns
+findings to file as issues (see [1b](#release-owned-pages-are-in-scope-and-read-only-4920)).
 Always follow a run with the docs build gate:
 
 ```bash

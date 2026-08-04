@@ -33,7 +33,7 @@ export const myPlugin: Plugin = {
 ```
 
 Take init-time configuration from the plugin's own options (as
-`CacheServicePlugin` and `createApiRegistryPlugin()` do) rather than from the
+`CacheServicePlugin` does) rather than from the
 `settings` service: that service is an async, namespaced resolver —
 `await settings.get(namespace, key)` returns a `{ value, source, locked, … }`
 envelope, not a synchronous config bag keyed by dotted paths — and it is only
@@ -128,7 +128,6 @@ The core ecosystem defines several standard service contracts:
 | `http-server` | `IHttpServer` | `plugin-hono-server` |
 | `data` | `IDataEngine` | `@objectstack/objectql` (drivers implement `IDataDriver`) |
 | `auth` | `IAuthService` | `plugin-auth` |
-| `api-registry` | `ApiRegistry` | `@objectstack/core` |
 | `cache` | `ICacheService` | `@objectstack/service-cache` (memory adapter; its Redis adapter is still a skeleton that throws) — otherwise the kernel's in-memory fallback |
 | `lifecycle` | `LifecycleService` (`@objectstack/objectql`) | Registered by `ObjectQLPlugin` — enforces object `lifecycle` declarations (ADR-0057 retention/rotation/archival); call `sweep()` for an on-demand pass |
 

@@ -1037,9 +1037,14 @@ is the declared budget multiplied by the number of nodes.
 **Not implemented, deliberately named rather than implied.** ObjectStack does **not**
 emit `X-RateLimit-Limit` / `-Remaining` / `-Reset` headers on successful responses —
 only `Retry-After` on a 429. And the per-endpoint `rateLimit` key on
-`ApiEndpointSchema` / `ApiEndpointRegistrationSchema` is **not wired to anything**;
-declaring it changes nothing today. Its fate travels with the declarative `apis:`
-surface as a whole, tracked by [#4936](https://github.com/objectstack-ai/objectstack/issues/4936).
+`ApiEndpointSchema` is **not wired to anything**; declaring it changes nothing today.
+It travels with the declarative `apis:` surface as a whole: since
+[#4936](https://github.com/objectstack-ai/objectstack/issues/4936) that surface has no
+executor and a **non-empty `apis:` is rejected at publish/validate**, so the key cannot
+be reached at all. Wiring it is part of the endpoint executor, tracked by
+[#5040](https://github.com/objectstack-ai/objectstack/issues/5040).
+(The second spelling this callout used to name, `ApiEndpointRegistrationSchema`, was
+retired outright in [#4939](https://github.com/objectstack-ai/objectstack/issues/4939).)
 </Callout>
 
 ## Best Practices

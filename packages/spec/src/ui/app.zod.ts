@@ -1172,8 +1172,12 @@ export const AppSchema = lazySchema(() => z.object({
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
-    'never read). Declarative endpoints belong to the stack (`defineStack({ apis })`), ' +
-    'not the app shell. Delete the key.',
+    'never read). Delete the key. Note the stack-level `defineStack({ apis })` this ' +
+    'prescription used to redirect to is ALSO not executable in v17 (#4936): the ' +
+    'vocabulary is kept but a non-empty array is rejected there too, until the endpoint ' +
+    'executor ships (tracked by ' +
+    'https://github.com/objectstack-ai/objectstack/issues/5040). Serve the route in code ' +
+    'meanwhile — a plugin manifest `contributes.routes` entry or an `http.server` route.',
   ),
 
   /**

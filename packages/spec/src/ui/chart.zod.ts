@@ -2,6 +2,49 @@
 
 import { z } from 'zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { strictObject } from '../shared/strict-object';
+
+// ---------------------------------------------------------------------------
+// UNKNOWN-KEY POSTURE (#4001 批 15, ADR-0078) — this file is SPLIT, on a
+// measurement, and the split is the point. Five of its seven object sites are
+// closed; two are deliberately left open with the reason recorded, because
+// closing them would gate nothing.
+//
+// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
+// `getFileDescription()` publishes the module's FIRST doc block as the
+// reference page's description (#3746 trap 1). Hence `//`. Note you cannot
+// safely spell that token out here either — see the longer note in
+// `theme.zod.ts`, where quoting it inside a `//` line silently emptied the
+// published page description.
+//
+// CLOSED (real door, three measurements, 2026-08-03):
+//   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
+//   `ChartAnnotationSchema`, `ChartInteractionSchema`.
+//
+//   1. CARRIER KEY — `dashboard.zod.ts` declares `DashboardWidget.chartConfig`
+//      and `report.zod.ts` declares `ReportChartSchema` (a
+//      `ChartConfigSchema.extend(...)`). `dashboard` and `report` are both
+//      registered metadata types.
+//   2. GRAPH — a BFS from all 24 metadata-type roots plus `ObjectStackSchema`
+//      (the `build-schemas.ts` / #4650 closure) reaches all five as
+//      `root-graph`. Controls in the same run: `PageSchema` /
+//      `DashboardSchema` / `ReportSchema` / `WebhookSchema` /
+//      `StateMachineSchema` resolve; 批 13's measured no-door shapes
+//      (`TouchTargetConfigSchema`, `GestureConfigSchema`) do not.
+//   3. PARSE — `getMetadataTypeSchema('dashboard' | 'report')` is what
+//      `MetadataManager.validate`, `GET /api/v1/meta` and the Studio form all
+//      go through, so a chart key is judged on the stored-metadata path.
+//
+//   ⚠️ Strictness RIDES `.extend()` onto `ReportChartSchema` (the #4001 trap
+//   that bit `webhook` and `view`). That is intended and pinned in
+//   `chart.test.ts` — the report chart narrows `xAxis`/`yAxis` to dataset
+//   dimension/measure NAMES and adds no key of its own, so the inherited key
+//   set is exactly right and no `extraKeys` entry is needed.
+//
+// LEFT OPEN, DELIBERATELY (`ChartAggregateSchema`, `ChartGroupBySchema`) —
+// see the block above those two schemas. Short version: their carrier is the
+// REACT tier's `<ObjectChart aggregate={…}>` prop, and nothing parses them.
+// ---------------------------------------------------------------------------
 
 /**
  * Unified Chart Type Taxonomy
@@ -92,37 +135,86 @@ export type ChartType = z.infer<typeof ChartTypeSchema>;
  * Chart Axis Schema
  * Definition for X and Y axes
  */
-export const ChartAxisSchema = lazySchema(() => z.object({
-  /** Data field to map to this axis */
-  field: z.string().describe('Data field key'),
-  
-  /** Axis title */
-  title: I18nLabelSchema.optional().describe('Axis display title'),
+export const ChartAxisSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart axis',
+    history:
+      'Until #4001 an undeclared axis key was dropped at parse and the axis rendered with the default scale and ticks — a chart that looked configured and was not.',
+    // MEASURED same-file inconsistency, both directions: this schema names its
+    // bound column `field` and its caption `title`, while `ChartSeriesSchema`
+    // twenty lines below names them `name` and `label`. An author who has just
+    // written a series writes the series spelling here. `dataKey` / `stackId` /
+    // `yAxisId` are Recharts' own prop names, and Recharts is the renderer
+    // behind these shapes — so they are what an author debugging in the browser
+    // reads off the component and writes back into the metadata.
+    aliases: {
+      name: 'field', key: 'field', dataKey: 'field', column: 'field', value: 'field',
+      label: 'title', text: 'title', caption: 'title',
+      grid: 'showGridLines', showGrid: 'showGridLines', gridLines: 'showGridLines',
+      step: 'stepSize', tickStep: 'stepSize', interval: 'stepSize',
+      log: 'logarithmic', logScale: 'logarithmic', scale: 'logarithmic',
+      minimum: 'min', maximum: 'max',
+      formatter: 'format', numberFormat: 'format',
+      side: 'position', align: 'position',
+    },
+  },
+  {
+    /** Data field to map to this axis */
+    field: z.string().describe('Data field key'),
 
-  /** Value formatting (d3-format or similar) */
-  format: z.string().optional().describe('Value format string (e.g., "$0,0.00")'),
-  
-  /** Axis scale settings */
-  min: z.number().optional().describe('Minimum value'),
-  max: z.number().optional().describe('Maximum value'),
-  stepSize: z.number().optional().describe('Step size for ticks'),
-  
-  /** Appearance */
-  showGridLines: z.boolean().default(true),
-  position: z.enum(['left', 'right', 'top', 'bottom']).optional().describe('Axis position'),
-  
-  /** Logarithmic scale */
-  logarithmic: z.boolean().default(false),
-}));
+    /** Axis title */
+    title: I18nLabelSchema.optional().describe('Axis display title'),
+
+    /** Value formatting (d3-format or similar) */
+    format: z.string().optional().describe('Value format string (e.g., "$0,0.00")'),
+
+    /** Axis scale settings */
+    min: z.number().optional().describe('Minimum value'),
+    max: z.number().optional().describe('Maximum value'),
+    stepSize: z.number().optional().describe('Step size for ticks'),
+
+    /** Appearance */
+    showGridLines: z.boolean().default(true),
+    position: z.enum(['left', 'right', 'top', 'bottom']).optional().describe('Axis position'),
+
+    /** Logarithmic scale */
+    logarithmic: z.boolean().default(false),
+  },
+));
 
 /**
  * Chart Series Schema
  * Defines a single data series in the chart
  */
-export const ChartSeriesSchema = lazySchema(() => z.object({
+export const ChartSeriesSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart series',
+    history:
+      'Until #4001 an undeclared series key was dropped at parse — the series still drew, in the palette colour, on the left axis, unstacked, which is precisely the configuration the author was overriding.',
+    // The mirror of `ChartAxisSchema`'s entries: `field`/`title` are the axis
+    // spellings of this schema's `name`/`label`. `stackId` / `yAxisId` /
+    // `strokeDasharray` are Recharts' prop names — and `dashArray`'s own
+    // `.describe()` says "SVG stroke-dasharray override", so the file itself
+    // teaches the spelling it then refuses. `chartType` is named in
+    // `react-blocks.ts` as the INTERNAL spelling that is deliberately not part
+    // of the author contract, which makes it a wrong-layer near-miss rather
+    // than a typo.
+    aliases: {
+      field: 'name', key: 'name', dataKey: 'name', column: 'name',
+      title: 'label', text: 'label', caption: 'label',
+      chartType: 'type', seriesType: 'type', kind: 'type',
+      stackId: 'stack', stackGroup: 'stack', group: 'stack',
+      axis: 'yAxis', yAxisId: 'yAxis', side: 'yAxis',
+      role: 'variant',
+      strokeDasharray: 'dashArray', strokeDashArray: 'dashArray', dashed: 'dashArray',
+      alpha: 'opacity', fillOpacity: 'opacity', strokeOpacity: 'opacity',
+      colour: 'color', fill: 'color', stroke: 'color',
+    },
+  },
+  {
   /** Field name for values */
   name: z.string().describe('Field name or series identifier'),
-  
+
   /** Display label */
   label: I18nLabelSchema.optional().describe('Series display label'),
   
@@ -155,21 +247,44 @@ export const ChartSeriesSchema = lazySchema(() => z.object({
 
   /** Override series opacity (0–1). */
   opacity: z.number().min(0).max(1).optional().describe('Series opacity override'),
-}));
+  },
+));
 
 /**
  * Chart Annotation Schema
  * Static lines or regions to highlight data
  */
-export const ChartAnnotationSchema = lazySchema(() => z.object({
-  type: z.enum(['line', 'region']).default('line'),
-  axis: z.enum(['x', 'y']).default('y'),
-  value: z.union([z.number(), z.string()]).describe('Start value'),
-  endValue: z.union([z.number(), z.string()]).optional().describe('End value for regions'),
-  color: z.string().optional(),
-  label: I18nLabelSchema.optional(),
-  style: z.enum(['solid', 'dashed', 'dotted']).default('dashed'),
-}));
+export const ChartAnnotationSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart annotation',
+    history:
+      'Until #4001 an undeclared annotation key was dropped at parse and the reference line drew at the wrong place, in the default style, or not at all — while the annotation itself reported valid.',
+    // A region is authored as a RANGE, and every neighbouring range vocabulary
+    // in the protocol spells its ends `from`/`to` or `start`/`end`
+    // (`data/filter.zod.ts` operators, the dashboard date-range filter). This
+    // schema spells them `value`/`endValue`, so the mismatch is a different
+    // word for the same intent, not a slip. Getting `endValue` wrong is the
+    // expensive one: the region collapses to a line at `value`.
+    aliases: {
+      from: 'value', start: 'value', at: 'value', threshold: 'value', y: 'value', x: 'value',
+      to: 'endValue', end: 'endValue', until: 'endValue', valueEnd: 'endValue',
+      title: 'label', text: 'label', caption: 'label',
+      lineStyle: 'style', strokeStyle: 'style', dash: 'style',
+      colour: 'color', stroke: 'color', fill: 'color',
+      orientation: 'axis', direction: 'axis',
+      kind: 'type', shape: 'type',
+    },
+  },
+  {
+    type: z.enum(['line', 'region']).default('line'),
+    axis: z.enum(['x', 'y']).default('y'),
+    value: z.union([z.number(), z.string()]).describe('Start value'),
+    endValue: z.union([z.number(), z.string()]).optional().describe('End value for regions'),
+    color: z.string().optional(),
+    label: I18nLabelSchema.optional(),
+    style: z.enum(['solid', 'dashed', 'dotted']).default('dashed'),
+  },
+));
 
 /**
  * Chart Interaction Schema
@@ -181,25 +296,103 @@ export const ChartAnnotationSchema = lazySchema(() => z.object({
  *
  *   * `zoom` — no renderer had a zoom primitive behind it, and `brush` already
  *     narrows a range. Migration: `brush: true`.
- *   * `clickAction` — a chart segment click already has two owners that DO
- *     work: `drillDown` (opens the filtered records, which is what a segment
- *     click is almost always for) and, in the react tier, the host's own
- *     `onSegmentClick`. A third, silent one only invited authors to wire a
- *     click that never fired. Migration: `drillDown`, or handle it in React.
+ *   * `clickAction` — a chart segment click already has owners that DO work,
+ *     so a third, silent one only invited authors to wire a click that never
+ *     fired. Migration: in the react tier, the host's own `onSegmentClick`;
+ *     on a report, `ReportSchema.drilldown` (ADR-0021 D2, on by default);
+ *     on a dashboard widget, the renderer's segment drill under the widget's
+ *     `options` bag, which is `passthrough` precisely so renderer-only
+ *     capabilities have a declared home.
  */
-export const ChartInteractionSchema = lazySchema(() => z.object({
-  tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
-  brush: z.boolean().default(false).describe('Show the range selector under the plot'),
-}));
+// ⚠️ Kept OUT of the doc comment above on purpose — `build-docs.ts` publishes
+// that block to the public reference page, and the following is a note to the
+// next maintainer, not protocol documentation (the #3746 trap, in its subtler
+// form: not the file's FIRST block, but internal prose inside a published one).
+//
+// That `clickAction` paragraph read "Migration: `drillDown`" from #3752 until
+// #4001 批 15, and **`drillDown` is not a key this protocol declares
+// anywhere** — it is an untyped `(schema as any).drillDown` read inside
+// objectui's `ObjectChart`. Promoting that sentence into the strict rejection
+// message below would have handed an author the platform's authority for a key
+// the very same gate then rejects: the ledger's finding 7, third occurrence.
+// The underlying gap — a live renderer capability with no spec declaration —
+// is filed, not fixed here.
+export const ChartInteractionSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart interaction block',
+    history:
+      'Until #4001 an undeclared interaction key was dropped at parse — including the two #3752 removed, so an author who kept writing `zoom` after it was retired got exactly the same silence as before the removal.',
+    aliases: { tooltip: 'tooltips', hover: 'tooltips', showTooltip: 'tooltips', rangeSelector: 'brush', slider: 'brush' },
+    // The prescriptions #3752 wrote in this file's own doc comment, now
+    // delivered at the rejection instead of only to whoever reads the source.
+    // Two DISTINCT strings on purpose: `guidance` emits one bullet per key
+    // verbatim, so a shared sentence prints the same paragraph twice (批 10's
+    // `join`/`joinGateway` lesson).
+    guidance: {
+      zoom:
+        '`zoom` was removed in #3752 — no renderer ever had a zoom primitive behind it, and `brush` already narrows the visible range. Write `brush: true`.',
+      clickAction:
+        '`clickAction` was removed in #3752 — a segment click already has owners that work: the host\'s own `onSegmentClick` in the react tier, `drilldown` on a report (`ReportSchema.drilldown`, ADR-0021 D2, already on by default), and the renderer\'s segment drill under a dashboard widget\'s `options` bag. Use one of those.',
+    },
+  },
+  {
+    tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
+    brush: z.boolean().default(false).describe('Show the range selector under the plot'),
+  },
+));
 
 /**
  * Chart Configuration Base
  * Common configuration for all chart types
  */
-export const ChartConfigSchema = lazySchema(() => z.object({
+export const ChartConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart config',
+    history:
+      'Until #4001 an undeclared chart key was dropped at parse and the chart rendered with the defaults it was written to override — the failure #4001 exists for, on a shape reachable from both the dashboard and report metadata roots.',
+    aliases: {
+      // `chartType` is named in `react-blocks.ts` as the INTERNAL spelling that
+      // is deliberately NOT part of the author contract, so an author who saw
+      // it in a flattened SDUI envelope writes it back here.
+      chartType: 'type', kind: 'type', visualization: 'type',
+      palette: 'colors', colorScheme: 'colors', colours: 'colors',
+      legend: 'showLegend', showLegends: 'showLegend',
+      dataLabels: 'showDataLabels', showLabels: 'showDataLabels', labels: 'showDataLabels',
+      // Same-file singular/plural split: `annotations` is plural and
+      // `interaction` is singular, three lines apart.
+      annotation: 'annotations', referenceLines: 'annotations', markers: 'annotations',
+      interactions: 'interaction', interactivity: 'interaction',
+      caption: 'subtitle', subTitle: 'subtitle',
+      accessibility: 'aria', ariaProps: 'aria',
+      plotHeight: 'height',
+      xAxes: 'xAxis', yAxes: 'yAxis',
+    },
+    // Wrong-layer pointers. Each names the key the contract LANDS ON, not the
+    // one the author typed (#4410's lesson), and none of them promises a slot
+    // that does not exist — the check the `drillDown` correction above forced.
+    guidance: {
+      width:
+        '`width` is not a chart-level key: a chart fills its container, and the container\'s width is owned by the dashboard widget\'s `layout.w` (or the report block). Only `height` is chart-level.',
+      aggregate:
+        '`aggregate` is not part of the chart config. On a DASHBOARD widget the pre-ADR-0021 inline analytics shape was removed — bind a `dataset` and select `dimensions` + `values`. On a react `<ObjectChart>` it is a sibling PROP next to `objectName`, not a key inside the chart config.',
+      objectName:
+        '`objectName` is not part of the chart config — the data binding lives one level up: `dataset` on a dashboard widget (ADR-0021), or the `objectName` PROP on a react `<ObjectChart>`.',
+      dataset:
+        '`dataset` is not part of the chart config — it is the dashboard widget\'s own key (ADR-0021), a sibling of `chartConfig`, not a key inside it.',
+      data:
+        '`data` is not part of the chart config. Inline/precomputed rows are a react-tier `<ObjectChart data={…}>` prop; a metadata chart gets its rows from the widget\'s `dataset` binding.',
+      stacked:
+        '`stacked` is not a chart-level key, because stacking is not a chart family: it is a property of the SERIES. Give the series that should stack a shared `series[].stack` group id; series without one are grouped.',
+      axes:
+        '`axes` is not a key — the two axes are declared separately and asymmetrically: `xAxis` is a single axis, `yAxis` is an ARRAY (that is how dual-axis and combo charts are configured).',
+      options:
+        '`options` is not part of the chart config — renderer-only presentation extras belong in the dashboard widget\'s `options` bag, which is deliberately open for exactly that.',
+    },
+  },
+  {
   /** Chart Type */
   type: ChartTypeSchema,
-  
+
   /** Titles */
   title: I18nLabelSchema.optional().describe('Chart title'),
   subtitle: I18nLabelSchema.optional().describe('Chart subtitle'),
@@ -237,7 +430,8 @@ export const ChartConfigSchema = lazySchema(() => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}));
+  },
+));
 
 /**
  * Object-bound chart aggregation
@@ -251,6 +445,50 @@ export const ChartConfigSchema = lazySchema(() => z.object({
  * the object-bound rule and exports the helpers that derive the columns
  * (`chartAggregateResultKeys`) — read it before binding an axis.
  */
+
+// ---------------------------------------------------------------------------
+// THE TWO SITES BELOW ARE DELIBERATELY NOT CLOSED (#4001 批 15) — and this is
+// a measured verdict, not the batch running out of file.
+//
+// `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm are the only
+// two of this file's seven object sites the 批 15 door measurement could not
+// find a PARSE for:
+//
+//   1. CARRIER KEY — yes, and a LIVE one, which is what makes this different
+//      from 批 13's no-door files: `aggregate` is a real authorable prop on the
+//      react tier's `<ObjectChart objectName aggregate={…}>` (ADR-0081), it is
+//      published in the generated react-blocks contract, and objectui's
+//      `ObjectChart` reads `schema.aggregate` to run the query.
+//   2. GRAPH — but the carrier is a REACT prop, not a metadata key, so neither
+//      schema is reachable from any of the 24 metadata-type roots or from
+//      `ObjectStackSchema`. Both come back UNREACHABLE in the same BFS run
+//      where the five closed schemas above come back `root-graph`.
+//   3. PARSE — nothing in `objectstack`, `objectui` or the example apps calls
+//      `.parse()`/`.safeParse()` on either, outside this file's own unit
+//      tests. The gate that DOES judge an authored `aggregate` — the react-page
+//      publish lint (`packages/lint/src/validate-react-page-props.ts`) —
+//      re-derives the rules by hand (`CHART_FUNCTIONS`, the count/field
+//      requirement, the result-column naming) and never checks unknown keys.
+//      In `react-blocks.ts` the prop is published as a hand-written TYPE
+//      STRING; the Zod schema beside it is not what the contract is generated
+//      from.
+//
+// `.strict()` is a property of a PARSE, and there is no parse. Closing these
+// two would spend a v17 breaking change to make the file look finished and
+// leave behind exactly what the ledger warns about — "a precisely validated
+// dead slot is the more convincing lie" (#4583) — except worse than 批 13's
+// case, because this vocabulary is not dead: authors write it and the renderer
+// runs it. The gap is that no unknown-key gate stands between them, so
+// `groupby` / `fn` / `dateGranularty` are silently dropped today and would go
+// on being silently dropped after a `strictObject` here.
+//
+// The contract-first fix is to make the react-page publish gate PARSE this
+// schema instead of re-deriving it — a change in `packages/lint`, not a
+// strictness change in the spec. Filed rather than smuggled in here.
+//
+// DO NOT convert these two to `strictObject` before that is decided: it would
+// read as load-bearing, and it would make the real gap harder to see.
+// ---------------------------------------------------------------------------
 
 /**
  * Aggregation functions an object-bound chart may ask for.

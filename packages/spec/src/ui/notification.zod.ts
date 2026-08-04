@@ -49,6 +49,41 @@ export type NotificationPosition = z.infer<typeof NotificationPositionSchema>;
 /**
  * Notification Action Schema
  * Defines an interactive action button within a notification.
+ *
+ * ⛔ **DELIBERATELY NOT `strictObject` — this shape has NO AUTHORING DOOR**
+ * (#4001 批 14, ADR-0078 completeness gate). It is a **vocabulary**, consumed by
+ * reading its `.shape`, never by parsing an authored payload. Three independent
+ * measurements on 2026-08-03, each with a positive control that passed in the
+ * same run:
+ *
+ * 1. **Carrier key** — nothing in `packages/spec/src` imports this schema except
+ *    the `ui/index.ts` barrel. No metadata type declares a notification-actions
+ *    key; the `./ui` "notification instance" and "notification system config"
+ *    wrappers that once could have carried it were deleted in #4610 for having
+ *    zero consumers (see the note at the bottom of this file).
+ * 2. **Graph reachability** — BFS from the 24 metadata-type roots plus
+ *    `defineStack`'s `ObjectStackSchema` (the closure `build-schemas.ts` uses for
+ *    the #4650 deletion check) visits 6860 nodes and never reaches it. Controls
+ *    `PageSchema` / `ActionSchema` / `DashboardWidgetSchema` / `WebhookSchema`
+ *    were all `root-graph` in the same run, and injecting a synthetic carrier
+ *    flipped this schema to `root-graph` — so "unreachable" is a fact about the
+ *    graph, not a broken instrument.
+ * 3. **Call sites** — no `.parse()` in framework or objectui outside this
+ *    module's own `notification.test.ts`. objectui's use is the opposite of a
+ *    parse: `animation-notification-spec-parity.test.tsx` reads
+ *    `NotificationActionSchema.shape.variant` to pin its own hand-written
+ *    `NotificationActionButton` interface against this enum, both ways. That pin
+ *    depends on the SHAPE and is unaffected by the posture — which is precisely
+ *    why closing the shape would buy nothing.
+ *
+ * `.strict()` is a property of a PARSE, and nothing parses this. Closing it
+ * would spend a v17 breaking change to make the file look finished and leave a
+ * precisely-validated dead slot — *"the more convincing lie"* (#4583). The
+ * verdict this shape actually needs is ADR-0049 enforce-or-remove; filed as #5015
+ * and recorded in the strictness ledger's `no door` class.
+ *
+ * The pin in `notification.test.ts` goes RED the moment anyone gives this shape
+ * a carrier key — at which point it becomes authorable and this comment is wrong.
  */
 export const NotificationActionSchema = lazySchema(() => z.object({
   label: I18nLabelSchema.describe('Action button label'),

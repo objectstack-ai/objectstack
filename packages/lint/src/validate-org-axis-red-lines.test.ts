@@ -1,8 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
+import { ObjectStackSchema } from '@objectstack/spec';
 import { ObjectSchema } from '@objectstack/spec/data';
-import { ShareRecipientType, SharingRuleSchema, type SharingRuleInput } from '@objectstack/spec/security';
+import {
+  PermissionSetSchema,
+  RowLevelSecurityPolicySchema,
+  ShareRecipientType,
+  SharingRuleSchema,
+  type PermissionSetInput,
+  type SharingRuleInput,
+} from '@objectstack/spec/security';
 
 import {
   validateOrgAxisRedLines,
@@ -41,6 +51,27 @@ function sharingRule(input: SharingRuleInput): Record<string, unknown> {
     throw new Error(
       `sharing-rule fixture is not spec-valid — the lint would be tested against a shape ` +
         `no author can write (#4984). Keys given: ${Object.keys(input as object).join(', ')}. ${detail}`,
+    );
+  }
+  return result.data as unknown as Record<string, unknown>;
+}
+
+/**
+ * Same guard for the permission-set fixtures rule ① reads (#5009).
+ *
+ * `permissions[].rowLevelSecurity` is the ONLY authorable RLS surface —
+ * `ObjectSchema` declares no `rowLevelSecurity` (nor `rls`) and is `.strict()`,
+ * so the object-level traversal this rule used to carry could not run against a
+ * stack that parses. Building rule ①'s fixtures through the real schema is what
+ * keeps that from quietly coming back: a fixture for a surface the spec does
+ * not have now fails HERE.
+ */
+function permissionSet(input: PermissionSetInput): Record<string, unknown> {
+  const result = PermissionSetSchema.safeParse(input);
+  if (!result.success) {
+    throw new Error(
+      `permission-set fixture is not spec-valid (#5009): ` +
+        result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
     );
   }
   return result.data as unknown as Record<string, unknown>;
@@ -114,16 +145,19 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
   it('flags an RLS `using` on a permission set that walks the org parent', () => {
     const findings = validateOrgAxisRedLines({
       permissions: [
-        {
+        permissionSet({
           name: 'group_hq_reader',
+          label: 'Group HQ Reader',
+          objects: {},
           rowLevelSecurity: [
             {
               name: 'child_orgs',
               object: 'work_order',
+              operation: 'select',
               using: 'organization_id IN (current_user.parent_organization_id)',
             },
           ],
-        },
+        }),
       ],
     });
     expect(findings).toHaveLength(1);
@@ -140,26 +174,17 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
     expect(
       rules({
         permissions: [
-          {
-            name: 'p',
-            rowLevelSecurity: [{ name: 'r', check: "parent_organization_id = 'org_hq'" }],
-          },
+          permissionSet({
+            name: 'pset',
+            label: 'P',
+            objects: {},
+            rowLevelSecurity: [
+              { name: 'r', object: 'work_order', operation: 'all', check: "parent_organization_id = 'org_hq'" },
+            ],
+          }),
         ],
       }),
     ).toEqual([ORG_AXIS_PERMISSION_INHERITANCE]);
-  });
-
-  it('flags an object-authored RLS policy', () => {
-    const findings = validateOrgAxisRedLines({
-      objects: [
-        {
-          name: 'work_order',
-          rowLevelSecurity: [{ name: 'rollup', using: 'parent_organization_id = current_user.organization_id' }],
-        },
-      ],
-    });
-    expect(findings).toHaveLength(1);
-    expect(findings[0].path).toBe('objects[0].rowLevelSecurity[0].using');
   });
 
   it('flags a spec-valid sharing rule whose `condition` walks the org parent', () => {
@@ -258,16 +283,28 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
     expect(
       rules({
         permissions: [
-          {
+          permissionSet({
             name: 'plant_reader',
+            label: 'Plant Reader',
+            objects: {},
             rowLevelSecurity: [
               // ADR-0105 D2 — the engine's own union wall vocabulary.
-              { name: 'my_orgs', using: 'organization_id IN (current_user.accessible_org_ids)' },
+              {
+                name: 'my_orgs',
+                object: 'work_order',
+                operation: 'select',
+                using: 'organization_id IN (current_user.accessible_org_ids)',
+              },
               // Intra-org hierarchy — the business-unit tree, not the org tree.
-              { name: 'my_unit', using: 'business_unit_id IN (current_user.unit_ids)' },
-              { name: 'mine', using: 'owner_id = current_user.id' },
+              {
+                name: 'my_unit',
+                object: 'work_order',
+                operation: 'select',
+                using: 'business_unit_id IN (current_user.unit_ids)',
+              },
+              { name: 'mine', object: 'work_order', operation: 'select', using: 'owner_id = current_user.id' },
             ],
-          },
+          }),
         ],
         sharingRules: [
           sharingRule({
@@ -279,6 +316,110 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
           }),
         ],
         objects: [objectFixture({ name: 'work_order' })],
+      }),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * ── The surfaces this rule deliberately does NOT read (#5009) ───────────────
+ *
+ * #4984 removed the `??` alias reads from the sharing rule's FIELDS and left
+ * three more of the same shape one level up. Each is pinned here against the
+ * schema fact that makes it unreachable, so "put the fallback back, just in
+ * case" fails a test with the evidence attached rather than passing quietly.
+ */
+const MANIFEST = { id: 'org_axis_probe', name: 'org_axis_probe', version: '1.0.0', type: 'app' } as const;
+
+/** The violating RLS policy shape, spelled for the object-level key that does not exist. */
+const ORG_WALKING_POLICY = { name: 'rollup', using: 'parent_organization_id = current_user.organization_id' };
+
+describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, not this rule’s (#5009)', () => {
+  it('object-level RLS is not an authoring surface: `ObjectSchema` declares neither `rowLevelSecurity` nor `rls`', () => {
+    const objectKeys = Object.keys(ObjectSchema.shape);
+    expect(objectKeys).not.toContain('rowLevelSecurity');
+    expect(objectKeys).not.toContain('rls');
+    // The only declared home for RLS policies is the permission set.
+    expect(Object.keys(PermissionSetSchema.shape)).toContain('rowLevelSecurity');
+
+    // And `ObjectSchema` is `.strict()`, so this is not a silent strip: a stack
+    // carrying an object-level policy is REFUSED by `os validate` / `os build`,
+    // by name. The traversal deleted in #5009 could therefore never run against
+    // a stack anyone can ship — it only ever described a surface that isn't.
+    const refused = ObjectStackSchema.safeParse({
+      manifest: MANIFEST,
+      objects: [
+        {
+          name: 'work_order',
+          label: 'Work Order',
+          fields: { name: { type: 'text', label: 'Name' } },
+          rowLevelSecurity: [ORG_WALKING_POLICY],
+        },
+      ],
+    });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((i) => i.message).join(' ')).toMatch(
+      /Unrecognized key\(s\) on this object: `rowLevelSecurity`/,
+    );
+
+    // The lint stays silent on both spellings — as it did BEFORE the deletion
+    // for every stack that parses. Removing dead code changed no verdict.
+    expect(rules({ objects: [{ name: 'work_order', rowLevelSecurity: [ORG_WALKING_POLICY] }] })).toEqual([]);
+    expect(rules({ objects: [{ name: 'work_order', rls: [ORG_WALKING_POLICY] }] })).toEqual([]);
+  });
+
+  it('`permissionSets` / `sharing` are not stack-root keys — the root STRIPS them before any rule runs', () => {
+    const rootKeys = Object.keys(ObjectStackSchema.shape);
+    expect(rootKeys).toEqual(expect.arrayContaining(['permissions', 'sharingRules']));
+    expect(rootKeys).not.toContain('permissionSets');
+    expect(rootKeys).not.toContain('sharing');
+
+    // Unlike the `.strict()` sub-schemas this one strips rather than rejects,
+    // which is precisely why the dead branch was invisible: the stack parses,
+    // and the key the rule reached for is simply gone.
+    const parsed = ObjectStackSchema.safeParse({
+      manifest: MANIFEST,
+      permissionSets: [{ name: 'pset', label: 'P', objects: {} }],
+      sharing: [{ name: 'r', type: 'criteria', object: 'o', sharedWith: HQ_TEAM, condition: 'true' }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).not.toHaveProperty('permissionSets');
+    expect(parsed.data).not.toHaveProperty('sharing');
+
+    // So the rule reads the declared spellings only. A stack that spells them
+    // the other way gets its diagnostic from the schema, not from a red line
+    // that would fire on a shape `os validate` never lets through.
+    expect(
+      rules({
+        permissionSets: [
+          { name: 'p', rowLevelSecurity: [{ name: 'r', using: "parent_organization_id = 'org_hq'" }] },
+        ],
+        sharing: [
+          { name: 's', object: 'work_order', condition: "record.parent_organization_id == 'x'" },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('`sharingRules[].objectName` is rejected by name, and `object` is required on any rule that parsed', () => {
+    expect(Object.keys(SharingRuleSchema.shape)).toContain('object');
+    expect(Object.keys(SharingRuleSchema.shape)).not.toContain('objectName');
+    expect(() =>
+      sharingRule({
+        name: 'r',
+        type: 'criteria',
+        objectName: 'material_catalog',
+        sharedWith: { type: 'business_unit', value: 'bu' },
+        condition: 'true',
+      } as unknown as SharingRuleInput),
+    ).toThrow(/not spec-valid/);
+    // ② therefore never needs a fallback for the rule's target object.
+    expect(
+      rules({
+        objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
+        sharingRules: [
+          { name: 'r', objectName: 'material_catalog', sharedWith: { type: 'business_unit', value: 'bu' } },
+        ],
       }),
     ).toEqual([]);
   });
@@ -435,6 +576,266 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
       ).toEqual([]);
     },
   );
+});
+
+/**
+ * ── The structural meta-guard (#4992 pattern, #5009) ────────────────────────
+ *
+ * The two tests above pin the three branches #5009 removed. These two pin the
+ * PROPERTY that made them removable, so the next one is caught before review:
+ *
+ * 1. **Declared-key guard.** Every key this rule reads off a stack, permission
+ *    set, RLS policy, object or sharing rule must appear in that surface's own
+ *    Zod `.shape`. A rule registered `input: 'parsed'` can only ever see
+ *    declared keys, so a read of anything else is dead on arrival — this is the
+ *    check whose absence cost #4984 a red line and #5009 three more branches.
+ *    Scanning the source (not the behaviour) is deliberate: an unreachable
+ *    branch has no behaviour to assert on, which is exactly the problem.
+ *
+ * 2. **Reachability guard.** Every `findings.push` site must be reached by at
+ *    least one fixture that passed `safeParse`. A gate no spec-valid stack can
+ *    trip is not a gate; it is documentation of a surface that does not exist,
+ *    and it reads as an invitation to write more code against it.
+ */
+const RULE_SOURCE = readFileSync(new URL('./validate-org-axis-red-lines.ts', import.meta.url), 'utf8');
+
+/** The rule's CODE — comments stripped, since the guards below scan reads, not prose. */
+const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+/** Distinct property names read off `receiver` in the rule's code. */
+function keysReadOff(receiver: string): string[] {
+  const re = new RegExp(`\\b${receiver}\\??\\.([A-Za-z_$][\\w$]*)`, 'g');
+  return [...new Set([...RULE_CODE.matchAll(re)].map((m) => m[1]))].sort();
+}
+
+const shapeKeys = (schema: unknown): string[] =>
+  Object.keys((schema as { shape: Record<string, unknown> }).shape);
+
+/**
+ * Each receiver in the rule's body, the keys it is EXPECTED to read, and the
+ * schema that has to declare every one of them. The expected list is spelled
+ * out so that adding a read (or renaming a parameter, which would silently
+ * disarm the scan) forces a deliberate visit to this table.
+ */
+const READ_SURFACES: Array<{
+  receiver: string;
+  expected: string[];
+  declaredBy: string;
+  keys: () => string[];
+}> = [
+  {
+    receiver: 'cfg',
+    expected: ['objects', 'permissions', 'sharingRules'],
+    declaredBy: 'ObjectStackSchema',
+    keys: () => shapeKeys(ObjectStackSchema),
+  },
+  {
+    receiver: 'ps',
+    expected: ['name', 'rowLevelSecurity'],
+    declaredBy: 'PermissionSetSchema',
+    keys: () => shapeKeys(PermissionSetSchema),
+  },
+  {
+    receiver: 'policy',
+    expected: ['name'],
+    declaredBy: 'RowLevelSecurityPolicySchema',
+    keys: () => shapeKeys(RowLevelSecurityPolicySchema),
+  },
+  {
+    receiver: 'object',
+    expected: ['systemFields', 'tenancy'],
+    declaredBy: 'ObjectSchema',
+    keys: () => shapeKeys(ObjectSchema),
+  },
+  {
+    receiver: 'rule',
+    expected: ['condition', 'name', 'object', 'sharedWith'],
+    declaredBy: 'SharingRuleSchema',
+    keys: () => shapeKeys(SharingRuleSchema),
+  },
+  {
+    receiver: 'sharedWith',
+    expected: ['type'],
+    declaredBy: 'SharingRuleSchema.sharedWith',
+    keys: () => shapeKeys((SharingRuleSchema as unknown as { shape: { sharedWith: unknown } }).shape.sharedWith),
+  },
+];
+
+describe('validateOrgAxisRedLines — reads only keys the spec declares (meta-test, #5009)', () => {
+  it.each(READ_SURFACES)('every key read off `$receiver` is declared by $declaredBy', (surface) => {
+    const read = keysReadOff(surface.receiver);
+    expect(read).toEqual(surface.expected);
+    const declared = surface.keys();
+    expect(read.filter((k) => !declared.includes(k))).toEqual([]);
+  });
+
+  it('the RLS clause list is spelled from `RowLevelSecurityPolicySchema` keys', () => {
+    // `policy[clause]` is a COMPUTED read, so the scan above cannot see it; the
+    // word list it indexes with is checked here instead.
+    const match = /for \(const clause of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
+    expect(match, 'the clause loop moved — update this guard').not.toBeNull();
+    const clauses = [...match![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(clauses).toEqual(['using', 'check']);
+    const declared = shapeKeys(RowLevelSecurityPolicySchema);
+    expect(clauses.filter((c) => !declared.includes(c))).toEqual([]);
+  });
+});
+
+/** A `findings.push` call site, as the rule's source declares it. */
+interface PushSite {
+  rule: string;
+  pathTemplate: string;
+}
+
+const RULE_IDS: Record<string, string> = {
+  ORG_AXIS_PERMISSION_INHERITANCE,
+  ORG_AXIS_CROSS_ORG_BU_GRANT,
+};
+
+function pushSites(): PushSite[] {
+  return RULE_CODE.split('findings.push({')
+    .slice(1)
+    .map((block, i) => {
+      const ruleConst = /rule:\s*([A-Z_][A-Z0-9_]*)/.exec(block)?.[1];
+      const pathTemplate = /path:\s*`([^`]*)`/.exec(block)?.[1];
+      if (!ruleConst || !pathTemplate) {
+        throw new Error(`findings.push site #${i} has no literal \`rule:\` / \`path:\` — the guard cannot map it`);
+      }
+      const rule = RULE_IDS[ruleConst];
+      if (!rule) throw new Error(`findings.push site #${i} emits unknown rule id \`${ruleConst}\``);
+      return { rule, pathTemplate };
+    });
+}
+
+/** `permissions[${i}].rowLevelSecurity[${j}].${clause}` → a matcher for a concrete path. */
+function templateToRegex(template: string): RegExp {
+  const literals = template.split(/\$\{[^}]*\}/g).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`^${literals.join('[^.\\[\\]]+')}$`);
+}
+
+/**
+ * One spec-valid stack per branch the rule still carries. EVERY fixture here
+ * goes through `safeParse` (via the helpers at the top of this file), so a
+ * branch is only "covered" if a stack an author can actually ship reaches it.
+ */
+const REACHABILITY_CORPUS: Array<{ label: string; stack: unknown }> = [
+  {
+    label: '① permission-set RLS `using`',
+    stack: {
+      permissions: [
+        permissionSet({
+          name: 'group_hq_reader',
+          label: 'Group HQ Reader',
+          objects: {},
+          rowLevelSecurity: [
+            {
+              name: 'child_orgs',
+              object: 'work_order',
+              operation: 'select',
+              using: 'organization_id IN (current_user.parent_organization_id)',
+            },
+          ],
+        }),
+      ],
+    },
+  },
+  {
+    label: '① permission-set RLS `check`',
+    stack: {
+      permissions: [
+        permissionSet({
+          name: 'group_hq_writer',
+          label: 'Group HQ Writer',
+          objects: {},
+          rowLevelSecurity: [
+            {
+              name: 'child_orgs',
+              object: 'work_order',
+              operation: 'insert',
+              check: "parent_organization_id = 'org_hq'",
+            },
+          ],
+        }),
+      ],
+    },
+  },
+  {
+    label: '① sharing-rule `condition`',
+    stack: {
+      sharingRules: [
+        sharingRule({
+          name: 'hq_sees_children',
+          type: 'criteria',
+          object: 'work_order',
+          sharedWith: HQ_TEAM,
+          condition: "record.parent_organization_id == 'org_hq'",
+        }),
+      ],
+    },
+  },
+  {
+    label: '① sharing-rule `sharedWith`',
+    stack: {
+      sharingRules: [
+        sharingRule({
+          name: 'by_parent_org',
+          type: 'criteria',
+          object: 'work_order',
+          sharedWith: { type: 'team', value: 'parent_organization_id' },
+          condition: 'true',
+        }),
+      ],
+    },
+  },
+  {
+    label: '② BU grant on a platform-global object',
+    stack: {
+      objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
+      sharingRules: [
+        sharingRule({
+          name: 'catalog_to_plant',
+          type: 'criteria',
+          object: 'material_catalog',
+          sharedWith: { type: 'unit_and_subordinates', value: 'bu_plant_a' },
+          condition: 'true',
+        }),
+      ],
+    },
+  },
+];
+
+describe('validateOrgAxisRedLines — every branch is reachable by a spec-valid stack (meta-test, #5009)', () => {
+  it('maps every `findings.push` site in the source', () => {
+    const sites = pushSites();
+    // ① permission-set RLS, ① sharing rule, ② cross-org BU grant. The fourth —
+    // `objects[].rowLevelSecurity[].${clause}` — is gone: no such surface.
+    expect(sites).toHaveLength(3);
+    expect(sites.map((s) => s.pathTemplate)).not.toContain(
+      'objects[${oIndex}].rowLevelSecurity[${pIndex}].${clause}',
+    );
+  });
+
+  it('reaches every site from a fixture that passed `safeParse`', () => {
+    const emitted = REACHABILITY_CORPUS.flatMap(({ stack }) => validateOrgAxisRedLines(stack));
+    expect(emitted.length).toBeGreaterThanOrEqual(pushSites().length);
+
+    const unreached = pushSites().filter(
+      (site) =>
+        !emitted.some((f) => f.rule === site.rule && templateToRegex(site.pathTemplate).test(f.path)),
+    );
+    expect(
+      unreached.map((s) => `${s.rule} @ ${s.pathTemplate}`),
+      'a branch no spec-valid stack can reach must be deleted, not kept "just in case" (#5009)',
+    ).toEqual([]);
+  });
+
+  it('emits no path the source does not declare', () => {
+    const matchers = pushSites().map((s) => ({ rule: s.rule, re: templateToRegex(s.pathTemplate) }));
+    const emitted = REACHABILITY_CORPUS.flatMap(({ stack }) => validateOrgAxisRedLines(stack));
+    for (const finding of emitted) {
+      expect(matchers.some((m) => m.rule === finding.rule && m.re.test(finding.path))).toBe(true);
+    }
+  });
 });
 
 describe('validateOrgAxisRedLines — input tolerance', () => {

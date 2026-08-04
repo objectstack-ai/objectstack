@@ -14,8 +14,14 @@ export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
 export * from './plugin-loader.js';
-export * from './api-registry.js';
-export * from './api-registry-plugin.js';
+// `./api-registry.js` + `./api-registry-plugin.js` were RETIRED in #4939
+// (ADR-0049 enforce-or-remove). `createApiRegistryPlugin()` registered an
+// `api-registry` service that only `packages/core/examples/` ever composed —
+// no runtime, CLI or example app mounted it, and a real 47-plugin boot had no
+// such service — so the ~500-line `ApiRegistry` and the whole
+// `ApiEndpointRegistration` schema family it served were zero-execution.
+// Declarative endpoints have ONE shape now: `ApiEndpointSchema`
+// (`@objectstack/spec/api`), whose executor is tracked by #5040.
 export * as QA from './qa/index.js';
 
 // Export security utilities
