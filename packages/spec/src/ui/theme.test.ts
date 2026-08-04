@@ -79,46 +79,23 @@ describe('TypographySchema', () => {
     expect(() => TypographySchema.parse(typography)).not.toThrow();
   });
 
-  it('should accept complete typography settings', () => {
-    const typography = {
-      fontFamily: {
-        base: 'Inter, system-ui, sans-serif',
-        heading: 'Poppins, sans-serif',
-        mono: 'Fira Code, monospace',
-      },
-      fontSize: {
-        xs: '0.75rem',
-        sm: '0.875rem',
-        base: '1rem',
-        lg: '1.125rem',
-        xl: '1.25rem',
-        '2xl': '1.5rem',
-        '3xl': '1.875rem',
-        '4xl': '2.25rem',
-      },
-      fontWeight: {
-        light: 300,
-        normal: 400,
-        medium: 500,
-        semibold: 600,
-        bold: 700,
-      },
-      lineHeight: {
-        tight: '1.25',
-        normal: '1.5',
-        relaxed: '1.75',
-        loose: '2',
-      },
-      letterSpacing: {
-        tighter: '-0.05em',
-        tight: '-0.025em',
-        normal: '0',
-        wide: '0.025em',
-        wider: '0.05em',
-      },
-    };
+  // REPLACED at #5021 (fixture triage, disposition 3). The fixture that used to
+  // sit here authored all four retired scales plus `fontFamily.heading`/`.mono`
+  // and asserted `not.toThrow()` — i.e. it pinned exactly the limbs the
+  // retirement deletes. Re-spelling it was not an option (there is no canonical
+  // spelling to move to) and keeping it would have made the whole surviving
+  // block untested, so it is replaced by a fixture the narrowed schema really
+  // reads. The rejection side is pinned in the #5021 block at the bottom.
+  it('accepts the whole SURVIVING typography surface — which is `fontFamily.base`', () => {
+    const typography = { fontFamily: { base: 'Inter, system-ui, sans-serif' } };
 
-    expect(() => TypographySchema.parse(typography)).not.toThrow();
+    const parsed = TypographySchema.parse(typography);
+    expect(parsed.fontFamily?.base).toBe('Inter, system-ui, sans-serif');
+    // Nothing else is left to WRITE: `base` emits `--font-sans`, the one
+    // typography variable objectui actually reads. (The four retired scales are
+    // still in the shape as tombstones, but they accept nothing, so they never
+    // appear on a parsed value.)
+    expect(Object.keys(parsed)).toEqual(['fontFamily']);
   });
 });
 
@@ -206,16 +183,13 @@ describe('ThemeSchema', () => {
         textSecondary: '#6C757D',
         border: '#DEE2E6',
       },
+      // #5021 fixture triage, disposition 1 (re-spell): this fixture merely
+      // USED `fontFamily.heading`/`.mono` and a `fontSize` scale, so it drops
+      // them and keeps the live `base`. It is still a "complete" theme — the
+      // completeness that matters is the set of blocks with live consumers.
       typography: {
         fontFamily: {
           base: 'Inter, sans-serif',
-          heading: 'Poppins, sans-serif',
-          mono: 'Fira Code, monospace',
-        },
-        fontSize: {
-          base: '1rem',
-          lg: '1.125rem',
-          xl: '1.25rem',
         },
       },
       borderRadius: {
@@ -307,51 +281,54 @@ describe('ThemeSchema', () => {
     expect(() => ThemeSchema.parse(theme)).not.toThrow();
   });
 
-  it('should accept theme with z-index configuration', () => {
+  // The `zIndex` and `animation` acceptance fixtures that sat here were
+  // REPLACED at #5021 (fixture triage, disposition 3) — they pinned the two
+  // keys the retirement deletes, and an `expect(…).not.toThrow()` on a deleted
+  // key has no honest re-spelling. Their replacements are the layering and
+  // motion fixtures below, which express the SAME intent through the door that
+  // survived, plus the rejection pins in the #5021 block at the bottom.
+
+  it('a layering scale is still expressible — through `customVars`, the live door', () => {
     const theme: Theme = {
       name: 'layered_theme',
       label: 'Layered Theme',
-      colors: {
-        primary: '#007BFF',
-      },
-      zIndex: {
-        base: 0,
-        dropdown: 1000,
-        sticky: 1020,
-        fixed: 1030,
-        modalBackdrop: 1040,
-        modal: 1050,
-        popover: 1060,
-        tooltip: 1070,
+      colors: { primary: '#007BFF' },
+      // The variable names are spelled out because that is what the engine used
+      // to derive from the `zIndex` key names. Byte for byte the same custom
+      // properties reach the document — which is the whole basis on which the
+      // retirement claims to remove no capability.
+      customVars: {
+        'z-base': '0',
+        'z-dropdown': '1000',
+        'z-sticky': '1020',
+        'z-fixed': '1030',
+        'z-modal-backdrop': '1040',
+        'z-modal': '1050',
+        'z-popover': '1060',
+        'z-tooltip': '1070',
       },
     };
 
-    expect(() => ThemeSchema.parse(theme)).not.toThrow();
+    const parsed = ThemeSchema.parse(theme);
+    expect(parsed.customVars?.['z-modal']).toBe('1050');
   });
 
-  it('should accept theme with animation settings', () => {
+  it('a motion scale is still expressible — same door, same variables', () => {
     const theme: Theme = {
       name: 'animated_theme',
       label: 'Animated Theme',
-      colors: {
-        primary: '#007BFF',
-      },
-      animation: {
-        duration: {
-          fast: '150ms',
-          base: '300ms',
-          slow: '500ms',
-        },
-        timing: {
-          ease: 'cubic-bezier(0.4, 0, 0.2, 1)',
-          ease_in: 'cubic-bezier(0.4, 0, 1, 1)',
-          ease_out: 'cubic-bezier(0, 0, 0.2, 1)',
-          ease_in_out: 'cubic-bezier(0.4, 0, 0.2, 1)',
-        },
+      colors: { primary: '#007BFF' },
+      customVars: {
+        'duration-fast': '150ms',
+        'duration-base': '300ms',
+        'duration-slow': '500ms',
+        'timing-ease': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'timing-ease_in': 'cubic-bezier(0.4, 0, 1, 1)',
       },
     };
 
-    expect(() => ThemeSchema.parse(theme)).not.toThrow();
+    const parsed = ThemeSchema.parse(theme);
+    expect(parsed.customVars?.['duration-fast']).toBe('150ms');
   });
 
 });
@@ -377,10 +354,11 @@ describe('Real-World Theme Examples', () => {
         textSecondary: '#718096',
         border: '#E2E8F0',
       },
+      // #5021 fixture triage, disposition 1 (re-spell): `heading` dropped, the
+      // live `base` kept.
       typography: {
         fontFamily: {
           base: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-          heading: 'Poppins, sans-serif',
         },
       },
     };
@@ -425,26 +403,44 @@ describe('Real-World Theme Examples', () => {
 
 // ============================================================================
 // Issue #6: Easing naming unified to snake_case in theme animation tokens
+//
+// RETIRED at #5021. `AnimationSchema` no longer exists, so the snake_case-vs-
+// camelCase question this block settled is moot at the schema — there is no
+// declared easing vocabulary left to be inconsistent about. The old fixture
+// (fixture triage, disposition 3) pinned `animation.timing` directly.
+//
+// Kept as a pin rather than deleted, because the useful half of #6's finding
+// SURVIVES the retirement and would otherwise go untested: an author who wants
+// snake_case easing variables can still emit them, and now spells the variable
+// name in full instead of relying on the engine's key-to-variable derivation —
+// which is the one thing that actually changed for them.
 // ============================================================================
-describe('AnimationSchema - snake_case timing keys', () => {
-  it('should accept snake_case easing keys', () => {
+describe('easing tokens after the #5021 retirement', () => {
+  it('the snake_case easing vocabulary is still emittable through `customVars`', () => {
     const theme = ThemeSchema.parse({
       name: 'snake_case_timing',
       label: 'Snake Case Timing',
       colors: { primary: '#000' },
-      animation: {
-        timing: {
-          linear: 'linear',
-          ease: 'ease',
-          ease_in: 'ease-in',
-          ease_out: 'ease-out',
-          ease_in_out: 'ease-in-out',
-        },
+      customVars: {
+        'timing-linear': 'linear',
+        'timing-ease': 'ease',
+        'timing-ease_in': 'ease-in',
+        'timing-ease_out': 'ease-out',
+        'timing-ease_in_out': 'ease-in-out',
       },
     });
-    expect(theme.animation?.timing?.ease_in).toBe('ease-in');
-    expect(theme.animation?.timing?.ease_out).toBe('ease-out');
-    expect(theme.animation?.timing?.ease_in_out).toBe('ease-in-out');
+    expect(theme.customVars?.['timing-ease_in']).toBe('ease-in');
+    expect(theme.customVars?.['timing-ease_in_out']).toBe('ease-in-out');
+  });
+
+  it('`animation` itself is gone — the key no longer exists on the parsed theme', () => {
+    const theme = ThemeSchema.parse({
+      name: 'no_animation',
+      label: 'No Animation',
+      colors: { primary: '#000' },
+    });
+    expect(theme).not.toHaveProperty('animation');
+    expect(theme).not.toHaveProperty('zIndex');
   });
 });
 
@@ -514,31 +510,23 @@ describe('#4001 批 15 — ThemeSchema unknown-key strictness', () => {
     expect(reject({ ...base, colors: { primary: '#000', notAColor: '#fff' } })).toContain('notAColor');
   });
 
+  // #5021 shrank this list from fourteen sites to six. The `animation`,
+  // `zIndex`, `typography.fontSize`/`.fontWeight`/`.lineHeight`/
+  // `.letterSpacing` and `animation.duration`/`.timing` rows were not
+  // re-spelled — those schemas no longer exist, so an unknown-key probe against
+  // them has nothing to probe. What replaced them is the retirement pin at the
+  // bottom of this file: writing the BLOCK is now the rejection, which is
+  // strictly stronger than rejecting one bad key inside it.
   it.each([
     ['typography', { notATypographyKey: 1 }],
     ['borderRadius', { notARadius: '1px' }],
     ['shadows', { notAShadow: 'x' }],
-    ['animation', { notAnAnimationKey: 1 }],
-    ['zIndex', { notALayer: 1 }],
   ])('rejects an undeclared key in `%s`', (block, value) => {
     expect(reject({ ...base, [block]: value })).toContain(Object.keys(value)[0]);
   });
 
-  it.each([
-    ['fontFamily', { notAFamily: 'x' }],
-    ['fontSize', { notASize: 'x' }],
-    ['fontWeight', { notAWeight: 1 }],
-    ['lineHeight', { notALeading: 'x' }],
-    ['letterSpacing', { notATracking: 'x' }],
-  ])('rejects an undeclared key in the nested `typography.%s` scale', (block, value) => {
-    expect(reject({ ...base, typography: { [block]: value } })).toContain(Object.keys(value)[0]);
-  });
-
-  it.each([
-    ['duration', { notADuration: 'x' }],
-    ['timing', { notATiming: 'x' }],
-  ])('rejects an undeclared key in the nested `animation.%s` block', (block, value) => {
-    expect(reject({ ...base, animation: { [block]: value } })).toContain(Object.keys(value)[0]);
+  it('rejects an undeclared key in the nested `typography.fontFamily` block', () => {
+    expect(reject({ ...base, typography: { fontFamily: { notAFamily: 'x' } } })).toContain('notAFamily');
   });
 
   // ---- 3. curation ----------------------------------------------------
@@ -553,28 +541,24 @@ describe('#4001 批 15 — ThemeSchema unknown-key strictness', () => {
     expect(msg).toContain('`destructive` → `error`');
   });
 
-  it('renames `md` onto `base` in the font-size scale — the same-file scale disagreement', () => {
-    // `borderRadius` and `shadows` declare `md`; `fontSize` jumps sm → base → lg.
-    expect(reject({ ...base, typography: { fontSize: { md: '1rem' } } })).toContain('`md` → `base`');
-    // …and the mirror: three scales spell the middle stop `base`, fontWeight
-    // spells it `normal`.
-    expect(reject({ ...base, typography: { fontWeight: { base: 400 } } })).toContain('`base` → `normal`');
-  });
-
-  it('renames camelCase easing onto the snake_case keys this one block uses', () => {
-    // The file's single snake_case vocabulary, against Prime Directive #3 —
-    // so `easeIn` is an author obeying the repo's naming rule, not a typo.
-    const msg = reject({ ...base, animation: { timing: { easeIn: 'x', easeInOut: 'y' } } });
-    expect(msg).toContain('`easeIn` → `ease_in`');
-    expect(msg).toContain('`easeInOut` → `ease_in_out`');
-  });
+  // The `md` → `base` (font-size), `base` → `normal` (font-weight) and
+  // `easeIn` → `ease_in` (animation timing) curation tests lived here until
+  // #5021. All three graded aliases INSIDE a retired scale, so they went with
+  // their schemas rather than being re-spelled — there is no surviving surface
+  // on which `md` or `easeIn` means anything. This is the honest reading of the
+  // fixture-triage rule: a fixture whose subject was deleted is replaced by one
+  // the surviving rule reads, not kept alive on a technicality.
 
   it('renames onto the camelCase targets the distance fallback is weak on (#4990)', () => {
     // `findClosestMatches` lowercases the input but not the candidates, so a
     // capital costs an edit. These land through the explicit table instead.
-    expect(reject({ ...base, zIndex: { backdrop: 10 } })).toContain('`backdrop` → `modalBackdrop`');
+    //
+    // The `backdrop` → `modalBackdrop` case that used to anchor this test was
+    // on `zIndex` and retired with it (#5021); `radius` and `cssVars` carry the
+    // same property on surfaces that are still live.
     expect(reject({ ...base, radius: {} })).toContain('`radius` → `borderRadius`');
     expect(reject({ ...base, cssVars: {} })).toContain('`cssVars` → `customVars`');
+    expect(reject({ ...base, customProperties: {} })).toContain('`customProperties` → `customVars`');
   });
 
   it('renames `inset` onto `inner` — CSS\'s word for what this scale calls inner', () => {
@@ -611,8 +595,213 @@ describe('#4001 批 15 — ThemeSchema unknown-key strictness', () => {
     // The `triggerPhrases` lesson in `shared/strict-object.ts`: never point an
     // author at a key that will reject them a second time. Walk the whole
     // alias table and prove each target parses.
-    const targets = ['colors', 'typography', 'borderRadius', 'shadows', 'animation', 'zIndex', 'customVars', 'extends', 'label', 'name', 'mode'];
+    //
+    // `animation` and `zIndex` left this list at #5021 — WITH the five aliases
+    // that pointed at them (`animations`/`motion`/`transitions`/`layers`/
+    // `stacking`). That pairing is the point of the test, not bookkeeping: had
+    // the aliases stayed, this assertion would be the thing that caught it.
+    const targets = ['colors', 'typography', 'borderRadius', 'shadows', 'customVars', 'extends', 'label', 'name', 'mode'];
     const shape = (ThemeSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape;
     for (const t of targets) expect(Object.keys(shape), `alias target "${t}" must be declared`).toContain(t);
+  });
+});
+
+// ============================================================================
+// #5021 — the nine emitted-but-unread token groups, RETIRED (ADR-0049 D2)
+//
+// The measurement (objectui `main`, re-confirmed 2026-08-04): `--font-size-*`,
+// `--font-weight-*`, `--line-height-*`, `--letter-spacing-*`, `--duration-*`,
+// `--timing-*`, `--z-*`, `--font-heading` and `--font-mono` have ZERO consumers
+// across objectui's `packages/**`, while `--font-sans`, `--radius*`,
+// `--shadow*` and the colour variables are read — the positive controls that
+// make the zero mean something.
+//
+// Route: STRICT REMOVAL + guidance map, not a `retiredKey()` tombstone. Both
+// channels are still covered and it is worth being explicit about which does
+// what, because the two routes' evidence looks different:
+//   * `tsc` — the key is gone from the inferred input type, so authoring one
+//     fails to compile. (A `retiredKey()` would type it `never`; deleting it
+//     from a `.strict()` shape is the same outcome by a different mechanism.)
+//   * the parse — `strictObject`'s `guidance` map carries the prescription, so
+//     the rejection is the upgrade instruction rather than a bare
+//     "unrecognized key". That is what these tests pin.
+// ============================================================================
+describe('#5021 — retired theme token scales', () => {
+  const base = { name: 'demo_theme', label: 'Demo', colors: { primary: '#000' } };
+  const reject = (input: unknown): string => {
+    const r = ThemeSchema.safeParse(input);
+    expect(r.success, 'fixture must be REJECTED — a passing parse means the key is still live').toBe(false);
+    return r.error!.issues.map((i) => i.message).join('\n');
+  };
+
+  // ---- 1. the control: this suite fails closed ------------------------
+  it('the surviving theme parses — these tests reject specific keys, not everything', () => {
+    expect(ThemeSchema.safeParse({
+      ...base,
+      typography: { fontFamily: { base: 'Inter' } },
+      borderRadius: { base: '0.25rem' },
+      shadows: { base: '0 1px 2px rgba(0,0,0,.1)' },
+      customVars: { 'z-modal': '1050' },
+    }).success).toBe(true);
+  });
+
+  // ---- 2. every retired key rejects, at its own path -------------------
+  it('rejects `animation` and `zIndex` at the theme top level', () => {
+    expect(reject({ ...base, animation: { duration: { fast: '150ms' } } })).toContain('`theme.animation` was removed');
+    expect(reject({ ...base, zIndex: { modal: 1050 } })).toContain('`theme.zIndex` was removed');
+  });
+
+  it.each(['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing'])(
+    'rejects the retired `typography.%s` scale',
+    (key) => {
+      const msg = reject({ ...base, typography: { [key]: {} } });
+      expect(msg).toContain('`theme.typography.' + key + '` was removed');
+    },
+  );
+
+  it.each(['heading', 'mono'])('rejects the retired `typography.fontFamily.%s`', (key) => {
+    const msg = reject({ ...base, typography: { fontFamily: { base: 'Inter', [key]: 'Georgia' } } });
+    expect(msg).toContain('`theme.typography.fontFamily.' + key + '` was removed');
+  });
+
+  // ---- 3. the prescription is the payload -----------------------------
+  it('every prescription names `customVars`, the door measured to have real consumers', () => {
+    for (const [input, key] of [
+      [{ ...base, animation: {} }, 'animation'],
+      [{ ...base, zIndex: {} }, 'zIndex'],
+      [{ ...base, typography: { fontSize: {} } }, 'typography.fontSize'],
+      [{ ...base, typography: { fontWeight: {} } }, 'typography.fontWeight'],
+      [{ ...base, typography: { lineHeight: {} } }, 'typography.lineHeight'],
+      [{ ...base, typography: { letterSpacing: {} } }, 'typography.letterSpacing'],
+      [{ ...base, typography: { fontFamily: { heading: 'x' } } }, 'typography.fontFamily.heading'],
+      [{ ...base, typography: { fontFamily: { mono: 'x' } } }, 'typography.fontFamily.mono'],
+    ] as const) {
+      const msg = reject(input);
+      expect(msg, `${key} must prescribe customVars`).toContain('customVars');
+      expect(msg, `${key} must name the migration command`).toContain('os migrate meta --from 16');
+      expect(msg, `${key} must cite the issue`).toContain('#5021');
+    }
+  });
+
+  it('gives each retired key its OWN sentence — a shared string prints N times (批 10)', () => {
+    const r = ThemeSchema.safeParse({ ...base, animation: {}, zIndex: {} });
+    expect(r.success).toBe(false);
+    const msg = r.error!.issues.map((i) => i.message).join('\n');
+    expect(msg).toContain('every transition ran at the renderer default');
+    expect(msg).toContain('still stacked by document order');
+    // Two keys, two DISTINCT issues. Note the shape difference from the #4001
+    // block above: a `guidance` prescription arrives as ONE unrecognized-key
+    // issue carrying N bullets, whereas a `retiredKey()` raises its own issue
+    // per key — so this counts issues, not bullets.
+    expect(r.error!.issues).toHaveLength(2);
+  });
+
+  // ---- 4. finding 7: no suggestion may point at a retired key ----------
+  it('the five aliases that pointed at `animation`/`zIndex` are GONE, not re-pointed', () => {
+    // Had `layers: 'zIndex'` survived, an author writing `layers` would be told
+    // "did you mean `zIndex`?" and then rejected for writing `zIndex` — walked
+    // out of one rejection into a second. The ledger's finding 7, which this
+    // file's own header has now signposted three times.
+    for (const alias of ['animations', 'motion', 'transitions', 'layers', 'stacking']) {
+      const msg = reject({ ...base, [alias]: {} });
+      expect(msg, `${alias} must not be renamed onto a retired key`).not.toContain('→ `animation`');
+      expect(msg, `${alias} must not be renamed onto a retired key`).not.toContain('→ `zIndex`');
+    }
+  });
+
+  it('the typography aliases that pointed at retired scales are GONE too', () => {
+    for (const alias of ['sizes', 'size', 'weights', 'weight', 'tracking', 'leading']) {
+      const msg = reject({ ...base, typography: { [alias]: {} } });
+      for (const dead of ['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']) {
+        expect(msg, `${alias} must not be renamed onto retired \`${dead}\``).not.toContain('→ `' + dead + '`');
+      }
+    }
+    for (const alias of ['headings', 'display', 'monospace', 'code']) {
+      const msg = reject({ ...base, typography: { fontFamily: { base: 'Inter', [alias]: 'x' } } });
+      expect(msg, `${alias} must not be renamed onto retired \`heading\``).not.toContain('→ `heading`');
+      expect(msg, `${alias} must not be renamed onto retired \`mono\``).not.toContain('→ `mono`');
+    }
+  });
+
+  it('the retired keys are DECLARED-but-unwritable, not deleted — the tombstone route', () => {
+    // The distinction that decides how `authorable-surface.json` moves: a
+    // tombstoned key STAYS in the walked shape (gaining a `[RETIRED]` marker
+    // in the baseline) rather than vanishing from it. Assert the mechanism
+    // directly, so a future "tidy-up" that deletes these keys outright fails
+    // here rather than in `gen:schema`'s #4650 deletion check.
+    const shapeOf = (s: unknown) =>
+      (s as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape;
+
+    const themeShape = shapeOf(ThemeSchema);
+    const typoShape = shapeOf(TypographySchema);
+    expect(Object.keys(themeShape)).toContain('animation');
+    expect(Object.keys(themeShape)).toContain('zIndex');
+    expect(Object.keys(typoShape)).toEqual(
+      expect.arrayContaining(['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']),
+    );
+
+    // …and every one of them accepts NOTHING, which is what makes it a
+    // tombstone rather than a live key.
+    for (const [shape, keys] of [
+      [themeShape, ['animation', 'zIndex']],
+      [typoShape, ['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']],
+    ] as const) {
+      for (const k of keys) {
+        const inner = (shape[k] as { _zod: { def: { innerType?: { _zod: { def: { type: string } } } } } })
+          ._zod.def.innerType;
+        expect(inner?._zod.def.type, `${k} must be a never-typed tombstone`).toBe('never');
+      }
+    }
+  });
+
+  // ---- 5. the capability survives -------------------------------------
+  it('`customVars` reproduces every retired variable by name — capability is not lost', () => {
+    // This is the claim the whole retirement rests on, so it is pinned rather
+    // than asserted in prose: the engine emits `customVars` as `--<key>:
+    // <value>` verbatim, so each retired variable has an exact spelling here.
+    const parsed = ThemeSchema.parse({
+      ...base,
+      customVars: {
+        'font-size-lg': '1.125rem',
+        'font-weight-bold': '700',
+        'line-height-relaxed': '1.75',
+        'letter-spacing-wide': '0.025em',
+        'duration-fast': '150ms',
+        'timing-ease_in': 'cubic-bezier(0.4, 0, 1, 1)',
+        'z-modal': '1050',
+        'font-heading': 'Georgia, serif',
+        'font-mono': 'ui-monospace, monospace',
+      },
+    });
+    // One entry per retired GROUP — all nine the issue measured.
+    expect(Object.keys(parsed.customVars ?? {})).toHaveLength(9);
+  });
+
+  // ---- 6. the live blocks are untouched -------------------------------
+  it('the blocks with live consumers still parse — the retirement is scoped, not a sweep', () => {
+    const parsed = ThemeSchema.parse({
+      ...base,
+      colors: { primary: '#7C3AED', surface: '#F8F9FA', text: '#1F2937' },
+      typography: { fontFamily: { base: 'Inter, sans-serif' } },
+      borderRadius: { none: '0', base: '0.25rem', full: '9999px' },
+      shadows: { base: '0 1px 3px rgba(0,0,0,.1)', inner: 'inset 0 2px 4px rgba(0,0,0,.06)' },
+    });
+    expect(parsed.colors.surface).toBe('#F8F9FA');
+    expect(parsed.typography?.fontFamily?.base).toBe('Inter, sans-serif');
+    expect(parsed.borderRadius?.full).toBe('9999px');
+    expect(parsed.shadows?.inner).toBe('inset 0 2px 4px rgba(0,0,0,.06)');
+  });
+
+  // ---- 7. the authoring DOORS carry the rejection ----------------------
+  it('both authoring doors reject a retired key — `defineTheme` and `defineStack`', () => {
+    expect(() => defineTheme({ ...base, zIndex: { modal: 1 } } as never)).toThrow(/`theme\.zIndex` was removed/s);
+
+    const stack = ObjectStackSchema.safeParse({
+      name: 'demo', label: 'Demo',
+      themes: [{ ...base, typography: { fontSize: { base: '1rem' } } }],
+    });
+    expect(stack.success).toBe(false);
+    expect(stack.error!.issues.map((i) => i.message).join('\n'))
+      .toContain('`theme.typography.fontSize` was removed');
   });
 });
