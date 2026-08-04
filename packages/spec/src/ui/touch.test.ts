@@ -195,3 +195,85 @@ describe('I18n and ARIA integration', () => {
     expect(interaction.ariaLabel).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #4001 batch 13 -- THIS FILE IS DELIBERATELY NOT `.strict()`, on a measurement.
+//
+// The strictness ledger scheduled these 7 sites as `authorable (p)`. Resolving
+// the `(p)` found no authoring door at all: nothing under `packages/spec/src`
+// imports this module except the `ui/index.ts` barrel, a BFS from all 24
+// metadata-type roots plus `defineStack`'s `ObjectStackSchema` never reaches
+// these schemas (`PageSchema` / `WebhookSchema` / `StateMachineSchema` pass as
+// positive controls in the same run), and no `.parse()` on any of them exists
+// in `objectstack`, `objectui` or the example apps outside this test file.
+// `.strict()` is a property of a PARSE, and there is no parse to gate.
+//
+// So the strip pinned below is not an unfinished row -- it is the recorded
+// verdict. The open question is ADR-0049 enforce-or-remove, filed as #4988.
+// These assertions exist so the next sweep stops and reads instead of reaching
+// for `strictObject` and shipping a precisely-validated dead slot (#4583). The
+// header comment in `touch.zod.ts` and this file's ledger row carry the same verdict.
+// ---------------------------------------------------------------------------
+describe('unknown-key posture is an open question, not an omission (#4001 batch 13 -> #4988)', () => {
+  it('TouchTargetConfigSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = TouchTargetConfigSchema.parse({ aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  it('TouchTargetConfigSchema.hitSlop (the nested site) strips too -- pending #4988', () => {
+    const parsed = TouchTargetConfigSchema.parse({ hitSlop: { top: 4, aKeyThisShapeDoesNotDeclare: 1 } });
+    expect((parsed.hitSlop as Record<string, unknown>).aKeyThisShapeDoesNotDeclare).toBeUndefined();
+    expect(parsed.hitSlop?.top).toBe(4);
+  });
+
+  it('SwipeGestureConfigSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = SwipeGestureConfigSchema.parse({ direction: ['left'], aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  it('PinchGestureConfigSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = PinchGestureConfigSchema.parse({ aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  it('LongPressGestureConfigSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = LongPressGestureConfigSchema.parse({ aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  it('GestureConfigSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = GestureConfigSchema.parse({ type: 'swipe', aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  it('TouchInteractionSchema still strips rather than rejecting -- deliberate, pending #4988', () => {
+    const parsed = TouchInteractionSchema.parse({ aKeyThisShapeDoesNotDeclare: 1 }) as Record<string, unknown>;
+    expect(parsed.aKeyThisShapeDoesNotDeclare).toBeUndefined();
+  });
+
+  // The standing half of measurement 1, so the verdict cannot go stale in
+  // silence: the day someone gives this vocabulary a carrier they will add an
+  // import, and this is where they are told to revisit #4988 and the ledger.
+  it('is still imported by nothing but the ui/ barrel', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const importers: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')
+          && full !== path.join(root, 'ui', 'touch.zod.ts')) {
+          if (/(?:import|export)[^;]*['"][^'"]*\/touch\.zod['"]/.test(fs.readFileSync(full, 'utf-8'))) {
+            importers.push(path.relative(root, full));
+          }
+        }
+      }
+    };
+    walk(root);
+    expect(importers, 'a new importer means this vocabulary got a carrier -- re-read #4988')
+      .toEqual(['ui/index.ts']);
+  });
+});

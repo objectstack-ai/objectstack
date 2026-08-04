@@ -82,15 +82,16 @@
  *    concrete field predicate, so a lowering CEL condition cannot produce a
  *    match-all filter. `matchAllIsUnreachable` in the tests pins that claim
  *    against the compiler rather than asserting it in prose.
- *  - **It does not judge RLS `using` / `check`.** Same class, same compiler,
- *    and ADR-0056 D4 explicitly asks for this gate — but the RLS decision
- *    procedure is `isSupportedRlsExpression`, which first bridges the legacy
- *    SQL-ish subset through `sqlPredicateToCel`, and BOTH live in
- *    `plugin-security`. Judging RLS here means either importing a runtime
- *    (forbidden) or copying the bridge (forking the predicate — the thing this
- *    file's opening paragraph refuses to do). Hoisting `sqlPredicateToCel` into
- *    `@objectstack/formula` first would make it exact; that is a spec/runtime
- *    move, not a lint change, and is filed separately.
+ *  - **It does not judge RLS `using` / `check`** — its sibling rule
+ *    `validate-rls-predicate-enforceability.ts` does (#4983). Same class, same
+ *    compiler, but a different decision procedure: RLS asks
+ *    `isSupportedRlsExpression`, which first bridges the legacy SQL-ish subset
+ *    through `sqlPredicateToCel`. Both used to live in `plugin-security`, so
+ *    judging RLS from here meant importing a runtime (forbidden) or copying the
+ *    bridge (forking the predicate — the thing this file's opening paragraph
+ *    refuses to do). #4983 hoisted both into `@objectstack/formula` and then
+ *    wrote the gate against the hoisted predicate, which is why the split is
+ *    two rules over two surfaces and still exactly two definitions.
  *  - **It does not look at flow / hook `condition`s.** Those are INTERPRETED by
  *    the CEL engine, not lowered to a filter, so the whole language is in scope
  *    there and non-pushdownability means nothing. Reusing this predicate on

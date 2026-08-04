@@ -31,6 +31,10 @@ vi.mock('./adapter', async (importOriginal) => ({
             listen: vi.fn(),
             getPort: vi.fn().mockReturnValue(3000),
             close: vi.fn(),
+            // [#4910] The plugin places the IHttpServer middleware seam at the
+            // end of init(). Real behaviour is covered against the REAL adapter
+            // in `middleware-seam.test.ts`; here it only has to exist.
+            installMiddlewareSeam: vi.fn(),
             getRawApp: vi.fn().mockReturnValue({
                 get: vi.fn(),
                 use: vi.fn(),

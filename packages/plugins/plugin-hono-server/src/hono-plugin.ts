@@ -380,6 +380,22 @@ export class HonoServerPlugin implements Plugin {
                 ctx.logger.debug('CORS middleware enabled', { origin: configuredOrigin, credentials });
             }
         }
+
+        // ─── IHttpServer middleware seam ──────────────────────────────────────
+        // Mounted LAST in init(), and that position is the whole point (#4910).
+        //
+        // After the built-ins above, so a middleware that short-circuits (the
+        // inbound rate limiter's 429) still gets CORS headers applied — a
+        // browser shown a header-less 429 reports an opaque network error and
+        // the operator debugs the wrong thing.
+        //
+        // Before any route, because every route on this server is mounted in
+        // some plugin's `start()` (Phase 2) and Phase 1 completes first. Hono
+        // composes matched handlers in registration order, so this is the last
+        // moment at which a gate can still precede all of them — and placing it
+        // here means a consumer's `use()` no longer has to win a race with route
+        // registration. It can register whenever it has the facts.
+        this.server.installMiddlewareSeam();
     }
 
     /**

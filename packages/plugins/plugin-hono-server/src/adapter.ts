@@ -79,6 +79,26 @@ export interface HonoCorsOptions {
 }
 
 /**
+ * The transport's peer address for a Hono context, when the runtime exposes one.
+ *
+ * `@hono/node-server` puts the Node `IncomingMessage` on `c.env.incoming`, so
+ * the socket's `remoteAddress` is reachable without adding a dependency on
+ * `hono/conninfo` (which resolves differently per runtime). Every access is
+ * guarded: on a runtime that exposes nothing, callers get `undefined` and must
+ * degrade deliberately rather than key security decisions off a fabricated
+ * value.
+ */
+function readRemoteAddress(c: any): string | undefined {
+    try {
+        const incoming = c?.env?.incoming;
+        const address = incoming?.socket?.remoteAddress ?? incoming?.connection?.remoteAddress;
+        return typeof address === 'string' && address.length > 0 ? address : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Hono Implementation of IHttpServer
  */
 export class HonoHttpServer implements IHttpServer {
@@ -93,6 +113,10 @@ export class HonoHttpServer implements IHttpServer {
      * raw Hono app are intentionally NOT tracked, so they never produce a 405.
      */
     private registeredRoutes: Array<{ method: string; pattern: string }> = [];
+    /** Registered {@link Middleware}s, in registration order. See `use()`. */
+    private middlewares: Array<{ path?: string; handler: Middleware }> = [];
+    /** Whether the Hono middleware that runs {@link middlewares} is mounted. */
+    private middlewareSeamInstalled = false;
 
     constructor(
         private port: number = 3000,
@@ -302,22 +326,154 @@ export class HonoHttpServer implements IHttpServer {
         return Array.from(methods).sort();
     }
 
+    /**
+     * Register middleware — see the CONTRACT on `IHttpServer.use` in
+     * `@objectstack/spec/contracts`.
+     *
+     * ## What this used to be, and why it matters (#4910)
+     *
+     * Until #4910 both branches here handed the middleware `{} as any` for BOTH
+     * `req` and `res`, and then ran `if (!nextCalled) await next()` — so a
+     * middleware could not read the request, could not write a response, and
+     * could not decline to continue. Every registered middleware was, in
+     * practice, an `await`ed no-op with a `next()` bolted on. `IHttpServer.use`
+     * was a declared seam with no execution behind it: exactly the
+     * declared-≠-enforced shape Prime Directive #10 names, one layer below the
+     * spec keys #4686 opened on. Nothing production caught it because nothing
+     * production called it — the inbound rate limiter is the first consumer, and
+     * building it is what surfaced this.
+     *
+     * ## Semantics now
+     *
+     * Middlewares run in registration order, before any route handler, and each
+     * one either:
+     *
+     *  - calls `next()` — the chain continues; or
+     *  - writes a response (`res.status(...).json(...)` / `.send(...)`) without
+     *    calling `next()` — the chain SHORT-CIRCUITS and that response is
+     *    returned. This is the branch that makes a 429 (or a 401, or a
+     *    maintenance 503) possible at all.
+     *
+     * A middleware that does neither is treated as pass-through, so an
+     * early-return on some condition cannot silently black-hole a request.
+     *
+     * ## Two deliberate limits, stated so they are not discovered
+     *
+     *  - **`req.body` is not populated.** Reading the body here would consume
+     *    the request stream before the route handler that owns it, so a
+     *    middleware sees headers/method/path/query only. Body-dependent policy
+     *    belongs in a route handler or a dispatcher gate stage.
+     *  - **The seam must be mounted before routes, but `use()` need not be
+     *    called before them.** Hono composes the handlers that matched, in
+     *    registration order, so a middleware Hono learns about after a route
+     *    runs after that route's handler — useless for short-circuiting. This
+     *    class therefore mounts ONE Hono middleware (the chain runner) and lets
+     *    `use()` append to the chain it reads per request. {@link
+     *    installMiddlewareSeam} places that runner; `HonoServerPlugin` calls it
+     *    at the end of `init()`, after the transport's own built-ins and before
+     *    any route exists, so every later `use()` — from any plugin, in either
+     *    boot phase — gates everything. A standalone `HonoHttpServer` that never
+     *    calls it gets the runner mounted on its first `use()` instead, and only
+     *    that path carries the register-before-routes requirement.
+     */
     use(pathOrHandler: string | Middleware, handler?: Middleware) {
         if (typeof pathOrHandler === 'string' && handler) {
-             this.app.use(pathOrHandler, async (c, next) => {
-                 let nextCalled = false;
-                 const wrappedNext = () => { nextCalled = true; return next(); };
-                 await handler({} as any, {} as any, wrappedNext);
-                 if (!nextCalled) await next();
-             });
+            this.middlewares.push({ path: pathOrHandler, handler });
         } else if (typeof pathOrHandler === 'function') {
-             this.app.use('*', async (c, next) => {
-                 let nextCalled = false;
-                 const wrappedNext = () => { nextCalled = true; return next(); };
-                 await pathOrHandler({} as any, {} as any, wrappedNext);
-                 if (!nextCalled) await next();
-             });
+            this.middlewares.push({ handler: pathOrHandler });
+        } else {
+            return;
         }
+        this.installMiddlewareSeam();
+    }
+
+    /**
+     * Mount the single Hono middleware that runs the registered
+     * {@link Middleware} chain. Idempotent.
+     *
+     * WHERE this is called decides what the seam can gate, and the two callers
+     * are deliberate:
+     *
+     *  - **`HonoServerPlugin.init()`, at the end** — after the transport's own
+     *    built-ins (Server-Timing, CORS) so a 429 short-circuit still carries
+     *    CORS headers (otherwise a browser reports an opaque network error
+     *    instead of the status), and before any route exists, since every route
+     *    in the platform is mounted in some plugin's `start()`. From there a
+     *    `use()` at ANY later moment gates the whole server, which is what lets
+     *    the dispatcher install the rate limiter in `start()` — where "no
+     *    http.server" is a settled fact rather than a mid-Phase-1 guess that a
+     *    later plugin could contradict.
+     *  - **the first `use()`** — for a bare `HonoHttpServer` composed without
+     *    the plugin, so the seam is never silently absent.
+     */
+    installMiddlewareSeam(): void {
+        if (this.middlewareSeamInstalled) return;
+        this.middlewareSeamInstalled = true;
+
+        this.app.use('*', async (c, next) => {
+            const chain = this.middlewares
+                .filter((m) => m.path === undefined || matchesRoutePattern(m.path, c.req.path))
+                .map((m) => m.handler);
+            if (chain.length === 0) return next();
+
+            const headers = c.req.header() as Record<string, string>;
+            const req = {
+                params: {},
+                query: c.req.query(),
+                // Deliberately absent — see the `use()` contract above.
+                body: undefined,
+                headers,
+                method: c.req.method,
+                path: c.req.path,
+                /**
+                 * The transport's own peer address. This is the value a client
+                 * CANNOT forge, which is what makes it the safe default for
+                 * identifying an anonymous caller when no proxy is trusted
+                 * (`server.trustProxy`). `@hono/node-server` exposes the Node
+                 * request as `c.env.incoming`; other Hono runtimes may not, and
+                 * consumers must treat it as optional.
+                 */
+                remoteAddress: readRemoteAddress(c),
+            } as any;
+
+            let responded = false;
+            let status = 200;
+            const outHeaders = new Headers();
+            let bodyJson: unknown;
+            let bodyRaw: string | Uint8Array | ArrayBuffer | undefined;
+
+            const res: any = {
+                status(code: number) { status = code; return res; },
+                header(name: string, value: string | string[]) {
+                    for (const v of Array.isArray(value) ? value : [value]) outHeaders.append(name, v);
+                    return res;
+                },
+                json(data: unknown) { responded = true; bodyJson = data; },
+                send(data: string | Uint8Array | ArrayBuffer) { responded = true; bodyRaw = data; },
+            };
+
+            let index = 0;
+            let continued = false;
+            const run = async (): Promise<void> => {
+                if (index >= chain.length) { continued = true; return; }
+                const middleware = chain[index++];
+                let nextCalled = false;
+                await middleware(req, res, async () => { nextCalled = true; await run(); });
+                // Neither continued nor answered → treat as pass-through, so a
+                // middleware cannot black-hole a request by accident.
+                if (!nextCalled && !responded) await run();
+            };
+            await run();
+
+            if (responded && !continued) {
+                if (bodyJson !== undefined) {
+                    outHeaders.set('Content-Type', 'application/json');
+                    return new Response(JSON.stringify(bodyJson), { status, headers: outHeaders });
+                }
+                return new Response((bodyRaw ?? '') as any, { status, headers: outHeaders });
+            }
+            return next();
+        });
     }
 
     /**

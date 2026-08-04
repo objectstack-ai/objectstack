@@ -45,6 +45,7 @@
     "doc",
     "---More---",
     "metadata-types",
-    "retry-policy"
+    "retry-policy",
+    "stack-server"
   ]
 }
