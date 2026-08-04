@@ -27,16 +27,28 @@
  * drive `matchEndpoint` through a stub, exactly as #5040 §5 prescribes for
  * every E-series unit that lands before the flip.
  *
+ * ## The policy chain (#5040 E4) now runs between the match and the answer
+ *
+ * `authRequired` / `rateLimit` / `cacheTtl` are enforced by
+ * {@link applyEndpointPolicies}, in the order #5040 §3 fixes, whenever the
+ * caller supplies a {@link EndpointPolicyContext}. A denial (401 / 429) is the
+ * answer; a pass still ends in the 501 below, because the thing that would run
+ * the endpoint is E5.
+ *
+ * That ordering is structural, not stylistic: execution lands INSIDE the
+ * post-policy branch, which is unreachable without a policy context. Wiring an
+ * executor without wiring policies is therefore not something a future change
+ * can do by forgetting — it would have nowhere to put the call.
+ *
  * What it does NOT do yet, so nobody reads more into it than is here:
- * `rateLimit`, `authRequired`, `cacheTtl`, `inputMapping` / `outputMapping`
- * (E4) and target execution — `object_operation` via `callData`, `flow` via the
- * automation service (E5). Those insert BETWEEN the match and the answer, in
- * the order #5040 §3 fixes.
+ * `inputMapping` / `outputMapping` and target execution — `object_operation`
+ * via `callData`, `flow` via the automation service (E5).
  */
 
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IMetadataService } from '@objectstack/spec/contracts';
 import { apiErrorResponse } from './error-envelope.js';
+import { applyEndpointPolicies, type EndpointPolicyContext } from './endpoint-policy.js';
 
 /**
  * The platform's single reserved carve-out segment for app-declared endpoints
@@ -81,6 +93,17 @@ export function isAppEndpointPath(path: string, runtimePrefix: string): boolean 
 export interface AppEndpointStepAnswer {
     status: number;
     body: unknown;
+    /**
+     * Headers that are part of THIS answer and must be written with it — today
+     * only `Retry-After` on a rate-limit denial, where the header carries the
+     * one piece of information the client needs to behave.
+     *
+     * Note what is NOT here: the `Cache-Control` computed from `cacheTtl`. It
+     * describes a successful response body that does not exist yet, and telling
+     * a client to cache a 501 would be worse than saying nothing. It stays on
+     * the policy verdict until execution lands (#5040 E5).
+     */
+    headers?: Record<string, string>;
 }
 
 export interface AppEndpointStepInput {
@@ -98,6 +121,19 @@ export interface AppEndpointStepInput {
      * depend on its landing).
      */
     metadataService: Pick<IMetadataService, 'matchEndpoint'> | undefined;
+    /**
+     * Request context + services for the policy chain (#5040 E4): the caller's
+     * headers and peer address, the principal lookup, the endpoint limiter
+     * registry, `trustProxy`.
+     *
+     * Optional ONLY because the dispatch seam that calls this step does not
+     * thread it yet — that plumbing lands with the executor wiring (#5040 E5),
+     * which is the same change that needs the request body and the environment
+     * anyway. Omitting it does not open anything: the terminal answer without a
+     * policy context is the 501 below, so no request can be SERVED unpoliced,
+     * and execution can only be added on the far side of the chain.
+     */
+    policy?: EndpointPolicyContext;
 }
 
 /**
@@ -130,16 +166,52 @@ export async function runAppEndpointStep(
     const match: ApiEndpointMatch | undefined = await metadataService.matchEndpoint({ path, method });
     if (!match) return undefined;
 
+    if (!input.policy) {
+        // No policy context threaded yet (see `AppEndpointStepInput.policy`).
+        // The answer is the same 501 this seam has always given, and the hint
+        // says which keys were NOT evaluated — a report that is wrong about
+        // what ran is worse than no report.
+        return notImplemented(match, method, path,
+            'The mounting seam is in place; execution (target dispatch, mappings) lands with #5040 E5. This '
+            + 'request reached the step without a policy context, so authRequired / rateLimit / cacheTtl were '
+            + 'not evaluated — nothing was served either. Until the E7 flip a non-empty `apis:` is rejected at '
+            + 'publish, so no reachable deployment can produce this answer.');
+    }
+
+    const verdict = await applyEndpointPolicies({ ...input.policy, endpoint: match.endpoint, method });
+    if (verdict.verdict === 'deny') {
+        return {
+            status: verdict.status,
+            body: verdict.body,
+            ...(verdict.headers ? { headers: verdict.headers } : {}),
+        };
+    }
+
+    // ── Everything past this line has been through the policy chain ──────
+    // This is where target execution lands (#5040 E5), and it is the ONLY place
+    // it can land: the branch is unreachable without a policy context, and the
+    // deny above short-circuits before it. `verdict.responseHeaders` carries the
+    // `Cache-Control` that the executor's success answer should apply — it is
+    // deliberately not applied to the 501 (see `AppEndpointStepAnswer.headers`).
+    return notImplemented(match, method, path,
+        'Policies (authRequired / rateLimit / cacheTtl) were enforced and this request passed them; target '
+        + 'execution lands with #5040 E5. Until the E7 flip a non-empty `apis:` is rejected at publish, so no '
+        + 'reachable deployment can produce this answer.');
+}
+
+/** The one 501 body this step answers with, whichever branch produced it. */
+function notImplemented(
+    match: ApiEndpointMatch,
+    method: string,
+    path: string,
+    hint: string,
+): AppEndpointStepAnswer {
     return apiErrorResponse({
         code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
         httpStatus: 501,
         message:
             `Declarative endpoint '${match.endpoint.name}' claims ${method} ${path}, but the endpoint `
             + 'executor is not enabled in this build. It lands in 17.x (#5040).',
-        extra: {
-            hint: 'The mounting seam is in place; execution (target dispatch, authRequired / rateLimit / '
-                + 'cacheTtl / mappings) lands with #5040 E4–E5. Until then a non-empty `apis:` is rejected '
-                + 'at publish, so no reachable deployment can produce this answer.',
-        },
+        extra: { hint },
     });
 }

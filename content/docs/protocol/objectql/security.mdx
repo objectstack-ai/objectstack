@@ -246,6 +246,64 @@ fields:
 
 > There is no separate `create` flag for fields. `editable` governs both create-time and update-time writes; read stripping is governed by `readable`.
 
+### Static `readonly` fields on the write path
+
+`readonly: true` on a field definition is a *schema-level* lock, independent of permission
+sets: no permission set can grant a write to it. It is enforced by **stripping**, not by
+rejecting — the offending key is removed from the payload and the rest of the write is
+committed. The write therefore **succeeds** (REST answers `200`), and the read-only column
+simply keeps its stored value.
+
+Four rules decide whether a given value survives:
+
+| # | Rule | Effect |
+|:--|:---|:---|
+| 1 | **Trusted context is exempt** | A write carrying `context.isSystem === true` skips the strip entirely and may set read-only columns. |
+| 2 | **Only *caller-supplied* keys are candidates** | The engine snapshots the payload's keys at entry (`suppliedKeys`), *before* middleware and `beforeUpdate` hooks run. Only keys in that snapshot can be stripped. |
+| 3 | **Hook / middleware backfill survives** | A key a `beforeUpdate` hook *adds* to `data` is absent from the entry snapshot, so it is not a candidate — this is why the built-in `updated_by` / `updated_at` stamps land even though those columns are `readonly`. |
+| 4 | **`context.preserveAudit` admits a whitelist** | An opt-in historical import reinstates the audit/timestamp family and author-declared business `readonly` fields; platform-managed `system` columns (tenancy, generated) stay stripped. |
+
+Rule 2 is scoped to keys, not values: a key the caller sent stays a strip candidate even if
+a hook later overwrites its value. So a `beforeUpdate` hook can *backfill* a read-only
+field, but cannot *rescue* one the caller supplied.
+
+<Callout type="warn">
+**Server-side plugins are not trusted by default.** `ctx.getService('data')` hands back the
+same engine the REST layer uses, with an **empty execution context** — so a cron job or
+background task writing a system-computed read-only column travels the same strip as
+untrusted client input, and its value is dropped while the call reports success. Trusted
+server code must say so:
+
+```ts
+const data = ctx.getService('data');
+await data.update('attendance', { id, status: 'closed', work_duration: 480 },
+  { context: { isSystem: true } });   // ← required to write a `readonly` column
+```
+
+`isSystem` is the documented convention for this, and it is deliberately explicit: it
+bypasses permission checks too, so it declares "this write is platform code acting as the
+platform", not "this write came from a plugin".
+</Callout>
+
+**Detecting a drop programmatically.** Every strip pass reports itself to the caller
+through `options.onFieldsDropped`, so a caller that reports per-field success (a flow's
+`update_record` step, an import runner) can surface a warning instead of a clean success:
+
+```ts
+await data.update('attendance', { id, work_duration: 480 }, {
+  onFieldsDropped: ({ object, fields, reason }) => {
+    // { object: 'attendance', fields: ['work_duration'], reason: 'readonly' }
+    logger.warn(`dropped ${fields.join(', ')} on ${object} (${reason})`);
+  },
+});
+```
+
+`reason` is `'readonly'` for this static lock and `'readonly_when'` for a conditional
+[`readonlyWhen`](/docs/references/data/field) predicate. The listener is an in-process
+callback: it is delivered by the local engine, and does **not** cross the RPC / Virtual
+Data Engine boundary, so a remote caller never receives these events. Without a listener,
+the only trace is a server-side `WARN` naming the object, the field, and both remedies.
+
 ---
 
 ## 4. Data Masking

@@ -3,6 +3,40 @@
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { SettingsActionHandler } from '../settings-service.types.js';
 
+/**
+ * ⚠️ This list is a CONTRACT, not a menu of aspirations: every value here must
+ * be one `@objectstack/plugin-email` can actually build a transport for, and
+ * every transport it can build must appear here. The two sets are held equal by
+ * an executable assertion —
+ * `packages/plugins/plugin-email/src/mail-manifest-providers.contract.test.ts`
+ * compares these values against `EMAIL_TRANSPORT_PROVIDERS` / `makeTransport`
+ * and goes red the moment they diverge, in either direction.
+ *
+ * Both directions had drifted (#5094): `sendgrid` and `ses` were offered here
+ * with no transport behind them — selecting one validated, saved, and then
+ * delivered nothing — while `resend`, which has shipped a working transport all
+ * along, could not be picked at all. Neither SendGrid nor SES lost any
+ * capability by being removed: both publish SMTP endpoints, so they are
+ * configured through `smtp` (see the field description below), which is a
+ * working route rather than a dead end.
+ *
+ * `log` is listed, and labelled for what it does. It is the one option that
+ * does not deliver, but it does not *pretend* to: the label says so, the
+ * runtime honours it (`LogTransport` records to `sys_email`), and `mail/test`
+ * answers `ok: false` for it. That is the deliberate, visible opt-out
+ * AGENTS.md asks a degradation to be, and it is what makes "offered" and
+ * "deliverable" exactly the same set instead of merely overlapping.
+ */
+const PROVIDER_OPTIONS = [
+  { value: 'smtp', label: 'SMTP' },
+  { value: 'resend', label: 'Resend' },
+  { value: 'postmark', label: 'Postmark' },
+  { value: 'log', label: 'None (log only — no real delivery)' },
+];
+
+/** Providers that need `api_key` — kept in step with the `visible` expressions below. */
+const API_KEY_PROVIDERS: readonly string[] = ['resend', 'postmark'];
+
 // Visibility expressions are written as inline strings here for
 // readability. The spec's ExpressionInputSchema accepts a bare string
 // and normalises it at parse time, but the inferred TypeScript output
@@ -23,13 +57,14 @@ const manifest = {
     { type: 'group', id: 'provider', label: 'Provider', required: false,
       description: 'Choose how this workspace sends outbound email.' },
 
+    // See PROVIDER_OPTIONS above — the option list is a contract with
+    // @objectstack/plugin-email, not a wish list.
     { type: 'select', key: 'provider', label: 'Provider', required: true, default: 'smtp',
-      options: [
-        { value: 'smtp', label: 'SMTP' },
-        { value: 'sendgrid', label: 'SendGrid' },
-        { value: 'ses', label: 'Amazon SES' },
-        { value: 'postmark', label: 'Postmark' },
-      ],
+      description: 'Only providers this server can actually deliver through are listed. '
+        + 'SendGrid and Amazon SES are configured as SMTP — host smtp.sendgrid.net '
+        + '(username "apikey", password = your API key), or email-smtp.<region>.amazonaws.com '
+        + 'with SES SMTP credentials.',
+      options: PROVIDER_OPTIONS,
     },
 
     { type: 'group', id: 'smtp', label: 'SMTP', required: false, visible: "${data.provider === 'smtp'}" },
@@ -44,9 +79,15 @@ const manifest = {
     { type: 'password', key: 'smtp_password', label: 'Password', required: false,
       visible: "${data.provider === 'smtp'}" },
 
-    { type: 'group', id: 'api_key', label: 'API key', required: false, visible: "${data.provider !== 'smtp'}" },
+    // Named positively — `provider !== 'smtp'` was only ever correct because
+    // every non-SMTP option happened to be an HTTP API. `log` is not, and a
+    // REQUIRED field is enforced server-side exactly when it is visible
+    // (`SettingsService.validatePatch`), so the negative form would refuse to
+    // save "None (log only)" until an API key it never uses was typed in.
+    { type: 'group', id: 'api_key', label: 'API key', required: false,
+      visible: "${data.provider === 'resend' || data.provider === 'postmark'}" },
     { type: 'password', key: 'api_key', label: 'API key', required: true, encrypted: true,
-      visible: "${data.provider !== 'smtp'}" },
+      visible: "${data.provider === 'resend' || data.provider === 'postmark'}" },
 
     { type: 'group', id: 'from_address', label: 'From address', required: false },
     { type: 'email', key: 'from_email', label: 'From email', required: true,
@@ -60,6 +101,9 @@ const manifest = {
 
 /** Mail Delivery — SMTP / API provider configuration. */
 export const mailSettingsManifest = manifest as unknown as SettingsManifest;
+
+/** Provider values the dropdown offers — the same array the manifest renders. */
+const OFFERED_PROVIDERS: readonly string[] = PROVIDER_OPTIONS.map((o) => o.value);
 
 /**
  * Built-in FALLBACK handler for `mail/test`.
@@ -75,6 +119,11 @@ export const mailSettingsManifest = manifest as unknown as SettingsManifest;
  * delivery": a success toast for a mail nobody sent, naming a package that
  * has never existed. An action button that says "Send test email" must
  * never report success for a send that did not happen (framework#5087).
+ *
+ * It also refuses a `provider` value the dropdown does not offer. Workspaces
+ * that saved `sendgrid` / `ses` while those options existed still carry the
+ * value (#5094), and "the form is well-formed" is the wrong answer for a
+ * provider nothing can deliver through.
  */
 export const mailTestActionHandler: SettingsActionHandler = async ({ values }) => {
   const provider = String(values.provider ?? 'smtp');
@@ -82,10 +131,21 @@ export const mailTestActionHandler: SettingsActionHandler = async ({ values }) =
   if (!fromEmail) {
     return { ok: false, severity: 'error', message: 'Configure a from address before testing.' };
   }
+  if (!OFFERED_PROVIDERS.includes(provider)) {
+    return {
+      ok: false,
+      severity: 'error',
+      message: `provider='${provider}' is not a delivery provider this server supports, so NO mail is being sent `
+        + `(a stored value from an older release, most likely). Fix: pick one of ${OFFERED_PROVIDERS.join(' / ')} `
+        + 'in Settings → Mail → Provider and save. SendGrid and Amazon SES are configured as SMTP — '
+        + 'smtp.sendgrid.net (username "apikey", password = your API key), or '
+        + 'email-smtp.<region>.amazonaws.com with SES SMTP credentials.',
+    };
+  }
   if (provider === 'smtp' && !values.smtp_host) {
     return { ok: false, severity: 'error', message: 'SMTP host is required.' };
   }
-  if (provider !== 'smtp' && !values.api_key) {
+  if (API_KEY_PROVIDERS.includes(provider) && !values.api_key) {
     return { ok: false, severity: 'error', message: 'API key is required.' };
   }
   return {

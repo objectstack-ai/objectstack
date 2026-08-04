@@ -182,12 +182,12 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           fields: {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
-            expected_revenue: { type: 'formula', name: 'expected_revenue', formula: 'amount * probability / 100' },
+            expected_revenue: { type: 'formula', name: 'expected_revenue', expression: 'amount * probability / 100' },
           },
         }],
       });
       expect(issues).toHaveLength(1);
-      expect(issues[0].where).toContain("field 'expected_revenue' formula");
+      expect(issues[0].where).toContain("field 'expected_revenue' expression");
       expect(issues[0].message).toMatch(/bare reference `(amount|probability)`/);
     });
 
@@ -211,7 +211,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           fields: {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
-            expected_revenue: { type: 'formula', name: 'expected_revenue', formula: 'record.amount * record.probability / 100' },
+            expected_revenue: { type: 'formula', name: 'expected_revenue', expression: 'record.amount * record.probability / 100' },
           },
           validations: [{ name: 'amt', condition: 'record.amount != null && record.amount >= 0' }],
         }],
@@ -231,14 +231,14 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             end_date: { type: 'date' },
             days: {
               type: 'formula', name: 'days',
-              formula: 'record.start_date != null && record.end_date != null ? (record.end_date - record.start_date) + 1 : null',
+              expression: 'record.start_date != null && record.end_date != null ? (record.end_date - record.start_date) + 1 : null',
             },
           },
         }],
       });
       expect(issues).toHaveLength(1);
       expect(issues[0].severity).toBe('error');
-      expect(issues[0].where).toContain("field 'days' formula");
+      expect(issues[0].where).toContain("field 'days' expression");
       expect(issues[0].message).toMatch(/date arithmetic/i);
       expect(issues[0].message).toMatch(/daysBetween/);
     });
@@ -252,7 +252,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             end_date: { type: 'date' },
             days: {
               type: 'formula', name: 'days',
-              formula: 'record.start_date != null && record.end_date != null ? daysBetween(record.start_date, record.end_date) + 1 : null',
+              expression: 'record.start_date != null && record.end_date != null ? daysBetween(record.start_date, record.end_date) + 1 : null',
             },
           },
         }],
@@ -326,13 +326,13 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           name: 'crm_lead',
           fields: {
             company: { type: 'text' },
-            score: { type: 'formula', formula: 'record.company * 2' },
+            score: { type: 'formula', expression: 'record.company * 2' },
           },
         }],
       });
       const w = issues.filter(i => i.severity === 'warning');
       expect(w).toHaveLength(1);
-      expect(w[0].where).toMatch(/formula/);
+      expect(w[0].where).toMatch(/expression/);
       expect(w[0].message).toMatch(/type mismatch/i);
       expect(w[0].message).toMatch(/record\.company/);
     });
@@ -345,7 +345,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
             close_date: { type: 'date' },
-            expected: { type: 'formula', formula: 'record.amount * record.probability / 100' },
+            expected: { type: 'formula', expression: 'record.amount * record.probability / 100' },
           },
           // The `!= null` guard is load-bearing since #4763: `close_date` is a
           // declared NULLABLE field, and an un-guarded `>=` over it faults at
@@ -1161,14 +1161,21 @@ describe('null-guard gate (#4763)', () => {
       ).toHaveLength(0);
     });
 
-    it('leaves `Field.formula` expressions alone (blessed `guard ? value : null`, #3306)', () => {
+    it('leaves field `expression` alone for the NULL-GUARD verdict (blessed `guard ? value : null`, #3306)', () => {
+      // Load-bearing since #5026: this pass now genuinely RUNS on `expression`
+      // (it read the rejected `formula` spelling before, so the fixture was
+      // silent for the wrong reason). Zero issues here therefore means the
+      // null-guard gate really is excluded from this surface, not that the
+      // surface is unreachable. `budget` / `spent` are both nullable and `-` is
+      // applied to them unguarded — exactly the shape the gate rejects on
+      // `requiredWhen`.
       expect(
         validateStackExpressions({
           objects: [{
             ...project,
             fields: {
               ...project.fields,
-              remaining: { type: 'formula', formula: 'record.budget - record.spent' },
+              remaining: { type: 'formula', expression: 'record.budget - record.spent' },
             },
           }],
         }),
@@ -1352,22 +1359,22 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
 ];
 
 /**
- * The ONE read in this file that is still undeclared, tracked rather than
- * silently tolerated.
+ * Undeclared reads still tracked rather than fixed. **Empty since #5026** —
+ * every key this rule reads is one `@objectstack/spec` declares.
  *
- * `FieldSchema` declares the computed slot as `expression` and rejects
- * `formula` by name ("Did you mean `formula` → `expression`?"), so the
- * field-formula pass has never run against a stack that parses. It is NOT
- * fixed here because converging it would ACTIVATE a check rather than delete a
- * dead branch — a coverage change with its own verification to do, not
- * dead-code removal. Filed as #5026.
+ * The last entry was `f.formula`: `FieldSchema` declares the computed slot as
+ * `expression` and rejects `formula` by name ("Did you mean `formula` →
+ * `expression`?"), so the field-formula pass had never run against a stack that
+ * parses. #5026 converged it onto `expression`, which ACTIVATED the check
+ * rather than deleting a dead branch — hence its own PR, with a sweep of every
+ * real stack in the repo attached (8 field `expression` slots across
+ * `app-showcase` / `app-crm` / `app-todo`; zero new findings).
  *
- * This list must shrink, never grow: a second entry means the next author
- * treated it as a place to put exceptions rather than a debt to pay down.
+ * This list must shrink, never grow. It is at zero: any entry at all now means
+ * someone treated it as a place to park an exception rather than a debt to pay
+ * down, and the `expected: []` assertions below make that a deliberate act.
  */
-const TRACKED_UNDECLARED_READS: Array<{ receiver: string; key: string; issue: number }> = [
-  { receiver: 'f', key: 'formula', issue: 5026 },
-];
+const TRACKED_UNDECLARED_READS: Array<{ receiver: string; key: string; issue: number }> = [];
 
 describe('validateStackExpressions — reads only keys the spec declares (meta-test, #5017)', () => {
   it.each(READ_SURFACES)('every key read off `$receiver` is declared by $declaredBy', (surface) => {
@@ -1380,16 +1387,22 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     expect(read.filter((k) => !declared.includes(k))).toEqual([]);
   });
 
-  it('the field receiver reads only declared keys, plus exactly the tracked debt', () => {
+  it('the field receiver reads only declared keys — the tracked debt is now empty (#5026)', () => {
     const read = keysReadOff('f');
-    expect(read).toEqual(['formula', 'name', 'readonlyWhen', 'requiredWhen']);
+    expect(read).toEqual(['expression', 'name', 'readonlyWhen', 'requiredWhen']);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
-    expect(tracked).toEqual(['formula']);
+    expect(tracked).toEqual([]);
     expect(read.filter((k) => !declared.includes(k) && !tracked.includes(k))).toEqual([]);
-    // And the debt is real, not a stale entry: `formula` genuinely is not there.
-    expect(declared).not.toContain('formula');
+    // The canonical key is the declared one, and the spelling this read used to
+    // carry is genuinely absent — so a revert to `f.formula` fails here, loudly,
+    // rather than quietly re-inerting the pass.
     expect(declared).toContain('expression');
+    expect(declared).not.toContain('formula');
+  });
+
+  it('nothing is tracked as an undeclared read any more — the list shrinks, never grows', () => {
+    expect(TRACKED_UNDECLARED_READS).toEqual([]);
   });
 
   it('the computed key lists are spelled from the declaring schema', () => {
@@ -1502,6 +1515,25 @@ const REJECTED_ALIASES: Array<{ label: string; stack: Record<string, unknown>; r
         fields: { p: { type: 'master_detail', label: 'P', referenceTo: 'invoice' } } }],
     },
     refusal: /Unrecognized key\(s\) on this field: `referenceTo`.*Did you mean `referenceTo` → `reference`/s,
+    lintAfter: null,
+  },
+  {
+    // #5026. The newest member of this table, and the one that reads
+    // differently from the rest: the other spellings were rejected AND unread,
+    // while this one was rejected and READ — the only key the rule honoured.
+    // Converging the read onto `expression` moved it here, where it belongs.
+    label: 'objects[].fields[].formula → expression',
+    stack: {
+      objects: [{ name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+        fields: {
+          amount: { type: 'currency', label: 'Amount' },
+          // A defect the rule WOULD name if it still read this key: bare refs.
+          expected_revenue: { type: 'formula', label: 'Expected', formula: 'amount * 2' },
+        } }],
+    },
+    refusal: /Unrecognized key\(s\) on this field: `formula`.*Did you mean `formula` → `expression`/s,
+    // Silent: the rule reads `expression` now, so an author who spells `formula`
+    // hears it from the schema, by name, once — not twice in two vocabularies.
     lintAfter: null,
   },
   {
@@ -1740,5 +1772,118 @@ describe('validateStackExpressions — every changed read is reachable from a sp
     );
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toMatch(/declares 2 `master_detail` relationships/);
+  });
+
+  it('fields[].expression — the field-formula pass fires from a stack that PARSES (#5026)', () => {
+    // The whole point of #5026. Before it, no spec-valid stack could reach this
+    // branch at all: it was keyed on `formula`, which the schema refuses. This
+    // fixture goes through a real `ObjectStackSchema.parse` and still produces
+    // the finding — the first time that sentence has been true.
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [{
+          name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+          fields: {
+            amount: { type: 'currency', label: 'Amount' },
+            probability: { type: 'percent', label: 'Probability' },
+            expected_revenue: { type: 'formula', label: 'Expected', expression: 'amount * probability / 100' },
+          },
+        }],
+      }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].where).toBe("object 'crm_opportunity' · field 'expected_revenue' expression");
+    expect(issues[0].message).toMatch(/bare reference `(amount|probability)`/);
+  });
+});
+
+/**
+ * ── Reverse verification for the ACTIVATION itself (#5026) ───────────────────
+ *
+ * #5017's five removals were behaviour-neutral on every parsing stack, so their
+ * reverse verification only had to show the alias limbs were dead. This one is
+ * the opposite shape: converging `f.formula` → `f.expression` turned a branch
+ * that had NEVER run into one that runs on every compile. So the verification
+ * owes four things, not one:
+ *
+ *   1. a broken `expression` on a spec-valid stack is now RED, and named;
+ *   2. a correct one is GREEN (the gate is not simply on);
+ *   3. the `formula:` spelling is handled by the SCHEMA, by name — this rule
+ *      says nothing about it, so the author hears one diagnostic, not two;
+ *   4. mutating the read back to `f.formula` is caught by the declared-key
+ *      meta-guard above — i.e. this cannot silently re-inert.
+ *
+ * Point 4 is asserted against the same source scan the guard uses rather than
+ * described, because "a guard that would have caught it" is exactly the claim
+ * that is worth nothing unless executed.
+ */
+describe('validateStackExpressions — the field-formula check now actually runs (#5026)', () => {
+  const OPP = (expression: string) => ({
+    objects: [{
+      name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+      fields: {
+        amount: { type: 'currency', label: 'Amount' },
+        probability: { type: 'percent', label: 'Probability' },
+        expected_revenue: { type: 'formula', label: 'Expected', expression },
+      },
+    }],
+  });
+
+  it('1 — a broken `expression` is RED on a stack the spec accepts', () => {
+    const issues = validateStackExpressions(specValid(OPP('record.no_such_field * 2')));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].message).toMatch(/unknown field `no_such_field`/);
+    expect(issues[0].where).toContain("field 'expected_revenue' expression");
+  });
+
+  it('1b — and a syntactically broken one is RED too', () => {
+    const issues = validateStackExpressions(specValid(OPP('record.amount *')));
+    expect(issues.length).toBeGreaterThanOrEqual(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].where).toContain("field 'expected_revenue' expression");
+  });
+
+  it('2 — a correct `expression` is GREEN (the gate discriminates, it is not just on)', () => {
+    // The shape every real app in this repo actually ships — verified against
+    // all 8 field `expression` slots in `examples/app-{showcase,crm,todo}` when
+    // the check was activated, all of which stayed green.
+    expect(validateStackExpressions(specValid(OPP('record.amount * record.probability / 100')))).toEqual([]);
+  });
+
+  it('3 — the `formula:` spelling is the SCHEMA’s to refuse; this rule stays silent', () => {
+    const badSpelling = {
+      objects: [{
+        name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+        fields: {
+          amount: { type: 'currency', label: 'Amount' },
+          expected_revenue: { type: 'formula', label: 'Expected', formula: 'amount * 2' },
+        },
+      }],
+    };
+    const parsed = ObjectStackSchema.safeParse({ manifest: MANIFEST, ...badSpelling });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.map((i) => i.message).join(' ')).toMatch(/Did you mean `formula` → `expression`/);
+    // And the lint adds nothing of its own — no second vocabulary for one key.
+    expect(validateStackExpressions(badSpelling)).toEqual([]);
+  });
+
+  it('4 — mutating the read back to `f.formula` is caught by the declared-key guard', () => {
+    // The mutation, applied to the real source the guard scans.
+    const mutated = RULE_CODE.replace(/\bf\.expression\b/g, 'f.formula');
+    expect(mutated, 'the read moved — this mutation no longer reproduces #5026').not.toBe(RULE_CODE);
+
+    const readAfterMutation = [
+      ...new Set([...mutated.matchAll(/\bf\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1])),
+    ].sort();
+    const declared = Object.keys(FieldSchema.shape);
+    const undeclared = readAfterMutation.filter(
+      (k) => !declared.includes(k) && !TRACKED_UNDECLARED_READS.some((t) => t.receiver === 'f' && t.key === k),
+    );
+    // The guard's own assertion, run against the mutant: it fails, naming the key.
+    expect(undeclared).toEqual(['formula']);
+    // …and the un-mutated source passes the identical assertion.
+    expect(keysReadOff('f').filter((k) => !declared.includes(k))).toEqual([]);
   });
 });

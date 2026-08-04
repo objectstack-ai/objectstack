@@ -542,9 +542,30 @@ export function stripReadonlyWhenFieldsMulti(
  *
  * Returns the same object when nothing is stripped, else a shallow copy with the
  * offending keys removed.
+ *
+ * ### What the strip LOGS, and why it stays at `warn` (#4903)
+ *
+ * A dropped field is the #4632 second-class shape: the caller is told the write
+ * succeeded, the database disagrees about one column, and the server log is the
+ * only trace. So the message must carry the CONSEQUENCE (committed without the
+ * field) and the REMEDY, not just the fact — a bare "ignoring incoming change"
+ * is what made os-project-titanwind-ehr#750 read as "only cron can't write".
+ *
+ * It stays at `warn`, one level for every caller, because THIS SEAM CANNOT TELL
+ * THE TWO CALLERS APART. The strip runs on `!context.isSystem`, and
+ * `ExecutionContext` carries no origin / channel / transport marker — `isSystem`
+ * is the only trust bit, and it is precisely the exemption. A hostile REST body
+ * forging `created_by` and a trusted cron plugin writing a computed column
+ * arrive here indistinguishable (an absent context is not proof of server code
+ * either: a plugin may legitimately act as a user, and an unauthenticated REST
+ * write also has no principal). Escalating to `error` would therefore let any
+ * client fill the error log on demand; demoting to `debug` would re-hide the
+ * silent-drop. `warn` + a message that names both remedies is the honest single
+ * level. Changing this means giving `ExecutionContext` a real origin marker
+ * first — not guessing from the absence of a principal.
  */
 export function stripReadonlyFields(
-  objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+  objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   suppliedKeys: ReadonlySet<string>,
   logger?: EvaluateRulesOptions['logger'],
@@ -561,9 +582,28 @@ export function stripReadonlyFields(
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];
-    logger?.warn?.(`Field '${name}' is read-only — ignoring incoming change (#2948)`);
+    logger?.warn?.(readonlyStripWarning(name, objectSchema?.name));
   }
   return result;
+}
+
+/**
+ * The message {@link stripReadonlyFields} logs per dropped field (#4903).
+ * Exported so the pin test asserts the CONTRACT of this text — consequence,
+ * `isSystem` remedy, `onFieldsDropped` remedy — rather than its wording.
+ */
+export function readonlyStripWarning(field: string, object?: string): string {
+  const on = object ? ` on '${object}'` : '';
+  return (
+    `Field '${field}'${on} is read-only: the caller-supplied value was DROPPED and the update ` +
+    `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
+    `value (#2948). Server-side code that legitimately writes read-only columns (a plugin, a cron / ` +
+    `background job persisting a system-computed value) must declare itself trusted by passing ` +
+    `{ context: { isSystem: true } } on the write; a beforeUpdate hook does NOT need this because ` +
+    `hook-written keys are not caller-supplied. To detect drops programmatically instead of reading ` +
+    `this log, pass options.onFieldsDropped (#3407). Forged read-only keys from untrusted client ` +
+    `input are expected here and need no action.`
+  );
 }
 
 /**

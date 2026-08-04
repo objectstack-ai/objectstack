@@ -35,7 +35,9 @@
     {
       "key": "type:action|component|dashboard|group|object|page|report|separator|url",
       "label": "app navigation item",
-      "docs": ["content/docs/ui/apps.mdx"],
+      "docs": [
+        "content/docs/ui/apps.mdx"
+      ],
       "note": "The gate's founding case: apps.mdx claimed eight types and omitted `separator` (#4165)."
     },
     {
@@ -58,18 +60,23 @@
     {
       "key": "language:expression|js",
       "label": "hook body language",
-      "docs": ["content/docs/automation/hook-bodies.mdx"]
+      "docs": [
+        "content/docs/automation/hook-bodies.mdx"
+      ]
     },
     {
       "key": "kind:file|http|object",
       "label": "knowledge source kind",
-      "docs": ["content/docs/protocol/knowledge.mdx"]
+      "docs": [
+        "content/docs/protocol/knowledge.mdx"
+      ]
     },
-
     {
       "key": "type:inline|npm|remote",
       "label": "widget implementation",
-      "docs": ["content/docs/protocol/objectui/widget-contract.mdx"],
+      "docs": [
+        "content/docs/protocol/objectui/widget-contract.mdx"
+      ],
       "note": "Was exempt as generated-reference-only until the #4001 audit: the page's `Widget Source` section documents all three variants, but in YAML examples, which the coverage matcher could not see. The exemption was recording a gate blind-spot as a doc gap."
     },
     {
@@ -81,13 +88,17 @@
     {
       "key": "type:api-key|basic|bearer|none|oauth2",
       "label": "connector authentication",
-      "docs": ["content/docs/automation/connectors.mdx"],
+      "docs": [
+        "content/docs/automation/connectors.mdx"
+      ],
       "note": "The runtime auth shape (ConnectorAuthConfigSchema) — five variants including the enterprise-tier `oauth2`. Was exempt generated-reference-only while no hand-written connector page existed; #4289 wrote the guide and bound it, per the old exemption's own instruction."
     },
     {
       "key": "type:api-key|basic|bearer|none",
       "label": "connector auth (environment-artifact projection)",
-      "docs": ["content/docs/automation/connectors.mdx"],
+      "docs": [
+        "content/docs/automation/connectors.mdx"
+      ],
       "note": "The declarative connector-instance auth shape (ADR-0097), reached via EnvironmentArtifactSchema.metadata.connectors[].auth: `credentialRef` references only, and `oauth2` deliberately absent (enterprise tier, ADR-0015) — the guide states that absence explicitly so authors don't read it as an omission."
     },
     {
@@ -149,6 +160,14 @@
       "label": "migration changeset operation",
       "exempt": "not-authorable",
       "reason": "Emitted by the diff engine, not hand-written."
+    },
+    {
+      "key": "kind:continue|next-record|redirect|thank-you",
+      "label": "form submit behavior",
+      "docs": [
+        "content/docs/ui/forms.mdx"
+      ],
+      "note": "Newly VISIBLE to this gate at #4001 批 18, not newly authorable: the four variants were always authored on `FormView.submitBehavior`, but the shape was a plain `z.union`, which this walk cannot recognise as discriminated. Batch 18 made it `z.discriminatedUnion('kind')` so a bad key inside one arm reports `unrecognized_keys` at the key's own path instead of an `invalid_union` whose prescription the renderers flatten away (#5014) — and that turned an already-authorable vocabulary into a governed one. GOVERNED rather than exempt: ui/forms.mdx names all four (line 20 lists them together, and the `thank-you` and `redirect` shapes have worked examples)."
     }
   ]
 }

@@ -215,6 +215,49 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
     .describe('Explicit category order for funnel/pyramid stages (stored values)'),
 }).passthrough().describe('Widget configuration — declared query keys + open renderer extras'));
 
+// ── `compareTo` convergence prescriptions (#5011) ────────────────────────────
+//
+// Declared with `//` rather than `/** */` on purpose (the `CRYPTO_HASH_RETIRED`
+// house style in `data/hook-body.zod.ts`): build-docs lifts JSDoc onto the
+// reference page, and a retirement prescription is an upgrade note, not a doc
+// for a shape that still exists.
+//
+// `{ offset }` promised a shift by an explicit duration. Nothing on the ADR-0021
+// dataset path could run it: the executor's comparison contract is
+// `{ kind, dimension? }` and there is no `offset` concept anywhere in it, so a
+// forwarded `{ offset }` reached `dataset-executor.ts` with `dimension:
+// undefined` and threw. It ran only on the legacy inline chart path. Rather than
+// implement calendar-offset arithmetic (whose month-length and leap-year corner
+// cases are a silent-wrong-window bug farm) the arm retires: `'1y'` already has
+// an exact equivalent, and the rest are expressible as a kind plus the window
+// the widget's own `filter` resolves to.
+const COMPARE_TO_OFFSET_RETIRED =
+  '`dashboard.widgets[].compareTo.offset` was removed in @objectstack/spec 17.0.0 (#5011, '
+  + 'ADR-0049 enforce-or-remove) — the analytics executor never had an `offset` concept, so on the '
+  + 'ADR-0021 dataset path this arm did not shift a window, it threw '
+  + '(`compareTo requires a timeDimension "undefined"`) and took the whole widget down with it. '
+  + "Write the kind instead: `compareTo: { kind: 'previousPeriod' }` for the equal-length window "
+  + "immediately before, `compareTo: { kind: 'previousYear' }` for the same window a calendar year "
+  + "back — `{ offset: '1y' }` is exactly `previousYear`. For any other duration "
+  + "(`'7d'`, `'1M'`, …) there is no faithful one-key rewrite: state the window you want on the "
+  + "widget's own `filter` and compare it with `previousPeriod`, which shifts by whatever length "
+  + 'that window resolves to. '
+  + 'Run `os migrate meta --from 16` to rewrite the `1y` case automatically; the other durations '
+  + 'are reported for you to re-state.';
+
+// The two string arms. They parsed, and on a dataset widget they then did
+// NOTHING — DatasetWidget dropped them deliberately, because forwarding one made
+// the executor throw. The value survives the rewrite verbatim; only its
+// container changes, which is what makes this a mechanical conversion.
+const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
+  `\`dashboard.widgets[].compareTo: '${kind}'\` (the bare string form) was removed in `
+  + '@objectstack/spec 17.0.0 (#5011) — the ADR-0021 dataset renderer silently DROPPED it, so the '
+  + 'widget rendered its base numbers with the comparison the author asked for quietly absent. '
+  + `Write \`compareTo: { kind: '${kind}' }\` instead — same comparison, spelled the way the `
+  + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
+  + 'when the selection has more than one dated time dimension; with one, the executor resolves '
+  + 'it. Run `os migrate meta --from 16` to rewrite it automatically.';
+
 /**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
@@ -268,75 +311,110 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)'),
 
   /**
-   * Period-over-period comparison primitive.
+   * Period-over-period comparison window.
    *
-   * When set, the renderer runs a second query against a shifted time
-   * window and surfaces the delta (metric widgets show a secondary
-   * value + arrow; chart widgets render a muted/dashed overlay series).
+   * When set, the runtime runs a second query against a shifted time window
+   * and attaches a `<measure>__compare` column per selected measure; metric
+   * widgets show a secondary value + arrow, chart widgets render a
+   * muted/dashed overlay series.
    *
-   * - `'previousPeriod'` — auto-detect the comparison window from the
-   *   widget's `filter` date macros (e.g. `{current_month_start}` →
-   *   `{last_month_start}`). Falls back to no comparison when the
-   *   filter contains no resolvable date range.
-   * - `'previousYear'` — shift the resolved filter window back by one
-   *   calendar year.
-   * - `{ offset: '7d' | '1M' | '1y' }` — shift by an explicit
-   *   ISO-8601-like duration. Units: `d` (days), `w` (weeks),
-   *   `M` (months), `y` (years).
+   * - `kind: 'previousPeriod'` — the equal-length window immediately before
+   *   the resolved one.
+   * - `kind: 'previousYear'` — the same window shifted back one calendar year.
+   * - `dimension` — OPTIONAL. Which time dimension's window to shift; omit it
+   *   and the executor resolves it (see below).
+   *
+   * ## Why this shape (#5011)
+   *
+   * This is a **thin projection of `DatasetSelection.compareTo`**
+   * (`contracts/analytics-service.ts`) — the one comparison contract the
+   * analytics executor actually implements. Until #5011 the widget declared a
+   * different vocabulary from the executor and the two never met: the two
+   * string arms were dropped on the floor by the dataset renderer (a
+   * comparison silently absent from a widget whose author had asked for one)
+   * and `{ offset }` was forwarded verbatim into a contract with no `offset`
+   * in it, so the executor threw `compareTo requires a timeDimension
+   * "undefined"` and the whole widget errored. Every arm was broken on the
+   * ADR-0021 dataset path — the path this spec calls the single author-facing
+   * analytics shape — while all three worked on the legacy inline chart path.
+   * Same key, two fates, the failing one blessed.
+   *
+   * Converging on the executor's own words makes `declared = enforced` true by
+   * construction rather than by vigilance: there is no widget-side vocabulary
+   * left to drift. It also leaves the slot union-free, which matters more than
+   * it looks — a union collapses into one bare `Invalid input` on the wire
+   * (#5014), so every curated message this campaign puts inside a union arm is
+   * written for a reader who never receives it. A plain strict object's errors
+   * reach the author.
+   *
+   * ## Resolving `dimension`
+   *
+   * Omit it and the EXECUTOR resolves it, by its own criterion: the selection's
+   * time dimensions that carry a `dateRange`. Exactly one candidate is used;
+   * zero or several is a loud error naming what it found. That rule lives in
+   * `dataset-executor.ts` — deliberately at the producer of the comparison, not
+   * as a renderer-side guess, so every caller gets the same answer or the same
+   * error (PD #12).
+   *
+   * `{ offset: '7d' | '1M' | '1y' }` was REMOVED in the same change; see
+   * `COMPARE_TO_OFFSET_RETIRED` below.
    */
-  compareTo: z.union([
-    z.literal('previousPeriod'),
-    z.literal('previousYear'),
-    // #4001 批 14: the object arm is closed. `DashboardWidgetSchema` has been
-    // strict since the ADR-0021 cutover, but STRICTNESS DOES NOT RECURSE — so
-    // `compareTo: { offset: '7d', granularity: 'month' }` parsed clean on `main`
-    // and came back `{ offset: '7d' }`, the widget rendering a comparison the
-    // author did not describe. A strict container around strip children is the
-    // silhouette of a closed surface, not a closed one.
-    //
-    // ⚠️ KNOWN REACH LIMIT, measured rather than assumed — this closure REJECTS
-    // reliably but its PROSE does not currently reach the author. `compareTo` is
-    // a union, and zod collapses a failed union into one top-level
-    // `invalid_union` issue whose message is the bare `Invalid input`; the arm
-    // errors (including the guidance below) live in `issue.errors`, and
-    // `zodIssuesToFields` in `rest/src/rest-server.ts` maps only top-level
-    // issues, so nothing carries them onto the wire. The rejection is still the
-    // #4001 win — a silent half-discard became a hard failure at `compareTo`.
-    // The transport gap is #5014, and it affects every curated
-    // unknown-key message this campaign has put inside a union arm, not just
-    // this one. `strictness-batch14.test.ts` pins BOTH halves: the bare
-    // top-level text an author sees today, and the guidance waiting in the arm
-    // errors — split deliberately, so a green test cannot stand in for a message
-    // no consumer prints.
-    strictObject({
-      surface: 'this comparison window',
-      history: DASHBOARD_HISTORY,
-      // The neighbouring vocabularies for "shift a time window": the widget's own
-      // string arms (`previousPeriod` / `previousYear`) spelled as an object, and
-      // the date-macro / granularity words used elsewhere on this same widget.
-      aliases: {
-        period: 'offset',
-        duration: 'offset',
-        interval: 'offset',
-        shift: 'offset',
-        delta: 'offset',
-        by: 'offset',
-        amount: 'offset',
-        value: 'offset',
-      },
-      guidance: {
-        // Naming an arm of this very union from inside its object arm.
-        type: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
-        kind: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
-        mode: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
-        // Two real slots one level up, both easy to reach for here.
-        granularity: 'a comparison window carries no granularity — the shift is a whole duration (`7d` / `1M` / `1y`). Date bucketing is declared on the DATASET dimension (`dateGranularity`), which every widget bound to that dataset then shares.',
-        filter: '`filter` is the widget\'s own presentation-scope key, one level up — `compareTo` shifts whatever window that filter already resolves to. Move it out of `compareTo`.',
-      },
-    }, {
-      offset: z.string().regex(/^\d+[dwMy]$/, 'Offset must match <N>(d|w|M|y), e.g. "7d", "1M", "1y"'),
-    }),
-  ]).optional().describe('Period-over-period comparison window'),
+  compareTo: strictObject({
+    surface: 'this comparison window',
+    history: DASHBOARD_HISTORY,
+    // Near-misses for the two live keys. The `kind` entries are not invented:
+    // #5042 curated `type`/`mode` here as guidance ("the comparison KIND is the
+    // union itself, not a key"), i.e. it had already measured that authors
+    // reach for those words on this slot. Now that `kind` IS the key, the same
+    // claim becomes a faithful rename. The `dimension` entries name the
+    // neighbouring vocabulary for "which date column": `dateRange.field` on the
+    // dashboard filter bar and `timeDimensions[].dimension` on the wire.
+    aliases: {
+      type: 'kind',
+      mode: 'kind',
+      field: 'dimension',
+      dateField: 'dimension',
+      timeDimension: 'dimension',
+    },
+    guidance: {
+      // The retired `{ offset }` arm and every word #5042 measured authors
+      // spelling it with. All resolve to one prescription: an explicit-duration
+      // shift has no executor behind it and never had one.
+      offset: COMPARE_TO_OFFSET_RETIRED,
+      period: COMPARE_TO_OFFSET_RETIRED,
+      duration: COMPARE_TO_OFFSET_RETIRED,
+      interval: COMPARE_TO_OFFSET_RETIRED,
+      shift: COMPARE_TO_OFFSET_RETIRED,
+      delta: COMPARE_TO_OFFSET_RETIRED,
+      by: COMPARE_TO_OFFSET_RETIRED,
+      amount: COMPARE_TO_OFFSET_RETIRED,
+      value: COMPARE_TO_OFFSET_RETIRED,
+      // Two real slots one level up, both easy to reach for from in here.
+      granularity: 'a comparison window carries no granularity — it shifts a window, it does not bucket one. Date bucketing is `options.dateGranularity` on this widget (or the DATASET dimension\'s own `dateGranularity` default), and the comparison pass reuses whatever the primary pass resolved.',
+      filter: '`filter` is the widget\'s own presentation-scope key, one level up — `compareTo` shifts whatever window that filter already resolves to. Move it out of `compareTo`.',
+    },
+    // The two spellings that really were legal until #5011 — and, being the
+    // documented ones, overwhelmingly the shape an upgrading source carries.
+    retiredForms: {
+      previousPeriod: COMPARE_TO_STRING_RETIRED('previousPeriod'),
+      previousYear: COMPARE_TO_STRING_RETIRED('previousYear'),
+    },
+  }, {
+    /**
+     * Which comparison window to run — the executor's own two kinds
+     * (`DatasetCompareTo.kind`).
+     */
+    kind: z.enum(['previousPeriod', 'previousYear'])
+      .describe('Comparison window: previousPeriod (equal-length, immediately before) or previousYear (−1 calendar year)'),
+    /**
+     * The time dimension (by name) whose window is shifted. Omit it when the
+     * selection has exactly one dated time dimension — the executor resolves it
+     * and errors loudly, listing the candidates, when the choice is ambiguous
+     * or there is nothing dated to shift.
+     */
+    dimension: z.string().optional()
+      .describe('Time dimension to shift; omit when the selection has exactly one dated time dimension'),
+  }).optional().describe('Period-over-period comparison window ({ kind, dimension? })'),
 
   /**
    * ADR-0021 — the semantic-layer `dataset` this widget binds to. The widget
