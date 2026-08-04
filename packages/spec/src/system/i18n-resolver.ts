@@ -9,11 +9,16 @@
  * (`*.view.ts`, `*.actions.ts`); these helpers translate at render time using
  * the standardized keys:
  *
- *   objects.<object>._views.<view_name>.label
- *   objects.<object>._views.<view_name>.description
+ *   objects.<object>._views.<view_key>.label
+ *   objects.<object>._views.<view_key>.description
  *   objects.<object>._actions.<action_name>.label
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *
+ * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
+ * list/form key) — never the `<object>.<key>` identity the registry assigns a
+ * served view document. `resolveViewLabel` derives the bare key from that
+ * identity, so the same bundle serves both hand-built and served views (#4854).
  *
  * For object-less actions (no `objectName`), helpers fall back to:
  *
@@ -27,15 +32,47 @@
 
 import type { TranslationBundle, TranslationData } from './translation.zod';
 
-/** Minimal view shape consumed by `resolveViewLabel`. */
+/**
+ * Minimal view shape consumed by `resolveViewLabel`.
+ *
+ * Covers BOTH shapes that reach the resolver (#4854):
+ *
+ *   1. a hand-constructed view (`{ name, label, objectName }`) — the shape
+ *      callers assemble when they already know the object;
+ *   2. the **served view document**, which is what
+ *      `GET /api/v1/meta/view?object=…` actually returns. That document is the
+ *      `ExpandedViewItem` produced by `expandViewContainer`
+ *      (`ui/view.zod.ts`) and registered verbatim by the ObjectQL engine
+ *      (`engine.ts` boot loop) — it binds its object at top-level `object` and
+ *      namespaces `name` to `<object>.<viewKey>`.
+ */
 export interface ViewLike {
+  /**
+   * View identity. The served document namespaces this to `<object>.<viewKey>`
+   * (`crm_account.account_gallery`); translations key on the bare `<viewKey>`,
+   * so the object prefix is stripped before lookup — see
+   * {@link viewTranslationKey}.
+   */
   name: string;
   label?: string;
   description?: string;
   /** Object the view is bound to. Required for translation lookup. */
   objectName?: string;
+  /**
+   * The bound object as the SERVED document spells it. `expandViewContainer`
+   * stamps `object` (never `objectName`) onto every expanded ViewItem, so this
+   * — not `objectName` — is the field a real `/meta/view` response carries.
+   */
+  object?: string;
   /** Some view definitions name the bound object via `data.object`. */
   data?: { object?: string };
+  /**
+   * Served ViewItems nest the authored view config here, which carries its own
+   * `data.object` for views that retarget another object. Read only as a last
+   * resort — a default `form` config carries no `data` at all, which is why
+   * top-level `object` is the load-bearing field.
+   */
+  config?: { data?: { object?: string } };
 }
 
 /** Minimal action shape consumed by the action resolvers. */
@@ -138,8 +175,43 @@ function localeChain(opts?: ResolveOptions): string[] {
   return chain;
 }
 
+/**
+ * The object a view binds to, across every shape that reaches this resolver.
+ *
+ * `objectName` / `data.object` alone could never match a served document
+ * (#4854): the view-document composer `expandViewContainer` emits `object` at
+ * the top level and leaves the authored config — including its `data` — nested
+ * under `config`, so the lookup bailed at the `!objectName` guard for every
+ * view authored through `defineView`. The order here mirrors the i18n
+ * extractor's own `viewObjectName` (`packages/cli/src/utils/i18n-extract.ts`),
+ * so the surface that WRITES `_views` keys and the resolver that READS them
+ * agree on which field identifies the object.
+ */
 function viewObjectName(view: ViewLike): string | undefined {
-  return view.objectName ?? view.data?.object;
+  return view.objectName ?? view.object ?? view.data?.object ?? view.config?.data?.object;
+}
+
+/**
+ * The `_views` key a view's translations live under: the **bare** view key.
+ *
+ * Translation bundles key on the authoring key (`objects.<object>._views.<key>`
+ * — what `pushViewEntries` in the i18n extractor writes, and what every shipped
+ * bundle carries), while the served document namespaces `name` to
+ * `<object>.<key>` because that is the registry's globally-unique identity
+ * (`ViewItemNameSchema`). Stripping the object prefix decodes that composition;
+ * it is not an alias. A name without the prefix — a hand-constructed view — is
+ * already bare and passes through untouched.
+ *
+ * Deliberately does NOT consult `config.name`. The bare key is the *container
+ * key* (`listViews.<key>`), which `expandViewContainer` puts in the name and
+ * nowhere else; `config.name` is an optional, author-supplied field that is
+ * absent from every view in the repo's own apps and, when present on a
+ * colliding view, names a DIFFERENT view than the one being resolved. One key,
+ * derived from the identity the registry actually assigned.
+ */
+function viewTranslationKey(view: ViewLike, objectName: string): string {
+  const prefix = `${objectName}.`;
+  return view.name.startsWith(prefix) ? view.name.slice(prefix.length) : view.name;
 }
 
 /**
@@ -154,9 +226,10 @@ export function resolveViewLabel(
   const fallback = view.label ?? view.name;
   const objectName = viewObjectName(view);
   if (!bundle || !objectName) return fallback;
+  const key = viewTranslationKey(view, objectName);
   for (const code of localeChain(opts)) {
     const data = pickData(bundle, code);
-    const candidate = data?.objects?.[objectName]?._views?.[view.name]?.label;
+    const candidate = data?.objects?.[objectName]?._views?.[key]?.label;
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return fallback;
@@ -173,10 +246,11 @@ export function resolveViewDescription(
 ): string | undefined {
   const objectName = viewObjectName(view);
   if (bundle && objectName) {
+    const key = viewTranslationKey(view, objectName);
     for (const code of localeChain(opts)) {
       const data = pickData(bundle, code);
       const candidate =
-        data?.objects?.[objectName]?._views?.[view.name]?.description;
+        data?.objects?.[objectName]?._views?.[key]?.description;
       if (typeof candidate === 'string' && candidate.length > 0) return candidate;
     }
   }
