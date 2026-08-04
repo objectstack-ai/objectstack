@@ -2051,7 +2051,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments_json: {
         label: "添付ファイル（JSON）",
-        help: "添付ファイルの JSON 配列で、要素は { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? } の形をとり、内容は base64 で `inline` に格納されます。添付の合計生サイズが plugin-email の予算（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES、256 KiB —— 最悪でも base64 で約 350 KB）に収まる場合にのみ書き込まれます。上限を超えるメッセージはインライン配信され、この列には何も保存されないため、行のサイズは有界に保たれます。`storageKey`（行外の内容）にはまだプロデューサーがありません —— objectstack#5172。"
+        help: "添付ファイルの JSON 配列で、要素は { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey?, contentReclaimedAt? } の形をとります。plugin-email の予算（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES、合計生サイズ 256 KiB —— 最悪でも base64 で約 350 KB）以内の内容は base64 で `inline` に格納され、それを超える内容は file-storage ケイパビリティに置かれて要素は代わりに `storageKey` を持つため、いずれの場合も行のサイズは有界に保たれます。filename/contentType/size/hash は**恒久的な**監査証跡です。行外の内容は配信用の成果物であり、行が終端状態に達してから猶予期間を過ぎると削除され、その時点で `storageKey` は `contentReclaimedAt` に置き換わります。"
       },
       status: {
         label: "ステータス",

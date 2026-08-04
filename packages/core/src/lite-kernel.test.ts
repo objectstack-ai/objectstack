@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LiteKernel } from './lite-kernel';
@@ -303,33 +303,97 @@ describe('LiteKernel with Configurable Logger', () => {
             expect(kernel.getState()).toBe('stopped');
         });
 
-        // The other side of the same contract: #5170 rules `kernel:ready` ONLY.
-        // The notification-style hooks keep LiteKernel's isolating dispatch, so
-        // one failing subscriber does not deny the others their notification.
-        // Pinned so a future "unify everything" reading of #5170 has to be a
-        // deliberate change with its own issue, not a silent widening.
-        it('keeps fail-soft dispatch for hooks other than kernel:ready (#5170)', async () => {
+        // #5257 — the DELIBERATE FLIP of the pin #5170 left behind. That pin
+        // read "keeps fail-soft dispatch for hooks other than kernel:ready",
+        // covering `kernel:bootstrapped`, `kernel:listening` AND
+        // `kernel:shutdown` in one assertion, because #5170's dispatch word
+        // ruled `kernel:ready` alone. #5257 rules the other two boot-path
+        // hooks: they propagate now, and only `kernel:shutdown` still holds
+        // the fail-soft half (its own test below). The split is what the
+        // three tests here record — per hook, on purpose.
+        it('fails the boot when a kernel:bootstrapped handler throws (#5257)', async () => {
             const reached: string[] = [];
             const plugin: Plugin = {
-                name: 'other-hook-thrower-plugin',
+                name: 'bootstrapped-thrower-plugin',
                 init: async (ctx) => {
-                    ctx.hook('kernel:bootstrapped', async () => { throw new Error('bootstrapped boom'); });
+                    ctx.hook('kernel:bootstrapped', async () => {
+                        throw new Error('node-type audit could not seal the vocabulary');
+                    });
                     ctx.hook('kernel:bootstrapped', async () => { reached.push('later-bootstrapped'); });
-                    ctx.hook('kernel:listening', async () => { throw new Error('listening boom'); });
+                    ctx.hook('kernel:listening', async () => { reached.push('kernel:listening'); });
+                },
+            };
+
+            kernel.use(plugin);
+
+            // The ORIGINAL error surfaces — not a wrapped "bootstrap failed".
+            await expect(kernel.bootstrap()).rejects.toThrow('node-type audit could not seal the vocabulary');
+
+            // Boot stopped AT the failing handler: no later bootstrapped
+            // handler, and no listening phase at all.
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+        });
+
+        // The headline case of #5257. `kernel:listening` is where HTTP server
+        // plugins open their socket — `HonoServerPlugin` awaits
+        // `server.listen(port)` there with no try/catch of its own. Swallowing
+        // that rejection (EACCES on a privileged port, a listen the edge /
+        // serverless host cannot perform at all) used to leave a live process
+        // that had printed "✅ Bootstrap complete" and was listening on
+        // nothing. Hence the explicit assertion that the success line is NOT
+        // logged: `bootstrap()` rejecting is only half the contract, the other
+        // half is that nothing announced success on the way out.
+        it('fails the boot — and never logs "Bootstrap complete" — when a kernel:listening handler throws (#5257)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'listening-thrower-plugin',
+                init: async (ctx) => {
+                    ctx.hook('kernel:listening', async () => {
+                        throw new Error('listen EACCES: permission denied 0.0.0.0:80');
+                    });
                     ctx.hook('kernel:listening', async () => { reached.push('later-listening'); });
+                },
+            };
+
+            kernel.use(plugin);
+            const infoSpy = vi.spyOn((kernel as unknown as { logger: { info: (...a: unknown[]) => void } }).logger, 'info');
+
+            await expect(kernel.bootstrap()).rejects.toThrow('listen EACCES: permission denied 0.0.0.0:80');
+
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+            const logged = infoSpy.mock.calls.map((c) => String(c[0]));
+            expect(logged.some((m) => m.includes('Bootstrap complete'))).toBe(false);
+            infoSpy.mockRestore();
+        });
+
+        // The half of the old pin that SURVIVES #5257, kept as its own test so
+        // the reason is attached to the one hook it applies to. `kernel:shutdown`
+        // stays fail-soft: on the teardown path there is no "refuse to proceed"
+        // left to buy, and the handlers queued behind a failing one are the
+        // cleanup that flushes buffers and releases resources. Aborting the
+        // sequence would turn one bad handler into leaked resources.
+        it('keeps fail-soft dispatch for kernel:shutdown — a failing handler must not block the remaining cleanup (#5257)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'shutdown-thrower-plugin',
+                init: async (ctx) => {
                     ctx.hook('kernel:shutdown', async () => { throw new Error('shutdown boom'); });
                     ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
                 },
+                destroy: async () => { reached.push('plugin-destroy'); },
             };
 
             kernel.use(plugin);
 
             await expect(kernel.bootstrap()).resolves.toBeUndefined();
             expect(kernel.getState()).toBe('running');
-            expect(reached).toEqual(['later-bootstrapped', 'later-listening']);
 
             await expect(kernel.shutdown()).resolves.toBeUndefined();
-            expect(reached).toContain('later-shutdown');
+            // Both the later hook handler AND the plugin teardown behind it ran.
+            expect(reached).toEqual(['later-shutdown', 'plugin-destroy']);
+            expect(kernel.getState()).toBe('stopped');
         });
     });
 });

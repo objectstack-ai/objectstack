@@ -80,34 +80,47 @@ export class LiteKernel extends ObjectKernelBase {
             await this.runPluginStart(plugin);
         }
 
-        // Trigger ready hook (route/middleware registration phase).
+        // The three boot-path lifecycle hooks all use PROPAGATING dispatch,
+        // identical to `ObjectKernel.bootstrap()`'s `context.trigger` (a bare
+        // awaited loop that never catches): a handler that throws FAILS THE
+        // BOOT on both kernels, the remaining handlers are skipped, the
+        // original error reaches the caller unwrapped, and the kernel is left
+        // 'stopped' rather than 'running' so a failed boot never reads as a
+        // live kernel. `kernel:ready` got this in #5170; `kernel:bootstrapped`
+        // and `kernel:listening` in #5257.
         //
-        // PROPAGATING dispatch, identical to ObjectKernel's (#5170): a
-        // `kernel:ready` handler that throws FAILS THE BOOT on both kernels.
-        // This hook is where plugins assert that what they declared can
-        // actually be delivered — the registries are still filling during
-        // init(), so a boot gate has nowhere earlier to run — and a swallowed
-        // assertion means the process keeps serving without the guarantee it
-        // announced. The kernel is left 'stopped' rather than 'running',
-        // mirroring `ObjectKernel.bootstrap()`'s catch, so a failed boot never
-        // reads as a live kernel.
+        // Why the boot path is the wrong place to be forgiving: everything
+        // between here and the log line below is a PRECONDITION of the
+        // "✅ Bootstrap complete" this method is about to print. Swallowing a
+        // throw does not make the boot succeed — it only makes the failure
+        // invisible while `bootstrap()` resolves normally. `kernel:listening`
+        // is the sharpest case: it is where HTTP server plugins actually open
+        // their socket (`HonoServerPlugin` awaits `server.listen(port)` with
+        // no try/catch of its own, deliberately — propagation is the correct
+        // behaviour there), so a swallowed EACCES / unavailable-listen on an
+        // edge or serverless host produced a live process, a cheerful
+        // "Bootstrap complete", and not one socket listening.
         try {
+            // Route/middleware registration phase, and the only correct moment
+            // for a plugin to assert that what it DECLARED can actually be
+            // delivered — the registries are still filling during init(), so a
+            // boot gate has nowhere earlier to run (#5170).
             await this.triggerHookOrThrow('kernel:ready');
+            // "All synchronous bootstrap has settled" anchor, strictly after
+            // every kernel:ready handler has settled and before any HTTP socket
+            // opens. Carries reconcile/backfill/audit work. NOTE: does not
+            // guarantee background app seed data has settled — subscribe
+            // `app:seeded` for that (see plugin-lifecycle-events.ts).
+            await this.triggerHookOrThrow('kernel:bootstrapped');
+            // HTTP servers open their listening socket here — strictly after
+            // every kernel:ready and kernel:bootstrapped handler has completed.
+            await this.triggerHookOrThrow('kernel:listening');
         } catch (error) {
             this.state = 'stopped';
             throw error;
         }
-        // Trigger bootstrapped hook — "all synchronous bootstrap has settled"
-        // anchor, strictly after every kernel:ready handler has settled and
-        // before any HTTP socket opens. NOTE: does not guarantee background app
-        // seed data has settled — subscribe `app:seeded` for that
-        // (see plugin-lifecycle-events.ts).
-        await this.triggerHook('kernel:bootstrapped');
-        // Trigger listening hook (HTTP servers open their socket here —
-        // strictly after every kernel:ready handler has completed).
-        await this.triggerHook('kernel:listening');
-        this.logger.info('✅ Bootstrap complete', { 
-            pluginCount: this.plugins.size 
+        this.logger.info('✅ Bootstrap complete', {
+            pluginCount: this.plugins.size
         });
     }
 
@@ -131,7 +144,17 @@ export class LiteKernel extends ObjectKernelBase {
         this.state = 'stopping';
         this.logger.info('Shutdown started');
 
-        // Trigger shutdown hook
+        // Trigger shutdown hook — FAIL-SOFT dispatch ({@link triggerHook}),
+        // deliberately, and NOT the propagating dispatcher the boot-path hooks
+        // above use (#5257). This is a per-hook judgement written down, not an
+        // inherited default: on the shutdown path there is no "refuse to
+        // proceed" left to buy. The remaining work — every other subscriber's
+        // cleanup, then each plugin's destroy() in reverse order — is what
+        // flushes buffers, closes connections and releases locks, so letting
+        // one subscriber's failure abort the rest converts a single bad
+        // handler into leaked resources and unflushed writes. A failing
+        // shutdown handler is logged (`Hook handler failed: kernel:shutdown`)
+        // and the cleanup continues.
         await this.triggerHook('kernel:shutdown');
 
         // Destroy plugins in reverse order

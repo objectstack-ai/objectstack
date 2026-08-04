@@ -250,11 +250,17 @@ export abstract class ObjectKernelBase {
      * Trigger a hook with all registered handlers, ISOLATING failures: a
      * handler that throws is logged and the remaining handlers still run.
      *
-     * Use this for notification-style hooks, where one subscriber's failure
-     * must not deny the others their notification. It is the WRONG dispatcher
-     * for a hook that carries boot assertions — a swallowed throw there turns
-     * "this deployment refuses to start misconfigured" into a log line nobody
-     * reads. Those hooks use {@link triggerHookOrThrow} (#5170).
+     * Use this for hooks where one subscriber's failure must not deny the
+     * others their turn — notification-style hooks, and `kernel:shutdown`,
+     * where the handlers still queued behind the failing one are the cleanup
+     * that flushes buffers and releases resources (#5257).
+     *
+     * It is the WRONG dispatcher for anything on the BOOT path. Every hook
+     * dispatched before "✅ Bootstrap complete" is a precondition of that
+     * claim, so swallowing a throw there does not rescue the boot — it only
+     * hides the failure behind a process that reports success. Those hooks
+     * (`kernel:ready`, `kernel:bootstrapped`, `kernel:listening`) use
+     * {@link triggerHookOrThrow} (#5170, #5257).
      *
      * @param name - Hook name
      * @param args - Arguments to pass to handlers
@@ -285,18 +291,31 @@ export abstract class ObjectKernelBase {
      * lifecycle hook (its `context.trigger` is a bare awaited loop that never
      * catches). `LiteKernel` used the isolating {@link triggerHook} for all of
      * them, so one hook name meant two opposite things depending on which
-     * kernel booted the same plugin code (#5170). `kernel:ready` is the hook
-     * where that divergence bites: it is the only correct moment for a plugin
-     * to assert that the preconditions it declared were actually met (the
-     * registries are still filling during `init()`), so "declared but not
-     * deliverable ⇒ refuse to boot" gates live there — and on LiteKernel,
-     * which is what vitest/serverless/edge run, they were being downgraded to
-     * an error log while the process carried on serving traffic without the
-     * guarantee it claimed.
+     * kernel booted the same plugin code (#5170).
      *
-     * Deliberately NOT applied to the other hook names: #5170 rules
-     * `kernel:ready` only, and a notification hook keeping fail-soft dispatch
-     * is a separate judgement per hook, not a side effect of this one.
+     * `LiteKernel` now uses this dispatcher for all three BOOT-path hooks:
+     *
+     * - `kernel:ready` (#5170) — the only correct moment for a plugin to
+     *   assert that the preconditions it declared were actually met (the
+     *   registries are still filling during `init()`), so "declared but not
+     *   deliverable ⇒ refuse to boot" gates live there. On LiteKernel, which
+     *   is what vitest/serverless/edge run, they were downgraded to an error
+     *   log while the process carried on serving traffic without the
+     *   guarantee it claimed.
+     * - `kernel:bootstrapped` and `kernel:listening` (#5257) — the same
+     *   argument one hook later. `kernel:listening` is where HTTP server
+     *   plugins open their socket, so a swallowed failure there produced the
+     *   worst shape available: a live process printing "✅ Bootstrap complete"
+     *   with nothing listening. `kernel:bootstrapped` carries reconcile and
+     *   audit passes whose silent failure is a quieter version of the same
+     *   lie.
+     *
+     * Deliberately NOT applied to `kernel:shutdown`, which keeps
+     * {@link triggerHook}: on the teardown path a failing handler must not
+     * block the cleanup queued behind it. That is a per-hook judgement
+     * recorded at the dispatch site in `lite-kernel.ts`, not an inherited
+     * default — and it is the reason this dispatcher is chosen per hook rather
+     * than swapped in wholesale.
      *
      * @param name - Hook name
      * @param args - Arguments to pass to handlers

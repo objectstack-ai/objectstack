@@ -40,6 +40,16 @@ import {
   unbindEmailTemplateProvenanceStamp,
 } from './email-template-provenance.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
+import {
+  EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+  EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
+  type EmailAttachmentReclaimPayload,
+  type EmailAttachmentStore,
+} from './attachment-storage.js';
+import {
+  reclaimAttachmentContent,
+  type AttachmentReclaimEngine,
+} from './attachment-reclaim.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -123,6 +133,40 @@ const QUEUE_DELIVERY_BACKOFF: QueueBackoffPolicy = {
  * layer over. It labels itself for exactly this purpose
  * (`__serviceInfo.status === 'degraded'`, ADR-0076 D12), so read the label.
  */
+/**
+ * Resolve the `file-storage` capability that can hold out-of-row attachment
+ * content (#5172), or `undefined`.
+ *
+ * Typed at the lookup — `EmailAttachmentStore`, declared in this package —
+ * rather than erased to `any` (#4127/#4251, the #5210 shape): the three calls
+ * this makes are `upload` / `download` / `delete`, and every one of them fails
+ * *invisibly* if the slot's shape changes under us. An upload that throws
+ * `x.upload is not a function` inside the offload's own `try` looks exactly
+ * like "the operator has no storage", so mail would quietly stop being durable
+ * with a log line blaming the deployment.
+ *
+ * Unlike `queue`, the kernel injects no in-memory fallback for `file-storage`,
+ * so absence is a plain throw from `getService` and there is no `degraded`
+ * label to read. The structural probe is still real: `SwappableStorageService`
+ * forwards to whatever adapter the `storage` settings namespace names.
+ */
+export function resolveAttachmentStore(
+  getService: (name: string) => unknown,
+): EmailAttachmentStore | undefined {
+  let storage: unknown;
+  try { storage = getService('file-storage'); } catch { return undefined; }
+  const candidate = storage as Partial<EmailAttachmentStore> | undefined;
+  if (
+    !candidate
+    || typeof candidate.upload !== 'function'
+    || typeof candidate.download !== 'function'
+    || typeof candidate.delete !== 'function'
+  ) {
+    return undefined;
+  }
+  return candidate as EmailAttachmentStore;
+}
+
 export function resolveDurableQueue(getService: (name: string) => unknown): IQueueService | undefined {
   let queue: any;
   try { queue = getService('queue'); } catch { return undefined; }
@@ -471,6 +515,15 @@ export class EmailServicePlugin implements Plugin {
       this.service.setTemplateLoader(templateLoader);
       ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
 
+      // Out-of-row attachment content (#5172). A thunk for the same reason the
+      // queue is one: `file-storage` is a SwappableStorageService whose
+      // adapter changes when the `storage` settings namespace does, and it may
+      // register after this plugin. Resolving here once would pin the service
+      // to the adapter that happened to exist at boot.
+      this.service.setAttachmentStorage({
+        resolve: () => resolveAttachmentStore((name) => ctx.getService(name)),
+      });
+
       // Re-apply the delivery mode now that persistence exists: queue
       // delivery references a `sys_email` row, so it is only meaningful once
       // there is somewhere to write one. (`applyMailSettings` above may
@@ -620,6 +673,73 @@ export class EmailServicePlugin implements Plugin {
         }
       } catch (err) {
         ctx.logger.warn(`EmailServicePlugin: ${EMAIL_SEND_QUEUE} subscription failed`, err as any);
+      }
+
+      // ── 'email.attachment.reclaim' SUBSCRIBER (#5172) ─────────────────
+      // The consuming half of out-of-row attachment content. Each job is
+      // published at a row's terminal transition with a one-day delay and
+      // carries the storage keys, so it can delete the content even when the
+      // row it belonged to is gone by the time it fires — which is exactly
+      // what keeps a future row-retention policy from orphaning bytes.
+      try {
+        const queue: IQueueService | undefined = resolveDurableQueue((name) => ctx.getService(name));
+        if (queue) {
+          const reclaimEngine = engine as unknown as AttachmentReclaimEngine;
+          await queue.subscribe<EmailAttachmentReclaimPayload>(
+            EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+            async (msg) => {
+              const payload = msg?.data;
+              if (!payload?.rowId) return;
+              // A throw here is the job's retry signal, and the reclaimer
+              // throws only for failures a retry can fix (a delete that did
+              // not land). Both shipped adapters delete idempotently, so the
+              // retry re-runs the whole key list cleanly.
+              await reclaimAttachmentContent(payload, {
+                engine: reclaimEngine,
+                store: resolveAttachmentStore((name) => ctx.getService(name)),
+                logger: ctx.logger,
+                rearm: async (delayMs) => {
+                  try {
+                    await queue.publish<EmailAttachmentReclaimPayload>(
+                      EMAIL_ATTACHMENT_RECLAIM_QUEUE,
+                      payload,
+                      {
+                        delay: delayMs,
+                        // A DIFFERENT key from the original publish: the job
+                        // being re-armed is the one currently running, so
+                        // reusing its key would let the running message's own
+                        // idempotency record suppress its successor.
+                        idempotencyKey: `sys_email_attachments:${payload.rowId}:rearm:${Date.now()}`,
+                        maxAttempts: 5,
+                        retries: 4,
+                        backoff: { type: 'exponential', delayMs: 60_000, maxDelayMs: 60 * 60_000 },
+                        metadata: { object: 'sys_email', rowId: payload.rowId },
+                      },
+                    );
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+              });
+            },
+          );
+          ctx.logger.info(
+            `EmailServicePlugin: subscribed to ${EMAIL_ATTACHMENT_RECLAIM_QUEUE} queue `
+            + `(out-of-row attachment content is reclaimed ${Math.round(EMAIL_ATTACHMENT_RECLAIM_GRACE_MS / 3600_000)}h `
+            + 'after a sys_email row reaches a terminal state; its filename/size/hash stay on the row forever)',
+          );
+        }
+      } catch (err) {
+        // `error`, not `warn`: without this subscriber, content that was
+        // uploaded on the promise of being temporary is never deleted, and
+        // nothing else in the process looks at those jobs.
+        ctx.logger.error(
+          `EmailServicePlugin: ${EMAIL_ATTACHMENT_RECLAIM_QUEUE} subscription FAILED — out-of-row attachment `
+          + 'content will keep being written but never reclaimed, so the storage backend grows without bound '
+          + 'while everything else looks healthy. Fix: check the durable queue service '
+          + `(@objectstack/service-queue over an ObjectQL engine) and restart. Cause: ${(err as any)?.message ?? err}`,
+        );
       }
 
       // ── CONSTRUCTOR / CLI GATE (#5160, #5132 precedent) ──────────────

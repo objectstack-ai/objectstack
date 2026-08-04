@@ -86,20 +86,32 @@ export function readEnvWithDeprecation(
 }
 
 /**
- * Resolve whether the deployment runs in multi-org (a.k.a. multi-tenant) mode.
+ * Read the LEGACY `OS_MULTI_ORG_ENABLED` boolean.
  *
- * Single source of truth for the `OS_MULTI_ORG_ENABLED` flag. Resolution: the
- * canonical `OS_MULTI_ORG_ENABLED`; else `false`. Any value other than a
+ * ⚠️ **[ADR-0105 D1] DEMOTED — not the knob to gate on.** `OS_TENANCY_POSTURE`
+ * superseded this flag and is the authoritative one;
+ * {@link resolveTenancyPosture} is where the two are reconciled (posture when
+ * set, else this boolean). This function only reports the legacy input, so a
+ * deployment that sets ONLY the canonical `OS_TENANCY_POSTURE` reads `false`
+ * here while genuinely running a walled multi-organization posture.
+ *
+ * **Answering "is this deployment multi-org?" with this function is a bug.**
+ * Ask the posture instead — `postureEnforcesWall(resolveTenancyPosture())`
+ * (`@objectstack/spec/security`) — or, inside a running kernel, the `tenancy`
+ * service, which additionally knows whether the requested wall is actually
+ * ENFORCED (ADR-0093 D4/D5). Two shipped defects came from gating on this
+ * boolean after the demotion: cloud#1020 (the EE licence gate) and #5233
+ * (`organization/create` 403'd on a posture-only deployment whose organization
+ * wall was fully mounted — the guided "create your workspace" path dead-ended).
+ * The sentence this paragraph replaced actively instructed both.
+ *
+ * Legitimate remaining callers are the ones that specifically mean *the legacy
+ * input*: {@link resolveTenancyPosture}'s own back-compat fallback, and
+ * back-compat/reporting surfaces that must echo what the operator typed.
+ *
+ * Resolution: `OS_MULTI_ORG_ENABLED`; else `false`. Any value other than a
  * case-insensitive `'false'` enables it. (The legacy `OS_MULTI_TENANT` alias was
  * removed in 11.0.)
- *
- * Every site that needs to know "is this multi-org?" — the SQL driver's
- * tenant-audit gate, the auth manager's `/auth/config` feature flag and
- * org-create guard, the CLI / dev / runtime org-scoping plugin wiring — MUST
- * call this instead of re-reading the env, so the driver, the security layer,
- * and the UI can never disagree about the mode. Previously each site inlined
- * its own `String(... ?? 'false').toLowerCase() !== 'false'` (and the SQL
- * driver read `process.env` directly, skipping the deprecation warning).
  *
  * Reads `process.env` live on each call; memoise at the call site if the
  * result must be stable for the process lifetime.
@@ -288,7 +300,9 @@ export function resolveMcpStdioAutoStart(): { enabled: boolean; viaDeprecatedAli
  * self-created orgs (each of which can auto-provision a free environment on the
  * cloud control plane) without penalising a user invited into many orgs.
  *
- * Only meaningful when multi-org is enabled ({@link resolveMultiOrgEnabled}).
+ * Only meaningful under a posture that enforces an organization wall, i.e.
+ * `postureEnforcesWall({@link resolveTenancyPosture}())` — NOT the demoted
+ * `resolveMultiOrgEnabled()` boolean (ADR-0105 D1, #5233).
  * Returns `undefined` when unset or non-positive → no limit (better-auth treats
  * an absent `organizationLimit` as unlimited), preserving self-host behaviour.
  * Deployments that let users self-create orgs SHOULD set a generous cap.
