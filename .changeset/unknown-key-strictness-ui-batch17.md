@@ -26,4 +26,4 @@ contract-first 的修法是把 parse 接到承载键自己的闸门上,已单独
 
 判定写在三处(文件头、`component.test.ts` 的钉子——含一条 `properties` 一旦获得类型化分派就变红的断言、账本 `ui/` 两张表),改要一起改。
 
-账本连带效果:`ui/` 的 authorable strip 从 76 降到 47(总数仍是 100,重分类只是换类不是出列),`no gate` 从 2 涨到 31。**`ui/` 剩余 100 个 strip 站点里有 53 个根本不是本 ratchet 的工作**(22 个 `no door` + 31 个 `no gate`)。
+账本连带效果(与 #5042 批 14 合并后、从存活行重算):`ui/` 的 authorable strip 从 65 降到 **36 of 91**——重分类只是换类不是出列,总数不变,文件保留 29/29 行,`check:strictness-ledger` 的反向钉子仍然管着它;`no gate` 从 2 涨到 **31**。由此得到这个目录现在最大的一个事实:**`ui/` 剩余 91 个 strip 站点里有 55 个(过半)根本不是本 ratchet 的工作**(24 个 `no door` + 31 个 `no gate`)。排后续 `ui/` 收紧批次前请先读这个数。
