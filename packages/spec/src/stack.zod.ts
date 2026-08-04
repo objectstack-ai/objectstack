@@ -1544,21 +1544,6 @@ function composeFunctions(
   return { declared: true, value: merged };
 }
 
-const warnedUncomposedStackKeys = new Set<string>();
-
-/**
- * Report a top-level key that reached composition with no declared rule (#5005).
- *
- * The invariant this restores: composition is never silent about a key it did
- * not know what to do with. It still composes the key by the default rule
- * (arrays concatenate, everything else follows the single-value rule) so
- * nothing is lost — but the NEXT top-level key someone adds without teaching
- * `composeStacks` about it announces itself here, instead of being discovered
- * by accident during unrelated work the way `server:` was.
- *
- * Warn-once per key, like the other authoring-time notices in this module.
- * @internal
- */
 const warnedMalformedCollectionKeys = new Set<string>();
 
 /**
@@ -1581,6 +1566,21 @@ function warnMalformedCollectionKey(key: string): void {
   );
 }
 
+const warnedUncomposedStackKeys = new Set<string>();
+
+/**
+ * Report a top-level key that reached composition with no declared rule (#5005).
+ *
+ * The invariant this restores: composition is never silent about a key it did
+ * not know what to do with. It still composes the key by the default rule
+ * (arrays concatenate, everything else follows the single-value rule) so
+ * nothing is lost — but the NEXT top-level key someone adds without teaching
+ * `composeStacks` about it announces itself here, instead of being discovered
+ * by accident during unrelated work the way `server:` was.
+ *
+ * Warn-once per key, like the other authoring-time notices in this module.
+ * @internal
+ */
 function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
   if (warnedUncomposedStackKeys.has(key)) return;
   warnedUncomposedStackKeys.add(key);
