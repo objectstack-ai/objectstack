@@ -73,6 +73,34 @@
  * recurses into those and reaches the very same `checkFormat` /
  * `checkJsonSchema`. Nothing else in the stack is judged here.
  *
+ * ### The keys read, and the one deliberately NOT read (#5096)
+ *
+ * This rule is registered `input: 'parsed'` (`authoring-rules.ts`), so on the
+ * compile path it sees what `ObjectStackSchema` returned. Every key it reads is
+ * one `@objectstack/spec` DECLARES — a contract, not a style preference: the
+ * strict sub-schemas reject an undeclared key by NAME, so a branch keyed on one
+ * is inert for every stack an author can ship (#4984, #5009, #5017, #5096).
+ *
+ * | Read                                        | Declared by                          |
+ * |---------------------------------------------|--------------------------------------|
+ * | `objects[].validations[]`                   | `ObjectSchema`                       |
+ * | `validations[].type` / `.name`              | every `*ValidationSchema` variant    |
+ * | `validations[].regex`                       | `FormatValidationSchema`             |
+ * | `validations[].schema`                      | `JSONValidationSchema`               |
+ * | `validations[].then` / `.otherwise`         | `ConditionalValidationSchema`        |
+ *
+ * NOT read: **`objects[].validationRules`**. `ObjectSchema` declares
+ * `validations` and is strict, so the alias is refused by name — "Unrecognized
+ * key(s) on this object: `validationRules`. … Did you mean `validationRules` →
+ * `validations`?" (#4001). It was read here as a `??` fallback with the
+ * canonical key FIRST, so the limb could not run on any parsing stack; what it
+ * did do was assert, to every later reader and to every AI writing metadata
+ * against this source, that `objects[].validationRules` is a real authoring
+ * surface. Alias tolerance belongs at the schema's refusal, never in a consumer
+ * (Prime Directive #12) — `validate-expressions.ts` shed the identical read in
+ * #5017/PR #5046, and this was the eighth of that family (#5096). The live
+ * `.shape` and the refusal text are both pinned in this rule's test.
+ *
  * ## Why `error`
  *
  * The severity bar `lint-flow-patterns.ts` states — gate when NO reading of the
@@ -232,11 +260,11 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
 
   for (const obj of asArray(stack.objects)) {
     const objectName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
-    // `validations` is the spec key; `validationRules` is read for the same
-    // reason `validate-expressions.ts` reads it — so the two rules that judge
-    // one object's validation list can never see different lists. Not a new
-    // dialect: no key is invented here, and neither rule rewrites anything.
-    const validations = obj.validations ?? obj.validationRules;
+    // `validations` is the key `ObjectSchema` declares; `validationRules` is a
+    // rejected alias of it (#5096) — see the `### The keys read` note above.
+    // The two rules that judge one object's validation list still see the same
+    // list, because `validate-expressions.ts` reads the same single key (#5017).
+    const validations = obj.validations;
 
     for (const authored of asArray(validations)) {
       for (const { rule, label, path } of flattenRules(authored, '', '')) {
