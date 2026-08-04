@@ -200,7 +200,10 @@ describe('reconcileContainerCoverage — deferrals are resolved, never believed'
     expect(r.deferredChildKeys).toBe(0);
   });
 
-  it('reports a stale coordinate once even when both lists name it', () => {
+  it('reports a gone-and-double-declared coordinate ONLY as stale', () => {
+    // Both rows are wrong, but the single fix is to delete them, and a second
+    // heading about a coordinate that no longer exists would obscure that —
+    // the same "do not report it twice" rule orphans.mts follows.
     const r = reconcileContainerCoverage({
       observed: [],
       baseline: ['object/fields'],
@@ -208,6 +211,7 @@ describe('reconcileContainerCoverage — deferrals are resolved, never believed'
       classifiedKeysAt: resolver,
     });
     expect(r.stale).toEqual(['object/fields']);
+    expect(r.brokenDeferrals).toEqual([]);
   });
 
   it('reports a deferral for a container that no longer exists as STALE, not broken', () => {

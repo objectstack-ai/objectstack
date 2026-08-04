@@ -153,9 +153,15 @@ export function reconcileContainerCoverage({
   const brokenDeferrals: string[] = [];
   let deferredChildKeys = 0;
   for (const { container, to } of deferred) {
+    const here = seen.get(container);
+    // Already reported as stale. Say nothing more about it — including the
+    // both-lists contradiction below — because the single fix is to delete the
+    // row(s), and a second heading about a coordinate that no longer exists
+    // would obscure it (the `orphans.mts` rule, same reasoning).
+    if (!here) continue;
     // Declared in BOTH lists — "classified nowhere" AND "classified at `to`"
     // cannot both be true, and whichever the gate silently preferred would
-    // decide whether the keys count as a gap. Refuse instead of picking.
+    // decide whether these keys count as a gap. Refuse instead of picking.
     if (recorded.has(container)) {
       brokenDeferrals.push(
         `${container} is declared in BOTH lists — 'containers' says its child keys are classified nowhere, ` +
@@ -163,8 +169,6 @@ export function reconcileContainerCoverage({
       );
       continue;
     }
-    const here = seen.get(container);
-    if (!here) continue; // already reported as stale
     const target = classifiedKeysAt(to);
     if (!target) {
       brokenDeferrals.push(
