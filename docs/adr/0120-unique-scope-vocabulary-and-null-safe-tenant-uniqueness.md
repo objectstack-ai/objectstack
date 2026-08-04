@@ -36,11 +36,16 @@ the per-tenant meaning **NULL-safe**:
 | D7 | Staged over 17.x → 18 | additive in 17.x, rejection + conversion at protocol 18 |
 | D8 | Freeze until accepted | no unilateral driver-sql semantic change before this ADR is accepted (standing PM order on #4986) |
 
-Governing principle, inherited from ADR-0113: **when one spelling carries two meanings,
-do not pick a winner — split the vocabulary and make the author state intent.** And from
+Governing principles. From ADR-0113: **when one spelling carries two meanings, do not
+pick a winner — split the vocabulary and make the author state intent.** From
 ADR-0049/0078: a unique constraint that validates clean but enforces nothing is the worst
 of the four outcomes; every scenario below must end in either a real constraint or a loud
-rejection, never a silent no-op.
+rejection, never a silent no-op. And a third, stated by the maintainer on #4986 and
+binding on every decision here: **app metadata is deployment-mode portable.** The same
+app package must run unmodified in single-organization and multi-organization
+deployments; the author states the *business boundary* of a constraint (per-organization
+vs per-installation) — never the topology, which the author cannot know. See §Mode
+portability below.
 
 ## Context
 
@@ -126,6 +131,7 @@ review gap to be raised on the PR.)
 | S10 | Cross-tenant existence-oracle avoidance (#3696 security rationale) | field `true` only | leaks via S3/S6 NULL-void edge? No — leak was global-index rejections; fixed for fields | `'tenant'` extends the no-oracle property to declared composites | a tenant's insert can no longer be rejected by (or reveal) another tenant's values on any `'tenant'` index |
 | S11 | Tenancy-less objects — `tenancy` disabled or `managedBy: 'better-auth'` (no tenant column) | all spellings | single-column / listed columns | unchanged; `'tenant'` degrades to listed columns alone, exactly as field-level `true` already does | unchanged |
 | S12 | Non-unique indexes (`unique: false` / omitted), `partial`, index `type` | verbatim | n/a | untouched — this ADR governs *unique scope* only; `'tenant'` composes with `partial` (both key-part forms already parse, #4884) | n/a |
+| S13 | **Mode-portable app package** — one metadata app, deployed both single-org and multi-org | field `true` (void on single-org, #5030) or hand-written org composite (author must know the convention *and* the topology trap) | multi-org: yes · single-org: **void** | `'tenant'` — states the business boundary, not the topology | **correct in both modes** — per-org under multi-org, deployment-wide under single-org (§Mode portability) |
 
 Two properties of this table are the ADR's acceptance criteria:
 
@@ -134,6 +140,41 @@ Two properties of this table are the ADR's acceptance criteria:
 2. **Every Before→After transition in S4/S5/S6 is byte-identical on disk** unless the
    author edits metadata (S6 opt-in) — the conversion is semantic bookkeeping, not a
    migration.
+
+## Mode portability: one app package, both deployment modes
+
+The constraint that shapes the vocabulary (maintainer requirement, #4986): a metadata
+app is authored **once** and must run unmodified under both deployment modes. The
+author can decide the *business rule* — "is this value one-per-organization, or
+one-per-installation?" — because that question has a mode-independent answer. The
+author cannot decide, and must never be asked to encode, the *topology* the app will
+be deployed into. The vocabulary satisfies this because both words name the business
+boundary, and D3 is what makes the single-org degradation real rather than nominal
+(#5030 is precisely the vocabulary-shaped hole where it used to be a lie):
+
+| Declaration | Multi-org deployment | Single-org deployment |
+|:---|:---|:---|
+| `'tenant'` | unique within each organization (the isolation boundary) | the deployment **is** one organization data space (the D3 bucket) → deployment-wide unique — exactly what the same business rule means there |
+| `'global'` | unique across the whole installation, all organizations | deployment-wide unique — physically coincides with `'tenant'`, semantically distinct (see transitions below) |
+
+**Mode transitions are part of the contract.** The physical coincidence of the two
+scopes under single-org is temporary state, not equivalence — the day the deployment
+changes mode, the declarations diverge, and the fact that the author *stated* the
+scope is what makes the transition mechanical:
+
+- **Single-org → multi-org** (a customer enables organizations): every `'tenant'`
+  constraint *relaxes* from deployment-wide to per-org — a pure loosening; existing
+  rows keep their bucket, new organizations open their own scopes, no violation is
+  possible, **zero migration**. `'global'` constraints do not move. Had the intent
+  been positional (bare `true`), this transition would have no right answer.
+- **Multi-org → single-org** (consolidation): `'tenant'` constraints *tighten* —
+  previously-separate org scopes merge, duplicates across former orgs are possible,
+  and the change goes through the D4 ceremony (drift op + duplicate pre-flight,
+  operator resolves collisions before the constraint lands). Never silent.
+
+Corollary for acceptance: the conformance suite must boot the **same fixture app** in
+both modes and assert each S-row's enforcement in each (see Acceptance tests) — mode
+portability is tested, not assumed.
 
 ## Decisions
 
@@ -151,6 +192,10 @@ Two properties of this table are the ADR's acceptance criteria:
   (D3 form) to the listed columns at registration, where tenancy is known — same shape
   family as field-level composites. On an object with no tenant column, `'tenant'`
   degrades to the listed columns alone, mirroring field-level behavior (S11).
+  Both words are **deployment-mode-invariant** (§Mode portability): they name the
+  business boundary relative to the organization, never the topology — the same
+  declaration is correct under single-org and multi-org deployment, which is what
+  lets one app package serve both.
   **Bare `true` on a declared index is retired**: deprecation warning in 17.x (D5a),
   rejected at protocol 18 with a prescriptive error naming both replacements. It is the
   one spelling whose meaning was positional, and it is the trap #4986 documents; an
@@ -344,6 +389,10 @@ orthogonal (S12).
 - Matrix invariant 1: for every S-row, either an enforcing index exists (integration
   test inserts the violating pair and expects rejection) or the spelling is rejected at
   validate — no silent third state.
+- Mode portability (S13): one fixture app booted under single-org **and** multi-org
+  configuration; every unique declaration's enforcement asserted in both modes, plus
+  the single-org → multi-org transition (loosening, zero migration ops emitted) and
+  the reverse (tightening surfaces as D4 ops, never auto-applied over duplicates).
 - Matrix invariant 2: expected-index output for the S4/S5/S6 corpus is byte-identical
   before/after D2 on an untouched database (drift plan is empty).
 - The #5030 probe, as a permanent regression test, on both single-tenant and
