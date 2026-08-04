@@ -296,6 +296,9 @@ const report: any = {
   undrilledStale: [] as string[], // a baseline row whose container now drills / is no longer a container
   undrilled: [] as Array<{ key: string; childKeys: string[] }>, // the recorded inheritance population — a worklist, not a failure
   undrilledChildKeys: 0, // how many child keys ride on those blanket verdicts
+  brokenDeferrals: [] as string[], // a declared deferral whose target is missing, drifted, or double-declared
+  deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
+  deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
   evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
@@ -432,15 +435,46 @@ const undrilledBaselineFile = join(here, 'undrilled-containers.baseline.json');
 const undrilledBaseline = parseUndrilledBaseline(
   JSON.parse(readFileSync(undrilledBaselineFile, 'utf8')),
 );
-const coverage = reconcileContainerCoverage({ observed: observedContainers, baseline: undrilledBaseline });
+
+/**
+ * Resolve a deferral target to the keys CLASSIFIED there, or `null` if it does
+ * not exist. Two forms, both real coordinates rather than prose:
+ *   `field`      — a governed type root; its walked top-level keys all carry a
+ *                  verdict (the type is governed, so the forward pass proved it).
+ *   `view/list`  — a drilled ledger coordinate; its `children` keys are verdicts.
+ * Anything else dangles, which is the failure this resolution exists to produce.
+ */
+function classifiedKeysAt(target: string): readonly string[] | null {
+  if (!target.includes('/')) {
+    if (!GOVERNED.includes(target)) return null;
+    try {
+      return topProps(target).map((p) => p.key);
+    } catch { return null; }
+  }
+  const [type, prop] = target.split('/');
+  if (!GOVERNED.includes(type)) return null;
+  const children = loadLedger(type).props?.[prop]?.children;
+  return children ? Object.keys(children) : null;
+}
+
+const coverage = reconcileContainerCoverage({
+  observed: observedContainers,
+  baseline: undrilledBaseline.containers,
+  deferred: undrilledBaseline.deferred,
+  classifiedKeysAt,
+});
 report.undrilledNew = coverage.undeclared.map(
   (c) => `${c.key} — one verdict covers ${c.childKeys.length} unclassified child key(s): ${c.childKeys.join(', ')}`,
 );
 report.undrilledStale = coverage.stale;
+report.brokenDeferrals = coverage.brokenDeferrals;
+const deferredKeys = new Set(undrilledBaseline.deferred.map((d) => d.container));
 report.undrilled = observedContainers
-  .filter((c) => !coverage.undeclared.some((u) => u.key === c.key))
+  .filter((c) => !coverage.undeclared.some((u) => u.key === c.key) && !deferredKeys.has(c.key))
   .map((c) => ({ key: c.key, childKeys: [...c.childKeys] }));
 report.undrilledChildKeys = coverage.inheritedChildKeys;
+report.deferredContainers = undrilledBaseline.deferred.map((d) => `${d.container} → ${d.to}`);
+report.deferredChildKeys = coverage.deferredChildKeys;
 
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
@@ -478,7 +512,8 @@ const failed =
   report.ungoverned.length > 0 ||
   report.stalePending.length > 0 ||
   report.undrilledNew.length > 0 ||
-  report.undrilledStale.length > 0;
+  report.undrilledStale.length > 0 ||
+  report.brokenDeferrals.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -555,6 +590,17 @@ if (asJson) {
     console.log('');
     STALE_UNDRILLED_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
+  if (report.brokenDeferrals.length) {
+    console.log(`\n✗ ${report.brokenDeferrals.length} broken deferral(s) — a "classified elsewhere" claim that does not resolve:`);
+    report.brokenDeferrals.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   This is the #4956 claim itself, caught. A deferral is only allowed because\n' +
+      '   the gate RESOLVES it: the target must exist (a governed type, or a drilled\n' +
+      '   `type/prop` coordinate) and classify exactly this container\'s child keys.\n' +
+      '   Point it at the real coordinate, drill the container, or move it to the\n' +
+      '   `containers` list and admit the keys are classified nowhere.',
+    );
+  }
   // ── re-verification clock ──
   const v = report.verification!;
   if (v.errors.length) {
@@ -584,11 +630,15 @@ if (asJson) {
   // count nobody can see is the same silence that produced #4956.
   console.log(
     `\ncontainer coverage: ${report.undrilled.length} container entr(ies) carry a blanket verdict over ` +
-    `${report.undrilledChildKeys} child key(s) that are classified NOWHERE (recorded in ` +
-    'scripts/liveness/undrilled-containers.baseline.json — shrink-only).',
+    `${report.undrilledChildKeys} child key(s) that are classified NOWHERE; ` +
+    `${report.deferredContainers.length} more defer ${report.deferredChildKeys} key(s) to a coordinate that ` +
+    'DOES classify them (resolved, not asserted). Both recorded in ' +
+    'scripts/liveness/undrilled-containers.baseline.json — shrink-only.',
   );
   if (showUndrilled) {
-    console.log('\n  undrilled worklist — drill the divergent ones first:');
+    console.log('\n  resolved deferrals (classified, just not here):');
+    report.deferredContainers.forEach((s: string) => console.log(`    ${s}`));
+    console.log('\n  undrilled worklist — classified nowhere; drill the divergent ones first:');
     report.undrilled.forEach((c: { key: string; childKeys: string[] }) =>
       console.log(`    ${c.key.padEnd(34)} ${c.childKeys.length} key(s): ${c.childKeys.join(', ')}`));
   } else if (report.undrilled.length) {

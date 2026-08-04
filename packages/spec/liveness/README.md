@@ -360,21 +360,46 @@ worse than an honest coarse one. What is *not* acceptable is inheriting that cov
 > Retired four days late in #4876 / PR #4995, by hand.
 
 So the gate now asks a **third** question, alongside schema → ledger and ledger → schema:
-*is every blanket container verdict a declared one?* A container entry must either drill
-(`children`) or appear in `../scripts/liveness/undrilled-containers.baseline.json`:
+*is every blanket container verdict a declared one?* Exactly three dispositions are legal,
+all of them data:
 
-- a container that is **neither** fails, printing the child keys its verdict silently covers;
-- a baseline row whose container **now drills** also fails — the same rot as an orphan row,
-  opposite direction (an overstated debt misleads as much as an unrecorded one);
-- every run prints how many child keys ride on inheritance, and the success line no longer
-  claims a completeness it does not have. `check:liveness --undrilled` prints the worklist.
+| Disposition | Meaning |
+|---|---|
+| **drilled** — `children` on the entry | per-key verdicts, as before |
+| **deferred** — a `{ container, to }` row in `../scripts/liveness/undrilled-containers.baseline.json` | the subtree is classified at another coordinate, and the gate **resolves** the reference |
+| **recorded** — a coordinate in that file's `containers` list | genuinely classified nowhere; a counted, shrink-only debt |
 
-The baseline is a **shrink-only ratchet**, not an allowlist: 64 containers / 540 child keys
-at landing, each a candidate for drilling. Adding a row is a visible edit to a file named
-for the debt it records — which is the point, since the thing it replaced (a reassuring
-sentence in a `note`) cost nothing to write and could not be checked. Logic and rationale
-live in `../scripts/liveness/drill.mts`; it is pure and unit-tested, because a tree that is
-fully reconciled by construction would otherwise prove only that the check is quiet.
+A container in **none** of the three fails, printing the child keys its verdict silently
+covers. A baseline row whose container **now drills** also fails — the same rot as an orphan
+row, opposite direction (an overstated debt misleads as much as an unrecorded one). Every
+run prints both populations, the success line no longer claims a completeness it does not
+have, and `check:liveness --undrilled` prints the worklist.
+
+**Why `deferred` exists, and why it is resolved rather than believed.** "Classified
+elsewhere" is the exact sentence that caused #4956 — but it is sometimes *true*:
+`object.fields[]` really is `FieldSchema`, which the `field` ledger classifies in full, and
+`object.listViews[]` is the same ListView surface `view.list` already drills. Six containers
+(248 child keys, nearly half the population) are in that position, so recording them as
+"classified nowhere" would have been this file's own false claim. What separates a legal
+deferral from the #4956 defect is not the claim but **who checks it**: a deferral names its
+target as data, and the gate requires that target to exist (a governed type root, or a
+drilled `type/prop` coordinate) and to classify **exactly** this container's child keys.
+A dangling target fails; so does a drifted one — equality, not subset, because a container
+that grows a key its target never classifies is #4956 one level down. Pointing a deferral at
+`DashboardWidgetSchema` today produces:
+
+```
+✗ 1 broken deferral(s) — a "classified elsewhere" claim that does not resolve:
+    object/fields defers to 'DashboardWidgetSchema', which does not exist — no governed
+    type and no drilled ledger coordinate of that name
+```
+
+At landing: **58 containers / 292 child keys classified nowhere**, plus 6 resolved
+deferrals covering 248. Adding a row is a visible edit to a file named for the debt it
+records — the point, since the thing it replaced (a reassuring sentence in a `note`) cost
+nothing to write and could not be checked. Logic and rationale live in
+`../scripts/liveness/drill.mts`; it is pure and unit-tested, because a tree that is fully
+reconciled by construction would otherwise prove only that the check is quiet.
 
 **Drilling a container is EVIDENCE work, not bookkeeping.** The 22 widget keys took a
 call-graph pass across both repos and produced six dead verdicts and one one-path-only

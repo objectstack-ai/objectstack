@@ -46,10 +46,22 @@ dropped and `{ offset }` fails in the analytics executor.
 **What changed for the gate**
 
 `pnpm --filter @objectstack/spec check:liveness` gains a third direction. A
-ledger entry sitting on a container property must now either drill (`children`)
-or be recorded in the shrink-only
-`scripts/liveness/undrilled-containers.baseline.json`; a new undeclared
-inheritance fails, and so does a baseline row whose container has since been
-drilled. Every run reports how many child keys ride on blanket verdicts (64
-containers / 540 keys today), `--undrilled` prints the worklist, and the success
-line no longer claims a completeness it does not have.
+ledger entry sitting on a container property must now declare one of exactly
+three dispositions, all of them data: **drilled** (`children`), **deferred** (a
+`{ container, to }` row naming the coordinate that does classify the subtree),
+or **recorded** (a row in the shrink-only
+`scripts/liveness/undrilled-containers.baseline.json`). A container in none of
+the three fails, and so does a baseline row whose container has since been
+drilled.
+
+A deferral is **resolved, not believed** — the target must exist (a governed
+type root, or a drilled `type/prop` coordinate) and classify exactly the
+container's child keys; a dangling or drifted target fails. That is the #4956
+claim itself, made checkable: pointing a deferral at `DashboardWidgetSchema`
+now produces a build failure naming it, where the same words in a `note` were
+believed for a release.
+
+Every run reports both populations (today: 58 containers / 292 child keys
+classified nowhere, plus 6 resolved deferrals covering 248), `--undrilled`
+prints the worklist, and the success line no longer claims a completeness it
+does not have.
