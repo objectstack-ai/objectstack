@@ -235,35 +235,81 @@ export const AddressSchema = lazySchema(() => z.object({
  * }
  */
 /**
- * Uniqueness scope for a `unique` constraint (#3696).
+ * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
+ * §Terminology; pattern of `strictTenancyError`): the error must carry the
+ * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
+ * name `'organization'` explicitly — a typo must be a loud, fixable parse
+ * error, never a silent scope change. Declared before `UniqueScopeSchema`
+ * because `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ */
+const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'invalid_union') return undefined;
+  const input = (issue as { input?: unknown }).input;
+  const spelled = typeof input === 'string' ? `'${input}'` : String(input);
+  const nearMiss =
+    input === 'tenant' || input === 'org'
+      ? ` ${spelled} is not accepted and is not an alias — the per-organization scope is spelled 'organization' (ADR-0120: "tenant" is overloaded across deployment topologies, and the platform spells the word out).`
+      : '';
+  return (
+    `Invalid unique scope ${spelled}. Allowed: true/false, 'organization' ` +
+    `(one holder per organization — the explicit spelling of true), or 'global' ` +
+    `(one holder across the whole installation).${nearMiss}`
+  );
+};
+
+/**
+ * Uniqueness scope for a `unique` constraint (#3696, ADR-0120 D1).
  *
- * `unique: true` on a tenant-scoped object materializes as a COMPOSITE unique
- * index `(tenantField, field)` — "unique within the tenant" — matching how
- * every other tenant-aware subsystem already behaves (reads are RLS-filtered,
- * writes stamp the tenant column, and the autonumber sequence table is keyed by
- * `(object, tenant_id, field, scope)` so each tenant counts from 1). A
- * single-column global index contradicted that: two tenants each issuing
- * `PROD-00001` collided on an index neither of them could see, and the
- * resulting UNIQUE violation doubled as a cross-tenant existence oracle
- * (a rejected insert told tenant B that *somebody else* holds the value).
+ * The vocabulary is `boolean | 'global' | 'organization'` — the scope of a
+ * unique constraint is *said*, never inferred from where the declaration sits.
  *
- * `unique: 'global'` opts back into the old single-column behavior for the
- * genuinely platform-wide identifiers where it is correct: an external
- * provider id (`stripe_customer_id`), a DNS hostname, a globally reserved
- * slug, a device identity. Global uniqueness is the special case and now has
- * to say so.
+ * `unique: true` on an organization-scoped object materializes as a COMPOSITE
+ * unique index `(organization key part, field)` — "unique within the
+ * organization" — matching how every other tenant-aware subsystem already
+ * behaves (reads are RLS-filtered, writes stamp the tenant column, and the
+ * autonumber sequence table is keyed by `(object, tenant_id, field, scope)` so
+ * each organization counts from 1). A single-column global index contradicted
+ * that: two organizations each issuing `PROD-00001` collided on an index
+ * neither of them could see, and the resulting UNIQUE violation doubled as a
+ * cross-tenant existence oracle (a rejected insert told org B that *somebody
+ * else* holds the value).
  *
- * On an object with no tenant column (`tenancy.enabled: false`, or simply no
- * tenant field) both spellings materialize identically — single-column unique.
- * Single-tenant deployments are therefore unaffected: the tenant column is
- * constant, so the composite index degenerates to the single-column one.
+ * `unique: 'organization'` is the EXPLICIT spelling of that same
+ * per-organization scope (ADR-0120 D1) — a synonym of `true` at field level,
+ * with identical materialization. Non-normative guidance: official examples,
+ * scaffolding, and generators emit `'organization'` in new code so intent is
+ * legible without knowing the positional default; bare `true` stays valid
+ * indefinitely (it has exactly one documented meaning here and no trap).
+ *
+ * `unique: 'global'` opts into installation-wide uniqueness for the genuinely
+ * platform-wide identifiers where it is correct: an external provider id
+ * (`stripe_customer_id`), a DNS hostname, a globally reserved slug, a device
+ * identity. Global uniqueness is the special case and has to say so.
+ *
+ * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): the kernel
+ * injects `organization_id` unconditionally, so on single-organization stacks
+ * the column exists and is NULL on every row — and SQL UNIQUE is
+ * NULL-distinct, so a raw-column composite `(organization_id, field)` enforces
+ * NOTHING there. The organization key part therefore materializes NULL-safe as
+ * `COALESCE(organization_id, '__global__')` (driver-side, #5030): NULL-org
+ * rows collapse into one platform bucket, unique among themselves; non-NULL
+ * rows are untouched. On an object with no tenant column at all
+ * (`tenancy.enabled: false`) both per-organization spellings degrade to the
+ * listed column alone.
+ *
+ * Rejected words (ADR-0120 §Terminology): `'tenant'` and `'org'` are not
+ * accepted and are NOT aliases — "tenant" is overloaded across deployment
+ * topologies and the platform spells the noun out (`organization_id`). The
+ * parse error names `'organization'` so the fix ships inside the rejection.
  */
 export const UniqueScopeSchema = lazySchema(() =>
-  z.union([z.boolean(), z.literal('global')]),
+  z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
+    error: uniqueScopeError,
+  }),
 );
 
 /** @see UniqueScopeSchema */
-export type UniqueScope = boolean | 'global';
+export type UniqueScope = boolean | 'global' | 'organization';
 
 /**
  * Does this `unique` declaration ask for platform-wide (cross-tenant)
@@ -276,10 +322,30 @@ export function isGlobalUnique(unique: unknown): boolean {
 
 /**
  * Does this `unique` declaration ask for a unique constraint at all?
- * Both `true` and `'global'` do; `false`/absent do not.
+ * `true`, `'global'` and `'organization'` do; `false`/absent do not.
+ * `'organization'` counts from the moment the word exists (ADR-0120 D1) —
+ * a scope the vocabulary accepts but no driver reads would be
+ * declarable-but-inert, the exact ADR-0078 class this vocabulary closes.
  */
 export function isUniqueDeclared(unique: unknown): boolean {
-  return unique === true || unique === 'global';
+  return unique === true || unique === 'global' || unique === 'organization';
+}
+
+/**
+ * Is this the EXPLICIT `'organization'` spelling (ADR-0120 D1)?
+ *
+ * Deliberately narrow — it detects the word, not the scope. At field level,
+ * bare `true` also means per-organization (the positional default;
+ * `isUniqueDeclared(u) && !isGlobalUnique(u)` is that question), so field
+ * consumers need no new predicate. This helper exists for the DECLARED-index
+ * side, where the two spellings differ: `'organization'` asks the driver to
+ * prepend the NULL-safe organization key part at registration, while bare
+ * `true` stays verbatim (deprecated spelling of `'global'` — warned in 17.x,
+ * rejected at protocol 18). Single source of truth so SQL and Mongo index
+ * sync cannot drift on the distinction.
+ */
+export function isOrganizationUnique(unique: unknown): boolean {
+  return unique === 'organization';
 }
 
 /**
@@ -399,8 +465,8 @@ export const FieldSchema = lazySchema(() => strictObject({
   multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
-  // unique. See {@link UniqueScopeSchema} for why `true` is tenant-scoped.
-  unique: UniqueScopeSchema.default(false).describe("Unique constraint. true = unique within the tenant (composite with the tenant column on tenant-scoped objects); 'global' = unique platform-wide across all tenants"),
+  // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
+  unique: UniqueScopeSchema.default(false).describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'"),
   defaultValue: z.unknown().optional().describe('Default value'),
   
   /** Text/String Constraints */

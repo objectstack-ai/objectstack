@@ -80,7 +80,7 @@ const result = AddressSchema.parse(data);
 | **storage** | `{ notNull?: boolean }` | optional | Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested. |
 | **searchable** | `boolean` | optional | Is searchable |
 | **multiple** | `boolean` | optional | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
-| **unique** | `boolean \| 'global'` | optional | Unique constraint. true = unique within the tenant (composite with the tenant column on tenant-scoped objects); 'global' = unique platform-wide across all tenants |
+| **unique** | `boolean \| 'global' \| 'organization'` | optional | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
 | **defaultValue** | `any` | optional | Default value |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
@@ -242,6 +242,12 @@ Type: `boolean`
 #### Option 2
 
 Type: `'global'`
+
+---
+
+#### Option 3
+
+Type: `'organization'`
 
 ---
 

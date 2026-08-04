@@ -688,6 +688,7 @@
     "isLegacyApiMethod (function)",
     "isMultiValueField (function)",
     "isNowDefaultToken (function)",
+    "isOrganizationUnique (function)",
     "isPlainRecord (function)",
     "isRuntimeDefaultToken (function)",
     "isTenancyDisabled (function)",

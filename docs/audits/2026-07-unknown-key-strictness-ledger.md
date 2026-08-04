@@ -640,7 +640,7 @@ sites left to be a verdict about.
 
 | File | Class | Note |
 |---|---|---|
-| `object.zod.ts` | authorable | top-level already guarded (#1535); inner blocks partially strict |
+| `object.zod.ts` | authorable | top-level already guarded (#1535); inner blocks strict as of 批 20 — except `IndexSchema`, held on a measured console drift (see the `data/` remaining-strip row) |
 | `data-engine.zod.ts` | wire (p) | engine contract shapes (was 14 — `DataEngineBatchRequestSchema` retired with `IDataEngine.batch?`, #4618) |
 | `external-lookup.zod.ts` | mixed (p) | authored config + wire results |
 | `seed-loader.zod.ts` | mixed (p) | seed file shapes are authored; loader state is runtime |
@@ -827,7 +827,7 @@ next person to open that file will look.
 | `keyboard.zod.ts` | **no door** | ⛔ same as `touch` — #4988 |
 | `offline.zod.ts` | **no door** | ⛔ same as `touch` — #4988 |
 | `sharing.zod.ts` | **no door** | 批 14: `SharingConfig` was a live door and is **closed**; the 1 left is `EmbedConfigSchema`, which no module in the repo even names (BFS-unreachable, zero parse). **This row shrinks without disappearing** — the first `no door` floor, the same read the `Class` column already has to carry for `flow`'s and `etl`'s wire floors. ADR-0049 verdict: #5015 |
-| `app.zod.ts` | verify | `BaseNavItemSchema` — the base the strict discriminated-union members extend. Closing a base that is `.extend()`ed is the #4001 trap that bit `view` (finding 16); confirm the members' strictness is not already covering it before touching |
+| `app.zod.ts` | verify | **批 19 ran the check and it came back NEGATIVE — no posture change, and the row's `Class` is held at `verify` deliberately (see below).** `BaseNavItemSchema`. The instruction here was to confirm the members' strictness was not already covering it before touching; it is, and the premise this row carried was wrong twice. (1) **The members do not `.extend()` the base — they spread `...BaseNavItemSchema.shape`.** That is a different mechanism, and the difference is the whole of finding 16: `.extend()` clones INHERIT the base's posture (which is how closing two `view` authoring schemas silently closed the Studio round-trip overlay), while a `...shape` spread copies the per-key schemas into a FRESH `z.object` whose posture is its own. Measured in both directions rather than read off the source, because *"closing the base closes the members"* and *"closing the base is a no-op"* are opposite claims: `strictBase.extend({…})` rejects an unknown key, `z.object({...strictBase.shape})` accepts it, `z.object({...openBase.shape}).strict()` rejects it. (2) **All nine branches already apply their own `.strict()`** with the curated `navItemUnknownKeyError` — asserted per branch through the real door (`AppSchema.navigation`, a `discriminatedUnion` on `type`), with a positive control (every base-contributed key, incl. `requiresService` which no branch declares itself, is ACCEPTED) and a negative control (an undeclared key is REJECTED) in the same run. The base is also module-private and has zero `.parse()` anywhere, so `.strict()` here would be a property of a parse that does not exist. Closing it is therefore a guaranteed no-op, and #4583 is explicit that a no-op closure is not neutral. ⚠️ **The open question is the VOCABULARY, not the measurement** — which is why the `Class` cell was not changed, since it is machine-read and a guess here would be published as a confident subtotal. The two-axis table above resolves carrier-absent + parse-absent to `no door`, whose prescribed follow-up is ADR-0049 retirement — and that prescription is *destructive* here: the vocabulary is fully ALIVE and fully GATED at nine consumers, so retiring the base would delete nine branches' shared keys. `no gate` is wrong for the mirror reason (the gate exists, at the members). `authorable` is the `FormFieldBaseSchema` precedent one row over in `view.zod.ts` — but that base really is `.extend()`ed, so closing it WOULD change behaviour, and calling this one `authorable` invites exactly the later sweep that "finishes the job" on a shape nothing parses. None of the eight enumerated verdicts is honest for a shape that is neither a door nor dead, and adding a ninth changes a machine-read contract — so the decision is the maintainer's (**#5249**). Recorded in three places (the `BaseNavItemSchema` JSDoc + `app-strictness-batch19.test.ts` + this row); the pin includes a guard that fails if any branch ever stops rejecting unknown keys, which is the one change that would make this verdict need re-taking |
 | `notification.zod.ts` | **no door** | 批 14: `NotificationActionSchema` reclassified, not tightened — no carrier key, BFS-unreachable, zero parse; objectui reads its `.shape` as a vocabulary. ADR-0049 verdict: #5015 |
 
 `responsive.zod.ts` left this table at **批 13** (#4001) on reverse-pin evidence
@@ -909,6 +909,24 @@ delta — eleven instances above are why that is now a generator and not a
 discipline. `app.zod.ts`'s single site is held pending the finding-16 `.extend()`
 check rather than counted as ready; it is counted as authorable all the same,
 which is what `verify` means in the Class grammar.
+
+**批 19 has now RUN that check, and it came back negative — but the row keeps
+`verify`, and the reason is worth stating because it is not the usual one.** The
+measurement is finished and unambiguous (the branches spread `...shape` rather
+than `.extend()`, so nothing inherits from the base; all nine already close their
+own surface; the base is module-private and never parsed — closing it is a
+guaranteed no-op, and #4583 says a no-op closure is not neutral). What is NOT
+settled is which `Class` word is honest for the result, and that cell is
+machine-read: `no door` is what the two-axis table mechanically returns and its
+prescribed follow-up — ADR-0049 retirement — would delete a vocabulary that nine
+live branches carry; `no gate` inverts the same error; `authorable` publishes it
+as forced scope and invites the sweep that closes it. The ledger has been here
+once before, at 批 15, and the answer that time was to ADD a verdict rather than
+round to the nearest wrong one. Adding a ninth changes a machine-read contract, so
+it is the maintainer's call — **#5249** — and `verify` — "held pending a check" — is the one
+existing value that publishes no claim about the outcome while the question is
+open. It keeps the subtotal exactly where it was, which is the honest number
+either way: the site is neither closed nor newly reclassified.
 
 **The overwhelming majority of what is left in this directory is the two
 no-parse classes** — the exact split is in the counts file, and the direction of
@@ -1003,7 +1021,7 @@ triage row record which one was taken.
 
 | File | Class | Batch |
 |---|---|---|
-| `object.zod.ts` | authorable | The registered type's top level is closed (#1535/#4519/#4522); these are inner blocks — `Index`, `ObjectAccessConfig`, `Lifecycle` (+4 sub-blocks), `ObjectFieldGroup`, `ObjectExternalBinding`, `userActions`, `systemFields`, `activityMilestones`, `publicSharing`, `ObjectExtension`. Highest author volume in the repo |
+| `object.zod.ts` | authorable | **13 of 14 closed at #4001 批 20; the 14th is HELD, and that hold is the batch's finding.** The registered type's top level was already closed (#1535/#4519/#4522) — these were the inner blocks under it, and the asymmetry is why the file mattered: an author who has SEEN the root reject a typo reads a clean parse of `lifecycle: { maxAge: '30d' }` as acceptance. Closed: `ObjectAccessConfig`, `Lifecycle` + all four sub-blocks (`retention`/`ttl`/`storage`/`archive`), `ObjectFieldGroup`, `ObjectExternalBinding`, `userActions`, `systemFields`, `activityMilestones`, `publicSharing`, `ObjectExtension`. Reachability was measured, not assumed: a BFS from all 24 metadata-type roots plus `ObjectStackSchema` (4810 nodes, 25 roots) resolves every one `direct` **by identity** — none rests on the `derived-clone` bridge #5056 found can mark a dead shape reachable — with `ObjectSchema`/`PageSchema` as positive controls and 批 14's `EmbedConfigSchema` UNREACHABLE (overlap 0.00) **in the same run**. The parse door was probed separately and at each path: `ObjectSchema.safeParse` REJECTS at the top level today and SILENTLY STRIPPED at all thirteen nested paths, so each closure converts a measured silent strip, not a hypothesis. Doors: `saveMetaItem`'s 422 (`metadata-protocol/protocol.ts` — `getMetadataTypeSchema('object')`), `ObjectSchema.create()`, `defineObjectExtension()`, and `registry.validate()` (diagnostic-only by #3903 design). ⚠️ **`IndexSchema` is deliberately NOT closed — the #5114 class, caught before it shipped rather than after.** objectui's console ships its own hand-copied JSON-Schema for this shape (`metadata-admin/EmbeddedItemEditor.tsx` → `FALLBACK_SCHEMAS.index`), because `index` is an embedded-only sub-type the framework publishes no schema for; that copy has drifted and offers **`where`** for the partial-index predicate where this schema declares **`partial`** (and `brin` in an enum that has no `brin`). The editor splices its form output into `object.indexes[]` and PUTs the WHOLE object, and `saveMetaItem` keeps the body verbatim while validating it — so closing this one shape would 422 a control the console itself renders. Unlike #5073's `allowAddTab` the capability is not merely un-gated but already DEAD in both directions: `driver-sql`'s `syncDeclaredIndexes` consumes `name`/`fields`/`unique` only, so neither `where` NOR `partial` reaches any DDL. That is why the hold is not just "fix the producer first": pointing an author at `partial` today would be a guidance entry claiming more than the platform delivers (finding 18), so the close is gated on BOTH the objectui rename (**#5247**) and an ADR-0049 answer for `type`/`partial` (**#5248**). Recorded in three places (the `IndexSchema` JSDoc + `object-strictness-batch20.test.ts` §4 + this row). One caveat shipped knowingly: `systemFields` is a `false | {…}` union, so its rejection is an `invalid_union` whose own message is the bare *"Invalid input"* — the #5014 flattening. 批 18's `discriminatedUnion` fix is unavailable (one arm is a literal, so there is no discriminant), so the behaviour is pinned honestly rather than papered over; every other site in the file is a plain object and surfaces its prescription directly. Curation is anchored to named siblings and each claim is asserted: the dominant failure here is FLATTENING (`maxAge`/`expireAfter`/`shards` written one level too high, where §3.5's own refine then rejects the object for the WRONG key), so `lifecycle` carries wrong-layer pointers DOWN into its four sub-blocks; `userActions` points at `ui/view.zod.ts`'s identically-named block, whose vocabulary is completely disjoint; `systemFields.owner` points at `ownership`, a key the block's own field doc names but the shape never declared; `external.allowWrites` names the ADR-0015 double opt-in and mirrors `datasource.zod.ts`'s own `writable → allowWrites` alias in the opposite direction; `fieldGroups[].fields` states the direction of the membership edge (declared on the FIELD), and its three DEPRECATED collapse aliases stay ACCEPTED — closing a shape must not turn a documented deprecation into a rejection. Highest author volume in the repo |
 | `data-engine.zod.ts` | wire | **out of scope** — engine request/response contracts |
 | `external-lookup.zod.ts` | mixed (p) | `ExternalDataSource` + `.authentication` and the `ExternalLookup` tree are authored config; needs the per-schema read the ledger never did |
 | `seed-loader.zod.ts` | mixed (p) | Split is real: `SeedLoaderConfig` / `SeedIdentity` (+`.user`/`.org`) / `ReferenceResolution` are authored; `SeedLoadResult` / `SeedLoaderResult` (+`.summary`) / `ReferenceResolutionError` / `ObjectDependencyNode` / `ObjectDependencyGraph` / `SeedLoaderRequest` are loader runtime |
@@ -1029,6 +1047,44 @@ and `field` are **firm** authorable; `external-lookup`, `seed-loader`, `analytic
 and out of the ruling's forced scope; that count fell by one when #4721 closed
 `query.zod.ts`'s `SortNodeSchema`, the one row in this directory where the per-schema read
 moved a site OUT of `open` rather than confirming it.
+
+**批 20 closed 13 of `object.zod.ts`'s 14 and parked the row at 1**, which makes it
+the fourth row in this ledger to shrink without disappearing — after `flow` (批 11),
+`etl` (批 12) and `sharing`/`i18n` (批 14/16) — and the first to do so on a
+`no gate`-shaped reason inside a directory whose other floors are all wire. The
+reverse pin cannot see the difference: it fires when a file reaches ZERO, so it
+proves a row's work is *done* and is completely silent about a row whose work is
+*deliberately partial*. To the gate, "finished, the last site is held on measured
+evidence" and "nobody got to it" are the same row, and only the `Class` column and
+this prose separate them. The held site is `IndexSchema`; the evidence is in its
+row above, the schema's own JSDoc, and §4 of `object-strictness-batch20.test.ts`,
+which pins the strip so the day it changes, it changes deliberately.
+
+**The #5107 split got its first merge-QUEUE test here, and passed silently**, which
+is the outcome worth recording precisely because there is nothing to see. 批 20 was
+evicted from the merge queue with `MERGE_CONFLICT` after #5237 (#5073's
+`allowAddTab`) landed — two batches touching this ledger from two different
+directories. Under the old single-file layout that is exactly the shape that merged
+**clean and wrong** eleven times: 批 20's branch had written `authorable = 16`,
+#5237's had written its own decrement, the prose rows do not overlap so git merges
+them cleanly, and the subtotal — conflicting with nothing — would have landed as one
+side's number. What actually happened: the prose merged with no conflict at all,
+`merge=os-regen` recorded `counts.md` as pending instead of text-merging it, and
+`pre-commit` refused to commit until it was regenerated from the merged tree. The
+recomputed answer is **15** (`ui/` 7 → 6 from #5237, `data/` 22 → 9 from 批 20) — a
+number neither branch ever wrote down, arrived at without anyone having to notice
+that it should be recomputed. That is the whole design: the twelfth instance is the
+first that cost nobody anything.
+
+Worth naming for whoever schedules the next `data/` batch: 批 20 is the first
+batch in this campaign to catch a #5114-class defect **before** shipping it rather
+than after. #5114 was found on `main`, live, because a wave closed
+`ViewFilterRuleSchema` without measuring who else writes that shape. The
+difference in method was small and entirely mechanical — grep the sibling repos
+for producers of every block in scope, then follow the ones that PUT back through
+`saveMetaItem` — and it is cheap enough that it should simply be part of the
+per-site discipline rather than a lesson. The producer it found is not even in
+this repo, which is the part a spec-only reading cannot reach.
 
 #### `security/` — remaining strip sites
 

@@ -140,6 +140,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'dropPromotedDraftRow',
         "A published draft was never drained — the active row is correct, but the `state='draft'` row is still in `sys_metadata`, so Studio/Setup keeps showing unpublished changes that do not exist and the next publish promotes the same stale body again (#4981).",
     ],
+    [
+        'saveMetaItem',
+        'The metadata definition was never written to the authoritative store — the runtime looks completely normal because the in-memory registry already has it, and the definition simply vanishes on the next provision/restart (#4754, from #4669).',
+    ],
 ]);
 
 /** Log levels that are ACCEPTABLE inside a durability-guarding catch. */
@@ -179,22 +183,40 @@ function collectSourceFiles(dir, out = []) {
     return out;
 }
 
+/** Does this node's body run LATER (a callback), rather than on this tick? */
+function runsLater(node) {
+    return (
+        ts.isFunctionDeclaration(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isArrowFunction(node) ||
+        ts.isMethodDeclaration(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node)
+    );
+}
+
 /** Walk `node`'s subtree without descending into bodies that run LATER. */
 function walkSameTick(node, visit) {
     node.forEachChild((child) => {
-        if (
-            ts.isFunctionDeclaration(child) ||
-            ts.isFunctionExpression(child) ||
-            ts.isArrowFunction(child) ||
-            ts.isMethodDeclaration(child) ||
-            ts.isClassDeclaration(child) ||
-            ts.isClassExpression(child)
-        ) {
-            return;
-        }
+        if (runsLater(child)) return;
         visit(child);
         walkSameTick(child, visit);
     });
+}
+
+/**
+ * `walkSameTick`, plus the node itself.
+ *
+ * A concise-arrow helper body (`const logError = (...a) => console.error(...a)`)
+ * IS the call expression, not a block containing one, so a plain `walkSameTick`
+ * — which only ever visits CHILDREN — never inspects it and the helper reads as
+ * silent. That shape is exactly the same-file reporter the `catch` side is
+ * documented to follow, so missing it made a genuinely loud catch report as
+ * `silent-swallow` (`rest-server.ts`'s two `/meta` PUT handlers, #4754).
+ */
+function walkSameTickInclusive(node, visit) {
+    visit(node);
+    walkSameTick(node, visit);
 }
 
 /** Walk everything, including nested function bodies. */
@@ -280,7 +302,7 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
     const collectResponse = (block, seen = new Set(), depth = 0) => {
         const levels = [];
         let rethrows = false;
-        walkSameTick(block, (child) => {
+        walkSameTickInclusive(block, (child) => {
             if (ts.isThrowStatement(child)) rethrows = true;
             const level = loggerLevel(child);
             if (level) {
@@ -349,20 +371,65 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
         return sawReturn || !block.statements.some(alwaysThrows);
     };
 
-    walkAll(sf, (node) => {
-        if (!ts.isTryStatement(node) || !node.catchClause) return;
-
-        // 1. Does the guarded block call a durability-critical operation?
+    /**
+     * Collect the durability-critical calls a `catch` ACTUALLY guards.
+     *
+     * A call wrapped in a NESTED try whose own catch RECOVERS can never reach
+     * the outer catch — the inner catch consumed it, and that inner catch is
+     * judged on its own as a seam in its own right. Attributing the call to
+     * every enclosing catch as well reported ONE seam once per level of
+     * nesting, and the enclosing handlers it accused are usually generic
+     * request-level error handlers that are correct as written. That pressures
+     * an author to baseline correct code, which is how a shrink-only ledger
+     * stops meaning anything (#4754: one `saveMetaItem` in `packages.ts`
+     * surfaced three times — at its real seam and at the two route/function
+     * level `catch`es enclosing it).
+     *
+     * Only an inner catch that propagates on EVERY path (see `catchRecovers`)
+     * actually delivers the failure outward, and then the outer catch is a real
+     * guard and is judged as one. Coverage is never lost either way: the
+     * shadowing catch is itself checked.
+     */
+    const collectGuardedCalls = (tryBlock) => {
         const guarded = [];
-        const inspectForCritical = (child) => {
+        const inspect = (child) => {
             const name = calleeName(child);
             if (name && DURABILITY_CRITICAL_CALLEES.has(name)) {
                 guarded.push({ callee: name, line: lineOf(child) });
             }
         };
+        const walk = (n) => {
+            n.forEachChild((child) => {
+                if (runsLater(child)) return;
+                if (
+                    ts.isTryStatement(child) &&
+                    child.catchClause &&
+                    catchRecovers(child.catchClause.block)
+                ) {
+                    // The inner TRY block is shadowed. Its `catch`/`finally`
+                    // bodies are not — a critical call there does propagate out.
+                    for (const b of [child.catchClause.block, child.finallyBlock]) {
+                        if (!b) continue;
+                        inspect(b);
+                        walk(b);
+                    }
+                    return;
+                }
+                inspect(child);
+                walk(child);
+            });
+        };
         // The try block itself may BE a call at top level, so check it too.
-        inspectForCritical(node.tryBlock);
-        walkSameTick(node.tryBlock, inspectForCritical);
+        inspect(tryBlock);
+        walk(tryBlock);
+        return guarded;
+    };
+
+    walkAll(sf, (node) => {
+        if (!ts.isTryStatement(node) || !node.catchClause) return;
+
+        // 1. Does the guarded block call a durability-critical operation?
+        const guarded = collectGuardedCalls(node.tryBlock);
         if (guarded.length === 0) return;
 
         // 2. How does the catch respond?
@@ -636,6 +703,91 @@ function selfTest() {
                 } }`,
             expectViolation: true,
         },
+        {
+            // #4754: `rest-server.ts` reports through
+            // `const logError = (...a) => console.error(...a)` — a same-file
+            // helper the catch side is DOCUMENTED to follow. Its body is the
+            // call expression itself, not a block containing one, and the
+            // walker only ever visited CHILDREN, so the loudest site in the
+            // file read as `silent-swallow`. A false positive here is not
+            // cosmetic: the only ways to satisfy it are to baseline correct
+            // code or to bolt on a redundant log.
+            name: 'passes: catch delegating to a loud CONCISE-ARROW helper (expression body)',
+            code: `
+                const logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); } catch (e) { logError('DDL never ran', e); }
+                } }`,
+            expectViolation: false,
+        },
+        {
+            name: 'flags: catch delegating to a QUIET concise-arrow helper (expression body)',
+            code: `
+                const note = (...args: unknown[]) => (globalThis as any).console?.warn(...args);
+                class P { async f(driver: any, obj: any) {
+                    try { await driver.syncSchema('t', obj); } catch (e) { note('failed', e); }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            // #4754: one `saveMetaItem` in `packages.ts` was reported THREE
+            // times — at its real seam and again at each enclosing route- and
+            // function-level catch, neither of which can ever observe it. The
+            // enclosing handlers are correct as written, so every extra report
+            // is pressure to baseline correct code.
+            name: 'passes: enclosing catch is not accused when an inner RECOVERING catch already consumed the call',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try {
+                        try { await driver.syncSchema('t', obj); }
+                        catch (e) { ctx.logger.error('DDL never ran — not durable; fix X', e); }
+                        return 'ok';
+                    } catch (outer) { return 'failed'; }
+                } }`,
+            expectViolation: false,
+            expectCount: 0,
+        },
+        {
+            name: 'flags: the inner catch itself is still judged (no coverage lost to shadowing)',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try {
+                        try { await driver.syncSchema('t', obj); }
+                        catch (e) { ctx.logger.warn('oh well', e); }
+                        return 'ok';
+                    } catch (outer) { return 'failed'; }
+                } }`,
+            expectViolation: true,
+            // Exactly one: the inner seam. The outer catch never sees it.
+            expectCount: 1,
+        },
+        {
+            name: 'flags: enclosing catch IS accused when the inner catch rethrows on every path',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any) {
+                    try {
+                        try { await driver.syncSchema('t', obj); }
+                        catch (e) { throw e; }
+                        return 'ok';
+                    } catch (outer) { return 'failed'; }
+                } }`,
+            expectViolation: true,
+            // Only the outer one: the inner catch propagates, so it is excused
+            // and the failure genuinely arrives at the outer catch.
+            expectCount: 1,
+        },
+        {
+            name: 'flags: a critical call in an inner CATCH body still reaches the enclosing catch',
+            code: `
+                class P { async f(ctx: any, driver: any, obj: any, fallback: any) {
+                    try {
+                        try { await driver.initObjects(obj); }
+                        catch (e) { ctx.logger.error('primary failed; retrying', e); await driver.syncSchema('t', fallback); }
+                        return 'ok';
+                    } catch (outer) { return 'failed'; }
+                } }`,
+            expectViolation: true,
+        },
     ];
 
     let failures = 0;
@@ -645,9 +797,18 @@ function selfTest() {
         const seams = [];
         analyzeSourceFile(sf, 't.ts', findings, seams);
         const got = findings.length > 0;
-        if (got !== c.expectViolation) {
+        // `expectCount` pins HOW MANY seams a case reports, not just whether it
+        // reports one. Nesting cases need it: "still flags" is satisfied both by
+        // the correct single finding and by the duplicate-per-nesting-level bug
+        // it replaced, so a boolean cannot tell those two apart (#4754).
+        const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
+        if (got !== c.expectViolation || countMismatch) {
             failures++;
-            console.error(`  ✗ ${c.name}: expected violation=${c.expectViolation}, got ${got}`);
+            console.error(
+                `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
+                    (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
+                    `, got violation=${got} count=${findings.length}`,
+            );
         } else {
             console.log(`  ✓ ${c.name}`);
         }
