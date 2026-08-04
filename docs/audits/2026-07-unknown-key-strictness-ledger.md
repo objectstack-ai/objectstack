@@ -695,12 +695,12 @@ it the same way: the decision is also written beside the schema and pinned in a
 test (`flow.test.ts`, `etl.test.ts`), because a row in a table is not where the
 next person to open that file will look.
 
-#### `ui/` — 100 strip of 198
+#### `ui/` — 84 strip of 198
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `component.zod.ts` | 29 | 29 | authorable (p) | Largest single block left. SDUI component props — **verify the React-prop open slots first**; `check:react-declaration-parity` compares two DECLARATIONS and cannot tell you which props a renderer reads |
-| `view.zod.ts` | 20 | 50 | mixed | Top level and the form/page shapes are closed (ADR-0089 + the final batch). Remaining are sub-blocks; `UserFiltersSchema` is the one the last batch **named as deliberately left open** — it strips page-only keys with a test pinning that, so closing it needs its own verification |
+| `view.zod.ts` | 4 | 50 | mixed | **16 of 20 closed at #4001 批 18**; the 4 that remain are each measured, and none is unfinished work. Closed: `ViewDataSchema`'s four provider arms, `UserFilterField.options`, `GanttQuickFilter.options`, `GanttConfig.tooltipFields`, `ListView.sort` / `.conditionalFormatting` / `.emptyState`, `FormFieldBase.keyField`, `FormView.subforms`, and `submitBehavior`'s four arms. Reachability was measured, not assumed: a BFS over the in-memory Zod graph from all 24 metadata-type roots plus `ObjectStackSchema` resolves every one of them `root-graph`, with `ViewSchema`/`FormViewSchema`/`ViewItemSchema`/`PageSchema` as positive controls and 批 13's no-door shapes (`touch`/`dnd`) UNREACHABLE **in the same run** — and the instrument had to be fixed first: `lazySchema` returns a Proxy, but a carrier writes `X.optional()`, which resolves it, so the closure holds the REAL instance and comparing the Proxy alone false-negatived `ViewDataSchema` (caught by cross-checking against its two literal carrier keys, not by trusting the reading). Three curation entries are anchored to named siblings: `direction → order` is the alias #4721 put on `SortNodeSchema` for the identical two-key tuple (it measured `{field, direction:'desc'}` parsing to `{field, order:'asc'}` — a silently REVERSED sort); an option `count` gets a wrong-layer pointer to `showCount` because objectui COMPUTES it per render; and a bare `name` on the `object` data source is deliberately NOT aliased to `object` — it is a real key on the view ITEM, so a rename would be finding 7 again. `submitBehavior` became a `discriminatedUnion` on the `kind` literal it already carried: as a plain union of four strict members the rejection is an `invalid_union` whose prescription #5014 measured the renderers flattening away, so closing it without discriminating would have delivered "Invalid input". ⚠️ **`GanttConfigSchema` / `TreeConfigSchema` are `strictObject(…).passthrough()`** — open at the parent by design (renderer-ahead knobs), and the ledger's own counter reads them as `strict` because `postureOf` returns early on the `strictObject` idiom without walking the chain. Filed; it inflates the strict count, it does not affect this row's strip count. **Still open, all four measured:** `UserFiltersSchema` — closing it would 422 `allowAddTab`, which objectui's renderer reads (`plugin-list/src/UserFilters.tsx:182`/`:742`) and the spec never declared; because `saveMetaItem` validates but persists the ORIGINAL body, the stripped key survives to the renderer and the capability WORKS today, so closing removes a capability instead of making a silent failure loud (the 批 6e reliance question IS answered — `ObjectUserFiltersSchema` is `.omit()`ed off this base and `.omit()` inherits posture, so the pin flips from "drops" to "rejects"; that flip is wanted and gated only on `allowAddTab`). `ViewItemSchema` ×2 — **wire, not authorable**: objectui's pin control PUTs `{...storedItem, isPinned}` (`ObjectView.tsx:882` → `data-objectstack/src/index.ts:2801`), a stored ViewItem record carries `viewKind` AND `config`, so it lands on this member (the flattened members are excluded by their `config: z.undefined()` guard) and closing it would 422 pinning a saved view. `FormFieldBaseSchema` — a module-private BASE whose sole consumer `FormFieldSchema` already applies `.strict()` plus the ADR-0089 `strictVisibilityError` map; the door is closed, the ledger counts the base. Each verdict is recorded in three places (schema JSDoc + `view-strictness-batch18.test.ts` + this row) |
 | `widget.zod.ts` | 9 | 9 | authorable (p) | Widget manifest + lifecycle/event/property/source |
 | `chart.zod.ts` | 2 | 7 | **no gate** | `ChartAggregateSchema` + `ChartGroupBySchema`'s object arm. Config / axis / series / annotation / interaction closed at 批 15; these two are NOT unfinished work — their carrier (`<ObjectChart aggregate>`) is live but nothing parses them, so closing them would gate nothing (#4583). Blocked on wiring the react-page publish gate to parse the schema instead of re-deriving it — see the triage row |
 | `touch.zod.ts` | 7 | 7 | **no door** | ⛔ **not strictness work** — measured unreachable from every authoring root (#4001 批 13); ADR-0049 triage is #4988. See the triage row above |
@@ -729,14 +729,28 @@ line, which conflicts with nothing, merged clean and wrong on both sides.
 merged alongside #4876, which edits this same section, so the conflict was
 expected and both sides' row edits were kept before recomputing.
 
-**Authorable strip in `ui/`: 76 of 100** — recomputed from the surviving
-rows on every merge (29 + 20 + 9 + 2 + 7 + 6 + 4 + 4 + 4 + 3 + 3 + 2 + 2 + 2 + 1 + 1 + 1 = 100), never decremented by a batch's own count. 批 13 moved it
+**Authorable strip in `ui/`: 60 of 84** — recomputed from the surviving
+rows on every merge (29 + 4 + 9 + 2 + 7 + 6 + 4 + 4 + 4 + 3 + 3 + 2 + 2 + 2 + 1 + 1 + 1 = 84), never decremented by a batch's own count. 批 13 moved it
 to 97 of 119 (from 123 of 123); 批 15 then closed all 14 `theme.zod.ts` sites
-and 5 of `chart.zod.ts`'s 7. Both batches edited this same section and the
+and 5 of `chart.zod.ts`'s 7; 批 18 then closed 16 of `view.zod.ts`'s 20.
+Those batches edited this same section and the
 conflict was expected: every row from both sides was kept before recomputing,
 and `check:strictness-ledger`'s header arithmetic is what settled the result.
+⚠️ 批 18 landed while #5042 (批 14) was on the landing track and 批 16/17 were
+in flight — a FOUR-way contention on this one section. The rule that survives
+it is the one seven wrong-on-both-sides instances paid for: the header and this
+subtotal are recomputed from the rows that SURVIVE the merge, never carried
+across from either side, and the gate's arithmetic is the arbiter even when the
+merge was textually clean.
 The 22-site gap 批 13 opened is unchanged and is described below; 批 15 adds a
-2-site gap of its own, in a DIFFERENT class. Of what remains, `app.zod.ts`'s
+2-site gap of its own, in a DIFFERENT class. 批 18 adds a third kind again: of
+its four remaining `view.zod.ts` sites, two are **wire** (`ViewItemSchema` —
+the union member Studio round-trips `isPinned` through), one is a **base** whose
+sole consumer already closes it (`FormFieldBaseSchema`), and one is blocked on a
+capability decision rather than on strictness (`UserFiltersSchema` /
+`allowAddTab`). None of the three is "not done yet", and the Class column is
+what carries that — reverse pins cannot tell a decided remainder from an
+unexamined one. Of what remains, `app.zod.ts`'s
 single site is still held pending the finding-16 `.extend()` check rather than
 counted as ready.
 `keyboard` (4) and `offline` (3) were reclassified out of `authorable` because
