@@ -1257,7 +1257,6 @@
     "system/GCounter",
     "system/HistogramBucketConfig",
     "system/HttpDestinationConfig",
-    "system/HttpServerConfig",
     "system/Incident",
     "system/IncidentCategory",
     "system/IncidentNotificationMatrix",
