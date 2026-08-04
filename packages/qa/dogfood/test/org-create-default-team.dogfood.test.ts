@@ -24,30 +24,78 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
+/**
+ * ── How this fixture opens the route (#5261) ─────────────────────────────────
+ *
+ * `beforeCreateOrganization` denies `organization/create` outright unless an
+ * organization wall is in force, so a single-tenant boot 403s long before
+ * better-auth reaches the team insert this file is about.
+ *
+ * It used to open the route by flipping `OS_MULTI_ORG_ENABLED=true` AFTER boot
+ * and leaning on the gate reading env live per request. That was a BYPASS, not a
+ * deployment: the stack stayed single-tenant while the gate alone was told
+ * otherwise. #5261 made the gate read the tenancy service's EFFECTIVE posture
+ * precisely so that no env combination can talk a wall-less deployment into
+ * minting organizations, which closes that trick — deliberately.
+ *
+ * So the fixture now simulates the DEPLOYMENT instead of fooling the gate:
+ * `multiTenant: 'posture-only'` registers the harness's stand-in for the
+ * enterprise `org-scoping` runtime, and the `tenancy` service resolves a real,
+ * non-degraded `isolated` posture the whole stack agrees on. That is more honest
+ * than the flag flip — it is the shape a deployment with the wall up actually
+ * has — but it is a stand-in, and its limits are exactly stated in
+ * `BootOptions.multiTenant`: it activates the POSTURE, never the WALL. Nothing
+ * here asserts isolation; the cross-tenant proofs still skip in this workspace
+ * (see `enterprise-organizations.ts`) rather than pretend.
+ *
+ * #3624's regression is in the team INSERT, which is identical under any
+ * posture that lets the route run.
+ */
 describe('#3624: org create provisions its default team', () => {
   let stack: VerifyStack;
   let token: string;
-  let priorMultiOrg: string | undefined;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
     token = await stack.signIn();
-    // `beforeCreateOrganization` denies the route outright unless multi-org is
-    // on, so a single-tenant boot 403s before better-auth ever reaches the team
-    // insert. The guard calls `resolveMultiOrgEnabled()` live per request, so
-    // flipping the flag AFTER boot opens the route while leaving the stack
-    // itself single-tenant — no OrgScopingPlugin, no enterprise
-    // `@objectstack/organizations` dependency (which this workspace does not
-    // ship, and which is why the multi-org RLS dogfood test skips here).
-    // The regression is in the team INSERT, which is identical either way.
-    priorMultiOrg = process.env.OS_MULTI_ORG_ENABLED;
-    process.env.OS_MULTI_ORG_ENABLED = 'true';
   }, 120_000);
 
   afterAll(async () => {
-    if (priorMultiOrg === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
-    else process.env.OS_MULTI_ORG_ENABLED = priorMultiOrg;
     await stack?.stop?.();
+  });
+
+  it('boots a genuinely walled posture — the route is open because the deployment is, not because a flag was flipped', async () => {
+    // [#5261] Guard the guard. If the stand-in ever stops activating the
+    // posture, the create below would 403 and this file would report "#3624
+    // regressed" — sending the next reader after a team-insert bug that isn't
+    // there. Naming the precondition separately keeps that misdiagnosis off the
+    // table, and pins the fact the fixture actually depends on.
+    const tenancy = await stack.kernel.getServiceAsync<{
+      posture: string;
+      requestedPosture: string;
+      isolationActive: boolean;
+      degraded: boolean;
+    }>('tenancy');
+
+    expect(tenancy.requestedPosture).toBe('isolated');
+    expect(tenancy.posture).toBe('isolated');
+    expect(tenancy.isolationActive).toBe(true);
+    // NOT degraded — that is the whole difference from the old flag flip, and
+    // the state #5261 refuses to create organizations in.
+    expect(tenancy.degraded).toBe(false);
+
+    // And the capability the console renders its button from agrees, because
+    // since #5261 it is the same derivation the gate uses.
+    const cfg = await stack.api('/auth/config');
+    expect(cfg.status).toBe(200);
+    const body = (await cfg.json()) as { data?: { features?: Record<string, unknown> } };
+    const features = body.data?.features;
+    // Read the key out explicitly before asserting on it: `?? {}` over a moved
+    // envelope turns "the flag is missing" into "the flag is false", which is
+    // how a green assertion can cover a route that stopped reporting at all.
+    expect(features, `no features in /auth/config: ${JSON.stringify(body)}`).toBeDefined();
+    expect(features!.multiOrgEnabled).toBe(true);
+    expect(features!.degradedTenancy).toBe(false);
   });
 
   it('creates the org AND its default team without a 500', async () => {
