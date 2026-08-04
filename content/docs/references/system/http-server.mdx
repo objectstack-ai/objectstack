@@ -7,9 +7,7 @@ description: Http Server protocol schemas
 
 HTTP Server Protocol
 
-Defines the runtime HTTP server configuration and capabilities.
-
-Provides abstractions for HTTP server implementations (Express, Fastify, Hono, etc.)
+Route-registration metadata, middleware declaration and the server-side lifecycle/status vocabulary for HTTP server implementations (Express, Fastify, Hono, etc.)
 
 Architecture alignment:
 
@@ -26,31 +24,12 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { HttpServerConfigSchema, MiddlewareConfigSchema, MiddlewareType, RouteHandlerMetadataSchema, ServerCapabilitiesSchema, ServerEventSchema, ServerEventType, ServerStatusSchema } from '@objectstack/spec/system';
-import type { HttpServerConfig, MiddlewareConfig, MiddlewareType, RouteHandlerMetadata, ServerCapabilities, ServerEvent, ServerEventType, ServerStatus } from '@objectstack/spec/system';
+import { MiddlewareConfigSchema, MiddlewareType, RouteHandlerMetadataSchema, ServerCapabilitiesSchema, ServerEventSchema, ServerEventType, ServerStatusSchema } from '@objectstack/spec/system';
+import type { MiddlewareConfig, MiddlewareType, RouteHandlerMetadata, ServerCapabilities, ServerEvent, ServerEventType, ServerStatus } from '@objectstack/spec/system';
 
 // Validate data
-const result = HttpServerConfigSchema.parse(data);
+const result = MiddlewareConfigSchema.parse(data);
 ```
-
----
-
-## HttpServerConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **port** | `integer` | ✅ | Port number to listen on |
-| **host** | `string` | ✅ | Host address to bind to |
-| **cors** | `{ enabled: boolean; origins: string \| string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean; … }` | optional | CORS configuration |
-| **requestTimeout** | `integer` | ✅ | Request timeout in milliseconds |
-| **bodyLimit** | `string` | ✅ | Maximum request body size |
-| **compression** | `boolean` | ✅ | Enable response compression |
-| **security** | `{ helmet: boolean; rateLimit?: object }` | optional | Security configuration |
-| **static** | `{ path: string; directory: string; cacheControl?: string }[]` | optional | Static file serving configuration |
-| **trustProxy** | `boolean` | ✅ | Trust X-Forwarded-* headers |
-
 
 ---
 

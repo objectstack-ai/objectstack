@@ -81,6 +81,12 @@ describe('server: carries only keys with a consumer (#4938 stays shut)', () => {
     const message = result.error!.issues.map((i) => i.message).join('\n');
     expect(message).toMatch(/Unrecognized key/);
     expect(message).toMatch(expected);
+    // Since #4938 these seven are not merely "not mounted here" — the shape
+    // that declared them is GONE, and this strict guidance map is the only
+    // surface left that answers for them. That is why the retirement needed no
+    // `retiredKey()` tombstone; if this assertion ever stops holding, the
+    // prescription has drifted away from the removal it stands in for.
+    expect(message).toMatch(/retired in v17/);
   });
 });
 

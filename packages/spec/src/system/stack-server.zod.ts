@@ -5,8 +5,8 @@
  *
  * ## Why this is NOT `HttpServerConfigSchema`
  *
- * `system/http-server.zod.ts` declares nine keys (`port`, `host`, `cors`,
- * `requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
+ * `system/http-server.zod.ts` used to declare nine keys (`port`, `host`,
+ * `cors`, `requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
  * `trustProxy`). #4938 measured them: **none had a runtime reader and none was
  * reachable from any authoring surface** — `stack.zod.ts` had no `server:` key,
  * so the whole shape was unwritable as well as unread. Mounting it wholesale
@@ -22,9 +22,19 @@
  * | `security.rateLimit` | `createDispatcherPlugin` → the inbound token bucket (`@objectstack/runtime` `security/inbound-rate-limit.ts`) — an over-budget caller gets `429` + `Retry-After` |
  * | `trustProxy` | the same limiter's IP resolution — see below |
  *
- * The other seven `HttpServerConfigSchema` keys stay unreachable, and their
- * enforce-or-remove fate is tracked by #4938. Adding one here without an
- * executor re-opens the hole this narrowness exists to close.
+ * The other seven `HttpServerConfigSchema` keys were RETIRED with the shape
+ * that carried them (#4938, ADR-0049 enforce-or-remove): unreachable *and*
+ * unread, they were the cleanest remove candidate in the ledger, and their
+ * prescriptions now live in the `guidance` maps below — the only place an
+ * author can write a server key is also the only place that has to answer for
+ * one. Adding one here without an executor re-opens the hole this narrowness
+ * exists to close.
+ *
+ * `cors` is the registered exception-in-waiting: the 2026-08-04 ruling named it
+ * the FIRST per-key admission candidate for this shape, because embedding
+ * (`example-embed-objectql`) is a real scenario with real pull. When that work
+ * is scheduled it arrives the #4910 way — key and executor in one change — not
+ * by un-retiring a declaration.
  *
  * ## What `server:` is NOT for
  *
@@ -170,17 +180,27 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
     guidance: {
       port:
         'Not authorable. The listening port belongs to the deployment, not the stack — pass '
-        + '`objectstack serve -p <port>` or set PORT.',
+        + '`objectstack serve -p <port>` or set PORT. (`HttpServerConfig.port` was retired in v17, #4938.)',
       host:
         'Not authorable. The bind address belongs to the deployment, not the stack — pass it to '
-        + '`objectstack serve`.',
+        + '`objectstack serve`. (`HttpServerConfig.host` was retired in v17, #4938.)',
       cors:
         'Not authorable here. CORS is owned by the transport adapter and configured by '
-        + 'OS_CORS_ORIGIN / OS_CORS_CREDENTIALS / OS_CORS_MAX_AGE.',
-      compression: 'Not authorable — no runtime reads it (#4938).',
-      requestTimeout: 'Not authorable — no runtime reads it (#4938).',
-      bodyLimit: 'Not authorable — no runtime reads it (#4938).',
-      static: 'Not authorable. Static mounts are configured on the transport plugin (`staticMounts`).',
+        + 'OS_CORS_ORIGIN / OS_CORS_CREDENTIALS / OS_CORS_MAX_AGE. (`HttpServerConfig.cors` was retired in '
+        + 'v17, #4938; it is the registered first candidate for a `server.cors` key, which will arrive with '
+        + 'its executor.)',
+      compression:
+        'Not authorable — nothing reads it. `HttpServerConfig.compression` was retired in v17 (#4938) '
+        + 'rather than mounted here; response compression is the transport adapter\'s concern.',
+      requestTimeout:
+        'Not authorable — nothing reads it. `HttpServerConfig.requestTimeout` was retired in v17 (#4938) '
+        + 'rather than mounted here.',
+      bodyLimit:
+        'Not authorable — nothing reads it. `HttpServerConfig.bodyLimit` was retired in v17 (#4938) '
+        + 'rather than mounted here.',
+      static:
+        'Not authorable. Static mounts are configured on the transport plugin (`staticMounts`). '
+        + '(`HttpServerConfig.static` was retired in v17, #4938.)',
     },
   },
   {
