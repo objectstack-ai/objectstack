@@ -4,7 +4,8 @@
  * @module shared/retry-policy
  *
  * The **single declaration** of the exponential-backoff retry policy (#4661,
- * the #4535 C8 dual-source cluster).
+ * the #4535 C8 dual-source cluster; completed for the anonymous inline blocks
+ * by #4964 / #4962).
  *
  * Until 17 this shape existed twice — `automation/control-flow.zod.ts` (the
  * `try_catch` node's `retry` region) and `system/job.zod.ts` (`job.retryPolicy`)
@@ -15,6 +16,32 @@
  * implemented that identical formula. What differed was the *spelling* of the
  * base delay (`retryDelayMs` vs `backoffMs`), two keys only one side had
  * (`maxRetryDelayMs` / `jitter`), and the defaults.
+ *
+ * ## Why it existed FOUR times, and what the first convergence could not see
+ *
+ * #4661 was driven by the dual-source instrument (#4411 / #4535 C8), whose
+ * question is "how many declarations publish the same exported NAME?". Two more
+ * encodings of this identical concept were invisible to it **by construction**,
+ * because neither has an exported name at all — both are anonymous inline
+ * `z.object`s nested inside a bigger schema:
+ *
+ * - `automation/flow.zod.ts` → `Flow.errorHandling` (#4964) — spelled the base
+ *   delay `retryDelayMs`, every other key already identical.
+ * - `automation/etl.zod.ts` → `ETLPipeline.retry` (#4962) — spelled the count
+ *   `maxAttempts`, defaulted it to **3** (the opposite of the opt-in reading
+ *   below), and declared no `backoffMultiplier` / `maxRetryDelayMs` / `jitter`
+ *   at all, so its backoff was flat, uncapped and unjittered.
+ *
+ * That is the campaign's "instrument misreports coverage" class, in its purest
+ * form: the instrument was not broken and answered its own question exactly —
+ * the question simply was not the one whose answer everybody read off it. After
+ * a convergence completes, a surviving dialect reads as *reviewed and kept*.
+ *
+ * Both now build from {@link retryPolicyShape}, so the four surfaces share one
+ * declaration of the key set, the bounds and the defaults. The two of them that
+ * are `.strict()` keep their own `strictObject` curation and their own extra
+ * keys (`Flow.errorHandling.strategy`) — what is shared is the *contract*, not
+ * the surface's framing of it.
  *
  * ## Why this file, and why it is not in `shared/index.ts`
  *
@@ -45,20 +72,85 @@ import { lazySchema } from './lazy-schema';
 import { retiredKey } from './retired-key';
 
 /**
- * Exponential-backoff retry policy — the one shape for both `job.retryPolicy`
- * and a `try_catch` node's `retry` region.
+ * The retry policy's raw Zod shape — key set, bounds, defaults and prose, in
+ * ONE place.
+ *
+ * Two of the four surfaces that carry this policy cannot simply reference
+ * {@link RetryPolicySchema}: `Flow.errorHandling` and `ETLPipeline.retry` are
+ * `.strict()` (`strictObject`, the #4001 campaign standard) and the flow one
+ * also carries `strategy` plus its own `superRefine`. Handing them the *shape*
+ * rather than the *schema* is what lets them stay strict, keep their curated
+ * unknown-key tables, and still have exactly one declaration of what a retry
+ * policy IS — the alternative (a fifth hand-copied key list) is the debt #4964
+ * and #4962 exist to remove.
+ *
+ * It is a function rather than a const for the same reason every schema here is
+ * wrapped in `lazySchema`: a module-level shape would allocate its five Zod
+ * nodes at import time for every consumer, including the ones that never parse
+ * a retry policy.
+ *
+ * NOT re-exported by any barrel — see the module note above. It is an
+ * intra-package construction detail, not authorable surface.
+ */
+export function retryPolicyShape() {
+  return {
+    maxRetries: z.number().int().min(0).max(10).default(0)
+      .describe('Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in.'),
+    backoffMs: z.number().int().min(0).default(1000)
+      .describe('Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier'),
+    backoffMultiplier: z.number().min(1).default(1)
+      .describe('Exponential backoff multiplier; 1 (the default) keeps the delay flat'),
+    maxRetryDelayMs: z.number().int().min(0).default(30000)
+      .describe('Ceiling for a single backoff delay (ms)'),
+    jitter: z.boolean().default(false)
+      .describe('Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries'),
+
+    // ── Tombstone (ADR-0087) ────────────────────────────────────────────
+    // `retryDelayMs` was the automation-side spelling of `backoffMs`, on BOTH
+    // `try_catch`'s `retry` (#4661) and `Flow.errorHandling` (#4964). It is
+    // tombstoned rather than deleted because two of the four owning shapes are
+    // not `.strict()`: a plain deletion would have Zod silently strip the
+    // authored value and drop the delay back to the 1000ms default, which is
+    // precisely the quiet-failure class ADR-0049 exists to remove. On the two
+    // strict surfaces the tombstone is still the better channel — it carries
+    // the rename, where a bare unknown-key rejection would only carry the key.
+    // `retry-policy-converged` rewrites it on the load path.
+    retryDelayMs: retiredKey(
+      '`retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now ' +
+      'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
+      "a `try_catch` node's `retry`, `flow.errorHandling` and an ETL pipeline's `retry`. " +
+      'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
+      'is unchanged. `os migrate meta --from 16` rewrites it for you.',
+    ),
+  };
+}
+
+/**
+ * Exponential-backoff retry policy — the named schema for `job.retryPolicy` and
+ * a `try_catch` node's `retry` region. `Flow.errorHandling` and
+ * `ETLPipeline.retry` carry the same contract via {@link retryPolicyShape},
+ * which they must, being `.strict()` (see that function's note).
  *
  * Delay before retry *n* is `min(backoffMs * backoffMultiplier^(n-1),
  * maxRetryDelayMs)`, optionally jittered.
  *
- * ## Defaults are opt-in, not opt-out (17.0.0, #4661)
+ * ## Defaults are opt-in, not opt-out (17.0.0, #4661, #4962)
  *
  * `maxRetries` defaults to **0** — declaring a retry block does not by itself
- * buy retries. The pre-17 `job.retryPolicy` defaulted to 3, so a job that wrote
- * `{ backoffMs: 5000 }` and nothing else silently got three attempts; the
+ * buy retries. Two pre-17 surfaces defaulted it to 3: `job.retryPolicy`, so a
+ * job that wrote `{ backoffMs: 5000 }` and nothing else silently got three
+ * attempts, and `ETLPipeline.retry` (as `maxAttempts`). The
  * `retry-policy-converged` conversion writes that `3` (and the old
  * `backoffMultiplier: 2`) into existing job documents, so no deployed stack
  * changes behaviour. What changes is what a NEWLY authored omission means.
+ *
+ * The ETL half needed no conversion branch and deliberately has none: an ETL
+ * pipeline is not a `defineStack` collection and `etl.zod.ts` has no parse site
+ * anywhere in objectstack / objectui / cloud (批 12's measurement), so there is
+ * no stored document for a D2 walker to reach. Writing one anyway would be a
+ * conversion advertising coverage it does not have. The `maxAttempts` tombstone
+ * on that block is the whole migration channel, and it reaches the only door
+ * that exists — `tsc` at the authoring site, and the parse.
  *
  * The reason to make absence mean "no retry" rather than "retry three times":
  * a retry replays whatever the attempt already did — a job handler's writes and
@@ -69,32 +161,7 @@ import { retiredKey } from './retired-key';
  * step (`flow-retry-max-retries-required`, #4247): an unstated count is
  * unambiguously 0, and "retry zero times" is a decision the author must state.
  */
-export const RetryPolicySchema = lazySchema(() => z.object({
-  maxRetries: z.number().int().min(0).max(10).default(0)
-    .describe('Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in.'),
-  backoffMs: z.number().int().min(0).default(1000)
-    .describe('Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier'),
-  backoffMultiplier: z.number().min(1).default(1)
-    .describe('Exponential backoff multiplier; 1 (the default) keeps the delay flat'),
-  maxRetryDelayMs: z.number().int().min(0).default(30000)
-    .describe('Ceiling for a single backoff delay (ms)'),
-  jitter: z.boolean().default(false)
-    .describe('Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries'),
-
-  // ── Tombstone (ADR-0087) ────────────────────────────────────────────
-  // `retryDelayMs` was the automation-side spelling of `backoffMs`. It is the
-  // ONE authorable key this convergence costs, and it is tombstoned rather than
-  // deleted because neither owning shape is `.strict()`: a plain deletion would
-  // have Zod silently strip the authored value and drop the delay back to the
-  // 1000ms default, which is precisely the quiet-failure class ADR-0049 exists
-  // to remove. `retry-policy-converged` rewrites the key.
-  retryDelayMs: retiredKey(
-    '`retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661) — the retry policy now ' +
-    'has one spelling for its base delay across `job.retryPolicy` and a `try_catch` node\'s ' +
-    '`retry`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
-    'is unchanged. `os migrate meta --from 16` rewrites it for you.',
-  ),
-}));
+export const RetryPolicySchema = lazySchema(() => z.object(retryPolicyShape()));
 
 /**
  * What an author writes — every key optional, defaults unapplied.

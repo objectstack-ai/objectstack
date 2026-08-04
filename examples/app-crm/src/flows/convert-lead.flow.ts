@@ -175,7 +175,7 @@ export const ConvertLeadScreenFlow = defineFlow({
   errorHandling: {
     strategy: 'fail',
     maxRetries: 0,
-    retryDelayMs: 0,
+    backoffMs: 0,
     backoffMultiplier: 1,
     maxRetryDelayMs: 0,
     jitter: false,

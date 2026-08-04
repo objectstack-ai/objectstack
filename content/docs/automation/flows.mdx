@@ -458,7 +458,7 @@ events).
     try: { nodes: [{ id: 'charge', type: 'http', label: 'Charge', config: { /* … */ } }], edges: [] },
     catch: { nodes: [{ id: 'flag', type: 'update_record', label: 'Flag failure', config: { /* … */ } }], edges: [] },
     errorVariable: '$error',
-    retry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2 },
+    retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
   },
 }
 ```
@@ -956,15 +956,25 @@ Configure how errors are handled during flow execution:
 errorHandling: {
   strategy: 'retry',           // 'fail' | 'retry' | 'continue'
   maxRetries: 3,
-  retryDelayMs: 5000,
+  backoffMs: 5000,
 }
 ```
+
+The retry knobs are the **one** retry policy the platform has (`RetryPolicySchema`),
+shared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
+`retry`. A spelling learned on any one of them is correct on all of them.
+
+<Callout type="warn">
+  **17.0.0 breaking:** the base delay here was `retryDelayMs` and is now
+  `backoffMs` — same value, same meaning. `retryDelayMs` is rejected with the
+  rename; `os migrate meta --from 16` rewrites it for you.
+</Callout>
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `strategy` | `enum` | `'fail'` (stop) or `'retry'` (re-run the whole flow). `'continue'` parses but the engine branches only on `'retry'`, so it behaves exactly like `'fail'` — use a `fault` edge to keep going past a failed node (default `'fail'`) |
 | `maxRetries` | `number` | Retry attempts **after** the initial one, `0`–`10`. Under `strategy: 'retry'` it must be at least `1` and there is no default — see below (default `0`, i.e. no retries, for the strategies that never retry) |
-| `retryDelayMs` | `number` | Delay between retries (ms) (default `1000`) |
+| `backoffMs` | `number` | Base delay before the first retry (ms); subsequent delays multiply by `backoffMultiplier` (default `1000`) |
 | `backoffMultiplier` | `number` | Exponential backoff multiplier (default `1`) |
 | `maxRetryDelayMs` | `number` | Ceiling on the backed-off delay (default `30000`) |
 | `jitter` | `boolean` | Randomize the delay to avoid a thundering herd (default `false`) |
@@ -982,7 +992,7 @@ with `maxRetries: 0` — is refused when the flow is registered:
 errorHandling: { strategy: 'retry' }
 
 // ✅ state the attempts
-errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 5000 }
+errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 5000 }
 ```
 
 A retry re-runs the **whole flow from the start**, so every node that already

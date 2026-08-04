@@ -183,7 +183,7 @@ describe('ETLPipelineSchema', () => {
       syncMode: 'incremental',
       schedule: '0 2 * * *',
       enabled: true,
-      retry: { maxAttempts: 5, backoffMs: 120000 },
+      retry: { maxRetries: 5, backoffMs: 120000 },
       notifications: {
         onSuccess: ['data-team@example.com'],
         onFailure: ['ops@example.com'],
@@ -207,13 +207,46 @@ describe('ETLPipelineSchema', () => {
     })).toThrow();
   });
 
-  it('should apply retry defaults when provided', () => {
+  /**
+   * #4962 — retry is OPT-IN, and this is the assertion that says so.
+   *
+   * Until 17 this block defaulted `maxAttempts: 3` / `backoffMs: 60000`, so
+   * `retry: {}` bought three silent re-runs a minute apart. It now carries the
+   * converged `RetryPolicySchema` contract, whose count defaults to 0. The
+   * business ground is the destination: an ETL destination is a foreign system
+   * by definition, so an implicit retry against a non-idempotent one is a
+   * duplicate write. Nothing deployed moves — `etl.zod.ts` has no parse site
+   * and an ETL pipeline is not a `defineStack` collection — which is exactly
+   * why this was the cheapest moment to fix the direction.
+   */
+  it('defaults the retry count to 0 — declaring the block does not buy retries (#4962)', () => {
     const result = ETLPipelineSchema.parse({
       ...minimalPipeline,
       retry: {},
     });
-    expect(result.retry?.maxAttempts).toBe(3);
-    expect(result.retry?.backoffMs).toBe(60000);
+    expect(result.retry?.maxRetries).toBe(0);
+    expect(result.retry?.backoffMs).toBe(1000);
+  });
+
+  it('accepts the three knobs this block never had before the convergence (#4962)', () => {
+    // `backoffMultiplier` / `maxRetryDelayMs` / `jitter` were 批 12's
+    // "documented ABSENCE" guidance entries — a nightly warehouse pipeline
+    // could only retry flat, uncapped and unjittered, the textbook
+    // thundering herd.
+    const result = ETLPipelineSchema.parse({
+      ...minimalPipeline,
+      retry: { maxRetries: 3, backoffMs: 60000, backoffMultiplier: 2, maxRetryDelayMs: 600000, jitter: true },
+    });
+    expect(result.retry).toMatchObject({
+      maxRetries: 3, backoffMs: 60000, backoffMultiplier: 2, maxRetryDelayMs: 600000, jitter: true,
+    });
+  });
+
+  it('caps the retry count at 10, the shared contract\'s bound (#4962)', () => {
+    // The old inline block had no upper bound. Clamping silently would halve a
+    // budget its author chose, so the bound is refused at parse instead.
+    expect(() => ETLPipelineSchema.parse({ ...minimalPipeline, retry: { maxRetries: 11 } })).toThrow();
+    expect(() => ETLPipelineSchema.parse({ ...minimalPipeline, retry: { maxRetries: 10 } })).not.toThrow();
   });
 });
 
@@ -337,7 +370,7 @@ const VALID_PIPELINE = {
   syncMode: 'incremental',
   schedule: '0 2 * * *',
   enabled: true,
-  retry: { maxAttempts: 5, backoffMs: 120000 },
+  retry: { maxRetries: 5, backoffMs: 120000 },
   notifications: { onSuccess: ['data@example.com'], onFailure: ['ops@example.com'] },
   tags: ['analytics'],
   metadata: { owner: 'data-team' },
@@ -449,19 +482,55 @@ describe('[#4001 批 12] curated prescriptions — each anchored to a sibling co
     expect(rejectionFor(['notifications'], 'onError')).toContain('`onError` → `onFailure`');
   });
 
-  it('renames `maxRetries` to `maxAttempts`, and points `retryDelayMs` at `backoffMs`', () => {
-    expect(rejectionFor(['retry'], 'maxRetries')).toContain('`maxRetries` → `maxAttempts`');
+  /**
+   * The four 批 12 curation entries that #4962 DISSOLVED, asserted from the
+   * other side so a regression reads as a failure rather than as silence.
+   *
+   * 批 12 could only make this divergence audible: `maxRetries` was aliased
+   * *to* `maxAttempts` (pointing authors away from the canonical spelling), and
+   * `backoffMultiplier` / `maxRetryDelayMs` / `jitter` each carried a
+   * "documented ABSENCE" guidance entry. Convergence removes the divergence the
+   * entries described, so the entries had to go with it — a curated message
+   * outliving the shape it describes is worse than none, because it is
+   * confidently wrong.
+   */
+  it('no longer points `maxRetries` at `maxAttempts` — the alias inverted (#4962)', () => {
+    // `maxRetries` is now a DECLARED key: writing it must parse, not suggest.
+    const result = ETLPipelineSchema.safeParse(pipelineWith(['retry'], 'maxRetries', 3));
+    expect(result.success, result.success ? '' : JSON.stringify(result.error.issues)).toBe(true);
+  });
+
+  it('tombstones `maxAttempts` with the rename AND the off-by-one warning (#4962)', () => {
+    const retired = rejectionFor(['retry'], 'maxAttempts');
+    expect(retired).toContain('was removed');
+    expect(retired).toContain('maxRetries');
+    expect(retired).toContain('#4962');
+    // The number does NOT change — and the message must say so, because the
+    // identically-spelled connector key IS off by one.
+    expect(retired).toContain('NUMBER IS UNCHANGED');
+    expect(retired).toContain('RetryConfig.maxAttempts');
+    // The default flip has to travel with the rename, or an author does a
+    // lossless-looking rename and silently loses their three retries.
+    expect(retired).toContain('maxRetries: 3');
+  });
+
+  it('tombstones `retryDelayMs` via the shared policy, naming this surface (#4661, #4964)', () => {
     const retired = rejectionFor(['retry'], 'retryDelayMs');
     expect(retired).toContain('backoffMs');
     expect(retired).toContain('#4661');
   });
 
-  it('names the three converged-policy keys this block deliberately lacks (#4962)', () => {
-    for (const absent of ['backoffMultiplier', 'maxRetryDelayMs', 'jitter']) {
-      const message = rejectionFor(['retry'], absent);
-      expect(message, `${absent} must carry the absence prescription`).toContain('documented ABSENCE');
-      expect(message).toContain('#4962');
+  it('DECLARES the three keys 批 12 documented as absent (#4962)', () => {
+    for (const key of ['backoffMultiplier', 'maxRetryDelayMs', 'jitter']) {
+      const message = rejectionFor(['retry'], key);
+      // 'x' is the wrong TYPE for all three, so a rejection is expected — what
+      // must be gone is the absence prescription: the key is real now.
+      expect(message, `${key} must no longer be described as absent`).not.toContain('documented ABSENCE');
     }
+    const parsed = ETLPipelineSchema.safeParse(
+      pipelineWith(['retry'], 'jitter', true),
+    );
+    expect(parsed.success).toBe(true);
   });
 
   it('explains that pipeline direction is structural, not a key', () => {

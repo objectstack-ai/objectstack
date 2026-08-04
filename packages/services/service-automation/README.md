@@ -310,7 +310,7 @@ author-visible split/join gateway.
     try: { nodes: [{ id: 'charge', type: 'http', label: 'Charge', config: { /* … */ } }], edges: [] },
     catch: { nodes: [{ id: 'flag', type: 'update_record', label: 'Flag failure', config: { /* … */ } }], edges: [] },
     errorVariable: '$error',
-    retry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2 },
+    retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
   },
 }
 ```

@@ -4645,9 +4645,14 @@ export class AutomationEngine implements IAutomationService {
         // `maxRetries >= 1` is guaranteed under `strategy: 'retry'` — the schema
         // refuses the zero-attempt spelling of "retry" (#4247), so reaching this
         // method always means at least one re-run.
+        // `backoffMs` (was `retryDelayMs`) since spec 17.0.0 — `errorHandling`
+        // now carries the converged `RetryPolicySchema` contract, so this reads
+        // the same key the `try_catch` executor and `runWithPolicy` read
+        // (#4661, #4964). Destructured, not `??`-defaulted: the parsed block is
+        // the only source of these numbers (#4247).
         const {
             maxRetries,
-            retryDelayMs: baseDelay,
+            backoffMs: baseDelay,
             backoffMultiplier: multiplier,
             maxRetryDelayMs: maxDelay,
             jitter: useJitter,
