@@ -477,13 +477,21 @@ export class SharingServicePlugin implements Plugin {
       // Not bound per object: the posture is judged per delete from live
       // metadata, so an object that gains `sharingModel` after boot is covered
       // without a rebind (see record-share-cascade.ts).
+      //
+      // [#5190] The same hook pair also reclaims `sys_share_link` — a link is a
+      // capability token, so an orphan of it is worse than an orphaned grant:
+      // no principal is named, and a reused record id hands the new record to
+      // whoever kept the URL. The link service is passed as a GETTER because it
+      // is constructed further down this same handler; `resolveToken` refuses
+      // dead-record links regardless of whether this hook ever runs.
       try {
         if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
-          bindRecordShareCascade(engine, this.service, ctx.logger as any);
+          bindRecordShareCascade(engine, this.service, ctx.logger as any, () => this.linkService);
         } else {
           ctx.logger.warn(
             'SharingServicePlugin: engine has no hook API — record deletes will NOT revoke their ' +
-              'sys_record_share rows; the kernel:bootstrapped orphan sweep is the only reclaim',
+              'sys_record_share / sys_share_link rows; the kernel:bootstrapped orphan sweeps are the ' +
+              'only reclaim',
           );
         }
       } catch (err: any) {
@@ -568,6 +576,8 @@ export class SharingServicePlugin implements Plugin {
       try {
         this.linkService = new ShareLinkService({
           engine: engine as SharingEngine,
+          // [#5190] The cascade / orphan sweep report through the plugin logger.
+          logger: ctx.logger as any,
           // [ADR-0111 D8] Let a record's share-manager (owner / Modify All)
           // revoke a link someone else minted on their record. `this.service`
           // is always constructed above — even under `enforce: false` (the
@@ -683,6 +693,29 @@ export class SharingServicePlugin implements Plugin {
         }
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: orphaned record-share sweep (kernel:bootstrapped) failed', { error: err?.message });
+      }
+
+      // [#5190] The same pass for `sys_share_link`. Separate try/catch, not a
+      // second statement inside the one above: a driver error reclaiming grants
+      // must not also skip the capability tokens, which are the leftovers that
+      // do not need a named recipient to be exercised. Same bounded shape
+      // (keyset pages, a self-reporting scan cap), and — like the share sweep —
+      // it runs in every posture, including `enforce: false`, where a host
+      // mounts this plugin purely for the share-link surface.
+      try {
+        if (this.linkService) {
+          const swept = await this.linkService.sweepOrphanedShareLinks();
+          if (swept.truncated) {
+            ctx.logger.info(
+              'SharingServicePlugin: orphaned share-link sweep hit its per-boot scan cap — the ' +
+                'remaining rows are examined on the next boot (they cannot be resolved meanwhile: ' +
+                'the token check re-asks whether the record exists)',
+              { scanned: swept.scanned, revoked: swept.revoked },
+            );
+          }
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: orphaned share-link sweep (kernel:bootstrapped) failed', { error: err?.message });
       }
 
       if (!this.ruleService) return;

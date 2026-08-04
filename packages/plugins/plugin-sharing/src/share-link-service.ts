@@ -11,9 +11,27 @@ import type {
   ShareLinkAudience,
 } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
+import {
+  deleteRowsForDeletedRecords,
+  sweepOrphanedRowsByRecordExistence,
+  type OrphanShareSweepOptions,
+  type OrphanShareSweepResult,
+} from './record-orphan-cleanup.js';
 
 /** Service-elevated context for the plugin's own queries / mutations. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * [#5190] The table whose orphans this service owns. `sys_share_link` is
+ * `managedBy: 'engine-owned'` and its object doc states every write flows
+ * through `IShareLinkService` — so the record-delete cascade reaches it through
+ * this service, never by another module writing the table behind its back.
+ */
+const SHARE_LINK_SWEEP_SUBJECT = {
+  table: 'sys_share_link',
+  noun: 'share-link',
+  issue: '#5190',
+} as const;
 
 /** URL-safe alphabet (RFC 4648 base64url minus padding). 64 symbols. */
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -182,6 +200,8 @@ export interface ShareLinkServiceOptions {
     recordId: string,
     context: ShareLinkExecutionContext,
   ) => Promise<boolean>;
+  /** [#5190] Optional logger for the record-delete cascade / orphan sweep. */
+  logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
 }
 
 /**
@@ -203,6 +223,7 @@ export class ShareLinkService implements IShareLinkService {
     recordId: string,
     context: ShareLinkExecutionContext,
   ) => Promise<boolean>;
+  private readonly logger?: ShareLinkServiceOptions['logger'];
 
   constructor(opts: ShareLinkServiceOptions) {
     this.engine = opts.engine;
@@ -210,6 +231,7 @@ export class ShareLinkService implements IShareLinkService {
     this.hashPassword = opts.hashPassword ?? defaultHashPassword;
     this.verifyPassword = opts.verifyPassword ?? defaultVerifyPassword;
     this.canManageShares = opts.canManageShares;
+    this.logger = opts.logger;
   }
 
   async createLink(
@@ -395,6 +417,26 @@ export class ShareLinkService implements IShareLinkService {
       if (!ok) return null;
     }
 
+    // [#5190] Does the shared RECORD still exist? A share link is an
+    // identity-less CAPABILITY token: whoever holds it has the access, no
+    // principal required. So an orphaned link is worse than an orphaned
+    // `sys_record_share` (#5103), whose recipients are at least a named set —
+    // the moment a record id is reused (custom primary keys, an import that
+    // preserves ids, any future id recycling) a link that morally died with its
+    // record starts authorising a BRAND-NEW record, for whoever kept the URL.
+    //
+    // This is the fail-closed half of the fix and it is deliberately
+    // independent of the delete cascade below: it holds for links that predate
+    // the cascade, for a hook that never ran, and for the postures the cascade
+    // skips. Same branch as revoked / expired — `null`, no distinct code, no
+    // distinct error — because "that record is gone" is itself information an
+    // unauthorised holder must not be able to read out of the endpoint.
+    //
+    // Placed AFTER the cheap in-memory gates (a revoked or expired token pays
+    // no query) and BEFORE the usage stamp, so a dead record never bumps
+    // `use_count` / `last_used_at` either.
+    if (!(await this.recordStillExists(row.object_name, row.record_id))) return null;
+
     // Compute the effective redaction set (object default ∪ per-link).
     const schema = this.engine.getSchema?.(row.object_name);
     const policy = getPolicy(schema);
@@ -418,5 +460,82 @@ export class ShareLinkService implements IShareLinkService {
     }
 
     return { link: row, redactFields };
+  }
+
+  /**
+   * [#5190] Is `(object, recordId)` still there? Read under the SYSTEM context
+   * on purpose: the question is EXISTENCE, not the holder's visibility — the
+   * token is the authorisation, and an anonymous holder has no context to read
+   * under in the first place.
+   *
+   * Fails CLOSED. A probe that throws (driver blip, unregistered object) is an
+   * unanswered question, and an unanswered question must not authorise: the
+   * caller treats `false` exactly like revoked. Note this is the OPPOSITE
+   * direction from the orphan sweep, which leaves rows alone when its probe
+   * fails — and for the same principle. Neither acts on an unanswered question;
+   * for a grant the safe direction is "deny", for a deletion it is "keep".
+   */
+  private async recordStillExists(
+    object: string | null | undefined,
+    recordId: string | null | undefined,
+  ): Promise<boolean> {
+    if (!object || !recordId) return false;
+    try {
+      const rows = await this.engine.find(String(object), {
+        where: { id: recordId },
+        fields: ['id'],
+        limit: 1,
+        context: SYSTEM_CTX,
+      } as any);
+      return Array.isArray(rows) && rows.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#5190] Delete every `sys_share_link` row belonging to records that have
+   * just been deleted — the cascade half, driven by `record-share-cascade.ts`.
+   *
+   * DELETE, not `revoked_at`: the row's whole subject is gone, so there is no
+   * link left to keep a revocation record OF, and the issue names the growth
+   * this table would otherwise show (`sys_share_link` only ever grows, and
+   * Setup's link lists point at records that do not exist). It is also what
+   * #5103 does to the sibling table for the same reason. A link the ADMIN
+   * revoked still keeps its audit row — that path is untouched.
+   */
+  async revokeLinksForDeletedRecords(
+    object: string,
+    recordIds: readonly string[],
+  ): Promise<void> {
+    await deleteRowsForDeletedRecords(
+      this.engine,
+      SHARE_LINK_SWEEP_SUBJECT.table,
+      object,
+      recordIds,
+    );
+  }
+
+  /**
+   * [#5190] Remove every share link whose RECORD no longer exists.
+   *
+   * The `sys_share_link` twin of `SharingService.sweepOrphanedRecordShares`,
+   * running the very same walk (`record-orphan-cleanup.ts`): keyset pages, a
+   * scan cap that reports itself, one batched existence probe per object per
+   * page, and rows left strictly alone when that probe fails.
+   *
+   * Called on `kernel:bootstrapped` (unscoped — every link that predates the
+   * cascade, plus anything a crashed hook missed) and from the cascade's
+   * unbounded-delete branch (scoped to one object).
+   */
+  async sweepOrphanedShareLinks(
+    options?: OrphanShareSweepOptions,
+  ): Promise<OrphanShareSweepResult> {
+    return sweepOrphanedRowsByRecordExistence(
+      this.engine,
+      SHARE_LINK_SWEEP_SUBJECT,
+      options,
+      this.logger,
+    );
   }
 }
