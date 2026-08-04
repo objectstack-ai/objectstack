@@ -12,12 +12,13 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
-import { readEnvWithDeprecation, resolveMultiOrgEnabled, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
@@ -1891,12 +1892,20 @@ export class AuthManager {
         // never seed `sys_environment`) keep working: any lookup error
         // is treated as "no envs to protect".
         organizationHooks: {
-          // Gate fresh organization creation behind the multi-org flag.
-          // The plugin itself is always installed (so list/update/invite endpoints
-          // keep responding); only the `create` operation is denied when the
-          // deployment is provisioned in single-org mode. Resolution order:
-          // `OS_MULTI_ORG_ENABLED` (default `'false'` → single-org /
-          // per-env runtime).
+          // Gate fresh organization creation behind the deployment's TENANCY
+          // POSTURE. The plugin itself is always installed (so list/update/invite
+          // endpoints keep responding); only the `create` operation is denied,
+          // and only where no organization wall is enforced — creating an
+          // organization there would mint a boundary nothing keeps (ADR-0049 at
+          // the deployment layer).
+          //
+          // [#5233] The judge is the REQUESTED tenancy posture
+          // (`multiOrgPostureRequested()`), never the `OS_MULTI_ORG_ENABLED`
+          // boolean ADR-0105 D1 demoted — that one reads `false` on a
+          // deployment configured with only the authoritative
+          // `OS_TENANCY_POSTURE=isolated`, so the whole organization wall
+          // mounted and every org-less user's guided "create your workspace"
+          // path still 403'd. Same defect shape as cloud#1020.
           beforeCreateOrganization: async ({ organization }: any = {}) => {
             // [ADR-0120 D3] `'__global__'` is the platform's name for the
             // NULL-organization bucket: the autonumber sequence table keys
@@ -1913,7 +1922,7 @@ export class AuthManager {
                   '(ADR-0120 D3) and cannot be used as an organization id or slug.',
               });
             }
-            if (!resolveMultiOrgEnabled()) {
+            if (!this.multiOrgPostureRequested()) {
               const { APIError } = await import('better-auth/api');
               throw new APIError('FORBIDDEN', {
                 message:
@@ -3185,6 +3194,34 @@ export class AuthManager {
     return readSsoOnlyEnv() ?? (this.config.ssoOnlyMode ?? false);
   }
 
+  /**
+   * [ADR-0105 D1 / #5233] Does this deployment ASK for a multi-organization
+   * posture? The `beforeCreateOrganization` gate's judge.
+   *
+   * ⛔ Never `resolveMultiOrgEnabled()`. ADR-0105 D1 DEMOTED that boolean to a
+   * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
+   * deployment configured with only the authoritative `OS_TENANCY_POSTURE` —
+   * the exact inversion of the declared contract. It shipped twice: cloud#1020
+   * (the EE licence gate) and #5233, where a fully walled
+   * `OS_TENANCY_POSTURE=isolated` deployment 403'd `organization/create`, so
+   * every org-less user's guided "create your workspace" path dead-ended while
+   * `/auth/config` advertised the capability as present.
+   *
+   * REQUESTED, not effective — the same fact `serve.ts`'s ADR-0093 D5 boot
+   * guard keys on (`resolveTenancyPosture() !== 'single'`), and the same fact
+   * the old boolean expressed, so this corrects the KNOB and nothing else.
+   * Whether a requested wall is actually ENFORCED is the `tenancy` service's
+   * separate answer (`degraded`), which `/auth/config` reports and this gate
+   * deliberately does not consult; #5261 carries that question.
+   *
+   * Read live on every call — never cached. The posture is process-level
+   * config, and freezing it at plugin-build time would make the gate unable to
+   * see anything a later boot phase (or a test) established.
+   */
+  private multiOrgPostureRequested(): boolean {
+    return postureEnforcesWall(resolveTenancyPosture());
+  }
+
   getPublicConfig() {
     // Extract social providers info (without sensitive data)
     const socialProviders = [];
@@ -3244,16 +3281,23 @@ export class AuthManager {
     // Extract enabled features
     const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
     // Multi-org capability (UI org-switcher, "create org" action, etc.).
-    // `OS_MULTI_ORG_ENABLED` (default `'false'` → single-org / per-env runtime).
     // ADR-0093 D4 / ADR-0105 D1 — the `tenancy` service is the single source of
-    // truth. Prefer it; fall back to the raw env flag only when it isn't wired
-    // (e.g. a lean embedding). `multiOrgEnabled` reflects ACTUAL capability —
-    // any posture that enforces an organization wall (`group` or `isolated`) —
-    // so a degraded deployment (requested but no isolation resolves to `single`)
-    // reports `false` and the org-management UI hides instead of rendering broken.
+    // truth. Prefer it; fall back to the resolved POSTURE only when it isn't
+    // wired (e.g. a lean embedding). `multiOrgEnabled` reflects ACTUAL
+    // capability — any posture that enforces an organization wall (`group` or
+    // `isolated`) — so a degraded deployment (requested but no isolation
+    // resolves to `single`) reports `false` and the org-management UI hides
+    // instead of rendering broken.
+    //
+    // [#5233] That fallback used to read `resolveMultiOrgEnabled()`, the
+    // boolean ADR-0105 D1 demoted, which reports `false` on a deployment that
+    // sets only the authoritative `OS_TENANCY_POSTURE` — the same stale
+    // contract that broke the org-create gate, one site over. It reads the
+    // posture now, so an unwired-tenancy embedding advertises the capability
+    // its gate actually allows.
     const tenancy = this.config.getTenancy?.();
-    const tenancyPosture = tenancy?.posture ?? (resolveMultiOrgEnabled() ? 'isolated' : 'single');
-    const multiOrgEnabled = tenancyPosture !== 'single';
+    const tenancyPosture = tenancy?.posture ?? resolveTenancyPosture();
+    const multiOrgEnabled = postureEnforcesWall(tenancyPosture);
     const degradedTenancy = tenancy?.degraded ?? false;
 
     // Legal links shown beneath the login / register cards. Defaults to
