@@ -1460,7 +1460,6 @@
     "ui/ActionParam",
     "ui/ActionType",
     "ui/AddRecordConfig",
-    "ui/Animation",
     "ui/AnimationTrigger",
     "ui/App",
     "ui/AppBranding",
@@ -1639,7 +1638,6 @@
     "ui/WidgetLifecycle",
     "ui/WidgetManifest",
     "ui/WidgetProperty",
-    "ui/WidgetSource",
-    "ui/ZIndex"
+    "ui/WidgetSource"
   ]
 }
