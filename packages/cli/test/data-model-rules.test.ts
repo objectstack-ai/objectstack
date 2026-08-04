@@ -248,10 +248,15 @@ describe('lintUnscopedDeclaredIndexes — bare unique: true on a declared index 
     expect(issues[0].rule).toBe(RULE);
   });
 
-  it('rides along in lintUniqueDeclarations and lintDataModel, so validate/build/lint all report it', () => {
+  it('surfaces through lintDataModel (os lint) but NOT through lintUniqueDeclarations — one report per command', () => {
+    // `os validate`/`os build` run R11 via its own AUTHORING_RULES entry and
+    // R10 via lintUniqueDeclarations; `os lint` runs both via lintDataModel.
+    // If lintUniqueDeclarations also emitted R11, validate/build would report
+    // every finding twice.
     const objs = [{ name: 'a', fields: {}, indexes: [{ fields: ['x'], unique: true }] }];
-    expect(has(lintUniqueDeclarations(objs), RULE)).toBe(true);
     expect(has(lintDataModel(objs), RULE)).toBe(true);
+    expect(has(lintUniqueDeclarations(objs), RULE)).toBe(false);
+    expect(lintDataModel(objs).filter((i) => i.rule === RULE)).toHaveLength(1);
   });
 });
 

@@ -12,9 +12,9 @@ feat(lint): uniqueness-scope rules speak the ADR-0120 vocabulary (#4986, D5a/D5b
   `'global'` (installation-wide — exactly today's behavior) or
   `'organization'` (one holder per organization). Protocol 18 rejects the
   spelling (#5082). Exported as `lintUnscopedDeclaredIndexes` +
-  `UNIQUE_UNSCOPED_DECLARED_INDEX`, and reported through
-  `lintUniqueDeclarations` / `lintDataModel`, so `os validate`, `os build` and
-  `os lint` all carry it.
+  `UNIQUE_UNSCOPED_DECLARED_INDEX`, registered as its own AUTHORING_RULES
+  entry (validate/build) and called by `lintDataModel` for `os lint`, so all
+  three commands report it — each finding exactly once.
 - **R10 `unique/double-declaration` rewritten as the four-quadrant scope
   matrix** (ADR-0120 D5b): field `true`/`'organization'` × declared `'global'`
   (or bare `true`, its deprecated spelling) on the same single column =

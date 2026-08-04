@@ -115,6 +115,9 @@ function indexUniqueScope(u: unknown): 'organization' | 'global' {
  *
  * 17.x: warning. Protocol 18 rejects the spelling at validate/publish (#5082).
  * Advisory — never fails a build in 17.x.
+ *
+ * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
+ * calls it for `os lint` — each command reports each finding exactly once.
  */
 export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -180,9 +183,7 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
  * never takes effect, not a broken artifact — so this never fails a build.
  */
 export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
-  // D5a rides along so `os build`'s narrow unique sweep (#3991) reports the
-  // unscoped spelling too — both rules read only the declarations.
-  const issues: LintIssue[] = lintUnscopedDeclaredIndexes(objects);
+  const issues: LintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   for (let i = 0; i < objects.length; i++) {
@@ -263,9 +264,13 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  // R10 lives in its own exported function so `os build` can run that ONE rule
-  // without pulling in the whole best-practice sweep (#3991).
-  const issues: LintIssue[] = lintUniqueDeclarations(objects);
+  // R10/R11 live in their own exported functions so `os validate`/`os build`
+  // can run those rules without pulling in the whole best-practice sweep
+  // (#3991, ADR-0120 D5a) — here `os lint` picks both up.
+  const issues: LintIssue[] = [
+    ...lintUnscopedDeclaredIndexes(objects),
+    ...lintUniqueDeclarations(objects),
+  ];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   // Index: parent object name → child relationships pointing at it.
