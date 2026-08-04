@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMemoryQueue } from '@objectstack/core';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { DbQueueAdapter } from '@objectstack/service-queue';
 import { EmailServicePlugin, resolveDurableQueue } from './email-plugin.js';
 import { EmailService, EMAIL_SEND_QUEUE } from './email-service.js';
@@ -82,10 +83,20 @@ function fakeEngine() {
       return r;
     },
     async delete(table: string, opts: any) {
-      const id = opts?.where?.id;
-      if (id == null) throw new Error('Delete requires an ID or options.multi=true');
-      tables.set(table, rowsOf(table).filter((r) => r.id !== id));
-      return { id };
+      // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate. A double
+      // looser than the engine it stands in for is how #4434 shipped a REST
+      // route that answered 500 to every caller with its suite green — and
+      // the half a hand-written mirror drops is exactly the scalar test
+      // (`where: { id: { $in: [...] } }` looks like an id and is not one).
+      const dispatch = assertEngineDeleteDispatch(opts);
+      if (dispatch.kind === 'multi') {
+        const survivors = rowsOf(table).filter((r) => !matches(r, opts?.where ?? {}));
+        const deleted = rowsOf(table).length - survivors.length;
+        tables.set(table, survivors);
+        return { deleted };
+      }
+      tables.set(table, rowsOf(table).filter((r) => r.id !== dispatch.id));
+      return { id: dispatch.id };
     },
   };
 }
