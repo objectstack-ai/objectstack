@@ -125,16 +125,6 @@ export const DatasourceMappingRuleSchema = lazySchema(() => z.object({
 export type DatasourceMappingRule = z.infer<typeof DatasourceMappingRuleSchema>;
 
 /**
- * ObjectStack Ecosystem Definition
- *
- * This schema represents the "Full Stack" definition of a project or environment.
- * It is used for:
- * 1. Project Export/Import (YAML/JSON dumps)
- * 2. IDE Validation (IntelliSense)
- * 3. Runtime Bootstrapping (In-memory loading)
- * 4. Platform Reflection (API & Capabilities Discovery)
- */
-/**
  * The prescription raised when a stack declares a non-empty `apis:` (#4936).
  *
  * This string IS the migration doc for whoever hits it — very often an AI
@@ -159,6 +149,16 @@ const APIS_NO_EXECUTOR_GUIDANCE =
   + 'is tracked by https://github.com/objectstack-ai/objectstack/issues/5040, and this '
   + 'rejection is replaced by real execution there — your endpoint definitions stay valid.';
 
+/**
+ * ObjectStack Ecosystem Definition
+ *
+ * This schema represents the "Full Stack" definition of a project or environment.
+ * It is used for:
+ * 1. Project Export/Import (YAML/JSON dumps)
+ * 2. IDE Validation (IntelliSense)
+ * 3. Runtime Bootstrapping (In-memory loading)
+ * 4. Platform Reflection (API & Capabilities Discovery)
+ */
 /**
  * 1. DEFINITION PROTOCOL (Static)
  * ----------------------------------------------------------------------
