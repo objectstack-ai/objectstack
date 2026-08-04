@@ -2,16 +2,26 @@
 '@objectstack/spec': patch
 ---
 
-**Saving a view filter from the console no longer 422s (#5114).**
+**A view filter rule carrying the console's UI row `id` no longer 422s (#5114).**
 
 `ViewFilterRuleSchema` had been closed to unknown keys by an earlier strictness
 wave. The filter builder the console renders stamps `id: crypto.randomUUID()` on
 every filter row it creates (a React list key), and the metadata write path
 validates the PUT body and then persists the **authored** body verbatim — so the
-`id` is on the wire. Closed, the schema rejected it, and every filter write that
-went through the builder came back `422 Unrecognized key(s) on this view filter
-rule: 'id'`. Measured on all three paths, including the flattened personalization
-overlay that is the body the console actually PUTs.
+`id` is on the wire, and in already-stored view rows. Closed, the schema rejected
+it: every filter write carrying one came back `422 Unrecognized key(s) on this
+view filter rule: 'id'`. Measured on all three paths, including the flattened
+personalization overlay that is the shape the console PUTs.
+
+⚠️ **This does not on its own restore "save a filter from the console".** Browser
+verification found a second, independent defect stacked on the same request: the
+list toolbar persists the filter builder's whole `FilterGroup` object (`{ id,
+logic, conditions }`) into `filter`, where the spec declares `ViewFilterRule[]` —
+a type mismatch that rejects before the `id` is ever reached. That one belongs to
+the producer and is tracked separately; until it lands, the console's filter save
+still fails. What this change fixes is every writer that sends a well-formed
+`ViewFilterRule[]` whose rows carry the UI `id` — including view rows already
+stored with one.
 
 The shape is reopened (unknown keys are dropped again, as before the closure).
 `id` is deliberately **not** declared: it is a UI artifact, and declaring it would
