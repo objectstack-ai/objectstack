@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Close stale issues and PRs
-        uses: actions/stale@v10.4.0
+        uses: actions/stale@v11.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           
