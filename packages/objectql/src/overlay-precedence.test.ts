@@ -265,21 +265,37 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
         }
     });
 
-    // ── single-kernel deployments: gate disengaged ──
-    describe('single-kernel mode (no environmentId) — gate bypassed', () => {
-        it('allows agent overlay when environmentId is undefined (gate bypassed)', async () => {
+    // ── single-kernel deployments: overlay gate disengaged ──
+    describe('single-kernel mode (no environmentId) — overlay gate bypassed', () => {
+        it('allows a hook overlay when environmentId is undefined (gate bypassed)', async () => {
             // No environmentId => not project-kernel mode => legacy "anything goes"
             // path used by control-plane bootstrap. ADR-0005 §"Whitelist".
-            // `agent` is a definitively-denied type in project-kernel mode
-            // (allowRuntimeCreate: false, ADR-0063), so this case best
-            // demonstrates the bypass semantics.
+            //
+            // The specimen used to be `agent`, which #5086 moved out from under
+            // this bypass: a type declaring BOTH `allowRuntimeCreate: false` and
+            // `allowOrgOverride: false` is code-only and is refused on EVERY
+            // kernel (see `protocol.code-only-types.test.ts`). What ADR-0005's
+            // sentence actually granted single kernels — the *overlay* whitelist
+            // staying off — is unchanged, so `hook` (allowOrgOverride:false,
+            // allowRuntimeCreate:true) is now the honest specimen for it.
             const { protocol: localProto } = makeProtocol({ environmentId: undefined });
             const result = await localProto.saveMetaItem({
-                type: 'agent',
-                name: 'my_agent',
-                item: { name: 'my_agent', label: 'My Agent', role: 'assistant', instructions: 'Answer questions about test data.' },
+                type: 'hook',
+                name: 'my_hook',
+                item: { name: 'my_hook', object: 'case', events: ['beforeUpdate'] },
             });
             expect(result.success).toBe(true);
+        });
+
+        it('refuses a code-only type even with environmentId undefined (#5086)', async () => {
+            const { protocol: localProto } = makeProtocol({ environmentId: undefined });
+            await expect(
+                localProto.saveMetaItem({
+                    type: 'agent',
+                    name: 'my_agent',
+                    item: { name: 'my_agent', label: 'My Agent', role: 'assistant', instructions: 'Answer questions about test data.' },
+                }),
+            ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
         });
     });
 

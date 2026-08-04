@@ -6276,6 +6276,62 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * The prescription half of a code-only refusal (#5086): where the author
+     * is supposed to declare this item instead. Read from the type's own
+     * registry entry (`filePatterns`), so a newly-flagged type carries an
+     * accurate hint the day it is flagged — nothing here to keep in sync.
+     */
+    private static codeOnlySourceHint(type: string): string {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
+        const pattern = entry?.filePatterns?.[0];
+        return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';
+    }
+
+    /**
+     * #5086 — a brand-new item of a type the registry declares code-only
+     * (`allowRuntimeCreate: false` AND `allowOrgOverride: false`).
+     *
+     * Names the type, the flags that produced the verdict, the prescription
+     * and the escape hatch — the same shape the retired-key refusals in this
+     * wave carry, because a refusal an author cannot act on just moves the
+     * confusion one layer down. `NOT_CREATABLE` is the catalogued code
+     * (`packages/spec/src/api/error-code-ledger.zod.ts`).
+     */
+    private static codeOnlyCreateError(type: string): Error {
+        const err = new Error(
+            `[not_creatable] Metadata type '${type}' is code-only: the metadata-type registry declares `
+            + `allowRuntimeCreate=false and allowOrgOverride=false, so it cannot be created through the `
+            + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
+            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
+            + ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        (err as any).code = 'NOT_CREATABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
+    /**
+     * #5086 — the artifact-backed half of the same refusal: the name IS
+     * shipped by a code package, so the honest verdict is "you may not
+     * overlay it" rather than "you may not create it".
+     */
+    private static codeOnlyOverrideError(type: string, name: string): Error {
+        const err = new Error(
+            `[not_overridable] Metadata item '${type}/${name}' is provided by a code package and its type is `
+            + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it cannot be overlaid through `
+            + `the runtime metadata API on any kernel.`
+            + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
+            + ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
+        );
+        (err as any).code = 'NOT_OVERRIDABLE';
+        (err as any).status = 403;
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -6796,9 +6852,46 @@ export class ObjectStackProtocolImplementation implements
         //    validations / triggers without unlocking the artifact-shadowing
         //    capability. Returns `not_creatable` (vs `not_overridable`) so
         //    the UI can present a tailored message.
+        const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
+        const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(request.type);
+
+        // #5086 — CODE-ONLY TYPES ARE REFUSED ON EVERY KERNEL, not only on
+        // project-scoped ones. A type whose registry entry sets BOTH
+        // `allowRuntimeCreate: false` AND `allowOrgOverride: false` declares
+        // that it has **no runtime write channel at all** — today `job`
+        // (#4509: `handler` resolves only through the compiled bundle's
+        // function table, so a runtime-created job could never be scheduled)
+        // and `agent` (ADR-0063 §2: platform-owned, per-org forks withdrawn).
+        //
+        // The rest of this block stays behind `environmentId !== undefined`
+        // because ADR-0005 §"Whitelist enforcement" deliberately keeps the
+        // *overlay* whitelist off single-kernel deployments ("keep their
+        // existing behaviour"). That sentence predates `allowRuntimeCreate`
+        // and speaks only of the overlay list — it never granted a topology
+        // the right to author a type the registry declares code-only. And the
+        // premise the carve-out rests on ("this kernel is the package
+        // author's own bootstrap channel") is simply not true for the CLI's
+        // lightweight assembler: a host config with instantiated plugins
+        // (`isHostConfig` → `shouldBootWithLibrary === false`) boots
+        // `new ObjectQLPlugin()` with NO environmentId, so the flagship
+        // showcase — a self-hosted app server whose `PUT /api/v1/meta/*` is
+        // an END-USER surface — ran with this entire gate disengaged. Keying
+        // authorization off a row-scoping key is what made a type-level
+        // declaration depend on deployment topology; the declaration decides
+        // it here instead.
+        //
+        // `isOverlayAllowed` still consults `OS_METADATA_WRITABLE`, so the
+        // documented operator escape hatch stays the ONE door: unlocking a
+        // type there unlocks it here too. `deleteMetaItem` is deliberately
+        // NOT gated the same way — removing a code-only row that predates
+        // this refusal is repair, and must stay possible.
+        if (!overlayAllowed && !runtimeCreateAllowed) {
+            throw this.isArtifactBacked(request.type, request.name)
+                ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
+                : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        }
+
         if (this.environmentId !== undefined) {
-            const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
-            const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(request.type);
             const artifactBacked = this.isArtifactBacked(request.type, request.name);
             if (artifactBacked && !overlayAllowed) {
                 const err = new Error(
@@ -6808,15 +6901,6 @@ export class ObjectStackProtocolImplementation implements
                     + `See docs/adr/0005-metadata-customization-overlay.md.`
                 );
                 (err as any).code = 'NOT_OVERRIDABLE';
-                (err as any).status = 403;
-                throw err;
-            }
-            if (!artifactBacked && !overlayAllowed && !runtimeCreateAllowed) {
-                const err = new Error(
-                    `[not_creatable] Metadata type '${request.type}' does not allow runtime creation `
-                    + `(allowRuntimeCreate=false, allowOrgOverride=false). New items of this type must be defined in source code.`
-                );
-                (err as any).code = 'NOT_CREATABLE';
                 (err as any).status = 403;
                 throw err;
             }
