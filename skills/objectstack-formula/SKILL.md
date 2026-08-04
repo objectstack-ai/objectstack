@@ -308,7 +308,9 @@ roots (#4784) — one scope, one meaning, whichever surface reads it.
 |:---|:---|
 | Update hook `condition` (single-record write), validation rule on update | the stored pre-write row |
 | Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
-| Predicate bulk update (`multi: true`) hook `condition` | **unbound** — one write matches N rows and the hook fires once, so there is no single prior record. `record` is the bare payload here too, so a *declared* field this write does not set is unevaluable as well |
+| **`after*` hook `condition` / record-change flow trigger on a predicate (`multi: true`) write** | **that row's pre-write row** — a bulk write fires after-hooks once PER MATCHED ROW (#5038) |
+| Validation rule on a predicate bulk update | that row's pre-write row — per row since #3106 |
+| `before*` hook `condition` on a predicate (`multi: true`) write | **unbound** — a `before*` hook fires ONCE for the whole batch (it may still rewrite the shared payload), so there is no single prior record. `record` is the bare payload here too, so a *declared* field this write does not set is unevaluable as well |
 
 ⚠️ **An unevaluable condition ABORTS the operation (#4775).** Referencing
 `previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
@@ -325,19 +327,41 @@ the condition says" are now different outcomes and the second one is loud —
 any handler runs). A condition that does not even **compile** aborts the same
 way.
 
-So write insert-event conditions over `record` alone, and keep transition
-conditions to single-record writes — that mistake used to cost you a hook that
-quietly never ran, and now costs you every write the hook is attached to.
+So write insert-event conditions over `record` alone — that mistake used to cost
+you a hook that quietly never ran, and now costs you every write the hook is
+attached to.
 
-**On a `multi: true` bulk update the cost lands on every batch (#4800/B1).**
-One hook condition reading `previous.*` makes *every* predicate bulk update of
-that object fail, and the failure names a hook that has nothing to do with the
-write. Fail-loud takes no exception here, but the error is a diagnosis rather
-than a raw `No such key: previous`: it says this is a predicate bulk write, that
-the N matched rows have no single prior record to bind, and gives the two ways
-out — rewrite the condition without `previous`, or target the write at one
-record (update by id). A record-change flow trigger is **not** a way around it:
-it binds the same lifecycle hook and receives the same unbound `previous`.
+**A transition condition needs no special handling for bulk writes (#5038).**
+Write it once, on an `after*` event, and it means the same thing whether the
+write carries an id or a predicate:
+
+```ts
+// Fires once per row that ACTUALLY transitioned — on `update(id)` and on
+// `update({multi: true})` alike.
+P`previous.status != 'done' && record.status == 'done'`
+```
+
+A predicate (`multi: true`) write is N record changes, so the platform evaluates
+and fires every record-scoped declaration on it **per row**: `previous` is that
+row's own pre-write state and `record` is that row's real state, not the bare
+payload (ADR-0058, bulk-write addendum). The matched rows are read once for the
+whole batch, so this costs one extra query, not one per row. Record-change flow
+triggers ride the same dispatch, so an `record-after-update` flow's start
+condition behaves identically.
+
+⚠️ **The exception is a `before*` hook, and it is not a bug to be fixed later.**
+`beforeUpdate` / `beforeDelete` fire ONCE for the whole batch — they may still
+rewrite the payload, and one `updateMany` carries one payload — so `previous` is
+unbound there and a condition reading it fails the write. The error is a
+diagnosis rather than a raw `No such key: previous`: it names the batch, says the
+`before*` phase is why, and points at the matching `after*` event, where the
+same condition evaluates per row exactly as authored. Put transition conditions
+on `after*`; keep `before*` conditions to the incoming payload
+(`record.<field this write sets>`).
+
+Above ~10 000 matched rows the platform refuses a predicate write on an object
+with after-hooks rather than fan out that many handler runs inside one write —
+paginate the write. It is a refusal, never a silent downgrade to one hook call.
 
 **`previous` is total over the object's declared fields.** A declared column the
 driver never returned reads as `null`, not as a fault. Guard with `!= null`,
@@ -375,9 +399,10 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
 > ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which exists only
-> where `previous` is **bound** — see §5. On an insert event, or on a
-> `multi: true` predicate bulk update, it is not; since #4775 that does not
-> quietly skip the hook, it **fails the write**.
+> where `previous` is **bound** — see §5. On an insert event, or in a `before*`
+> hook condition on a `multi: true` predicate write, it is not; since #4775 that
+> does not quietly skip the hook, it **fails the write**. On `after*` events it
+> IS bound, per matched row, on bulk and single-record writes alike (#5038).
 
 ---
 

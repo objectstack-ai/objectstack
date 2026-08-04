@@ -1,28 +1,39 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#5037] A hook condition that reads `previous` on a PREDICATE bulk write gets
- * a diagnosis that names the LIMITATION — not a CEL riddle, and not permanent
- * advice to abandon the shape.
+ * [#5038, rescoping #5037] Where the bulk-write hook-condition diagnostic still
+ * applies, and where the per-row contract retired it.
  *
- * The rc-window stopgap half of the 2026-08-04 ruling on #4800 / #4862.
- * The ruling settled the contract (ADR-0058, bulk-write addendum): on a bulk
- * write, after-hooks and record-change flow triggers evaluate and fire **per
- * row**, implemented by #5038. Until that lands, the engine's bulk branch binds
- * no `previous` and the condition gate rejects the write (#4775 — fail loud, no
- * exemptions). What this file pins is the shape of that rejection:
+ * The 2026-08-04 ruling on #4800 / #4862 settled the contract, recorded as
+ * ADR-0058's bulk-write addendum: on a predicate (`multi: true`) write,
+ * after-hooks and the record-change flow triggers riding them **evaluate and
+ * fire per row**. #5037 shipped an rc-window stopgap for the gap — a rejection
+ * that named the limitation instead of blaming the author, and promised to
+ * retire when the contract landed. #5038 landed it.
  *
- *   a. bulk write + a condition reading `previous` → a rejection carrying the
- *      machine-readable `limitation`, saying it is the CURRENT VERSION that
- *      cannot do this, and naming the route that works today;
- *   b. the SAME hook on a single-record write → completely unchanged: bound
- *      `previous`, condition evaluates, handler runs;
- *   c. a bulk write whose condition does NOT read `previous` → completely
- *      unchanged, including the plain typo report;
- *   d. the generic `No such key` / `Unknown variable` riddle no longer reaches
- *      the caller as the WHOLE story for (a) — including when the fault names
- *      some other key the same condition reads, which is what the AST-based
- *      detection (`collectCelRootIdentifiers`) buys over reading cel-js's prose.
+ * The promise is kept ASYMMETRICALLY, and that asymmetry is the point of this
+ * file. Per-row dispatch is an AFTER-phase idea: a bulk write's after-hooks now
+ * get one single-record-shaped context per matched row, so a transition
+ * condition on `afterUpdate`/`afterDelete` evaluates as authored and never
+ * reaches the diagnostic. Its `before*` hooks still fire ONCE for the whole
+ * batch — not a version gap, but what the phase IS: a `before*` hook may still
+ * rewrite the payload, and one `updateMany` carries one payload, so there is
+ * nothing per-row to hand it. The diagnostic therefore survives, rescoped, for
+ * exactly that dispatch, and its message no longer promises an expiry it would
+ * now be breaking.
+ *
+ *   a. batch (`before*`) dispatch + a condition reading `previous` → the named
+ *      `limitation`, the phase as the reason, and the after-type event as the
+ *      first route out;
+ *   b. the SAME hook on a single-record write → completely unchanged;
+ *   c. a batch dispatch whose condition does NOT read `previous` → unchanged,
+ *      including the plain typo report;
+ *   d. the generic `No such key` / `Unknown variable` riddle is never the WHOLE
+ *      story for (a) — including when the fault names some other key the same
+ *      condition reads, which is what AST-based detection
+ *      (`collectCelRootIdentifiers`) buys over reading cel-js's prose;
+ *   e. RETIRED: the same condition on an `afterUpdate` hook, through the real
+ *      engine, now evaluates per row and the bulk write SUCCEEDS.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,18 +60,21 @@ const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: (
 
 function makeHook(condition: string, extra: Partial<Hook> = {}): Hook {
   return {
-    name: 'audit_task_completion', object: 'hook_task', events: ['afterUpdate'], priority: 100,
+    name: 'audit_task_completion', object: 'hook_task', events: ['beforeUpdate'], priority: 100,
     condition, handler: () => {},
     ...extra,
   } as unknown as Hook;
 }
 
-/** An after-update context for a predicate (`multi: true`) bulk write: no id,
- *  no prior record — exactly what the engine's bulk branch builds. */
-function bulkCtx(data: Record<string, unknown>): HookContext {
+/**
+ * The BATCH dispatch of a predicate (`multi: true`) write: no id, no prior
+ * record — exactly what the engine's bulk branch builds for `beforeUpdate` /
+ * `beforeDelete`, one call standing for N matched rows.
+ */
+function batchCtx(data: Record<string, unknown>, event = 'beforeUpdate'): HookContext {
   return {
     object: 'hook_task',
-    event: 'afterUpdate',
+    event,
     input: { data, options: { multi: true } },
     previous: undefined,
     ql: qlStub,
@@ -79,10 +93,10 @@ function singleCtx(data: Record<string, unknown>): HookContext {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * a. The bulk write reading `previous` gets the named limitation
+ * a. The batch (`before*`) dispatch reading `previous` keeps the named limitation
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5037] a bulk write whose hook condition reads `previous`', () => {
+describe('[#5038] the batch dispatch of a bulk write, whose condition reads `previous`', () => {
   const TRANSITION = 'previous.done != true && record.done == true';
 
   it('rejects with a machine-readable `limitation`, not just prose', async () => {
@@ -91,7 +105,7 @@ describe('[#5037] a bulk write whose hook condition reads `previous`', () => {
       makeHook(TRANSITION), (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
 
     expect(err).toBeInstanceOf(HookConditionError);
     // The discriminator a caller branches on. Deliberately NOT `code`: ADR-0112
@@ -108,44 +122,85 @@ describe('[#5037] a bulk write whose hook condition reads `previous`', () => {
     expect(ran).toEqual([]);
   });
 
-  it('names the batch, the missing binding, and that the VERSION is what is behind', async () => {
+  it('names the batch, the missing binding, and the PHASE as the reason', async () => {
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
     );
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
 
     expect(err.message).toContain("Hook 'audit_task_completion'");
     expect(err.message).toContain('PREDICATE bulk write (multi: true)');
     expect(err.message).toContain('no single prior record to bind');
-    // The ruling's substance: the author's metadata is fine, the platform is
-    // behind, and the gap has an owner. Without this the message reads as
-    // "never write transition conditions", which is the opposite of the
-    // contract recorded on ADR-0058.
-    expect(err.message).toContain('CURRENT-VERSION limitation');
-    expect(err.message).toContain('PER ROW');
+    expect(err.message).toContain("'beforeUpdate'");
+    // The reason is now the phase, not a missing release. A `before*` hook may
+    // still rewrite the shared payload, so it cannot be per-row.
+    expect(err.message).toContain('before any row is written');
     expect(err.message).toContain('ADR-0058');
-    expect(err.message).toContain('#5038');
   });
 
-  it('gives the route that works TODAY, and prices the one that changes meaning', async () => {
+  it('no longer promises an expiry that has already happened', async () => {
+    // #5037's message said "this rejection retires when #5038 lands". It has
+    // landed. Repeating that sentence would be a promise the platform is now
+    // breaking — an author would wait for a release that already shipped.
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
     );
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
 
-    expect(err.message).toContain('target the write at one record (update by id)');
+    expect(err.message).not.toContain('CURRENT-VERSION limitation');
+    expect(err.message).not.toMatch(/retires when/);
+  });
+
+  it('leads with the after-type event — the route the contract just made real', async () => {
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
+    );
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
+
+    // The first route out is the one per-row dispatch created: the same
+    // condition on the matching after-type event evaluates as authored.
+    expect(err.message).toContain("'afterUpdate'");
+    expect(err.message).toContain('PER MATCHED ROW');
+    // Single-record targeting still works and is still named.
+    expect(err.message).toContain('one record (update by id)');
     // Dropping `previous` is not free and the message must not present it as
     // the fix: a transition silently becomes a state test.
     expect(err.message).toContain('becomes a state test');
-    // VERIFIED (#4862): the record-change trigger subscribes to these same
-    // lifecycle hooks, so it is not an escape hatch. Naming it would make this
-    // very message the next `declared ≠ delivered`.
-    expect(err.message).toContain('A record-change flow trigger is NOT a way around this');
   });
 
-  it('still ABORTS the write — the diagnosis is not an exemption', async () => {
+  it('now DOES name the record-change flow trigger — the fact it was refused over changed', async () => {
+    // #5037 deliberately refused this route on measured evidence: the trigger
+    // subscribes to these same lifecycle hooks, so on a bulk write it fired once
+    // with the same unbound `previous` (#4862). #5038 fixed it at the producer,
+    // so an after-type record-change trigger rides the per-row dispatch. The
+    // message follows the fact rather than the other way round.
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
+    );
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
+
+    expect(err.message).toContain('record-change flow trigger');
+    expect(err.message).not.toContain('A record-change flow trigger is NOT a way around this');
+  });
+
+  it('names `beforeDelete` for a delete-shaped batch dispatch', async () => {
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous.done != true', { events: ['beforeDelete'] } as any),
+      (async () => {}) as any, { logger: silentLogger },
+    );
+    const ctx = {
+      object: 'hook_task', event: 'beforeDelete',
+      input: { options: { multi: true } }, previous: undefined, ql: qlStub,
+    } as unknown as HookContext;
+
+    const err = await wrapped(ctx).then(() => null, (e) => e);
+    expect(err.limitation).toBe('bulk_write_previous_unbound');
+    expect(err.message).toContain("'afterDelete'");
+  });
+
+  it('still ABORTS the write — the rescoping is not an exemption', async () => {
     const engine = await bootEngine([{
-      name: 'audit_task_completion', object: 'hook_task', events: ['afterUpdate'], priority: 90,
+      name: 'audit_task_completion', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
       condition: TRANSITION,
       handler: () => {},
     } as unknown as Hook]);
@@ -159,20 +214,9 @@ describe('[#5037] a bulk write whose hook condition reads `previous`', () => {
 
     expect(err).toBeInstanceOf(HookConditionError);
     expect(err.limitation).toBe('bulk_write_previous_unbound');
-  });
-
-  it('fires for a delete-shaped predicate bulk write too', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true', { events: ['afterDelete'] } as any),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-    const ctx = {
-      object: 'hook_task', event: 'afterDelete',
-      input: { data: {}, options: { multi: true } }, previous: undefined, ql: qlStub,
-    } as unknown as HookContext;
-
-    const err = await wrapped(ctx).then(() => null, (e) => e);
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
+    // Fail loud takes no exception: nothing was written.
+    const rows: any[] = await engine.find('hook_task', {} as any);
+    expect(rows.every((r) => r.done === false)).toBe(true);
   });
 });
 
@@ -180,13 +224,14 @@ describe('[#5037] a bulk write whose hook condition reads `previous`', () => {
  * b. The single-record write of the SAME hook is untouched
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5037] a single-record write is completely unchanged', () => {
+describe('[#5038] a single-record write is completely unchanged', () => {
   const TRANSITION = 'previous.done != true && record.done == true';
 
   it('binds `previous`, evaluates the transition, and runs the handler', async () => {
     const ran: string[] = [];
     const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
+      makeHook(TRANSITION, { events: ['afterUpdate'] } as any),
+      (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
     );
 
     await wrapped(singleCtx({ done: true }));
@@ -197,7 +242,8 @@ describe('[#5037] a single-record write is completely unchanged', () => {
   it('skips (without throwing) when the transition did not happen', async () => {
     const ran: string[] = [];
     const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
+      makeHook(TRANSITION, { events: ['afterUpdate'] } as any),
+      (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
     );
     // Already done before the write → not a transition → plain skip, no error.
     const ctx = singleCtx({ done: true });
@@ -225,17 +271,17 @@ describe('[#5037] a single-record write is completely unchanged', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * c. A bulk write whose condition does not read `previous` is untouched
+ * c. A batch dispatch whose condition does not read `previous` is untouched
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5037] a bulk write with no `previous` in the condition is unaffected', () => {
+describe('[#5038] a batch dispatch with no `previous` in the condition is unaffected', () => {
   it('evaluates over the payload and runs the handler', async () => {
     const ran: string[] = [];
     const wrapped = wrapDeclarativeHook(
       makeHook('record.done == true'), (async () => { ran.push('ran'); }) as any, { logger: silentLogger },
     );
 
-    await wrapped(bulkCtx({ done: true }));
+    await wrapped(batchCtx({ done: true }));
 
     expect(ran).toEqual(['ran']);
   });
@@ -246,7 +292,7 @@ describe('[#5037] a bulk write with no `previous` in the condition is unaffected
       makeHook('record.done == true'), (async () => { ran.push('ran'); }) as any, { logger: silentLogger },
     );
 
-    await wrapped(bulkCtx({ done: false }));
+    await wrapped(batchCtx({ done: false }));
 
     expect(ran).toEqual([]);
   });
@@ -256,7 +302,7 @@ describe('[#5037] a bulk write with no `previous` in the condition is unaffected
       makeHook('record.stauts == "x"'), (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
     expect(err.limitation).toBeUndefined();
     expect(err.predicateBulkWrite).toBeUndefined();
@@ -271,27 +317,29 @@ describe('[#5037] a bulk write with no `previous` in the condition is unaffected
       makeHook('record.archived == true'), (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
     expect(err.limitation).toBe('bulk_write_stored_state_unavailable');
     expect(err.predicateBulkWrite).toBe(true);
     expect(err.message).toContain("'archived' IS declared on this object");
-    expect(err.message).toContain('#5038');
+    // Same rescoping: the after-type event is where `record` holds the row's
+    // real state, so it is named here too.
+    expect(err.message).toContain("'afterUpdate'");
   });
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * d. The riddle no longer reaches the caller for the `previous` case
+ * d. The riddle is never the whole story for the `previous` case
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5037] the generic CEL fault is never the whole story on this path', () => {
+describe('[#5038] the generic CEL fault is never the whole story on this path', () => {
   it('does not leave the author with the bare `No such key` / unbound-root sentence', async () => {
     const wrapped = wrapDeclarativeHook(
       makeHook('previous.done != true && record.done == true'),
       (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
 
     // `describeCelFault`'s generic sentences — both of which read as "you wrote
     // it wrong" — must not be what this author is left holding.
@@ -303,7 +351,7 @@ describe('[#5037] the generic CEL fault is never the whole story on this path', 
   });
 
   it('names `previous` for a condition that also reads a declared-but-unset field', async () => {
-    // Both halves are unevaluable on a batch, for the same reason. The
+    // Both halves are unevaluable on a batch dispatch, for the same reason. The
     // `previous` half is the one the author cannot work around by writing the
     // condition differently, so it is the one the message leads with — reading
     // the answer off the parsed AST rather than off whichever fault the
@@ -313,7 +361,7 @@ describe('[#5037] the generic CEL fault is never the whole story on this path', 
       (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
     expect(err.limitation).toBe('bulk_write_previous_unbound');
     expect(err.message).toContain("The condition reads 'previous'");
@@ -331,7 +379,7 @@ describe('[#5037] the generic CEL fault is never the whole story on this path', 
       (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
     expect(err.limitation).toBe('bulk_write_stored_state_unavailable');
     expect(err.message).toContain("'previous_status' IS declared on this object");
@@ -347,7 +395,7 @@ describe('[#5037] the generic CEL fault is never the whole story on this path', 
       (async () => {}) as any, { logger: silentLogger },
     );
 
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
+    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
     expect(err.limitation).toBe('bulk_write_previous_unbound');
     if (err.missingKey === 'stauts') {
@@ -368,9 +416,62 @@ describe('[#5037] the generic CEL fault is never the whole story on this path', 
       (async () => { ran.push('ran'); }) as any, { logger: silentLogger },
     );
 
-    await wrapped(bulkCtx({ done: true }));
+    await wrapped(batchCtx({ done: true }));
 
     expect(ran).toEqual(['ran']);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * e. RETIRED — the after-type dispatch of the very same write now succeeds
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#5038] the diagnostic is RETIRED for after-type hooks', () => {
+  const TRANSITION = 'previous.done != true && record.done == true';
+
+  it('the bulk write that #5037 rejected now succeeds, firing the hook per row', async () => {
+    // The exact scenario `hook-condition-bulk-previous.test.ts` used to pin as a
+    // rejection, verbatim except for the event. This is the contract landing.
+    const audited: string[] = [];
+    const engine = await bootEngine([{
+      name: 'audit_task_completion', object: 'hook_task', events: ['afterUpdate'], priority: 90,
+      condition: TRANSITION,
+      handler: (ctx: any) => { audited.push(String(ctx.previous?.id ?? ctx.input?.id)); },
+    } as unknown as Hook]);
+
+    await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    await engine.insert('hook_task', { title: 'B', status: 'todo', done: false });
+
+    const affected = await engine.update(
+      'hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any,
+    );
+
+    // The write's own contract is untouched — a predicate update still resolves
+    // the affected COUNT (#4639), not a list of rows.
+    expect(affected).toBe(2);
+    // …and the transition hook fired once per matched row.
+    expect(audited).toHaveLength(2);
+    expect(new Set(audited).size).toBe(2);
+  });
+
+  it('does not fire for rows the transition did not happen on', async () => {
+    // The whole reason `previous` exists: an already-done row is not a
+    // transition. Per-row evaluation is what makes that distinction possible on
+    // a batch — one payload, N different prior states.
+    const audited: string[] = [];
+    const engine = await bootEngine([{
+      name: 'audit_task_completion', object: 'hook_task', events: ['afterUpdate'], priority: 90,
+      condition: TRANSITION,
+      handler: (ctx: any) => { audited.push(String(ctx.previous?.title)); },
+    } as unknown as Hook]);
+
+    await engine.insert('hook_task', { title: 'fresh', status: 'todo', done: false });
+    await engine.insert('hook_task', { title: 'already', status: 'todo', done: true });
+
+    await engine.update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any);
+
+    // Both rows matched the predicate; only ONE of them transitioned.
+    expect(audited).toEqual(['fresh']);
   });
 });
 
@@ -418,6 +519,11 @@ function makeMemoryDriver(): any {
     async updateMany(o: string, ast: any, data: Record<string, unknown>) {
       const rows = await this.find(o, ast);
       for (const r of rows) storeFor(o).set(r.id as string, { ...r, ...data, id: r.id });
+      return rows.length;
+    },
+    async deleteMany(o: string, ast: any) {
+      const rows = await this.find(o, ast);
+      for (const r of rows) storeFor(o).delete(r.id as string);
       return rows.length;
     },
     async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },

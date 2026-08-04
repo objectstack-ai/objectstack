@@ -197,6 +197,9 @@ importers:
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../packages/formula
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../packages/objectql

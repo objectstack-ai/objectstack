@@ -200,7 +200,7 @@ Keep them pure, dependency-free, and AI-readable.
 | Binding | Source | Available in |
 |:---|:---|:---|
 | `record` | the row being evaluated | formulas, validation, sharing, visibility |
-| `previous` | row before update | hooks, validation on update |
+| `previous` | row before update — on a `multi: true` write, that row's own pre-write state in `after*` hooks / record-change triggers (per row); unbound in `before*` hooks, which fire once for the batch | hooks, validation on update |
 | `input` | hook payload | hooks |
 | `current_user` | the authenticated subject — the canonical binding (ADR-0068). `user`, `ctx.user` and `os.user` are aliases of the **same** object | predicates with identity |
 | `os.user` | alias of `current_user` | seed, predicates with identity |
@@ -348,6 +348,41 @@ The `condition` is the CEL part — it binds `record` / `previous` directly. The
 JS `body` is a different surface: it is wrapped as `new AsyncFunction('ctx', source)`,
 so inside it the record is `ctx.input` (there is no bare `record`), and every
 `ctx` API it touches must be covered by a declared capability.
+
+#### Transitions on bulk writes
+
+The condition above is a **transition** — `record.status == 'escalated'` alone
+would be true on every update of an already-escalated case, so "just became" is
+only expressible by comparing against `previous`.
+
+Write it once. A predicate (`multi: true`) write is N record changes, so
+`after*` hooks — and the record-change flow triggers that ride them — are
+evaluated and fired **once per matched row**, with `previous` bound to that
+row's own pre-write state and `record` holding that row's real state rather than
+the write's payload. The same condition therefore means the same thing whether
+the write targets one id or matches a thousand rows:
+
+```ts
+await data.update('case', { status: 'escalated' }, { multi: true, where: { severity: 'high' } });
+// → `notify_on_escalation` fires once per case that ACTUALLY transitioned;
+//   cases already escalated do not fire.
+```
+
+The matched rows are read once for the whole batch and reused for every per-row
+evaluation, so this costs one extra query per write, not one per row. Above
+~10 000 matched rows a predicate write against an object with `after*` hooks is
+**refused** rather than fanned out — paginate the write. The refusal is loud;
+the platform never silently downgrades it to a single hook call.
+
+<Callout type="warn">
+`before*` hooks are the exception, by nature rather than by omission.
+`beforeUpdate` / `beforeDelete` fire **once for the whole batch** — they may
+still rewrite the payload, and a bulk write carries exactly one payload — so
+`previous` is unbound there and a `before*` condition that reads it fails the
+write with an error naming the batch and pointing at the matching `after*`
+event. Keep transition conditions on `after*`; keep `before*` conditions to the
+fields the incoming payload actually sets.
+</Callout>
 
 ---
 

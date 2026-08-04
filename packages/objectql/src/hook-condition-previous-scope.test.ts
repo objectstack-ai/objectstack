@@ -193,25 +193,51 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
     expect(conditionWarnings()).toEqual([]);
   });
 
-  it('fabricates nothing on a predicate bulk update — `previous` stays unbound', async () => {
+  it('fabricates nothing on the BATCH dispatch of a bulk update — `previous` stays unbound', async () => {
     const calls: string[] = [];
     const { logger } = captureLogger();
-    // A `multi: true` update matched N rows and fires the hook ONCE; there is
-    // no single prior record. Binding `{}` or `null` would make
+    // The `beforeUpdate` of a `multi: true` update fires ONCE for N matched
+    // rows; there is no single prior record. Binding `{}` or `null` would make
     // `previous.done != true` answer for rows nobody read. #4775/B1: it stays
     // unbound AND the write is rejected — with a diagnosis, not `No such key`.
+    //
+    // [#5038] The AFTER dispatch of that same write is per row and DOES bind
+    // `previous` — the case below.
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION, ['beforeUpdate']),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    await expect(wrapped(makeCtx({
+      event: 'beforeUpdate',
+      previous: undefined,
+      input: { data: { done: true }, options: { multi: true } },
+    } as any))).rejects.toThrow(/PREDICATE bulk write/);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('binds `previous` on the PER-ROW dispatch of a bulk update (#5038)', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    // What the engine now hands an after-hook for each matched row of a
+    // predicate write: the single-record shape, carrying the row's id and its
+    // own pre-image. The transition condition evaluates exactly as it does on a
+    // single-record write — which is the contract ADR-0058's addendum records.
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await expect(wrapped(makeCtx({
-      previous: undefined,
-      input: { data: { done: true }, options: { multi: true } },
-    } as any))).rejects.toThrow(/PREDICATE bulk write/);
+    await wrapped(makeCtx({
+      input: { id: 't1', data: { done: true }, options: { multi: true } },
+      previous: { id: 't1', title: 'Ship it', status: 'todo', done: false },
+    } as any));
 
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(['ran']);
+    expect(conditionWarnings()).toEqual([]);
   });
 
   it('a delete-shaped context evaluates `previous` against the pre-image', async () => {

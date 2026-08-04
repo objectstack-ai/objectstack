@@ -56,10 +56,10 @@
 
 ---
 
-> **Addendum (2026-08, #4800 / #4862 / #5037) — BULK-WRITE SCOPE: on a predicate
-> (`multi: true`) write, after-hooks and record-change flow triggers evaluate and
-> fire PER ROW.** _Contract recorded here; implementation tracked by #5038; the
-> rc window ships a named diagnostic in its place._
+> **Addendum (2026-08, #4800 / #4862 / #5037 / #5038) — BULK-WRITE SCOPE: on a
+> predicate (`multi: true`) write, after-hooks and record-change flow triggers
+> evaluate and fire PER ROW.** _Contract recorded here; **implemented by #5038**
+> (see "How it landed" below). `before*` hooks are outside it, by nature._
 >
 > The addendum above settles what happens when a write-path predicate cannot be
 > evaluated. It does not settle **what the evaluation is even over** when one
@@ -76,37 +76,69 @@
 > transition condition (`previous.done != true && record.done == true`) and it
 > means the same thing whether the write carries an id or a predicate.
 >
-> **What the engine does today, measured (#4862).** A `multi: true` update
+> **What the engine did before #5038, measured (#4862).** A `multi: true` update
 > reaches `driver.updateMany`, which resolves an affected COUNT; the lifecycle
-> hook fires **once**, `hookContext.previous` is never assigned (only the
-> single-id branch fetches a prior row), and `record` degrades to the write's
-> bare payload. So a condition naming `previous` is unevaluable and — since the
-> #4775 row above — **rejects the write**.
+> hook fired **once**, `hookContext.previous` was never assigned (only the
+> single-id branch fetched a prior row), and `record` degraded to the write's
+> bare payload. So a condition naming `previous` was unevaluable and — since the
+> #4775 row above — **rejected the write**. The rc window (#5037) kept the
+> rejection (fail loud takes no exception; logging-and-skipping was considered
+> and refused on #4800, because a missing audit row is the one failure nobody
+> goes looking for) but made it name the limitation instead of the author.
 >
-> **The rc-window stopgap (#5037).** The rejection stands: fail loud takes no
-> exception here (the alternatives — logging an error and skipping the hook, or
-> skipping it silently — were considered and refused on #4800, because a missing
-> audit row is the one failure nobody goes looking for). What changed is that it
-> must no longer read as an author's mistake. `HookConditionError` carries a
-> machine-readable `limitation` (`bulk_write_previous_unbound`,
-> `bulk_write_stored_state_unavailable`) and a message that names the batch, says
-> the CURRENT VERSION is what cannot bind the row's prior state, points at the
-> contract above, and gives the route that works today (target the write at one
-> record). It is a stopgap with an expiry: when #5038 lands per-row evaluation
-> the condition evaluates as authored and this rejection has nothing left to
-> report.
+> **How it landed (#5038).** The engine's bulk branch reads the matched row set
+> **once** — the same `driver.find` #3106 already issues for per-row validation,
+> now also demanded when the object has after-hooks — and then dispatches
+> `afterUpdate` / `afterDelete` **once per matched row**, on a context with the
+> single-record shape: `input.id` = the row, `previous` = its pre-image,
+> `result` = its state. That shape is #2922's ruling for batch INSERT restated
+> (a single array-shaped context "broke every consumer built for the single
+> shape"), and it is why the fix has no code in the consumers: `hook-wrappers`'
+> `record`/`previous` bindings, the record-change trigger's `buildContext` and
+> plugin-audit's diff all read those same fields and became correct at the
+> producer. The write's own contract is untouched — a predicate write still
+> resolves an affected count (#4639), and still publishes ONE aggregate
+> `data.records.updated`, because per-row dispatch changed hook granularity, not
+> what the write is.
 >
-> **Deliberately not written into that message:** "use a record-change flow
-> trigger instead". Verified, not assumed — that trigger subscribes to these very
-> lifecycle hooks, so on a bulk write it fires once with the same unbound
-> `previous` (#4862). Naming it would have made the error that fixes a
-> `declared ≠ delivered` into another one.
+> **The consequences, priced as this addendum required.**
 >
-> **Consequences to price when #5038 implements this**: an after-hook that fires
-> once per batch today fires N times (notification hooks send N messages,
-> cache-invalidation hooks run N times), so the shape of `ctx.result` per row,
-> the per-row meaning of `onError`, and a ceiling on very large matched sets are
-> part of that implementation, not free riders on it.
+> - **`ctx.result` per row is the ROW, not the batch** — composed as
+>   `row ⊕ payload` from the pre-image already in hand, so the guardrail above
+>   ("read the row set once") stays literal: no second full-set query after the
+>   write. A bulk DELETE has no post-state, so its per-row context sets no
+>   `result` and consumers fall back to `previous`, which is what `record` means
+>   for a delete.
+> - **`onError` needed no per-row meaning.** It governs a HANDLER on a
+>   record-scoped context, and per-row dispatch is what finally gives it one:
+>   `abort` propagates and fails the operation (as on the single-record and
+>   batch-insert paths), `log` swallows that row and the batch continues.
+> - **The ceiling is a refusal, not a downgrade.** Past
+>   `MAX_BULK_PER_ROW_HOOK_ROWS` (10 000) a predicate write against an object
+>   with after-hooks is rejected BEFORE the driver call, so nothing is written.
+>   Falling back to one dispatch for the batch would skip the hook for N-1 rows
+>   silently — the failure shape this whole family exists to abolish.
+>
+> **`before*` hooks are NOT per row, and that is not a version gap.** A
+> `beforeUpdate` / `beforeDelete` fires once for the whole batch because it may
+> still rewrite the payload, and one `updateMany` carries one payload — there is
+> nothing per-row to hand it. So #5037's `HookConditionError` and its
+> `limitation` discriminator (`bulk_write_previous_unbound`,
+> `bulk_write_stored_state_unavailable`) **survive, rescoped to that dispatch**,
+> and their message no longer promises an expiry that has already happened: it
+> names the phase as the reason and points at the matching `after*` event, where
+> the same condition evaluates per row exactly as authored. Authors put
+> transition conditions on `after*`; `before*` conditions stay over the incoming
+> payload.
+>
+> **One refusal reversed on evidence.** #5037 deliberately did NOT offer "use a
+> record-change flow trigger instead", because that trigger subscribes to these
+> very lifecycle hooks and so fired once with the same unbound `previous`
+> (#4862) — naming it would have made the error that fixes a
+> `declared ≠ delivered` into another one. #5038 fixed it at the producer, so an
+> after-type record-change trigger now rides the per-row dispatch and the route
+> is real. The message names it because the fact changed, not because the
+> constraint was relaxed.
 
 ---
 

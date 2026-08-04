@@ -76,23 +76,38 @@ const noopLogger = {
  * mint a third set of semantics for the same word.
  */
 /**
- * Which CURRENT-VERSION platform limitation made the condition unevaluable,
- * when a limitation — rather than the author — is what happened (#5037).
+ * Which platform limitation made the condition unevaluable, when a limitation
+ * — rather than the author — is what happened (#5037).
  *
  * The distinction this names is the whole point of the diagnostic: an
- * undeclared key is the AUTHOR's to fix and stays fixed; these two are the
- * PLATFORM's, they contradict the contract ADR-0058's bulk-write addendum
- * records, and they retire when #5038 lands per-row semantics. A caller that
- * wants to tell "your hook is wrong" from "this version cannot do that yet"
- * — a REST layer choosing a status, a test, a Studio surface — reads this
- * field instead of matching on the message text.
+ * undeclared key is the AUTHOR's to fix and stays fixed, while these two are
+ * the PLATFORM's. A caller that wants to tell "your hook is wrong" from "this
+ * event cannot do that" — a REST layer choosing a status, a test, a Studio
+ * surface — reads this field instead of matching on the message text.
  *
  *   - `bulk_write_previous_unbound` — the condition names `previous` on a
- *     predicate (`multi: true`) write, which matches N rows and fires the hook
- *     once, so there is no single prior record to bind;
+ *     predicate (`multi: true`) write whose hook fires once for the whole
+ *     batch, so there is no single prior record to bind;
  *   - `bulk_write_stored_state_unavailable` — the condition names a DECLARED
- *     field this write does not set, and `record` is the bare payload on a bulk
+ *     field this write does not set, and `record` is the bare payload on such a
  *     write for the same reason (no single stored row to merge with).
+ *
+ * ## What #5038 retired, and what it did NOT
+ *
+ * #5037 shipped these as a stopgap for the whole bulk-write surface, expiring
+ * when #5038 landed the per-row contract. #5038 retires them for **after-type**
+ * hooks, which now receive one single-record-shaped context per matched row —
+ * `previous` bound, `record` the row's real state — so a transition condition
+ * on `afterUpdate`/`afterDelete` evaluates on a bulk write exactly as authored
+ * and never reaches this error.
+ *
+ * They stay reachable, and correct, for **before-type** hooks. A
+ * `beforeUpdate`/`beforeDelete` on a predicate write fires ONCE, before any row
+ * is touched, because it may still rewrite the payload — and one payload cannot
+ * be edited per row. That is not a version gap that a later release closes; it
+ * is what a batch-scoped event is. So the message no longer promises expiry:
+ * it names the phase as the reason and points at the after-type event, which
+ * per-row semantics made a route that actually works.
  *
  * ## Why this is not `error.code`
  *
@@ -486,18 +501,26 @@ function isInsertEvent(event: unknown): boolean {
 }
 
 /**
- * Is this operation a PREDICATE (`multi: true`) bulk write?
- *
- * The engine routes an update/delete to `updateMany`/`deleteMany` when the call
- * carries no `id` and `options.multi` is set, and fires the lifecycle hook
- * ONCE for the whole batch — `hookContext.previous` is never assigned and the
- * payload is never merged with any stored row, because there are N stored rows
- * and no single one of them is "the" prior state.
+ * Is this context a BATCH-SCOPED dispatch of a predicate (`multi: true`) write
+ * — one hook call standing for N matched rows?
  *
  * Read off the same two facts the engine branches on (`input.id` absent +
- * `options.multi`), which survive into the after-event context: `input.options`
- * is rebuilt by `buildDriverOptions` as a COPY of the caller's bag, so `multi`
- * is still there.
+ * `options.multi`), which survive into the event context: `input.options` is
+ * rebuilt by `buildDriverOptions` as a COPY of the caller's bag, so `multi` is
+ * still there.
+ *
+ * ## Why the `id` test is the whole test (#5038)
+ *
+ * Since the per-row contract landed, a bulk write's AFTER-hooks are dispatched
+ * on one single-record-shaped context per matched row, each carrying that row's
+ * `input.id`, `previous` and `result`. Those contexts therefore answer `false`
+ * here — correctly, because they are not batch-scoped at all: nothing about
+ * them stands for N rows. What still answers `true` is the `beforeUpdate` /
+ * `beforeDelete` dispatch, which genuinely is one call for the whole batch (it
+ * may rewrite the shared payload, and there is only one payload to rewrite).
+ *
+ * So this predicate did not need a phase test bolted on: the id it looks for is
+ * exactly what per-row dispatch supplies and batch dispatch cannot.
  */
 function isPredicateBulkWrite(ctx: HookContext): boolean {
   const input: any = ctx.input ?? {};
@@ -505,6 +528,21 @@ function isPredicateBulkWrite(ctx: HookContext): boolean {
   if (input.id !== undefined && input.id !== null && input.id !== '') return false;
   const options: any = input.options;
   return Boolean(options && typeof options === 'object' && options.multi);
+}
+
+/** Hook events that fire BEFORE the write, once for the whole operation. */
+function isBeforeEvent(event: unknown): boolean {
+  return typeof event === 'string' && event.startsWith('before');
+}
+
+/**
+ * The after-type event a batch-scoped `before*` condition should move to, so
+ * the diagnostic can name it instead of describing one.
+ */
+function afterCounterpartEvent(event: unknown): string {
+  return typeof event === 'string' && event.startsWith('before')
+    ? `after${event.slice('before'.length)}`
+    : 'after* ';
 }
 
 /**
@@ -546,10 +584,19 @@ function conditionReadsPrevious(source: string): boolean {
  * facts, same two explanatory sentences (both come out of the shared
  * `cel-fault.ts`), so an author who has met one message can read the other.
  *
- * ## The predicate-bulk-write branch (#4800 / B1)
+ * ## The predicate-bulk-write branch (#4800 / B1, rescoped by #5038)
  *
- * A `multi: true` write matches N rows and fires the hook once, so two things
- * the condition may legitimately name are simply not in hand:
+ * A `multi: true` write matches N rows. Its AFTER hooks now fire once PER ROW
+ * on a single-record-shaped context (ADR-0058's bulk-write addendum,
+ * implemented in `engine.ts`), so they never reach this branch: `previous` is
+ * that row's pre-image and `record` is that row's state, and the transition
+ * condition evaluates as authored.
+ *
+ * Its BEFORE hooks still fire ONCE for the whole batch — that is not a gap
+ * waiting on a release, it is what the phase means: a `before*` hook may
+ * rewrite the payload, and one `updateMany` carries one payload, so there is
+ * nothing per-row to give it. For that dispatch two things the condition may
+ * legitimately name are still not in hand:
  *
  *   - `previous` — unbound, because there is no single prior record;
  *   - a DECLARED field the payload does not set — `record` is the payload
@@ -570,28 +617,31 @@ function conditionReadsPrevious(source: string): boolean {
  * misspells something, the author gets both sentences — the typo is theirs to
  * fix, and the batch limitation is still waiting behind it.
  *
- * ## The rejection names a LIMITATION, not the contract (#5037, ADR-0058)
+ * ## The rejection names a PHASE limit, not a version gap (#5038, ADR-0058)
  *
  * The 2026-08-04 ruling on #4800/#4862 settled what a bulk write MEANS: after
- * hooks and record-change flow triggers evaluate and fire PER ROW — recorded as
- * an addendum on ADR-0058, implemented by #5038. This rejection is the rc-window
- * stopgap for the gap between that contract and today's engine, so it says so:
- * an author who reads it learns that the transition condition they wrote is
- * legitimate and that the platform, not their metadata, is behind. The earlier
- * wording ("rewrite the condition without `previous`") predates the ruling and
- * read as permanent guidance to abandon a supported shape — worse, silently
- * changing a transition into a state test, which fires on rows that were
- * already done. The single-record route is now the recommended one, with the
- * rewrite named for what it costs.
+ * hooks and record-change flow triggers evaluate and fire PER ROW. #5037 shipped
+ * this rejection as the rc-window stopgap for the gap between that contract and
+ * the engine, and said so — "this retires when #5038 lands".
  *
- * ⚠️ The escape routes named below are deliberately the only ones. "Use a
- * record-change flow trigger instead" was considered and REJECTED on evidence:
- * that trigger subscribes to these very lifecycle hooks
- * (`trigger-record-change/src/record-change-trigger.ts` → `engine.registerHook`),
- * so on a `multi: true` update it also fires once with `ctx.previous`
- * undefined — measured, not assumed (#4862). Naming it here would have made
- * this message the next `declared ≠ delivered`; it converges on the same per-row
- * contract through #5038, not before.
+ * #5038 has landed, and the honest message changed with it. The rejection is no
+ * longer a placeholder for missing work; it is the standing answer for the one
+ * dispatch that is batch-scoped by nature, the `before*` phase. So the message
+ * no longer promises expiry (a promise it would now be breaking), and its FIRST
+ * route is the one the contract just made real: move the condition to the
+ * matching `after*` event, where it evaluates per row exactly as authored.
+ *
+ * ⚠️ One escape route named here was added on evidence and one was refused on
+ * evidence. A record-change flow trigger IS now a real route — it subscribes to
+ * these very lifecycle hooks (`trigger-record-change/src/record-change-trigger.ts`
+ * → `engine.registerHook`), which is precisely why the per-row contract reaches
+ * it: an `after*` record-change trigger receives the row's bound `previous` on a
+ * bulk write (#4862, closed by #5038). #5037 refused to name it because at that
+ * time it did not; the fact changed, so the message did. What is still NOT
+ * offered is "drop `previous` from the condition" as a fix — it unblocks the
+ * batch by silently turning a transition ("just became done") into a state test
+ * ("is done"), which fires on rows that were already done. It is named only with
+ * that cost attached.
  */
 function unevaluableConditionError(
   meta: Hook,
@@ -620,31 +670,46 @@ function unevaluableConditionError(
     // for a caller that did not pass the AST answer through.
     const namesPrevious = readsPrevious || unknownVariable === 'previous';
 
+    // Which dispatch is this? A `before*` hook on a predicate write is the one
+    // that is batch-scoped by nature (#5038); anything else reaching here is a
+    // context that named no row despite the per-row contract, so it gets the
+    // same facts without the phase explanation.
+    const beforePhase = isBeforeEvent(ctx.event);
+    const afterEvent = afterCounterpartEvent(ctx.event);
+    const perRowSentence = beforePhase
+      ? ` A '${afterEvent}' hook on this same write does NOT have this problem: after-hooks on a` +
+        ` predicate write fire once PER MATCHED ROW, each with that row's 'previous' bound and` +
+        ` 'record' holding its real state (ADR-0058, bulk-write addendum; ruling on #4800/#4862).` +
+        ` If the condition is a TRANSITION rather than a guard on the incoming payload, move the hook` +
+        ` to '${afterEvent}' — or express it as an after-type record-change flow trigger, which rides` +
+        ` the same per-row dispatch.`
+      : ` After-hooks on a predicate write are dispatched once per matched row, each carrying that` +
+        ` row's id, 'previous' and state (ADR-0058, bulk-write addendum); this context carries no row id,` +
+        ` so it was dispatched for the batch.`;
+
     let limitation: HookConditionLimitation | undefined;
     let bulkDetail: string | undefined;
     if (namesPrevious) {
       limitation = 'bulk_write_previous_unbound';
       bulkDetail =
-        ` The condition reads 'previous', but this is a PREDICATE bulk write (multi: true):` +
-        ` it matches many rows and fires the hook ONCE, so there is no single prior record to bind.` +
-        ` This is a CURRENT-VERSION limitation, not the contract: a bulk write is declared to` +
-        ` evaluate and fire after-hooks PER ROW (ADR-0058, bulk-write addendum; ruling on #4800/#4862),` +
-        ` and this rejection retires when that lands (#5038).` +
-        ` Until then, target the write at one record (update by id) — a single-record write binds` +
-        ` 'previous', so this very condition evaluates as authored. Dropping 'previous' from the` +
-        ` condition also unblocks the batch, but it changes what the hook MEANS: a transition` +
-        ` ("just became done") becomes a state test ("is done"), which fires on rows that were` +
-        ` already done.` +
-        ` A record-change flow trigger is NOT a way around this — it binds the same lifecycle hook` +
-        ` and receives the same unbound 'previous' on a bulk write (#4862).`;
+        ` The condition reads 'previous', but this is the ${beforePhase ? `'${ctx.event}'` : 'batch'} dispatch of a` +
+        ` PREDICATE bulk write (multi: true): it matches many rows and fires ONCE for the whole batch` +
+        ` — before any row is written, so it may still rewrite the shared payload — and one call has no` +
+        ` single prior record to bind.` +
+        perRowSentence +
+        ` Targeting the write at one record (update by id) also binds 'previous', so this very condition` +
+        ` evaluates as authored. Dropping 'previous' from the condition unblocks the batch too, but it` +
+        ` changes what the hook MEANS: a transition ("just became done") becomes a state test ("is done"),` +
+        ` which fires on rows that were already done.`;
     } else if (declaredMissingKey) {
       limitation = 'bulk_write_stored_state_unavailable';
       bulkDetail =
-        ` '${declaredMissingKey}' IS declared on this object, but this is a PREDICATE bulk write (multi: true):` +
+        ` '${declaredMissingKey}' IS declared on this object, but this is the` +
+        ` ${beforePhase ? `'${ctx.event}'` : 'batch'} dispatch of a PREDICATE bulk write (multi: true):` +
         ` the stored state of the matched rows is not in hand, so 'record' carries only this write's` +
-        ` payload. Reference only fields this write sets, or target the write at one record (update by id).` +
-        ` Same current-version limitation as above: per-row evaluation (#5038) gives 'record' the row's` +
-        ` real state.`;
+        ` payload.` +
+        perRowSentence +
+        ` Otherwise reference only fields this write sets, or target the write at one record (update by id).`;
     }
     if (bulkDetail !== undefined) {
       return new HookConditionError(`${head}${typoDetail}${bulkDetail}`, {
@@ -757,8 +822,13 @@ function declaredFieldsFor(ctx: HookContext): Record<string, unknown> | undefine
  *
  * Materialisation is applied only when the record's persisted state is in hand
  * — an insert (nothing to know) or an update whose prior row was fetched.
- * A predicate bulk update carries no prior row, so its payload is left exactly
- * as it is rather than gaining `null`s that contradict N stored rows.
+ *
+ * Since #5038 a predicate bulk update's AFTER dispatch is per row and DOES
+ * carry the row's prior state, so it merges and materialises like any
+ * single-record write — which is exactly what "`record` is the row's real state,
+ * not the bare payload" means (#4862). Its `before*` dispatch still fires once
+ * for the batch with no prior row, so that payload is left exactly as it is
+ * rather than gaining `null`s that contradict N stored rows.
  *
  * Copies, never mutates: `ctx.previous` and `ctx.input.data` are the engine's
  * own objects, observed by the handlers that run after this gate.
@@ -824,9 +894,12 @@ function pickRecordPayload(ctx: HookContext): any {
  * identifier from the CEL scope. Same here:
  *   - **insert** — there is no prior state, so `previous` is unbound and any
  *     reference to it is an author error, reported as such;
- *   - **predicate (`multi: true`) bulk update** — the engine matched N rows
- *     and fires the hook ONCE, so there is no single prior record to bind;
- *     `previous` stays unbound rather than being invented.
+ *   - **the `before*` dispatch of a predicate (`multi: true`) bulk write** —
+ *     it fires ONCE for N matched rows, so there is no single prior record to
+ *     bind; `previous` stays unbound rather than being invented. The `after*`
+ *     dispatch of that same write is per row since #5038 and binds the row's
+ *     own pre-image, so a transition condition there reads exactly as it does
+ *     on a single-record write.
  * Binding `null`/`{}` instead would make `previous.x == null` answer "yes"
  * for a record whose prior state is simply unknown — a fabricated fact, the
  * one thing materialisation is careful never to do.

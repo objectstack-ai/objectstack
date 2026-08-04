@@ -1136,6 +1136,131 @@ export class ObjectQL implements IObjectQLEngine {
     }
   }
 
+  /**
+   * [#5038] Would `triggerHooks(event, ctx)` reach ANY handler for `object`?
+   *
+   * Mirrors the per-object filter in `triggerHooks` exactly (an entry with no
+   * `object` is global; an array or `'*'` widens it), because this answer gates
+   * a READ of the whole matched row set on the bulk write path. Getting it
+   * looser than the dispatch loop only costs a wasted query; getting it
+   * TIGHTER would silently drop hooks that were going to fire, so the two must
+   * be read together.
+   *
+   * `session.skipAutomations` is deliberately NOT consulted: it suppresses only
+   * metadata-bound entries, and code-registered hooks (audit, sharing) still
+   * run, so the row set is still needed. Over-reading in that case is a cost,
+   * never a correctness loss.
+   */
+  private hasHooksFor(event: string, object: string): boolean {
+    const entries = this.hooks.get(event);
+    if (!entries || entries.length === 0) return false;
+    return entries.some((entry) => {
+      if (!entry.object) return true;
+      const targets = Array.isArray(entry.object) ? entry.object : [entry.object];
+      return targets.includes('*') || targets.includes(object);
+    });
+  }
+
+  /**
+   * [#5038] The per-row after-hook contexts a predicate (`multi: true`) write
+   * dispatches, one per matched row.
+   *
+   * ## Why per row at all
+   *
+   * ADR-0058's bulk-write addendum (the 2026-08-04 ruling on #4800 / #4862)
+   * records the contract: **a bulk write is N record changes, so after-hooks
+   * and the record-change flow triggers riding them evaluate and fire PER
+   * ROW**, with `previous` = that row's pre-write state and `record` = that
+   * row's actual state. Before it, the engine fired the hook ONCE, never
+   * assigned `previous`, and left `record` degraded to the bare payload — so
+   * the transition condition both the docs and ten showcase flows teach
+   * (`status == "done" && previous.status != "done"`) was unevaluable on a
+   * bulk write, and the audit/notification flows behind it silently did not
+   * happen.
+   *
+   * ## The shape is the SINGLE-RECORD shape, deliberately
+   *
+   * Each context is exactly what a single-id write builds — `input.id` is the
+   * row, `input.data` is this write's payload, `result` is the row's state,
+   * `previous` is its pre-image. That is #2922's ruling for batch INSERT
+   * restated: a single array-shaped context "broke every consumer built for
+   * the single shape", so a per-row context must be indistinguishable from a
+   * record-scoped one. It is also what makes this fix land at the PRODUCER:
+   * `hook-wrappers`' `record`/`previous` bindings, the record-change trigger's
+   * `buildContext`, and plugin-audit's diff all read these same four fields and
+   * need no bulk-aware branch of their own.
+   *
+   * `input.data` is a shallow COPY per row: the batch has one payload, but an
+   * after-handler that writes through the flat-input proxy must not have its
+   * mutation leak into the next row's view.
+   *
+   * ## `result` is composed, not re-read
+   *
+   * The row's post-write state is `row ⊕ payload` — the pre-image the matched
+   * set already gave us, overlaid with the payload the driver just applied.
+   * Composing keeps the issue's performance guardrail literal: the matched row
+   * set is read ONCE and reused for every per-row evaluation. Re-reading the
+   * batch after the write to capture driver-side stamps would be a second
+   * full-set query for fields the after-view has never carried on this path.
+   *
+   * For a DELETE there is no post-state, so `result` is left unset and
+   * `input` carries no `data`: consumers fall back to `previous` (the deleted
+   * row), which is what `record` means for a delete.
+   */
+  private buildPerRowAfterContexts(
+    object: string,
+    event: 'afterUpdate' | 'afterDelete',
+    rows: Record<string, unknown>[],
+    batchCtx: HookContext,
+    payload?: Record<string, unknown>,
+  ): HookContext[] {
+    const schema = this._registry.getObject(object);
+    const options = (batchCtx.input as { options?: unknown } | undefined)?.options;
+    return rows.map((row) => ({
+      ...batchCtx,
+      event,
+      input: payload
+        ? { id: (row as { id?: unknown }).id, data: { ...payload }, options }
+        : { id: (row as { id?: unknown }).id, options },
+      previous: coerceBooleanFields(schema as any, row as any),
+      result: payload
+        ? coerceBooleanFields(schema as any, { ...row, ...payload } as any)
+        : undefined,
+    }) as unknown as HookContext);
+  }
+
+  /**
+   * [#5038] Ceiling on the matched-row set a predicate write fires per-row
+   * after-hooks over.
+   *
+   * The consequence ADR-0058's addendum told this implementation to price: an
+   * after-hook that used to run once per batch now runs once per row, so a
+   * notification hook sends N messages and a cache-invalidation hook runs N
+   * times. Unbounded, a single `multi: true` update matching a whole table
+   * turns into an unbounded fan-out of handler executions inside one write.
+   *
+   * Exceeding it REJECTS the write, before `updateMany`/`deleteMany` runs, so
+   * nothing is written. The alternative — quietly falling back to firing once
+   * for the batch — is the silent degradation this whole family exists to
+   * abolish (#4649/#4775): the hooks would not fire for N-1 rows and nothing
+   * would say so. The rejection names the count, the ceiling and both routes
+   * out (narrow the predicate, or drop the after-hook).
+   */
+  private assertBulkPerRowHookBudget(object: string, event: string, matched: number): void {
+    if (matched <= ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS) return;
+    throw Object.assign(
+      new Error(
+        `Refusing the bulk write on '${object}': it matches ${matched} rows, and '${event}' hooks are ` +
+          `contracted to fire PER ROW on a predicate write (ADR-0058, bulk-write addendum), which is ` +
+          `over the ${ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS}-row ceiling for one write. Nothing was written. ` +
+          `Narrow the predicate so the batch matches fewer rows (paginate the write), or remove the ` +
+          `'${event}' hook from this object. The write is NOT silently downgraded to one hook call for ` +
+          `the batch — that would skip the hook for ${matched - 1} rows without saying so.`,
+      ),
+      { code: 'ERR_BULK_PER_ROW_HOOK_LIMIT', object, event, matched, limit: ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS },
+    );
+  }
+
   // ========================================
   // Action System
   // ========================================
@@ -3727,6 +3852,12 @@ export class ObjectQL implements IObjectQLEngine {
   /** Maximum depth for recursive expand to prevent infinite loops */
   private static readonly MAX_EXPAND_DEPTH = 3;
   private static readonly MAX_CASCADE_DEPTH = 10;
+  /**
+   * [#5038] Most rows one predicate write may fire per-row after-hooks over.
+   * Public so a test — and an operator reading a rejection — can name the same
+   * number the engine enforces. See `assertBulkPerRowHookBudget`.
+   */
+  public static readonly MAX_BULK_PER_ROW_HOOK_ROWS = 10_000;
   /** In-memory next-value cache per `object.field` for autonumber generation,
    *  lazily seeded from the current max in the store. */
   private readonly autonumberCounters = new Map<string, number>();
@@ -4988,6 +5119,13 @@ export class ObjectQL implements IObjectQLEngine {
            // reading `previous` must be counted into the new demand test —
            // pinned by `hook-condition-previous-scope.test.ts`.
            let priorRecord: Record<string, unknown> | null = null;
+           // [#5038] The matched rows a PREDICATE write fires its per-row
+           // `afterUpdate` contexts over — set only when this object actually
+           // has `afterUpdate` hooks, so a bulk write with none pays for no
+           // read and keeps its single (no-op) batch dispatch. `[]` is
+           // meaningful and distinct from `null`: zero matched rows is zero
+           // record changes, hence zero hook calls.
+           let bulkPerRowRows: Record<string, unknown>[] | null = null;
            const updateSchema = this._registry.getObject(object);
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
@@ -5063,9 +5201,27 @@ export class ObjectQL implements IObjectQLEngine {
                // it), so a rule-free schema still pays nothing here.
                const rulesNeedRows = needsPriorRecord(updateSchema as any);
                const payloadHasReadonlyWhen = hasReadonlyWhenInPayload(updateSchema as any, hookContext.input.data as Record<string, unknown>);
+               // [#5038] The THIRD demand on that same read: after-hooks are
+               // contracted to fire PER ROW on a predicate write (ADR-0058,
+               // bulk-write addendum), and a per-row context needs the row's
+               // pre-image for `previous`. Folded into the existing gate on
+               // purpose — one `driver.find` serves validation, the
+               // `readonlyWhen` strip AND the hook dispatch, which is the
+               // issue's performance guardrail ("行集读取一次完成,求值批内复用")
+               // stated as code. The demand is uniform across after-hooks: it
+               // is NOT keyed on whether any condition mentions `previous`,
+               // which the ruling rejected explicitly as a hidden rule that
+               // makes a hook's firing count depend on its condition text.
+               const perRowAfterHooks = this.hasHooksFor('afterUpdate', object);
                let priorRows: Record<string, unknown>[] | null = null;
-               if (rulesNeedRows || payloadHasReadonlyWhen) {
+               if (rulesNeedRows || payloadHasReadonlyWhen || perRowAfterHooks) {
                    priorRows = await driver.find(object, ast, hookContext.input.options as any) as Record<string, unknown>[];
+               }
+               if (perRowAfterHooks) {
+                   // Refuse an unbounded fan-out BEFORE the write, so a batch
+                   // over the ceiling changes nothing at all.
+                   this.assertBulkPerRowHookBudget(object, 'afterUpdate', priorRows?.length ?? 0);
+                   bulkPerRowRows = priorRows ?? [];
                }
                // [#3042] Enforce conditional `readonlyWhen` on the bulk path too.
                // Unlike static `readonly` (below), a `readonlyWhen` lock is PER
@@ -5142,7 +5298,30 @@ export class ObjectQL implements IObjectQLEngine {
              ? result.map((r) => coerceBooleanFields(updateSchema as any, r as any))
              : coerceBooleanFields(updateSchema as any, result as any);
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any);
-           await this.triggerHooks('afterUpdate', hookContext);
+           if (bulkPerRowRows) {
+             // [#5038] N record changes ⇒ N `afterUpdate` dispatches, each on a
+             // single-record-shaped context (see `buildPerRowAfterContexts`).
+             // The batch `hookContext` still carries the affected COUNT as
+             // `result` and is what this call returns — the write's own contract
+             // (a predicate update resolves a count, #4639) is unchanged; only
+             // the hook dispatch became per row.
+             //
+             // Rows outer, hooks inner — the same order batch INSERT uses
+             // (#2922) — so a handler observes one whole record at a time.
+             // A per-row handler that throws propagates and fails the operation,
+             // exactly as it does on the single-record and batch-insert paths;
+             // `onError: 'log'` still swallows it per row. `onError` needed no
+             // new per-row meaning: it governs a HANDLER on a record-scoped
+             // context, and that is now what it always gets.
+             for (const rowCtx of this.buildPerRowAfterContexts(
+               object, 'afterUpdate', bulkPerRowRows, hookContext,
+               hookContext.input.data as Record<string, unknown>,
+             )) {
+               await this.triggerHooks('afterUpdate', rowCtx);
+             }
+           } else {
+             await this.triggerHooks('afterUpdate', hookContext);
+           }
 
            // Roll-up: recompute parent summaries; pass priorRecord too so a child
            // that moved to a different parent updates BOTH old and new parent.
@@ -5361,6 +5540,11 @@ export class ObjectQL implements IObjectQLEngine {
           // [#4639] See update()'s twin: recorded at the branch that chose the
           // driver call, not inferred later from a missing id.
           let isPredicateWrite = false;
+          // [#5038] Matched rows for the per-row `afterDelete` dispatch — see
+          // the twin in update(). A bulk delete is N record changes too, so a
+          // `record-after-delete` flow must see each deleted row rather than
+          // one context that names none of them.
+          let bulkPerRowRows: Record<string, unknown>[] | null = null;
           // Capture the row's FK values BEFORE deletion so roll-up summaries can
           // recompute the (now-orphaned) parent. Only when a summary aggregates
           // this object — avoids an extra read on every delete.
@@ -5387,6 +5571,15 @@ export class ObjectQL implements IObjectQLEngine {
                        `(a hook cleared the target id after the security filter was composed).`,
                    );
                }
+               // [#5038] Read the doomed rows ONCE, before they are gone —
+               // the only moment their pre-image exists. Gated on this object
+               // actually having `afterDelete` hooks, so a bulk delete with
+               // none pays for no read (this path did no read at all before).
+               if (this.hasHooksFor('afterDelete', object)) {
+                   const doomed = await driver.find(object, ast, hookContext.input.options as any) as Record<string, unknown>[];
+                   this.assertBulkPerRowHookBudget(object, 'afterDelete', doomed?.length ?? 0);
+                   bulkPerRowRows = doomed ?? [];
+               }
                result = await driver.deleteMany(object, ast, hookContext.input.options as any);
                isPredicateWrite = true;
           } else {
@@ -5398,7 +5591,21 @@ export class ObjectQL implements IObjectQLEngine {
 
           hookContext.event = 'afterDelete';
           hookContext.result = result;
-          await this.triggerHooks('afterDelete', hookContext);
+          if (bulkPerRowRows) {
+            // [#5038] One dispatch per deleted row. No payload is passed, so
+            // each context carries `previous` = the deleted row and no
+            // `result`: after a delete there IS no post-state, and every
+            // consumer (hook `condition`, the record-change trigger, the audit
+            // diff) already falls back to the pre-image for `record` on a
+            // delete-shaped context.
+            for (const rowCtx of this.buildPerRowAfterContexts(
+              object, 'afterDelete', bulkPerRowRows, hookContext,
+            )) {
+              await this.triggerHooks('afterDelete', rowCtx);
+            }
+          } else {
+            await this.triggerHooks('afterDelete', hookContext);
+          }
 
           // Roll-up: recompute the parent summary now that the child is gone.
           const summaryFailures = summaryPrev

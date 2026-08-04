@@ -314,13 +314,19 @@ describe('[#4775] a condition fault never enters `onError`', () => {
  * 5. The predicate bulk write gets a DIAGNOSIS, not `No such key` (#4800 / B1)
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#4775 / #4800 B1] a predicate bulk write gets its own diagnosis', () => {
+describe('[#4775 / #4800 B1, rescoped by #5038] the BATCH dispatch of a predicate write gets its own diagnosis', () => {
+  // [#5038] The batch dispatch is now the `before*` phase only: after-hooks on
+  // a predicate write are dispatched once per matched row, on a
+  // single-record-shaped context, so they never land here. A `beforeUpdate`
+  // still fires ONCE for the whole batch — it may rewrite the shared payload,
+  // and there is one payload — so this diagnosis is its standing answer.
   const bulkCtx = (data: Record<string, unknown>) => makeCtx({
+    event: 'beforeUpdate',
     previous: undefined,
     input: { data, options: { multi: true } },
   } as any);
 
-  it('`previous` on a bulk update names the batch instead of saying "No such key"', async () => {
+  it('`previous` on a batch dispatch names the batch instead of saying "No such key"', async () => {
     const wrapped = wrapDeclarativeHook(
       makeHook('previous.done != true && record.done == true'),
       (async () => {}) as any, { logger: silentLogger },
@@ -333,22 +339,25 @@ describe('[#4775 / #4800 B1] a predicate bulk write gets its own diagnosis', () 
     expect(err.message).toContain("Hook 'audit_hook'");
     expect(err.message).toContain('PREDICATE bulk write (multi: true)');
     expect(err.message).toContain('no single prior record to bind');
-    expect(err.message).toContain('target the write at one record (update by id)');
+    expect(err.message).toContain('one record (update by id)');
     // The default riddle must NOT be the whole story the author gets.
     expect(err.message).not.toMatch(/which this object does not declare/);
   });
 
-  it('does NOT point at a record-change flow trigger as the way out', async () => {
-    // VERIFIED (probe, 2026-08-03): the record-change trigger subscribes to
-    // these same lifecycle hooks, so on a `multi: true` update it fires ONCE
-    // with `ctx.previous` undefined — same limitation, not an escape hatch.
-    // Naming it here would make this very message the next
-    // `declared ≠ delivered`, which is the defect the change exists to remove.
+  it('DOES point at the after-type event, and at a record-change flow trigger', async () => {
+    // #5037 refused both on measured evidence: the record-change trigger rides
+    // these same lifecycle hooks, so on a `multi: true` update it fired ONCE
+    // with `ctx.previous` undefined (#4862) — naming it would have made that
+    // message the next `declared ≠ delivered`. #5038 fixed it at the PRODUCER,
+    // so the per-row dispatch reaches the trigger and the route became real.
+    // The message follows the fact.
     const wrapped = wrapDeclarativeHook(
       makeHook('previous.done != true'), (async () => {}) as any, { logger: silentLogger },
     );
     const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
-    expect(err.message).toContain('A record-change flow trigger is NOT a way around this');
+    expect(err.message).toContain("'afterUpdate'");
+    expect(err.message).toContain('record-change flow trigger');
+    expect(err.message).not.toContain('A record-change flow trigger is NOT a way around this');
   });
 
   it('a DECLARED field the bulk payload does not set gets the batch diagnosis too', async () => {
@@ -378,8 +387,11 @@ describe('[#4775 / #4800 B1] a predicate bulk write gets its own diagnosis', () 
   });
 
   it('fail loud takes NO exception for the batch — the bulk write still fails', async () => {
+    // [#5038] On a `beforeUpdate` hook, which is the dispatch that is still
+    // batch-scoped. The same condition on `afterUpdate` now evaluates per row
+    // and the write SUCCEEDS — pinned in `hook-condition-bulk-previous.test.ts`.
     const engine = await bootEngine([{
-      name: 'bulk_breaker', object: 'hook_task', events: ['afterUpdate'], priority: 90,
+      name: 'bulk_breaker', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
       condition: 'previous.done != true && record.done == true',
       handler: () => {},
     } as unknown as Hook]);
