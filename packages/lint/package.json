@@ -22,7 +22,8 @@
     "build": "tsup",
     "dev": "tsc -w",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:doc-formula-expressions": "node scripts/check-doc-formula-expressions.mjs --self-test && node scripts/check-doc-formula-expressions.mjs"
   },
   "dependencies": {
     "@marcbachmann/cel-js": "^8.0.0",

@@ -227,7 +227,7 @@ profile_image: Field.avatar({ label: 'Profile Image' }),
 // Formula
 total: Field.formula({
   label: 'Total',
-  expression: 'quantity * price * (1 - discount / 100)',
+  expression: 'record.quantity * record.price * (1 - record.discount / 100)',
 }),
 
 // Summary (roll-up)
