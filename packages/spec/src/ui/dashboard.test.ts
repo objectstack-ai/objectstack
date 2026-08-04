@@ -277,3 +277,104 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     expect(c.responsive).toEqual({ columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] });
   });
 });
+
+// ============================================================================
+// [#5010] the widget action trio + `aria` are RETIRED
+// ============================================================================
+//
+// RUNTIME assertions for the same reason the #4876 block above gives: a
+// compile-time pin in `packages/spec` is dead text (#4642). The tombstone's
+// `tsc` channel is proved by the build of the packages that author dashboards.
+//
+// Two affordances, one block, because they were retired as one change:
+//   - `actionUrl`/`actionType`/`actionIcon` — a per-widget action BUTTON that no
+//     renderer has ever drawn (every dispatched action comes from
+//     `header.actions[]`);
+//   - `aria` — ARIA attributes that never reached the DOM, the dashboard-level
+//     `aria` retired by #3896 one level down.
+describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () => {
+  const widget = { id: 'orders_kpi', type: 'metric', dataset: 'orders', values: ['total'] };
+
+  const parseWith = (extra: Record<string, unknown>): string => {
+    try {
+      DashboardWidgetSchema.parse({ ...widget, ...extra });
+    } catch (e) { return String((e as Error).message); }
+    return '';
+  };
+
+  it.each([
+    ['actionUrl', 'export_dashboard_pdf'],
+    ['actionType', 'script'],
+    ['actionIcon', 'download'],
+  ] as const)('REJECTS an authored `%s` with the prescription', (key, value) => {
+    const message = parseWith({ [key]: value });
+
+    // The prescription, in the parts an upgrading author needs: the
+    // fully-qualified key, the version, the issue, and the fix.
+    expect(message).toMatch(new RegExp(`dashboard\\.widgets\\[\\]\\.${key}`));
+    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
+    expect(message).toMatch(/#5010/);
+    // The three went together — an author who deletes only the one key they
+    // were told about would hit this same error twice more.
+    expect(message).toMatch(/delete all three/i);
+    // It must name the surviving home, or this reads as "dashboards cannot have
+    // buttons" rather than "the button belongs on the header".
+    expect(message).toMatch(/header\.actions\[\]/);
+    // The tombstone is what makes it a prescription; a plain `.strict()`
+    // rejection of a DELETED key would be a generic unrecognized-key error.
+    expect(message).not.toMatch(/Unrecognized key/);
+  });
+
+  it('REJECTS an authored `aria` with the prescription, naming its surviving homes', () => {
+    const message = parseWith({ aria: { ariaLabel: 'Total orders' } });
+
+    expect(message).toMatch(/dashboard\.widgets\[\]\.aria/);
+    expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
+    expect(message).toMatch(/#5010/);
+    expect(message).toMatch(/Delete the key/);
+    // The shared shape survives elsewhere. Without this, the message reads as
+    // "AriaProps is gone", which would send an author deleting live metadata.
+    expect(message).toMatch(/app\.aria/);
+    expect(message).toMatch(/page\.components\[\]\.aria/);
+    expect(message).not.toMatch(/Unrecognized key/);
+  });
+
+  it('still accepts a widget carrying none of the four (nothing else was stripped)', () => {
+    const w = DashboardWidgetSchema.parse(widget);
+    for (const k of ['actionUrl', 'actionType', 'actionIcon', 'aria']) {
+      expect(w).not.toHaveProperty(k);
+    }
+    expect(w.dataset).toBe('orders');
+    expect(w.values).toEqual(['total']);
+  });
+
+  // ── CONTROLS: only the WIDGET embeds go ────────────────────────────────────
+  it('CONTROL: `header.actions[]` still takes the whole action vocabulary', () => {
+    const d = DashboardSchema.parse({
+      name: 'ops', label: 'Ops',
+      header: {
+        actions: [{ label: 'Export', actionUrl: 'export_dashboard_pdf', actionType: 'script', icon: 'download' }],
+      },
+      widgets: [widget],
+    });
+    // The header action is the live dispatch path (DashboardRenderer builds an
+    // ActionDef from exactly these keys) — it must round-trip untouched.
+    expect(d.header?.actions?.[0]).toMatchObject({
+      label: 'Export', actionUrl: 'export_dashboard_pdf', actionType: 'script', icon: 'download',
+    });
+  });
+
+  it('CONTROL: `AriaPropsSchema` is still exported and still parses', async () => {
+    const ui = await import('./index');
+    expect(ui.AriaPropsSchema).toBeTruthy();
+    expect(ui.AriaPropsSchema.parse({ ariaLabel: 'Total orders' }).ariaLabel).toBe('Total orders');
+  });
+
+  it('CONTROL: `page.components[].aria` parses exactly as before', async () => {
+    const { PageComponentSchema } = await import('./page.zod');
+    const c = PageComponentSchema.parse({
+      type: 'page:sidebar', properties: {}, aria: { ariaLabel: 'Sidebar' },
+    });
+    expect(c.aria).toEqual({ ariaLabel: 'Sidebar' });
+  });
+});

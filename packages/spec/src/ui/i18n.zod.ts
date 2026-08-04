@@ -12,9 +12,12 @@ import { z } from 'zod';
 //
 //  - `AriaPropsSchema` is carried as `aria:` on ~30 live shapes across six
 //    metadata-type roots — `ListViewSchema`, `PageSchema`, `PageComponentSchema`,
-//    `DashboardWidgetSchema`, `ChartConfigSchema`, `ActionSchema`, and 20 SDUI
-//    component defs — and a BFS from all 24 roots plus `defineStack` reaches it
-//    directly. It was silently stripping: through the `view` root,
+//    `ChartConfigSchema`, `ActionSchema`, and 20 SDUI component defs — and a BFS
+//    from all 24 roots plus `defineStack` reaches it directly. (`DashboardWidgetSchema`
+//    was a seventh carrier when this was measured; its `aria` embed was retired
+//    later the same day — #5010, ADR-0049 — because no dashboard renderer applied
+//    it. The shape and every carrier above are unaffected.)
+//    It was silently stripping: through the `view` root,
 //    `aria: { label: 'Accounts', describedBy: 'x' }` parsed CLEAN and returned
 //    `aria: {}`, so the accessible name the author wrote simply did not exist.
 //  - `I18nObjectSchema` / `PluralRuleSchema` / `NumberFormatSchema` /

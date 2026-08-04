@@ -195,6 +195,12 @@
         "toMajor": 17
       },
       {
+        "surface": "dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / dashboard.widgets[].actionIcon / dashboard.widgets[].aria",
+        "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
+        "conversionId": "dashboard-widget-action-aria-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "dashboard.widgets[].compareTo",
         "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
         "conversionId": "dashboard-widget-compareto-converged",
@@ -861,6 +867,12 @@
           "surface": "dashboard.widgets[].responsive",
           "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
           "conversionId": "dashboard-widget-responsive-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / dashboard.widgets[].actionIcon / dashboard.widgets[].aria",
+          "to": "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed (#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never reached the DOM; use header.actions[] and the widget title/description)",
+          "conversionId": "dashboard-widget-action-aria-removed",
           "toMajor": 17
         },
         {

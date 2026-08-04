@@ -860,6 +860,25 @@ const step17: MigrationStep = {
     + 'rows the comparison counts. The converged slot is also union-free, which is not cosmetic: '
     + 'zod collapses a failed union into one bare `Invalid input` and #5014 showed that curated '
     + 'guidance inside a union arm never reaches the author at all.\n\n'
+    + 'The same widget drill retires four more keys (#5010): the action trio '
+    + '`actionUrl`/`actionType`/`actionIcon`, and `aria`. The trio described a per-widget action '
+    + 'BUTTON that no renderer in either repo has ever drawn — all 14 `actionUrl` reads in '
+    + 'DashboardRenderer are scoped to `header.actions[]`, a different schema — and `actionIcon` '
+    + 'had zero references anywhere outside its own declaration. `aria` is the dashboard-level '
+    + '`aria` removed by the #3896 sweep, one level down: declared ARIA attributes that never '
+    + 'reached the DOM, i.e. an accessibility guarantee an author could state and nothing '
+    + 'honoured. It survived that sweep for the same reason `responsive` did — `widgets` had no '
+    + 'ledger drill until #4956 — not on evidence. This removal also settles a second-order cost '
+    + 'the trio was carrying: `packages/lint`\'s dashboard action-ref rule enforced '
+    + 'ERROR-severity reference integrity on `widgets[].actionUrl`, its docblock calling the key '
+    + '"the per-widget button" and claiming to mirror a runtime dispatch that does not exist, so '
+    + 'an author could FAIL A BUILD because a control that cannot render pointed at an action '
+    + 'that also did not. That widget branch is deleted with the keys. Lossless deletes in every '
+    + 'case — the keys contributed nothing to any rendered output — and the shared `AriaProps` '
+    + 'shape is untouched, staying live on `app.aria` and `page.components[].aria`. Move a '
+    + 'dashboard-wide affordance to `header.actions[]` (where `icon` is the header spelling of '
+    + '`actionIcon`); for per-row click-through use a dataset-bound `table`/`pivot`, whose rows '
+    + 'drill through the semantic layer already.\n\n'
     + '⚠️ One protocol-17 change turns metadata ON rather than off, and it is the one to read '
     + 'first: declarative `apis:` endpoints EXECUTE from 17 (#5040). The surface used to be inert '
     + 'end to end — no route mounted, no matcher, every key including `authRequired` parsed and '
@@ -915,6 +934,7 @@ const step17: MigrationStep = {
     'hook-body-crypto-hash-removed',
     'connector-rate-limit-config-removed',
     'dashboard-widget-responsive-removed',
+    'dashboard-widget-action-aria-removed',
     'dashboard-widget-compareto-converged',
   ],
   semantic: [

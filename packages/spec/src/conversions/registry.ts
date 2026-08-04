@@ -2285,6 +2285,91 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].actionUrl / actionType / actionIcon / aria (#5010) — the
+ * four widget-level keys the #4956 drill judged dead on a closed call graph.
+ *
+ * Two affordances, one removal, because both fail the same way and an upgrading
+ * source carries them together:
+ *
+ *   - the action TRIO described a per-widget button. No renderer in either repo
+ *     draws one; every action a dashboard dispatches comes from
+ *     `header.actions[]`. Its only reader was `packages/lint`'s reference-
+ *     integrity rule, which failed builds when a button that cannot render
+ *     pointed at an action that did not exist — that widget branch is deleted in
+ *     the same change.
+ *   - `aria` promised ARIA attributes that never reached the DOM: the same false
+ *     compliance the DASHBOARD-level `aria` was retired for above, one level
+ *     down. `dashboard-inert-keys-removed` took the parent key in the #3896
+ *     sweep and left this one, because `widgets` had no ledger drill then.
+ *
+ * A SEPARATE entry rather than more keys on `dashboard-inert-keys-removed`, for
+ * the reason `dashboard-widget-responsive-removed` gives just above: that entry's
+ * identity is the #3896 sweep, and folding a differently-evidenced removal into
+ * it would misattribute this one in `spec-changes.json` and the upgrade guide —
+ * the two places an upgrading author actually reads. All are `toMajor: 17`, so a
+ * stored dashboard carrying keys from several of them is cleaned in one replay.
+ *
+ * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here: its
+ * disposition is unresolved (the rewrite target `options.colorVariant` measured
+ * dead on the ADR-0021 dataset path too), and 16 authored sites depend on the
+ * answer. Retiring it later is a new entry, not an edit to this one.
+ */
+const dashboardWidgetActionAriaRemoved: MetadataConversion = {
+  id: 'dashboard-widget-action-aria-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface:
+    'dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / '
+    + 'dashboard.widgets[].actionIcon / dashboard.widgets[].aria',
+  summary:
+    "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed "
+    + '(#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never '
+    + 'reached the DOM; use header.actions[] and the widget title/description)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const cleaned = stripKeys(
+          w as Record<string, unknown>,
+          ['actionUrl', 'actionType', 'actionIcon', 'aria'],
+          emit,
+          `${path}.widgets[${i}]`,
+        );
+        if (cleaned !== w) touched = true;
+        return cleaned;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{
+          id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'],
+          actionUrl: 'export_dashboard_pdf',
+          actionType: 'script',
+          actionIcon: 'download',
+          aria: { ariaLabel: 'Total orders' },
+        }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+      }],
+    },
+    // One notice per KEY, not per widget — four keys on one widget.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * dashboard.widgets[].compareTo (#5011) — a VOCABULARY convergence, not a
  * removal: the widget's three declared arms are replaced by the one shape the
  * analytics executor implements, `{ kind, dimension? }`
@@ -3901,6 +3986,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
+    dashboardWidgetActionAriaRemoved,
     dashboardWidgetCompareToConverged,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
