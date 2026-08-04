@@ -49,7 +49,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **messages** | `Record<string, any>[]` | ✅ | Conversation messages (at least one) |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[] } & Record<string, any>)[]` | ✅ | Conversation messages (at least one) |
 | **context** | `Record<string, any>` | optional | Agent context (app, object, record, …) |
 | **options** | `Record<string, any>` | optional | Request options (model, temperature, …) |
 
@@ -87,7 +87,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **messages** | `Record<string, any>[]` | ✅ | Conversation messages (at least one) |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[] } & Record<string, any>)[]` | ✅ | Conversation messages (at least one) |
 | **system** | `string` | optional | System prompt, prepended as a system message |
 | **model** | `string` | optional | Model id override |
 | **temperature** | `number` | optional | Sampling temperature |
@@ -137,7 +137,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **title** | `string` | optional | Title / summary |
 | **agentId** | `string` | optional | Agent this conversation is bound to |
 | **userId** | `string` | optional | Owning user |
-| **messages** | `Record<string, any>[]` | ✅ | Message history |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[] } & Record<string, any>)[]` | ✅ | Message history |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO 8601) |
 | **metadata** | `Record<string, any>` | optional | Conversation metadata |
