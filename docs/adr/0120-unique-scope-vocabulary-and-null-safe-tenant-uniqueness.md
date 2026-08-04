@@ -204,24 +204,27 @@ The rows to read twice:
   mis-scoped `'company'`. `os doctor` / `os migrate plan` surface it as an advisory
   under that posture (never a boot warning — #4884 discipline).
 
-**Posture transitions are part of the contract.** Deployments move along the ADR-0105
-spectrum (a `single` customer enables `group`; acquisitions merge `isolated`
-customers into a `group`; a BU subtree is promoted to an organization, ADR-0105 D13).
-The stated scope is what makes each move mechanical:
-
-- **`single` → `group`**: `'organization'` constraints relax from one bucket to
-  per-org as rows acquire org ids — same index shape, **zero migration**;
-  `'company'`/`'global'` do not move.
-- **`single`/`group` → `isolated`**, or the reverse (acquisition/consolidation):
-  `'company'` re-resolves between verbatim and org-composite — a D4 `recreate_index`
-  ceremony with the duplicate pre-flight. The tightening direction (e.g. two acquired
-  companies holding the same material code, merging into one group) is precisely what
-  the probe reports for operator resolution before the constraint lands. Never
-  silent, never auto-applied over duplicates.
+**Posture transitions are rare, and deliberately not automated** (maintainer ruling,
+#4986). A deployment's posture is chosen at setup and effectively never changes; when
+it does (an acquisition merges `isolated` customers into a `group`; a `single`
+customer enables `group`), that is a planned re-platforming event, not something the
+runtime should handle behind anyone's back. The vocabulary's whole obligation to that
+event is to make the **target state well-defined and the diff trustworthy**: after a
+posture change, `'company'` indexes re-resolve at the next registration and the
+difference surfaces as *ordinary* D4 drift — `recreate_index` ops gated by the
+duplicate pre-flight — with nothing transition-specific built or maintained.
+Executing the move is an explicit migration task, and per ADR-0087's operating
+assumption the migrator is an AI agent: it reads the `os migrate plan` output —
+including the probe's duplicate report, e.g. two merging companies holding the same
+material code — writes the upgrade script, and applies it deliberately. (`single` →
+`group` happens to be a zero-op diff — same shapes; a fact, not a promise the suite
+must keep re-proving.)
 
 Corollary for acceptance: the conformance suite boots the **same fixture app** under
-all three postures and asserts each S-row's enforcement in each, plus the transition
-stories above (see Acceptance tests) — posture portability is tested, not assumed.
+all three postures and asserts each S-row's enforcement in each — posture portability
+is tested, not assumed. Transitions get exactly one smoke assertion: a posture flip
+yields an ordinary D4 plan, duplicate-gated and never auto-applied — the trustworthy
+input the AI-authored upgrade script depends on. No transition matrix beyond that.
 
 ## Decisions
 
@@ -245,8 +248,10 @@ by field-level `unique` and `IndexSchema.unique`:
   verbatim/single-column shape (`'global'`-form — the installation *is* the company);
   under `isolated` it materializes as the organization composite (D3 form — the
   organization *is* the company). It owns no third physical shape; it is a
-  posture-resolved selection between the two existing ones, and a posture change
-  re-resolves it through the D4 ceremony. This is the word that keeps ISV apps
+  posture-resolved selection between the two existing ones; a posture change (rare
+  and always a deliberate re-platforming, §Posture portability) surfaces the
+  re-resolution as ordinary D4 drift for an explicitly-run migration. This is the
+  word that keeps ISV apps
   portable across `group` and `isolated` deployments (S14) — without it, "company-wide
   unique" is expressible only by guessing the posture.
 
@@ -415,11 +420,12 @@ existence-oracle property (#3696) extends to declared composites (S10).
   declared indexes for the first time; the drift reader's COALESCE handling (#4884)
   must be exercised for tenant key parts too (new tests in D6.6).
 - `'company'` introduces the platform's first posture-resolved physical shape: the
-  registration path must read the tenancy posture, and a posture change acquires
-  schema consequences (D4 ops) it never had before. The alternative — authors
-  guessing the posture — is the trap S14 documents; the coupling is real, and is why
-  the resolution lives at the one point (registration) that already knows the
-  posture.
+  registration path must read the tenancy posture, and a posture change — rare, and
+  always a deliberate re-platforming — acquires schema consequences it never had
+  before, surfaced as ordinary D4 drift for an explicitly-run (AI-authored)
+  migration rather than automated away. The alternative — authors guessing the
+  posture — is the trap S14 documents; the coupling is real, and is why the
+  resolution lives at the one point (registration) that already knows the posture.
 - Protocol 18 is the earliest point at which bare `true` can be rejected; until then
   the trap is warned, not closed. Accepting a full major of warning-only is the price
   of not breaking third-party authors mid-major (ADR-0059/0087 discipline).
@@ -458,10 +464,10 @@ orthogonal (S12).
 - Posture portability (S13/S14): one fixture app booted under all three postures
   (`single | group | isolated`); every unique declaration's enforcement asserted in
   each, including `'company'` resolving to the verbatim shape under `single`/`group`
-  and to the org composite under `isolated`. Transition coverage: `single → group`
-  emits zero migration ops; posture moves that re-resolve `'company'`
-  (`group ↔ isolated`, `single → isolated`) surface as D4 ops, and the tightening
-  direction is never auto-applied over seeded cross-org duplicates.
+  and to the org composite under `isolated`. Transitions: one smoke assertion only —
+  a posture flip yields an ordinary D4 plan, duplicate-gated and never auto-applied
+  (the input for an AI-authored upgrade script, §Posture portability); no transition
+  matrix.
 - Matrix invariant 2: expected-index output for the S4/S5/S6 corpus is byte-identical
   before/after D2 on an untouched database (drift plan is empty).
 - The #5030 probe, as a permanent regression test, on both single-tenant and
