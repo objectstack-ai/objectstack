@@ -605,6 +605,37 @@ describe('ObjectKernel', () => {
             expect(order).toEqual(['kernel:ready', 'kernel:bootstrapped', 'kernel:listening']);
         });
 
+        // #5170 — the ObjectKernel HALF of the cross-kernel pin. `kernel:ready`
+        // is where plugins assert that what they declared is actually
+        // deliverable, so a throw there must fail the boot. LiteKernel has the
+        // twin of this test (lite-kernel.test.ts); the pair is what keeps one
+        // hook name from meaning two opposite things again.
+        it('fails the boot when a kernel:ready handler throws (#5170)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'ready-thrower-plugin',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    ctx.hook('kernel:ready', async () => {
+                        throw new Error('declared a durable queue, got none');
+                    });
+                    ctx.hook('kernel:ready', async () => { reached.push('later-ready'); });
+                    ctx.hook('kernel:bootstrapped', async () => { reached.push('kernel:bootstrapped'); });
+                    ctx.hook('kernel:listening', async () => { reached.push('kernel:listening'); });
+                },
+            };
+
+            await kernel.use(plugin);
+
+            // The ORIGINAL error surfaces — not a wrapped "bootstrap failed".
+            await expect(kernel.bootstrap()).rejects.toThrow('declared a durable queue, got none');
+
+            // Boot stopped AT the failing handler: no later ready handler, and
+            // neither of the anchors that promise "every ready handler settled".
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+        });
+
         it('should trigger shutdown hook', async () => {
             let hookCalled = false;
 

@@ -80,8 +80,23 @@ export class LiteKernel extends ObjectKernelBase {
             await this.runPluginStart(plugin);
         }
 
-        // Trigger ready hook (route/middleware registration phase)
-        await this.triggerHook('kernel:ready');
+        // Trigger ready hook (route/middleware registration phase).
+        //
+        // PROPAGATING dispatch, identical to ObjectKernel's (#5170): a
+        // `kernel:ready` handler that throws FAILS THE BOOT on both kernels.
+        // This hook is where plugins assert that what they declared can
+        // actually be delivered — the registries are still filling during
+        // init(), so a boot gate has nowhere earlier to run — and a swallowed
+        // assertion means the process keeps serving without the guarantee it
+        // announced. The kernel is left 'stopped' rather than 'running',
+        // mirroring `ObjectKernel.bootstrap()`'s catch, so a failed boot never
+        // reads as a live kernel.
+        try {
+            await this.triggerHookOrThrow('kernel:ready');
+        } catch (error) {
+            this.state = 'stopped';
+            throw error;
+        }
         // Trigger bootstrapped hook — "all synchronous bootstrap has settled"
         // anchor, strictly after every kernel:ready handler has settled and
         // before any HTTP socket opens. NOTE: does not guarantee background app

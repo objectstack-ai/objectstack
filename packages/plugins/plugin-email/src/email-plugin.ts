@@ -659,10 +659,13 @@ export class EmailServicePlugin implements Plugin {
       //
       // NOT awaited: a backlog of stranded mail must not hold the server off
       // its port, and in inline mode every row is a transport round trip. And
-      // self-catching rather than trusting the hook: a `kernel:ready` handler
-      // that throws is silently swallowed on LiteKernel (#5170), which for a
-      // durability sweep would mean losing the report of the very failure it
-      // exists to prevent.
+      // self-catching BECAUSE it is not awaited: a `kernel:ready` handler that
+      // throws now fails the boot on BOTH kernels (#5170 unified that), but
+      // this sweep is detached from the handler, so an escaping rejection
+      // would surface as an unhandled rejection instead — losing the report of
+      // the very failure it exists to prevent. A stranded-row report is also
+      // not grounds to refuse an otherwise healthy boot; the gate above is
+      // where this plugin refuses.
       if (persistence) {
         const svc = this.service;
         this.outboxSweepSettled = (async () => {

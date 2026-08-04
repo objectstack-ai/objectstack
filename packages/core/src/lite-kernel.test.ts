@@ -270,5 +270,66 @@ describe('LiteKernel with Configurable Logger', () => {
 
             expect(order).toEqual(['kernel:ready', 'kernel:bootstrapped', 'kernel:listening']);
         });
+
+        // #5170 — the LiteKernel half of the cross-kernel pin. This is the
+        // behaviour the issue changed: the throw used to be caught inside
+        // `triggerHook`, logged as `Hook handler failed: kernel:ready`, and the
+        // boot carried on to report "✅ Bootstrap complete". A vitest /
+        // serverless / edge host therefore came up WITHOUT the guarantee its
+        // ready handler had just refused to give it. Same hook, same plugin
+        // code, same answer on both kernels now.
+        it('fails the boot when a kernel:ready handler throws (#5170)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'ready-thrower-plugin',
+                init: async (ctx) => {
+                    ctx.hook('kernel:ready', async () => {
+                        throw new Error('declared a durable queue, got none');
+                    });
+                    ctx.hook('kernel:ready', async () => { reached.push('later-ready'); });
+                    ctx.hook('kernel:bootstrapped', async () => { reached.push('kernel:bootstrapped'); });
+                    ctx.hook('kernel:listening', async () => { reached.push('kernel:listening'); });
+                },
+            };
+
+            kernel.use(plugin);
+
+            // The ORIGINAL error surfaces — not a wrapped "bootstrap failed".
+            await expect(kernel.bootstrap()).rejects.toThrow('declared a durable queue, got none');
+
+            // Boot stopped AT the failing handler: no later ready handler, and
+            // neither of the anchors that promise "every ready handler settled".
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+        });
+
+        // The other side of the same contract: #5170 rules `kernel:ready` ONLY.
+        // The notification-style hooks keep LiteKernel's isolating dispatch, so
+        // one failing subscriber does not deny the others their notification.
+        // Pinned so a future "unify everything" reading of #5170 has to be a
+        // deliberate change with its own issue, not a silent widening.
+        it('keeps fail-soft dispatch for hooks other than kernel:ready (#5170)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'other-hook-thrower-plugin',
+                init: async (ctx) => {
+                    ctx.hook('kernel:bootstrapped', async () => { throw new Error('bootstrapped boom'); });
+                    ctx.hook('kernel:bootstrapped', async () => { reached.push('later-bootstrapped'); });
+                    ctx.hook('kernel:listening', async () => { throw new Error('listening boom'); });
+                    ctx.hook('kernel:listening', async () => { reached.push('later-listening'); });
+                    ctx.hook('kernel:shutdown', async () => { throw new Error('shutdown boom'); });
+                    ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
+                },
+            };
+
+            kernel.use(plugin);
+
+            await expect(kernel.bootstrap()).resolves.toBeUndefined();
+            expect(kernel.getState()).toBe('running');
+            expect(reached).toEqual(['later-bootstrapped', 'later-listening']);
+
+            await expect(kernel.shutdown()).resolves.toBeUndefined();
+            expect(reached).toContain('later-shutdown');
+        });
     });
 });
