@@ -34,7 +34,7 @@ the per-organization meaning **NULL-safe**:
 |---|---|---|
 | D1 | Scope is said, not inferred | `unique: 'global' \| 'organization'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
 | D2 | Stored metadata converts losslessly | ADR-0087 D2 entry rewrites declared-index `unique: true → 'global'` — byte-identical physical shape, **zero drift** |
-| D3 | Per-tenant unique survives NULL | tenant key part materializes as `COALESCE(tenantField, '')` (ADR-0048 canonical form) — fixes #5030 for field-level and new `'organization'` indexes alike |
+| D3 | Per-organization unique survives NULL | organization key part materializes as `COALESCE(organization_id, '__global__')` — fixes #5030 for field-level and new `'organization'` indexes alike; ships in 17.x |
 | D4 | Tightening migrates through ceremony | `recreate_index` drift + duplicate pre-flight in `os migrate plan`; auto-apply only on a clean probe |
 | D5 | Authoring gates carry the contract | new lint rule for unscoped declared uniques (authoring-time checkable, no tenancy guessing); R10 rewritten in the new vocabulary |
 | D6 | Written surfaces tell one truth | the five #3696 surfaces, the pin tests, and the false single-tenant claim in `UniqueScopeSchema` are updated in the same wave |
@@ -203,13 +203,18 @@ The residual, and its deliberate special handling:
 - **`'global'` is physically posture-invariant but not *safety*-invariant**: under
   `isolated`, a `'global'` unique on an app business object is almost always meant
   company-wide, not cross-customer — deployed there it both over-constrains and
-  becomes a cross-customer existence oracle (S10). `os doctor` / `os migrate plan`
-  surface every such index as an explicit decision point under that posture (never a
-  boot warning — #4884 discipline): confirm it as genuinely platform-wide, or
-  rewrite it to `'organization'` as an install-time, AI-authored metadata
-  adjustment. The benign mirror direction — `'organization'` under `group`
-  constraining per-subsidiary rather than group-wide — is under-constraint within
-  one company, carries no leak, and is left to the app's install notes.
+  becomes a cross-customer existence oracle (S10). Decided (2026-08-04): this is a
+  **hard install-time gate**, not an advisory — installing an app that carries
+  `'global'` uniques on non-`sys` objects into an `isolated` environment stops and
+  lists each index; the installer (typically an AI agent) either confirms it as
+  genuinely platform-wide or rewrites it to `'organization'`, and the confirmation
+  is recorded in the install manifest (ADR-0104 attestation style) so it is never
+  re-asked. `os doctor` / `os migrate plan` keep the same check as an advisory for
+  the two cases the gate cannot reach — installs that predate it, and environments
+  whose posture changed after install. Never a boot warning (#4884 discipline). The
+  benign mirror direction — `'organization'` under `group` constraining
+  per-subsidiary rather than group-wide — is under-constraint within one company,
+  carries no leak, and is left to the app's install notes.
 
 **Posture transitions are rare, and deliberately not automated** (maintainer ruling,
 #4986). A deployment's posture is chosen at setup and effectively never changes; when
@@ -239,10 +244,13 @@ from. No transition matrix beyond that.
 `UniqueScopeSchema` becomes `boolean | 'global' | 'organization'`, shared by
 field-level `unique` and `IndexSchema.unique`:
 
-- **Field-level**: `true` keeps meaning tenant-scoped (unchanged since #3696 — it is
-  documented, unambiguous, and ubiquitous; churning every schema for symmetry would be
-  cost without safety). `'organization'` is accepted as its explicit synonym; `'global'`
-  unchanged.
+- **Field-level**: `true` keeps meaning organization-scoped (unchanged since #3696 —
+  it is documented, unambiguous, and ubiquitous; churning every schema for symmetry
+  would be cost without safety). `'organization'` is accepted as its explicit synonym;
+  `'global'` unchanged. Non-normative guidance (decided 2026-08-04): official
+  examples, scaffolding, and generators emit `'organization'` rather than `true` in
+  new code — the explicit spelling becomes the standard organically, and bare `true`
+  stays valid indefinitely.
 - **Declared index**: `'global'` = today's verbatim semantics — materialized over
   exactly the listed columns. `'organization'` = the driver prepends the tenant key part
   (D3 form) to the listed columns at registration, where tenancy is known — same shape
@@ -284,13 +292,24 @@ conversion's test asserts their expected-index output is identical before and af
 
 Field-level `unique: true` is **not** converted — it is not deprecated (D1).
 
-### D3 — Tenant key part materializes NULL-safe: `COALESCE(tenantField, '')`
+### D3 — Organization key part materializes NULL-safe: `COALESCE(organization_id, '__global__')`
 
-All tenant-scoped unique materializations — field-level `true`/`'organization'` and declared
-`'organization'` — use `COALESCE(organization_id, '')` as the tenant key part instead of the
-raw column. NULL-tenant rows collapse into one platform bucket, unique among themselves
-(S7, S8); non-NULL rows are untouched. Empty string cannot collide with a real tenant
-id (tenant ids are non-empty by contract).
+All organization-scoped unique materializations — field-level `true`/`'organization'`
+and declared `'organization'` — use `COALESCE(organization_id, '__global__')` as the
+organization key part instead of the raw column. NULL-organization rows collapse into
+one platform bucket, unique among themselves (S7, S8); non-NULL rows are untouched.
+
+The literal is `'__global__'` — a maintainer decision (2026-08-04), flipped from this
+draft's earlier `''` — for two reasons: **the constraint-violation error becomes
+self-describing** (`Key (COALESCE(organization_id, '__global__'), email)=(__global__,
+a@b.com)` reads as "the platform bucket collided" to the AI agent triaging the
+incident, where `('', …)` reads as data corruption), and **it is the word the platform
+already uses for this bucket** — the autonumber sequence table keys global rows by
+`GLOBAL_TENANT = '__global__'`, and #3696's root lesson was two subsystems naming the
+same concept differently. Two guardrails come with it: organization creation
+**reserves the token** (an org id may never equal `'__global__'`), and the definition
+site documents that **storage stays NULL** — the index folds NULL into the bucket;
+`WHERE organization_id = '__global__'` matches nothing, by design.
 
 Why this mechanism, against the #5030 alternatives:
 
@@ -305,10 +324,11 @@ Why this mechanism, against the #5030 alternatives:
 - **(C) PostgreSQL `NULLS NOT DISTINCT`**: PG-15-only; SQLite/MySQL have no
   equivalent — a dialect semantics fork. Rejected.
 - **(D — chosen) COALESCE key part**: zero write-path/RLS/data changes; the platform
-  already materializes and *round-trips* this exact form — ADR-0048 pins
-  `sys_metadata` overlays with `COALESCE(package_id, '')`, and #4884 taught the drift
-  reader to parse and attribute `COALESCE(col, <literal>) ≡ col` across dialects
-  (`parseIndexDdl`, `classifyIndexKeyPart`). No new dialect floor, no new parser.
+  already materializes and *round-trips* this form — ADR-0048 pins `sys_metadata`
+  overlays with `COALESCE(package_id, '')`, and #4884 taught the drift reader to
+  parse and attribute `COALESCE(col, <literal>) ≡ col` across dialects, literal
+  included (`parseIndexDdl`, `classifyIndexKeyPart`). No new dialect floor, no new
+  parser.
 
 Drift-detection both sides (declared vs actual) read the same normalization helper, so
 no false drift is created — the #4884 lesson, and the #4986 issue text's explicit
@@ -316,8 +336,8 @@ requirement.
 
 ### D4 — Physical migration goes through the ceremony, with a duplicate pre-flight
 
-D3 changes the physical shape of every existing tenant-composite unique index:
-`(organization_id, X) → (COALESCE(organization_id,''), X)`. This is a **pure
+D3 changes the physical shape of every existing organization-composite unique index:
+`(organization_id, X) → (COALESCE(organization_id, '__global__'), X)`. This is a **pure
 tightening** (non-NULL rows: identical; NULL rows: previously unconstrained, now
 constrained), surfaced as `recreate_index` drift ops. Because tightening can collide
 with pre-existing duplicate NULL-row data — data the old index wrongly admitted —
@@ -356,6 +376,11 @@ c. **Advisory nudge (S6)**: a declared unique whose column list *contains* the t
 d. **Registration-time diagnostic**: `'organization'` on an object with no tenant column
    logs the degrade (S11) once, at registration — informational, matching field-level
    behavior, not a boot warning storm (#4884 discipline).
+e. **Install-time posture gate** (decided 2026-08-04): installing an app that carries
+   `'global'` uniques on non-`sys` objects into an `isolated` environment is a hard
+   stop-and-confirm per index, with confirmations recorded in the install manifest;
+   `os doctor` / `os migrate plan` carry the advisory form for pre-gate installs and
+   post-install posture changes (§Posture portability).
 
 ### D6 — The written surfaces tell one truth, in the same wave
 
@@ -385,8 +410,9 @@ split this ADR exists to close (PD #10):
 ### D7 — Staging across 17.x → protocol 18
 
 - **17.x (additive, non-breaking)**: `'organization'` accepted on both spellings; D3
-  materialization + D4 drift/probe; D5 warnings; D6 truth sweep. Bare `true` on
-  declared indexes still accepted (warned).
+  materialization + D4 drift/probe (decided 2026-08-04: D3 ships here, not at 18 —
+  see Resolved questions #3); D5 warnings and the D5e install gate; D6 truth sweep.
+  Bare `true` on declared indexes still accepted (warned).
 - **Protocol 18**: D2 conversion active; bare `true` on declared indexes rejected at
   validate/publish with the prescriptive error; the synonym pin retires.
 - Changesets per package as usual; the ADR-0087 registries (`spec-changes`,
@@ -479,9 +505,10 @@ orthogonal (S12).
 - Posture portability (S13/S14): one fixture app booted under all three postures
   (`single | group | isolated`); every unique declaration's enforcement asserted in
   each. One smoke assertion pins that a posture flip by itself emits zero drift ops
-  (no shape reads the posture), and one that the `isolated`-posture doctor/plan
-  advisory lists a seeded `'global'` business unique — the listing an AI-authored
-  deployment adjustment starts from (§Posture portability). No transition matrix.
+  (no shape reads the posture). The D5e gate is exercised once: installing a fixture
+  app with a `'global'` business unique into an `isolated` environment stops, records
+  the confirmation, and does not re-ask; the doctor/plan advisory form is asserted
+  for a pre-gate install. No transition matrix.
 - Matrix invariant 2: expected-index output for the S4/S5/S6 corpus is byte-identical
   before/after D2 on an untouched database (drift plan is empty).
 - The #5030 probe, as a permanent regression test, on both single-tenant and
@@ -493,23 +520,34 @@ orthogonal (S12).
 - `check:docs` / `check:api-surface` / `check:spec-changes` / `check:upgrade-guide` /
   `check:adr-anchors` green — the generated surfaces carry the new vocabulary.
 
-## Open questions for review
+## Resolved review questions (maintainer decisions, 2026-08-04)
 
-1. **COALESCE literal**: `''` (this draft, matches ADR-0048) vs `'__global__'`
-   (matches the write path's `GLOBAL_TENANT` constant). `''` is collision-safe and
-   already round-trips through the drift reader; `'__global__'` is more self-describing
-   in `\d`-style index listings. Draft picks `''`; cheap to flip before acceptance.
-2. **Field-level bare `true`**: this draft keeps it valid indefinitely (unambiguous,
-   ubiquitous). Should it eventually require the explicit `'organization'` as well, for one
-   uniform rule? Draft says no — deprecation should buy safety, and there is no trap
-   on that spelling.
-3. **D3 timing**: land the COALESCE materialization in 17.x (this draft — it is a fix
-   to declared-but-unenforced behavior, not a contract change) or hold it for 18 with
-   the rest? Landing in 17.x means single-tenant stacks get real constraints a major
-   earlier; holding means one migration wave instead of two.
-4. **How loud the `isolated`-posture decision point for `'global'` business uniques
-   is**: `os doctor` + `os migrate plan` advisory (this draft), or a harder
-   install-time confirm gate when an app carrying `'global'` uniques on non-`sys`
-   objects is installed into an `isolated` environment. Lint cannot see posture, and
-   boot warnings are banned (#4884). The harder gate is what would make the S14
-   special handling loud rather than advisory — confirm which.
+Four questions were left open by earlier draft rounds; all four are now decided and
+folded into the sections above. Recorded here so the reasoning survives review:
+
+1. **COALESCE literal → `'__global__'`** (flipped from the draft's `''`). Deciding
+   scenario: the constraint-violation error an AI ops agent reads at incident time —
+   `(__global__, a@b.com)` says "platform bucket", `('', …)` reads as corruption.
+   Also unifies the bucket's name with the autonumber sequence table's
+   `GLOBAL_TENANT` (#3696's lesson: subsystems must not name the same concept
+   differently). Guardrails: the token is reserved at organization creation, and the
+   definition site documents that storage stays NULL. (D3)
+2. **Field-level bare `true` stays valid indefinitely.** It has exactly one
+   documented meaning and no trap — deprecation would buy churn, not safety.
+   Non-normative guidance: official examples, scaffolding, and generators emit
+   `'organization'` in new code, so the explicit spelling becomes the de-facto
+   standard organically. (D1)
+3. **D3 ships in 17.x.** It fixes declared-but-unenforced behavior (ADR-0049 class),
+   and the cost of waiting compounds: every month of delay grows the duplicate sets
+   the D4 probe will eventually report. The protocol-18 wave is physically empty
+   either way (D2 is zero-drift by construction). Release notes carry an
+   AI-executable runbook for probe-reported duplicates. (D7)
+4. **The `isolated`-posture decision point is a hard install-time gate**, not an
+   advisory. Installing an app that carries `'global'` uniques on non-`sys` objects
+   into an `isolated` environment stops and lists each index; the installer
+   (typically an AI agent) confirms it as genuinely platform-wide or rewrites it to
+   `'organization'`, and the confirmation is recorded in the install manifest
+   (ADR-0104 attestation style) so it is never re-asked. `os doctor` /
+   `os migrate plan` keep the advisory form for the two cases the gate cannot reach:
+   installs that predate it, and environments whose posture changed after install.
+   (D5e, §Posture portability)
