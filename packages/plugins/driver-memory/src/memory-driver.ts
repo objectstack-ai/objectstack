@@ -3,33 +3,19 @@
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
+import {
+  emptyFieldConstraintError,
+  isEmptyFieldConstraint,
+  unsupportedFilterError,
+} from './filter-refusal.js';
 import {
   coerceTemporalValue,
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
-
-/**
- * [#4436] A filter this driver cannot COMPILE — see the twin in
- * `driver-sql`'s `unsupportedFilterError`, which carries the full rationale.
- *
- * Kept in lockstep with driver-sql deliberately: #3948 made the two backends
- * AGREE that an uncompilable filter is a refusal rather than a silent
- * match-everything, and the refusal's wire envelope has to agree too. A test
- * suite that swaps the memory driver for SQL must see the same `400
- * INVALID_FILTER`, not a coded refusal on one backend and a bare `{error}` on
- * the other.
- */
-function unsupportedFilterError(message: string): Error {
-  const err = new Error(message) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.INVALID_FILTER;
-  err.status = 400;
-  return err;
-}
 
 /**
  * Persistence adapter interface.
@@ -875,22 +861,33 @@ export class InMemoryDriver implements IDataDriver {
    * operators ($contains, $notContains, $startsWith, $endsWith, $between, $null)
    * to Mingo-compatible equivalents ($regex, $gte/$lte, null checks).
    */
-  private normalizeFilterCondition(filter: Record<string, any>, object?: string): Record<string, any> {
+  private normalizeFilterCondition(filter: Record<string, any>, object?: string, path = 'filter'): Record<string, any> {
     const result: Record<string, any> = {};
     const extraAndConditions: Record<string, any>[] = [];
 
     for (const key of Object.keys(filter)) {
       const value = filter[key];
+      const here = `${path}.${key}`;
+      // [#5240] `{ field: {} }` is refused in EVERY position, before mingo sees
+      // it. Left alone it normalises to `{ field: {} }`, which mingo reads as
+      // "the field deep-equals the empty document" — a filter that matches
+      // nothing in ordinary data and is therefore indistinguishable, from the
+      // outside, from the FALSE the reference matcher answered. Neither is what
+      // the author meant, and driver-sql read the same shape as TRUE inside a
+      // combinator. Refused rather than reinterpreted; see the ruling on #5240.
+      if (isEmptyFieldConstraint(value) && !key.startsWith('$')) {
+        throw emptyFieldConstraintError(key, here);
+      }
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
         result[key] = Array.isArray(value)
-          ? value.map((child: any) => this.normalizeFilterCondition(child, object))
+          ? value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`))
           : value;
         continue;
       }
       if (key === '$not') {
         result[key] = value && typeof value === 'object'
-          ? this.normalizeFilterCondition(value, object)
+          ? this.normalizeFilterCondition(value, object, here)
           : value;
         continue;
       }
