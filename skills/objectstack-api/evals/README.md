@@ -21,7 +21,10 @@ evals/
 │   └── test-data-route-errors.md    # flat { error, code } bodies (CONCURRENT_UPDATE 409, VALIDATION_FAILED 400)
 ├── endpoints/
 │   ├── test-rest-endpoint-shape.md  # RestApiEndpointSchema fields (public/permissions, schema name refs)
-│   └── test-api-endpoint-types.md   # ApiEndpointSchema type/target/authRequired
+│   ├── test-api-endpoint-types.md   # only object_operation/flow execute; script/proxy rejected at publish
+│   ├── test-endpoint-path-carveout.md  # /api/v1/apps/<manifest.namespace>/<subpath>, explicit namespace
+│   ├── test-auth-required-default.md   # defaults true — omission is safe, explicit false opens anonymous
+│   └── test-d6-armed-rate-limit.md     # authRequired:false REQUIRES rateLimit.enabled === true (ADR-0121 D6)
 └── ...
 ```
 

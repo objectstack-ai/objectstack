@@ -125,6 +125,28 @@ export interface ClusterMetadataChangedPayload {
   event: MetadataWatchEvent;
 }
 
+/**
+ * [#5184] One entry of {@link MetadataManager}'s short-TTL `list()` cache.
+ *
+ * Deliberately NOT exported: this is an internal caching-policy detail, not
+ * part of the `IMetadataService` contract. See the `listCache` field comment
+ * for the policy this shape encodes.
+ */
+interface ListCacheEntry {
+  /** When the entry was written (`Date.now()`). */
+  ts: number;
+  /** The `list()` result being memoized. */
+  items: unknown[];
+  /**
+   * True when at least one loader threw while `items` was being assembled, so
+   * this answer is known to be a partial view of what is declared. Degraded
+   * entries expire after `DEGRADED_LIST_CACHE_TTL_MS` instead of
+   * `LIST_CACHE_TTL_MS`, and any future consumer of the cache can branch on
+   * this rather than having to guess.
+   */
+  degraded: boolean;
+}
+
 export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
@@ -162,12 +184,59 @@ export class MetadataManager implements IMetadataService {
   // acquire a fresh knex connection while the transaction is still holding
   // SQLite's single connection — knex waits the full `acquireConnectionTimeout`
   // (60s) before returning []. The cache absorbs the repeated lookups so the
-  // loader is only hit once per TTL window.
+  // loader is only hit once per TTL window — for SEQUENTIAL callers. Nothing is
+  // written until a read completes, so calls issued concurrently with the first
+  // one all miss and each walk every loader (#5253); read that sentence as a
+  // statement about repeated lookups, not a concurrency guarantee.
+  //
+  // [#5184] That hazard is NOT historical — it was re-verified on the current
+  // driver stack before this policy was chosen. `DatabaseLoader._find()` still
+  // issues `engine.find('sys_metadata', …)` without threading the caller's
+  // transaction, and `driver-sql` still treats SQLite as a single-connection
+  // pool (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
+  // guard that is a no-op in production, so production still waits the timeout
+  // out). `plugin-audit`'s `captureBefore` threads the transaction by hand for
+  // exactly this reason. Hence the policy below keeps caching degraded reads
+  // rather than skipping them: "don't cache a degraded read" would trade one
+  // 30s silent window for a fresh 60s stall per call.
+  //
+  // [#5184] WHAT IS ACTUALLY CACHED, AND FOR HOW LONG — this paragraph is the
+  // contract, and it describes `cacheListResult()` / `readCachedList()` below.
+  // (An earlier version of this comment claimed the cache kept "only positive
+  // (non-empty) hits or repeated hits with a stable miss signature". No such
+  // condition ever existed in the code. Comment is contract; a comment that
+  // describes a policy nothing implements is a declared ≠ enforced defect in
+  // its own right, so it is replaced rather than patched.)
+  //
+  //   • EVERY completed `list()` is cached, empty results included. There is
+  //     no non-empty test and no "miss signature" concept.
+  //   • An entry assembled while at least one loader THREW is a known-partial
+  //     answer: it is cached with `degraded: true` and expires after
+  //     `DEGRADED_LIST_CACHE_TTL_MS`, not `LIST_CACHE_TTL_MS`. So the burst of
+  //     repeated lookups the knex path above depends on is still absorbed,
+  //     while the window in which the manager serves a known-short set without
+  //     re-asking anyone shrinks from 30s to ~2s. Recovery is therefore also
+  //     noticed (and `reportLoaderReadRecovered` logged) within ~2s of storage
+  //     healing instead of up to 30s later.
+  //   • `degraded` lives ON the entry, not in a side table, so every consumer
+  //     of the cache can tell a complete answer from a partial one. Read
+  //     entries through `readCachedList()` rather than `listCache.get()`, so
+  //     the flag and its TTL are applied in one place.
   //
   // Invalidated on every `register()` / `unregister()` to keep CRUD writes
   // visible to subsequent reads.
-  private listCache = new Map<string, { ts: number; items: unknown[] }>();
+  private listCache = new Map<string, ListCacheEntry>();
   private static readonly LIST_CACHE_TTL_MS = 30_000;
+  /**
+   * [#5184] TTL for an entry produced by a degraded read (≥1 loader threw).
+   *
+   * Deliberately at the top of the 1–2s band: the point of keeping degraded
+   * results cached at all is to absorb a burst of `list()` calls issued from
+   * inside one open transaction, and those bursts are milliseconds apart but
+   * can be spread by per-row work. Two seconds covers that while still being
+   * 15× shorter than the healthy TTL.
+   */
+  private static readonly DEGRADED_LIST_CACHE_TTL_MS = 2_000;
 
   // [#5108] Loader names whose read failure has already been reported at
   // `error` by `list()`. AGENTS.md → "Degradation log levels": say it once, at
@@ -539,12 +608,11 @@ export class MetadataManager implements IMetadataService {
    * List all metadata items of a given type
    */
   async list(type: string): Promise<unknown[]> {
-    // Short-TTL cache: see field comment on `listCache`. Skip when called
-    // from tests / hot reloads that rely on always-fresh reads — we only
-    // cache positive (non-empty) hits or repeated hits with a stable miss
-    // signature.
-    const cached = this.listCache.get(type);
-    if (cached && Date.now() - cached.ts < MetadataManager.LIST_CACHE_TTL_MS) {
+    // Short-TTL cache: see the field comment on `listCache` for what is
+    // cached and for how long. Every completed read is memoized; a read that
+    // lost a loader is memoized as `degraded` and expires ~15× sooner.
+    const cached = this.readCachedList(type);
+    if (cached) {
       return cached.items;
     }
 
@@ -558,7 +626,11 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    // From loaders (deduplicate)
+    // From loaders (deduplicate). [#5184] `degraded` records whether this
+    // particular read lost a loader, so the memoized answer carries the fact
+    // that it is known-partial instead of being indistinguishable from a
+    // complete one.
+    let degraded = false;
     for (const loader of this.loaders.values()) {
       try {
         const loaderItems = await loader.loadMany(type);
@@ -570,12 +642,13 @@ export class MetadataManager implements IMetadataService {
         }
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
+        degraded = true;
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
     const result = Array.from(items.values());
-    this.cacheListResult(type, result);
+    this.cacheListResult(type, result, degraded);
     return result;
   }
 
@@ -601,6 +674,14 @@ export class MetadataManager implements IMetadataService {
    * Said **once** per loader, and un-said on recovery, because `list()` is a
    * hot path — one line per outage, not one per read.
    *
+   * [#5184] The once-only guard carries more weight than it used to: a
+   * degraded `list()` result is now memoized for `DEGRADED_LIST_CACHE_TTL_MS`
+   * rather than `LIST_CACHE_TTL_MS`, so during an outage the loader is
+   * re-asked (and this method re-entered) roughly every 2s instead of every
+   * 30s. That is the point — the outage stops being a 30s silent window and
+   * recovery is noticed within seconds — and it costs nothing in log volume
+   * precisely because `loaderReadFailureReported` still speaks only once.
+   *
    * Deliberately does NOT rethrow: `list()` is the best-effort listing seam and
    * must keep serving what the reachable loaders hold. The strict counterpart
    * for callers whose answer is a security decision is `listForIndex()` (no
@@ -617,8 +698,9 @@ export class MetadataManager implements IMetadataService {
         `Consumers that gate on a declared set (permissions, sharing rules, policies, api endpoints) will read the ` +
         `declarations this loader holds as "never declared" — which grants or locks out depending on the consumer, silently either way. ` +
         `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists. ` +
-        `The read is retried on the next list once the ${MetadataManager.LIST_CACHE_TTL_MS}ms list cache lapses, so a transient ` +
-        `cause recovers on its own and the recovery is logged.`,
+        `The read is retried on the next list once the ${MetadataManager.DEGRADED_LIST_CACHE_TTL_MS}ms degraded-result list cache lapses ` +
+        `(a known-partial listing is memoized far more briefly than a complete one — #5184), so a transient cause recovers on its ` +
+        `own within seconds and the recovery is logged.`,
       error instanceof Error ? error : undefined,
       { loader: loaderName, type, error },
     );
@@ -632,8 +714,33 @@ export class MetadataManager implements IMetadataService {
     );
   }
 
-  private cacheListResult(type: string, items: unknown[]): void {
-    this.listCache.set(type, { ts: Date.now(), items });
+  /**
+   * Memoize a completed {@link list} result.
+   *
+   * [#5184] `degraded` is not optional at the call site by accident — it is the
+   * one thing this cache used to throw away. A result assembled while a loader
+   * was unreadable is stored, but stored *as* what it is, so it expires on the
+   * degraded TTL and any reader can tell it apart from a complete answer.
+   */
+  private cacheListResult(type: string, items: unknown[], degraded: boolean): void {
+    this.listCache.set(type, { ts: Date.now(), items, degraded });
+  }
+
+  /**
+   * Read a still-fresh {@link listCache} entry, or `undefined` when there is
+   * none / it has expired.
+   *
+   * [#5184] The single place the TTL policy is applied, so "a degraded entry
+   * expires sooner" cannot be forgotten by a second reader. Returns the whole
+   * entry rather than just `items` so callers keep access to `degraded`.
+   */
+  private readCachedList(type: string): ListCacheEntry | undefined {
+    const cached = this.listCache.get(type);
+    if (!cached) return undefined;
+    const ttl = cached.degraded
+      ? MetadataManager.DEGRADED_LIST_CACHE_TTL_MS
+      : MetadataManager.LIST_CACHE_TTL_MS;
+    return Date.now() - cached.ts < ttl ? cached : undefined;
   }
 
   /** Internal helper: drop the cached `list()` result for a type. */

@@ -230,7 +230,12 @@ describe('posture reading, with a red control for each', () => {
     // And the claim the ledger rests on: no STRIP site moved. Both postures
     // involved are non-strip, so the remaining-strip map — the thing every batch
     // is planned against — is untouched by this fix.
-    expect(countStripSites(at('ui/view.zod.ts'))).toBe(6);
+    //
+    // The number itself tracks real batches: 6 when #5072 was written, 5 since
+    // #5073 closed `UserFiltersSchema`. It is the file's live strip count, not a
+    // #5072 invariant — what #5072 pins is that ITS OWN change moved no strip
+    // site, and that still reads correctly against whatever the current count is.
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(5);
   });
 
   it('lets a chained posture override the idiom in either direction (#5072)', () => {

@@ -375,7 +375,7 @@ List chart view configuration
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
-| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]; tabs?: { name: string; label?: string; icon?: string; view?: string; … }[]; showAllRecords?: boolean }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
+| **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]; tabs?: { name: string; label?: string; icon?: string; view?: string; … }[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **striped** | `boolean` | optional | Striped row styling |
 | **bordered** | `boolean` | optional | Show borders |
@@ -653,6 +653,7 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **fields** | `{ field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 | **tabs** | `{ name: string; label?: string; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
+| **allowAddTab** | `boolean` | optional | Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets |
 
 
 ---

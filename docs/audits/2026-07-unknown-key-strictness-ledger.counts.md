@@ -21,15 +21,15 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 483 |
-| Still-open (strip) sites | 235 |
+| Object sites in them | 484 |
+| Still-open (strip) sites | 234 |
 | Files carrying at least one | 36 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 29 |
+| authorable — the ruling's forced scope | 28 |
 | unresolved — needs a per-schema verdict | 33 |
 | wire / open — out of forced scope | 104 |
 | no door — no carrier, ADR-0049 territory | 38 |
@@ -43,12 +43,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 199 | 118 | 5 | 0 | 76 |
+| `ui/` | 200 | 120 | 5 | 0 | 75 |
 | `data/` | 162 | 41 | 1 | 0 | 120 |
 | `automation/` | 75 | 49 | 0 | 0 | 26 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **483** | **242** | **6** | **0** | **235** |
+| **total** | **484** | **244** | **6** | **0** | **234** |
 
 ## File-level triage — site counts
 
@@ -79,9 +79,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `sharing.zod.ts` | 2 |
 | `theme.zod.ts` | 14 |
 | `touch.zod.ts` | 7 |
-| `view.zod.ts` | 50 |
+| `view.zod.ts` | 51 |
 | `widget.zod.ts` | 9 |
-| **total** | **199** |
+| **total** | **200** |
 
 ### `data/` — sites
 
@@ -161,7 +161,7 @@ over it is here.
 
 ### `ui/` — open
 
-**76 strip of 199**, in 13 file(s).
+**75 strip of 200**, in 13 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -176,13 +176,13 @@ over it is here.
 | `offline.zod.ts` | 3 | 3 |
 | `sharing.zod.ts` | 1 | 2 |
 | `touch.zod.ts` | 7 | 7 |
-| `view.zod.ts` | 6 | 50 |
+| `view.zod.ts` | 5 | 51 |
 | `widget.zod.ts` | 9 | 9 |
-| **total** | **76** | **199** |
+| **total** | **75** | **200** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 7 |
+| authorable — the ruling's forced scope | 6 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 0 |
 | no door — no carrier, ADR-0049 territory | 38 |
