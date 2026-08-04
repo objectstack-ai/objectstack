@@ -87,8 +87,8 @@ const STATE_MACHINE_STRIP_HISTORY =
  * real issues nested one level down in `issue.errors[]`. That payload survives
  * everywhere the issues are carried structurally (`ZodError.message`, the REST
  * error body); until #4971 the flatten-to-one-line consumers dropped it, and
- * `formatZodError` — the CLI's formatter — was one, so this schema rendered a
- * bare `✗ (root): Invalid input` where `TransitionSchema` (a plain
+ * `formatZodError` — what `defineStack` throws through — was one, so this
+ * schema rendered a bare `✗ (root): Invalid input` where `TransitionSchema` (a plain
  * `strictObject`) rendered its full prescription. `formatZodError` now expands
  * the union's most informative branch, so both render the prescription; what
  * remains union-shaped is the extra `Invalid input` line above it.
