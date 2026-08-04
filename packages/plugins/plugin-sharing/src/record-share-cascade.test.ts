@@ -20,10 +20,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
+import { ShareLinkService } from './share-link-service.js';
 import {
   bindRecordShareCascade,
   unbindRecordShareCascade,
   objectCanCarryRecordShares,
+  objectCanCarryShareLinks,
   orphanShareSweepQueue,
   RECORD_SHARE_CASCADE_PACKAGE,
 } from './record-share-cascade.js';
@@ -193,6 +195,29 @@ function manualShare(engine: Engine, object: string, recordId: string, recipient
     access_level: 'read',
     source: 'manual',
     granted_by: 'admin',
+  });
+  return id;
+}
+
+// ── [#5190] the `sys_share_link` half ────────────────────────────────────────
+const shareLinks = (engine: Engine) => engine._tables.sys_share_link ?? [];
+const shareLinkIds = (engine: Engine) => shareLinks(engine).map((r) => String(r.id)).sort();
+
+/** A capability token on `(object, recordId)` — no recipient, by design. */
+function shareLink(engine: Engine, object: string, recordId: string, id = `shl_${recordId}`, extra: Row = {}) {
+  (engine._tables.sys_share_link ??= []).push({
+    id,
+    token: `tok_${id}_aaaaaaaaaaaa`,
+    object_name: object,
+    record_id: recordId,
+    permission: 'view',
+    audience: 'link_only',
+    expires_at: null,
+    revoked_at: null,
+    created_by: 'admin',
+    use_count: 0,
+    last_used_at: null,
+    ...extra,
   });
   return id;
 }
@@ -655,6 +680,566 @@ describe('#5103 coexistence with the #5102 rule hooks', () => {
   });
 
   it('both packages bind, and neither unbind touches the other', () => {
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE).length).toBeGreaterThan(0);
+    expect(engine.boundFor(RECORD_SHARE_CASCADE_PACKAGE)).toHaveLength(2);
+
+    unbindRecordShareCascade(engine as any);
+
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE).length).toBeGreaterThan(0);
+    expect(engine.boundFor(RECORD_SHARE_CASCADE_PACKAGE)).toHaveLength(0);
+  });
+});
+
+/**
+ * [#5190] The same cascade, for `sys_share_link`.
+ *
+ * `sys_record_share` orphans (#5103) at least name their beneficiaries. A share
+ * link is an identity-less CAPABILITY token: whoever holds the URL has the
+ * access. So the same orphan is strictly worse here — on a reused record id the
+ * new record is handed to whoever kept a link that morally died with the old
+ * one, and that holder can be anyone the record was ever shared with.
+ *
+ * Two halves, and BOTH are tested: `resolveToken`'s existence check
+ * (share-link-service.test.ts) holds whether or not a hook ever ran; this file
+ * covers the cascade and boot sweep that stop the rows from accumulating in the
+ * first place.
+ */
+describe('#5190 objectCanCarryShareLinks — a DIFFERENT posture question', () => {
+  it('accepts any object that declares publicSharing', () => {
+    expect(objectCanCarryShareLinks({ name: 'ai_conversations', publicSharing: { enabled: true } })).toBe(true);
+  });
+
+  /**
+   * THE PREDICATE REPRO. Link minting is gated by `publicSharing`, which is
+   * INDEPENDENT of `sharingModel` — so the object most likely to hold links (a
+   * platform object that opted into link sharing) is exactly one the
+   * record-share predicate skips. Reuse `objectCanCarryRecordShares` for links
+   * and this object's links outlive their records forever.
+   */
+  it('covers a publicSharing object the RECORD-SHARE predicate skips', () => {
+    const schema = { name: 'sys_report', isSystem: true, publicSharing: { enabled: true } };
+    expect(objectCanCarryRecordShares(schema)).toBe(false);
+    expect(objectCanCarryShareLinks(schema)).toBe(true);
+  });
+
+  it('still covers an object whose publicSharing was turned OFF (links outlive the flip)', () => {
+    expect(objectCanCarryShareLinks({ name: 'sys_report', isSystem: true, publicSharing: { enabled: false } })).toBe(true);
+  });
+
+  it('covers everything the record-share cascade already covers (system mints need no opt-in)', () => {
+    expect(objectCanCarryShareLinks({ name: 'contract', sharingModel: 'private' })).toBe(true);
+    expect(objectCanCarryShareLinks({ name: 'inquiry', fields: {} })).toBe(true);
+  });
+
+  it('skips an UNMARKED system object — the same documented boundary #5103 drew', () => {
+    expect(objectCanCarryShareLinks({ name: 'sys_audit_log', isSystem: true })).toBe(false);
+  });
+
+  it("never cascades on the sharing subsystem's own tables", () => {
+    expect(objectCanCarryShareLinks({ name: 'sys_share_link', publicSharing: { enabled: true } })).toBe(false);
+    expect(objectCanCarryShareLinks({ name: 'sys_record_share' })).toBe(false);
+  });
+
+  it('falls toward cleanup when the schema cannot be resolved', () => {
+    expect(objectCanCarryShareLinks(undefined)).toBe(true);
+    expect(objectCanCarryShareLinks(null)).toBe(true);
+  });
+});
+
+describe('#5190 record delete revokes the share LINKS of that record', () => {
+  let engine: Engine;
+  let sharing: SharingService;
+  let linkService: ShareLinkService;
+  let logger: any;
+
+  beforeEach(() => {
+    logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    engine = makeEngine();
+    engine._schemas.contract = { name: 'contract', sharingModel: 'private', fields: { owner_id: {} } };
+    engine._tables.contract = [
+      { id: 'ctr1', owner_id: 'boss' },
+      { id: 'ctr2', owner_id: 'boss' },
+    ];
+    engine._tables.sys_record_share = [];
+    engine._tables.sys_share_link = [];
+    sharing = new SharingService({ engine: engine as any, logger });
+    linkService = new ShareLinkService({ engine: engine as any, logger });
+    bindRecordShareCascade(engine as any, sharing, logger, () => linkService);
+  });
+
+  /**
+   * THE REPRO. Revert the link half (or the `links` argument) and the token row
+   * survives its record, so this reads both ids instead of one.
+   */
+  it('deletes the link rows of a deleted record, on an object with no rules', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    shareLink(engine, 'contract', 'ctr2');
+
+    await engine.simulateDeleteById('contract', 'ctr1');
+
+    expect(shareLinkIds(engine)).toEqual(['shl_ctr2']);
+  });
+
+  it('leaves the links of records that were NOT deleted, and of other objects', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    shareLink(engine, 'contract', 'ctr2', 'shl_keep');
+    engine._schemas.invoice = { name: 'invoice', sharingModel: 'private', fields: { owner_id: {} } };
+    // Same record id on a DIFFERENT object — the revoke is keyed on both.
+    shareLink(engine, 'invoice', 'ctr1', 'shl_other_object');
+
+    await engine.simulateDeleteById('contract', 'ctr1');
+
+    expect(shareLinkIds(engine)).toEqual(['shl_keep', 'shl_other_object']);
+  });
+
+  it('revokes on a SYSTEM-context delete too', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+
+    await engine.simulateDeleteById('contract', 'ctr1', SYS);
+
+    expect(shareLinkIds(engine)).toEqual([]);
+  });
+
+  it('revokes every id of a BOUNDED predicate delete', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    shareLink(engine, 'contract', 'ctr2');
+    engine._tables.contract.push({ id: 'ctr3', owner_id: 'other' });
+    shareLink(engine, 'contract', 'ctr3');
+
+    await engine.simulateBulkDelete('contract', { owner_id: 'boss' });
+
+    expect(shareLinkIds(engine)).toEqual(['shl_ctr3']);
+  });
+
+  it('issues a set-based revoke per table, not one delete per link row', async () => {
+    shareLink(engine, 'contract', 'ctr1', 'shl_a');
+    shareLink(engine, 'contract', 'ctr1', 'shl_b');
+    shareLink(engine, 'contract', 'ctr2', 'shl_c');
+    manualShare(engine, 'contract', 'ctr1', 'carol');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateBulkDelete('contract', { owner_id: 'boss' });
+
+    const linkDeletes = engine._deleteCalls.filter((c) => c.object === 'sys_share_link');
+    expect(linkDeletes).toHaveLength(1);
+    expect(linkDeletes[0].options).toMatchObject({
+      multi: true,
+      where: { object_name: 'contract', record_id: { $in: ['ctr1', 'ctr2'] } },
+    });
+    expect(shareLinks(engine)).toEqual([]);
+    // …and the share half still issued exactly its own one statement.
+    expect(engine._deleteCalls.filter((c) => c.object === 'sys_record_share')).toHaveLength(1);
+  });
+
+  /**
+   * The publicSharing-only object: the SHARE half declines it (unmarked system
+   * object), the LINK half must not. A single shared predicate for both halves
+   * fails here.
+   */
+  it('revokes links on a publicSharing object the share half skips', async () => {
+    engine._schemas.sys_report = { name: 'sys_report', isSystem: true, publicSharing: { enabled: true } };
+    engine._tables.sys_report = [{ id: 'rep1' }];
+    shareLink(engine, 'sys_report', 'rep1');
+    manualShare(engine, 'sys_report', 'rep1', 'carol');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateDeleteById('sys_report', 'rep1');
+
+    expect(shareLinkIds(engine)).toEqual([]);
+    // The share row is untouched — that posture is still the boot sweep's job.
+    expect(engine._deleteCalls.filter((c) => c.object === 'sys_record_share')).toHaveLength(0);
+    expect(shareIds(engine)).toEqual(['shr_rep1_carol']);
+  });
+
+  it('skips an object outside BOTH postures (no query on the hot path)', async () => {
+    engine._schemas.sys_audit_log = { name: 'sys_audit_log', isSystem: true };
+    engine._tables.sys_audit_log = [{ id: 'evt1' }];
+    shareLink(engine, 'sys_audit_log', 'evt1');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateDeleteById('sys_audit_log', 'evt1');
+
+    expect(engine._deleteCalls.filter((c) => c.object === 'sys_share_link')).toHaveLength(0);
+    expect(shareLinkIds(engine)).toEqual(['shl_evt1']); // the boot sweep's job
+  });
+
+  it('covers an object that gains `publicSharing` AFTER boot — no rebind needed', async () => {
+    engine._schemas.late = { name: 'late', isSystem: true }; // outside both postures
+    engine._tables.late = [{ id: 'late1' }, { id: 'late2' }];
+    shareLink(engine, 'late', 'late1');
+    await engine.simulateDeleteById('late', 'late1');
+    expect(shareLinkIds(engine)).toEqual(['shl_late1']);
+
+    engine._schemas.late = { name: 'late', isSystem: true, publicSharing: { enabled: true } };
+    shareLink(engine, 'late', 'late2');
+
+    await engine.simulateDeleteById('late', 'late2');
+
+    expect(shareLinkIds(engine)).toEqual(['shl_late1']); // only the pre-flip orphan
+  });
+
+  /**
+   * The two halves are isolated: they are different tables, and the token is the
+   * more dangerous leftover, so a driver error reclaiming grants must not also
+   * skip the links. One shared `try` around both fails this test.
+   */
+  it('still revokes the LINKS when the share revoke throws', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    const boom = {
+      revokeSharesForDeletedRecords: vi.fn(async () => { throw new Error('driver down'); }),
+      sweepOrphanedRecordShares: vi.fn(async () => ({ scanned: 0, revoked: 0, unresolvedObjects: [], truncated: false })),
+    };
+    unbindRecordShareCascade(engine as any);
+    bindRecordShareCascade(engine as any, boom as any, logger, () => linkService);
+
+    await expect(engine.simulateDeleteById('contract', 'ctr1')).resolves.toBeDefined();
+
+    expect(boom.revokeSharesForDeletedRecords).toHaveBeenCalled();
+    expect(shareLinkIds(engine)).toEqual([]);
+  });
+
+  it('never fails the write when the LINK revoke throws — and names the repair', async () => {
+    manualShare(engine, 'contract', 'ctr1', 'carol');
+    const brokenLinks = {
+      revokeLinksForDeletedRecords: vi.fn(async () => { throw new Error('link table down'); }),
+      sweepOrphanedShareLinks: vi.fn(async () => ({ scanned: 0, revoked: 0, unresolvedObjects: [], truncated: false })),
+    };
+    unbindRecordShareCascade(engine as any);
+    bindRecordShareCascade(engine as any, sharing, logger, () => brokenLinks);
+
+    await expect(engine.simulateDeleteById('contract', 'ctr1')).resolves.toBeDefined();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('share links'),
+      expect.objectContaining({ object: 'contract' }),
+    );
+    // The share half still ran — isolation cuts both ways.
+    expect(shareIds(engine)).toEqual([]);
+  });
+
+  it('degrades to shares-only when no link service is wired (and never throws)', async () => {
+    manualShare(engine, 'contract', 'ctr1', 'carol');
+    shareLink(engine, 'contract', 'ctr1');
+    unbindRecordShareCascade(engine as any);
+    bindRecordShareCascade(engine as any, sharing, logger); // no `links` argument
+
+    await expect(engine.simulateDeleteById('contract', 'ctr1')).resolves.toBeDefined();
+
+    expect(shareIds(engine)).toEqual([]);
+    expect(shareLinkIds(engine)).toEqual(['shl_ctr1']); // left to the boot sweep
+  });
+
+  it('survives a link-service getter that throws', async () => {
+    manualShare(engine, 'contract', 'ctr1', 'carol');
+    unbindRecordShareCascade(engine as any);
+    bindRecordShareCascade(engine as any, sharing, logger, () => { throw new Error('registry tearing down'); });
+
+    await expect(engine.simulateDeleteById('contract', 'ctr1')).resolves.toBeDefined();
+    expect(shareIds(engine)).toEqual([]);
+  });
+
+  /**
+   * Both halves of the fix, on one timeline: a real link minted through the real
+   * service stops resolving AND stops existing when its record is deleted.
+   */
+  it('end to end — a minted link is gone from the table and unresolvable', async () => {
+    engine._schemas.contract.publicSharing = { enabled: true };
+    const link = await linkService.createLink(
+      { object: 'contract', recordId: 'ctr1', audience: 'link_only', permission: 'view' },
+      { isSystem: true },
+    );
+    expect(await linkService.resolveToken(link.token)).not.toBeNull();
+
+    await engine.simulateDeleteById('contract', 'ctr1');
+
+    expect(shareLinks(engine)).toEqual([]);
+    expect(await linkService.resolveToken(link.token)).toBeNull();
+  });
+});
+
+describe('#5190 an UNBOUNDED delete reclaims the links by sweep too', () => {
+  let engine: Engine;
+  let sharing: SharingService;
+  let linkService: ShareLinkService;
+  let logger: any;
+
+  beforeEach(() => {
+    logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    engine = makeEngine();
+    engine._schemas.contract = { name: 'contract', sharingModel: 'private', fields: { owner_id: {} } };
+    engine._tables.contract = [{ id: 'ctr1', owner_id: 'boss' }, { id: 'ctr2', owner_id: 'boss' }];
+    engine._tables.sys_record_share = [];
+    engine._tables.sys_share_link = [];
+    sharing = new SharingService({ engine: engine as any, logger });
+    linkService = new ShareLinkService({ engine: engine as any, logger });
+    bindRecordShareCascade(engine as any, sharing, logger, () => linkService);
+  });
+
+  it('sweeps links by record-existence when the delete names no predicate at all', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    shareLink(engine, 'contract', 'ctr2');
+
+    await engine.simulateBulkDelete('contract', undefined);
+    await orphanShareSweepQueue.whenIdle();
+
+    expect(engine._tables.contract).toEqual([]);
+    expect(shareLinkIds(engine)).toEqual([]);
+  });
+
+  it('spares links whose record survived the unbounded delete', async () => {
+    engine._tables.contract.push({ id: 'ctr3', owner_id: 'boss' });
+    shareLink(engine, 'contract', 'ctr1');
+    shareLink(engine, 'contract', 'ctr3', 'shl_survivor');
+
+    const ctx: any = {
+      object: 'contract',
+      event: 'beforeDelete',
+      input: { id: undefined, options: { where: undefined, multi: true } },
+      session: ADMIN_SESSION,
+    };
+    await engine.fire('beforeDelete', 'contract', ctx);
+    engine._tables.contract = engine._tables.contract.filter((r) => r.id !== 'ctr1');
+    ctx.event = 'afterDelete';
+    await engine.fire('afterDelete', 'contract', ctx);
+    await orphanShareSweepQueue.whenIdle();
+
+    expect(shareLinkIds(engine)).toEqual(['shl_survivor']);
+  });
+
+  it('never revokes the object wholesale — a token nobody can re-mint is unrecoverable', async () => {
+    shareLink(engine, 'contract', 'ctr2');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateBulkDelete('contract', undefined);
+
+    for (const call of engine._deleteCalls.filter((c) => c.object === 'sys_share_link')) {
+      expect(call.options.where).not.toEqual({ object_name: 'contract' });
+    }
+  });
+
+  it('queues both sweeps on the SAME serialized queue (no parallel table walks)', async () => {
+    shareLink(engine, 'contract', 'ctr1');
+    manualShare(engine, 'contract', 'ctr1', 'carol');
+
+    await engine.simulateBulkDelete('contract', undefined);
+    // One `whenIdle` settles both halves — a second queue would leave rows here.
+    await orphanShareSweepQueue.whenIdle();
+
+    expect(shareLinkIds(engine)).toEqual([]);
+    expect(shareIds(engine)).toEqual([]);
+  });
+});
+
+describe('#5190 boot sweep — orphaned share links', () => {
+  let engine: Engine;
+  let linkService: ShareLinkService;
+  let logger: any;
+
+  beforeEach(() => {
+    logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    engine = makeEngine();
+    engine._schemas.contract = { name: 'contract', sharingModel: 'private', fields: { owner_id: {} } };
+    engine._tables.contract = [{ id: 'ctr_live', owner_id: 'boss' }];
+    engine._tables.sys_share_link = [];
+    linkService = new ShareLinkService({ engine: engine as any, logger });
+  });
+
+  it('removes historical orphans and keeps the valid links', async () => {
+    shareLink(engine, 'contract', 'ctr_live', 'shl_live');
+    shareLink(engine, 'contract', 'ctr_gone', 'shl_dead');
+    // A REVOKED link on a live record: still a valid audit row, not an orphan.
+    shareLink(engine, 'contract', 'ctr_live', 'shl_revoked', { revoked_at: '2026-01-01T00:00:00.000Z' });
+
+    const result = await linkService.sweepOrphanedShareLinks();
+
+    expect(result).toMatchObject({ scanned: 3, revoked: 1, unresolvedObjects: [], truncated: false });
+    expect(shareLinkIds(engine)).toEqual(['shl_live', 'shl_revoked']);
+  });
+
+  it('is idempotent — a second boot finds nothing to do', async () => {
+    shareLink(engine, 'contract', 'ctr_gone');
+    expect((await linkService.sweepOrphanedShareLinks()).revoked).toBe(1);
+    expect((await linkService.sweepOrphanedShareLinks()).revoked).toBe(0);
+  });
+
+  it('covers the posture the cascade skips (an unmarked system object)', async () => {
+    engine._schemas.sys_audit_log = { name: 'sys_audit_log', isSystem: true };
+    engine._tables.sys_audit_log = [];
+    shareLink(engine, 'sys_audit_log', 'evt_gone');
+
+    expect((await linkService.sweepOrphanedShareLinks()).revoked).toBe(1);
+    expect(shareLinkIds(engine)).toEqual([]);
+  });
+
+  /**
+   * "Could not ask" is not "the record is gone" — for the LINK table as much as
+   * for the share table. A probe failure that deleted would turn a transient
+   * driver error into a link nobody can get back (nothing can re-mint a token
+   * someone already holds).
+   */
+  it('LEAVES links alone when the existence probe fails, and reports the object', async () => {
+    shareLink(engine, 'contract', 'ctr_gone');
+    engine.failFindOn = 'contract';
+
+    const result = await linkService.sweepOrphanedShareLinks();
+
+    expect(result.revoked).toBe(0);
+    expect(result.unresolvedObjects).toEqual(['contract']);
+    expect(shareLinkIds(engine)).toEqual(['shl_ctr_gone']);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('could not check whether records still exist'),
+      expect.objectContaining({ object: 'contract' }),
+    );
+  });
+
+  it('scopes to one object when asked (the unbounded-delete repair)', async () => {
+    engine._schemas.invoice = { name: 'invoice', sharingModel: 'private', fields: { owner_id: {} } };
+    engine._tables.invoice = [];
+    shareLink(engine, 'contract', 'ctr_gone', 'shl_contract_orphan');
+    shareLink(engine, 'invoice', 'inv_gone', 'shl_invoice_orphan');
+
+    const result = await linkService.sweepOrphanedShareLinks({ object: 'contract' });
+
+    expect(result).toMatchObject({ scanned: 1, revoked: 1 });
+    expect(shareLinkIds(engine)).toEqual(['shl_invoice_orphan']);
+  });
+
+  it('probes existence in ONE batched query per object per page', async () => {
+    for (let i = 0; i < 25; i++) shareLink(engine, 'contract', `ctr_gone_${i}`, `shl_${i}`);
+    engine._findCalls.length = 0;
+
+    await linkService.sweepOrphanedShareLinks({ batchSize: 100 });
+
+    const probes = engine._findCalls.filter((c) => c.object === 'contract');
+    expect(probes).toHaveLength(1);
+    expect(probes[0].options.where).toMatchObject({ id: { $in: expect.any(Array) } });
+    expect(shareLinks(engine)).toEqual([]);
+  });
+
+  it('pages by keyset and REPORTS a scan that its cap cut short', async () => {
+    for (let i = 0; i < 12; i++) shareLink(engine, 'contract', `ctr_gone_${i}`, `shl_${String(i).padStart(2, '0')}`);
+
+    const result = await linkService.sweepOrphanedShareLinks({ batchSize: 5, max: 10 });
+
+    expect(result.scanned).toBe(10);
+    expect(result.truncated).toBe(true);
+    expect(result.revoked).toBe(10);
+    expect(shareLinks(engine)).toHaveLength(2);
+  });
+
+  it('walks past rows it just deleted (a seek, never an OFFSET — #4363)', async () => {
+    for (let i = 0; i < 9; i++) shareLink(engine, 'contract', `ctr_gone_${i}`, `shl_${i}`);
+
+    const result = await linkService.sweepOrphanedShareLinks({ batchSize: 3 });
+
+    expect(result).toMatchObject({ scanned: 9, revoked: 9 });
+    expect(shareLinks(engine)).toEqual([]);
+  });
+
+  it('sweeps the two tables independently — neither can hide the other', async () => {
+    const sharing = new SharingService({ engine: engine as any, logger });
+    manualShare(engine, 'contract', 'ctr_gone', 'carol', 'shr_orphan');
+    shareLink(engine, 'contract', 'ctr_gone', 'shl_orphan');
+
+    expect((await sharing.sweepOrphanedRecordShares()).revoked).toBe(1);
+    expect(shareLinkIds(engine)).toEqual(['shl_orphan']); // untouched by the share sweep
+    expect((await linkService.sweepOrphanedShareLinks()).revoked).toBe(1);
+    expect(shareLinkIds(engine)).toEqual([]);
+    expect(shareIds(engine)).toEqual([]);
+  });
+});
+
+/**
+ * [#5190] The link half on a RULES-BEARING object.
+ *
+ * Every link-cascade case above runs on an object with no sharing rules, which
+ * leaves the one interaction that only exists on the objects carrying the MOST
+ * sharing machinery unpinned: where rules exist, #5102's `bindRuleHooks`
+ * registers its own `beforeDelete` / `afterDelete` under a DIFFERENT hook
+ * package, and both packages read the same stashed row set
+ * ({@link AFFECTED_ROWS_STASH_KEY}). A link cascade that happened to work only
+ * while it was the sole `beforeDelete` writer — or one that let the rule
+ * package's recompute consume the stash first — would pass all of them and
+ * still leak tokens exactly where the risk is highest.
+ *
+ * So this asserts the three revocations on one timeline, from one delete: the
+ * rule grant (#5102), the manual share (#5103) and the capability token
+ * (#5190).
+ */
+describe('#5190 the LINK cascade on a rules-bearing object', () => {
+  let engine: Engine;
+  let sharing: SharingService;
+  let rules: SharingRuleService;
+  let linkService: ShareLinkService;
+  let logger: any;
+
+  beforeEach(async () => {
+    logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    engine = makeEngine();
+    // A rules-bearing object that ALSO opted into link sharing — the realistic
+    // shape, and the one where all three revocation paths meet.
+    engine._schemas.opportunity = {
+      name: 'opportunity',
+      sharingModel: 'private',
+      publicSharing: { enabled: true },
+      fields: { owner_id: {} },
+    };
+    engine._tables.opportunity = [
+      { id: 'opp1', region: 'east', owner_id: 'boss' },
+      { id: 'opp2', region: 'east', owner_id: 'boss' },
+    ];
+    engine._tables.sys_record_share = [];
+    engine._tables.sys_share_link = [];
+    engine._tables.sys_sharing_rule = [{
+      id: 'srule_east',
+      name: 'east_to_alice',
+      label: 'East → Alice',
+      object_name: 'opportunity',
+      criteria_json: JSON.stringify({ region: 'east' }),
+      recipient_type: 'user',
+      recipient_id: 'alice',
+      access_level: 'edit',
+      active: true,
+    }];
+    sharing = new SharingService({ engine: engine as any, logger });
+    rules = new SharingRuleService({ engine: engine as any, sharing, logger });
+    linkService = new ShareLinkService({ engine: engine as any, logger });
+    bindRuleHooks(engine as any, rules, await rules.listRules({ activeOnly: true }, SYS), logger);
+    bindRecordShareCascade(engine as any, sharing, logger, () => linkService);
+  });
+
+  it('revokes the rule grant, the manual share AND the link of the deleted record', async () => {
+    await rules.evaluateRule('srule_east', SYS);
+    expect(shares(engine).filter((r) => r.source === 'rule')).toHaveLength(2);
+    manualShare(engine, 'opportunity', 'opp1', 'carol', 'shr_manual_opp1');
+    shareLink(engine, 'opportunity', 'opp1', 'shl_opp1');
+    shareLink(engine, 'opportunity', 'opp2', 'shl_opp2');
+
+    await engine.simulateDeleteById('opportunity', 'opp1');
+
+    // The token goes with the record…
+    expect(shareLinkIds(engine)).toEqual(['shl_opp2']);
+    // …and so do BOTH share sources, while opp2 keeps everything.
+    expect(shares(engine).every((r) => r.record_id === 'opp2')).toBe(true);
+    expect(shares(engine).map((r) => r.source)).toEqual(['rule']);
+  });
+
+  it('a BOUNDED predicate delete across both hook packages takes every link with it', async () => {
+    await rules.evaluateRule('srule_east', SYS);
+    shareLink(engine, 'opportunity', 'opp1', 'shl_opp1');
+    shareLink(engine, 'opportunity', 'opp2', 'shl_opp2');
+    engine._deleteCalls.length = 0;
+
+    await engine.simulateBulkDelete('opportunity', { region: 'east' });
+
+    expect(engine._tables.opportunity).toEqual([]);
+    expect(shareLinkIds(engine)).toEqual([]);
+    // Still ONE set-based statement for the links, even with the rule package
+    // sharing the same stash.
+    expect(engine._deleteCalls.filter((c) => c.object === 'sys_share_link')).toHaveLength(1);
+  });
+
+  it('both hook packages stay bound, and unbinding the cascade leaves the rule hooks', () => {
     expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE).length).toBeGreaterThan(0);
     expect(engine.boundFor(RECORD_SHARE_CASCADE_PACKAGE)).toHaveLength(2);
 
