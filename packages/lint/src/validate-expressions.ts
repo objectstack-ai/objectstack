@@ -36,6 +36,7 @@
  * | `objects[].validations[]`              | `ObjectSchema`                    |
  * | `validations[].condition` / `.when` / `.then` / `.otherwise` | the six `*ValidationSchema` variants |
  * | `objects[].fields[].reference`         | `FieldSchema`                     |
+ * | `objects[].fields[].expression`        | `FieldSchema`                     |
  * | `actions[].objectName`                 | the action schema                 |
  * | `sharingRules[].condition` / `.object` | `SharingRuleSchema`               |
  *
@@ -60,16 +61,19 @@
  *   `relatedTo` / `target` / `targetObject` / `lookupObject`) to `reference`.
  * - `actions[].object` — the action schema's own rejection says "Did you mean
  *   `object` → `objectName`?".
+ * - `objects[].fields[].formula` / `.calculation` / `.compute` — the three names
+ *   `field.zod.ts:333` aliases back to `expression`. The field-formula pass read
+ *   `formula` until #5026, so it had never run against a stack that parses;
+ *   converging it onto `expression` ACTIVATED the check rather than deleting a
+ *   dead branch, which is why it moved on its own PR with a real-metadata sweep
+ *   attached rather than riding along with #5017's five removals.
  *
  * Alias tolerance belongs at the schema's refusal, not in a consumer (Prime
  * Directive #12) — in a consumer it also converts a loud, named rejection into
  * a silently-inert (or, above, silently-WRONG) gate.
  *
- * One read here is still undeclared and is tracked rather than fixed in place:
- * the field-formula pass below reads `f.formula`, which `FieldSchema` rejects
- * in favour of `expression`. Converging it would ACTIVATE a check that has
- * never run against a parsing stack, which is a coverage change, not dead-code
- * removal — see the note at that call site and the tracking issue.
+ * Every read in this file is now a key the spec declares; the meta-guard in
+ * `validate-expressions.test.ts` pins that with no tracked exceptions left.
  */
 
 import { validateExpression, collectCelRootIdentifiers } from '@objectstack/formula';
@@ -582,7 +586,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         objectName,
         'fail-open',
       );
-      if (f.formula) {
+      if (f.expression) {
+        // `expression` is the key `FieldSchema` declares for a computed field —
+        // what `Field.formula({ expression: … })` writes. This read was spelled
+        // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
+        // aliasing it back to `expression`, so the whole pass had never run
+        // against a stack that parses. Converging it ACTIVATED a check rather
+        // than deleting a dead branch — the real-metadata sweep that had to
+        // accompany that is in #5026's PR body.
+        //
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
         //
@@ -597,9 +609,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
         // deciding later is low. Raise it as its own issue rather than widening
         // this call. Ledger: `validate-null-guards.ts`.
-        const res = validateExpression('value', f.formula as string | { dialect?: string; source?: string },
+        const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
-        const fieldWhere = `object '${objectName}' · field '${fname}' formula`;
+        // Names the KEY the author edits, not the field type. Saying "formula"
+        // here is how the wrong spelling propagates: the next author reads the
+        // diagnostic and writes `formula:`, which the schema then rejects.
+        const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
       }

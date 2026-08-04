@@ -801,13 +801,15 @@ NODE_ENV=eu node server.js   # Loads objectstack.config.eu.ts
 
 ```typescript
 // Production config
+// objectstack.config.ts
 {
   stripe: {
     apiKey: process.env.STRIPE_API_KEY,  // Live key
   },
   email: {
-    provider: 'sendgrid',
-    fromAddress: 'noreply@company.com',
+    provider: 'resend',                   // 'log' | 'resend' | 'postmark'
+    apiKey: process.env.RESEND_API_KEY,   // Required by every non-'log' provider
+    defaultFrom: { name: 'Acme', address: 'noreply@company.com' },
   },
 }
 
@@ -818,12 +820,16 @@ NODE_ENV=eu node server.js   # Loads objectstack.config.eu.ts
     apiKey: 'sk_test_...',  // Test key
   },
   email: {
-    provider: 'console',  // Log emails instead of sending
+    provider: 'log',  // Print emails to stdout instead of sending
   },
 }
 
-// Developer can further override with .env.local
-OS_EMAIL_PROVIDER=mailhog  # Use local Mailhog for testing
+// Developer can further override with .env.local — ENVIRONMENT beats both
+// files. Merging is per key (deep merge, see above): the development file
+// only replaces `provider`, so `apiKey` / `defaultFrom` are still inherited
+// from the production config until something names them too.
+OS_EMAIL_PROVIDER=log                       # Force the log transport
+OS_EMAIL_FROM=Dev Mailer <dev@example.com>  # ...and now defaultFrom, too
 ```
 
 ## Best Practices

@@ -32,6 +32,7 @@ import type {
   ExplainRecordAttribution,
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
+import { superuserBypassBitForOperation } from './permission-evaluator.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -480,6 +481,16 @@ interface RecordAttributionContext {
   owd: { model: string; effect: 'private' | 'read' | 'public' };
   capsDeny: boolean;
   crudAllowed: boolean;
+  /**
+   * [#4647] Whether the object-level pass found the View/Modify All Data bypass
+   * EFFECTIVE for this operation (already D10-intersected, already
+   * operation-scoped to the right bit). The row story consumes the verdict the
+   * `vama_bypass` layer published — it never re-derives it — so the layer, the
+   * record attribution and the write gate stay one answer.
+   */
+  vamaEffective: boolean;
+  /** [#4647] The sets that carry the bypass, for the row-level detail text. */
+  vamaSets: string[];
 }
 
 /**
@@ -498,7 +509,7 @@ interface RecordAttributionContext {
 async function applyRecordAttribution(
   ra: RecordAttributionContext,
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
-  const { deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed } = ra;
+  const { deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
 
@@ -651,12 +662,42 @@ async function applyRecordAttribution(
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
           : canEdit !== undefined
             ? (canEdit
-                ? 'The sharing service grants write on this record (ownership or an edit/full share).'
+                // [#4647] Name the REAL reason the gate admitted the row. The
+                // write gate consults the Modify All Data bypass after
+                // ownership and shares, so "the sharing service grants write"
+                // would be a false attribution for a bypass holder — precisely
+                // the mis-reporting this issue was filed on, inverted.
+                ? (!ownerIsMe && !anyShareAdmits && vamaEffective
+                    ? `The write gate admits this record via the Modify All Data bypass [${vamaSets.join(', ')}], ` +
+                      'not ownership or a share (see the vama_bypass layer).'
+                    : 'The sharing service grants write on this record (ownership or an edit/full share).')
                 : 'No ownership and no edit/full share grants write on this record.')
             : sharingOutcome === 'admitted'
               ? (ownerIsMe ? 'Caller owns the record — visible without a share.' : `${shareRules.length} share(s) attached; access is granted for this record.`)
-              : `${shareRules.length} share(s) attached; none grants the caller access to this record.`,
+              : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
+                (vamaEffective
+                  ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
+                  : ''),
     };
+  }
+
+  // ── vama_bypass: what the bypass did to THIS row ─────────────────────────
+  // [#4647] The layer that claims "ownership and sharing checks are skipped"
+  // now says so at row granularity too, and says it from the same verdict the
+  // write gate consults.
+  const vamaLayer = layers.find((l) => l.layer === 'vama_bypass');
+  if (vamaLayer) {
+    vamaLayer.record = !recordExists
+      ? { outcome: 'not_evaluated', rules: [], detail: 'Record not found; the bypass was not evaluated.' }
+      : vamaEffective
+        ? {
+            outcome: 'admitted',
+            rowFilter: null,
+            rules: [],
+            detail: `View/Modify All Data via [${vamaSets.join(', ')}] admits this record regardless of ownership — ` +
+              'the same bypass the write path consults (#4647).',
+          }
+        : { outcome: 'not_evaluated', rules: [], detail: 'No View/Modify All Data bypass applies to this record.' };
   }
 
   // ── rls: the business (Layer 1) predicate for this record ────────────────
@@ -694,11 +735,26 @@ async function applyRecordAttribution(
   // ── decision.record: bottom line + decisive layer ────────────────────────
   const tenantExcluded = tenantRecord.outcome === 'excluded';
   const rlsExcluded = rlsLayer?.record?.outcome === 'excluded';
+  // [#4647] The bypass admits any row of this object for this principal — the
+  // row-level meaning of the `vama_bypass` layer's own claim. On the WRITE
+  // branch the gate (`canEdit`/`canDelete`) is still the authority when it is
+  // available, because the gate is what the request will actually hit and it
+  // now consults this same bypass; the disjunction below only carries the
+  // bypass where no gate answered (a deployment without plugin-sharing) and on
+  // the read branch, whose row filter the bypass short-circuits identically.
+  const vamaAdmitsRow = vamaEffective && recordExists;
   const businessRowAdmits = isRead
-    ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted'
+    ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted' || vamaAdmitsRow
     : canEdit !== undefined
       ? canEdit
-      : owd.effect === 'public' || ownerIsMe || sharingOutcome === 'admitted';
+      : owd.effect === 'public' || ownerIsMe || sharingOutcome === 'admitted' || vamaAdmitsRow;
+
+  // [#4647] Was the bypass DECISIVE? Only where the baseline and the concrete
+  // shares would otherwise have excluded the row — an owner or a shared-to
+  // principal is admitted with or without it, and reporting `vama_bypass` there
+  // would over-credit the grant.
+  const baselineAdmitsRow = isRead ? owd.effect !== 'private' : owd.effect === 'public';
+  const bypassWasDecisive = vamaAdmitsRow && !baselineAdmitsRow && !ownerIsMe && !anyShareAdmits;
 
   let visible: boolean;
   let decidedBy: NonNullable<ExplainDecision['record']>['decidedBy'];
@@ -710,15 +766,17 @@ async function applyRecordAttribution(
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
   else {
     visible = true;
-    decidedBy = (owd.effect === 'private' && !ownerIsMe && sharingOutcome === 'admitted')
-      ? 'sharing'
-      : layer1 != null
-        ? 'rls'
-        : owd.effect === 'private' && ownerIsMe
-          ? 'owd_baseline'
-          : layer0 != null
-            ? 'tenant_isolation'
-            : 'object_crud';
+    decidedBy = bypassWasDecisive
+      ? 'vama_bypass'
+      : (owd.effect === 'private' && !ownerIsMe && sharingOutcome === 'admitted')
+        ? 'sharing'
+        : layer1 != null
+          ? 'rls'
+          : owd.effect === 'private' && ownerIsMe
+            ? 'owd_baseline'
+            : layer0 != null
+              ? 'tenant_isolation'
+              : 'object_crud';
   }
 
   return {
@@ -955,14 +1013,21 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   });
 
   // ── 8. vama_bypass ─────────────────────────────────────────────────────
+  // [#4647] Resolved through `PermissionEvaluator.superuserBypassSets` — the
+  // ONE bypass predicate. `ISecurityService.hasWriteBypass` folds through the
+  // same function, and that is what plugin-sharing's `canEdit`/`canDelete`
+  // (hence the `sys_attachment` `canEdit(parent)` gate) consult on the write
+  // path. explain and enforcement ask the same question of the same code, so
+  // they can no longer answer it differently for one (principal, record,
+  // operation) triple.
+  //
+  // The bit is OPERATION-scoped: a write asks for `modifyAllRecords` exactly as
+  // the write gate does, because "View All Data" is a read power and must not
+  // widen a write. Reading either bit here (the pre-#4647 behaviour) would have
+  // re-created the same contradiction one bit down.
+  const vamaBit = superuserBypassBitForOperation(dataOp);
   const vamaOf = (list: PermissionSet[]): string[] =>
-    list
-      .filter((s: any) => {
-        const objects = s?.objects ?? {};
-        const entry = objects[object] ?? objects['*'];
-        return entry && (entry.viewAllRecords === true || entry.modifyAllRecords === true);
-      })
-      .map((s: any) => String(s.name ?? '?'));
+    deps.evaluator.superuserBypassSets(object, list, { isPrivate: secMeta.isPrivate, bit: vamaBit });
   const agentVama = vamaOf(sets);
   const delegatorVama = delegatorSets ? vamaOf(delegatorSets) : null;
   // [ADR-0090 D10] The bypass only survives the intersection when BOTH sides
@@ -971,16 +1036,28 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // belt-and-braces at evaluation time).
   const vamaEffective = agentVama.length > 0 && (delegatorVama === null || delegatorVama.length > 0);
   const vamaSets = agentVama;
+  // [#4647] A write question whose answer is "no bypass" still owes the admin
+  // WHICH bit is missing: holding View All Data and being refused an update is
+  // exactly the case this layer is read for.
+  const viewOnlySets = vamaBit === 'modify' && agentVama.length === 0
+    ? deps.evaluator.superuserBypassSets(object, sets, { isPrivate: secMeta.isPrivate, bit: 'view' })
+    : [];
   layers.push({
     layer: 'vama_bypass',
     verdict: vamaEffective ? 'widens' : 'not_applicable',
     detail: vamaEffective
       ? `View/Modify All Data bypass held via [${vamaSets.join(', ')}]` +
         (delegatorVama ? ` AND by the delegator [${delegatorVama.join(', ')}]` : '') +
-        ` — ownership and sharing checks are skipped.`
+        ` — ownership and sharing checks are skipped` +
+        (vamaBit === 'modify'
+          ? ` (Modify All Data: the write path consults this SAME bypass, #4647).`
+          : `.`)
       : agentVama.length > 0 && delegatorVama !== null && delegatorVama.length === 0
         ? `Agent holds View/Modify All Data via [${agentVama.join(', ')}] but the DELEGATOR does not — D10 intersection strips the bypass.`
-        : 'No View/Modify All Data bypass.',
+        : viewOnlySets.length > 0
+          ? `View All Data held via [${viewOnlySets.join(', ')}] does NOT bypass ownership for ${operation} — ` +
+            `a write bypass requires Modify All Data (modifyAllRecords), so ownership and sharing still decide (#4647).`
+          : 'No View/Modify All Data bypass.',
     contributors: vamaEffective ? vamaSets.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })) : [],
   });
 
@@ -1028,6 +1105,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   if (input.recordId) {
     const out = await applyRecordAttribution({
       deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
+      vamaEffective, vamaSets,
     });
     recordVerdict = out.record;
     posture = out.posture;
@@ -1050,6 +1128,13 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     // rows through the same filter, so omitting it would hide the very
     // narrowing that explains a short export.
     ...(operation === 'read' || operation === 'export' ? { readFilter: readFilter ?? null } : {}),
+    // [#4647] `allowed` answers the OBJECT question and `record` the ROW one;
+    // what they may never do is contradict each other about the same row. The
+    // pre-#4647 payload could carry `allowed: true` beside
+    // `record: { visible: false, decidedBy: 'sharing' }` for a Modify All Data
+    // holder — the row verdict denying what the bypass layer above it said was
+    // skipped. They agree now because the row verdict comes from the write gate
+    // that consults the same bypass `allowed`'s RLS composition short-circuits.
     ...(recordVerdict ? { record: recordVerdict } : {}),
   };
   return decision;

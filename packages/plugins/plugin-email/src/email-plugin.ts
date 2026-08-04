@@ -13,6 +13,8 @@ import {
   makeTransport,
   SmtpTransport,
   smtpOptionsFromMailSettings,
+  isEmailTransportProvider,
+  unsupportedProviderFix,
   type EmailTransportProvider,
 } from './transports/index.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
@@ -262,12 +264,24 @@ export class EmailServicePlugin implements Plugin {
                   return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
                 }
               } else if (provider !== 'log') {
+                // A provider with no transport behind it — a value stored while
+                // the settings page still offered SendGrid / Amazon SES (#5094).
+                // Refuse before asking for an API key: nothing here can use one.
+                if (!isEmailTransportProvider(provider)) {
+                  return {
+                    ok: false,
+                    severity: 'error',
+                    message: `provider='${provider}' is not a provider this server can deliver with, so NOTHING was `
+                      + 'sent (and nothing has been sent through it since it was saved). Fix: '
+                      + unsupportedProviderFix(provider),
+                  };
+                }
                 if (!apiKey) {
                   return { ok: false, severity: 'error', message: `${provider}: api_key is required.` };
                 }
                 try {
                   const transport = makeTransport({
-                    provider: provider as 'resend' | 'postmark',
+                    provider,
                     apiKey,
                     logger: ctx.logger,
                   });
@@ -567,6 +581,12 @@ export class EmailServicePlugin implements Plugin {
    *    still applied.
    *  - `provider = 'resend' | 'postmark'` rebuilds the transport using
    *    `api_key` from settings.
+   *  - anything else — including `sendgrid` / `ses`, which the settings page
+   *    offered for several releases without a transport behind either (#5094)
+   *    and which persisted workspaces still resolve — keeps the previous
+   *    transport and reports at `error` with the SMTP migration that replaces
+   *    it. A settings value written by an older release must not be able to
+   *    stop a server from booting, and must not be able to look configured.
    *
    * **This path never throws.** A settings save must not be able to kill a
    * running server, so a transport that cannot be built leaves the previous
@@ -649,6 +669,21 @@ export class EmailServicePlugin implements Plugin {
       return;
     }
 
+    // A stored provider this build cannot deliver with — checked BEFORE the
+    // api_key branch, because "set an API key" is the wrong instruction for a
+    // provider that has no transport to hand the key to. Same shape as every
+    // other failure here: previous transport kept, error naming the consequence
+    // and the fix, no throw. Workspaces that saved `sendgrid` / `ses` while the
+    // settings page still offered them arrive here on every boot (#5094).
+    if (!isEmailTransportProvider(provider)) {
+      ctx.logger.error(
+        `EmailServicePlugin: provider='${provider}' is not a provider this server can deliver with — the `
+        + 'previous transport is kept and NO mail is delivered through it. Fix: '
+        + unsupportedProviderFix(provider),
+      );
+      return;
+    }
+
     const apiKey = typeof values.api_key === 'string' ? values.api_key : undefined;
     if (!apiKey) {
       ctx.logger.error(
@@ -660,7 +695,7 @@ export class EmailServicePlugin implements Plugin {
 
     try {
       const transport = makeTransport({
-        provider: provider as 'resend' | 'postmark',
+        provider,
         apiKey,
         logger: ctx.logger,
       });
