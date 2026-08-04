@@ -16,27 +16,12 @@ Defines the visual presentation style of the notification.
 ## TypeScript Usage
 
 ```typescript
-import { NotificationActionSchema, NotificationPositionSchema, NotificationSeveritySchema, NotificationTypeSchema } from '@objectstack/spec/ui';
-import type { NotificationAction, NotificationPosition, NotificationSeverity, NotificationType } from '@objectstack/spec/ui';
+import { NotificationPositionSchema, NotificationSeveritySchema, NotificationTypeSchema } from '@objectstack/spec/ui';
+import type { NotificationPosition, NotificationSeverity, NotificationType } from '@objectstack/spec/ui';
 
 // Validate data
-const result = NotificationActionSchema.parse(data);
+const result = NotificationPositionSchema.parse(data);
 ```
-
----
-
-## NotificationAction
-
-Notification action button
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Action button label |
-| **action** | `string` | ✅ | Action identifier to execute |
-| **variant** | `Enum<'primary' \| 'secondary' \| 'link'>` | ✅ | Button variant style |
-
 
 ---
 
