@@ -378,6 +378,95 @@ export class SharingRuleService implements ISharingRuleService {
     return results;
   }
 
+  /**
+   * [#4779] Reconcile EVERY rule bound to `object` — the object-scoped twin of
+   * the `kernel:bootstrapped` backfill.
+   *
+   * This is the re-grant half of the ruling's option C: after a bulk write
+   * whose row set could not be bounded has had its grants revoked set-based,
+   * this pass puts back the grants that are still deserved. Per RULE rather
+   * than per row, deliberately — `evaluateRule` already diffs the whole
+   * matched set against the whole existing grant set in one pass, which is
+   * both cheaper than N per-row reconciles and the exact primitive the boot
+   * backfill uses, so the asynchronous repair and the restart repair are the
+   * same code path rather than two that must be kept agreeing.
+   *
+   * Inactive rules are included: `evaluateRule` purges their grants (#4433),
+   * so excluding them would leave withdrawal to the next restart. Best-effort
+   * per rule — one broken rule must not stop its siblings being restored.
+   */
+  async evaluateAllRulesForObject(object: string): Promise<number> {
+    if (!object) return 0;
+    const rules = await this.listRules({ object }, SYSTEM_CTX as any);
+    let reconciled = 0;
+    for (const rule of rules) {
+      try {
+        await this.evaluateRule(rule.id, SYSTEM_CTX as any);
+        reconciled += 1;
+      } catch (err: any) {
+        this.logger?.warn?.('[sharing-rule] object reconcile failed for rule', {
+          object,
+          rule: rule.name ?? rule.id,
+          error: err?.message,
+        });
+      }
+    }
+    return reconciled;
+  }
+
+  /**
+   * [#4779] Revoke every rule-materialised grant on `object`, set-based.
+   *
+   * The cheap, uncapped half of the ruling: one predicate delete over
+   * `sys_record_share`, whose cost does not grow with the number of records
+   * the triggering write touched. It is what lets a bulk write proceed
+   * without the recompute bound leaking out as a limit on how many rows an
+   * admin may change — the write lands, every grant that may have gone stale
+   * is gone before it returns, and {@link evaluateAllRulesForObject} puts
+   * back the deserved ones asynchronously.
+   *
+   * `multi: true` is required, not decorative: `ObjectQL.delete` refuses a
+   * predicate-shaped call that does not declare bulk intent
+   * (`resolveEngineDeleteDispatch`), which is precisely the shape that made
+   * every `DELETE /sharing/rules/:id` answer 500 in #4434.
+   *
+   * Only `source: 'rule'` rows are touched. A manual grant is a human's
+   * decision about one record and no rule evaluation would ever re-create it,
+   * so sweeping it here would destroy data this subsystem does not own.
+   */
+  async revokeRuleGrantsForObject(object: string): Promise<void> {
+    if (!object) return;
+    await this.engine.delete('sys_record_share', {
+      where: { source: 'rule', object_name: object },
+      multi: true,
+      context: SYSTEM_CTX,
+    } as any);
+  }
+
+  /**
+   * [#4779] Revoke the rule-materialised grants of a NAMED set of records —
+   * the delete path's revoke, where the rows are gone and no reconcile can
+   * ever reach them again.
+   *
+   * Chunked because the id set rides in an `$in`, and a single statement
+   * binding a thousand parameters is a portability trap (SQLite's default
+   * `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds). Chunking keeps this
+   * O(ids/CHUNK) statements instead of O(ids), which is still set-based in
+   * the sense that matters.
+   */
+  async revokeRuleGrantsForRecords(object: string, recordIds: readonly string[]): Promise<void> {
+    if (!object || recordIds.length === 0) return;
+    const CHUNK = 200;
+    for (let i = 0; i < recordIds.length; i += CHUNK) {
+      const batch = recordIds.slice(i, i + CHUNK);
+      await this.engine.delete('sys_record_share', {
+        where: { source: 'rule', object_name: object, record_id: { $in: batch } },
+        multi: true,
+        context: SYSTEM_CTX,
+      } as any);
+    }
+  }
+
   // ── internals ─────────────────────────────────────────────────────
 
   /**

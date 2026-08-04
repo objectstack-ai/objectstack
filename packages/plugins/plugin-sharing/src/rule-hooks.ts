@@ -3,10 +3,30 @@
 import type { SharingRuleService } from './sharing-rule-service.js';
 import type { SharingRuleRow } from '@objectstack/spec/contracts';
 import { isMatchAllCriteria, SharingCriteriaValidationError } from './rule-criteria.js';
+import {
+  RULE_RECOMPUTE_ROW_CAP,
+  RuleRegrantQueue,
+  resolveAffectedRows,
+  type AffectedRows,
+} from './bulk-recompute.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 export const SHARING_RULE_HOOK_PACKAGE = 'plugin-sharing:rules';
+
+/**
+ * [#4779] Shared-`HookContext` key holding the row set the write is about to
+ * change, stashed by the `before` hook for the `after` hook to consume.
+ *
+ * The stash is necessary, not a convenience: an update that moves rows OUT of
+ * a rule's criteria makes them unfindable by the write's own predicate the
+ * instant it lands, and a delete removes them outright — so `afterUpdate` /
+ * `afterDelete` are structurally too late to ask "which rows was this?".
+ * `ObjectQL.update()` / `.delete()` reuse ONE `HookContext` instance across
+ * each before/after pair (they mutate `ctx.event` in place), which is the same
+ * seam `primary-bu-projection.ts`'s `__primaryBuUserId` rides on.
+ */
+const STASH_KEY = '__sharingAffectedRows';
 
 /**
  * Package id for the `sys_sharing_rule` DATA-change triggers that re-run the
@@ -29,6 +49,14 @@ interface MinimalEngine {
     packageId?: string;
   }): void;
   unregisterHooksByPackage(packageId: string): number;
+  /**
+   * [#4779] Needed to resolve a predicate write's row set in the `before`
+   * hook. Optional so a caller holding only the hook-registry surface still
+   * type-checks; absent, every predicate write is treated as unbounded — the
+   * safe direction (revoke everything, re-grant asynchronously), never the
+   * silent no-op this issue was filed for.
+   */
+  find?(object: string, options?: any): Promise<any[]>;
 }
 
 interface MinimalLogger {
@@ -37,10 +65,43 @@ interface MinimalLogger {
 }
 
 /**
- * Bind afterInsert/afterUpdate hooks for every distinct object_name in
- * `rules`. Each hook calls `service.evaluateAllForRecord(object, id, …)`
- * with SYSTEM_CTX so the evaluator can write `sys_record_share` rows
- * without being blocked by its own enforcement.
+ * The in-process executor for the asynchronous re-grant half of #4779.
+ *
+ * Module-scoped on purpose: `bindRuleHooks` is called again on every rule
+ * rebind (`bindRuleRebindTriggers` unbinds and re-binds the whole package on
+ * each `sys_sharing_rule` write), and a per-call queue would let a rebind
+ * orphan re-grants that were still in flight. One queue per process keeps the
+ * chain — and therefore the serialization guarantee — continuous across
+ * rebinds. Exported for tests to await; production code never does.
+ */
+export const ruleRegrantQueue = new RuleRegrantQueue();
+
+/**
+ * Bind the sharing-rule recompute hooks for every distinct object_name in
+ * `rules`. Everything runs with SYSTEM_CTX so the evaluator can write
+ * `sys_record_share` without being blocked by its own enforcement.
+ *
+ * Five hooks per object:
+ *
+ *  - `afterInsert` — recompute the inserted row (unchanged behaviour).
+ *  - `beforeUpdate` / `beforeDelete` — resolve the affected row set and stash
+ *    it on the shared `HookContext` ({@link STASH_KEY}). Must be `before`:
+ *    the write is what makes those rows unfindable.
+ *  - `afterUpdate` — recompute per row when the set is bounded (which grants
+ *    AND revokes, so a bulk update INTO a rule's criteria is covered as well
+ *    as one out of it); otherwise revoke the object's rule grants set-based
+ *    and queue the re-grant.
+ *  - `afterDelete` — revoke the deleted rows' rule grants. Nothing can
+ *    re-grant them: `evaluateRule` iterates records that still exist, so a
+ *    grant whose record is gone is unreachable by every reconcile path and
+ *    outlives restarts (the orphan noted at the tail of #4779). Harmless only
+ *    while record ids are never reused — an assumption no gate enforces.
+ *
+ * [#4779] `if (!id) return` — the line these hooks used to open with — is
+ * gone. It read as a cheap guard and was in fact the whole defect: predicate
+ * (`multi: true`) writes never populate `input.id`, so every bulk write
+ * skipped recompute entirely and left stale `sys_record_share` rows granting
+ * access the rules no longer imply.
  *
  * Caller is responsible for invoking {@link unbindAllRuleHooks} before
  * re-binding when the rule set changes.
@@ -57,19 +118,100 @@ export function bindRuleHooks(
     if (r.object_name) objects.add(r.object_name);
   }
   for (const objectName of objects) {
-    const handler = async (ctx: any) => {
+    const opts = { object: objectName, packageId: SHARING_RULE_HOOK_PACKAGE, priority: 180 };
+
+    /** Recompute one record; never throws (a hook must not fail the write). */
+    const recomputeRow = async (id: string): Promise<void> => {
+      await service.evaluateAllForRecord(objectName, id, SYSTEM_CTX as any);
+    };
+
+    /**
+     * The unbounded branch: revoke now, re-grant later. Ordered so that the
+     * process can die between the two and still be safe — the grants are
+     * already gone, and the `kernel:bootstrapped` backfill re-grants on the
+     * next start.
+     */
+    const revokeThenQueueRegrant = async (reason: string): Promise<void> => {
+      await service.revokeRuleGrantsForObject(objectName);
+      logger?.warn?.(
+        '[sharing-rule] a bulk write touched more rows than can be recomputed inline — every rule grant on ' +
+          'this object was revoked and is being re-granted in the background; recipients may briefly lose ' +
+          'access to records they still qualify for (a restart re-runs the same reconcile)',
+        { object: objectName, reason, cap: RULE_RECOMPUTE_ROW_CAP },
+      );
+      ruleRegrantQueue.enqueue(
+        () => service.evaluateAllRulesForObject(objectName).then(() => undefined),
+        (err: any) => logger?.warn?.(
+          '[sharing-rule] background re-grant failed — grants stay revoked until the next reconcile ' +
+            '(any sharing-rule write, or a restart)',
+          { object: objectName, error: err?.message },
+        ),
+      );
+    };
+
+    const stashAffectedRows = async (ctx: any) => {
+      if ((ctx?.session as any)?.isSystem) return;
+      try {
+        ctx[STASH_KEY] = typeof engine.find === 'function'
+          ? await resolveAffectedRows(engine as Required<MinimalEngine>, objectName, ctx, logger)
+          : ({ kind: 'unbounded', reason: 'resolve-failed', detail: 'engine has no find()' } as AffectedRows);
+      } catch (err: any) {
+        // resolveAffectedRows already fails safe; this is the belt for a
+        // genuinely unexpected throw. Unknown must never degrade to "no rows".
+        ctx[STASH_KEY] = { kind: 'unbounded', reason: 'resolve-failed', detail: err?.message } as AffectedRows;
+      }
+    };
+
+    /** What the `after` hook should act on when no `before` hook ran. */
+    const affectedFrom = (ctx: any): AffectedRows =>
+      (ctx?.[STASH_KEY] as AffectedRows | undefined)
+      ?? ({ kind: 'unbounded', reason: 'resolve-failed', detail: 'no before-hook stash' } as AffectedRows);
+
+    engine.registerHook('afterInsert', async (ctx: any) => {
       if ((ctx?.session as any)?.isSystem) return;
       try {
         const data = ctx?.result ?? ctx?.input?.data ?? {};
         const id = String((data as any)?.id ?? ctx?.input?.id ?? '');
         if (!id) return;
-        await service.evaluateAllForRecord(objectName, id, SYSTEM_CTX as any);
+        await recomputeRow(id);
       } catch (err: any) {
         logger?.warn?.('[sharing-rule] hook evaluation failed', { object: objectName, error: err?.message });
       }
-    };
-    engine.registerHook('afterInsert', handler, { object: objectName, packageId: SHARING_RULE_HOOK_PACKAGE, priority: 180 });
-    engine.registerHook('afterUpdate', handler, { object: objectName, packageId: SHARING_RULE_HOOK_PACKAGE, priority: 180 });
+    }, opts);
+
+    engine.registerHook('beforeUpdate', stashAffectedRows, opts);
+    engine.registerHook('beforeDelete', stashAffectedRows, opts);
+
+    engine.registerHook('afterUpdate', async (ctx: any) => {
+      if ((ctx?.session as any)?.isSystem) return;
+      try {
+        const affected = affectedFrom(ctx);
+        if (affected.kind === 'rows') {
+          for (const id of affected.ids) await recomputeRow(id);
+          return;
+        }
+        await revokeThenQueueRegrant(affected.reason);
+      } catch (err: any) {
+        logger?.warn?.('[sharing-rule] hook evaluation failed', { object: objectName, error: err?.message });
+      }
+    }, opts);
+
+    engine.registerHook('afterDelete', async (ctx: any) => {
+      if ((ctx?.session as any)?.isSystem) return;
+      try {
+        const affected = affectedFrom(ctx);
+        if (affected.kind === 'rows') {
+          await service.revokeRuleGrantsForRecords(objectName, affected.ids);
+          return;
+        }
+        // The deleted set is unknown, so which grants are orphaned is unknown
+        // too. Revoke them all and let the re-grant restore those whose record
+        // survived — the same trade the update path makes.
+        await revokeThenQueueRegrant(affected.reason);
+      } catch (err: any) {
+        logger?.warn?.('[sharing-rule] hook evaluation failed', { object: objectName, error: err?.message });
+      }
+    }, opts);
   }
   logger?.info?.('[sharing-rule] hooks bound', { objects: Array.from(objects), ruleCount: rules.length });
 }

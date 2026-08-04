@@ -23,6 +23,36 @@ export const RouteCategory = z.enum([
 export type RouteCategory = z.infer<typeof RouteCategory>;
 
 /**
+ * Route Conflict Resolution Strategy
+ *
+ * Defines how to handle conflicts when multiple endpoints register the same or
+ * overlapping URL patterns.
+ *
+ * MOVED HERE in #4939 from the retired `api/registry.zod.ts`. The `ApiRegistry`
+ * family that declared it was removed whole — it was assembled only in
+ * `packages/core/examples/`, never in a real composition, so every key on
+ * `ApiEndpointRegistrationSchema` was zero-execution (including
+ * `requiredPermissions`, whose TSDoc promised in the present tense that "the
+ * gateway layer automatically validates these permissions" while no gateway
+ * read it). This enum survives that removal deliberately and is NOT a
+ * re-introduction of the registry: it is pinned as a `@objectstack/spec/api`
+ * export by two independent ratchets — `spec/src/automation/sync-retirement.test.ts`
+ * (#4738: it is the FOURTH relative of the `ConflictResolution` family and must
+ * never collapse into the `ui` declaration) and, cross-repo, objectui's
+ * `offline-nav-performance-spec-parity.test.ts`, whose `useOffline` hook renamed
+ * its own symbol precisely because this name was taken. Route conflicts are a
+ * router concern, so the router module is where it belongs now.
+ */
+export const ConflictResolutionStrategy = z.enum([
+  'error',       // Throw error on conflict (safest, default)
+  'priority',    // Use priority field to resolve (highest priority wins)
+  'first-wins',  // First registered endpoint wins
+  'last-wins',   // Last registered endpoint wins (override mode)
+]);
+
+export type ConflictResolutionStrategy = z.infer<typeof ConflictResolutionStrategy>;
+
+/**
  * Route Definition Schema
  * Describes a single routable endpoint in the Kernel.
  */

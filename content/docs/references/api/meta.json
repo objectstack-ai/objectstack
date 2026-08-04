@@ -9,7 +9,6 @@
     "endpoint",
     "errors",
     "protocol",
-    "registry",
     "router",
     "versioning",
     "---Transport & Realtime---",

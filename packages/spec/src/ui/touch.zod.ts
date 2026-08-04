@@ -140,6 +140,13 @@ export const TouchInteractionSchema = lazySchema(() => z.object({
   gestures: z.array(GestureConfigSchema).optional().describe('Configured gesture recognizers'),
   touchTarget: TouchTargetConfigSchema.optional().describe('Touch target sizing and hit area'),
   hapticFeedback: z.boolean().optional().describe('Enable haptic feedback on touch interactions'),
-}).merge(AriaPropsSchema.partial()).describe('Touch and gesture interaction configuration'));
+}).merge(AriaPropsSchema.partial())
+  // `.strip()` is LOAD-BEARING (#4001 批 16): `AriaPropsSchema` became `strictObject` and
+  // `.merge()` adopts the incoming schema's unknown-key posture, so without this the shape
+  // would silently become `.strict()` — with zod's generic message, not the campaign's — and
+  // would contradict this file's measured `no door` verdict (#4988: nothing parses it, so a
+  // strict shell enforces nothing). Keep it until #4988 says what happens to this file.
+  .strip()
+  .describe('Touch and gesture interaction configuration'));
 
 export type TouchInteraction = z.infer<typeof TouchInteractionSchema>;

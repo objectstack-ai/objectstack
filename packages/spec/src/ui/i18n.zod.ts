@@ -2,6 +2,36 @@
 
 import { z } from 'zod';
 
+// ⚠️ #4001 批 16 — this file SPLITS across the ledger's classes. Read before editing.
+//
+// `AriaPropsSchema` is a REAL DOOR and is closed (`strictObject`). Every other
+// shape here is `no door` and must NOT be tightened — see the per-schema notes.
+//
+// The split was measured on 2026-08-04, three independent ways with positive AND
+// negative controls in the same run (`i18n.test.ts` pins both halves):
+//
+//  - `AriaPropsSchema` is carried as `aria:` on ~30 live shapes across six
+//    metadata-type roots — `ListViewSchema`, `PageSchema`, `PageComponentSchema`,
+//    `DashboardWidgetSchema`, `ChartConfigSchema`, `ActionSchema`, and 20 SDUI
+//    component defs — and a BFS from all 24 roots plus `defineStack` reaches it
+//    directly. It was silently stripping: through the `view` root,
+//    `aria: { label: 'Accounts', describedBy: 'x' }` parsed CLEAN and returned
+//    `aria: {}`, so the accessible name the author wrote simply did not exist.
+//  - `I18nObjectSchema` / `PluralRuleSchema` / `NumberFormatSchema` /
+//    `DateFormatSchema` / `LocaleConfigSchema` have no carrier key anywhere, are
+//    unreachable in that same BFS, and are never parsed in `objectstack`,
+//    `objectui` or `cloud` outside this file's own tests. `.strict()` is a
+//    property of a PARSE; with no parse it enforces nothing and only makes a dead
+//    slot look load-bearing (#4583). ADR-0049 enforce-or-remove is #5055.
+//
+// Note `NumberFormatSchema` / `DateFormatSchema` DO have a carrier
+// (`LocaleConfig.numberFormat` / `.dateFormat`) — but the carrier is itself
+// doorless, so the whole subtree is `no door`, not `no gate`.
+//
+// The `z.record` slots stay open ON PURPOSE and are not sites this ratchet can
+// close: `I18nObject.params` is an interpolation bag whose key space is whatever
+// the message template names. Openness there is the contract.
+
 /**
  * I18n Object Schema
  * Structured internationalization label with translation key and parameters.
@@ -16,6 +46,7 @@ import { z } from 'zod';
  * ```
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 export const I18nObjectSchema = lazySchema(() => z.object({
   /** Translation key (e.g., "views.task_list.label", "apps.crm.description") */
   key: z.string().describe('Translation key (e.g., "views.task_list.label")'),
@@ -47,16 +78,28 @@ export const I18nLabelSchema = lazySchema(() => z.string().describe('Display lab
 
 export type I18nLabel = z.infer<typeof I18nLabelSchema>;
 
+// The one closed shape in this file (#4001 批 16). Everything below `AriaProps`
+// stays open on the `no door` verdict recorded at the top.
+//
+// Curation is anchored to NAMED SIBLING CONTRACTS, never to edit distance —
+// each entry below was measured against a real producer, and the distance
+// fallback was measured first so nothing is hand-written that it already reaches
+// (it reaches `arialabel`, `ariaLabell`, `ariadescribedby`, `aria-label`,
+// `roles`; it does NOT reach any of the four aliases here).
+const ARIA_HISTORY =
+  'Until #4001 closed this shape an unknown key was dropped silently — the component still '
+  + 'rendered, with no accessible name and nothing to say the one you wrote had been discarded.';
+
 /**
  * ARIA Accessibility Properties Schema
- * 
+ *
  * Common ARIA attributes for UI components to support screen readers
  * and assistive technologies.
- * 
+ *
  * Aligned with WAI-ARIA 1.2 specification.
- * 
+ *
  * @see https://www.w3.org/TR/wai-aria-1.2/
- * 
+ *
  * @example
  * ```typescript
  * const aria: AriaProps = {
@@ -66,7 +109,44 @@ export type I18nLabel = z.infer<typeof I18nLabelSchema>;
  * };
  * ```
  */
-export const AriaPropsSchema = lazySchema(() => z.object({
+export const AriaPropsSchema = lazySchema(() => strictObject({
+  surface: 'these ARIA attributes',
+  history: ARIA_HISTORY,
+  aliases: {
+    // objectui's `ARIA_KEY_ALIASES` (`packages/core/src/utils/normalize-list-view.ts`)
+    // is the measured source for these two: they are the spellings stored view
+    // metadata really carries, folded onto the canonical keys at the ListView
+    // boundary (objectui#2890). A view authored the legacy way reached this
+    // schema and lost BOTH keys — `aria: {}` — so the accessible name existed in
+    // the source file and nowhere else.
+    label: 'ariaLabel',
+    describedBy: 'ariaDescribedBy',
+    // Two of this shape's three keys carry the `aria` prefix and `role` does not.
+    // An author who has just written `ariaLabel` and `ariaDescribedBy` generalises
+    // to `ariaRole`; that is the shape's own inconsistency, not a typo, and the
+    // distance fallback provably cannot bridge it (measured).
+    ariaRole: 'role',
+  },
+  guidance: {
+    // NOT an alias — `live` is not a key this schema accepts, and suggesting one
+    // the schema cannot accept is the ledger's finding 7 (this campaign's own fix
+    // signposting the way into the failure it exists to kill).
+    live: '`live` is objectui\'s LIST-VIEW-ONLY extension, declared there as '
+      + '`AriaPropsSchema.extend({ live })` and read by `ListView` alone — this shared shape is '
+      + 'carried by ~30 renderers and only one of them applies `aria-live`, so declaring it here '
+      + 'would advertise a capability the other 29 do not deliver. On an objectui list view the key '
+      + 'is valid as-is; anywhere else, drop it. Promoting it into the protocol is #5058.',
+    // `aria-labelledby` REFERENCES another element's id; `ariaLabel` is a literal
+    // string. Renaming between them would be a wrong prescription, so this names
+    // the gap instead of pretending there is a target.
+    ariaLabelledBy: '`aria-labelledby` has no counterpart in this protocol — it references another '
+      + 'element\'s id, which is not the same thing as `ariaLabel` (a literal accessible name), so '
+      + 'there is nothing to rename it to. Use `ariaLabel` only if a literal string is what you meant. '
+      + 'Declaring the referencing form is #5058.',
+    labelledBy: '`aria-labelledby` has no counterpart in this protocol — see `ariaLabelledBy`. '
+      + 'Use `ariaLabel` only if a literal accessible name is what you meant; #5058 tracks the gap.',
+  },
+}, {
   /** Accessible label for screen readers */
   ariaLabel: I18nLabelSchema.optional().describe('Accessible label for screen readers (WAI-ARIA aria-label)'),
 

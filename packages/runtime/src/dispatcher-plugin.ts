@@ -123,12 +123,15 @@ export interface DispatcherPluginConfig {
      * `init()` — a `use()` at any later point still gates every route, so the
      * gate does not have to win a race with route registration to be complete.
      *
-     * Endpoint-level `ApiEndpointSchema.rateLimit` /
-     * `ApiEndpointRegistrationSchema.rateLimit` are NOT read here. They remain
-     * KNOWN-UNWIRED and are tracked by #4936, which owns the fate of the whole
-     * declarative `apis:` face — wiring one key of a surface whose existence is
-     * still undecided would have to be undone if that decision goes the other
-     * way.
+     * Endpoint-level `ApiEndpointSchema.rateLimit` is NOT read here. It remains
+     * KNOWN-UNWIRED and is now tracked by #5040, the endpoint-executor build.
+     * (`ApiEndpointRegistrationSchema.rateLimit`, the second spelling this note
+     * used to name, no longer exists — that whole registry family was retired
+     * in #4939.) #4936 settled the fate this note called undecided: the
+     * `ApiEndpoint` vocabulary is KEPT, a non-empty `apis:` is rejected at
+     * publish/validate until the executor exists, and every endpoint-level key
+     * — this one included — gets wired there, reusing the server-level seam
+     * below as its pattern.
      */
     rateLimit?: {
         /** The authored `server.security.rateLimit` budget. */

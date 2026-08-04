@@ -472,6 +472,52 @@ dropped at parse, and nothing failed.
     has 8, and `ui/` as 49 when it has 72. Both the map and the gate now carry the
     open-site count directly (see the remaining-strip map below).
 
+20. **The DOOR measurement was wrong in the one direction that costs a breaking
+    change** (批 16; filed as #5056). The counter in finding 19 answers "how many
+    sites"; this is its opposite number — the instrument that answers "is there
+    anybody on the other side of them", which is the question the whole
+    authorable / `no door` split turns on.
+
+    批 13 built the BFS and 批 15 added a **derived-clone bridge** to it, for a
+    real reason: `.extend()` / `.strip()` produce a clone that shares no identity
+    with its base but DOES share the base's per-property schema instances, and
+    `ChartConfigSchema` is reached exactly that way through `ReportChartSchema`.
+    The bridge fired when **any one** property matched under the same name.
+
+    Two facts turn that into a false door. Zod's `.describe()` returns a clone
+    that shares the original `_zod.def` **object** — so every described
+    `SnakeCaseIdentifierSchema` and `I18nLabelSchema` is def-identical across the
+    entire spec. And `name` / `label` are two keys almost every authorable shape
+    here declares. So `WidgetManifestSchema` — in a file **nothing imports** —
+    measured as REACHABLE on 2 shared keys out of 20, and 批 16 came within one
+    control of closing nine sites in a dead file: a breaking change spent to
+    produce *"a precisely validated dead slot — the more convincing lie"*
+    (#4583), which is the exact artifact the `no door` class was invented to stop
+    the campaign from manufacturing.
+
+    **The error is one-directional.** A too-eager bridge can only invent a door,
+    never hide one — so its entire failure budget is spent on making batches
+    tighten things nothing parses. That is what makes it worth a numbered finding
+    rather than a fix in passing.
+
+    Two method notes, both of which the campaign has now paid for twice:
+
+    - **The control that catches it is the one nobody writes.** 批 15's near-miss
+      (`typeof v !== 'object'` skipping every lazy Proxy, which halved the graph)
+      was caught by a POSITIVE control. This one is invisible to positive
+      controls — every root still resolved — and needed a NEGATIVE one plus the
+      synthetic-carrier flip. A door measurement owes all three, in the same run:
+      a known-live schema, a known-dead one, and an injected carrier that must
+      flip the verdict.
+    - **The fix is to ask how much of the shape is shared, not whether anything
+      is.** A real derived clone carries nearly all of its base's properties; a
+      coincidence carries one or two of twenty. `ui/door-reachability.testkit.ts`
+      is now the one implementation, with the threshold justified against both
+      ends of the measured range (批 15's real derivation far above it, 批 16's
+      false positive far below). The duplicate copy still living in
+      `chart.test.ts` is part of #5056 — the campaign's own recurring lesson
+      about a second copy of the truth, arriving this time in its instruments.
+
 ## Where this ended up
 
 **24 of 25 registered types closed** (from 9 when the line started), and the
@@ -535,10 +581,10 @@ not verdicts).
 | `theme.zod.ts` | 14 | authorable | **strict as of #4001 批 15** — all 14 sites. The `(p)` resolved to authorable on two doors, both measured: `stack.zod.ts` declares `themes: z.array(ThemeSchema)` (so `defineStack()` parses every theme on boot and on `objectstack build`), and `defineTheme()` parses one directly. A BFS from all 24 metadata-type roots plus `ObjectStackSchema` reaches every schema in the file, with `PageSchema`/`DashboardSchema`/`ReportSchema`/`WebhookSchema`/`StateMachineSchema` passing as positive controls and 批 13's no-door shapes failing as negative controls **in the same run**. Note what is NOT claimed: `theme` is deliberately absent from `BUILTIN_METADATA_TYPE_SCHEMAS`, so a stored theme row is not validated by the metadata REST door — the gate is the authoring one, and the file says so rather than implying reach it lacks. **The `passthrough` question was asked per BLOCK, not per file**, and the answer split: objectui's `ThemeEngine` reads `colors`/`borderRadius`/`shadows`/`typography.fontFamily` through FIXED maps (an extra key is read by nothing, ever), but spreads `fontSize`/`fontWeight`/`lineHeight`/`letterSpacing`/`duration`/`timing`/`zIndex` with `Object.entries` into `--font-size-<key>` … — the #4909 open shape at the runtime. Closed anyway, on two measurements: `.strip` already discarded those extras before the engine saw them (so no author depends on the openness and nothing the renderer receives changes), and `customVars` is a DECLARED escape hatch that emits an arbitrary CSS custom property by name, so closing the token scales removes no capability and only removes a second, undocumented way to spell one — the way whose typos are indistinguishable from intent. Curation is measured throughout: the shadcn vocabulary (`card`→`surface`, `foreground`→`text`, `destructive`→`error`) comes from objectui's own `COLOR_TO_CSS_MAP`, which RENAMES every palette key on the way out; `md`→`base` on `fontSize` and `base`→`normal` on `fontWeight` are a same-file scale disagreement (`borderRadius`/`shadows` declare `md`, `fontSize` does not); `radius`→`base` because `base` is emitted as the bare `--radius`, the one radius variable objectui's CSS actually reads; and `easeIn`→`ease_in` because `animation.timing` is the file's single snake_case vocabulary, so the camelCase spelling is an author obeying AGENTS.md #3 rather than making a typo. The eight #3494 removals get one distinct tombstone each. ⚠️ **Two of those tombstones deliberately prescribe NO replacement slot**: `touchTarget`/`keyboardNavigation` read like they should point at `ui/touch.zod.ts`/`ui/keyboard.zod.ts`, which 批 13 measured as having no carrier at all (#4988) — prescribing them would walk an author out of a loud rejection into a silent one, the ledger's finding 7. ⚠️ **Separately filed, not answered here**: `--font-size-*`, `--font-weight-*`, `--line-height-*`, `--letter-spacing-*`, `--z-*`, `--duration-*`, `--timing-*`, `--font-heading` and `--font-mono` have ZERO first-party consumers (only the colour vars, `--radius*`, `--shadow*` and `--font-sans` are read). That is ADR-0049 liveness, not unknown keys, and the two must not be run together — strictness makes a dropped key loud, it cannot make a slot live |
 | `app.zod.ts` | 18 | authorable | **strict as of #4001 PR B** — `AppSchema` + branding / area / context-selector / contribution, and the nav-item union converted to `z.discriminatedUnion('type', …)` (the union-error question, settled empirically: matched-branch-only errors, exact recursive paths, `toJSONSchema` clean). Per-target `params` stay open. PR A (#4142) tombstoned the seven audit-dead keys first |
 | `dashboard.zod.ts` | 11 | authorable | **strict as of #4001 批 14 — 0 strip sites remain.** `DashboardWidgetSchema` has been strict since the ADR-0021 cutover; 批 14 closed the two NESTED holes inside it (`compareTo`'s object arm, `layout`), the same strict-shell-over-strip-children silhouette 批 13 found on `page.components[]`. `DashboardWidgetOptionsSchema` stays `passthrough` **deliberately** (renderer escape hatch) and the `responsive` tombstone (#4876) is untouched. ⚠️ `compareTo` is a UNION, so its curated prescription is produced but not delivered — `zodIssuesToFields` maps only top-level issues and a failed union collapses to a bare `Invalid input` (#5014). The REJECTION is unaffected |
-| `widget.zod.ts` | 9 | authorable (p) | |
+| `widget.zod.ts` | 9 | ~~authorable (p)~~ **no door** | **no authoring door (measured, #4001 批 16)** — the `(p)` resolved NEGATIVE for the whole file, the second such run after 批 13's five. Three independent measurements on 2026-08-04: (1) nothing under `packages/spec/src` imports this module except the `ui/index.ts` barrel, so no schema anywhere declares a carrier key for a widget shape — `field.widget` is a `z.string()` naming a registered *component* and has never referenced `WidgetManifest`; (2) a BFS over the in-memory Zod graph from all 24 metadata-type roots plus `defineStack` (4 766 nodes) reaches none of the six shapes, while `PageSchema` / `ObjectListViewSchema` resolve in the same run, a fresh `z.object` and a deliberate look-alike both resolve unreachable, and a synthetic carrier flips all six to reachable; (3) zero `.parse()` / `.safeParse()` in `objectstack`, `objectui` or `cloud` outside this file's own tests — objectui re-exports the inferred TYPES only and under different names (`RuntimeWidgetManifest` / `FieldWidgetComponentProps`, #4115 / #3161), and a `cloud` code search returns 0 for every symbol against a working index (`"@objectstack/spec"` → 345). ADR-0049 enforce-or-remove is **#5055**. ⚠️ **The campaign's own BFS said REACHABLE on the first run** — a false positive in the derived-clone bridge, filed as **#5056**: zod's `.describe()` returns a clone that SHARES the original `_zod.def`, so `WidgetManifestSchema.name` / `.label` (a described `SnakeCaseIdentifierSchema` / `I18nLabelSchema`) are def-identical to the same leaves on live schemas, and a bridge firing on ANY one shared property links two unrelated shapes. 2 shared keys of 20. The error is one-directional — it can only manufacture a door, i.e. it can only make a batch tighten something dead. Corrected to whole-shape overlap in `ui/door-reachability.testkit.ts` and pinned in `widget.test.ts` |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
 | `chart.zod.ts` | 7 | **mixed — 5 authorable, 2 no gate** | **5 strict as of #4001 批 15**; 2 deliberately left open. `ChartConfigSchema` / `ChartAxis` / `ChartSeries` / `ChartAnnotation` / `ChartInteraction` are `root-graph`-reachable from the `dashboard` and `report` metadata roots (`DashboardWidget.chartConfig`, `ReportChartSchema`), so they are judged on the stored-metadata path and are now closed. **`ChartAggregateSchema` and `ChartGroupBySchema`'s object arm are NOT**, and this is the batch's real finding. They are not 批 13's no-door case — their carrier is LIVE: `aggregate` is a real authorable prop on the react tier's `<ObjectChart objectName aggregate={…}>` (ADR-0081), published in the generated react-blocks contract, and objectui's `ObjectChart` reads `schema.aggregate` to run the query. What is missing is the PARSE: neither schema is reachable from any metadata-type root or from `ObjectStackSchema` (both `UNREACHABLE` in the run where the five above come back `root-graph`), nothing in the three repos calls `.parse()` on them outside this file's unit tests, and the gate that DOES judge an authored `aggregate` — the react-page publish lint — re-derives the rules by hand (`CHART_FUNCTIONS`, the count/field requirement, the result-column naming) and never checks unknown keys. `react-blocks.ts` publishes the prop as a hand-written TYPE STRING; the Zod schema beside it is not what the contract is generated from. So `groupby` / `dateGranularty` are silently dropped today and would go on being silently dropped after a `strictObject` here — `.strict()` is a property of a parse. A fourth class, **`no gate`**: carrier live, parse absent. Distinct from `no door` (批 13), where the carrier itself does not exist. The contract-first fix is to make the publish gate PARSE the schema instead of re-deriving it — a `packages/lint` change, filed rather than smuggled into a spec strictness batch. Recorded in three places (schema-adjacent comment, test pin incl. a standing BFS assertion that goes red the day a carrier key appears, this row). ⚠️ One correction shipped with the tightening: the `clickAction` migration text #3752 wrote into this file prescribed **`drillDown`, which is not a key this protocol declares anywhere** — it is an untyped `(schema as any).drillDown` read inside objectui's `ObjectChart`. Promoting that sentence into a strict rejection would have handed an author the platform's authority for a key the same gate then rejects: finding 7, third occurrence, this time caught before shipping. The prose and the tombstone now name `onSegmentClick` / `ReportSchema.drilldown` / the widget's `options` bag, all of which exist. Filed separately. **`chart` 6 → 7 at the re-measurement** — no schema changed: `ChartAggregateSchema` is written `z\n  .object({`, and the old counter's `z\.object\(` could not match across the line break |
-| `i18n.zod.ts` | 6 | authorable (p) | i18n label shapes are wide-open records by design — verify |
+| `i18n.zod.ts` | 6 | **split** | **`i18n` SPLITS across two classes (measured, #4001 批 16)** and is the file this table's standing warning was about. The warning said "label shapes are wide-open records by design"; measurement says something more useful. `AriaPropsSchema` is a **real door and is closed** — carried as `aria:` on ~30 live shapes under six metadata-type roots (`ListViewSchema`, `PageSchema`, `PageComponentSchema`, `DashboardWidgetSchema`, `ChartConfigSchema`, `ActionSchema`, 20 SDUI component defs) and directly BFS-reachable. It was stripping in the wild: through the `view` root, `aria: { label: 'Accounts', describedBy: 'x' }` parsed CLEAN and returned `aria: {}`, so the accessible name existed in the source file and nowhere else. The other five (`I18nObject`, `PluralRule`, `NumberFormat`, `DateFormat`, `LocaleConfig`) are **no door** — no carrier, unreachable, zero parse in all three repos; ADR-0049 is #5055. Note `NumberFormat` / `DateFormat` DO have a carrier (`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier is itself doorless, so the subtree is `no door`, not `no gate`. And the warning's own subject — the wide-open **record** level — was never one of the six sites: `I18nObject.params` is a `z.record` interpolation bag whose key space is whatever the message template names, so openness there is the contract and there was nothing to close. Pinned in `i18n.zod.ts`'s header, in `i18n.test.ts`, and here |
 | `responsive.zod.ts` | 4 | authorable | **strict as of #4001 批 13** — all four sites (`ResponsiveConfig`, `ResponsiveStyles`, and the two per-breakpoint maps). This is the one file of batch 13's six whose `(p)` resolved POSITIVE, and it resolved on the graph rather than on the file's face: `page.components[].responsive` / `.responsiveStyles` put both shapes inside the `page` metadata-type root (`dashboard.widgets[].responsive` was the second carrier until #4876 retired it, same day). What the closure bought is the batch's whole argument in one parse — **`PageComponentSchema` has been `.strict()` since ADR-0089 D3a and that never reached these blocks**, so `{ type:'element:text', responsiveStyles: { lg: {…} }, responsive: { colums: {…}, hideOn: [] } }` parsed CLEAN and returned `responsiveStyles: {}, responsive: {}` — every styling and layout instruction the author wrote, gone, reported valid. A strict shell over strip-mode children is a closed surface's silhouette, not a closed surface. The curation is the file's real hazard rather than typos: it carries TWO breakpoint vocabularies sixteen lines apart on the same component (`responsiveStyles`' `large`/`medium`/`small`/`xsmall`, ADR-0065, against `responsive`'s Tailwind `xs`…`2xl`), so the aliases run BOTH ways between them and are anchored to the named sibling, not to edit distance — batch 12's method, and the only thing that can answer `lg` → `large`. Two entries had to be measured rather than reasoned: `{ columns: { large: 4, lg: 3 } }` used to keep HALF the map (the node laid out, at the wrong width, on breakpoints the author never named — worse than a total loss, which is at least visible); and `hideOn` → `hiddenOn` needed a hand-written alias because the distance fallback provably cannot reach it — it lowercases the input but not the candidates, so a capital in a declared key costs an extra edit against a budget of 2, and the all-lowercase `hiddenon` resolves while the correctly-cased `hideOn` does not. That asymmetry is general to camelCase keys, i.e. to most of the spec, and is filed as **#4990**. `StyleMapSchema` stays deliberately OPEN (its key space is every CSS property; objectui's `declarations()` emits whatever it is handed) — recorded in the schema JSDoc, in a test pin, and in this row |
 | `dataset.zod.ts` | 4 | authorable | **strict as of #4001 批 14 — 0 strip sites remain.** `DatasetSchema` was strict from the ADR-0021 cutover while the two shapes carrying the actual semantic contract — `DatasetDimension`, `DatasetMeasure` (+ `.derived`) — were not. Curated against the sibling this module's own header names, `data/analytics.zod.ts`'s Cube layer: a Cube metric's `type` IS its aggregation, so `{ name: 'revenue', type: 'sum', field: 'amount' }` parsed clean and computed a `count`; `sql` gets guidance rather than an alias, because aiming `SUM(amount)` at `field` is finding 7's trap |
 | `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` / `offline.zod.ts` | 4+4+4+7+3 | ~~authorable (p)~~ **no door** | **no authoring door (measured, #4001 批 13)** — the `(p)` resolved NEGATIVE and the row is kept only so the arithmetic stays complete. Three independent measurements on 2026-08-03: (1) nothing under `packages/spec/src` imports these modules except the `ui/index.ts` barrel, so no schema anywhere declares a carrier key for them; (2) a BFS over the in-memory Zod graph from all 24 metadata-type roots plus `defineStack`'s `ObjectStackSchema` — the closure `build-schemas.ts` uses for the #4650 deletion check — reaches none of the 22 sites, while its three positive controls (`PageSchema`, batch 11's `WebhookSchema`, batch 10's `StateMachineSchema`) all resolve `root-graph` in the same run; (3) no `.parse()` / `.safeParse()` on any of them exists in `objectstack`, `objectui` or the example apps outside their own unit tests — objectui re-exports the inferred TYPES only and says so (#2561). `.strict()` is a property of a PARSE and there is no parse, so closing them would enforce nothing and would spend a v17 breaking change to leave *"a precisely validated dead slot — the more convincing lie"* (the #4583 row below). The live question is ADR-0049 enforce-or-remove, filed as **#4988**; each file's header comment and its test file carry the same verdict (the batch 12 three-places standard). **Do not reschedule these as strictness work** — that is what the `(p)` was for, and it has been answered |
@@ -709,16 +755,16 @@ it the same way: the decision is also written beside the schema and pinned in a
 test (`flow.test.ts`, `etl.test.ts`), because a row in a table is not where the
 next person to open that file will look.
 
-#### `ui/` — 91 strip of 198
+#### `ui/` — 90 strip of 198
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
 | `component.zod.ts` | 29 | 29 | **no gate** | ⛔ **not strictness work** — measured at 批 17 as having no parse at all: BFS-unreachable from every metadata root (all 52 targets, controls green in the same run), zero production `.parse()` sites in the three repos, and an unknown key inside `components[].properties` demonstrably survives the live `definePage()` door. The carrier (`PageComponentSchema.properties`) is live but is `z.record(z.string(), z.unknown())` — ADR-0089 D3a strictness does not recurse into it. Closing these 29 sites would gate nothing (#4583). Blocked on wiring the parse at the carrier — **#5068**. See the triage row for the full measurement |
 | `view.zod.ts` | 20 | 50 | mixed | Top level and the form/page shapes are closed (ADR-0089 + the final batch). Remaining are sub-blocks; `UserFiltersSchema` is the one the last batch **named as deliberately left open** — it strips page-only keys with a test pinning that, so closing it needs its own verification |
-| `widget.zod.ts` | 9 | 9 | authorable (p) | Widget manifest + lifecycle/event/property/source |
+| `widget.zod.ts` | 9 | 9 | **no door** | ⛔ **not strictness work** — the whole file measured unreachable from every authoring root (#4001 批 16), with no carrier key and zero parse in all three repos. ADR-0049 triage is **#5055**. See the triage row above, including why the campaign's own BFS said otherwise first (**#5056**) |
 | `chart.zod.ts` | 2 | 7 | **no gate** | `ChartAggregateSchema` + `ChartGroupBySchema`'s object arm. Config / axis / series / annotation / interaction closed at 批 15; these two are NOT unfinished work — their carrier (`<ObjectChart aggregate>`) is live but nothing parses them, so closing them would gate nothing (#4583). Blocked on wiring the react-page publish gate to parse the schema instead of re-deriving it — see the triage row |
 | `touch.zod.ts` | 7 | 7 | **no door** | ⛔ **not strictness work** — measured unreachable from every authoring root (#4001 批 13); ADR-0049 triage is #4988. See the triage row above |
-| `i18n.zod.ts` | 6 | 6 | authorable (p) | ⚠️ the triage row warns label shapes are wide-open records **by design** — verify before closing |
+| `i18n.zod.ts` | 5 | 6 | **split** | **批 16 closed the one real door**: `AriaPropsSchema` (`strictObject`, carried as `aria:` on ~30 shapes under six metadata-type roots — it was returning `aria: {}` for a legacy-spelled block). The 5 left are `I18nObject` / `PluralRule` / `NumberFormat` / `DateFormat` / `LocaleConfig`, all **no door** (#5055) — ⛔ **do not close them**. This row shrinks without disappearing, the third such in the ledger after `flow` (批 11) and `etl` (批 12): the reverse pin fires on ZERO, so a row parked at a deliberate floor looks exactly like a row nobody finished, and only the `Class` column separates them |
 | `animation.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
 | `dnd.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
 | `keyboard.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
@@ -751,36 +797,63 @@ here each time and would have reported none at all had the batches touched
 different paragraphs. Every row from every side was kept and the arithmetic redone
 from them; nothing was resolved in favour of a side.
 
-**批 17 is the eighth instance, and it hit this line the same way.** It computed
-`47 of 100` against a tree where 批 14's four rows (`dataset`, `dashboard`,
-`report`, `action`) still existed and `sharing`/`notification` were still
-`authorable` — correct against its own branch, wrong against the merge, which is
-**36 of 91**. Git conflicted this paragraph (both sides rewrote it) but merged the
-TABLE cleanly, because 批 17 changed only its own row's Class column. So the rows
-were right and the prose was wrong on both sides — the exact failure this section
-keeps recording. Recomputed from the surviving rows, again.
+**批 16 is the eighth instance, and the first to be caught by the header rather
+than by the subtotal.** It computed 118 against a tree where 批 14's and 批 15's
+rows still existed — `theme` at 14, `chart` at 7, `dashboard`/`report`/`dataset`
+still open, `sharing` at 2 — and every one of those numbers was right against its
+own branch. The merge is neither side's. Rows from all sides kept, arithmetic
+redone from them.
 
-**Authorable strip in `ui/`: 36 of 91** (was 123 of 123 when the ruling was
-written) — recomputed from the surviving rows on every merge, never decremented
-by a batch's own count: `view` 20 + `widget` 9 + `i18n` 6 + `app` 1 = **36**.
+批 16 moved the authorable subtotal by 14 while CLOSING exactly one site, and the
+gap is the batch's finding rather than a rounding of it: `widget.zod.ts` (9) and
+five of `i18n.zod.ts`'s six (`I18nObject`, `PluralRule`, `NumberFormat`,
+`DateFormat`, `LocaleConfig`) left `authorable` because their `(p)` resolved
+negative. The one closure is the file this map had flagged as most likely to be
+deliberately open — `AriaPropsSchema` — which is worth reading twice: **the
+standing warning and the measurement pointed in opposite directions**, and the
+warning was not wrong so much as aimed one level off. The wide-open record it
+described is real (`I18nObject.params`) and was never a site this ratchet could
+close; the config block the map assumed was open alongside it turned out to be the
+directory's most widely carried live shape (~30 `aria:` carriers under six
+metadata-type roots), and it was returning `aria: {}` for a legacy-spelled block.
+
+**批 17 is the ninth instance, and it hit this same line twice in one branch.**
+It first computed `47 of 100` against a tree where 批 14's four rows (`dataset`,
+`dashboard`, `report`, `action`) still existed and `sharing`/`notification` were
+still `authorable`; merging 批 14 made that `36 of 91`; merging 批 16 — which
+closed `AriaProps` and moved `widget` (9) plus five of `i18n` out of `authorable`
+— makes it `21 of 90`. Three different right answers against three different
+trees, none of them the merge. Both times git merged the TABLE cleanly, because
+批 17 changes only its own row's Class column, and conflicted only this
+paragraph. The rows were right and the prose was wrong on every side, every time
+— which is now nine for nine, and the reason the arithmetic below is recomputed
+from the surviving rows rather than adjusted.
+
+**Authorable strip in `ui/`: 21 of 90** (was 123 of 123 when the ruling was
+written). Recomputed from the surviving rows after the 批 16 + 批 17 merge, not
+decremented: 29+20+9+2+7+5+4+4+4+3+1+1+1 = 90, of which **69** are the two
+no-parse classes, leaving the authorable half as `view` 20 + `app` 1 = **21**.
 `app.zod.ts`'s single site is held pending the finding-16 `.extend()` check
 rather than counted as ready.
 
-**55 of the 91 — a clear majority of what is left in this directory — are the
-two no-parse classes**, and that is now the single largest fact about `ui/`:
+**69 of the 90 — more than three quarters of what is left in this directory —
+are the two no-parse classes.** That is now the single largest fact about `ui/`,
+and it should be read before any further `ui/` strictness batch is scheduled:
 
-- **24 `no door`** — `touch` (7), `animation` (4), `dnd` (4), `keyboard` (4) and
-  `offline` (3) from 批 13, plus `sharing.zod.ts`'s `EmbedConfig` and
-  `notification.zod.ts`'s `NotificationAction` from 批 14 (#4988, #5015).
+- **38 `no door`** — `touch` (7), `animation` (4), `dnd` (4), `keyboard` (4) and
+  `offline` (3) from 批 13; `sharing.zod.ts`'s `EmbedConfig` and
+  `notification.zod.ts`'s `NotificationAction` from 批 14; `widget.zod.ts` (9)
+  plus `i18n.zod.ts`'s remaining 5 from 批 16 (#4988, #5015, #5055).
 - **31 `no gate`** — `chart.zod.ts`'s remaining pair from 批 15, plus **all 29
-  sites of `component.zod.ts` from 批 17** (#5068), which is the campaign's
-  largest single reclassification and the reason this subtotal fell by 29
-  without a single site being closed.
+  sites of `component.zod.ts` from 批 17** (#5068). That single row is the
+  campaign's largest reclassification and the reason this subtotal fell by 29
+  without one site being closed.
 
 Read the difference before acting on either: they imply OPPOSITE follow-ups
-(`no door` → ADR-0049 retire; `no gate` → wire the parse). And read the size of
-the two together before scheduling more `ui/` strictness work: **most of the
-remaining strip surface here is not this ratchet's job at all.**
+(`no door` → ADR-0049 enforce-or-remove; `no gate` → wire the parse at the
+carrier). Acting on the wrong one is not merely wasteful but destructive —
+retiring a `no gate` vocabulary deletes something authors use and renderers
+run.
 
 ## What the three `ui/` batches measured, and why the answers differ
 

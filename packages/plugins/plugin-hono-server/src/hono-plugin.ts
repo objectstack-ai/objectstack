@@ -43,11 +43,12 @@ export interface HonoPluginOptions {
      * Controls automatic endpoint generation and API behavior
      */
     restConfig?: RestServerConfig;
-    /**
-     * Whether to load endpoints from API Registry
-     * @default true
-     */
-    useApiRegistry?: boolean;
+    // `useApiRegistry` REMOVED in #4939. It advertised "load endpoints from
+    // API Registry" and was defaulted to `true` in the constructor, but no
+    // code path ever read it — and the `api-registry` service it named was
+    // itself composed only in `packages/core/examples/`, so there were never
+    // endpoints to load. The ApiRegistry family is retired; the option went
+    // with it rather than outliving the thing it configured.
 
     /**
      * Whether to enable SPA fallback
@@ -216,7 +217,6 @@ export class HonoServerPlugin implements Plugin {
     constructor(options: HonoPluginOptions = {}) {
         this.options = {
             port: 3000,
-            useApiRegistry: true,
             spaFallback: false,
             ...options
         };

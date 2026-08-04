@@ -122,7 +122,12 @@ describe('runtime publish gate (#4463)', () => {
       {
         name: 'leave_request',
         fields: { owner: { type: 'text' } },
-        validationRules: [{ name: 'bad', expression: 'record.owner ==', message: 'x' }],
+        // Spelled with the two keys the spec declares (`validations` /
+        // `condition`). Written as `validationRules` / `expression` — both
+        // rejected aliases — the broken CEL was not reachable by the rule at
+        // all, so this fixture proved the subtraction worked by having nothing
+        // to subtract (#5017).
+        validations: [{ type: 'script', name: 'bad', message: 'x', condition: 'record.owner ==' }],
       },
     ];
 
@@ -147,7 +152,12 @@ describe('runtime publish gate (#4463)', () => {
       {
         name: 'leave_request',
         fields: { owner: { type: 'text' } },
-        validationRules: [{ name: 'bad', expression: 'record.owner ==', message: 'x' }],
+        // Spelled with the two keys the spec declares (`validations` /
+        // `condition`). Written as `validationRules` / `expression` — both
+        // rejected aliases — the broken CEL was not reachable by the rule at
+        // all, so this fixture proved the subtraction worked by having nothing
+        // to subtract (#5017).
+        validations: [{ type: 'script', name: 'bad', message: 'x', condition: 'record.owner ==' }],
       },
     ];
     const result = runRuntimeAuthoringRules({

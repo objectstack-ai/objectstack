@@ -65,9 +65,13 @@ baked into the artifact.
 
 Related: #4910 (this seam), #4937 (the limiter that documented an execution
 
-chain it never had), #4936 (`apis:` endpoint-level `rateLimit`, still
+chain it never had), #4936 (the declarative `apis:` surface: vocabulary kept,
 
-unwired), ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
+a non-empty array rejected until an executor exists) and #5040 (that
+
+executor, which wires endpoint-level `rateLimit` — still unwired today),
+
+ADR-0069 D2 (shared counters), ADR-0049 (enforce or remove).
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/stack-server.zod.ts`

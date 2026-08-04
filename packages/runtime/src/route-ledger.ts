@@ -97,7 +97,14 @@ export const LEGACY_CHAIN_PREFIXES = [
   '/mcp',
   '/actions',
   '/openapi.json',
-  '/__api-endpoint', // handleApiEndpoint catch-all (metadata-declared endpoints)
+  // `/__api-endpoint` (the `handleApiEndpoint` catch-all for metadata-declared
+  // `apis:`) was REMOVED in #4936. It never named a mounted route: the branch
+  // it stood for resolved a `matchEndpoint` method no implementation in this
+  // repo ever provided, so it returned "not handled" on every request, and the
+  // declared paths were never mounted for it to see in the first place. A
+  // non-empty `apis:` is now rejected at publish/validate instead. When the
+  // executor lands (#5040) it re-enters this file as a REAL mount, not a
+  // catch-all placeholder.
 ] as const;
 
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
@@ -243,5 +250,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
 
   // ── misc legacy ───────────────────────────────────────────────────────────
   { route: 'GET /openapi.json', domain: '/openapi.json', disposition: 'server-only', note: 'docs tooling; falls through when metadata service lacks a generator' },
-  { route: '* (unmatched)', domain: '/__api-endpoint', disposition: 'dynamic', note: 'metadata-declared custom endpoints (flow/script/object_operation/proxy)' },
+  // `* (unmatched)` / `/__api-endpoint` removed in #4936 — see LEGACY_CHAIN_PREFIXES
+  // above. It was the ledger's only row for a surface nothing served; an
+  // unmatched path now falls to the semantic 404 with no pretence otherwise.
 ];

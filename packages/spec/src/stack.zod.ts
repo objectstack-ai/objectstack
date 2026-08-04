@@ -125,6 +125,35 @@ export const DatasourceMappingRuleSchema = lazySchema(() => z.object({
 export type DatasourceMappingRule = z.infer<typeof DatasourceMappingRuleSchema>;
 
 /**
+ * The prescription raised when a stack declares a non-empty `apis:` (#4936).
+ *
+ * This string IS the migration doc for whoever hits it — very often an AI
+ * (ADR-0033) — so it states the fact, the fix, and the tracking issue that
+ * will make the key writable again. Same posture as a `retiredKey()`
+ * tombstone, except the key is NOT retired: the vocabulary stays, only
+ * authoring it is refused while no executor exists.
+ *
+ * Deliberately module-local: a rejection that a later release deletes should
+ * not first become a public export other packages can start depending on.
+ */
+const APIS_NO_EXECUTOR_GUIDANCE =
+  '`apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime, so a '
+  + 'non-empty array is rejected instead of silently accepted (#4936). Nothing mounts the '
+  + 'declared `path`, no endpoint matcher exists, and therefore NO key on the endpoint takes '
+  + 'effect — `authRequired` included, which would parse green while gating nothing. '
+  + 'Fix: delete the `apis:` entries (an empty array or an absent key is fine). To serve the '
+  + 'route today, mount it in code — a plugin manifest `contributes.routes` entry or an '
+  + '`http.server` route — which is the path the showcase now uses. '
+  + 'The `ApiEndpoint` vocabulary is deliberately KEPT: the executor (mounting + endpoint '
+  + 'matching + per-key wiring for authRequired/cacheTtl/inputMapping/outputMapping/rateLimit) '
+  + 'is tracked by https://github.com/objectstack-ai/objectstack/issues/5040, and this '
+  + 'rejection is replaced by real execution there — so keep your definitions, do not '
+  + 'redesign around the refusal. One thing WILL change when they come back: ADR-0121 D1 '
+  + 'namespaces endpoint paths as `<runtime-prefix>/apps/<namespace>/<subpath>`, so a path '
+  + 'like `/api/v1/my/thing` becomes `/api/v1/apps/<your manifest.namespace>/thing`. Everything '
+  + 'else about the endpoint is unchanged.';
+
+/**
  * ObjectStack Ecosystem Definition
  *
  * This schema represents the "Full Stack" definition of a project or environment.
@@ -139,7 +168,7 @@ export type DatasourceMappingRule = z.infer<typeof DatasourceMappingRuleSchema>;
  * ----------------------------------------------------------------------
  * Describes the "Blueprint" or "Source Code" of an ObjectStack Plugin/Project.
  * This represents the complete declarative state of the application.
- * 
+ *
  * Usage:
  * - Developers write this in files locally.
  * - AI Agents generate this to create apps.
@@ -263,8 +292,26 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
 
   /**
    * ObjectAPI: API Layer
+   *
+   * ⚠️ **A non-empty `apis:` is REJECTED in v17** (#4936, maintainer verdict
+   * 2026-08-04). The vocabulary below is deliberately KEPT — endpoint shapes
+   * are an industry-stable form and retiring one only to re-introduce the same
+   * thing later is churn — but this runtime has no executor for it, so
+   * declaring an endpoint is refused rather than parsed into silence.
+   *
+   * Why refusing beats accepting: the whole surface was zero-execution end to
+   * end. Nothing mounted the declared `path`, `matchEndpoint` had no
+   * implementation anywhere in the repo, and every key was therefore
+   * declared ≠ enforced — `authRequired: true` included, which is a SECURITY
+   * semantic that parsed green and gated nothing. Accepting that metadata is
+   * the false-compliance failure ADR-0049 exists to stop; refusing it is the
+   * only honest state until {@link https://github.com/objectstack-ai/objectstack/issues/5040 #5040}
+   * lands the executor and turns this rejection back into execution.
    */
-  apis: z.array(ApiEndpointSchema).optional().describe('API Endpoints'),
+  apis: z.array(ApiEndpointSchema)
+    .max(0, { error: () => APIS_NO_EXECUTOR_GUIDANCE })
+    .optional()
+    .describe('API Endpoints — vocabulary retained, but a non-empty array is REJECTED until the executor ships (#4936 → #5040)'),
   webhooks: z.array(WebhookSchema).optional().describe('Outbound Webhooks'),
 
   /**
