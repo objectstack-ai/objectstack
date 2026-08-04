@@ -6,27 +6,14 @@ import { isMatchAllCriteria, SharingCriteriaValidationError } from './rule-crite
 import {
   RULE_RECOMPUTE_ROW_CAP,
   RuleRegrantQueue,
-  resolveAffectedRows,
+  stashAffectedRows as stashAffectedRowsOnCtx,
+  readAffectedRows,
   type AffectedRows,
 } from './bulk-recompute.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 export const SHARING_RULE_HOOK_PACKAGE = 'plugin-sharing:rules';
-
-/**
- * [#4779] Shared-`HookContext` key holding the row set the write is about to
- * change, stashed by the `before` hook for the `after` hook to consume.
- *
- * The stash is necessary, not a convenience: an update that moves rows OUT of
- * a rule's criteria makes them unfindable by the write's own predicate the
- * instant it lands, and a delete removes them outright — so `afterUpdate` /
- * `afterDelete` are structurally too late to ask "which rows was this?".
- * `ObjectQL.update()` / `.delete()` reuse ONE `HookContext` instance across
- * each before/after pair (they mutate `ctx.event` in place), which is the same
- * seam `primary-bu-projection.ts`'s `__primaryBuUserId` rides on.
- */
-const STASH_KEY = '__sharingAffectedRows';
 
 /**
  * Package id for the `sys_sharing_rule` DATA-change triggers that re-run the
@@ -94,8 +81,17 @@ export const ruleRegrantQueue = new RuleRegrantQueue();
  *  - `afterDelete` — revoke the deleted rows' rule grants. Nothing can
  *    re-grant them: `evaluateRule` iterates records that still exist, so a
  *    grant whose record is gone is unreachable by every reconcile path and
- *    outlives restarts (the orphan noted at the tail of #4779). Harmless only
- *    while record ids are never reused — an assumption no gate enforces.
+ *    outlives restarts (the orphan noted at the tail of #4779).
+ *
+ * [#5103] This package covers `source: 'rule'` rows only, and only on objects
+ * that HAVE a rule — which left a manual share on a deleted record orphaned
+ * forever. The general invariant ("the record is gone, so no share on it can
+ * be valid") is not the rule subsystem's to enforce and now lives in
+ * `record-share-cascade.ts`, bound on every sharing-capable object regardless
+ * of rules. The two are deliberately independent: this one keeps working if
+ * the cascade is unbound, and its unbounded-delete branch (revoke the object's
+ * rule grants, re-grant asynchronously) is a rule-only trade the cascade must
+ * never make on manual rows.
  *
  * [#4779] `if (!id) return` — the line these hooks used to open with — is
  * gone. It read as a cheap guard and was in fact the whole defect: predicate
@@ -149,23 +145,21 @@ export function bindRuleHooks(
       );
     };
 
+    /**
+     * [#5103] Delegates to the shared stash: the record-delete cascade binds
+     * its own `beforeDelete` on the same objects, and whichever of the two runs
+     * first resolves the row set for both. Still skips system writes — the
+     * recompute half deliberately leaves seeds to the boot backfill — but the
+     * skip is now only about *this* subscriber; the cascade stashes for system
+     * writes on its own account.
+     */
     const stashAffectedRows = async (ctx: any) => {
       if ((ctx?.session as any)?.isSystem) return;
-      try {
-        ctx[STASH_KEY] = typeof engine.find === 'function'
-          ? await resolveAffectedRows(engine as Required<MinimalEngine>, objectName, ctx, logger)
-          : ({ kind: 'unbounded', reason: 'resolve-failed', detail: 'engine has no find()' } as AffectedRows);
-      } catch (err: any) {
-        // resolveAffectedRows already fails safe; this is the belt for a
-        // genuinely unexpected throw. Unknown must never degrade to "no rows".
-        ctx[STASH_KEY] = { kind: 'unbounded', reason: 'resolve-failed', detail: err?.message } as AffectedRows;
-      }
+      await stashAffectedRowsOnCtx(engine, objectName, ctx, logger);
     };
 
     /** What the `after` hook should act on when no `before` hook ran. */
-    const affectedFrom = (ctx: any): AffectedRows =>
-      (ctx?.[STASH_KEY] as AffectedRows | undefined)
-      ?? ({ kind: 'unbounded', reason: 'resolve-failed', detail: 'no before-hook stash' } as AffectedRows);
+    const affectedFrom = (ctx: any): AffectedRows => readAffectedRows(ctx);
 
     engine.registerHook('afterInsert', async (ctx: any) => {
       if ((ctx?.session as any)?.isSystem) return;

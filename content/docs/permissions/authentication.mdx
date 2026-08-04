@@ -114,6 +114,13 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 # Optional: lock auth settings from env. Env wins over Setup UI values.
 OS_AUTH_SIGNUP_ENABLED=false
 OS_AUTH_GOOGLE_ENABLED=true
+
+# Optional: what a new user joins (ADR-0093 D1). `auto` (default) binds every
+# new user to the default organization; `invite-only` grants membership only
+# through an explicit act — creating a workspace, accepting an invitation, an
+# admin adding them, or SSO just-in-time provisioning.
+# Also configurable in Setup → Authentication → Membership.
+OS_AUTH_MEMBERSHIP_POLICY=invite-only
 ```
 
 > **Important**: Never commit `OS_AUTH_SECRET` to version control. Use a strong random string (minimum 32 characters).

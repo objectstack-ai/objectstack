@@ -36,6 +36,39 @@ export function nowIso(clock?: JobClock): string {
   return (clock?.now() ?? new Date()).toISOString();
 }
 
+/**
+ * Milliseconds per ADR-0057 lifecycle duration unit. Mirrors
+ * `parseLifecycleDuration` in `@objectstack/objectql` (the canonical runtime
+ * consumer), reproduced here rather than imported because the queue adapters
+ * deliberately do not depend on the engine package — they duck-type
+ * {@link JobEngine} so they stay testable without booting a kernel. Both
+ * tables are fixed by the ADR (coarse operational bounds: `y` is 365 days),
+ * and `job-queue-retention.test.ts` pins this one against them.
+ */
+const LIFECYCLE_UNIT_MS: Record<string, number> = {
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 7 * 86_400_000,
+  y: 365 * 86_400_000,
+};
+
+/**
+ * Parse an ADR-0057 duration literal (`'6h'`, `'7d'`, `'12w'`, `'7y'`) into
+ * milliseconds. Throws on anything else: declarations reach this code already
+ * validated by `LifecycleSchema`, so a failure here is a broken declaration,
+ * not user input — and a queue that silently guessed a window would be exactly
+ * the silent behaviour #5179 is about.
+ */
+export function lifecycleDurationMs(literal: string): number {
+  const m = /^(\d+)(h|d|w|y)$/.exec(literal);
+  if (!m) {
+    throw new Error(
+      `[service-queue] invalid lifecycle duration literal '${literal}' — expected <n><unit> with unit h|d|w|y (e.g. '7d')`,
+    );
+  }
+  return Number(m[1]) * LIFECYCLE_UNIT_MS[m[2]!]!;
+}
+
 export function parseJson<T = unknown>(raw: unknown, fallback?: T): T | undefined {
   if (raw == null) return fallback;
   if (typeof raw === 'string') {

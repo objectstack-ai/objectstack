@@ -25,6 +25,8 @@
     "nodemailer": "^9.0.3"
   },
   "devDependencies": {
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",

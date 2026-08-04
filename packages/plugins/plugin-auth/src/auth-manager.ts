@@ -2662,6 +2662,26 @@ export class AuthManager {
   }
 
   /**
+   * ADR-0093 D1 — the deployment's membership policy **as it stands right now**.
+   *
+   * The ONE source both membership paths read (#5152):
+   *   - sign-up: the reconciler composed into `user.create.after` (below);
+   *   - backfill: `AuthPlugin`'s ADR-0093 D6 pass over pre-existing member-less
+   *     users, which used to read the plugin's CONSTRUCTOR options instead.
+   *
+   * That split mattered because `this.config` is what {@link applyConfigPatch}
+   * targets: once `auth.membership_policy` became a platform setting, the
+   * constructor options stopped being current the moment an admin saved the
+   * form. Sign-up would honour the new policy while the backfill kept running
+   * the old one — and the backfill binds in BULK. Read the policy through here,
+   * never off a captured option, so a settings change reaches both without a
+   * restart.
+   */
+  getMembershipPolicy(): MembershipPolicy {
+    return this.config.membershipPolicy ?? 'auto';
+  }
+
+  /**
    * Inject (or replace) the outbound email service used by better-auth
    * callbacks. Safe to call after construction but BEFORE the first
    * request hits the auth handler — callbacks read this via
@@ -3647,7 +3667,9 @@ export class AuthManager {
     const membershipReconciler = async (user: any) => {
       try {
         await reconcileMembership(this.config.dataEngine, user?.id, {
-          policy: this.config.membershipPolicy ?? 'auto',
+          // #5152 — read through the accessor, not `this.config` directly: it is
+          // the single source the backfill path reads too.
+          policy: this.getMembershipPolicy(),
           resolveTargetOrg: async () => {
             const tenancy = this.config.getTenancy?.();
             // Single-org → default org; multi-org → none (invite/JIT own it).

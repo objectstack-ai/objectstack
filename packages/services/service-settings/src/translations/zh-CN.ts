@@ -24,6 +24,7 @@ export const zhCN: TranslationData = {
         smtp: { title: 'SMTP' },
         api_key: { title: 'API 密钥' },
         from_address: { title: '发件地址' },
+        delivery: { title: '投递方式', description: '邮件以何种方式交给服务商。' },
       },
       keys: {
         provider: {
@@ -44,6 +45,11 @@ export const zhCN: TranslationData = {
         api_key: { label: 'API 密钥' },
         from_email: { label: '发件地址', help: '示例:no-reply@example.com' },
         from_name: { label: '发件人名称' },
+        queue_delivery: {
+          label: '持久化队列投递',
+          help: '把每封邮件交给任务队列而不是内联发送:投递失败由 worker 按退避重试,进程重启也不会丢失。'
+            + '需要挂载具备持久化适配器的队列能力。「发送测试邮件」始终走内联发送。',
+        },
       },
       actions: {
         test: { label: '发送测试邮件' },
@@ -240,6 +246,10 @@ export const zhCN: TranslationData = {
           title: '邮箱与密码',
           description: '控制本地邮箱/密码登录与自助注册。',
         },
+        membership: {
+          title: '成员归属',
+          description: '新建用户加入什么。与上方的自助注册成对配置。',
+        },
         password_policy: {
           title: '密码策略',
           description: '由认证提供商在注册和重置密码时强制的长度限制。',
@@ -269,6 +279,14 @@ export const zhCN: TranslationData = {
         email_password_enabled: { label: '启用邮箱/密码登录' },
         signup_enabled: { label: '允许自助注册' },
         require_email_verification: { label: '要求邮箱验证' },
+        membership_policy: {
+          label: '新用户的成员归属',
+          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建工作区、接受邀请、被管理员添加，或由 SSO 即时开通。',
+          options: {
+            auto: '自动加入默认组织',
+            'invite-only': '仅限邀请——绝不自动加入',
+          },
+        },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },
         password_reject_breached: {

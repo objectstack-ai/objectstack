@@ -33,6 +33,7 @@ genuinely requires their call.
 |---|---|---|
 | `label:<name>` | backlog filter label; `label:all` = every open unassigned issue | `pm:queue` |
 | `repo:<owner/name>` | which repo's **backlog** to scan (the target repo per issue comes from `repo:*` labels — see "Multi-repo coordination") | `objectstack-ai/objectstack` |
+| `epic:#<n>` | 队列 = 父 issue #n 的子树(open 未认领 sub-issue,每轮重读)— 见「Epic 子树车道」 | — |
 | `batch:<n>` | max developer agents in flight at once | `3` |
 | `rounds:<n>` | stop after N rounds | until queue empty |
 | `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | `subagent` |
@@ -48,9 +49,41 @@ write state only through these signals:
 | open + queue label + **unassigned** | ready to dispatch |
 | **assignee set** | claimed / in flight — if the assignee isn't you, it is another agent's or a human's; **never touch it** |
 | label `pm:dispatched` | dispatched by this loop (the dispatch comment records the round) |
-| label `needs-user-decision` | waiting on the maintainer — **never dispatch**, never auto-answer |
+| label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
+| label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
+| label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
+| label `pm:epic`(on a parent)| 整棵子树已委托给登记在册的 epic PM(登记表 #4604)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
+
+**Label discipline — the labels ARE the state machine, so keep them honest:**
+
+- **`needs-user-decision` vs `pm:on-hold` is the difference between 决定待做
+  and 决定已做.** #4829 spent a day in the wrong one: the maintainer's
+  2026-08-03 暂缓处理 ruling lived only in a mid-thread comment while the
+  issue kept `needs-user-decision` — a label that reads "still awaiting an
+  answer" and so invites every later sweep to re-escalate a question that
+  was already answered. A hold is a *made* decision; give it the label that
+  says so.
+- **Label + comment land as a pair.** `pm:on-hold` is applied together with
+  a hold comment carrying three elements: **日期、理由、重启条件**
+  (「v17 发布后实施」「上游 #N 落地后重看」). A hold without a restart
+  condition is a state nobody can ever legally exit.
+- **`pm:blocked` carries its machine half in the body.** The `Blocked-by: #N`
+  line is what selection skips on and what the unlock sweep greps for: when
+  an issue or PR closes, sweep open `pm:blocked` issues naming it and return
+  the unblocked ones to the queue — unlocking is a sweep duty, not a memory.
+- **A label exists iff something reads it.** Every label above is consumed
+  by a named query or gate (selection filters, the unlock sweep, the
+  maintainer's inbox filter, the findings-triage round). Do not invent
+  labels nothing queries — an unread label is a comment in costume, and it
+  rots silently.
+- **状态变更不过夜.** Never end a session — including a rate-limit
+  suspension — in a half-state: label applied but its paired comment
+  missing, assignee set but no claim comment, verdict announced in chat but
+  absent from the issue. Finish the pair or revert the half before you stop;
+  the next reader (possibly your own post-compact self) has only GitHub to
+  read.
 
 **One-time setup** (idempotent, run at the start of the first round):
 
@@ -59,7 +92,10 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" || true
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" || true
+  gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — do not dispatch, do not nag; restart condition in the hold comment" || true
+  gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" || true
+  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (registry #4604) — other PMs never dispatch into its subtree" || true
 done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
@@ -71,7 +107,7 @@ protocol is identical.)
 
 ## Operational notes(实测坑位)
 
-队列与平台层的八条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+队列与平台层的九条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
 也不取本地工作树的现状,更不取「看起来相邻」的两行日志** —— 每一条都是在这一步上
 咬过人之后写下来的。
 
@@ -187,6 +223,16 @@ draft、解绑 `Fixes`,免得一个错结论继续被当作已立案的事实引
 规则:CI 配置、超时、构建脚本、门禁这类**共享基础设施**的修复,入队前跑
 `git log --oneline origin/main -- <该文件>`,确认在飞期间没有别人已经修掉;真撞上了,
 先比**数值与作用域**再决定关哪个 —— 后合的那个可能是回退,不是改进。
+
+**9. 立单前先查重:关键词、CVE/公告号、包名、报错串,各搜一遍再开 issue。**
+#5039 是反例:为一批 OSV 公告立单前没有做任何搜索,而 #5032 六分钟前已为同
+一批公告立单、且分析更全(逐包 `pnpm why` 归因 + main 上的逐条复现证据),
+两分钟后 #5039 只能关成 duplicate。代价不止两分钟:两条单各自吸走了一次认
+领,直接诱发了 #5032 上相隔 20 秒的认领撞车(见 step 4)。同日另一例:
+#4946 与 #4945 各自为同一条 brace-expansion 公告立单,后立者关 duplicate。
+边界要记清:duplicate-fix-guard 只拦两个 **PR** 声明同一个 `Fixes #N`(第
+8 条讲过它的覆盖面)—— 两条 **issue** 描述同一个问题,没有任何门禁能看见,
+查重只能发生在立单前、你自己手里。
 
 ## Multi-repo coordination (backend / frontend / cloud)
 
@@ -362,6 +408,62 @@ with the number of PMs, and a red queue blocks every lane at once. Queue
 health is therefore a shared duty — a PM that notices a flake fixes or files
 it rather than re-queuing past it, whichever lane it came from.
 
+## Epic 子树车道(大任务委托专职 PM)
+
+Domain lanes 按「修复落点的包」**横向**切分;epic 车道是**纵向**的第二种切法:
+一个大开发(父 issue + 一批 sub-issue)整体委托给一个专职 PM 会话,从立项跟到
+收尾。两者组合使用,不互斥:epic 内的 sub-issue 照常在分诊时打 `domain:*`
+标签(标签是共享路由信息,全局在飞检查要读它),但**认领权属于 epic PM**,
+不属于域 PM。
+
+**启动**:`/pm-dispatch epic:#<n>`。队列定义 = 父 issue #n 的 open、未认领
+sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条就是衍生任务的
+吸收机制:开发中新挂到父单下的 sub-issue,下一轮自动进入队列,零新标签、
+零额外登记。
+
+**委托信号(标签 + 登记成对落地,同 label discipline)**:
+
+- 父 issue 打 `pm:epic`,同时在登记表(#4604)登记:会话 ID、父 issue 号、
+  **声明的文件领地**(packages/目录清单,同一份也写进父 issue 正文)。缺一半
+  就是 label discipline 禁止的过夜半状态。
+- 其它 PM(主 backlog / 域 PM)的候选获取(step 1)**跳过 `pm:epic` 父单的
+  整棵子树** —— 这是该标签的第一消费点;第二消费点是登记表,第三是收尾流程。
+- epic 与非 epic 工作的**文件相交**由既有机制兜住:epic PM 的每条认领评论
+  照常声明「文件面」,所有 PM 的全局在飞检查照常读它。epic 不豁免任何一条
+  认领纪律(assign + claim comment + race check 全套照做)。
+- 触 `packages/spec` 的 sub-issue 照常受「shared contract surfaces have one
+  owner」约束 —— epic 委托不改变 spec 的单一所有者。
+
+**衍生问题三分法。** epic 开发中冒出的每个新问题,用一个判据分流:
+**「不修它,epic 的验收标准过不过得去?」**
+
+| 类型 | 判据 | 去向 | 谁派发 |
+|:--|:--|:--|:--|
+| in-scope 衍生 | 不修则 epic 验收不过 | 挂为父单 sub-issue(原生) | epic PM,下轮自动入队 |
+| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进主 backlog(查重先行,`finding` 分诊纪律照旧) | 主/域 PM;epic 不吸收 |
+| 触 spec / 公共契约 | 无论是否阻塞 epic | 按跨分片转移协议转主 PM 队列,epic 侧 sub-issue 写 `Blocked-by:` | 主 PM |
+
+第一行防「衍生项没人管、epic 烂尾」;第二行防「epic 无限膨胀吞掉整个仓」;
+第三行维持契约面的单一调度权。发现分诊轮的**归挂限定在 epic 内同样成立**:
+仅有依赖关系、不属完成范围的,独立立单 + `Blocked-by:`,不得借 sub-issue
+自动入队的通道把未分诊的东西塞进池子。每次分流留一行审计评论(「分流:
+in-scope,验收依据 …」),维护者可否决。
+
+**进度视图。** epic PM 每轮在父 issue 维护一份 checklist 汇总评论
+(sub-issue → 状态 → PR),待决项单独列出。维护者只看父单一个入口;决策
+本身仍锚在具体 sub-issue 上(step 8 不变),父单只汇总、不承载分析。
+
+**收尾与僵尸回收。** 最后一个 sub-issue 关闭 → epic PM 在父单留总结评论、
+关闭父单、摘 `pm:epic`、登记表注销 —— 四步是一组,缺一步就是过夜半状态。
+僵尸判据:登记在册但整棵子树 ~48h 无任何认领/分支/PR 动静 → 主 PM 在登记表
+评论询问,再静默一窗后摘 `pm:epic` 收回子树;子树内仍在飞的认领按认领协议
+由原认领者跟完(stale-claim reclaim 的既有规则逐单适用)。
+
+**残余风险(如实声明)。** epic 领地与其它车道的文件相交靠「声明 + 全局
+在飞检查」防,不是机械保证;撞上了由合并队列兜底(代价是返工,不是脏数据)。
+这与 domain lanes 的风险形状相同,epic 车道没有更差 —— 但也没有更好,所以
+领地声明写得越窄越诚实,越宽越要在登记表里说明为什么。
+
 ## The round loop
 
 ### 0. Backlog sweep — classification is a standing duty, not a request
@@ -417,11 +519,23 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
 List open issues matching the filter, excluding anything assigned or labeled
 `needs-user-decision`. **Open sub-issues of a matching parent are candidates
 too** — they inherit the parent's queue membership and need no label of their
-own. Read each candidate's full body **and its comments** — a comment may
-record that half the work already shipped (#4075's step 1 had been merged
-for three days; the claim went out without reading the comment that said
-so). Triage, batch selection (steps 2–3) and the dispatch prompt all need
-the full picture.
+own. **Exception: a parent carrying `pm:epic`** — its whole subtree belongs
+to the registered epic PM, and no other PM treats those sub-issues as
+candidates(见「Epic 子树车道」;没有这条排除,本句的自动继承会让两个 PM
+抢同一批子任务). Read each candidate's full body **and its comments — all of them,
+before the issue can even be a candidate.** A comment may record that half
+the work already shipped (#4075's step 1 had been merged for three days;
+the claim went out without reading the comment that said so). Comments are
+also where **rulings** land, not just progress notes: #4829's body reads as
+a straightforward "delete the access gate" fix, while its thread held the
+maintainer's 2026-08-03 暂缓处理 verdict AND the recorded finding that the
+gate is ADR-0045 §3 (Accepted) mechanism with four pin tests. A PM that
+read only the body recommended deleting an accepted ADR's mechanism and
+dispatched it — only the dev's stop-and-refuse prevented the patch (the
+maintainer later re-decided on the corrected analysis; that is the process
+working *despite* the skipped read, not because of it). 裁决落在评论区,
+跳过评论就是跳过裁决。Triage, batch selection (steps 2–3) and the dispatch
+prompt all need the full picture.
 
 **Stale-premise check before every dispatch.** Issues describe the repo as
 of their filing date; main moves ~18 merges a day. Before dispatching,
@@ -521,7 +635,7 @@ an issue to a later round, record the known trap on it before the round ends.
 All agents share one GitHub identity, so the assignee alone says "some agent
 claimed this" but never *which* — the claim comment carries the identity. For
 each selected issue, **before dispatching** (repo rule: claim before code),
-execute atomically, in order:
+execute as **one atomic pair**, in order:
 
 1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
@@ -541,11 +655,40 @@ execute atomically, in order:
 
    「文件面」is **required** for cross-domain and borrowed claims and
    **recommended** for ordinary same-domain ones — it is the only input
-   another PM's global in-flight check has to read.
-3. **Race check**: assignment is idempotent, so two agents can both
-   "succeed". Re-read the comments; if an earlier claim comment with a
-   *different* session ID or branch name exists, you lost — touch nothing of
-   theirs, reply 「已有认领,让行」, and pick another issue. First comment wins.
+   another PM's global in-flight check has to read. The branch name must
+   carry the issue number: #5032's losing claim promised
+   `claude/issue-osv-fast-uri-hono-undici`, which
+   `git ls-remote --heads origin | grep issue-5032` cannot find — the #4588
+   discoverability hole, reopened.
+
+   **Assign + comment are one indivisible act — rate limits do not split
+   them.** "Assign now, comment when quota recovers" leaves exactly the
+   state the shared identity cannot interpret: an assignee with no owner.
+   If the comment cannot be posted, undo the assign (or never start); if
+   GraphQL quota is gone, queue the whole pair for later (Operational
+   notes 3) — never half of it.
+3. **Race check — after your claim comment is up, re-read the whole
+   thread.** Assignment is idempotent, so two agents can both "succeed";
+   the claim comments' **timestamps are the only tiebreaker**, whatever the
+   assignee field seems to say. An earlier claim comment with a *different*
+   session ID or branch means you lost: touch nothing of theirs, reply
+   「已有认领,让行」, and pick another issue. First comment wins. #5032 is
+   the 20-second version: claims at 00:39:44 and 00:40:04, the later one
+   composed **without re-reading the thread** — and both aimed at
+   `pnpm-lock.yaml`, where two parallel re-resolutions produce mutually
+   unmergeable diffs. The dispatched dev caught the collision on its own
+   pre-code re-read and stood down with zero files touched; that pre-code
+   re-read is the dev's duty too (os-dev rule 2), which is what makes the
+   claim protocol self-healing when a PM slips.
+
+   **Yielding is a handoff, not an exit.** The loser posts, together with
+   its 让行 comment, everything it already diagnosed — repro commands,
+   dependency paths, traps confirmed. In #5032 that handoff (the offline
+   scanner repro, `pnpm why` chains for all three packages, and live proof
+   that the existing undici override's exclusive upper bound had
+   self-invalidated) was consumed directly by the winning dev, whose PR
+   #5052 was up within half an hour of the yield. A yield that discards
+   its diagnosis re-bills the whole investigation to the winner.
 
 Dev agents push their branch early — a remote branch is the hardest evidence
 of work in flight, closing the gap between "claimed" and "PR exists".
@@ -589,6 +732,11 @@ PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 {feedback}
 
 Follow your operating procedure (you are the os-dev agent). Non-negotiables:
+- The ISSUE BODY above is a LEAD, not a spec: verify its premise against
+  origin/main BEFORE implementing. If the premise no longer holds (already
+  fixed, wrong attribution, capability already exists), return
+  premise_still_valid: false with evidence and NO PR — that is a successful
+  outcome, not a failure.
 - Work in {target_repo}: branch claude/issue-{n}-{slug} off origin/main,
   in a DEDICATED worktree of that repo.
 - The issue is already claimed; do not touch its assignee.
@@ -612,6 +760,25 @@ line whenever `git log origin/main --oneline -20 -- <paths>` shows a merge on
 the issue's files today, and tell the dev to verify against `origin/main`
 rather than any working tree (Operational notes 4) — the dev's worktree is cut
 from `origin/main` once and never refreshes itself.
+
+**Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
+honest "the premise is dead" cheap to return.** Step 1's stale-premise check
+is the PM's sample; the dev's verification is the real thing, so the prompt
+must state the premise-first requirement explicitly (the template line
+above), and the PM must treat `premise_still_valid: false` with no PR as a
+legitimate — often valuable — deliverable. Evidence from one working day:
+#4832 (dispatched; the dev found the premise had already expired), #4250
+(the issue's minimum ask had long shipped via the stall-guard series — the
+premise check instead surfaced that the guard's SIGKILL escalation path had
+never once executed, a real defect the issue never named), #5047 (the
+claimed 「enable/disable 重启即失」 was disproven with file:line evidence —
+persistence existed by design — and verification narrowed the work to the
+real empty-env seed bug PR #5117 fixed), #4930 (two of the three "silently
+green" claims were wrong: the scripts went red with misleading messages, and
+the fix was re-scoped to the dev's measurements). A dev that falsifies the
+issue — or the PM's own framing — is a good run (step 7 says so); a prompt
+that presumes the issue is true converts that good run into apparent
+disobedience.
 
 #### Handing off an interrupted dev(worktree 接手协议)
 
@@ -702,7 +869,9 @@ against the report's own claims:
 - Test evidence in the report shows the actual commands and passing output,
   not a bare "tests pass".
 - The diff plausibly satisfies the issue's acceptance criteria.
-- **Did the dev verify the issue's premise?** A report that falsifies the
+- **Did the dev verify the issue's premise?** The report's
+  `premise_still_valid` field makes the answer explicit — a `false` there
+  reopens triage rather than failing review. A report that falsifies the
   issue — or your own dispatch prompt — is a sign of a *good* run; a report
   that accepts every stated cause at face value is the one to read twice. Four
   same-day cases: #4808 (the issue was half right — the real truncation was in
@@ -889,6 +1058,7 @@ Stop the loop and report when any of these hits:
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-123-short-slug",
   "pr": "https://github.com/objectstack-ai/objectstack/pull/456 | null",
+  "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence",
   "open_questions": [
@@ -898,6 +1068,9 @@ Stop the loop and report when any of these hits:
 }
 ```
 
+`premise_still_valid: false` with `pr: null` is a legitimate terminal report
+(step 5): review it as a re-triage input — verify the dev's evidence, then
+close, re-scope, or re-file the issue — never as a failed dispatch.
 `open_questions` must be non-empty when `status` is `needs_decision`, and each
 entry becomes input to a `[决策]` issue. `out_of_scope_findings` should already
 be filed as unassigned issues by the dev per the filing discipline in the

@@ -2862,6 +2862,11 @@ export interface EmailCapabilityArg {
  * from `@objectstack/plugin-email` — the package that has to materialise the
  * transport — rather than restated here. Two literals describing one vocabulary
  * is how the settings dropdown and the transports drifted apart (#5094).
+ *
+ * `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) switches
+ * delivery from inline to the durable `sys_job_queue` path (#5160). It reuses
+ * `OS_EMAIL_RETRIES` as its attempt budget rather than adding a second retry
+ * knob — see `EmailServicePlugin.makeQueueDelivery`.
  */
 export function resolveEmailCapabilityArg(
   cfgEmail: Record<string, any> = {},
@@ -2882,6 +2887,15 @@ export function resolveEmailCapabilityArg(
     }
   }
   const retries = env.OS_EMAIL_RETRIES ? Number(env.OS_EMAIL_RETRIES) : cfgEmail.retries;
+  // `OS_EMAIL_QUEUE_ENABLED` — a boolean feature flag, so `_ENABLED` and
+  // default-off (Prime Directive #9; a bare `OS_EMAIL_QUEUE` would read as a
+  // config value, e.g. a queue name). Whether the declaration can be HONOURED
+  // is not knowable here — no kernel exists yet — so the plugin asserts it on
+  // `kernel:ready`, where the service registry has settled, and fails the boot
+  // there if no durable queue showed up.
+  const queueDelivery = env.OS_EMAIL_QUEUE_ENABLED != null
+    ? ['1', 'true', 'yes', 'on'].includes(String(env.OS_EMAIL_QUEUE_ENABLED).trim().toLowerCase())
+    : cfgEmail.queueDelivery;
   const defaultTemplateContext = {
     appName: env.OS_APP_NAME || cfgEmail.appName || configAppName || 'ObjectStack',
     ...(cfgEmail.defaultTemplateContext || {}),
@@ -2915,6 +2929,7 @@ export function resolveEmailCapabilityArg(
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
     defaultFrom,
     ...(retries != null && !Number.isNaN(retries) ? { retries } : {}),
+    ...(queueDelivery != null ? { queueDelivery: !!queueDelivery } : {}),
     defaultTemplateContext,
   };
 

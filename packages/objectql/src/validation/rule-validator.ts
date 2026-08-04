@@ -28,7 +28,9 @@
  *    (`email` / `url` / `phone` / `json`). Only runs when the write touches
  *    the field and the value is non-empty (emptiness is the field-shape
  *    validator's job, not the format rule's).
- *  - `json_schema` — a JSON field validated against a JSON Schema via ajv.
+ *  - `json_schema` — a JSON field validated against a JSON Schema via ajv,
+ *    with `ajv-formats` registered so the standard `format` keyword (`email`,
+ *    `uri`, `uuid`, `date-time`, …) is actually enforced (#5029).
  *  - `conditional` — evaluates the `when` CEL predicate and then recurses into
  *    `then` (true) or `otherwise` (false). The nested rule's violation message
  *    is surfaced; the *outer* conditional's `severity` decides whether it
@@ -137,6 +139,9 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import Ajv, { type ValidateFunction } from 'ajv';
+// #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
+// See the `const ajv` note below for why the runtime registers it.
+import addFormats from 'ajv-formats';
 import {
   ValidationError,
   buildFieldError,
@@ -224,8 +229,42 @@ interface RuleContext {
  * Shared ajv instance. `strict: false` tolerates author-written JSON Schemas
  * that use vendor keywords; `compile` results are memoised per schema object
  * (see `jsonSchemaCache`) so we don't recompile on every write.
+ *
+ * ## Why `addFormats` (#5029)
+ *
+ * In ajv 8 the `format` keyword is **not built in** — it lives in the separate
+ * `ajv-formats` package. Without it, and under `strict: false`, an unknown
+ * format is not an error: ajv logs one line at compile time and **ignores the
+ * keyword**. So a rule declaring
+ * `{ email: { type: 'string', format: 'email' } }` compiled fine, ran on every
+ * write, enforced `type` and `required` — and enforced *nothing* for `format`,
+ * for every record, forever. The failure was PARTIAL, which is what made it
+ * nastier than an uncompilable schema (#4762): the rule visibly rejects bad
+ * `type` / `required` payloads in dev, so it reads as working while the
+ * `format` half never fires. Same #4649 family, one level in: declared ≠
+ * enforced with only a stderr line — naming no rule and no object — as signal.
+ *
+ * Registering the plugin makes the declaration true. The **default (full)**
+ * format set is used deliberately: `fast` mode trades correctness for speed on
+ * exactly the formats authors reach for most (`email`, `uri`, `date-time`), and
+ * a format that "mostly" matches is the same declared ≠ enforced defect with a
+ * smaller hole. Cost of doing this at all: it is a behaviour change on deployed
+ * data — records that passed while `format` was inert can now be rejected at
+ * write time. That is the point, and the changeset says so loudly.
+ *
+ * `format` remains *tolerant of a typo* by construction: under `strict: false`
+ * an unrecognised format name (`'emial'`) is still logged-and-ignored rather
+ * than rejected. Registering the standard set does not change that, and this
+ * PR deliberately does not either — flipping it is an authoring-time question
+ * for the publish gate, filed separately.
+ *
+ * The #4762 publish gate (`@objectstack/lint`'s
+ * `validate-rule-compilability.ts`) compiles with the SAME ajv environment on
+ * purpose, so it registers the same plugin; its parity test reads this file's
+ * source and goes red if these two lines drift apart.
  */
 const ajv = new Ajv({ allErrors: true, strict: false });
+addFormats(ajv);
 const jsonSchemaCache = new WeakMap<object, ValidateFunction>();
 
 export interface EvaluateRulesOptions {

@@ -36,6 +36,12 @@ vi.mock('@objectstack/core', () => ({
   }),
 }));
 
+/**
+ * A stored `api` item that parses AND passes the identity-free publish gates
+ * the index applies since #5189 — `objectParams` is required for an
+ * `object_operation` (E7's target gate), so without it the item would be
+ * excluded from the index instead of matched.
+ */
 function endpoint(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: 'list_tasks',
@@ -43,6 +49,7 @@ function endpoint(over: Record<string, unknown> = {}): Record<string, unknown> {
     method: 'GET',
     type: 'object_operation',
     target: 'showcase_task',
+    objectParams: { object: 'showcase_task', operation: 'find' },
     ...over,
   };
 }
@@ -91,6 +98,34 @@ describe('#5089 — MetadataManager.matchEndpoint', () => {
   it('ignores items of other metadata types', async () => {
     await manager.register('action', 'list_tasks', endpoint());
     await expect(manager.matchEndpoint(TASKS)).resolves.toBeUndefined();
+  });
+
+  // ── #5189 (#5040 E7b) — the load-time backstop, end to end ─────────────
+  //
+  // `register()` is route 3 of #5189: a direct metadata write that no publish
+  // gate ever sees. Before the backstop it minted an anonymous, zero-quota
+  // execution entry point — the runtime honours `authRequired: false` and an
+  // unarmed budget meters nothing. It must now MISS.
+  describe('#5189 — a directly-registered item that never passed publish', () => {
+    it('does not match when it violates ADR-0121 D6 (anonymous + no armed budget)', async () => {
+      await manager.register('api', 'open_tasks', endpoint({ name: 'open_tasks', authRequired: false }));
+      await expect(manager.matchEndpoint(TASKS)).resolves.toBeUndefined();
+    });
+
+    it('matches once the same declaration arms its budget', async () => {
+      await manager.register(
+        'api',
+        'open_tasks',
+        endpoint({
+          name: 'open_tasks',
+          authRequired: false,
+          rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
+        }),
+      );
+      const match = await manager.matchEndpoint(TASKS);
+      expect(match?.endpoint.name).toBe('open_tasks');
+      expect(match?.endpoint.authRequired).toBe(false);
+    });
   });
 
   describe('invalidation', () => {
