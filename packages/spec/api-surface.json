@@ -3195,6 +3195,8 @@
     "ChartAxisSchema (const)",
     "ChartConfig (type)",
     "ChartConfigSchema (const)",
+    "ChartDrillDown (type)",
+    "ChartDrillDownSchema (const)",
     "ChartGroupBy (type)",
     "ChartGroupBySchema (const)",
     "ChartInteraction (type)",

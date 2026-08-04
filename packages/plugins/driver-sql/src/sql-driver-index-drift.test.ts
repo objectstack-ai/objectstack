@@ -1,7 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { SqlDriver, diffManagedIndexes, isManagedIndexName } from '../src/index.js';
+import {
+  SqlDriver,
+  classifyIndexKeyPart,
+  diffManagedIndexes,
+  isManagedIndexName,
+  parseIndexDdl,
+} from '../src/index.js';
 
 /**
  * Index-dimension managed-schema drift (#3728).
@@ -65,13 +71,37 @@ describe('SqlDriver index drift (#3728)', () => {
     },
   ];
 
+  /**
+   * Unique index name → canonical key parts, read from the index DDL so
+   * expression keys are visible (`PRAGMA index_info` reports a NULL name for
+   * them). A plain column reads as its name; the NULL-safe organization key
+   * part (ADR-0120 D3) reads as `COALESCE(<column>)` — literal elided, the
+   * same literal-agnostic identity the drift differ compares on.
+   */
   const uniqueIndexColumns = async (table: string): Promise<Record<string, string[]>> => {
     const list: any = await knexInstance.raw(`PRAGMA index_list(${table})`);
+    const master: any = await knexInstance.raw(
+      `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`,
+      [table],
+    );
+    const ddlByName = new Map<string, string>();
+    for (const r of Array.isArray(master) ? master : (master?.rows ?? [])) {
+      if (typeof r?.sql === 'string' && r.sql) ddlByName.set(r.name, r.sql);
+    }
     const out: Record<string, string[]> = {};
     for (const idx of list) {
       if (idx.origin === 'pk' || idx.unique !== 1) continue;
-      const info: any = await knexInstance.raw(`PRAGMA index_info("${idx.name}")`);
-      out[idx.name] = info.map((c: any) => c.name);
+      const parsed = parseIndexDdl(ddlByName.get(idx.name) ?? '');
+      if (parsed) {
+        out[idx.name] = parsed.keyParts.map((p) => {
+          const part = classifyIndexKeyPart(p);
+          if (part.kind === 'column') return part.column;
+          return part.column === null ? p : `COALESCE(${part.column})`;
+        });
+      } else {
+        const info: any = await knexInstance.raw(`PRAGMA index_info("${idx.name}")`);
+        out[idx.name] = info.map((c: any) => c.name);
+      }
     }
     return out;
   };
@@ -185,7 +215,7 @@ describe('SqlDriver index drift (#3728)', () => {
       // Both are current intent: the tenant composite from the field-level
       // `unique: true`, and the verbatim declared global unique.
       const uniques = await uniqueIndexColumns('hp_contact');
-      expect(uniques['uniq_hp_contact_organization_id_email']).toEqual(['organization_id', 'email']);
+      expect(uniques['uniq_hp_contact_organization_id_email']).toEqual(['COALESCE(organization_id)', 'email']);
       expect(uniques['uniq_hp_contact_email']).toEqual(['email']);
 
       // Before the fix this reported `replace_unique_index` — proposing to drop
@@ -260,7 +290,7 @@ describe('SqlDriver index drift (#3728)', () => {
 
       const uniques = await uniqueIndexColumns('product');
       expect(uniques['product_code_unique']).toBeUndefined();
-      expect(Object.values(uniques)).toContainEqual(['organization_id', 'code']);
+      expect(Object.values(uniques)).toContainEqual(['COALESCE(organization_id)', 'code']);
 
       // Existing rows survived, and the cross-tenant insert the issue is about works.
       expect(await driver.count('product', { object: 'product' })).toBe(2);
@@ -281,7 +311,7 @@ describe('SqlDriver index drift (#3728)', () => {
       const again = await driver.applyMigrationEntries(drift, { allowDestructive: false });
       expect(again.skipped).toHaveLength(0);
       expect(Object.values(await uniqueIndexColumns('product'))).toContainEqual([
-        'organization_id',
+        'COALESCE(organization_id)',
         'code',
       ]);
     });
@@ -298,7 +328,7 @@ describe('SqlDriver index drift (#3728)', () => {
 
       const uniques = await uniqueIndexColumns('product');
       expect(uniques['product_code_unique']).toBeUndefined();
-      expect(Object.values(uniques)).toContainEqual(['organization_id', 'code']);
+      expect(Object.values(uniques)).toContainEqual(['COALESCE(organization_id)', 'code']);
       expect(await driver.detectManagedDrift()).toHaveLength(0);
 
       const b = await driver.create('product', { organization_id: 'org_b', code: 'PROD-00001' });

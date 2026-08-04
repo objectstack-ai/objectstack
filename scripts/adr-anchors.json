@@ -105,6 +105,16 @@
       "file": "packages/spec/src/kernel/functional-completeness.ts",
       "adrs": ["ADR-0078"],
       "invariant": "Every rule here cites the runtime line that silently skips the instance, and every deliberate NON-rule cites the evidence that exempts it (ADR-0078 §6). `multiselect` without `options` is NOT flagged — `record-validator.ts` blesses it verbatim as free-form tags, which is §1 case (3) genuinely-optional; `user` relationships and `timeline`/`tree` views are exempt for their own stated reasons. A rule added without its skip-site citation, or an exemption 'fixed', is a false prescription: it tells an AI author to change working metadata, which is the failure this gate exists to prevent."
+    },
+    {
+      "file": "packages/plugins/driver-sql/src/schema-drift.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "The organization key part of every organization-scoped unique index is the NULL-safe COALESCE form — `COALESCE(<tenantField>, '__global__')` — never the bare column: SQL UNIQUE is NULL-distinct, so the bare composite enforces NOTHING on NULL-organization rows, which on a single-tenant stack is every row (#5030). Declared-index `unique: 'global'`/bare `true` stays VERBATIM (the #3696 contract, now the 'global' arm of the vocabulary); `'organization'` prepends the key part at registration. Expected and physical sides compare through the SAME normalization, literal-agnostic on the COALESCE literal — two spellings of the literal are one constraint, never drift (#4884)."
+    },
+    {
+      "file": "packages/plugins/driver-sql/src/sql-driver.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "The bare-composite → NULL-safe tightening migrates through the ceremony (ADR-0120 D4): a `recreate_index` gated by the duplicate pre-flight probe — clean data grades it `safe` (dev autoMigrate may apply), duplicates BLOCK it with a row report and the old index stays in place; apply re-probes, so even --allow-destructive cannot drop a constraint whose replacement is not creatable. Storage stays NULL — GLOBAL_TENANT is an index-key fold, never written to the organization column."
     }
   ]
 }

@@ -158,6 +158,26 @@ const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
       'not part of the author-facing dashboard spec (framework#3251).'
     );
   }
+  // #5022 — the drill near-key, in all three spellings an author reaches for.
+  // A dashboard widget has NO per-widget drill configuration, by design: an
+  // ADR-0021 dataset-bound widget drills through the semantic layer, deriving
+  // the target object and filter from the clicked dataset row. Saying only
+  // "unrecognized key" here would leave the author to conclude the capability
+  // is missing, when in fact it is automatic — and would leave them guessing
+  // between two real keys on two other surfaces.
+  if (keys.some((k) => k === 'drillDown' || k === 'drilldown' || k === 'drill')) {
+    return (
+      base +
+      ' Drill-through on a dashboard is AUTOMATIC and not configurable per widget: ' +
+      'a dataset-bound widget derives the drill target and filter from the dataset row ' +
+      'that was clicked, and a `table`/`pivot` widget is the one to reach for when you ' +
+      'want the detail to be clickable (`metric`/`chart` render the aggregate only). ' +
+      'The two configurable drills live elsewhere and neither is a widget key: ' +
+      '`drillDown` (camelCase, a config object) is the react-tier `<ObjectChart drillDown={…}>` ' +
+      'prop — `ChartDrillDownSchema`; `drilldown` (all lowercase, a boolean) is ' +
+      '`ReportSchema.drilldown` (ADR-0021 D2, on by default).'
+    );
+  }
   return base;
 };
 

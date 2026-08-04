@@ -250,6 +250,19 @@ export const ReportSchema = lazySchema(() => strictObject({
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   aliases: { dataSet: 'dataset', source: 'dataset', fields: 'values', columns: 'values', chart: 'chartConfig', filter: 'filters' },
+  guidance: {
+    // #5022 — the reverse half of a two-way disambiguation. The forward half
+    // lives on `ChartDrillDownSchema` in `ui/chart.zod.ts`, which tells an
+    // author who writes `drilldown` on a CHART that they want the report's
+    // boolean. This one catches the opposite mistake, and it is the one edit
+    // distance cannot help with: `drillDown` → `drilldown` is a distance of 1,
+    // so the suggester would cheerfully propose the rename and the author would
+    // write `drilldown: { target: 'dialog' }` — a config object into a boolean
+    // slot, rejected a second time. Naming the TYPE difference is what makes
+    // the difference actionable (批 10's lesson, applied to a case-only twin).
+    drillDown:
+      '`drillDown` (camelCase) is a different capability on a different surface: it is the react-tier `<ObjectChart drillDown={…}>` prop, a configuration OBJECT (`ChartDrillDownSchema` — `enabled`/`filter`/`title`/`target`/`columns`/`maxRows`) that configures a CHART segment drill. A report\'s drill switch is `drilldown` — all lowercase, and a plain BOOLEAN (ADR-0021 D2, on by default), which turns row/cell drill on a `summary`/`matrix` report on or off. If you meant this report, write `drilldown: true` or `drilldown: false`; if you meant a chart, the prop belongs on a react page, not in report metadata.',
+  },
 }, {
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Report unique name'),

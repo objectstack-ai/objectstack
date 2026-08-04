@@ -1035,6 +1035,64 @@ describe('AuthManager', () => {
       expect(assertIssuable).not.toHaveBeenCalled();
     });
 
+    // ── [ADR-0120 D3] `'__global__'` is reserved at the org-minting seam ──
+    //
+    // The token names the NULL-organization ("platform") bucket in every
+    // organization-scoped unique index (`COALESCE(organization_id,
+    // '__global__')`) and in the autonumber sequence table. An organization
+    // minted with it as id or slug would collide with that bucket.
+    describe("'__global__' organization id/slug reservation (ADR-0120 D3)", () => {
+      const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+      beforeEach(() => {
+        process.env.OS_MULTI_ORG_ENABLED = 'true';
+      });
+      afterEach(() => {
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+      });
+
+      it("rejects an organization whose slug is '__global__'", async () => {
+        const orgPlugin = await bootOrgPlugin();
+        await expect(
+          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+            organization: { name: 'Global Inc', slug: '__global__' },
+            user: { id: 'u1' },
+          }),
+        ).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+      });
+
+      it("rejects an organization whose id is '__global__'", async () => {
+        const orgPlugin = await bootOrgPlugin();
+        await expect(
+          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+            organization: { id: '__global__', name: 'Global Inc', slug: 'global-inc' },
+            user: { id: 'u1' },
+          }),
+        ).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+      });
+
+      it('an ordinary organization passes the reservation guard', async () => {
+        const orgPlugin = await bootOrgPlugin();
+        await expect(
+          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+            organization: { name: 'Acme', slug: 'acme' },
+            user: { id: 'u1' },
+          }),
+        ).resolves.toBeUndefined();
+      });
+
+      it('the reservation is judged before the multi-org gate (precise error in single-org mode too)', async () => {
+        delete process.env.OS_MULTI_ORG_ENABLED; // default: single-org
+        const orgPlugin = await bootOrgPlugin();
+        await expect(
+          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+            organization: { name: 'Global Inc', slug: '__global__' },
+            user: { id: 'u1' },
+          }),
+        ).rejects.toThrow(/'__global__' is reserved/);
+      });
+    });
+
     it('should register twoFactor plugin with schema mapping when enabled', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
