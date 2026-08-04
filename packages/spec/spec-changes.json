@@ -195,6 +195,12 @@
         "toMajor": 17
       },
       {
+        "surface": "dashboard.widgets[].compareTo",
+        "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
+        "conversionId": "dashboard-widget-compareto-converged",
+        "toMajor": 17
+      },
+      {
         "surface": "agent.knowledge",
         "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
         "conversionId": "agent-knowledge-removed",
@@ -373,6 +379,13 @@
         "migrationId": "dashboard-widget-strict-unknown-keys",
         "toMajor": 16,
         "rationale": "The `.strict()` flip turns a previously silently-stripped unknown key into a parse error. There is no mapping target for an arbitrary unknown key — auto-deleting it would be exactly the silent data loss ADR-0078 bans — so each occurrence needs the author to decide: bind a `dataset` and select `dimensions`/`values`, move a renderer setting under `options`, or delete the dead key."
+      },
+      {
+        "surface": "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
+        "replacement": "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+        "migrationId": "dashboard-widget-compareto-offset",
+        "toMajor": 17,
+        "rationale": "The widget declared three comparison arms; the analytics executor implements one shape, `{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset path — the spec's single author-facing analytics shape — `{ offset }` was forwarded verbatim into that contract and threw `compareTo requires a timeDimension \"undefined\"`, taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every other duration has NO faithful target: `previousPeriod` shifts by the length of whatever window the widget's filter resolves to, which equals `7d` only when that window happens to be seven days long. Rewriting mechanically would silently change which rows the comparison column counts — a wrong number rather than a missing one, which is strictly worse and exactly the class this convergence exists to end. Re-stating the intended window is a judgment about the presentation, not a transform."
       },
       {
         "surface": "job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)",
@@ -837,6 +850,12 @@
           "toMajor": 17
         },
         {
+          "surface": "dashboard.widgets[].compareTo",
+          "to": "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract (#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } durations have no faithful target and are reported, not guessed)",
+          "conversionId": "dashboard-widget-compareto-converged",
+          "toMajor": 17
+        },
+        {
           "surface": "agent.knowledge",
           "to": "agent key 'knowledge' removed (#3896 close-out — declaring sources/indexes never scoped retrieval; restrict at the knowledge-service level)",
           "conversionId": "agent-knowledge-removed",
@@ -946,6 +965,13 @@
         }
       ],
       "migrated": [
+        {
+          "surface": "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
+          "replacement": "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+          "migrationId": "dashboard-widget-compareto-offset",
+          "toMajor": 17,
+          "rationale": "The widget declared three comparison arms; the analytics executor implements one shape, `{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset path — the spec's single author-facing analytics shape — `{ offset }` was forwarded verbatim into that contract and threw `compareTo requires a timeDimension \"undefined\"`, taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every other duration has NO faithful target: `previousPeriod` shifts by the length of whatever window the widget's filter resolves to, which equals `7d` only when that window happens to be seven days long. Rewriting mechanically would silently change which rows the comparison column counts — a wrong number rather than a missing one, which is strictly worse and exactly the class this convergence exists to end. Re-stating the intended window is a judgment about the presentation, not a transform."
+        },
         {
           "surface": "job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)",
           "replacement": "maxRetries <= 10, and backoffMultiplier >= 1",
