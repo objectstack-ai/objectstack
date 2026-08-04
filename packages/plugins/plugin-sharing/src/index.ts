@@ -34,9 +34,19 @@ export {
   bindRuleHooks,
   unbindAllRuleHooks,
   bindRuleCriteriaGuard,
+  ruleRegrantQueue,
   SHARING_RULE_HOOK_PACKAGE,
   RULE_CRITERIA_GUARD_PACKAGE,
 } from './rule-hooks.js';
+export {
+  RULE_RECOMPUTE_ROW_CAP,
+  RuleRegrantQueue,
+  resolveAffectedRows,
+  idsFromHookInput,
+  type AffectedRows,
+  type UnboundedReason,
+  type RecomputeEngine,
+} from './bulk-recompute.js';
 export {
   parseCriteria,
   isMatchAllCriteria,

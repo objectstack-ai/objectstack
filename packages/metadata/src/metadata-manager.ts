@@ -63,6 +63,8 @@ import type {
   MetadataEvent,
   MetaRef,
 } from '@objectstack/metadata-core';
+import { EndpointMatcher } from './endpoint-matcher.js';
+import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 
 /**
  * Watch callback function (legacy)
@@ -174,9 +176,36 @@ export class MetadataManager implements IMetadataService {
   private repoWatchIter?: AsyncIterator<MetadataEvent>;
   private repoWatchClosed = false;
 
+  // ── #5089 (#5040 E2): declared-endpoint index ────────────────────────
+  // Backs `matchEndpoint`. Lazily built from `api` items on the first call
+  // and invalidated by every path that can change them — see
+  // `invalidateListCache` (local writes, repo events, HMR/artifact ingest,
+  // which registers with `notify:false`) and the `subscribe('api', …)`
+  // registration below (cluster peer replay, which reaches watchers only).
+  private static readonly ENDPOINT_METADATA_TYPE = 'api';
+  private readonly endpointMatcher: EndpointMatcher;
+
   constructor(config: MetadataManagerOptions) {
     this.config = config;
     this.logger = createLogger({ level: 'info', format: 'pretty' });
+
+    // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
+    // covering disjoint event sets — both are needed, neither is redundant:
+    //   1. `invalidateListCache('api')` — every LOCAL mutation of the stored
+    //      set, including the `{ notify: false }` writes the artifact ingest
+    //      and the HMR reload use, which by construction never reach a
+    //      watcher. It is the same invariant the list cache carries: if the
+    //      cached list of a type is stale, so is the index built from it.
+    //   2. `subscribe('api', …)` — a CLUSTER peer's write, which
+    //      `attachClusterPubSub` replays through `notifyWatchersLocal` only
+    //      and therefore does not pass through (1). (That the peer replay
+    //      leaves the manager's OWN caches stale is #5109; the index does not
+    //      inherit the bug because it listens on the watcher too.)
+    this.endpointMatcher = new EndpointMatcher({
+      listApiItems: () => this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE),
+      logger: this.logger,
+    });
+    this.subscribe(MetadataManager.ENDPOINT_METADATA_TYPE, () => this.endpointMatcher.invalidate());
 
     // Initialize serializers
     this.serializers = new Map();
@@ -523,6 +552,58 @@ export class MetadataManager implements IMetadataService {
   /** Internal helper: drop the cached `list()` result for a type. */
   private invalidateListCache(type: string): void {
     this.listCache.delete(type);
+    // [#5089] The endpoint index is a cache of the same stored set, so it goes
+    // stale under exactly the same conditions. Hooking here (rather than only
+    // on the watcher) is what covers the `{ notify: false }` writes — artifact
+    // ingest and HMR reload — which never announce to a subscriber.
+    if (type === MetadataManager.ENDPOINT_METADATA_TYPE) {
+      this.endpointMatcher.invalidate();
+    }
+  }
+
+  /**
+   * Enumerate stored items of `type` for an index build — like {@link list},
+   * but a store that cannot be read THROWS instead of contributing nothing.
+   *
+   * [#5089] `list()` deliberately warn-logs and skips a failing loader so a
+   * partially-available metadata plane still serves what it can. That posture
+   * is wrong for `matchEndpoint`: its `undefined` becomes an HTTP 404, and a
+   * store outage that silently yields "zero declarations" would turn every
+   * declared endpoint into a semantic "nothing declares this route". Same
+   * distinction {@link loadDiagnosed} draws on the singular read (ADR-0110
+   * D3) — a miss and an outage are different facts with opposite meanings.
+   *
+   * Deliberately private and single-purpose: it is not a second `list()`, it
+   * is `list()`'s failure posture inverted for the one caller whose answer is
+   * a security/availability decision rather than a best-effort listing.
+   *
+   * ⚠️ This surfaces only failures a loader actually reports. `DatabaseLoader`
+   * currently swallows its own read errors into `[]` (#5108), so a DB outage is
+   * invisible even here — that is a defect in the loader, not a reason to
+   * soften this seam.
+   */
+  private async listForIndex(type: string): Promise<unknown[]> {
+    const items = new Map<string, unknown>();
+
+    const typeStore = this.registry.get(type);
+    if (typeStore) {
+      for (const [name, data] of typeStore) {
+        items.set(name, data);
+      }
+    }
+
+    for (const loader of this.loaders.values()) {
+      // No try/catch, on purpose — see the doc comment above.
+      const loaderItems = await loader.loadMany(type);
+      for (const item of loaderItems) {
+        const itemAny = item as { name?: unknown };
+        if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name)) {
+          items.set(itemAny.name, item);
+        }
+      }
+    }
+
+    return Array.from(items.values());
   }
 
   /**
@@ -1448,6 +1529,35 @@ export class MetadataManager implements IMetadataService {
   }
 
   // ==========================================
+  // API Endpoint Resolution
+  // ==========================================
+
+  /**
+   * Resolve a request's `method`+`path` to the declared `api` metadata item
+   * that owns it — `IMetadataService.matchEndpoint` (#5080 contract, #5089
+   * implementation, #5040 E2).
+   *
+   * The behaviour is specified by the contract text in
+   * `packages/spec/src/contracts/metadata-service.ts`; the mechanics
+   * (normalization, lazy index, loud parse-skip, duplicate resolution) live in
+   * `./endpoint-matcher.ts` and are documented there.
+   *
+   * Scope is THIS instance. There is no environment parameter, because callers
+   * already resolve the `metadata` service for the environment they serve —
+   * adding one here would create a second scoping mechanism.
+   *
+   * Nothing reaches this method over HTTP in 17.x: the dispatcher seam is
+   * #5090's, and publish still rejects a non-empty `apis:` (#4936), so the
+   * whole path is structurally unreachable until the #5040 E7 flip.
+   *
+   * @throws when the metadata store cannot be read — an outage must never be
+   *   reported as a miss, because a miss becomes a 404.
+   */
+  async matchEndpoint(query: { path: string; method: string }): Promise<ApiEndpointMatch | undefined> {
+    return this.endpointMatcher.match(query);
+  }
+
+  // ==========================================
   // Legacy Loader API (backward compatible)
   // ==========================================
 
@@ -1671,6 +1781,7 @@ export class MetadataManager implements IMetadataService {
     await this.stopWatching().catch(() => undefined);
     await this.stopRepositoryWatch().catch(() => undefined);
     this.listCache.clear();
+    this.endpointMatcher.invalidate();
   }
 
   private async startRepositoryWatch(): Promise<void> {

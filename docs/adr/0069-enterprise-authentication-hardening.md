@@ -1,6 +1,6 @@
 # ADR-0069: Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, and anti-brute-force, all enforcement-wired
 
-**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24.
+**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (**the governing constraint** — a security property that isn't enforced at runtime is forbidden; no toggle may be a "false surface"), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings manifest + cascade KV store), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`sys_role` is platform-native, decoupled from better-auth; org scoping), [ADR-0066](./0066-unified-authorization-model.md) (capability/assignment split), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (`current_user` contract, built-in roles)
 **Consumers**: `@objectstack/plugin-auth` (better-auth wiring, `bindAuthSettings`/`applyConfigPatch`, auth route middleware), `@objectstack/service-settings` (`auth.manifest.ts`), `@objectstack/platform-objects` (identity objects `sys_user`/`sys_session`/`sys_account`), `@objectstack/rest` (auth request middleware seam), `../objectui` (settings UI rendering)
@@ -58,7 +58,21 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 |---|---|---|---|
 | `lockout_threshold` (failed attempts, 0 = off) | 0 | `before`/`after` hook on `/sign-in/email` | **[custom]+[field]** `sys_user.failed_login_count`, `sys_user.locked_until`; increment on failure, set `locked_until = now + lockout_duration` past threshold, **reject even on correct password** while locked, reset on success |
 | `lockout_duration_minutes` | 15 | as above | **[custom]** |
-| `rate_limit_window_seconds` / `rate_limit_max` (per IP, auth endpoints) | 60 / 10 | better-auth core `rateLimit` | **[native]** enable + tune better-auth `rateLimit` (stricter `customRules` for `/sign-in/*`, `/sign-up/*`, `/reset-password`); use a **shared store** (not in-memory) for multi-node |
+| `rate_limit_window_seconds` / `rate_limit_max` (per IP, auth endpoints) | 60 / 10 | better-auth core `rateLimit` | **[native]** enable + tune better-auth `rateLimit` (stricter `customRules` for `/sign-in/*`, `/sign-up/*`, `/reset-password`); use a **shared store** (not in-memory) for multi-node — see the scoping note below |
+
+> **What "shared store" means here, exactly: rate-limit counters and nothing else (#4785).**
+> The store is wired as better-auth's `rateLimit.customStorage`, fed by the kernel `cache`
+> service (`createLazyCacheRateLimitStorage`), and it holds **counters only**. It is
+> deliberately **not** better-auth's `secondaryStorage`, because that option is not a
+> counter store — handing better-auth one also relocates the **session of record** into it
+> (`createSession` skips the `sys_session` row, `findSession` answers from the cached
+> snapshot without reading the database), which silently disables every D4 control below.
+> **The session of record is always `sys_session`, the database.** Moving it into the cache
+> would be a NEW decision, not an implementation detail of this row: it would have to
+> supersede D4's revocation mechanism and state its own revocation-consistency
+> requirements — how a revocation invalidates the cached snapshot on every node, and what
+> happens when that invalidation fails — in the same ADR that proposes it. Absent such a
+> decision, a cache-backed session store is out of scope for D2.
 
 > Distinction that matters: better-auth `rateLimit` throttles **requests per IP/path** (native); **account lockout** (per-identity, survives IP rotation) is **custom** and needs the two `sys_user` fields above + an admin "unlock" action.
 
@@ -81,6 +95,27 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 | `max_concurrent_sessions_per_user` (0 = off) | 0 | post-`/sign-in` | **[custom]** count live `sys_session` for the user; reject or evict-oldest past the cap |
 | "Sign out all other sessions" | — | — | **[native]** already wired (`/revoke-other-sessions`, action on `sys_session`) — keep |
 | `session_expiry_days` / `session_refresh_days` | 7 / 1 | `session.expiresIn`/`updateAge` | **[native]** existing — keep |
+
+> **The session of record is `sys_session` — the database (#4785).** All three controls
+> above revoke the same way: stamp the row (`expires_at` into the past, plus
+> `revoked_at`/`revoke_reason` for the audit trail). That mechanism is only sound while
+> better-auth reads sessions from the database, so this is a **precondition of D4, not a
+> deployment preference**: the kernel `cache` service serves auth as the D2 rate-limit
+> counter store only, and is never bound as `secondaryStorage`. `expires_at` is the field
+> that actually revokes — better-auth's session read checks it and nothing else, so
+> `revoked_at`/`revoke_reason` are diagnostics, and a revocation that stamped only those
+> would be inert.
+>
+> Two of these three controls are enforced in `customSession`, which runs **after** the
+> session for the current request has already been validated, so idle-timeout and
+> absolute-max take effect on the **next** request (the detecting request still succeeds).
+> The concurrent cap runs in the sign-in after-hook and is effective immediately.
+>
+> `packages/plugins/plugin-auth/src/session-of-record.test.ts` proves each control really
+> ends a live session end-to-end through the real better-auth pipeline, and pins the
+> counter-factual — that a cache-backed session store makes them inert. The absence of
+> exactly that test is why the conflict in #4785 stayed invisible from 2026-07-04 until it
+> was found by reading the code.
 
 ### D5 — Network gating / IP allowlist (P2)
 
@@ -139,7 +174,7 @@ Each row in D1-D6 names exactly one of these seams. No setting is introduced wit
 | Phase | Status | Notes |
 |---|---|---|
 | **P1** (D1/D2/D3 + D7 fields) | ✅ **implemented** | Password complexity/history/expiry (`assertPasswordComplexity`/`assertPasswordNotReused`/`stampPasswordChangedAt`), HIBP (`haveIBeenPwned` plugin), account lockout (`assertAccountNotLocked`/`recordSignInOutcome` + `unlock_user` action), enforced MFA + grace (`computeAuthGate` → `MFA_REQUIRED`, per-org `require_mfa`), rate-limit tuning (`customRules`). All settings in `auth.manifest.ts`, bound via `bindAuthSettings`. Login-audit fields `last_login_at`/`last_login_ip` stamped on sign-in (`stampLastLogin`). |
-| **P2** (D4/D5) | 🟡 **mostly implemented** | Session idle/absolute/concurrent (`enforceSessionControls`/`enforceConcurrentCap`), the **global** IP allow-list (`isClientIpAllowed`, `auth.allowed_ip_ranges`), and the **shared multi-node rate-limit counters** (better-auth `rateLimit.customStorage` fed by the kernel cache service through `createLazyCacheRateLimitStorage`; shared iff the cache is — Redis adapter in a cluster) are landed. **Correction (#4772):** this row previously claimed a shared **session** store via `secondaryStorage` as landed. It was not: the binding was taken in `AuthPlugin.init()`, which runs *before* `CacheServicePlugin` registers `cache`, so it never fired in the standard composition — and the counters it was supposed to share never reached the cache either. The counters now ride `rateLimit.customStorage`, resolved at counting time. The **session** half is deliberately NOT auto-wired: better-auth answers `findSession` from a `secondaryStorage` snapshot without reading the database, while D4 above revokes by writing the `sys_session` row, so a cache-backed session store silently disables idle-timeout / absolute-max / concurrent-cap enforcement. `cacheSecondaryStorage` remains exported for a host that opts into that trade knowingly. **Remaining:** per-org `sys_organization.allowed_ip_ranges` (+ optional `sys_user.allowed_ip_ranges` override) — tracked in #2571; the session-store question — tracked in #4785. |
+| **P2** (D4/D5) | 🟡 **mostly implemented** | Session idle/absolute/concurrent (`enforceSessionControls`/`enforceConcurrentCap`), the **global** IP allow-list (`isClientIpAllowed`, `auth.allowed_ip_ranges`), and the **shared multi-node rate-limit counters** (better-auth `rateLimit.customStorage` fed by the kernel cache service through `createLazyCacheRateLimitStorage`; shared iff the cache is — Redis adapter in a cluster) are landed. **Correction (#4772):** this row previously claimed a shared **session** store via `secondaryStorage` as landed. It was not: the binding was taken in `AuthPlugin.init()`, which runs *before* `CacheServicePlugin` registers `cache`, so it never fired in the standard composition — and the counters it was supposed to share never reached the cache either. The counters now ride `rateLimit.customStorage`, resolved at counting time. The **session** half is NOT wired, by decision: better-auth answers `findSession` from a `secondaryStorage` snapshot without reading the database, while D4 above revokes by writing the `sys_session` row, so a cache-backed session store silently disables idle-timeout / absolute-max / concurrent-cap enforcement. **Settled 2026-08-04 (#4785): the session of record is always `sys_session`; cache serves auth as the rate-limit counter store only.** `cacheSecondaryStorage` remains exported for a host that opts into that trade knowingly and accepts that it disables the D4 controls — the default composition cannot reach it silently, because the OIDC provider plugin is on by default and better-auth refuses `secondaryStorage` without `session.storeSessionInDatabase`, which `AuthManager` does not plumb. Dual-writing (`storeSessionInDatabase: true`) was considered and **rejected**: the row exists so the controls appear to work, while the read path still answers from the cache. All three controls are proven end-to-end in `session-of-record.test.ts`. **Remaining:** per-org `sys_organization.allowed_ip_ranges` (+ optional `sys_user.allowed_ip_ranges` override) — tracked in #2571. |
 | **P2/P3** (D6) | 🟡 partial | Generic OIDC RP wired (`genericOAuth`/`sso`); admin OIDC **trust-list settings UI** still env/`sys_sso_provider`-only. |
 | **P3** (SAML, broader social) | 🟡 partial | `@better-auth/sso` present (SAML now better-auth-native — see Addendum); broader settings-driven social providers pending. |
 

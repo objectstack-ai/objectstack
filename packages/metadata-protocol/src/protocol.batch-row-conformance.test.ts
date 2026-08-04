@@ -148,7 +148,13 @@ describe('batchData rows conform to BatchOperationResultSchema (#4793)', () => {
 
         expectConformantResponse(res, 2);
         expect(res.results[0].data).toBeUndefined();
-        expect(res.results[1].errors[0].message).toMatch(/no such record/);
+        // [#5088] Was an unclassified engine throw (`no such record`, rendered
+        // INTERNAL_ERROR) because the row reached `engine.update` at all. The
+        // update branch now runs the same existence probe as the single-record
+        // PATCH, so a missing id is refused BEFORE the write with the catalogued
+        // 404 — see `protocol.bulk-record-not-found.test.ts`.
+        expect(res.results[1].errors[0]).toMatchObject({ code: 'RECORD_NOT_FOUND', httpStatus: 404 });
+        expect(res.results[1].errors[0].message).toMatch(/not found/);
     });
 
     it('a row that names no id fails with VALIDATION_FAILED, not an unclassified 500', async () => {

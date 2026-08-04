@@ -61,7 +61,21 @@ const manifest = {
 /** Mail Delivery — SMTP / API provider configuration. */
 export const mailSettingsManifest = manifest as unknown as SettingsManifest;
 
-/** Built-in action handler stub for `mail/test`. */
+/**
+ * Built-in FALLBACK handler for `mail/test`.
+ *
+ * The real one lives in `@objectstack/plugin-email`, which overrides this
+ * via `registerAction` on `kernel:ready` and actually delivers a message
+ * through the configured transport (same pattern as `storage/test`). This
+ * fallback therefore runs only where no email plugin is mounted — it can
+ * check the form, and it cannot send anything.
+ *
+ * So it reports `ok: false`. It previously answered `ok: true` with
+ * "Configuration looks valid … Wire @objectstack/plugin-mail for actual
+ * delivery": a success toast for a mail nobody sent, naming a package that
+ * has never existed. An action button that says "Send test email" must
+ * never report success for a send that did not happen (framework#5087).
+ */
 export const mailTestActionHandler: SettingsActionHandler = async ({ values }) => {
   const provider = String(values.provider ?? 'smtp');
   const fromEmail = values.from_email as string | undefined;
@@ -75,8 +89,9 @@ export const mailTestActionHandler: SettingsActionHandler = async ({ values }) =
     return { ok: false, severity: 'error', message: 'API key is required.' };
   }
   return {
-    ok: true,
-    severity: 'info',
-    message: `Configuration looks valid (provider=${provider}). Wire @objectstack/plugin-mail for actual delivery.`,
+    ok: false,
+    severity: 'warning',
+    message: `No email service is mounted, so NO test message was sent (the form itself is well-formed, provider=${provider}). `
+      + 'Add the "email" capability (@objectstack/plugin-email) to deliver mail and to make this button send a real test.',
   };
 };
