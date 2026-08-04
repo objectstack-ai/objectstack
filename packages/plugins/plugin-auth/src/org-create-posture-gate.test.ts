@@ -28,12 +28,28 @@
 //      of defect pointed the other way, so every scenario asserts BOTH and the
 //      table at the bottom asserts they cannot disagree.
 //
-// The gate judges the REQUESTED posture, which is what the old boolean also
-// meant and what `serve.ts`'s ADR-0093 D5 boot guard keys on — this corrects
-// the KNOB and nothing else. Whether a requested wall is actually ENFORCED is
-// the `tenancy` service's separate answer; the deployment where those two come
-// apart (degraded) is pinned at the bottom as CURRENT behaviour, unchanged by
-// this fix, with the follow-up that owns it.
+// #5261 — and the posture the gate judges is the EFFECTIVE one.
+//
+// #5233 corrected the KNOB and left the gate judging the operator's REQUEST,
+// which is what the demoted boolean also meant. That left exactly one shape
+// where the gate and the flag answered from different facts: ADR-0093 D5
+// degradation — a wall was requested, the enterprise `@objectstack/organizations`
+// runtime is absent, so the `tenancy` service resolves an effective posture of
+// `single` + `degraded`. The console hid the "Create organization" action while
+// the route happily minted organizations whose boundary NO engine enforces:
+// declared-but-unenforced, ADR-0049's canonical failure, at the deployment layer.
+//
+// The maintainer settled it (2026-08-04) as option B: the gate reads the
+// EFFECTIVE posture, the same derivation `/auth/config` reads, so the two sites
+// are one fact and cannot diverge on ANY deployment shape. The assertions this
+// file used to carry as "pinned as CURRENT behaviour (#5261)" are flipped here
+// deliberately, which is precisely what pinning them was for.
+//
+// This is a BREAKING capability contraction, shipped with v17: a deployment
+// running without the enterprise runtime can no longer create organizations at
+// all, whatever its env says. `serve.ts` already refuses to boot that shape
+// without `OS_ALLOW_DEGRADED_TENANCY=1`; the org-create route now refuses too
+// rather than half-working.
 //
 // Real better-auth pipeline throughout (the #3585 EdDSA / #4785 session-of-record
 // precedent: patch the real thing, never stub our own code).
@@ -161,10 +177,11 @@ const enforcedTenancy = (requested: TenancyPosture): TenancyService =>
 /**
  * ADR-0093 D5 degradation: a wall was REQUESTED and the enterprise
  * `@objectstack/organizations` runtime is absent, so `posture` resolves to
- * `single` and `degraded` is true.
+ * `single` and `degraded` is true. Both walled postures degrade — the wall's
+ * code is open, ACTIVATING a multi-organization posture is the entitlement.
  */
-const degradedTenancy = (): TenancyService =>
-  createTenancyService({ requested: 'isolated', probeIsolation: () => false });
+const degradedTenancy = (requested: TenancyPosture = 'isolated'): TenancyService =>
+  createTenancyService({ requested, probeIsolation: () => false });
 
 interface Scenario {
   /** `OS_TENANCY_POSTURE`, or `undefined` to leave it unset. */
@@ -204,6 +221,7 @@ const runGuidedWorkspaceCreation = async (scenario: Scenario, slug = 'acme') => 
     body,
     multiOrgEnabled: features.multiOrgEnabled as boolean,
     tenancyPosture: features.tenancyPosture as TenancyPosture,
+    degradedTenancy: features.degradedTenancy as boolean,
     orgRows: (engine.tables.get('sys_organization') ?? []) as any[],
   };
 };
@@ -224,7 +242,11 @@ afterEach(() => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#5233 — the org-create gate reads OS_TENANCY_POSTURE, not the demoted boolean', () => {
+describe('#5233 — no tenancy service wired: the gate reads OS_TENANCY_POSTURE, not the demoted boolean', () => {
+  // A lean embedding that never registered the `tenancy` service. There is
+  // nothing that knows whether a wall is standing, so both the gate and
+  // `/auth/config` fall back to the operator's env-resolved REQUEST — the path
+  // #5261 leaves exactly as #5233 shipped it, and these cases are its proof.
   it('posture-only deployment (OS_TENANCY_POSTURE=isolated, legacy boolean UNSET) creates the workspace', async () => {
     // THE regression. Configured exactly as the docs say, and exactly as
     // cloud#1012's real `objectstack serve` probe was: the authoritative knob
@@ -312,27 +334,69 @@ describe('#5233 — with a `tenancy` service wired, as a real kernel boot has', 
     expect(run.multiOrgEnabled).toBe(true);
   });
 
-  it('DEGRADED: the gate still allows while the flag hides — pinned as CURRENT behaviour (#5261)', async () => {
-    // ADR-0093 D5: a wall was REQUESTED and cannot be enforced (no enterprise
-    // `@objectstack/organizations`), so the tenancy service reports an
-    // effective posture of `single` + `degraded`. The gate judges the REQUEST,
-    // so it allows; the flag reports ACTUAL capability, so it hides.
+  it('DEGRADED (isolated requested, no enterprise runtime): the gate REFUSES — #5261', async () => {
+    // THE #5261 regression, and the whole point of this change.
     //
-    // That divergence PREDATES this fix — `resolveMultiOrgEnabled()` was an env
-    // read too, and answered `true` here just the same — so #5233 does not
-    // silently change it: tightening the gate to the effective posture would
-    // take org creation away from every deployment running without the
-    // enterprise package, which is a capability decision for the maintainer,
-    // not a knob correction. Filed as #5261. This assertion exists so that
-    // whichever way it is settled, it is settled DELIBERATELY.
+    // ADR-0093 D5: a wall was REQUESTED and cannot be enforced (no enterprise
+    // `@objectstack/organizations`), so the tenancy service reports an effective
+    // posture of `single` + `degraded`. Before #5261 the gate judged the REQUEST
+    // and answered 200 here, while `/auth/config` reported ACTUAL capability and
+    // hid the button — so the console showed no way to create an organization
+    // and the API minted them anyway, each one a tenant boundary that nothing
+    // isolates. Now both read the effective posture: no wall, no organization.
     const run = await runGuidedWorkspaceCreation(
       { posture: 'isolated', tenancy: degradedTenancy() },
       'degraded',
     );
 
-    expect(run.status).toBe(200);
+    expect(run.status).toBe(403);
+    expect(JSON.stringify(run.body)).toContain(
+      'Creating additional organizations is disabled on this deployment.',
+    );
+    // Nothing was minted — the assertion that separates "refused" from
+    // "returned an error after committing the row" (#3624's failure shape).
+    expect(run.orgRows).toHaveLength(0);
     expect(run.multiOrgEnabled).toBe(false);
     expect(run.tenancyPosture).toBe('single');
+    // …and the deployment is branded degraded, so an operator reading
+    // /auth/config can tell "no wall was asked for" from "the wall fell down".
+    expect(run.degradedTenancy).toBe(true);
+  });
+
+  it('DEGRADED (group requested) refuses too — the entitlement gates BOTH walled postures', async () => {
+    // `group` walls organizations as much as `isolated` does (ADR-0105 D1); the
+    // wall's code is open but ACTIVATING a multi-organization posture is the
+    // entitlement, so a `group` request without the enterprise runtime degrades
+    // to `single` exactly like `isolated`. Asserted separately because reading
+    // the gate as an `isolated`-only concern is how `group` briefly became a
+    // free multi-org back door around it.
+    const run = await runGuidedWorkspaceCreation(
+      { posture: 'group', tenancy: degradedTenancy('group') },
+      'degraded-group',
+    );
+
+    expect(run.status).toBe(403);
+    expect(run.orgRows).toHaveLength(0);
+    expect(run.multiOrgEnabled).toBe(false);
+    expect(run.tenancyPosture).toBe('single');
+    expect(run.degradedTenancy).toBe(true);
+  });
+
+  it('the env knobs cannot talk the gate past a degraded tenancy service', async () => {
+    // The escape hatch #5261 deliberately closes. `resolveTenancyPosture()` is
+    // still the fallback for a lean embedding with no tenancy service, so the
+    // temptation is to let a loud enough env config win. It must not: the
+    // service is the only thing that knows whether the wall is STANDING, and a
+    // deployment that could out-shout it would be back to minting unenforced
+    // boundaries. Both knobs are set as loudly as possible here.
+    const run = await runGuidedWorkspaceCreation(
+      { posture: 'isolated', legacy: 'true', tenancy: degradedTenancy() },
+      'degraded-loud-env',
+    );
+
+    expect(run.status).toBe(403);
+    expect(run.orgRows).toHaveLength(0);
+    expect(run.multiOrgEnabled).toBe(false);
   });
 
   it('the verdict is taken LIVE per request, never frozen at plugin-build time', async () => {
@@ -358,16 +422,52 @@ describe('#5233 — with a `tenancy` service wired, as a real kernel boot has', 
     expect(allowed.status).toBe(200);
     expect((manager.getPublicConfig() as any).features.multiOrgEnabled).toBe(true);
   });
+
+  it('sees the enterprise runtime that registers AFTER plugin-auth — the probe is live too', async () => {
+    // [#5261] Same recorded-verdict hazard, one layer down. The `tenancy`
+    // service's `probeIsolation` is lazy BECAUSE `org-scoping` registers after
+    // plugin-auth: the wall genuinely comes up mid-boot. Now that the gate reads
+    // the service's effective posture, caching either the service handle's
+    // answer or our own derivation would freeze the deployment in its
+    // pre-org-scoping state and refuse org creation forever on a fully walled
+    // deployment — #5233's 403, resurrected by a different mistake.
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    delete process.env.OS_MULTI_ORG_ENABLED;
+
+    let orgScopingRegistered = false;
+    const tenancy = createTenancyService({
+      requested: 'isolated',
+      probeIsolation: () => orgScopingRegistered,
+    });
+
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, { getTenancy: () => tenancy });
+    const cookie = cookieFrom(await signUp(manager, 'late-wall@example.com'));
+
+    const refused = await createOrganization(manager, cookie, 'before-wall');
+    expect(refused.status).toBe(403);
+    expect((manager.getPublicConfig() as any).features.multiOrgEnabled).toBe(false);
+
+    // The enterprise runtime registers its `org-scoping` service.
+    orgScopingRegistered = true;
+
+    const allowed = await createOrganization(manager, cookie, 'after-wall');
+    expect(allowed.status).toBe(200);
+    expect((manager.getPublicConfig() as any).features.multiOrgEnabled).toBe(true);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#5233 — /auth/config and the gate agree on every deployment shape', () => {
-  // For every configuration where the requested wall is the wall in force,
+describe('#5233 / #5261 — /auth/config and the gate agree on EVERY deployment shape', () => {
   // `features.multiOrgEnabled` must predict the HTTP answer exactly. A future
   // change that fixes one site and forgets the other fails here, which is the
   // only reason #5233 was ever hard to see — the flag said yes, the route said
-  // no, and nothing compared them. (The one shape where the two legitimately
-  // report different facts — degraded — is asserted above, not here.)
+  // no, and nothing compared them.
+  //
+  // [#5261] The table now covers EVERY shape, with no exceptions carved out.
+  // It used to exclude the degraded rows, because there the two sites reported
+  // different facts by design; making the gate read the effective posture is
+  // what let the exception go, and the exception's absence is itself the proof.
   const scenarios: Array<{ name: string; scenario: Scenario; allowed: boolean }> = [
     { name: 'posture=isolated (legacy unset)', scenario: { posture: 'isolated' }, allowed: true },
     { name: 'posture=group (legacy unset)', scenario: { posture: 'group' }, allowed: true },
@@ -393,6 +493,22 @@ describe('#5233 — /auth/config and the gate agree on every deployment shape', 
     {
       name: 'tenancy service: single',
       scenario: { posture: 'single', tenancy: enforcedTenancy('single') },
+      allowed: false,
+    },
+    // [#5261] The rows the table could not previously hold.
+    {
+      name: 'tenancy service: isolated requested + DEGRADED (no enterprise runtime)',
+      scenario: { posture: 'isolated', tenancy: degradedTenancy('isolated') },
+      allowed: false,
+    },
+    {
+      name: 'tenancy service: group requested + DEGRADED (no enterprise runtime)',
+      scenario: { posture: 'group', tenancy: degradedTenancy('group') },
+      allowed: false,
+    },
+    {
+      name: 'tenancy service: DEGRADED with both env knobs shouting yes',
+      scenario: { posture: 'isolated', legacy: 'true', tenancy: degradedTenancy('isolated') },
       allowed: false,
     },
   ];
