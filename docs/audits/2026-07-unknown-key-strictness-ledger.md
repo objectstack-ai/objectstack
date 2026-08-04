@@ -1060,6 +1060,22 @@ this prose separate them. The held site is `IndexSchema`; the evidence is in its
 row above, the schema's own JSDoc, and §4 of `object-strictness-batch20.test.ts`,
 which pins the strip so the day it changes, it changes deliberately.
 
+**The #5107 split got its first merge-QUEUE test here, and passed silently**, which
+is the outcome worth recording precisely because there is nothing to see. 批 20 was
+evicted from the merge queue with `MERGE_CONFLICT` after #5237 (#5073's
+`allowAddTab`) landed — two batches touching this ledger from two different
+directories. Under the old single-file layout that is exactly the shape that merged
+**clean and wrong** eleven times: 批 20's branch had written `authorable = 16`,
+#5237's had written its own decrement, the prose rows do not overlap so git merges
+them cleanly, and the subtotal — conflicting with nothing — would have landed as one
+side's number. What actually happened: the prose merged with no conflict at all,
+`merge=os-regen` recorded `counts.md` as pending instead of text-merging it, and
+`pre-commit` refused to commit until it was regenerated from the merged tree. The
+recomputed answer is **15** (`ui/` 7 → 6 from #5237, `data/` 22 → 9 from 批 20) — a
+number neither branch ever wrote down, arrived at without anyone having to notice
+that it should be recomputed. That is the whole design: the twelfth instance is the
+first that cost nobody anything.
+
 Worth naming for whoever schedules the next `data/` batch: 批 20 is the first
 batch in this campaign to catch a #5114-class defect **before** shipping it rather
 than after. #5114 was found on `main`, live, because a wave closed
