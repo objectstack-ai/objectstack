@@ -1,0 +1,370 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * #4001 批 20 — `data/object.zod.ts` inner-block strictness.
+ *
+ * The object's TOP level has been closed since #1535 (`create()`'s bespoke
+ * guard) and #4519/#4522 (the schema itself). Its inner blocks were not, and
+ * strictness does not recurse — so until this batch every one of them silently
+ * discarded whatever the author wrote that it did not declare, behind a root
+ * that rejects the same mistake one level up. That asymmetry is the reason this
+ * file mattered: `object` carries the highest author volume in the repo, and an
+ * author who has SEEN the top level reject a typo has every reason to read a
+ * clean parse of `lifecycle: { maxAge: '30d' }` as acceptance.
+ *
+ * 13 of the 14 open sites are closed here. The fourteenth — `IndexSchema` — is
+ * deliberately still open, and section 4 pins that decision with the evidence,
+ * because a deliberately-open shape explained only in prose is indistinguishable
+ * from one nobody got to, which is how the next sweep "finishes the job" and
+ * breaks something.
+ *
+ * This file is the third of the three places each verdict is recorded (the
+ * others: the JSDoc on the shape itself, and the `data/` row in
+ * `docs/audits/2026-07-unknown-key-strictness-ledger.md`).
+ *
+ * What is pinned, and why each needs its own assertion:
+ *
+ *   1. THE DOOR. `.strict()` is a property of a PARSE — a strict schema nobody
+ *      parses gates nothing (#4583). Asserted directly, not inferred from posture.
+ *   2. EVERY closed site at its OWN path, reached through the real carrier key
+ *      rather than standalone: strictness does not recurse, so a closed parent
+ *      proves nothing about a nested block.
+ *   3. The CURATION. Every alias/guidance entry is a CLAIM about the schema
+ *      (ledger finding 18 — this campaign shipped four false ones), so each is
+ *      anchored here to the sibling contract that makes it true.
+ *   4. The one shape left OPEN, with the measurement that says why.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import {
+  ObjectSchema,
+  ObjectAccessConfigSchema,
+  LifecycleSchema,
+  ObjectFieldGroupSchema,
+  ObjectExternalBindingSchema,
+  ObjectExtensionSchema,
+  IndexSchema,
+  defineObjectExtension,
+} from './object.zod';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+
+/** Reject `value` through `schema` and return its issues as a searchable string. */
+function reject(
+  schema: { safeParse: (v: unknown) => { success: boolean; error?: unknown } },
+  value: unknown,
+): string {
+  const r = schema.safeParse(value);
+  expect(r.success, `expected REJECTION, got a successful parse of ${JSON.stringify(value)}`).toBe(false);
+  return JSON.stringify((r.error as { issues?: unknown })?.issues ?? r.error ?? []);
+}
+
+/** Parse `value` and fail loudly (with the issues) if it does not succeed. */
+function accept(
+  schema: { safeParse: (v: unknown) => { success: boolean; error?: unknown; data?: unknown } },
+  value: unknown,
+): unknown {
+  const r = schema.safeParse(value);
+  expect(r.success, `expected ACCEPTANCE, got ${JSON.stringify((r.error as { issues?: unknown })?.issues ?? '')}`).toBe(true);
+  return r.data;
+}
+
+/** A minimal object body that parses — every nested probe is layered onto this. */
+const OBJ = {
+  name: 'batch20_probe',
+  label: 'Batch 20 Probe',
+  fields: { name: { type: 'text', label: 'Name' } },
+} as const;
+
+/** Reject `patch` merged onto a valid object, THROUGH the object root. */
+const rejectOnObject = (patch: Record<string, unknown>): string => reject(ObjectSchema, { ...OBJ, ...patch });
+
+// ===========================================================================
+// 1. The doors — a parse must exist, or none of the rest means anything
+// ===========================================================================
+describe('#4001 批 20 — the doors these shapes are reachable through', () => {
+  it('the `object` metadata type resolves to a registered schema (the save-time 422 door)', () => {
+    expect(getMetadataTypeSchema('object')).toBeDefined();
+  });
+
+  it('`ObjectSchema.create()` is a real parse door — it throws on a malformed config', () => {
+    expect(() =>
+      ObjectSchema.create({ name: 'batch20_probe', fields: { name: { type: 'text', label: 'N' } }, notAnObjectKey: 1 } as never),
+    ).toThrow();
+  });
+
+  it('`defineObjectExtension()` is a real parse door — it throws on a malformed config', () => {
+    expect(() => defineObjectExtension({ extend: 'contact', notAnExtensionKey: 1 } as never)).toThrow();
+  });
+
+  it('controls parse — these tests fail closed, they do not reject everything', () => {
+    accept(ObjectSchema, OBJ);
+    accept(ObjectSchema, {
+      ...OBJ,
+      access: { default: 'private' },
+      lifecycle: { class: 'audit', retention: { maxAge: '7y' } },
+      fieldGroups: [{ key: 'contact_info', label: 'Contact' }],
+      external: { remoteName: 'remote_contacts', writable: true },
+      userActions: { create: false, exportCsv: true },
+      systemFields: { tenant: false, audit: true },
+      activityMilestones: [{ field: 'stage', value: 'won', summary: 'Deal won: {name}' }],
+      publicSharing: { enabled: true, allowedAudiences: ['link_only'] },
+    });
+    accept(ObjectExtensionSchema, { extend: 'contact', fields: {} });
+  });
+
+  it('the root itself was already closed — this batch is the level BELOW it (#1535/#4519/#4522)', () => {
+    expect(rejectOnObject({ notAnObjectKey: 1 })).toContain('notAnObjectKey');
+  });
+});
+
+// ===========================================================================
+// 2. Every closed site, at its own path, through its real carrier
+// ===========================================================================
+describe('#4001 批 20 — closed sites reject unknown keys where they live', () => {
+  it('`access` — the ADR-0066 D2 exposure posture', () => {
+    accept(ObjectAccessConfigSchema, { default: 'private' });
+    expect(reject(ObjectAccessConfigSchema, { default: 'private', notAnAccessKey: 1 })).toContain('notAnAccessKey');
+    // Through the carrier, because strictness does not recurse.
+    expect(rejectOnObject({ access: { default: 'private', notAnAccessKey: 1 } })).toContain('notAnAccessKey');
+  });
+
+  it('`lifecycle` — the ADR-0057 block itself', () => {
+    expect(rejectOnObject({ lifecycle: { class: 'record', notALifecycleKey: 1 } })).toContain('notALifecycleKey');
+  });
+
+  it.each([
+    ['retention', { class: 'audit', retention: { maxAge: '7y', notARetentionKey: 1 } }, 'notARetentionKey'],
+    ['ttl', { class: 'transient', ttl: { field: 'expires_at', expireAfter: '1d', notATtlKey: 1 } }, 'notATtlKey'],
+    ['storage', { class: 'telemetry', storage: { strategy: 'rotation', shards: 7, unit: 'day', notAStorageKey: 1 } }, 'notAStorageKey'],
+    [
+      'archive',
+      { class: 'audit', retention: { maxAge: '7y' }, archive: { after: '7y', to: 'cold', notAnArchiveKey: 1 } },
+      'notAnArchiveKey',
+    ],
+  ])('`lifecycle.%s` — the sub-block, one level below an already-closed parent', (_name, lifecycle, key) => {
+    expect(rejectOnObject({ lifecycle })).toContain(key);
+  });
+
+  it('`fieldGroups[]` — the ADR-0085 group entry, inside an array', () => {
+    accept(ObjectFieldGroupSchema, { key: 'billing', label: 'Billing', collapse: 'collapsed' });
+    expect(rejectOnObject({ fieldGroups: [{ key: 'billing', label: 'Billing', notAGroupKey: 1 }] })).toContain('notAGroupKey');
+  });
+
+  it('`fieldGroups[]` still accepts its three DEPRECATED collapse aliases — they are declared, not tombstoned', () => {
+    // ADR-0085 kept `defaultExpanded`/`collapsible`/`collapsed` as parse-time
+    // aliases. Closing the shape must not turn a documented deprecation into a
+    // rejection; that would be finding 18 (a schema making a false claim).
+    accept(ObjectFieldGroupSchema, { key: 'g', label: 'G', defaultExpanded: false });
+    accept(ObjectFieldGroupSchema, { key: 'g', label: 'G', collapsible: true, collapsed: true });
+  });
+
+  it('`external` — the ADR-0015 federated binding', () => {
+    accept(ObjectExternalBindingSchema, { remoteName: 'remote_contacts', writable: true });
+    expect(rejectOnObject({ external: { remoteName: 'r', notABindingKey: 1 } })).toContain('notABindingKey');
+  });
+
+  it('`userActions` — the CRUD affordance overrides', () => {
+    expect(rejectOnObject({ userActions: { create: true, notAUserActionKey: 1 } })).toContain('notAUserActionKey');
+  });
+
+  it('`systemFields` — the OBJECT arm of the `false | {…}` union', () => {
+    // The literal arm must keep working: closing the object arm must not make
+    // the documented opt-out spelling unparseable.
+    accept(ObjectSchema, { ...OBJ, systemFields: false });
+    accept(ObjectSchema, { ...OBJ, systemFields: { tenant: false } });
+    expect(rejectOnObject({ systemFields: { tenant: true, notASystemFieldKey: 1 } })).toContain('notASystemFieldKey');
+  });
+
+  it('⚠️ `systemFields` is the batch\'s ONE #5014 flattening — pinned honestly, including the part that does not reach the author', () => {
+    // This site is a union (`z.literal(false) | {…}`), so its rejection is an
+    // `invalid_union` whose OWN message is the bare "Invalid input" — the
+    // curated prescription is real, but it sits one level down in
+    // `issue.errors[1][0].message`, and #5014 measured renderers flattening
+    // exactly that away. Every other site in this batch is a plain object and
+    // surfaces its message directly (see the sibling assertions above).
+    //
+    // 批 18 fixed the equivalent on `submitBehavior` by converting to
+    // `z.discriminatedUnion`, which is NOT available here: one arm is the
+    // literal `false`, so there is no discriminant property to key on. Rather
+    // than invent a mechanism inside a strictness batch, the behaviour is
+    // recorded — a caveat written down is worth more than one silently carried.
+    const r = ObjectSchema.safeParse({ ...OBJ, systemFields: { tenant: true, owner: false } });
+    expect(r.success).toBe(false);
+    const issues = (r as { error: { issues: Array<Record<string, unknown>> } }).error.issues;
+    expect(issues[0].code).toBe('invalid_union');
+    expect(issues[0].message, 'the top-level message the author is most likely to be shown').toBe('Invalid input');
+    // The prescription IS there, nested — so the fix is a rendering/union
+    // concern (#5014), not a missing curation.
+    expect(JSON.stringify(issues)).toContain('ownership');
+  });
+
+  it('`activityMilestones[]` — the ADR-0052 §5b.2 milestone entry', () => {
+    expect(
+      rejectOnObject({ activityMilestones: [{ field: 'stage', value: 'won', summary: 'Won', notAMilestoneKey: 1 }] }),
+    ).toContain('notAMilestoneKey');
+  });
+
+  it('`publicSharing` — the share-link policy, where a dropped key fails OPEN', () => {
+    expect(rejectOnObject({ publicSharing: { enabled: true, notASharingKey: 1 } })).toContain('notASharingKey');
+  });
+
+  it('`ObjectExtensionSchema` — the `objectExtensions[]` entry', () => {
+    accept(ObjectExtensionSchema, { extend: 'contact', priority: 300 });
+    expect(reject(ObjectExtensionSchema, { extend: 'contact', notAnExtensionKey: 1 })).toContain('notAnExtensionKey');
+  });
+});
+
+// ===========================================================================
+// 3. The curation — every alias and guidance entry is a CLAIM (finding 18)
+// ===========================================================================
+describe('#4001 批 20 — curation is anchored to the sibling contract that makes it true', () => {
+  it('the bare rejection already names the surface and echoes the key — curation is an upgrade, not a precondition', () => {
+    const msg = rejectOnObject({ publicSharing: { enabled: true, notASharingKey: 1 } });
+    expect(msg).toContain('publicSharing');
+    expect(msg).toContain('notASharingKey');
+  });
+
+  describe('wrong-LAYER pointers — the key is spelled correctly, just written one level off', () => {
+    it('`lifecycle.maxAge` points DOWN into `retention`, where the key really lives', () => {
+      const msg = rejectOnObject({ lifecycle: { class: 'audit', maxAge: '7y' } });
+      expect(msg).toContain('retention');
+      // And the pointed-at spelling really does parse — a prescription that
+      // does not work is worse than none (finding 18).
+      accept(ObjectSchema, { ...OBJ, lifecycle: { class: 'audit', retention: { maxAge: '7y' } } });
+    });
+
+    it('`lifecycle.expireAfter` / `.field` point DOWN into `ttl`', () => {
+      expect(rejectOnObject({ lifecycle: { class: 'transient', expireAfter: '1d' } })).toContain('ttl');
+      expect(rejectOnObject({ lifecycle: { class: 'transient', field: 'expires_at' } })).toContain('ttl');
+      accept(ObjectSchema, { ...OBJ, lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '1d' } } });
+    });
+
+    it('`lifecycle.shards`/`unit`/`strategy` point DOWN into `storage`', () => {
+      for (const patch of [{ shards: 7 }, { unit: 'day' }, { strategy: 'rotation' }]) {
+        expect(rejectOnObject({ lifecycle: { class: 'telemetry', ...patch } })).toContain('storage');
+      }
+    });
+
+    it('`lifecycle.ttl.maxAge` points SIDEWAYS at `retention`, and says which axis each measures', () => {
+      const msg = rejectOnObject({ lifecycle: { class: 'transient', ttl: { field: 'f', expireAfter: '1d', maxAge: '7d' } } });
+      expect(msg).toContain('retention');
+    });
+
+    it('`access.sharingModel` points UP — it is a real TOP-LEVEL key, so distance would never find it', () => {
+      const msg = rejectOnObject({ access: { default: 'private', sharingModel: 'private' } });
+      expect(msg).toContain('TOP-LEVEL');
+      // The claim: `sharingModel` really is accepted one level up.
+      accept(ObjectSchema, { ...OBJ, sharingModel: 'private' });
+    });
+
+    it('`publicSharing.sharingModel` distinguishes LINK sharing from PRINCIPAL sharing', () => {
+      const msg = rejectOnObject({ publicSharing: { enabled: true, sharingModel: 'private' } });
+      expect(msg).toContain('PRINCIPAL');
+    });
+
+    it('`systemFields.owner` points at `ownership` — the field doc above the block names a key the shape never had', () => {
+      const msg = rejectOnObject({ systemFields: { tenant: true, owner: false } });
+      expect(msg).toContain('ownership');
+      // The claim: `ownership` is the real, enforced lever, one level up.
+      accept(ObjectSchema, { ...OBJ, ownership: 'none' });
+    });
+
+    it('`external.allowWrites` names the DOUBLE opt-in — the datasource half and the object half', () => {
+      const msg = rejectOnObject({ external: { remoteName: 'r', allowWrites: true } });
+      expect(msg).toContain('writable');
+      expect(msg).toContain('datasource');
+      accept(ObjectExternalBindingSchema, { remoteName: 'r', writable: true });
+    });
+
+    it('`userActions.sort` names the VIEW block it belongs to — same key NAME, disjoint vocabulary', () => {
+      // `ui/view.zod.ts`'s UserActionsConfigSchema declares sort/search/filter/
+      // refresh/rowHeight/addRecordForm/editInline/buttons; the object block
+      // declares create/import/edit/delete/exportCsv. Nothing overlaps, which
+      // is exactly why an author who learned one writes it on the other.
+      const msg = rejectOnObject({ userActions: { sort: false } });
+      expect(msg).toContain('VIEW');
+    });
+
+    it('`userActions.clone` points at the `enable` capability block, which really does declare it', () => {
+      const msg = rejectOnObject({ userActions: { clone: false } });
+      expect(msg).toContain('enable');
+      accept(ObjectSchema, { ...OBJ, enable: { clone: false } });
+    });
+
+    it('`fieldGroups[].fields` states the direction of the membership edge', () => {
+      const msg = rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', fields: ['name'] }] });
+      expect(msg).toContain('group');
+      // The claim: membership really is declared on the FIELD.
+      accept(ObjectSchema, {
+        ...OBJ,
+        fields: { name: { type: 'text', label: 'Name', group: 'g' } },
+        fieldGroups: [{ key: 'g', label: 'G' }],
+      });
+    });
+
+    it('`objectExtensions[].actions` says the merge has no slot for it, and names the route that does', () => {
+      // `objectql/src/engine.ts` copies exactly extend/fields/label/pluralLabel/
+      // description/validations/indexes/priority onto the extension def, so
+      // `actions` is not "unsupported yet" — there is nowhere for it to arrive.
+      const msg = reject(ObjectExtensionSchema, { extend: 'contact', actions: [] });
+      expect(msg).toContain('objectName');
+    });
+  });
+
+  describe('tombstones — a retired key\'s rejection carries its upgrade', () => {
+    it('`fieldGroups[].visibleWhen` says it was REMOVED, not misspelled', () => {
+      const msg = rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', visibleWhen: 'true' }] });
+      expect(msg).toContain('ADR-0085');
+    });
+  });
+
+  describe('aliases — semantic near-misses edit distance cannot reach', () => {
+    it.each([
+      ['userActions.export → exportCsv', { userActions: { export: true } }, 'exportCsv'],
+      ['publicSharing.audiences → allowedAudiences', { publicSharing: { enabled: true, audiences: [] } }, 'allowedAudiences'],
+      ['publicSharing.redact → redactFields', { publicSharing: { enabled: true, redact: [] } }, 'redactFields'],
+      ['external.table → remoteName', { external: { table: 't' } }, 'remoteName'],
+      ['fieldGroups[].title → label', { fieldGroups: [{ key: 'g', label: 'G', title: 'T' }] }, 'label'],
+    ])('%s', (_name, patch, expected) => {
+      expect(rejectOnObject(patch)).toContain(expected);
+    });
+
+    it('`objectExtensions[].object → extend` — `object` is real on a NEIGHBOURING surface, which is what makes it an alias', () => {
+      expect(reject(ObjectExtensionSchema, { extend: 'contact', object: 'contact' })).toContain('extend');
+    });
+  });
+});
+
+// ===========================================================================
+// 4. The one shape left OPEN — and the measurement that says why
+// ===========================================================================
+describe('#4001 批 20 — `IndexSchema` is deliberately NOT closed', () => {
+  it('still strips, on purpose — do not "finish the job" without reading the JSDoc', () => {
+    const parsed = accept(ObjectSchema, { ...OBJ, indexes: [{ fields: ['name'], where: "status = 'open'" }] }) as {
+      indexes: Array<Record<string, unknown>>;
+    };
+    // The key rides in and is dropped. That IS the defect — it is pinned here
+    // so the day it changes, it changes deliberately.
+    expect(parsed.indexes[0].where).toBeUndefined();
+    expect(parsed.indexes[0].fields).toEqual(['name']);
+  });
+
+  it('the drift is real: the console offers `where`, this schema declares `partial`', () => {
+    // objectui `metadata-admin/EmbeddedItemEditor.tsx` → FALLBACK_SCHEMAS.index
+    // publishes `where` for the partial-index predicate. The spec's key is
+    // `partial`. The editor splices its output into `object.indexes[]` and PUTs
+    // the whole object, and `saveMetaItem` keeps the body verbatim — so closing
+    // this shape 422s a control the console itself renders (the #5114 class).
+    accept(IndexSchema, { fields: ['name'], partial: "status = 'open'" });
+    const parsedWhere = accept(IndexSchema, { fields: ['name'], where: "status = 'open'" }) as Record<string, unknown>;
+    expect(parsedWhere.where, 'the console spelling is silently discarded today').toBeUndefined();
+  });
+
+  it('its SIBLINGS in the same file are closed — this is a held site, not an unwalked file', () => {
+    // The distinction the ledger's Class column exists to carry: a row parked
+    // at a deliberate floor looks exactly like a row nobody finished.
+    expect(rejectOnObject({ lifecycle: { class: 'record', notALifecycleKey: 1 } })).toContain('notALifecycleKey');
+    expect(rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', notAGroupKey: 1 }] })).toContain('notAGroupKey');
+  });
+});

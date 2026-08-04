@@ -49,6 +49,34 @@
  * "absence must be loud" (AGENTS.md, Route & surface ownership §3). Skipping
  * one bad item never disturbs the good ones.
  *
+ * ## The publish gates, applied a second time at load (#5189, #5040 E7b)
+ *
+ * Parsing is necessary and NOT sufficient. `ApiEndpointSchema` accepts shapes
+ * the runtime refuses and shapes ADR-0121 forbids — `type: 'proxy'`, a mapping
+ * `transform`, and above all `authRequired: false` with no armed `rateLimit`.
+ * E7 (#5111) hung the gates that reject those on `ObjectStackDefinitionSchema`,
+ * which covers every path that parses a STACK; #5189 proved that a stored `api`
+ * item need never have been part of one (`metadata.register()`, a Studio write,
+ * `publishPackage`). Most gates degrade safely when bypassed — the executor
+ * answers a structured 501, a mis-namespaced path simply matches nothing — but
+ * D6 has no runtime counterpart at all: the runtime honours `authRequired:
+ * false` faithfully and `deriveBucketConfig` returns `null` for a disarmed
+ * budget, so a bypassed D6 mints an anonymous, zero-quota execution entry
+ * point. That is the exact shape D6 exists to prevent.
+ *
+ * So every parsed item is re-judged here by
+ * {@link identityFreeEndpointGateFailure} — the SAME `firstFailure` the publish
+ * gate runs, minus the two gates that need an identity this module does not
+ * have. The asymmetry is deliberate and worth stating: the **namespace** gate
+ * needs `manifest.namespace` (a stored row carries no manifest, and deriving
+ * one from the very path being judged would be circular), and the
+ * **uniqueness** gate is a per-stack rule that the duplicate-claim resolution
+ * below already covers store-wide. An item failing an identity-free gate is
+ * EXCLUDED from the index and named at `error` level, exactly like a parse
+ * failure: a bypassed endpoint that answers 404 plus a loud log is the safe
+ * failure; one that answers anonymously and unmetered is not. Publish is the
+ * first door; this is the backstop, never the only door.
+ *
  * ## Duplicate claims
  *
  * Two stored items may claim the same METHOD+path (publish rejects that inside
@@ -72,7 +100,12 @@
  * have recovered.
  */
 
-import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
+import {
+  ApiEndpointSchema,
+  identityFreeEndpointGateFailure,
+  normalizeEndpointPath,
+  type ApiEndpoint,
+} from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 
@@ -87,13 +120,13 @@ export function normalizeEndpointMethod(method: string): string {
  * Trim exactly one trailing slash, never from a lone `/`.
  *
  * Applied to BOTH the stored declaration and the query, so the two sides can
- * never disagree about which form is canonical.
+ * never disagree about which form is canonical — and re-exported from
+ * `@objectstack/spec/api`, which OWNS the rule (#5040 E7), rather than
+ * re-implemented here. The publish gate that rejects two endpoints claiming the
+ * same METHOD + path must normalize exactly as this matcher does, or a stack
+ * could publish a duplicate the index then silently resolves to one winner.
  */
-export function normalizeEndpointPath(path: string): string {
-  const raw = String(path ?? '');
-  if (raw.length > 1 && raw.endsWith('/')) return raw.slice(0, -1);
-  return raw;
-}
+export { normalizeEndpointPath };
 
 /** The index key for a normalized method+path pair. */
 export function endpointIndexKey(method: string, path: string): string {
@@ -145,6 +178,24 @@ export function buildEndpointIndex(items: readonly unknown[], logger: Logger): E
     }
 
     const endpoint = parsed.data;
+
+    // [#5189, #5040 E7b] Second door: the identity-free publish gates. A stored
+    // item that never passed publish is excluded rather than served — see the
+    // module header for why D6 in particular cannot be left to the runtime.
+    const gateFailure = identityFreeEndpointGateFailure(endpoint);
+    if (gateFailure) {
+      logger.error(
+        `[EndpointMatcher] stored api item '${endpoint.name}' was stored WITHOUT passing the ` +
+          `endpoint publish gates (#5040 E7 / ADR-0121) — it is EXCLUDED from endpoint matching and ` +
+          `its declared route will answer 404. Republish it through a gated path (a stack artifact, ` +
+          `or \`publishPackage\` with the package's \`manifest.namespace\`); a direct metadata write ` +
+          `is not a publish. Gate failure: ${gateFailure.message}`,
+        undefined,
+        { name: endpoint.name, issue: { path: gateFailure.path, message: gateFailure.message } },
+      );
+      continue;
+    }
+
     const key = endpointIndexKey(endpoint.method, endpoint.path);
     const incumbent = index.get(key);
 

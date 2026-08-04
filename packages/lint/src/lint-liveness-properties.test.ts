@@ -421,14 +421,6 @@ describe('lintLivenessProperties', () => {
       }],
     });
 
-    it('warns on a widget action button that no renderer draws (`actionUrl`)', () => {
-      const findings = lintLivenessProperties(dash({ actionUrl: '/apps/sales/orders' }));
-      const hit = findings.find((f) => f.message.includes('widgets.actionUrl'));
-      expect(hit).toBeDefined();
-      expect(hit!.where).toContain('sales_overview');
-      expect(hit!.hint).toMatch(/header\.actions/);
-    });
-
     it('warns on `colorVariant`, the key this repo\'s own system dashboard authors 7 times', () => {
       const findings = lintLivenessProperties(dash({ colorVariant: 'teal' }));
       const hit = findings.find((f) => f.message.includes('widgets.colorVariant'));
@@ -438,24 +430,57 @@ describe('lintLivenessProperties', () => {
       expect(hit!.hint).toMatch(/options/);
     });
 
-    it('warns on a widget `aria` block that never reaches the DOM', () => {
-      const findings = lintLivenessProperties(dash({ aria: { ariaLabel: 'Total pipeline' } }));
-      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.aria'))).toBe(true);
-    });
-
     it('fans out over EVERY widget, not just the first', () => {
       const findings = lintLivenessProperties({
         dashboards: [{
           name: 'ops',
           widgets: [
             { id: 'a', type: 'metric', dataset: 'd', values: ['v'] },
-            { id: 'b', type: 'metric', dataset: 'd', values: ['v'], actionIcon: 'plus' },
+            { id: 'b', type: 'metric', dataset: 'd', values: ['v'], colorVariant: 'teal' },
           ],
         }],
       });
       // The dead key is on the SECOND widget — a walk that only looked at
       // `widgets[0]` would be silently half-blind on every real dashboard.
-      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.actionIcon'))).toBe(true);
+      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.colorVariant'))).toBe(true);
+    });
+
+    // ── #5010: four of these keys are RETIRED, so this lint must go quiet ─────
+    //
+    // This lint is ledger-driven by design: it warns on rows carrying
+    // `authorWarn`. When a key is retired the row keeps its `dead` verdict (the
+    // tombstone keeps the key in the walked shape) but drops `authorWarn`,
+    // because the advisory has been replaced by something strictly louder — a
+    // `tsc` error and a parse error carrying the prescription.
+    //
+    // Asserting the SILENCE is the point. A retired key that still warned here
+    // would tell an author to "move the affordance" for a key they cannot
+    // author at all, and would double-report every real occurrence.
+    it.each(['actionUrl', 'actionType', 'actionIcon', 'aria'])(
+      'no longer warns on the retired `%s` — the strict parse owns it now (#5010)',
+      (key) => {
+        const value = key === 'aria' ? { ariaLabel: 'Total pipeline' } : 'x';
+        const findings = lintLivenessProperties(dash({ [key]: value }));
+        expect(findings.map((f) => f.message).some((m) => m.includes(`widgets.${key}`))).toBe(false);
+      },
+    );
+
+    it('the retirement silenced only those four — `colorVariant` still warns beside them', () => {
+      // The negative control for the block above. Without it, a change that
+      // broke the dashboard walk entirely (or dropped `dashboard` from
+      // TYPE_COLLECTIONS again) would read as "the retirement worked".
+      const findings = lintLivenessProperties(dash({
+        actionUrl: '/apps/sales/orders',
+        actionType: 'url',
+        actionIcon: 'plus',
+        aria: { ariaLabel: 'Total pipeline' },
+        colorVariant: 'teal',
+      }));
+      const messages = findings.map((f) => f.message);
+      expect(messages.some((m) => m.includes('widgets.colorVariant'))).toBe(true);
+      for (const retired of ['actionUrl', 'actionType', 'actionIcon', 'aria']) {
+        expect(messages.some((m) => m.includes(`widgets.${retired}`))).toBe(false);
+      }
     });
 
     it('stays silent on a widget built entirely from live keys', () => {

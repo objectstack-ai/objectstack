@@ -394,3 +394,211 @@ describe('execution runs on the far side of the policy chain', () => {
         expect(hint).toContain('no execution wiring');
     });
 });
+
+/**
+ * The mapping keys, joined to the chain (#5040 E5c / #5137).
+ *
+ * `api-mapping.test.ts` owns what a projection IS; what is asserted here is
+ * where it applies — that a mapped body is what the executor delegates, that a
+ * mapped result is what the caller receives, that an ERROR answer is never
+ * remapped whatever produced it, and that a declaration this runtime cannot
+ * serve is refused before the target runs rather than after.
+ */
+describe('the mapping keys apply on the two sides of the delegation', () => {
+    const CREATE: ApiEndpoint = ApiEndpointSchema.parse({
+        name: 'showcase_inquiries',
+        path: '/api/v1/apps/showcase/inquiries',
+        method: 'POST',
+        type: 'object_operation',
+        target: 'showcase_inquiry',
+        objectParams: { object: 'showcase_inquiry', operation: 'create' },
+        authRequired: false,
+    });
+
+    const limiters = () => createEndpointRateLimiterRegistry({ resolveCache: async () => undefined });
+
+    function callDataSpy(result: unknown = { id: 'rec_1', name: 'Ada', internal_note: 'do not ship' }) {
+        const calls: unknown[][] = [];
+        return { calls, fn: async (...args: unknown[]) => { calls.push(args); return result; } };
+    }
+
+    const mappedStep = (
+        endpoint: ApiEndpoint,
+        callData: unknown,
+        body: unknown = { firstName: 'Ada', secret: 'internal' },
+        policy: Partial<EndpointPolicyContext> = {},
+    ) => runAppEndpointStep({
+        method: endpoint.method,
+        path: endpoint.path,
+        prefix: '/api/v1',
+        metadataService: matcherFor([endpoint]).service as never,
+        policy: { limiters: limiters(), ...policy },
+        execution: {
+            request: { method: endpoint.method, path: endpoint.path, query: { trace: '1' }, body },
+            deps: { callData: callData as never },
+        },
+    });
+
+    it('delegates the MAPPED body — the executor never sees the raw one', async () => {
+        const spy = callDataSpy();
+        const mapped = ApiEndpointSchema.parse({
+            ...CREATE,
+            inputMapping: [{ source: 'firstName', target: 'first_name' }],
+        });
+
+        const answer = await mappedStep(mapped, spy.fn);
+
+        expect(answer?.status).toBe(201);
+        // `data` is the projection: the renamed field is there and the
+        // undeclared one is gone, delegated through the same `callData` shape
+        // `/data` uses.
+        expect(spy.calls).toEqual([['create', { object: 'showcase_inquiry', data: { first_name: 'Ada' } }, undefined, undefined, undefined]]);
+    });
+
+    it('leaves the query string alone — inputMapping maps the BODY', async () => {
+        // The vocabulary says "Map Request Body to Internal Params"; query
+        // parameters keep reaching the pipeline exactly as they did before.
+        const spy = callDataSpy({ records: [], total: 0 });
+        const find = ApiEndpointSchema.parse({
+            ...CREATE,
+            name: 'showcase_find',
+            method: 'GET',
+            objectParams: { object: 'showcase_inquiry', operation: 'find' },
+            inputMapping: [{ source: 'firstName', target: 'first_name' }],
+        });
+
+        await mappedStep(find, spy.fn);
+
+        expect((spy.calls[0]![1] as { query: unknown }).query).toEqual({ trace: '1' });
+    });
+
+    it('delegates the caller\'s own body when no mapping is declared', async () => {
+        const spy = callDataSpy();
+        const body = { firstName: 'Ada', secret: 'internal' };
+
+        await mappedStep(CREATE, spy.fn, body);
+
+        // By reference: an endpoint that declares no mapping is served exactly
+        // as E5b served it, with no projection in between.
+        expect((spy.calls[0]![1] as { data: unknown }).data).toBe(body);
+    });
+
+    it('answers with the MAPPED result on a success', async () => {
+        const spy = callDataSpy();
+        const mapped = ApiEndpointSchema.parse({
+            ...CREATE,
+            outputMapping: [{ source: 'id', target: 'inquiry_id' }, { source: 'name', target: 'contact.name' }],
+        });
+
+        const answer = await mappedStep(mapped, spy.fn);
+
+        expect(answer?.status).toBe(201);
+        expect(answer?.body).toEqual({
+            success: true,
+            data: { inquiry_id: 'rec_1', contact: { name: 'Ada' } },
+            meta: undefined,
+        });
+        // The allow-list property, end to end: an internal field the pipeline
+        // returned and the declaration did not name never reaches the wire.
+        expect(JSON.stringify(answer?.body)).not.toContain('internal_note');
+    });
+
+    it('keeps the cacheTtl header on a mapped success', async () => {
+        // `cacheTtl` is GET-only (#5040 §3.3), so this is a read endpoint: the
+        // point is that the two keys compose — the projection replaces the body
+        // and the policy verdict's header still rides with it.
+        const mapped = ApiEndpointSchema.parse({
+            ...CREATE,
+            name: 'showcase_cached_map',
+            method: 'GET',
+            objectParams: { object: 'showcase_inquiry', operation: 'find' },
+            cacheTtl: 30,
+            outputMapping: [{ source: 'total', target: 'count' }],
+        });
+
+        const answer = await mappedStep(mapped, callDataSpy({ records: [], total: 2 }).fn);
+
+        expect(answer?.body).toEqual({ success: true, data: { count: 2 }, meta: undefined });
+        expect(answer?.headers).toEqual({ 'Cache-Control': 'private, max-age=30' });
+    });
+
+    it('never remaps an ERROR answer — a mapping must not disguise a failure', async () => {
+        const outputMapping = [{ source: 'id', target: 'inquiry_id' }];
+
+        // 401: denied by the policy chain, before execution.
+        const authed = ApiEndpointSchema.parse({ ...CREATE, name: 'showcase_authed', authRequired: true, outputMapping });
+        const denied = await mappedStep(authed, callDataSpy().fn);
+        expect(denied?.status).toBe(401);
+        expect((denied!.body as { error: { code: string } }).error.code).toBe('UNAUTHENTICATED');
+
+        // 400: a delegated pipeline's own failure.
+        const failing = ApiEndpointSchema.parse({ ...CREATE, name: 'showcase_failing', outputMapping });
+        const bad = await mappedStep(failing, async () => { throw { statusCode: 400, message: 'name is required' }; });
+        expect(bad?.status).toBe(400);
+        expect((bad!.body as { error: { message: string } }).error.message).toBe('name is required');
+
+        // 501: a declaration this runtime does not execute.
+        const proxied = ApiEndpointSchema.parse({
+            ...CREATE, name: 'showcase_proxy_map', type: 'proxy', target: 'https://example.invalid', outputMapping,
+        });
+        const unsupported = await mappedStep(proxied, callDataSpy().fn);
+        expect(unsupported?.status).toBe(501);
+        expect((unsupported!.body as { error: { code: string } }).error.code).toBe('NOT_IMPLEMENTED');
+
+        // 429: the endpoint budget, spent. Every one of these bodies is the
+        // error envelope, untouched by the declared projection.
+        const entries = new Map<string, unknown>();
+        const store: CounterStore = {
+            get: async <T,>(k: string) => entries.get(k) as T | undefined,
+            set: async (k: string, v: unknown) => { entries.set(k, v); },
+        };
+        const limited = ApiEndpointSchema.parse({
+            ...CREATE, name: 'showcase_limited_map', outputMapping,
+            rateLimit: { enabled: true, windowMs: 1_000, maxRequests: 1 },
+        });
+        const policy = { limiters: createEndpointRateLimiterRegistry({ resolveCache: async () => store }) };
+        expect((await mappedStep(limited, callDataSpy().fn, undefined, policy))?.status).toBe(201);
+        const over = await mappedStep(limited, callDataSpy().fn, undefined, policy);
+        expect(over?.status).toBe(429);
+
+        for (const answer of [denied, bad, unsupported, over]) {
+            expect(JSON.stringify(answer?.body)).not.toContain('inquiry_id');
+            expect((answer!.body as { success: boolean }).success).toBe(false);
+        }
+    });
+
+    it('refuses a `transform` declaration at request time, without executing anything', async () => {
+        const spy = callDataSpy();
+        const withTransform = ApiEndpointSchema.parse({
+            ...CREATE,
+            inputMapping: [{ source: 'price', target: 'amount', transform: 'convertToInt' }],
+        });
+
+        const answer = await mappedStep(withTransform, spy.fn);
+
+        expect(answer?.status).toBe(501);
+        const error = (answer!.body as { error: Record<string, unknown> }).error;
+        expect(error.code).toBe('NOT_IMPLEMENTED');
+        expect(String(error.message)).toContain('inputMapping[0].transform');
+        expect(spy.calls, 'a refused declaration still reached the pipeline').toEqual([]);
+        // No `Cache-Control` on a refusal, for the same reason as any error.
+        expect(answer?.headers).toBeUndefined();
+    });
+
+    it('refuses a broken outputMapping BEFORE the target runs, not after', async () => {
+        // The ordering that matters: a `create` with an unservable projection
+        // must not insert the record and then fail to answer with it.
+        const spy = callDataSpy();
+        const broken = ApiEndpointSchema.parse({
+            ...CREATE,
+            outputMapping: [{ source: 'id', target: 'a' }, { source: 'name', target: 'a.b' }],
+        });
+
+        const answer = await mappedStep(broken, spy.fn);
+
+        expect(answer?.status).toBe(501);
+        expect(String((answer!.body as { error: { message: string } }).error.message))
+            .toContain('outputMapping[1].target');
+        expect(spy.calls, 'the record was created and then the answer was refused').toEqual([]);
+    });
+});

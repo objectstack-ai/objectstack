@@ -2,6 +2,11 @@
   "//": "ADR anchors — see scripts/check-adr-anchors.mjs. Each entry pins the ADR ids that MUST stay referenced in a file whose behaviour an accepted ADR decided. Add an entry when an ADR's decision is realized in code that would look arbitrary (or wrong) to someone reading the file alone.",
   "anchors": [
     {
+      "file": "packages/objectql/src/lifecycle/lifecycle-service.ts",
+      "adrs": ["ADR-0057"],
+      "invariant": "ADR-0057 P4 settings overrides are bounded from below by consumer-registered retention floors (§3.3 amendment, #5195). An override under a floor — global or tenant-scoped — is REJECTED, never clamped to the floor: the declared window is the one fallback, the same resolution an unparseable override already gets, and a clamp would enforce a third number written in neither the declaration nor the settings. Floors are runtime wiring, not spec surface, for the reap-guard reason plus one of their own — the first floor IS `DbQueueAdapterOptions.idempotencyWindowMs`, a per-kernel construction option a static `lifecycle` key could only copy and drift from. The rejection is `error`-level with consequence and fix because what it prevents (duplicate delivery on a reaped dedup row) leaves the system looking healthy."
+    },
+    {
       "file": "packages/objectql/src/validation/rule-validator.ts",
       "adrs": ["ADR-0057", "ADR-0058"],
       "invariant": "A declared field lock is the SERVER's to enforce (ADR-0057 D10 — the client grid is courtesy). A `readonlyWhen` whose predicate names a scope root the write path could not bind resolves to LOCKED, not to \"not locked\": \"could not check\" must never read as \"allowed\" on a field the author declared frozen. This narrows ADR-0058 D5's fail-soft tier deliberately and only for that case — a merely BROKEN predicate (undeclared key, null overload, parse fault, throw) still fails open, and requiredWhen / option visibleWhen are untouched."
@@ -100,6 +105,31 @@
       "file": "packages/spec/src/kernel/functional-completeness.ts",
       "adrs": ["ADR-0078"],
       "invariant": "Every rule here cites the runtime line that silently skips the instance, and every deliberate NON-rule cites the evidence that exempts it (ADR-0078 §6). `multiselect` without `options` is NOT flagged — `record-validator.ts` blesses it verbatim as free-form tags, which is §1 case (3) genuinely-optional; `user` relationships and `timeline`/`tree` views are exempt for their own stated reasons. A rule added without its skip-site citation, or an exemption 'fixed', is a false prescription: it tells an AI author to change working metadata, which is the failure this gate exists to prevent."
+    },
+    {
+      "file": "packages/spec/src/data/field.zod.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "`UniqueScopeSchema` is the closed scope vocabulary `boolean | 'global' | 'organization'` (ADR-0120 D1). `'organization'` is the explicit synonym of field-level `true` — identical materialization, and `isUniqueDeclared` MUST count it (a word the vocabulary accepts but no driver reads is declarable-but-inert, ADR-0078). `'tenant'` and `'org'` are rejected, never aliased — the parse error names `'organization'` (§Terminology; PD #12: one contract, no dialects). The single-tenant story is D3's NULL-safe COALESCE bucket, NOT the retired 'composite degenerates to single-column' claim #5030 falsified."
+    },
+    {
+      "file": "packages/spec/src/data/object.zod.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "`IndexSchema.unique` scope contract (ADR-0120 D1, amending #3696): `'global'` = verbatim columns (no organization column injected); `'organization'` = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration; bare `true` = deprecated positional spelling of `'global'` — warned in 17.x (lint unique/unscoped-declared-index), rejected at protocol 18 (#5082). Do NOT re-broaden the describe() back to 'true and global are synonyms, list the tenant column yourself' — that is the #4986 trap, and the hand-written composite is not NULL-safe (#5030)."
+    },
+    {
+      "file": "packages/lint/src/data-model-rules.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "The uniqueness rules judge SPELLINGS only, never inferred tenancy or posture (authoring-time tenancy inference is impossible — `organization_id` is kernel-injected; the dead end is documented on #4698). `unique/unscoped-declared-index` (D5a) fires on bare declared `unique: true` — warning in 17.x, the protocol-18 gate rejects the spelling (#5082). `unique/double-declaration` (D5b) is the four-quadrant scope matrix: cross-scope = contradiction (the installation-wide side wins physically), same-scope = redundancy. Fix texts speak the `'organization'`/`'global'` vocabulary — never resurrect the hand-written `['organization_id', …]` advice (not NULL-safe, #5030)."
+    },
+    {
+      "file": "packages/plugins/driver-sql/src/schema-drift.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "The organization key part of every organization-scoped unique index is the NULL-safe COALESCE form — `COALESCE(<tenantField>, '__global__')` — never the bare column: SQL UNIQUE is NULL-distinct, so the bare composite enforces NOTHING on NULL-organization rows, which on a single-tenant stack is every row (#5030). Declared-index `unique: 'global'`/bare `true` stays VERBATIM (the #3696 contract, now the 'global' arm of the vocabulary); `'organization'` prepends the key part at registration. Expected and physical sides compare through the SAME normalization, literal-agnostic on the COALESCE literal — two spellings of the literal are one constraint, never drift (#4884)."
+    },
+    {
+      "file": "packages/plugins/driver-sql/src/sql-driver.ts",
+      "adrs": ["ADR-0120"],
+      "invariant": "The bare-composite → NULL-safe tightening migrates through the ceremony (ADR-0120 D4): a `recreate_index` gated by the duplicate pre-flight probe — clean data grades it `safe` (dev autoMigrate may apply), duplicates BLOCK it with a row report and the old index stays in place; apply re-probes, so even --allow-destructive cannot drop a constraint whose replacement is not creatable. Storage stays NULL — GLOBAL_TENANT is an index-key fold, never written to the organization column."
     }
   ]
 }

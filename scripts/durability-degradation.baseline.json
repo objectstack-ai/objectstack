@@ -5,7 +5,54 @@
     "site that gets fixed must have its entry deleted in the same PR. There is deliberately",
     "no `--fix`/`--update` flag — a generator would let a new violation be admitted by",
     "'just run the update command', which is precisely how a gate stops meaning anything.",
-    "Every entry names WHY it is still here and WHAT closes it."
+    "Every entry names WHY it is still here and WHAT closes it.",
+    "",
+    "Key granularity is `<file>::<callee>`, NOT a line — line numbers churn on every",
+    "unrelated edit and a line-keyed ledger would go stale constantly. The cost is that an",
+    "entry licenses the WHOLE file for that callee: a genuinely new silent swallow of the",
+    "same callee in an already-listed file would be excused. Read the entry's `sites` list",
+    "as the set it was reviewed against, and re-review when that file grows a new one."
   ],
-  "entries": []
+  "entries": [
+    {
+      "file": "packages/runtime/src/domains/meta.ts",
+      "callee": "saveMetaItem",
+      "sites": ["PUT /metadata/:type/:name — catch → deps.errorFromThrown(e, 400)"],
+      "reason": [
+        "Not a degradation: `saveMetaItem` IS this request's primary operation, and the catch",
+        "hands the failure straight back to the caller as a real 4xx/422 error envelope",
+        "(errorFromThrown preserves the protocol's own `.status` plus the structured",
+        "spec-validation `issues`). Nothing continues on a reduced path and nothing looks",
+        "normal afterwards — the Studio that asked for the save is told, field-anchored, that",
+        "it did not happen. AGENTS.md's judgment question ('does the system still look normal",
+        "while something it claims is persisted has not landed?') answers NO here.",
+        "Raising it to `error` would be the mirror-image failure AGENTS.md warns about: the",
+        "common case on this path is an author submitting an off-spec body, so it would emit a",
+        "durability `error` per bad keystroke and train everyone to skim `error` — which is",
+        "what made the #4420 `warn` unreadable in the first place."
+      ],
+      "closes": "#5241 — teach the checker a DECLARED failure-propagation vocabulary (a catch whose every path returns an error envelope propagates the failure and is not a degradation), then delete this entry. Until then the gate cannot tell 'reported to the caller' from 'swallowed'.",
+      "added": "2026-08-04 (#4754, the PR that added `saveMetaItem` to DURABILITY_CRITICAL_CALLEES)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "callee": "saveMetaItem",
+      "sites": [
+        "migrateStoredItems() apply pass — catch → record({ outcome: 'failed', reason }), which increments report.failed and itemises the row",
+        "duplicate/copy into target package — catch → failed.push({ type, name, error }), which flips the returned `success` to false and populates failedCount/failed[]"
+      ],
+      "reason": [
+        "Not a degradation: both are batch operations whose CONTRACT is a per-item outcome",
+        "report, and both catches write the failure into that report rather than dropping it.",
+        "The first increments a `failed` counter and itemises the row with its reason; the",
+        "second flips the aggregate `success` to false and returns the failed item in",
+        "`failed[]`. This is strictly louder than a log line — it is the `error` + counter",
+        "shape #4669 itself adopted, delivered as structured data the caller cannot miss.",
+        "The system does not look normal afterwards: the response says, per item, that the",
+        "write did not land."
+      ],
+      "closes": "#5241 — same declared failure-propagation vocabulary (structured per-item outcome reports are the second shape it must cover), then delete this entry.",
+      "added": "2026-08-04 (#4754, the PR that added `saveMetaItem` to DURABILITY_CRITICAL_CALLEES)"
+    }
+  ]
 }

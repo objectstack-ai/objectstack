@@ -191,6 +191,174 @@ describe('ShareLinkService', () => {
     expect(await service.resolveToken('expired-token-xyz-123')).toBeNull();
   });
 
+  // ── [#5190] the record-existence gate ─────────────────────────────────────
+  //
+  // A share link is an identity-less CAPABILITY token: holding the URL IS the
+  // authorisation. `resolveToken` checked the token, `revoked_at`, `expires_at`,
+  // the audience and the password — and never whether the record it points at
+  // still existed. Delete the record and the link kept resolving; reuse the
+  // record id and the link starts authorising a brand-new record for whoever
+  // kept the URL.
+  //
+  // This suite pins the FAIL-CLOSED half, which holds whether or not the delete
+  // cascade (record-share-cascade.test.ts) ever ran.
+  describe('a deleted record kills the link (#5190)', () => {
+    /** Mint a link on the live `c1`, then make `c1` disappear. */
+    async function mintThenDeleteRecord(): Promise<string> {
+      const link = await service.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'u1' },
+      );
+      engine._tables.ai_conversations = [];
+      return link.token;
+    }
+
+    it('THE REPRO — refuses to resolve once the shared record is deleted', async () => {
+      const token = await mintThenDeleteRecord();
+      expect(await service.resolveToken(token)).toBeNull();
+    });
+
+    /**
+     * The response must not tell an unauthorised holder WHICH failure they hit:
+     * "that record was deleted" is itself information they have no claim to,
+     * and a distinct status would turn every leaked token into an existence
+     * oracle over the object. Same branch, same `null`, no throw — a mutation
+     * that raises a dedicated error (or returns a marker object) fails here even
+     * though the link stops resolving.
+     */
+    it('is indistinguishable from revoked / expired / unknown — one `null`, never a throw', async () => {
+      const attempt = async (token: string) => {
+        try {
+          return { threw: false, value: await service.resolveToken(token) };
+        } catch (err) {
+          return { threw: true, value: err };
+        }
+      };
+
+      // The dead-record link points at `c2`, so removing it leaves `c1` alive
+      // for the other three cases — every outcome below differs ONLY in why it
+      // failed.
+      engine._tables.ai_conversations.push({ id: 'c2', title: 'Second' });
+      const deadRecord = await service.createLink(
+        { object: 'ai_conversations', recordId: 'c2', audience: 'link_only', permission: 'view' },
+        { userId: 'u1' },
+      );
+      engine._tables.ai_conversations = engine._tables.ai_conversations.filter((r) => r.id !== 'c2');
+      const revoked = await service.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'u1' },
+      );
+      await service.revokeLink(revoked.id, { userId: 'u1' });
+      engine._tables.sys_share_link.push({
+        id: 'shl_expired',
+        token: 'expired-token-xyz-123',
+        object_name: 'ai_conversations',
+        record_id: 'c1',
+        permission: 'view',
+        audience: 'link_only',
+        expires_at: new Date(Date.now() - 60_000).toISOString(),
+        revoked_at: null,
+      });
+
+      const outcomes = await Promise.all([
+        attempt(deadRecord.token),
+        attempt(revoked.token),
+        attempt('expired-token-xyz-123'),
+        attempt('nope-not-a-real-token-xyz'),
+      ]);
+
+      expect(outcomes).toEqual([
+        { threw: false, value: null },
+        { threw: false, value: null },
+        { threw: false, value: null },
+        { threw: false, value: null },
+      ]);
+    });
+
+    /**
+     * Follows from the gate sitting BEFORE the usage stamp, and pinned
+     * separately because the ordering is what makes it true: a dead record must
+     * not keep ticking `use_count` / `last_used_at`, which is both noise in the
+     * Setup grid and a bad signal for anyone auditing a leaked link.
+     */
+    it('does not stamp use_count / last_used_at for a dead-record link', async () => {
+      const token = await mintThenDeleteRecord();
+      const row = () => engine._tables.sys_share_link[0];
+
+      await service.resolveToken(token);
+
+      expect(row().use_count).toBe(0);
+      expect(row().last_used_at).toBeNull();
+
+      // Control: the same link on a LIVE record still stamps, so the assertion
+      // above is about the record's death, not about stamping being broken.
+      engine._tables.ai_conversations = [{ id: 'c1', title: 'Demo' }];
+      await service.resolveToken(token);
+      expect(row().use_count).toBe(1);
+      expect(row().last_used_at).not.toBeNull();
+    });
+
+    /**
+     * "Could not ask" must not authorise. The orphan SWEEP fails the other way
+     * (a failed probe deletes nothing) — both refuse to act on an unanswered
+     * question; only the safe direction differs, because one grants access and
+     * the other destroys rows.
+     */
+    it('fails CLOSED when the existence probe throws', async () => {
+      const token = await mintThenDeleteRecord();
+      engine._tables.ai_conversations = [{ id: 'c1', title: 'Demo' }];
+      const broken = {
+        ...engine,
+        async find(object: string, options?: any) {
+          if (object === 'ai_conversations') throw new Error('driver down');
+          return engine.find(object, options);
+        },
+      };
+      const svc = new ShareLinkService({ engine: broken as any });
+
+      expect(await svc.resolveToken(token)).toBeNull();
+    });
+
+    it('a link on a record that never existed is refused even when nothing else objects', async () => {
+      // Minted by a SYSTEM caller (which may mint on any object), then the row
+      // outlives its record — the path no `publicSharing` opt-in guards.
+      engine._tables.sys_share_link = [{
+        id: 'shl_ghost',
+        token: 'ghost-token-abcdefgh',
+        object_name: 'ai_conversations',
+        record_id: 'never_existed',
+        permission: 'view',
+        audience: 'link_only',
+        expires_at: null,
+        revoked_at: null,
+        use_count: 0,
+        last_used_at: null,
+      }];
+
+      expect(await service.resolveToken('ghost-token-abcdefgh')).toBeNull();
+    });
+
+    it('costs no existence query on a link the cheap gates already rejected', async () => {
+      const probed: string[] = [];
+      const recording = {
+        ...engine,
+        async find(object: string, options?: any) { probed.push(object); return engine.find(object, options); },
+      };
+      const svc = new ShareLinkService({ engine: recording as any });
+      const link = await svc.createLink(
+        { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+        { userId: 'u1' },
+      );
+      await svc.revokeLink(link.id, { userId: 'u1' });
+      probed.length = 0;
+
+      expect(await svc.resolveToken(link.token)).toBeNull();
+
+      // Only the token lookup — a revoked link never pays for the record probe.
+      expect(probed).toEqual(['sys_share_link']);
+    });
+  });
+
   // ── [Finding-2] verified-authz enforcement ────────────────────────────────
   describe('authorization (Finding-2)', () => {
     it('only the creator may revoke a link (a different user is denied)', async () => {

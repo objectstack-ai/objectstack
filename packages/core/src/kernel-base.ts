@@ -247,7 +247,15 @@ export abstract class ObjectKernelBase {
     }
 
     /**
-     * Trigger a hook with all registered handlers
+     * Trigger a hook with all registered handlers, ISOLATING failures: a
+     * handler that throws is logged and the remaining handlers still run.
+     *
+     * Use this for notification-style hooks, where one subscriber's failure
+     * must not deny the others their notification. It is the WRONG dispatcher
+     * for a hook that carries boot assertions — a swallowed throw there turns
+     * "this deployment refuses to start misconfigured" into a log line nobody
+     * reads. Those hooks use {@link triggerHookOrThrow} (#5170).
+     *
      * @param name - Hook name
      * @param args - Arguments to pass to handlers
      */
@@ -265,6 +273,43 @@ export abstract class ObjectKernelBase {
                 this.logger.error(`Hook handler failed: ${name}`, error as Error);
                 // Continue with other handlers even if one fails
             }
+        }
+    }
+
+    /**
+     * Trigger a hook with all registered handlers, PROPAGATING the first
+     * failure: the remaining handlers do not run and the original error
+     * reaches the caller unwrapped.
+     *
+     * This is the dispatch semantics `ObjectKernel` has always had for every
+     * lifecycle hook (its `context.trigger` is a bare awaited loop that never
+     * catches). `LiteKernel` used the isolating {@link triggerHook} for all of
+     * them, so one hook name meant two opposite things depending on which
+     * kernel booted the same plugin code (#5170). `kernel:ready` is the hook
+     * where that divergence bites: it is the only correct moment for a plugin
+     * to assert that the preconditions it declared were actually met (the
+     * registries are still filling during `init()`), so "declared but not
+     * deliverable ⇒ refuse to boot" gates live there — and on LiteKernel,
+     * which is what vitest/serverless/edge run, they were being downgraded to
+     * an error log while the process carried on serving traffic without the
+     * guarantee it claimed.
+     *
+     * Deliberately NOT applied to the other hook names: #5170 rules
+     * `kernel:ready` only, and a notification hook keeping fail-soft dispatch
+     * is a separate judgement per hook, not a side effect of this one.
+     *
+     * @param name - Hook name
+     * @param args - Arguments to pass to handlers
+     */
+    protected async triggerHookOrThrow(name: string, ...args: any[]): Promise<void> {
+        const handlers = this.hooks.get(name) || [];
+        this.logger.debug(`Triggering hook: ${name}`, {
+            hook: name,
+            handlerCount: handlers.length,
+        });
+
+        for (const handler of handlers) {
+            await handler(...args);
         }
     }
 

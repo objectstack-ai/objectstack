@@ -72,24 +72,18 @@
         },
         "actionUrl": {
           "status": "dead",
-          "authorWarn": true,
-          "verifiedAt": "2026-08-03",
-          "authorHint": "No renderer draws a per-widget action button — only `dashboard.header.actions[]` is dispatched. Move the affordance to a header action, or drop the key.",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere reads `widget.actionUrl`. Note the second-order cost: packages/lint/src/validate-dashboard-action-refs.ts:328-333 enforces reference integrity on this key and its docblock calls it 'the per-widget button', mirroring a runtime dispatch that does not exist — so a dangling target fails the build for an affordance that never renders. ADR-0049 enforce-or-remove tracked in #5010."
+          "verifiedAt": "2026-08-04",
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03, re-measured 2026-08-04 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere read `widget.actionUrl`. The second-order cost is settled in the same change: packages/lint/src/validate-dashboard-action-refs.ts enforced ERROR-severity reference integrity on this key while its docblock called it 'the per-widget button', so a dangling target failed the build for an affordance that never rendered — that widget branch is deleted, with a pin test asserting it stays silent. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
         },
         "actionType": {
           "status": "dead",
-          "authorWarn": true,
-          "verifiedAt": "2026-08-03",
-          "authorHint": "Pairs with the dead `actionUrl` — no per-widget action button exists. Use `dashboard.header.actions[]`.",
-          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Read only by packages/lint/src/validate-dashboard-action-refs.ts:331 to pick which resolution rule to apply to the (unrendered) `actionUrl`. ADR-0049 enforce-or-remove tracked in #5010."
+          "verifiedAt": "2026-08-04",
+          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Its only consumer was the action-ref lint, picking which resolution rule to apply to the (unrendered) `actionUrl`; that branch is gone too. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
         },
         "actionIcon": {
           "status": "dead",
-          "authorWarn": true,
-          "verifiedAt": "2026-08-03",
-          "authorHint": "No per-widget action button renders, so its icon reaches nothing. Use `dashboard.header.actions[].icon`.",
-          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looks at it. ADR-0049 enforce-or-remove tracked in #5010."
+          "verifiedAt": "2026-08-04",
+          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looked at it. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
         },
         "filter": {
           "status": "live",
@@ -99,7 +93,6 @@
         },
         "compareTo": {
           "status": "live",
-          "verifiedAt": "2026-08-03",
           "verifiedAt": "2026-08-04",
           "evidence": "packages/services/service-analytics/src/dataset-executor.ts — runCompare() reads `compareTo.kind` (shiftRange) and resolves `compareTo.dimension` via resolveCompareDimension(); packages/spec/src/contracts/analytics-service.ts DatasetCompareTo is the same `{ kind, dimension? }` shape the widget now declares; objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:163-168 (forwards the structured object into DatasetSelection.compareTo)",
           "note": "CONVERGED 2026-08-04 (#5011) — this entry SUPERSEDES the path-split record it carried, which is now history rather than the shape. What it recorded was real: the widget declared three arms ('previousPeriod' / 'previousYear' / { offset }) that only the LEGACY inline object-provider chart path could run (objectui packages/core/src/utils/compare-to.ts shiftFilterByCompareTo), while on the ADR-0021 dataset path — the one the spec calls the single author-facing analytics shape — DatasetWidget deliberately DROPPED the two string arms and forwarded `{ offset }` into a contract with no `offset` in it, so dataset-executor.ts threw 'compareTo requires a timeDimension \"undefined\"'. Same key, two fates, the failing one blessed. The fix converged the widget's vocabulary onto the executor's: `compareTo` is now `{ kind, dimension? }`, a thin projection of DatasetSelection.compareTo, so `declared = enforced` holds by construction with no second vocabulary left to drift. `dimension` is optional and resolved BY THE EXECUTOR (exactly one dated time dimension → that one; zero or several → a loud error listing candidates) — a producer-side resolution rule, not the consumer-side tolerance PD #12 forbids. `{ offset }` retired via the ADR-0087 `dashboard-widget-compareto-converged` conversion (+ the `dashboard-widget-compareto-offset` semantic migration for durations with no faithful target). Still LIVE, and now on the canonical path: the reason the verdict is unchanged is that the CONSUMER was never missing, only the agreement about what it consumes. ⚠️ One half is out of this repo: objectui's legacy inline chart path (DashboardRenderer.tsx:495 → ObjectChart, CompareToConfig in packages/core/src/utils/compare-to.ts) still expects the retired three-arm shape and adapts in objectui#3337, which also deletes the now-unnecessary DatasetWidget.tsx:163-168 string-drop workaround. Until that lands, read this `live` as 'the dataset path honours it'; the inline path is mid-handoff, not unread."
@@ -153,10 +146,8 @@
         },
         "aria": {
           "status": "dead",
-          "authorWarn": true,
-          "verifiedAt": "2026-08-03",
-          "authorHint": "Declared ARIA attributes never reach the DOM on a dashboard widget — no renderer applies them. Delete the key; the renderer emits its own aria-* attributes.",
-          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours. ADR-0049 enforce-or-remove tracked in #5010."
+          "verifiedAt": "2026-08-04",
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03, re-measured 2026-08-04 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours. The shared AriaProps shape is untouched and stays live on `app.aria` / `page.components[].aria`. Retired 2026-08-04 via #5010 / ADR-0049 D2 (retiredKey tombstone + the protocol-17 `dashboard-widget-action-aria-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error carrying the prescription."
         }
       }
     },

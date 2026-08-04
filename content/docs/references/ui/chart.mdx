@@ -18,8 +18,8 @@ Provides a comprehensive set of chart types for data visualization.
 ## TypeScript Usage
 
 ```typescript
-import { ChartAggregateSchema, ChartAggregateFunctionSchema, ChartAnnotationSchema, ChartAxisSchema, ChartConfigSchema, ChartGroupBySchema, ChartInteractionSchema, ChartSeriesSchema, ChartTypeSchema } from '@objectstack/spec/ui';
-import type { ChartAggregate, ChartAggregateFunction, ChartAnnotation, ChartAxis, ChartConfig, ChartGroupBy, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
+import { ChartAggregateSchema, ChartAggregateFunctionSchema, ChartAnnotationSchema, ChartAxisSchema, ChartConfigSchema, ChartDrillDownSchema, ChartGroupBySchema, ChartInteractionSchema, ChartSeriesSchema, ChartTypeSchema } from '@objectstack/spec/ui';
+import type { ChartAggregate, ChartAggregateFunction, ChartAnnotation, ChartAxis, ChartConfig, ChartDrillDown, ChartGroupBy, ChartInteraction, ChartSeries, ChartType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ChartAggregateSchema.parse(data);
@@ -111,6 +111,22 @@ Inline aggregation for an object-bound chart
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
 | **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## ChartDrillDown
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional | Turn the segment drill on/off; the block being present already means on, so this is only needed to force it off |
+| **filter** | `Record<string, any>` | optional | Filter for the drilled list; values support $`{event.*}`. Omit to derive it from the clicked category |
+| **title** | `string` | optional | Drill drawer/dialog heading; supports $`{event.*}` interpolation |
+| **target** | `Enum<'drawer' \| 'dialog'>` | optional | Where the drilled list opens: 'drawer' (default, side sheet) or 'dialog' (centered modal) |
+| **columns** | `string[]` | optional | Field names to show as columns in the drilled list (default: the table's own columns) |
+| **maxRows** | `integer` | optional | Rows per page in the drilled list |
 
 
 ---

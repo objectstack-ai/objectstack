@@ -1874,6 +1874,53 @@ describe('HttpDispatcher', () => {
             expect((result.response as any)?.body?.data?.unhideError).toBe('meta backend down');
             expect(saveMetaItem).not.toHaveBeenCalled();
         });
+
+        // #4754 — the flip is a metadata WRITE riding on someone else's success.
+        // `unhideError` in a 200 body is not a signal anyone reads: the route
+        // still answers success, so the loss ("I published it but the app never
+        // appeared") surfaces much later to someone who cannot connect it back
+        // here. That is the #4669 shape, so AGENTS.md → "Degradation log levels"
+        // requires `error`, naming the CONSEQUENCE and the FIX.
+        it('POST /packages/:id/publish-drafts logs at ERROR (consequence + fix) when the saveMetaItem write fails', async () => {
+            const publishPackageDrafts = vi.fn().mockResolvedValue({
+                success: true, publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+            });
+            const getMetaItems = vi.fn().mockResolvedValue([
+                { name: 'edu_admin', hidden: true, navigation: [] },
+            ]);
+            const saveMetaItem = vi.fn().mockRejectedValue(new Error('sys_metadata write rejected'));
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem });
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+            // No host logger is attached to the dispatcher in this harness, so
+            // the domain falls back to `console` (`deps.logger ?? console`).
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+            try {
+                const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+
+                // Unchanged contract: the drafts ARE published, so this still 200s
+                // and still carries the machine-readable `unhideError`.
+                expect(result.response?.status).toBe(200);
+                expect((result.response as any)?.body?.data?.unhideError).toBe('sys_metadata write rejected');
+
+                expect(errorSpy).toHaveBeenCalledTimes(1);
+                const line = String(errorSpy.mock.calls[0]?.[0] ?? '');
+                // The consequence, concretely — what is not durable, and that the
+                // system keeps looking healthy anyway.
+                expect(line).toContain('app.edu');
+                expect(line).toMatch(/hidden/i);
+                expect(line).toMatch(/publish reports success|reports success/i);
+                // The fix — the concrete action that restores the intended state.
+                expect(line).toContain('publish-drafts');
+                // And the cause is not swallowed.
+                expect(line).toContain('sys_metadata write rejected');
+            } finally {
+                errorSpy.mockRestore();
+            }
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

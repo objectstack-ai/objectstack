@@ -2045,6 +2045,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       body_html: {
         label: "Contenido (HTML)"
       },
+      headers_json: {
+        label: "Cabeceras (JSON)",
+        help: "Cabeceras personalizadas facilitadas a IEmailService.send, como un objeto JSON de nombre → valor. Se escriben en ambos modos de entrega (son tanto evidencia de auditoría como entrada de la entrega). Ausentes en las filas escritas antes de que existiera esta columna, que se leen como «sin cabeceras personalizadas»."
+      },
+      attachments_json: {
+        label: "Adjuntos (JSON)",
+        help: "Adjuntos como un array JSON de { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }, con el contenido en base64 en `inline`. Solo se escribe cuando el tamaño bruto combinado está dentro del presupuesto de plugin-email (SYS_EMAIL_ATTACHMENT_LIMIT_BYTES, 256 KiB — ~350 KB de base64 en el peor caso); un mensaje mayor se entrega en línea y aquí no se almacena nada, de modo que la fila permanece acotada. `storageKey` (contenido fuera de la fila) todavía no tiene productor — objectstack#5172."
+      },
       status: {
         label: "Estado",
         help: "Estado del ciclo de vida; se pone en cola mediante IEmailService.send antes de la llamada al transporte.",

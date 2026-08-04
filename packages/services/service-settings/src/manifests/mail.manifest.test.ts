@@ -83,6 +83,31 @@ describe('mailSettingsManifest', () => {
     }
   });
 
+  it('offers durable queue delivery as an opt-in toggle, visible for every provider', () => {
+    // framework#5160. Off by default because turning it on changes what
+    // `send()` RETURNS (`queued` instead of `sent`/`failed`) — that is an
+    // opt-in, never something a workspace should acquire silently on upgrade.
+    const queue = spec('queue_delivery');
+    expect(queue.type).toBe('toggle');
+    expect(queue.default).toBe(false);
+    expect(queue.required).not.toBe(true);
+    // Delivery mode is orthogonal to the provider — no `visible` expression,
+    // so it does not disappear when the provider changes.
+    expect(queue.visible).toBeUndefined();
+    expect(group('delivery')).toBeDefined();
+  });
+
+  it('tells the operator what the toggle costs and what it needs', () => {
+    const description = String(spec('queue_delivery').description);
+    // The requirement, so "I turned it on and nothing changed" is answerable.
+    expect(description).toMatch(/queue capability/i);
+    // The behaviour change the caller sees.
+    expect(description).toMatch(/retried/i);
+    // And the exception, because the button right below it is the one thing
+    // that keeps sending inline (#5087 — it must report the provider's answer).
+    expect(description).toMatch(/test email/i);
+  });
+
   it('exposes a test action that POSTs to /api/settings/mail/test', () => {
     const test = specs().find((s) => s.type === 'action_button' && s.id === 'test');
     expect(test).toBeDefined();

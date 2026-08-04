@@ -28,10 +28,39 @@ import { z } from 'zod';
  * Field Reference
  * Represents a reference to another field/column instead of a literal value.
  * Used for joins (ON clause) and cross-field comparisons.
- * 
+ *
  * @example
  * // user.id = order.owner_id
  * { "$eq": { "$field": "order.owner_id" } }
+ *
+ * ## Execution support (#5041)
+ *
+ * This shape is declared here and really is produced — `compileCelToFilter`
+ * (`@objectstack/formula`) emits `{ $field: path }` for a field-to-field
+ * comparison in a CEL permission/RLS rule. Its execution support is NOT
+ * uniform across evaluation paths, and a producer must know which path its
+ * filter will run on:
+ *
+ * - **In-memory evaluation — supported.** `matchesFilter`
+ *   (`@objectstack/formula`, `matches-filter.ts`) resolves the reference
+ *   against the record, dot-paths included.
+ * - **SQL push-down — refused, loudly.** `@objectstack/driver-sql` (and
+ *   `driver-sqlite-wasm`, which inherits its filter compiler) does not compile
+ *   a field reference to a column-to-column comparison. Rather than bind the
+ *   reference object as a literal value — which produced a bare driver
+ *   `TypeError` outside the ADR-0112 envelope, and, inside an `$in`/`$between`
+ *   list, a silent zero-row answer — the driver rejects the filter with
+ *   `INVALID_FILTER` (HTTP 400) naming the field, the operator and the
+ *   reference.
+ *
+ * The declaration is deliberately retained: the shape has a real producer and
+ * a real implementation, so it is not a dead key. Compiling it to SQL
+ * column-to-column comparison is tracked as its own capability in #5222, where
+ * the two open semantic questions ride with it — dot-path relation references,
+ * and the validation boundary for the referenced column name.
+ *
+ * @see https://github.com/objectstack-ai/objectstack/issues/5041 (refusal)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5222 (SQL support)
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const FieldReferenceSchema = lazySchema(() => z.object({

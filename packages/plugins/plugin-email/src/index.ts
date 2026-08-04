@@ -14,10 +14,27 @@
  * endpoints. `EMAIL_TRANSPORT_PROVIDERS` is the machine-readable form.
  */
 
-export { EmailServicePlugin } from './email-plugin.js';
+export { EmailServicePlugin, resolveDurableQueue } from './email-plugin.js';
 export type { EmailServicePluginOptions } from './email-plugin.js';
-export { LogTransport, normalizeMessage, formatAddress } from './email-service.js';
-export type { EmailServiceOptions, TemplateLoader, EmailTemplateRow, EmailPersistence } from './email-service.js';
+export { LogTransport, normalizeMessage, formatAddress, EMAIL_SEND_QUEUE } from './email-service.js';
+export type {
+  EmailServiceOptions,
+  TemplateLoader,
+  EmailTemplateRow,
+  EmailPersistence,
+  EmailQueueDelivery,
+  EmailSendQueuePayload,
+  DeliverAttemptOptions,
+} from './email-service.js';
+export {
+  SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
+  encodeAttachmentsForRow,
+  decodeAttachmentsFromRow,
+  encodeHeadersForRow,
+  decodeHeadersFromRow,
+  type PersistedEmailAttachment,
+  type EncodedAttachments,
+} from './sys-email-payload.js';
 export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,
@@ -47,6 +64,15 @@ export {
   EMAIL_TEMPLATE_OBJECT,
   type BootstrapDeclaredEmailTemplatesResult,
 } from './bootstrap-declared-email-templates.js';
+export {
+  sweepStrandedOutbox,
+  OUTBOX_OBJECT,
+  OUTBOX_SWEEP_MIN_AGE_MS,
+  OUTBOX_SWEEP_LIMIT,
+  type OutboxSweepResult,
+  type OutboxSweepService,
+  type SweepStrandedOutboxOptions,
+} from './outbox-sweep.js';
 export {
   bindEmailTemplateProvenanceStamp,
   unbindEmailTemplateProvenanceStamp,

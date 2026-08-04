@@ -2285,6 +2285,91 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].actionUrl / actionType / actionIcon / aria (#5010) — the
+ * four widget-level keys the #4956 drill judged dead on a closed call graph.
+ *
+ * Two affordances, one removal, because both fail the same way and an upgrading
+ * source carries them together:
+ *
+ *   - the action TRIO described a per-widget button. No renderer in either repo
+ *     draws one; every action a dashboard dispatches comes from
+ *     `header.actions[]`. Its only reader was `packages/lint`'s reference-
+ *     integrity rule, which failed builds when a button that cannot render
+ *     pointed at an action that did not exist — that widget branch is deleted in
+ *     the same change.
+ *   - `aria` promised ARIA attributes that never reached the DOM: the same false
+ *     compliance the DASHBOARD-level `aria` was retired for above, one level
+ *     down. `dashboard-inert-keys-removed` took the parent key in the #3896
+ *     sweep and left this one, because `widgets` had no ledger drill then.
+ *
+ * A SEPARATE entry rather than more keys on `dashboard-inert-keys-removed`, for
+ * the reason `dashboard-widget-responsive-removed` gives just above: that entry's
+ * identity is the #3896 sweep, and folding a differently-evidenced removal into
+ * it would misattribute this one in `spec-changes.json` and the upgrade guide —
+ * the two places an upgrading author actually reads. All are `toMajor: 17`, so a
+ * stored dashboard carrying keys from several of them is cleaned in one replay.
+ *
+ * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here: its
+ * disposition is unresolved (the rewrite target `options.colorVariant` measured
+ * dead on the ADR-0021 dataset path too), and 16 authored sites depend on the
+ * answer. Retiring it later is a new entry, not an edit to this one.
+ */
+const dashboardWidgetActionAriaRemoved: MetadataConversion = {
+  id: 'dashboard-widget-action-aria-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface:
+    'dashboard.widgets[].actionUrl / dashboard.widgets[].actionType / '
+    + 'dashboard.widgets[].actionIcon / dashboard.widgets[].aria',
+  summary:
+    "dashboard widget keys 'actionUrl'/'actionType'/'actionIcon' and 'aria' removed "
+    + '(#5010 — no renderer ever drew a per-widget action button, and widget ARIA attributes never '
+    + 'reached the DOM; use header.actions[] and the widget title/description)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const cleaned = stripKeys(
+          w as Record<string, unknown>,
+          ['actionUrl', 'actionType', 'actionIcon', 'aria'],
+          emit,
+          `${path}.widgets[${i}]`,
+        );
+        if (cleaned !== w) touched = true;
+        return cleaned;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{
+          id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'],
+          actionUrl: 'export_dashboard_pdf',
+          actionType: 'script',
+          actionIcon: 'download',
+          aria: { ariaLabel: 'Total orders' },
+        }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'ops_overview',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+      }],
+    },
+    // One notice per KEY, not per widget — four keys on one widget.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * dashboard.widgets[].compareTo (#5011) — a VOCABULARY convergence, not a
  * removal: the widget's three declared arms are replaced by the one shape the
  * analytics executor implements, `{ kind, dimension? }`
@@ -3459,9 +3544,10 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  *     see the `datasource-inert-blocks-removed` note above, which leans on
  *     exactly that distinction), so the platform drops from three spellings to
  *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
- *     deleted — because neither owning shape is `.strict()`: a plain deletion
- *     would have Zod silently swallow the authored number and fall back to the
- *     1000ms default, which is the quiet-failure class ADR-0049 removes.
+ *     deleted — because two of the four owning shapes are not `.strict()`: a
+ *     plain deletion would have Zod silently swallow the authored number and
+ *     fall back to the 1000ms default, which is the quiet-failure class
+ *     ADR-0049 removes.
  *
  *  2. **The defaults were opposite, and no gate can see a default.** Pre-17,
  *     `job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2`
@@ -3479,6 +3565,33 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  * Jobs with no `retryPolicy` block at all are left alone — absence already
  * meant a single attempt on both sides of the change.
  *
+ * ## The two surfaces this entry grew to cover (#4964 / #4962)
+ *
+ * The convergence above was driven by the dual-source instrument, whose
+ * question is "how many declarations share one exported NAME?". Two further
+ * encodings of the identical policy were invisible to it because they are
+ * anonymous inline `z.object`s with no exported name at all — and after a
+ * convergence lands, a surviving dialect reads as reviewed-and-kept rather
+ * than missed:
+ *
+ *  - **`flow.errorHandling`** (#4964) spelled the base delay `retryDelayMs`;
+ *    every other key, bound and default already matched. Step 0 below renames
+ *    it, so the ONE authorable casualty of the whole convergence is still just
+ *    that word — now retired everywhere it was ever legal rather than on two
+ *    surfaces out of four.
+ *  - **`ETLPipeline.retry`** (#4962) spelled the count `maxAttempts` and
+ *    defaulted it to 3. It gets **no step here, deliberately.** An ETL pipeline
+ *    is not a `defineStack` collection and `etl.zod.ts` has no parse site in
+ *    objectstack / objectui / cloud (批 12's measurement), so there is no
+ *    stored or authored document a walker could reach: a branch for it would be
+ *    dead code claiming migration coverage that does not exist, which is the
+ *    ADR-0049 failure this registry is supposed to prevent, not commit. Its
+ *    `maxAttempts` tombstone carries the rename AND the default change, and the
+ *    tombstone reaches the only doors that exist (`tsc` at the authoring site,
+ *    and the parse). That is also why the ETL default flip 3 → 0 needs no
+ *    materialization step while the job one did: nothing is deployed under the
+ *    old reading.
+ *
  * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
  * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
  * conversion layer is the only seam that can declare and retire that spelling.
@@ -3488,13 +3601,34 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
   toMajor: 17,
-  surface: 'flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
+  surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
-    "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', " +
-    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+    "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
   apply(stack, emit) {
+    // ── 0. flows: errorHandling.retryDelayMs → errorHandling.backoffMs ─
+    //
+    // The FLOW-LEVEL retry policy (#4964). Same rename as the try_catch node
+    // below and for the same reason, reached one level up: `errorHandling`
+    // hangs off the flow document, not off a node, so `mapFlowNodes` walks
+    // straight past it — which is a small echo of why this divergence survived
+    // #4661 at all. `renameKey` leaves an already-canonical `backoffMs` alone
+    // and, when BOTH spellings are present, leaves the alias shadowed rather
+    // than guessing which number the author meant; the strict block then
+    // rejects naming both. (#4923 is queued to revisit that shadowing rule —
+    // this entry deliberately relies on the shared helper's semantics rather
+    // than open-coding its own, so it moves with that ruling.)
+    const withErrorHandling = mapCollection(stack, 'flows', (flow, path) => {
+      const eh = flow.errorHandling;
+      if (!eh || typeof eh !== 'object' || Array.isArray(eh)) return flow;
+      const renamed = renameKey(eh as Record<string, unknown>, 'retryDelayMs', 'backoffMs');
+      if (renamed === null) return flow;
+      emit({ from: 'retryDelayMs', to: 'backoffMs', path: `${path}.errorHandling.backoffMs` });
+      return { ...flow, errorHandling: renamed };
+    });
+
     // ── 1. try_catch nodes: retry.retryDelayMs → retry.backoffMs ──────
-    const withFlows = mapFlowNodes(stack, (node, path) => {
+    const withFlows = mapFlowNodes(withErrorHandling, (node, path) => {
       if (node.type !== 'try_catch') return node;
       const config = node.config;
       if (!config || typeof config !== 'object' || Array.isArray(config)) return node;
@@ -3536,6 +3670,9 @@ const retryPolicyConverged: MetadataConversion = {
     before: {
       flows: [{
         name: 'sync_orders',
+        // Flow-LEVEL policy (#4964) — one level up from the nodes, so the node
+        // walk below never sees it.
+        errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
         nodes: [
           { id: 'n1', type: 'start' },
           {
@@ -3553,6 +3690,11 @@ const retryPolicyConverged: MetadataConversion = {
             config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
           },
         ],
+      }, {
+        // Flow-level block already canonical — left alone, no notice.
+        name: 'roll_up',
+        errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 100 },
+        nodes: [{ id: 'n1', type: 'start' }],
       }],
       jobs: [
         // Omits both defaults — both get written out.
@@ -3566,6 +3708,7 @@ const retryPolicyConverged: MetadataConversion = {
     after: {
       flows: [{
         name: 'sync_orders',
+        errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 2000 },
         nodes: [
           { id: 'n1', type: 'start' },
           {
@@ -3582,6 +3725,10 @@ const retryPolicyConverged: MetadataConversion = {
             config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
           },
         ],
+      }, {
+        name: 'roll_up',
+        errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 100 },
+        nodes: [{ id: 'n1', type: 'start' }],
       }],
       jobs: [
         { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 } },
@@ -3589,8 +3736,9 @@ const retryPolicyConverged: MetadataConversion = {
         { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
       ],
     },
-    // n2's rename, plus nightly_sync's two materialized defaults.
-    expectedNotices: 3,
+    // sync_orders' flow-level rename, n2's node-level rename, plus
+    // nightly_sync's two materialized defaults.
+    expectedNotices: 4,
   },
 };
 
@@ -3838,6 +3986,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
+    dashboardWidgetActionAriaRemoved,
     dashboardWidgetCompareToConverged,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,

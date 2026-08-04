@@ -5,6 +5,7 @@ import {
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
+  REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   type ReactPropFinding as PropFinding,
 } from './validate-react-page-props.js';
@@ -769,5 +770,96 @@ describe('validateReactPageProps — <ObjectForm subforms> resolve per child obj
       ),
     );
     expect(f).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// <ObjectChart drillDown> — the declared shape, ENFORCED (#5022)
+//
+// This is the half that makes `ChartDrillDownSchema` more than a type. The
+// schema is `.strict()`, but `.strict()` is a property of a PARSE — before
+// this gate nothing on the react surface called one, which is exactly the
+// `no gate` verdict the strictness ledger records for `aggregate` two props
+// over. The rule parses instead of re-deriving, so the surface name, the
+// near-key guidance and the `target: 'navigate'` prescription all arrive
+// without being restated here.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
+  const drill = (cfg: string) =>
+    chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} drillDown={${cfg}}`));
+
+  it('passes a fully-declared drill config', () => {
+    const f = validateReactPageProps(
+      drill(`{ enabled: true, target: 'dialog', columns: ['status'], maxRows: 25, title: 'Deals' }`),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('passes the empty config — presence alone enables the drill', () => {
+    expect(validateReactPageProps(drill('{}'))).toEqual([]);
+  });
+
+  it('passes a chart with no drillDown at all', () => {
+    const f = validateReactPageProps(
+      chartPage(chart(`objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}`)),
+    );
+    expect(f).toEqual([]);
+  });
+
+  it('rejects an undeclared key inside the block, carrying the schema’s own suggestion', () => {
+    const f = validateReactPageProps(drill(`{ maxrows: 10 }`));
+    const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
+    expect(hit, 'the unknown key must be reported').toBeTruthy();
+    expect(hit!.message).toContain('chart drill-down block');
+    expect(hit!.message, 'the schema’s suggester reaches the author through the gate').toContain('`maxrows` → `maxRows`');
+    expect(hit!.severity).toBe('error');
+  });
+
+  it("rejects target: 'navigate' with the chart-specific reason", () => {
+    const f = validateReactPageProps(drill(`{ target: 'navigate' }`));
+    const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
+    expect(hit!.message).toContain('objectui#3354');
+    expect(hit!.message).toContain('drillDown.target');
+  });
+
+  it('rejects a key that belongs to another widget, with the reason rather than a rename', () => {
+    const f = validateReactPageProps(drill(`{ mode: 'record' }`));
+    const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
+    expect(hit!.message).toContain('TABLE / PIVOT / METRIC');
+  });
+
+  it('rejects the report near-key spelling and names the type difference', () => {
+    const f = validateReactPageProps(drill(`{ drilldown: true }`));
+    const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
+    expect(hit!.message).toContain('ReportSchema.drilldown');
+    expect(hit!.message).toContain('BOOLEAN');
+  });
+
+  it('rejects a non-object drillDown and shows the two shapes that work', () => {
+    const f = validateReactPageProps(drill('true'));
+    const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
+    expect(hit!.message).toContain('configuration object');
+    expect(hit!.hint).toContain('drillDown={{}}');
+  });
+
+  it('says nothing about a config it cannot resolve — unresolvable is not wrong (ADR-0072 D1)', () => {
+    // A value assembled from React state. `staticValue` collapses the whole
+    // object, so the gate must stay silent rather than guess at the keys.
+    const f = validateReactPageProps(
+      chartPage(
+        `function Page(){ const cols=useCols(); return <ObjectChart objectName="invoice" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} drillDown={{ columns: cols, maxrows: 10 }} />; }`,
+      ),
+    );
+    expect(f.filter((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID)).toEqual([]);
+  });
+
+  it('checks the drill even on an inline-data chart, which skips every aggregate rule', () => {
+    // The drill config is independent of how the chart is bound; the rule runs
+    // before the `data` early return for exactly this case.
+    const f = validateReactPageProps(
+      chartPage(`function Page(){ return <ObjectChart objectName="invoice" data={[]} drillDown={{ maxrows: 10 }} />; }`),
+    );
+    expect(f.some((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID)).toBe(true);
   });
 });

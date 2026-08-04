@@ -44,7 +44,9 @@ export const lifecycleSettingsManifest = {
       default: {},
       description:
         'Per-object window overrides: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. ' +
-        'Duration literals: h/d/w/y. Tenant-scoped — a regulated tenant sets years while dev keeps days (ADR-0057 §3.2).',
+        'Duration literals: h/d/w/y. Tenant-scoped — a regulated tenant sets years while dev keeps days (ADR-0057 §3.2). ' +
+        'An override BELOW a retention floor a consumer registered (e.g. the job queue\'s dedup window) is rejected at ' +
+        'sweep time and logged at error — the declared window keeps running (#5195).',
     },
     {
       type: 'json',

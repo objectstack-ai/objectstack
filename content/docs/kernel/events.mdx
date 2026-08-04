@@ -33,6 +33,8 @@ ctx.hook('kernel:ready', async () => {
 
 `ctx.hook(name, handler)` takes exactly two arguments — there is no options/priority parameter. Kernel hooks run in **registration order**, and `ctx.trigger()` awaits each handler sequentially.
 
+A `kernel:ready` handler that **throws fails the boot**, on `ObjectKernel` and `LiteKernel` alike: the remaining `kernel:ready` handlers are skipped, `kernel:bootstrapped` and `kernel:listening` never fire, and `bootstrap()` rejects with the original error. That is what makes `kernel:ready` the place to assert that a precondition your plugin *declared* was actually met — the service registry is still filling during `init()`, so nothing earlier can judge it, and a deployment that cannot honour what it announced must refuse to start rather than serve without the guarantee. The other lifecycle hooks do **not** share that contract: `ObjectKernel` propagates their failures too, while `LiteKernel` logs each one and runs the remaining handlers. Put boot assertions in `kernel:ready`.
+
 ### Emitting Custom Events
 
 Plugins can trigger their own namespaced events for inter-plugin communication. Use `ctx.trigger()` (it is async and returns a `Promise`); handlers receive the positional arguments you pass to `trigger()`:

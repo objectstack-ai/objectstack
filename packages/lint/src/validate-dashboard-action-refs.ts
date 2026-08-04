@@ -1,17 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0049 — references] Reference-integrity for dashboard header & widget
- * action targets (issue #3367).
+ * [ADR-0049 — references] Reference-integrity for dashboard header action
+ * targets (issue #3367).
  *
  * ADR-0049 established the "enforce-or-remove" gate for spec *properties*: a
  * declared property the runtime does not honour is a false promise and must be
  * enforced, marked experimental, or removed. This rule applies the SAME honesty
- * principle to *references*. A dashboard header action (or a widget's header
- * action button) names a target — a `script`/`modal` action, or a `url` route —
- * that must actually resolve. A dangling target ships a button that renders and,
- * on click, silently does nothing: a false affordance, exactly the failure
- * ADR-0049 exists to prevent, just for a reference rather than a property.
+ * principle to *references*. A dashboard header action names a target — a
+ * `script`/`modal` action, or a `url` route — that must actually resolve. A
+ * dangling target ships a button that renders and, on click, silently does
+ * nothing: a false affordance, exactly the failure ADR-0049 exists to prevent,
+ * just for a reference rather than a property.
  *
  * Nothing in the protocol schema can express this: `actionUrl` is a free string,
  * so `{ actionType: 'script', actionUrl: 'export_dashboard_pdf' }` parses and
@@ -19,7 +19,24 @@
  *
  * Surfaces checked:
  *   - dashboard `header.actions[]` — each `{ actionType, actionUrl }`
- *   - dashboard `widgets[].actionUrl` (+ `actionType`) — the per-widget button
+ *
+ * ## The widget branch, and why it is gone (#5010)
+ *
+ * This rule used to check `widgets[].actionUrl` too, describing it as "the
+ * per-widget button" and claiming in this docblock that it "mirrors the objectui
+ * runtime dispatch". It did not: no renderer in either repo has ever drawn a
+ * per-widget action button — all 14 `actionUrl` reads in `DashboardRenderer` are
+ * scoped to `header.actions[]`. So the strictest arm of this rule (a dangling
+ * `script`/`modal` target is an ERROR, i.e. a failed build) was enforcing
+ * referential integrity for a button that could not render. An author could be
+ * blocked from shipping because a control that does not exist pointed at an
+ * action that also did not.
+ *
+ * That inversion — a rule written to delete false affordances, itself sustaining
+ * one — is why the widget keys were retired rather than the check merely
+ * relaxed: `widgets[].actionUrl` / `actionType` / `actionIcon` are now tombstoned
+ * in `@objectstack/spec` 17.0.0, so authoring one is a `tsc` error and a parse
+ * error carrying the prescription. There is no widget target left to resolve.
  *
  * Resolution mirrors the objectui runtime dispatch (`DashboardRenderer` +
  * `DashboardView`) so the lint flags exactly what would fail to resolve at
@@ -230,7 +247,7 @@ interface HeaderAction {
 }
 
 /**
- * Validate every dashboard header / widget action reference in a stack. Returns
+ * Validate every dashboard header action reference in a stack. Returns
  * findings (empty = clean). `script`/`modal` dead targets are errors; `url`
  * unresolved routes are warnings.
  */
@@ -249,7 +266,7 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
     path: string,
   ) => {
     const target = strName(action.actionUrl);
-    if (!target) return; // nothing referenced (widget with no action button)
+    if (!target) return; // nothing referenced
     if (target.includes('${')) return; // dynamic target — not statically resolvable
 
     // Renderer default: a missing actionType is treated as a 'url' navigation
@@ -320,19 +337,12 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
       );
     }
 
-    // Per-widget action buttons.
-    const widgets = asArray(dash.widgets);
-    for (let wi = 0; wi < widgets.length; wi++) {
-      const widget = widgets[wi];
-      if (!widget || typeof widget !== 'object') continue;
-      if (!strName(widget.actionUrl)) continue;
-      const widgetId = strName(widget.id) ?? `#${wi}`;
-      checkOne(
-        { actionType: widget.actionType as string | undefined, actionUrl: widget.actionUrl as string | undefined },
-        `dashboard "${dashName}" · widget "${widgetId}" action`,
-        `${dashPath}.widgets[${wi}].actionUrl`,
-      );
-    }
+    // Per-widget action buttons: NOT checked — they do not exist. See the
+    // docblock (#5010). `widgets[].actionUrl` / `actionType` / `actionIcon` are
+    // tombstoned in the spec as of 17.0.0, so a stack reaching this rule cannot
+    // carry a widget target: the parse rejects it upstream with the
+    // prescription. Re-adding a branch here would resurrect an ERROR-severity
+    // gate over an affordance no renderer draws.
   }
 
   return findings;

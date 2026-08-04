@@ -179,8 +179,14 @@ describe('the #4148 behaviours survive the generalization', () => {
     // degenerating into a single-collection test: `object` reports a NESTED
     // strip site under a CLOSED root (the #4522 behaviour), and `view` — the
     // last open root, and the union case — reports at its own.
+    //
+    // The object-side fixture was `userActions` until #4001 批 20 closed it
+    // (with lifecycle/{retention,ttl,storage,archive}, fieldGroups, external,
+    // systemFields, activityMilestones, publicSharing and the extension entry).
+    // `indexes[]` is what that batch deliberately left open — see the
+    // IndexSchema JSDoc for why — so it is now the object's nested strip site.
     const findings = lintUnknownAuthoringKeys({
-      objects: [{ name: 'a', label: 'A', userActions: { zzz: 1 } }],
+      objects: [{ name: 'a', label: 'A', indexes: [{ fields: ['a'], zzz: 1 }] }],
       views: [{ name: 'v', object: 'a', zzz: 1 }],
     });
     // Deduped deliberately: `view` is a union (container | ViewItem | overlay)
@@ -190,7 +196,7 @@ describe('the #4148 behaviours survive the generalization', () => {
     // and it becomes moot when `view` closes. Left recorded rather than papered
     // over by picking a non-union collection.
     expect([...new Set(findings.map((f) => `${f.surface}:${f.path}`))].sort()).toEqual([
-      'object:objects.a.userActions.zzz',
+      'object:objects.a.indexes.0.zzz',
       'view:views.v.zzz',
     ]);
   });
@@ -232,41 +238,70 @@ describe('nested descent (#4001 evidence phase)', () => {
   // and — just as importantly — the two cases where it must stay quiet.
 
   it('reports inside a nested object', () => {
-    const [finding, ...rest] = lintUnknownAuthoringKeys({
+    // This one has now run out of subject too, and — unlike the array case
+    // below — it has not got it back. `userActions` was the last strip-mode
+    // nested object-valued PROPERTY reachable under any registered root;
+    // #4001 批 20 closed it together with `lifecycle` (+ its four sub-blocks),
+    // `fieldGroups`, `external`, `access`, `systemFields`, `activityMilestones`,
+    // `publicSharing` and the object-extension entry. Measured, not assumed:
+    // every one of those fixtures now lints CLEAN and PARSES FALSE.
+    //
+    // So assert the hand-off, which is the outcome this layer exists to reach —
+    // the key is not unreported, it is REJECTED — and keep the descent itself
+    // under test one shape over.
+    expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', userActions: { zzz_nested: 1 } }],
+    })).toEqual([]);
+    expect(ObjectSchema.safeParse({
+      name: 'o1',
+      label: 'O',
+      fields: { a: { type: 'text', label: 'A' } },
+      userActions: { zzz_nested: 1 },
+    }).success).toBe(false);
+
+    // The per-node descent under a CLOSED root — the #4522 behaviour, and the
+    // reason the walk no longer gates a whole collection on its root's posture
+    // — is still exercised, on the one nested shape 批 20 deliberately left
+    // open (`indexes[]`; the IndexSchema JSDoc says why). When that closes,
+    // this describe block is genuinely finished.
+    const [finding, ...rest] = lintUnknownAuthoringKeys({
+      objects: [{ name: 'o1', indexes: [{ fields: ['a'], zzz_nested: 1 }] }],
     });
     expect(rest).toEqual([]);
     expect(finding).toMatchObject({
-      path: 'objects.o1.userActions.zzz_nested',
+      path: 'objects.o1.indexes.0.zzz_nested',
       surface: 'object',
       key: 'zzz_nested',
     });
   });
 
   it('reports inside an array element, indexed by position', () => {
-    // This test has now run out of subject, and that is worth saying plainly
-    // rather than deleting it or inventing a fixture.
+    // RESTORED at #4001 批 20, under the standing instruction this test left
+    // for itself when it ran out of subject at 6d ("if a new strip surface with
+    // a nested array ever appears, restore the indexed assertion here; do not
+    // let it go untested a second time").
     //
-    // It was `pages[].regions[]`, then `objects[].actions[]` when `page` closed
-    // (6a), and with `action` closed (6d) there is no declared ARRAY OF OBJECTS
-    // left anywhere in the registered surface that is still strip-mode. The
-    // walker's array-index handling is unchanged and still correct; what is gone
-    // is any metadata type that exercises it. That is the ratchet finishing, not
-    // the walk regressing.
+    // The subject is `object.indexes[]` — a declared ARRAY OF OBJECTS that is
+    // still strip-mode, and deliberately so: 批 20 closed every other inner
+    // block of `data/object.zod.ts` and held this one, because the console
+    // ships a drifted hand-copy of the shape (`where` for the spec's `partial`)
+    // and closing it would 422 a control the console itself renders. See the
+    // IndexSchema JSDoc. It did not become open again — it never closed.
     //
-    // So: assert the hand-off, and assert what still holds — the per-node
-    // descent under a CLOSED root, which is the #4522 fix and the reason the
-    // walk no longer gates a whole collection on its root's posture. If a new
-    // strip surface with a nested array ever appears, restore the indexed
-    // assertion here; do not let it go untested a second time.
+    // Element 1, not 0, so this proves POSITION is carried rather than that a
+    // path happens to end in an index.
+    const [indexed, ...rest] = lintUnknownAuthoringKeys({
+      objects: [{ name: 'o1', indexes: [{ fields: ['a'] }, { fields: ['b'], zzz_nested: 1 }] }],
+    });
+    expect(rest).toEqual([]);
+    expect(indexed).toMatchObject({ path: 'objects.o1.indexes.1.zzz_nested', surface: 'object' });
+
+    // The hand-off half: `actions[]` closed at 6d, so the walk stays quiet
+    // there. A broken walk would produce the same empty result, which is why
+    // the positive assertion above has to exist alongside it.
     expect(lintUnknownAuthoringKeys({
       objects: [{ name: 'o1', actions: [{ name: 'a', zzz_nested: 1 }] }],
     })).toEqual([]);
-
-    const [nested] = lintUnknownAuthoringKeys({
-      objects: [{ name: 'o1', userActions: { zzz_nested: 1 } }],
-    });
-    expect(nested).toMatchObject({ path: 'objects.o1.userActions.zzz_nested', surface: 'object' });
   });
 
   it('hands the field record and its nested array to the parse', () => {

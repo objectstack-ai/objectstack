@@ -9,7 +9,11 @@ import { DateGranularity } from '../data/query.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+// `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
+// (#5010). The shape itself is NOT removed — it stays live on `app.aria` and
+// `page.components[].aria`, whose renderers really do apply it. See the
+// tombstone below.
+import { I18nLabelSchema } from './i18n.zod';
 // `ResponsiveConfigSchema` is no longer imported here: `widgets[].responsive`
 // was retired (#4876). The shape itself is NOT removed — it stays live on
 // `page.components[].responsive` (`page.zod.ts`), whose renderer really does
@@ -32,19 +36,23 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
 ]).describe('Widget color variant'));
 
 /**
- * Action type for widget action buttons.
+ * Action type for DASHBOARD HEADER action buttons.
+ *
+ * Named `Widget…` for history only — since #5010 its single consumer is
+ * `DashboardHeaderActionSchema`. The per-widget `actionType` this was also
+ * shared with was retired in 17.0.0: no renderer ever drew a per-widget button.
  *
  * `ActionType` itself, not a hand-kept subset of it. The two lists had drifted
  * apart by one member — `form` — and the disagreement was backwards: a
- * dashboard header or widget action button dispatches through the same
- * `ActionRunner` that implements `form` (objectui's `DashboardRenderer` routes
- * everything except a raw `url` into it, deliberately, so a `flow` header
- * action works — objectstack#3528). So the narrower enum rejected at validation
- * exactly what the shared dispatcher then executes at runtime.
+ * dashboard header action button dispatches through the same `ActionRunner`
+ * that implements `form` (objectui's `DashboardRenderer` routes everything
+ * except a raw `url` into it, deliberately, so a `flow` header action works —
+ * objectstack#3528). So the narrower enum rejected at validation exactly what
+ * the shared dispatcher then executes at runtime.
  *
  * Derived rather than restated: a type added to `ActionType` is dispatchable
- * from a widget the moment the runner implements it, with no second list to
- * remember.
+ * from a header action the moment the runner implements it, with no second list
+ * to remember.
  */
 export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
@@ -158,6 +166,26 @@ const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
       'not part of the author-facing dashboard spec (framework#3251).'
     );
   }
+  // #5022 — the drill near-key, in all three spellings an author reaches for.
+  // A dashboard widget has NO per-widget drill configuration, by design: an
+  // ADR-0021 dataset-bound widget drills through the semantic layer, deriving
+  // the target object and filter from the clicked dataset row. Saying only
+  // "unrecognized key" here would leave the author to conclude the capability
+  // is missing, when in fact it is automatic — and would leave them guessing
+  // between two real keys on two other surfaces.
+  if (keys.some((k) => k === 'drillDown' || k === 'drilldown' || k === 'drill')) {
+    return (
+      base +
+      ' Drill-through on a dashboard is AUTOMATIC and not configurable per widget: ' +
+      'a dataset-bound widget derives the drill target and filter from the dataset row ' +
+      'that was clicked, and a `table`/`pivot` widget is the one to reach for when you ' +
+      'want the detail to be clickable (`metric`/`chart` render the aggregate only). ' +
+      'The two configurable drills live elsewhere and neither is a widget key: ' +
+      '`drillDown` (camelCase, a config object) is the react-tier `<ObjectChart drillDown={…}>` ' +
+      'prop — `ChartDrillDownSchema`; `drilldown` (all lowercase, a boolean) is ' +
+      '`ReportSchema.drilldown` (ADR-0021 D2, on by default).'
+    );
+  }
   return base;
 };
 
@@ -258,6 +286,29 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   + 'when the selection has more than one dated time dimension; with one, the executor resolves '
   + 'it. Run `os migrate meta --from 16` to rewrite it automatically.';
 
+// ── Per-widget action button prescriptions (#5010) ───────────────────────────
+//
+// `//` rather than `/** */` deliberately, per the `COMPARE_TO_*` block above:
+// build-docs lifts JSDoc onto the reference page, and an upgrade note is not a
+// doc for a shape that still exists.
+//
+// The three keys read as one affordance ("give this widget its own button"), so
+// they share one prescription and name each other — an author who removes only
+// `actionUrl` should learn in the same breath that its two companions are gone
+// too, rather than hitting three parse errors in three edit rounds.
+const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =>
+  `\`dashboard.widgets[].${key}\` was removed in @objectstack/spec 17.0.0 (#5010, `
+  + 'ADR-0049 enforce-or-remove) — a dashboard widget has NO action button, and never had one. '
+  + 'No renderer draws per-widget chrome for it: every action the dashboard dispatches comes from '
+  + '`header.actions[]`. The three keys `actionUrl` / `actionType` / `actionIcon` went together; '
+  + 'delete all three. '
+  + 'Put the affordance on the dashboard header instead — '
+  + "`header: { actions: [{ label, actionUrl, actionType, icon }] }` — which IS dispatched "
+  + '(`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of '
+  + '`actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` '
+  + 'bound to a dataset: its rows are clickable and drill through the semantic layer. '
+  + 'Run `os migrate meta --from 16` to rewrite it automatically.';
+
 /**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
@@ -298,15 +349,19 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
    */
   requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered'),
 
-  /** Action URL for the widget header action button */
-  actionUrl: z.string().optional().describe('URL or target for the widget action button'),
+  // `actionUrl` / `actionType` / `actionIcon` REMOVED (#5010, ADR-0049 D2):
+  // the three keys described a per-widget header action BUTTON that no renderer
+  // has ever drawn. Re-measured 2026-08-04 against objectui@91757a7: all 14
+  // `actionUrl` reads in `DashboardRenderer.tsx` are scoped to
+  // `schema.header.actions[]` (a `DashboardHeaderAction`, a different schema);
+  // `actionIcon` has zero references in either repo outside this declaration.
+  // The one consumer of the pair was `packages/lint`'s reference-integrity rule,
+  // which failed builds when a NEVER-RENDERED button pointed at a missing
+  // action — its widget branch goes with the keys, in this same change.
+  actionUrl: retiredKey(WIDGET_ACTION_RETIRED('actionUrl')),
+  actionType: retiredKey(WIDGET_ACTION_RETIRED('actionType')),
+  actionIcon: retiredKey(WIDGET_ACTION_RETIRED('actionIcon')),
 
-  /** Action type for the widget header action button */
-  actionType: WidgetActionTypeSchema.optional().describe('Type of action for the widget action button'),
-
-  /** Icon for the widget header action button */
-  actionIcon: z.string().optional().describe('Icon identifier for the widget action button'),
-  
   /** Presentation-scope filter (MongoDB-style), ANDed into the dataset query as `runtimeFilter`. */
   filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)'),
 
@@ -528,8 +583,27 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
     'Run `os migrate meta --from 16` to rewrite it automatically.',
   ),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  // `aria` REMOVED (#5010, ADR-0049 D2): the same "false compliance" the
+  // dashboard-level `aria` was retired for in the #3896 close-out (see the
+  // tombstone on `DashboardSchema` below) — declared ARIA attributes never
+  // reached the DOM, so a dashboard could claim accessibility work that had
+  // measurably not happened. Call graph closed by hand across both repos
+  // 2026-08-04: no consumer of `widget.aria` anywhere. The `aria-*` attributes
+  // in `DashboardRenderer` / `DatasetWidget` are the renderer's OWN DOM props,
+  // and objectui's single `.aria` read (`plugin-view/ObjectView.tsx:989`) is a
+  // `view`'s. The shared `AriaPropsSchema` is untouched — it stays live on
+  // `app.aria` and `page.components[].aria`, which really are applied.
+  aria: retiredKey(
+    '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 D2) — ' +
+    'no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach ' +
+    'the DOM: the key promised accessibility compliance it did not deliver. This is the same ' +
+    'removal the dashboard-level `aria` got in 17.0.0 (#3896). Delete the key. The dashboard ' +
+    'renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and ' +
+    '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
+    'The shared `AriaProps` shape is NOT gone: it stays live on `app.aria` and ' +
+    '`page.components[].aria`. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.
 }, { error: strictWidgetAnalyticsError })

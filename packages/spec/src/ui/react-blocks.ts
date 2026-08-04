@@ -244,6 +244,23 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       { name: 'filter', type: 'FilterArray', kind: 'controlled', description: 'ObjectQL filter scoping the data; drive from React state.' },
       { name: 'aggregate', type: "{ field?: string; function: 'count' | 'sum' | 'avg' | 'min' | 'max'; groupBy: string | { field: string; dateGranularity?: 'day' | 'week' | 'month' | 'quarter' | 'year' } }", kind: 'binding', description: 'Aggregation run against objectName. Result rows are keyed by the RAW FIELD NAMES: one column named after groupBy (the category) and one named after field (the value; the literal "count" for a fieldless count). Bind xAxis.field / yAxis[].field / series[].name to those names.' },
       { name: 'data', type: 'any[]', kind: 'binding', description: 'Static/precomputed data to chart directly instead of binding via objectName + aggregate.' },
+      // #5022 — the segment drill. Published from the OVERLAY, not from
+      // `dataProps`, and that placement is the whole point of the issue.
+      //
+      // `dataProps` reads `block.schema`, which is `ChartConfigSchema`, which is
+      // also what a DASHBOARD widget's `chartConfig` parses. Declaring the drill
+      // there would make `widget.chartConfig.drillDown` legal metadata that no
+      // dashboard renderer reads (objectui `DatasetWidget` forwards exactly one
+      // chartConfig key, `showLegend`) — the declared-but-not-delivered shape
+      // this campaign removes elsewhere. The overlay publishes it on the react
+      // tier ONLY, which is the tier that measurably reads it.
+      //
+      // The type string is not a second source of truth: `react-blocks.test.ts`
+      // derives the key set from `ChartDrillDownSchema` and fails if this string
+      // drifts from it. `renderType` would flatten the nested object to the
+      // useless `'object'` anyway, which is why `aggregate` above is spelled out
+      // the same way.
+      { name: 'drillDown', type: "{ enabled?: boolean; filter?: Record<string, unknown>; title?: string; target?: 'drawer' | 'dialog'; columns?: string[]; maxRows?: number }", kind: 'binding', description: "Click a segment to open the underlying records, filtered by the clicked category, in a drawer (or 'dialog'). Present = on; {} is enough. `filter`/`title` support ${event.*} interpolation; omit `filter` to derive it from aggregate.groupBy. Declared by ChartDrillDownSchema — NOT a dashboard widget key (a dataset-bound widget drills through the semantic layer instead), and not ReportSchema.drilldown (that is lowercase, boolean, report-only)." },
     ],
   },
   // NOTE: `<RecordDetails>` / `<RecordHighlights>` / `<RecordRelatedList>` /

@@ -49,6 +49,13 @@ import {
   MetadataEventSchema,
   type MetadataEvent as RealtimeMetadataEvent,
 } from '@objectstack/spec/api';
+// [#5189, #5040 E7b] The endpoint publish gates, reused verbatim — see
+// `gateApiItemsForPublish`.
+import {
+  ApiEndpointSchema,
+  validateApiEndpointDeclarations,
+  type ApiEndpoint,
+} from '@objectstack/spec/api';
 import { createLogger, type Logger } from '@objectstack/core';
 import { JSONSerializer } from './serializers/json-serializer.js';
 import { YAMLSerializer } from './serializers/yaml-serializer.js';
@@ -70,6 +77,19 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * [#5189] Appended to the namespace gate's message when `publishPackage` was
+ * called without one, because the gate's own text ("declare an explicit
+ * `manifest.namespace`") describes a stack file this caller may not have.
+ */
+const PUBLISH_NAMESPACE_REMEDY =
+  'From `MetadataManager.publishPackage` specifically: this method indexes items by `packageId` and '
+  + 'carries no manifest, so it cannot prove a namespace on its own and will not infer one from the '
+  + 'items being published (an author-supplied value would make the carve-out gate vacuous). Pass the '
+  + "package's explicit namespace as `publishPackage(id, { namespace })`, or publish the endpoints as "
+  + 'part of a stack artifact (`defineStack` → compile → artifact ingest), which carries the manifest '
+  + 'and runs these same gates at parse time.';
 
 /**
  * RFC-4122 v4 uuid for realtime `MetadataEvent.id` (#4602).
@@ -103,6 +123,28 @@ export interface ClusterMetadataChangedPayload {
   type: string;
   /** The legacy watch event replayed verbatim on peer nodes. */
   event: MetadataWatchEvent;
+}
+
+/**
+ * [#5184] One entry of {@link MetadataManager}'s short-TTL `list()` cache.
+ *
+ * Deliberately NOT exported: this is an internal caching-policy detail, not
+ * part of the `IMetadataService` contract. See the `listCache` field comment
+ * for the policy this shape encodes.
+ */
+interface ListCacheEntry {
+  /** When the entry was written (`Date.now()`). */
+  ts: number;
+  /** The `list()` result being memoized. */
+  items: unknown[];
+  /**
+   * True when at least one loader threw while `items` was being assembled, so
+   * this answer is known to be a partial view of what is declared. Degraded
+   * entries expire after `DEGRADED_LIST_CACHE_TTL_MS` instead of
+   * `LIST_CACHE_TTL_MS`, and any future consumer of the cache can branch on
+   * this rather than having to guess.
+   */
+  degraded: boolean;
 }
 
 export interface MetadataManagerOptions extends MetadataManagerConfig {
@@ -142,12 +184,67 @@ export class MetadataManager implements IMetadataService {
   // acquire a fresh knex connection while the transaction is still holding
   // SQLite's single connection — knex waits the full `acquireConnectionTimeout`
   // (60s) before returning []. The cache absorbs the repeated lookups so the
-  // loader is only hit once per TTL window.
+  // loader is only hit once per TTL window — for SEQUENTIAL callers. Nothing is
+  // written until a read completes, so calls issued concurrently with the first
+  // one all miss and each walk every loader (#5253); read that sentence as a
+  // statement about repeated lookups, not a concurrency guarantee.
+  //
+  // [#5184] That hazard is NOT historical — it was re-verified on the current
+  // driver stack before this policy was chosen. `DatabaseLoader._find()` still
+  // issues `engine.find('sys_metadata', …)` without threading the caller's
+  // transaction, and `driver-sql` still treats SQLite as a single-connection
+  // pool (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
+  // guard that is a no-op in production, so production still waits the timeout
+  // out). `plugin-audit`'s `captureBefore` threads the transaction by hand for
+  // exactly this reason. Hence the policy below keeps caching degraded reads
+  // rather than skipping them: "don't cache a degraded read" would trade one
+  // 30s silent window for a fresh 60s stall per call.
+  //
+  // [#5184] WHAT IS ACTUALLY CACHED, AND FOR HOW LONG — this paragraph is the
+  // contract, and it describes `cacheListResult()` / `readCachedList()` below.
+  // (An earlier version of this comment claimed the cache kept "only positive
+  // (non-empty) hits or repeated hits with a stable miss signature". No such
+  // condition ever existed in the code. Comment is contract; a comment that
+  // describes a policy nothing implements is a declared ≠ enforced defect in
+  // its own right, so it is replaced rather than patched.)
+  //
+  //   • EVERY completed `list()` is cached, empty results included. There is
+  //     no non-empty test and no "miss signature" concept.
+  //   • An entry assembled while at least one loader THREW is a known-partial
+  //     answer: it is cached with `degraded: true` and expires after
+  //     `DEGRADED_LIST_CACHE_TTL_MS`, not `LIST_CACHE_TTL_MS`. So the burst of
+  //     repeated lookups the knex path above depends on is still absorbed,
+  //     while the window in which the manager serves a known-short set without
+  //     re-asking anyone shrinks from 30s to ~2s. Recovery is therefore also
+  //     noticed (and `reportLoaderReadRecovered` logged) within ~2s of storage
+  //     healing instead of up to 30s later.
+  //   • `degraded` lives ON the entry, not in a side table, so every consumer
+  //     of the cache can tell a complete answer from a partial one. Read
+  //     entries through `readCachedList()` rather than `listCache.get()`, so
+  //     the flag and its TTL are applied in one place.
   //
   // Invalidated on every `register()` / `unregister()` to keep CRUD writes
   // visible to subsequent reads.
-  private listCache = new Map<string, { ts: number; items: unknown[] }>();
+  private listCache = new Map<string, ListCacheEntry>();
   private static readonly LIST_CACHE_TTL_MS = 30_000;
+  /**
+   * [#5184] TTL for an entry produced by a degraded read (≥1 loader threw).
+   *
+   * Deliberately at the top of the 1–2s band: the point of keeping degraded
+   * results cached at all is to absorb a burst of `list()` calls issued from
+   * inside one open transaction, and those bursts are milliseconds apart but
+   * can be spread by per-row work. Two seconds covers that while still being
+   * 15× shorter than the healthy TTL.
+   */
+  private static readonly DEGRADED_LIST_CACHE_TTL_MS = 2_000;
+
+  // [#5108] Loader names whose read failure has already been reported at
+  // `error` by `list()`. AGENTS.md → "Degradation log levels": say it once, at
+  // the first degradation — `list()` is hot enough that one line per failed
+  // read would bury the one line that matters. Cleared when the loader answers
+  // again, so a second outage is reported again. Same once-only discipline as
+  // `DatabaseLoader.schemaFailureReported`.
+  private readonly loaderReadFailureReported = new Set<string>();
 
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
@@ -157,9 +254,12 @@ export class MetadataManager implements IMetadataService {
   // become cluster-wide:
   //   • Local notifyWatchers() publishes on `metadata.changed` so peers
   //     can invalidate their caches.
-  //   • Subscribed remote events are replayed into the local watch hub
-  //     so existing consumers (ObjectQLPlugin, Studio HMR, …) see
-  //     uniform behavior regardless of which node initiated the change.
+  //   • A subscribed remote event first invalidates THIS node's caches
+  //     (registry entry + listCache, via `invalidateForForeignWrite` —
+  //     #5109) and is then replayed into the local watch hub, so existing
+  //     consumers (ObjectQLPlugin, Studio HMR, …) see uniform behavior
+  //     regardless of which node initiated the change — including when
+  //     they answer the event by re-reading through `list()`.
   // `originNode` on the payload prevents loopback; `partitionKey` keeps
   // per-object ordering on partitioned drivers.
   private clusterPubSub?: IPubSub;
@@ -179,9 +279,9 @@ export class MetadataManager implements IMetadataService {
   // ── #5089 (#5040 E2): declared-endpoint index ────────────────────────
   // Backs `matchEndpoint`. Lazily built from `api` items on the first call
   // and invalidated by every path that can change them — see
-  // `invalidateListCache` (local writes, repo events, HMR/artifact ingest,
-  // which registers with `notify:false`) and the `subscribe('api', …)`
-  // registration below (cluster peer replay, which reaches watchers only).
+  // `invalidateListCache` (local writes, repo events, HMR/artifact ingest
+  // which registers with `notify:false`, and — since #5109 — cluster peer
+  // replay) and the `subscribe('api', …)` registration below.
   private static readonly ENDPOINT_METADATA_TYPE = 'api';
   private readonly endpointMatcher: EndpointMatcher;
 
@@ -190,17 +290,18 @@ export class MetadataManager implements IMetadataService {
     this.logger = createLogger({ level: 'info', format: 'pretty' });
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
-    // covering disjoint event sets — both are needed, neither is redundant:
-    //   1. `invalidateListCache('api')` — every LOCAL mutation of the stored
-    //      set, including the `{ notify: false }` writes the artifact ingest
-    //      and the HMR reload use, which by construction never reach a
-    //      watcher. It is the same invariant the list cache carries: if the
-    //      cached list of a type is stale, so is the index built from it.
-    //   2. `subscribe('api', …)` — a CLUSTER peer's write, which
-    //      `attachClusterPubSub` replays through `notifyWatchersLocal` only
-    //      and therefore does not pass through (1). (That the peer replay
-    //      leaves the manager's OWN caches stale is #5109; the index does not
-    //      inherit the bug because it listens on the watcher too.)
+    // covering overlapping but non-identical event sets — both are kept:
+    //   1. `invalidateListCache('api')` — every mutation of the stored set
+    //      this manager learns about, including the `{ notify: false }`
+    //      writes the artifact ingest and the HMR reload use, which by
+    //      construction never reach a watcher. It is the same invariant the
+    //      list cache carries: if the cached list of a type is stale, so is
+    //      the index built from it. Since #5109 a CLUSTER peer's write also
+    //      passes through here, via `invalidateForForeignWrite`.
+    //   2. `subscribe('api', …)` — the watcher seam, which additionally
+    //      covers events raised by subclasses / test doubles that call
+    //      `notifyWatchers` without a cache mutation of their own.
+    //      Double invalidation is idempotent, so the overlap is free.
     this.endpointMatcher = new EndpointMatcher({
       listApiItems: () => this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE),
       logger: this.logger,
@@ -507,12 +608,11 @@ export class MetadataManager implements IMetadataService {
    * List all metadata items of a given type
    */
   async list(type: string): Promise<unknown[]> {
-    // Short-TTL cache: see field comment on `listCache`. Skip when called
-    // from tests / hot reloads that rely on always-fresh reads — we only
-    // cache positive (non-empty) hits or repeated hits with a stable miss
-    // signature.
-    const cached = this.listCache.get(type);
-    if (cached && Date.now() - cached.ts < MetadataManager.LIST_CACHE_TTL_MS) {
+    // Short-TTL cache: see the field comment on `listCache` for what is
+    // cached and for how long. Every completed read is memoized; a read that
+    // lost a loader is memoized as `degraded` and expires ~15× sooner.
+    const cached = this.readCachedList(type);
+    if (cached) {
       return cached.items;
     }
 
@@ -526,7 +626,11 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    // From loaders (deduplicate)
+    // From loaders (deduplicate). [#5184] `degraded` records whether this
+    // particular read lost a loader, so the memoized answer carries the fact
+    // that it is known-partial instead of being indistinguishable from a
+    // complete one.
+    let degraded = false;
     for (const loader of this.loaders.values()) {
       try {
         const loaderItems = await loader.loadMany(type);
@@ -536,17 +640,107 @@ export class MetadataManager implements IMetadataService {
             items.set(itemAny.name, item);
           }
         }
+        this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
-        this.logger.warn(`Loader ${loader.contract.name} failed to loadMany ${type}`, { error: e });
+        degraded = true;
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
     const result = Array.from(items.values());
-    this.cacheListResult(type, result);
+    this.cacheListResult(type, result, degraded);
     return result;
   }
-  private cacheListResult(type: string, items: unknown[]): void {
-    this.listCache.set(type, { ts: Date.now(), items });
+
+  /**
+   * Report — at `error`, once per outage episode — that a loader could not be
+   * read while serving {@link list}.
+   *
+   * [#5108] This branch used to be dead for the loader that matters. Before
+   * #5108 `DatabaseLoader` caught its own read failures and answered `[]`, so
+   * `list()` received a *successful empty read* and never entered this `catch`
+   * at all: an unreachable `sys_metadata` and "this environment declares no
+   * `permission`" produced byte-identical results with not one line logged.
+   * With the loader rethrowing everything but the benign not-provisioned case,
+   * this is where the outage finally becomes speakable.
+   *
+   * `error`, not `warn`, per AGENTS.md → "Degradation log levels". Apply its
+   * one question — *does the system still look normal from outside while
+   * something it claims to know has not actually landed?* — and the answer is
+   * yes: `list()` still returns, callers still get an array, nothing 500s, and
+   * the set they gate on is quietly short. Which way that cuts depends on the
+   * consumer, and both ways are silent (#3935 is the fail-open precedent).
+   *
+   * Said **once** per loader, and un-said on recovery, because `list()` is a
+   * hot path — one line per outage, not one per read.
+   *
+   * [#5184] The once-only guard carries more weight than it used to: a
+   * degraded `list()` result is now memoized for `DEGRADED_LIST_CACHE_TTL_MS`
+   * rather than `LIST_CACHE_TTL_MS`, so during an outage the loader is
+   * re-asked (and this method re-entered) roughly every 2s instead of every
+   * 30s. That is the point — the outage stops being a 30s silent window and
+   * recovery is noticed within seconds — and it costs nothing in log volume
+   * precisely because `loaderReadFailureReported` still speaks only once.
+   *
+   * Deliberately does NOT rethrow: `list()` is the best-effort listing seam and
+   * must keep serving what the reachable loaders hold. The strict counterpart
+   * for callers whose answer is a security decision is `listForIndex()` (no
+   * `catch`, feeding `matchEndpoint`) and {@link loadDiagnosed} (ADR-0110 D3)
+   * for the singular read — both of which only became honest for
+   * `DatabaseLoader` with the same #5108 change.
+   */
+  private reportLoaderReadFailure(loaderName: string, type: string, error: unknown): void {
+    if (this.loaderReadFailureReported.has(loaderName)) return;
+    this.loaderReadFailureReported.add(loaderName);
+    this.logger.error(
+      `[MetadataManager] Loader \`${loaderName}\` could NOT be read (first failure seen while listing \`${type}\`) — ` +
+        `every list served from now on is a PARTIAL set presented as a complete one, and the server keeps reporting healthy. ` +
+        `Consumers that gate on a declared set (permissions, sharing rules, policies, api endpoints) will read the ` +
+        `declarations this loader holds as "never declared" — which grants or locks out depending on the consumer, silently either way. ` +
+        `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists. ` +
+        `The read is retried on the next list once the ${MetadataManager.DEGRADED_LIST_CACHE_TTL_MS}ms degraded-result list cache lapses ` +
+        `(a known-partial listing is memoized far more briefly than a complete one — #5184), so a transient cause recovers on its ` +
+        `own within seconds and the recovery is logged.`,
+      error instanceof Error ? error : undefined,
+      { loader: loaderName, type, error },
+    );
+  }
+
+  /** Un-say {@link reportLoaderReadFailure} once the loader answers again. */
+  private reportLoaderReadRecovered(loaderName: string): void {
+    if (!this.loaderReadFailureReported.delete(loaderName)) return;
+    this.logger.info(
+      `[MetadataManager] Loader \`${loaderName}\` is readable again — listings are complete once more.`,
+    );
+  }
+
+  /**
+   * Memoize a completed {@link list} result.
+   *
+   * [#5184] `degraded` is not optional at the call site by accident — it is the
+   * one thing this cache used to throw away. A result assembled while a loader
+   * was unreadable is stored, but stored *as* what it is, so it expires on the
+   * degraded TTL and any reader can tell it apart from a complete answer.
+   */
+  private cacheListResult(type: string, items: unknown[], degraded: boolean): void {
+    this.listCache.set(type, { ts: Date.now(), items, degraded });
+  }
+
+  /**
+   * Read a still-fresh {@link listCache} entry, or `undefined` when there is
+   * none / it has expired.
+   *
+   * [#5184] The single place the TTL policy is applied, so "a degraded entry
+   * expires sooner" cannot be forgotten by a second reader. Returns the whole
+   * entry rather than just `items` so callers keep access to `degraded`.
+   */
+  private readCachedList(type: string): ListCacheEntry | undefined {
+    const cached = this.listCache.get(type);
+    if (!cached) return undefined;
+    const ttl = cached.degraded
+      ? MetadataManager.DEGRADED_LIST_CACHE_TTL_MS
+      : MetadataManager.LIST_CACHE_TTL_MS;
+    return Date.now() - cached.ts < ttl ? cached : undefined;
   }
 
   /** Internal helper: drop the cached `list()` result for a type. */
@@ -565,7 +759,7 @@ export class MetadataManager implements IMetadataService {
    * Enumerate stored items of `type` for an index build — like {@link list},
    * but a store that cannot be read THROWS instead of contributing nothing.
    *
-   * [#5089] `list()` deliberately warn-logs and skips a failing loader so a
+   * [#5089] `list()` deliberately logs a failing loader and skips it so a
    * partially-available metadata plane still serves what it can. That posture
    * is wrong for `matchEndpoint`: its `undefined` becomes an HTTP 404, and a
    * store outage that silently yields "zero declarations" would turn every
@@ -577,10 +771,14 @@ export class MetadataManager implements IMetadataService {
    * is `list()`'s failure posture inverted for the one caller whose answer is
    * a security/availability decision rather than a best-effort listing.
    *
-   * ⚠️ This surfaces only failures a loader actually reports. `DatabaseLoader`
-   * currently swallows its own read errors into `[]` (#5108), so a DB outage is
-   * invisible even here — that is a defect in the loader, not a reason to
-   * soften this seam.
+   * This surfaces only failures a loader actually reports — which, since
+   * #5108, includes `DatabaseLoader`: it used to swallow its own read errors
+   * into `[]`, making a DB outage invisible even here. It now rethrows every
+   * read failure except the benign "table not provisioned yet", so this seam
+   * holds against the real datasource-backed loader and not just the memory /
+   * remote ones. (`database-loader.test.ts` pins that end to end: a broken
+   * driver behind a real `DatabaseLoader` makes `matchEndpoint` reject rather
+   * than answer a 404-shaped `undefined`.)
    */
   private async listForIndex(type: string): Promise<unknown[]> {
     const items = new Map<string, unknown>();
@@ -805,11 +1003,32 @@ export class MetadataManager implements IMetadataService {
    * 2. Snapshot all items in the package (publishedDefinition = clone(metadata))
    * 3. Increment version
    * 4. Set all items state → active
+   *
+   * [#5189, #5040 E7b] Step 1 additionally runs the **endpoint publish gates**
+   * over every `api` item — see {@link gateApiItemsForPublish}. That pass is
+   * NOT governed by `options.validate`: the gates are a contract, not a
+   * lint (ADR-0121 D6 says publish REJECTS an unmetered anonymous endpoint),
+   * and an opt-out flag on a security gate is the bypass this issue closed.
    */
   async publishPackage(packageId: string, options?: {
     changeNote?: string;
     publishedBy?: string;
     validate?: boolean;
+    /**
+     * [#5189] The package manifest's EXPLICIT `manifest.namespace` (ADR-0121
+     * D2), supplied by a caller that holds the manifest.
+     *
+     * `MetadataManager` has no manifest concept — it indexes items by
+     * `packageId` and nothing else — so it cannot prove a namespace on its
+     * own, and an `api` item's own `namespace`-ish fields are author-supplied
+     * data, not identity (reading them would make the D1/D2 carve-out gate
+     * vacuous: an author would simply declare the namespace their path
+     * already uses). Absent this option the namespace gate fails and `api`
+     * items in the package cannot publish through this path — which is the
+     * correct outcome, not a limitation to route around: a publish that
+     * cannot prove a namespace must not mint a URL under one.
+     */
+    namespace?: string;
   }): Promise<PackagePublishResult> {
     const now = new Date().toISOString();
     const shouldValidate = options?.validate !== false;
@@ -837,10 +1056,19 @@ export class MetadataManager implements IMetadataService {
       };
     }
 
+    const validationErrors: Array<{ type: string; name: string; message: string }> = [];
+
+    // [#5189, #5040 E7b] Endpoint publish gates — ALWAYS, `validate: false`
+    // included. Every other check in this method is a best-effort quality
+    // check whose opt-out is a convenience; these gates decide whether an
+    // externally reachable, possibly ANONYMOUS execution entry point comes
+    // into existence, and ADR-0121 D6 has no runtime counterpart to catch what
+    // slips through. A flag that turns them off would be exactly the bypass
+    // #5189 filed.
+    validationErrors.push(...this.gateApiItemsForPublish(packageItems, options?.namespace));
+
     // Validation pass
     if (shouldValidate) {
-      const validationErrors: Array<{ type: string; name: string; message: string }> = [];
-
       // Schema validation
       for (const item of packageItems) {
         const result = await this.validate(item.type, item.data);
@@ -883,17 +1111,17 @@ export class MetadataManager implements IMetadataService {
           }
         }
       }
+    }
 
-      if (validationErrors.length > 0) {
-        return {
-          success: false,
-          packageId,
-          version: 0,
-          publishedAt: now,
-          itemsPublished: 0,
-          validationErrors,
-        };
-      }
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        packageId,
+        version: 0,
+        publishedAt: now,
+        itemsPublished: 0,
+        validationErrors,
+      };
     }
 
     // Determine the next version by finding the max current version across items
@@ -924,6 +1152,98 @@ export class MetadataManager implements IMetadataService {
       publishedAt: now,
       itemsPublished: packageItems.length,
     };
+  }
+
+  /**
+   * [#5189, #5040 E7b] Run the endpoint publish gates over a package's `api`
+   * items and report every failure as a publish-blocking validation error.
+   *
+   * ## Why this exists at all
+   *
+   * E7 (#5111) hung the five per-endpoint gates on
+   * `ObjectStackDefinitionSchema`, which covers every path that parses a
+   * STACK — `defineStack`, `os validate`, the lint scorer, artifact ingest,
+   * `EnvironmentArtifactSchema.metadata`. It does not cover this one: an `api`
+   * item can be minted item-by-item (`metadata.register()`, a Studio write)
+   * and published here without a stack ever being parsed. Three of the gates
+   * degrade safely when bypassed (the executor answers a structured 501; a
+   * mis-namespaced path matches nothing), but **ADR-0121 D6 has no runtime
+   * counterpart**: `authRequired: false` is honoured faithfully and an
+   * unarmed `rateLimit` meters nothing, so the bypass mints an anonymous,
+   * zero-quota execution entry point. Hence a gate here, on the same
+   * function, rather than a second set of criteria that would drift.
+   *
+   * ## What it judges, and on what
+   *
+   * The registry stores either a raw spec document or a publish envelope
+   * (`{ name, packageId, state, metadata: {…spec} }`); the endpoint is read
+   * out with the SAME rule this method's caller uses for
+   * `publishedDefinition` (`data.metadata ?? data`), so publish gates exactly
+   * the document publish is about to snapshot. An item that does not satisfy
+   * `ApiEndpointSchema` fails here too — not extra strictness but a
+   * precondition: an unparsed shape cannot be gated, and it could never be
+   * served either (the matcher's own loud skip refuses it at load).
+   *
+   * @param packageItems every item collected for this package (all types).
+   * @param namespace the caller-supplied `manifest.namespace`; `undefined`
+   *   fails the namespace gate, deliberately — see `publishPackage`'s option.
+   * @returns one entry per gate failure, `[]` when the package declares no
+   *   `api` items (a package without endpoints is untouched by this pass).
+   */
+  private gateApiItemsForPublish(
+    packageItems: Array<{ type: string; name: string; data: any }>,
+    namespace: string | undefined,
+  ): Array<{ type: string; name: string; message: string }> {
+    const apiItems = packageItems.filter(i => i.type === MetadataManager.ENDPOINT_METADATA_TYPE);
+    if (apiItems.length === 0) return [];
+
+    const errors: Array<{ type: string; name: string; message: string }> = [];
+    /** Parsed endpoints, index-aligned with the items that produced them. */
+    const endpoints: ApiEndpoint[] = [];
+    const gatedItems: Array<{ name: string }> = [];
+
+    for (const item of apiItems) {
+      const document = item.data?.metadata ?? item.data;
+      const parsed = ApiEndpointSchema.safeParse(document);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          errors.push({
+            type: item.type,
+            name: item.name,
+            message:
+              `api item '${item.name}' does not satisfy ApiEndpointSchema and cannot be published: `
+              + `${issue.message} (at ${issue.path.join('.') || '<root>'}). An endpoint that does not `
+              + `parse cannot be gated and would be excluded from endpoint matching at load anyway.`,
+          });
+        }
+        continue;
+      }
+      endpoints.push(parsed.data);
+      gatedItems.push({ name: item.name });
+    }
+
+    for (const issue of validateApiEndpointDeclarations(endpoints, { namespace })) {
+      // The gate reports per-endpoint issues at `['apis', <index>, …]` and the
+      // namespace PRECONDITION once at `['apis']` — the latter is a property of
+      // the publish call, not of any one endpoint, so it is reported once with
+      // this path's own remedy appended.
+      const index = typeof issue.path[1] === 'number' ? issue.path[1] : undefined;
+      if (index === undefined) {
+        errors.push({
+          type: MetadataManager.ENDPOINT_METADATA_TYPE,
+          name: '',
+          message: `${issue.message} ${PUBLISH_NAMESPACE_REMEDY}`,
+        });
+        continue;
+      }
+      errors.push({
+        type: MetadataManager.ENDPOINT_METADATA_TYPE,
+        name: gatedItems[index]?.name ?? '',
+        message: issue.message,
+      });
+    }
+
+    return errors;
   }
 
   /**
@@ -1634,8 +1954,13 @@ export class MetadataManager implements IMetadataService {
                 }
                 results.push(item);
             }
+            this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
-           this.logger.warn(`Loader ${loader.contract.name} failed to loadMany ${type}`, { error: e });
+            // [#5108] Same seam, same verdict as `list()` — see
+            // {@link reportLoaderReadFailure}. Two adjacent plural reads
+            // reporting one storage outage at two different levels is how the
+            // wrong one gets copied.
+            this.reportLoaderReadFailure(loader.contract.name, type, e);
         }
     }
     return results;
@@ -1813,22 +2138,63 @@ export class MetadataManager implements IMetadataService {
     }
   }
 
+  /**
+   * Drop every local cache of `type` (and of `name` within it) that a change
+   * we did not perform ourselves has just invalidated, so the next read falls
+   * through to the source of truth.
+   *
+   * The callers are the manager's *foreign-write* seams — the repository watch
+   * loop ({@link applyRepoEvent}), the cluster peer replay in
+   * {@link attachClusterPubSub}, and — since #5218 — `NodeMetadataManager`'s
+   * chokidar handler, which is why this is `protected` rather than `private`.
+   * All three learn about a write that landed somewhere else (the repo head;
+   * another node's `sys_metadata`; an editor writing `rootDir/view/x.json`) and
+   * hold caches that the write silently aged out. A file event qualifies on
+   * exactly the definition that matters here: it did not come through this
+   * manager's write API, so nothing has updated the caches on its behalf.
+   * Local writes do not come through here: `register()` / `unregister()` /
+   * `registerInMemory()` update the registry to the value they just wrote and
+   * call `invalidateListCache()` themselves.
+   *
+   * **Delete, do not pre-fill.** Even when the event carries a body we drop the
+   * registry entry rather than writing the body into it: the body reaching us
+   * is a snapshot of *someone else's* write, already possibly superseded, and
+   * pre-filling would race with the true head and require us to re-canonicalise
+   * a definition we did not load. Lazy invalidation is the safer default —
+   * `get()` then falls through to the loaders / repository, which is where the
+   * truth is. (This paragraph is the rationale `applyRepoEvent` carried since
+   * ADR-0008 PR-6; #5109 extended the same choice to the cluster path, #5218 to
+   * the filesystem watcher — where "the truth" is the file chokidar just
+   * reported, served by the `FilesystemLoader` the registry entry was shadowing.)
+   *
+   * `name` is optional because `MetadataWatchEvent.name` is: a nameless event
+   * cannot address a registry entry, so it invalidates the list cache only.
+   * Dropping the whole type store instead would evict `registerInMemory()`
+   * artefacts (code-owned datasources, ADR-0015 Addendum) that no loader can
+   * restore — an unrecoverable loss in exchange for a guess.
+   */
+  protected invalidateForForeignWrite(type: string, name?: string): void {
+    if (name) {
+      const typeStore = this.registry.get(type);
+      if (typeStore) {
+        typeStore.delete(name);
+        if (typeStore.size === 0) this.registry.delete(type);
+      }
+    }
+    this.invalidateListCache(type);
+  }
+
   /** Translate a repo event to the legacy MetadataWatchEvent + invalidate caches. */
   private applyRepoEvent(evt: MetadataEvent): void {
     const ref: MetaRef = evt.ref;
     const type = ref.type;
     const name = ref.name;
 
-    // Invalidate in-memory registry so manager.get() falls through to
-    // loaders / repository on next read. We do NOT pre-fill the registry
-    // here — that would race with the repo head and require us to
-    // re-canonicalise. Lazy invalidation is the safer default.
-    const typeStore = this.registry.get(type);
-    if (typeStore) {
-      typeStore.delete(name);
-      if (typeStore.size === 0) this.registry.delete(type);
-    }
-    this.listCache.delete(type);
+    // Invalidate before announcing, so a watcher that re-reads on the event
+    // observes the write rather than the pre-write cache. See
+    // {@link invalidateForForeignWrite} for why the registry entry is deleted
+    // rather than pre-filled.
+    this.invalidateForForeignWrite(type, name);
 
     const legacyType: 'added' | 'changed' | 'deleted' =
       evt.op === 'create' ? 'added'
@@ -1923,6 +2289,40 @@ export class MetadataManager implements IMetadataService {
         // Loopback guard — never replay events we just emitted.
         if (p?.originNode && p.originNode === this.clusterNodeId) return;
         if (!p?.type || !p.event) return;
+
+        // [#5109] Invalidate FIRST, and SYNCHRONOUSLY on receipt — this is
+        // what the channel is for ("consumed by peers to invalidate their
+        // local caches", see ClusterMetadataChangedPayload). Until this
+        // landed, a peer's write only woke this node's watchers: the registry
+        // entry and the `listCache` were left untouched, so every `list(type)`
+        // kept serving the pre-write set for up to LIST_CACHE_TTL_MS (30s) —
+        // and a watcher that re-read via `list()` in response to the wake-up
+        // got the stale set back, an invalidation notice carrying invalidated
+        // data.
+        //
+        // Two deliberate choices, both pinned by tests in
+        // `metadata-manager-cluster.test.ts`:
+        //
+        //   • BEFORE the notify, matching every other write path in this file
+        //     (`register` / `unregister` / `applyRepoEvent` all invalidate,
+        //     then announce): a watcher must never be able to observe the
+        //     event and the pre-event cache at the same time.
+        //   • OUTSIDE the `setImmediate`, unlike the notify. The deferral
+        //     exists so a slow *watcher callback* — arbitrary consumer code —
+        //     cannot back-pressure the pubsub dispatch loop. Invalidation is
+        //     two `Map.delete`s and runs no consumer code, so it has nothing
+        //     to defer for, while deferring it would leave a window between
+        //     receipt and the next tick in which reads still answer stale.
+        //     Any `await` in a request handler is enough to lose that race.
+        try {
+          this.invalidateForForeignWrite(p.type, p.event.name);
+        } catch (err) {
+          this.logger.error('Cluster remote invalidation failed', undefined, {
+            type: p.type,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
         // Defer to setImmediate so a slow local handler can't back-pressure
         // the pubsub dispatch loop on memory drivers.
         setImmediate(() => {

@@ -9,6 +9,20 @@ import type {
   ShareAccessLevel,
 } from '@objectstack/spec/contracts';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
+import {
+  deleteRowsForDeletedRecords,
+  sweepOrphanedRowsByRecordExistence,
+  type OrphanShareSweepOptions,
+  type OrphanShareSweepResult,
+} from './record-orphan-cleanup.js';
+
+/**
+ * [#5103] Re-exported from their new home so this module's public surface is
+ * unchanged: #5190 moved the record-existence cleanup MECHANISM into
+ * `record-orphan-cleanup.ts` (`sys_share_link` needs the identical walk), and a
+ * type that moved house is not an API change callers should have to notice.
+ */
+export type { OrphanShareSweepOptions, OrphanShareSweepResult };
 
 /**
  * Shape of the data engine the service actually needs. Kept narrow so
@@ -66,7 +80,7 @@ const OWNER_FIELD = 'owner_id';
  * parse at authoring. A stored value this function does not recognise
  * fails CLOSED to `private` (never silently public).
  */
-function effectiveSharingModel(schema: any): 'private' | 'read' | 'public' {
+export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public' {
   const m = schema?.sharingModel ?? schema?.security?.sharingModel;
   if (m === 'private') return 'private';
   if (m === 'public_read') return 'read';
@@ -102,6 +116,13 @@ export interface SharingSecurityProbe {
   ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
 }
 
+/** [#5103] The table whose orphans this service owns. */
+const RECORD_SHARE_SWEEP_SUBJECT = {
+  table: 'sys_record_share',
+  noun: 'share',
+  issue: '#5103',
+} as const;
+
 export interface SharingServiceOptions {
   engine: SharingEngine;
   /** Object names that bypass sharing — typically platform internals. */
@@ -118,6 +139,8 @@ export interface SharingServiceOptions {
    * null → management authority fails CLOSED to owner-only.
    */
   securityService?: () => SharingSecurityProbe | null | undefined;
+  /** [#5103] Optional logger for the record-delete cascade / orphan sweep. */
+  logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
 }
 
 /**
@@ -133,11 +156,13 @@ export class SharingService implements ISharingService {
   private readonly bypassObjects: Set<string>;
   private readonly hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
   private readonly securityService?: () => SharingSecurityProbe | null | undefined;
+  private readonly logger?: SharingServiceOptions['logger'];
 
   constructor(options: SharingServiceOptions) {
     this.engine = options.engine;
     this.hierarchyResolver = options.hierarchyResolver;
     this.securityService = options.securityService;
+    this.logger = options.logger;
     this.bypassObjects = new Set([
       'sys_record_share',
       'sys_user',
@@ -737,6 +762,94 @@ export class SharingService implements ISharingService {
       context: SYSTEM_CTX,
     });
     return Array.isArray(rows) ? (rows as RecordShare[]) : [];
+  }
+
+  /**
+   * [#5103] Revoke EVERY `sys_record_share` row belonging to records that have
+   * just been deleted — regardless of `source`.
+   *
+   * This is the one place manual shares are swept, and the justification is
+   * exactly what makes it safe: the record is GONE. A share says "principal P
+   * has level L on (object O, record R)"; with R deleted the row cannot
+   * describe any access a human decided to give, so keeping it is not respect
+   * for the admin's decision, it is a dangling reference. Contrast rule
+   * RECOMPUTE, which must never touch a manual row (#5102 pinned that, and it
+   * stays pinned): there the record still exists and the human's decision is
+   * still about something.
+   *
+   * Why the orphan matters even though the record is gone: `buildReadFilter`
+   * emits `id IN (<granted record ids>)`, which matches nothing today ONLY
+   * because record ids are never reused — an assumption no gate enforces. A
+   * new record landing on a recycled id would inherit the dead record's
+   * recipients outright (#5103). The rows are also unbounded growth and show
+   * up in Setup's Record Shares list pointing at nothing.
+   *
+   * Set-based and chunked, so its cost tracks the number of ids, not the
+   * number of share rows. Returns nothing: counting would need a read the hot
+   * delete path should not pay for, and callers that need a count (tests, the
+   * sweep) can read the table.
+   *
+   * [#5190] The mechanism now lives in `record-orphan-cleanup.ts`, shared with
+   * `sys_share_link`'s identical cascade. This method keeps the meaning.
+   */
+  async revokeSharesForDeletedRecords(
+    object: string,
+    recordIds: readonly string[],
+  ): Promise<void> {
+    await deleteRowsForDeletedRecords(
+      this.engine,
+      RECORD_SHARE_SWEEP_SUBJECT.table,
+      object,
+      recordIds,
+    );
+  }
+
+  /**
+   * [#5103] Revoke every share row whose RECORD no longer exists.
+   *
+   * The convergence half of the record-delete cascade, and the shape
+   * `SharingRuleService.sweepOrphanedRuleGrants` (#4433) established — with a
+   * different predicate, which is the whole point: that sweep asks "does the
+   * RULE row still exist", so it can never see a manual share, nor a rule
+   * grant whose rule is alive and whose record is not. This one asks "does the
+   * RECORD still exist", which is the question the invariant is actually made
+   * of, and it is source-agnostic.
+   *
+   * Two callers, one primitive:
+   *  - `kernel:bootstrapped`, unscoped — historical orphans from before the
+   *    cascade existed, plus anything a crashed hook missed, converge on the
+   *    next boot;
+   *  - the cascade's unbounded-delete branch, scoped to one object — a bulk
+   *    delete whose row set could not be enumerated cannot name the ids to
+   *    revoke, but the sweep does not need them: it reads the shares and asks
+   *    about each record. This is deliberately NOT the rule path's
+   *    "revoke everything on the object and re-grant asynchronously" — that
+   *    trade is only available where a reconcile can put the grants back, and
+   *    nothing can re-create a manual share.
+   *
+   * Bounded on both axes: rows are read by keyset page (never `OFFSET`, which
+   * skips rows in a walk that deletes as it goes — #4363), the scan stops at
+   * `max` and SAYS so, and existence is probed one batched `id IN (…)` per
+   * object per page rather than one query per share row.
+   *
+   * Fails SAFE per object: a probe that throws leaves that object's rows
+   * untouched and is reported in `unresolvedObjects`. "Nothing was queried" is
+   * not "nothing matched" — deleting on a failed probe would turn a transient
+   * driver error into permanent access loss.
+   *
+   * [#5190] The walk itself lives in `record-orphan-cleanup.ts` — `sys_share_link`
+   * runs the identical one, and a second copy is how two sweeps that must agree
+   * start disagreeing (chunk size, cap, the failed-probe rule).
+   */
+  async sweepOrphanedRecordShares(
+    options?: OrphanShareSweepOptions,
+  ): Promise<OrphanShareSweepResult> {
+    return sweepOrphanedRowsByRecordExistence(
+      this.engine,
+      RECORD_SHARE_SWEEP_SUBJECT,
+      options,
+      this.logger,
+    );
   }
 
   // ── helpers ──────────────────────────────────────────────────────

@@ -7,17 +7,79 @@ import type {
   QueueMessageRecord,
   QueueHandler,
 } from '@objectstack/spec/contracts';
+import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import {
   SYSTEM_CTX,
   uid,
   nowIso,
   parseJson,
+  lifecycleDurationMs,
   type JobEngine,
   type JobClock,
   type JobLogger,
 } from './common.js';
 
 const QUEUE_TABLE = 'sys_job_queue';
+
+/**
+ * How long a `completed` row survives before the platform Reaper deletes it.
+ *
+ * Read from the object's own ADR-0057 declaration
+ * (`sys_job_queue.lifecycle.retention`, #5179) instead of being a second
+ * number here: the declaration is what actually runs (LifecycleService sweeps
+ * every registered object hourly), so a copy in this file could only ever be
+ * a copy that drifts. A missing or unparseable declaration throws: the queue's
+ * dedup contract below is defined against this window, so "no window" is not a
+ * state the adapter can run in.
+ */
+export function completedRetentionWindowMs(): number {
+  const maxAge = SysJobQueue.lifecycle?.retention?.maxAge;
+  if (!maxAge) {
+    throw new Error(
+      '[service-queue] sys_job_queue no longer declares lifecycle.retention — DbQueueAdapter dedups against '
+      + 'terminal rows by `created_at` window and relies on that declared retention to keep them (ADR-0057, #5179). '
+      + 'Restore the declaration in @objectstack/platform-objects rather than sweeping the table from here.',
+    );
+  }
+  return lifecycleDurationMs(maxAge);
+}
+
+/**
+ * [#5195] The shape `LifecycleService.registerRetentionFloor()` accepts.
+ *
+ * Restated here rather than imported: `@objectstack/objectql` is a
+ * devDependency of this package on purpose (the queue must not drag the engine
+ * into every install), so its types are not available to this package's
+ * consumers at build time.
+ */
+export interface QueueRetentionFloor {
+  policy: 'retention';
+  minWindowMs: number;
+  declaredBy: string;
+  consequence: string;
+  remedy: string;
+}
+
+/**
+ * [#5195] The `lifecycle` slot's contract as THIS package consumes it — the one
+ * method `QueueServicePlugin` calls, and nothing else.
+ *
+ * Declared rather than erased to `any` at the lookup (#4127/#4251): `any` would
+ * switch off checking on the single call that carries the floor, so a rename or
+ * a changed argument order in `LifecycleService.registerRetentionFloor` would
+ * compile here and fail at runtime inside a `try` that logs and continues —
+ * i.e. the floor would silently not exist, which is precisely the silent
+ * bypass #5195 exists to close.
+ *
+ * `registerRetentionFloor` is **optional** on purpose, and that optionality is
+ * the honest part of the contract: a kernel may carry a lifecycle service that
+ * predates floors, so the runtime `typeof … === 'function'` probe below is a
+ * real check and the type says so, instead of an `any` that hides both the
+ * check and the call.
+ */
+export interface LifecycleFloorRegistrar {
+  registerRetentionFloor?(object: string, floor: QueueRetentionFloor): void;
+}
 
 export interface DbQueueAdapterOptions {
   /** Polling interval for the worker loop (ms, default 1000) */
@@ -26,7 +88,15 @@ export interface DbQueueAdapterOptions {
   batchSize?: number;
   /** Lease duration before another worker may reclaim (ms, default 30000) */
   leaseMs?: number;
-  /** Idempotency window — how long the same key blocks re-publish (ms, default 24h) */
+  /**
+   * Idempotency window — how long the same key blocks re-publish (ms, default 24h).
+   *
+   * Must not exceed `sys_job_queue`'s declared retention for `completed` rows
+   * ({@link completedRetentionWindowMs}, 7d): the window is evaluated against
+   * rows that are still in the table, so a longer window would silently start
+   * accepting duplicates as soon as the Reaper swept the row it dedups
+   * against. The constructor rejects that configuration (#5179).
+   */
   idempotencyWindowMs?: number;
   /** Default maxAttempts when publish doesn't specify (default 3) */
   defaultMaxAttempts?: number;
@@ -51,6 +121,15 @@ interface RegisteredHandler {
  *
  * Idempotency: publish suppresses duplicates within a configurable
  * window when `(queue, idempotencyKey)` is non-null.
+ *
+ * Retention: this adapter does NOT sweep the table. `completed` rows are
+ * bounded by `sys_job_queue`'s declared ADR-0057 retention (7d, filtered to
+ * `status='completed'`), enforced by the one platform-owned
+ * `LifecycleService` reaper — see the object definition in
+ * `@objectstack/platform-objects` and {@link completedRetentionWindowMs}.
+ * `dlq`/`failed` rows are never swept; they are the dead-letter surface
+ * ({@link DbQueueAdapter.listFailed} / {@link DbQueueAdapter.replay} /
+ * {@link DbQueueAdapter.purgeFailed}).
  *
  * Designed for SQLite and Postgres alike — uses CAS via WHERE-clauses,
  * not row-level locking.
@@ -84,6 +163,67 @@ export class DbQueueAdapter implements IQueueService {
       autoStart: o.autoStart ?? true,
       workerId: o.workerId ?? uid('worker'),
     };
+
+    // [#5179] The dedup window only means anything while the row it dedups
+    // against still exists. `completed` rows now expire on the declared
+    // retention window, so an idempotency window LONGER than it would quietly
+    // degrade into "dedup for as long as the Reaper happens not to have run" —
+    // duplicate deliveries appearing days later, with nothing in any log. The
+    // two windows are ordered here, at construction, rather than tolerated at
+    // publish time: the fix is a config or declaration change, and both are
+    // named in the message.
+    const retentionMs = completedRetentionWindowMs();
+    if (this.opts.idempotencyWindowMs > retentionMs) {
+      throw new Error(
+        `[service-queue] idempotencyWindowMs (${this.opts.idempotencyWindowMs}ms) exceeds the retention window `
+        + `sys_job_queue declares for completed rows (${retentionMs}ms, lifecycle.retention.maxAge — ADR-0057). `
+        + 'Terminal-row dedup is evaluated by `created_at` against that same window, so the longer setting would '
+        + 'silently accept duplicates once a row is reaped. Lower idempotencyWindowMs, or raise the declared '
+        + 'retention (both windows are measured from `created_at`).',
+      );
+    }
+  }
+
+  /** The configured dedup window (ms) — the number the floor below is made of. */
+  get idempotencyWindowMs(): number {
+    return this.opts.idempotencyWindowMs;
+  }
+
+  /**
+   * [#5195] The retention floor `sys_job_queue` must satisfy for this adapter's
+   * dedup contract to mean anything, handed to `LifecycleService`
+   * (`registerRetentionFloor`) by `QueueServicePlugin`.
+   *
+   * The constructor check above only reads the object's **declaration**. ADR-0057
+   * P4 lets an operator override that window per environment/tenant through the
+   * `lifecycle` settings namespace, which the constructor cannot see: set
+   * `lifecycle.retention_overrides.sys_job_queue.maxAge = '1h'` and completed
+   * rows vanish an hour after they are written while publish keeps dedupping
+   * against a 24h window — duplicate deliveries resume, with nothing in any log.
+   * Registering the floor is what closes that door, and it carries the number
+   * this adapter was actually CONSTRUCTED with rather than a static copy of the
+   * default (a per-kernel option cannot live in the object's declaration).
+   */
+  retentionFloor(): QueueRetentionFloor {
+    const ms = this.opts.idempotencyWindowMs;
+    // Settings are authored as ADR-0057 duration literals, not milliseconds, so
+    // the remedy quotes one the operator can paste — rounded UP, since a
+    // rounded-down literal would be rejected by the very floor it is meant to
+    // satisfy.
+    const literal = `${Math.ceil(ms / 3_600_000)}h`;
+    return {
+      policy: 'retention',
+      minWindowMs: ms,
+      declaredBy: 'com.objectstack.service.queue',
+      consequence:
+        `DbQueueAdapter dedups sys_job_queue publishes by comparing created_at against its ${ms}ms `
+        + 'idempotency window, so a shorter retention deletes the very rows that check reads — '
+        + 'duplicate deliveries resume silently, with nothing in any log.',
+      remedy:
+        `set lifecycle.retention_overrides.sys_job_queue.maxAge to '${literal}' or longer, or lower `
+        + "QueueServicePlugin's db.idempotencyWindowMs to the window you actually want (both are measured "
+        + 'from created_at).',
+    };
   }
 
   // ── IQueueService ────────────────────────────────────────────────
@@ -96,7 +236,16 @@ export class DbQueueAdapter implements IQueueService {
     const opts = options ?? {};
     const now = this.now();
 
-    // Idempotency check
+    // Idempotency check.
+    //
+    // [#5179] This is the reason `sys_job_queue`'s retention is filtered and
+    // generous rather than aggressive: a terminal (`completed`/`dlq`) row
+    // blocks a re-publish only while its `created_at` is inside the
+    // idempotency window, so the row must SURVIVE that long. The declared
+    // retention (7d on `completed`, nothing on `dlq`) is measured on the very
+    // same `created_at` axis and is ≥ this window — enforced in the
+    // constructor — which makes "the reaper deleted a row the dedup check
+    // needed" unrepresentable rather than merely unlikely.
     if (opts.idempotencyKey) {
       const windowStart = new Date(now.getTime() - this.opts.idempotencyWindowMs).toISOString();
       const existing = await this.engine.find(QUEUE_TABLE, {

@@ -2045,6 +2045,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       body_html: {
         label: "正文（HTML）"
       },
+      headers_json: {
+        label: "邮件头（JSON）",
+        help: "传给 IEmailService.send 的自定义邮件头，以 name → value 的 JSON 对象存储。两种投递模式下都会写入（它既是投递输入，也是审计证据）。在该列出现之前写入的行没有此值，读回时按「无自定义邮件头」处理。"
+      },
+      attachments_json: {
+        label: "附件（JSON）",
+        help: "附件的 JSON 数组，元素形状为 { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }，内容以 base64 存放在 `inline` 中。仅当附件合计原始大小在 plugin-email 的预算内（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES，256 KiB —— 最坏约 350 KB 的 base64）时才写入；超出上限的邮件改走内联投递，此列不落任何内容，因此行体积有界。`storageKey`（行外内容）目前还没有生产者 —— 见 objectstack#5172。"
+      },
       status: {
         label: "状态",
         help: "生命周期状态——在调用传输层之前由 IEmailService.send 排队",

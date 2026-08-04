@@ -6,14 +6,18 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager';
 import { MemoryLoader } from './memory-loader';
 
-// Suppress logger output during tests
+// Suppress logger output during tests. Stable object (not a fresh one per
+// `createLogger()` call) so the #5108 block can assert on what `list()` says
+// when a loader cannot be read — the whole point of that fix is the log line.
+const logger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
 vi.mock('@objectstack/core', () => ({
-  createLogger: () => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  }),
+  createLogger: () => logger,
 }));
 
 /**
@@ -378,46 +382,49 @@ describe('DatabaseLoader', () => {
   });
 
   describe('error handling', () => {
-    it('should return null data on load failure', async () => {
+    // [#5108] These five used to assert the opposite — that a read failure is
+    // answered with the method's empty value. That behaviour WAS the defect:
+    // it made an unreachable `sys_metadata` byte-identical to "nothing of this
+    // type was ever declared". The read seam now discriminates by error type
+    // (see the dedicated #5108 block below for the benign half).
+    it('should rethrow a read failure from load — an outage is not a miss', async () => {
       const failingDriver = createMockDriver();
       failingDriver.findOne = vi.fn().mockRejectedValue(new Error('DB error'));
       const failLoader = new DatabaseLoader({ driver: failingDriver });
 
-      const result = await failLoader.load('object', 'account');
-      expect(result.data).toBeNull();
+      await expect(failLoader.load('object', 'account')).rejects.toThrow('DB error');
     });
 
-    it('should return empty array on loadMany failure', async () => {
+    it('should rethrow a read failure from loadMany', async () => {
       const failingDriver = createMockDriver();
       failingDriver.find = vi.fn().mockRejectedValue(new Error('DB error'));
       const failLoader = new DatabaseLoader({ driver: failingDriver });
 
-      const result = await failLoader.loadMany('object');
-      expect(result).toEqual([]);
+      await expect(failLoader.loadMany('object')).rejects.toThrow('DB error');
     });
 
-    it('should return false on exists failure', async () => {
+    it('should rethrow a read failure from exists', async () => {
       const failingDriver = createMockDriver();
       failingDriver.count = vi.fn().mockRejectedValue(new Error('DB error'));
       const failLoader = new DatabaseLoader({ driver: failingDriver });
 
-      expect(await failLoader.exists('object', 'account')).toBe(false);
+      await expect(failLoader.exists('object', 'account')).rejects.toThrow('DB error');
     });
 
-    it('should return null on stat failure', async () => {
+    it('should rethrow a read failure from stat', async () => {
       const failingDriver = createMockDriver();
       failingDriver.findOne = vi.fn().mockRejectedValue(new Error('DB error'));
       const failLoader = new DatabaseLoader({ driver: failingDriver });
 
-      expect(await failLoader.stat('object', 'account')).toBeNull();
+      await expect(failLoader.stat('object', 'account')).rejects.toThrow('DB error');
     });
 
-    it('should return empty array on list failure', async () => {
+    it('should rethrow a read failure from list', async () => {
       const failingDriver = createMockDriver();
       failingDriver.find = vi.fn().mockRejectedValue(new Error('DB error'));
       const failLoader = new DatabaseLoader({ driver: failingDriver });
 
-      expect(await failLoader.list('object')).toEqual([]);
+      await expect(failLoader.list('object')).rejects.toThrow('DB error');
     });
 
     it('should throw descriptive error on save failure', async () => {
@@ -833,6 +840,263 @@ describe('DatabaseLoader event_seq on a failed history read (#4825)', () => {
 
     expect(historySeqsWritten(driver)).toEqual([1, 2]);
     expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------- A storage read failure is never answered as "nothing declared" ----------
+
+/**
+ * #5108 (rule: #4632; same shape one layer up from #4825, ADR-0110 D3).
+ *
+ * Every read method used to `catch {}` into its own empty value, so a
+ * `sys_metadata` the metadata plane could not reach returned EXACTLY what "this
+ * environment declares nothing of that type" returns — `[]`, `false`, `null` —
+ * with not one line logged anywhere on the chain. `MetadataManager`'s own
+ * degradation branches could not fire either, because the loader handed them a
+ * *successful* empty read rather than an exception.
+ *
+ * Both directions are pinned, deliberately, exactly as #4728/#4825 pin theirs:
+ * proving the outage is loud is not enough, because "always throw" would pass
+ * that alone while making a first boot against an unprovisioned table explode.
+ * The point is that the two are DISTINGUISHED.
+ */
+describe('DatabaseLoader read failures are outages, not misses (#5108)', () => {
+  /** Benign: nothing provisioned yet, so "nothing declared" really is true. */
+  const noSuchTable = () =>
+    Object.assign(new Error('no such table: sys_metadata'), { code: 'SQLITE_ERROR' });
+
+  /** NOT benign: the rows are there, this read simply did not see them. */
+  const connectionReset = () =>
+    Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+
+  /**
+   * A driver whose reads of `sys_metadata` fail the way a real outage does.
+   * `syncSchema` still succeeds — the table was provisioned at boot and the
+   * datasource fell over afterwards, which is what makes the defect invisible.
+   */
+  function driverWithFailingReads(makeError: () => unknown): IDataDriver {
+    const driver = createMockDriver();
+    driver.find = vi.fn().mockImplementation(() => Promise.reject(makeError()));
+    driver.findOne = vi.fn().mockImplementation(() => Promise.reject(makeError()));
+    driver.count = vi.fn().mockImplementation(() => Promise.reject(makeError()));
+    return driver;
+  }
+
+  describe('a REAL outage — the driver is reachable but the read failed', () => {
+    let loader: DatabaseLoader;
+
+    beforeEach(() => {
+      loader = new DatabaseLoader({ driver: driverWithFailingReads(connectionReset) });
+    });
+
+    it('loadMany rethrows instead of answering []', async () => {
+      await expect(loader.loadMany('permission')).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('exists rethrows instead of answering false', async () => {
+      await expect(loader.exists('permission', 'admin_all')).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('stat rethrows instead of answering null', async () => {
+      await expect(loader.stat('permission', 'admin_all')).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('list rethrows instead of answering []', async () => {
+      await expect(loader.list('permission')).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('load rethrows too — ADR-0110 D3 needs the singular read to fail loudly', async () => {
+      await expect(loader.load('permission', 'admin_all')).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('carries the driver error unchanged, so the cause is diagnosable', async () => {
+      const thrown = await loader.loadMany('permission').catch((e: unknown) => e);
+      expect((thrown as { code?: string }).code).toBe('ECONNRESET');
+    });
+
+    it('does not poison the cache with the failed read', async () => {
+      await expect(loader.loadMany('permission')).rejects.toThrow();
+      // A retry must hit the driver again rather than serve a memoized [].
+      await expect(loader.loadMany('permission')).rejects.toThrow();
+    });
+  });
+
+  describe('the benign case — `sys_metadata` has not been provisioned yet', () => {
+    let loader: DatabaseLoader;
+
+    beforeEach(() => {
+      loader = new DatabaseLoader({ driver: driverWithFailingReads(noSuchTable) });
+    });
+
+    it('answers empty rather than exploding on a first boot', async () => {
+      await expect(loader.loadMany('permission')).resolves.toEqual([]);
+      await expect(loader.list('permission')).resolves.toEqual([]);
+      await expect(loader.exists('permission', 'admin_all')).resolves.toBe(false);
+      await expect(loader.stat('permission', 'admin_all')).resolves.toBeNull();
+      await expect(loader.load('permission', 'admin_all')).resolves.toMatchObject({ data: null });
+    });
+
+    it('does not memoize the empty answer — the table may appear next call', async () => {
+      const driver = createMockDriver();
+      let provisioned = false;
+      const realFind = driver.find as unknown as (t: string, q: unknown) => Promise<Record<string, unknown>[]>;
+      driver.find = vi.fn().mockImplementation((table: string, query: unknown) => {
+        if (!provisioned) return Promise.reject(noSuchTable());
+        return realFind(table, query);
+      });
+      const healing = new DatabaseLoader({ driver });
+
+      expect(await healing.list('permission')).toEqual([]);
+
+      provisioned = true;
+      await healing.save('permission', 'admin_all', { name: 'admin_all' });
+      expect(await healing.list('permission')).toEqual(['admin_all']);
+    });
+  });
+
+  it('DISTINGUISHES the two: same call site, opposite verdicts', async () => {
+    const benign = new DatabaseLoader({ driver: driverWithFailingReads(noSuchTable) });
+    const real = new DatabaseLoader({ driver: driverWithFailingReads(connectionReset) });
+
+    expect(await benign.loadMany('permission')).toEqual([]);
+    await expect(real.loadMany('permission')).rejects.toThrow('read ECONNRESET');
+  });
+
+  describe('what the manager on top of it can finally say', () => {
+    beforeEach(() => {
+      logger.error.mockClear();
+      logger.info.mockClear();
+      logger.warn.mockClear();
+    });
+
+    function managerOverBrokenDb(): MetadataManager {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
+      manager.registerLoader(
+        new DatabaseLoader({ driver: driverWithFailingReads(connectionReset) }),
+      );
+      return manager;
+    }
+
+    it('list() keeps serving what it can, and reports the outage at `error`', async () => {
+      const manager = managerOverBrokenDb();
+      manager.registerInMemory('permission', 'from_code', { name: 'from_code' });
+
+      const items = await manager.list('permission');
+      // Best-effort listing survives — that posture is deliberate.
+      expect(items).toEqual([{ name: 'from_code' }]);
+
+      // …but it is no longer silent. AGENTS.md → "Degradation log levels":
+      // the system looks normal while the set it gates on is short → `error`.
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.warn).not.toHaveBeenCalled();
+      const [message] = logger.error.mock.calls[0] as [string];
+      expect(message).toContain('database');
+      expect(message).toContain('permission');
+      expect(message).toMatch(/PARTIAL/);
+      expect(message).toMatch(/never declared/i);
+      expect(message).toMatch(/reporting healthy/i);
+      expect(message).toMatch(/Fix:/);
+    });
+
+    it('says it once per outage, not once per read', async () => {
+      const manager = managerOverBrokenDb();
+
+      await manager.list('permission');
+      await manager.list('view');
+      await manager.list('flow');
+
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('the sibling plural read, loadMany(), reports at the same level', async () => {
+      const manager = managerOverBrokenDb();
+
+      await expect(manager.loadMany('permission')).resolves.toEqual([]);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('un-says it when the loader becomes readable again', async () => {
+      const driver = createMockDriver();
+      let broken = true;
+      const realFind = driver.find as unknown as (t: string, q: unknown) => Promise<Record<string, unknown>[]>;
+      driver.find = vi.fn().mockImplementation((table: string, query: unknown) => {
+        if (broken) return Promise.reject(connectionReset());
+        return realFind(table, query);
+      });
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerLoader(new DatabaseLoader({ driver, cache: { enabled: false } }));
+
+      await manager.loadMany('permission');
+      expect(logger.error).toHaveBeenCalledTimes(1);
+
+      broken = false;
+      await manager.loadMany('permission');
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.info.mock.calls.map(c => c[0]).join()).toMatch(/readable again/i);
+    });
+
+    it('loadDiagnosed reports `degraded` — ADR-0110 D3 now holds for the DB loader', async () => {
+      const manager = managerOverBrokenDb();
+
+      const diagnosed = await manager.loadDiagnosed('permission', 'admin_all');
+      expect(diagnosed.data).toBeNull();
+      expect(diagnosed.degraded).toBe(true);
+      expect(diagnosed.errors.join()).toContain('read ECONNRESET');
+    });
+
+    it('a clean miss is still NOT degraded — the distinction is the point', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
+      manager.registerLoader(new DatabaseLoader({ driver: createMockDriver() }));
+
+      const diagnosed = await manager.loadDiagnosed('permission', 'never_declared');
+      expect(diagnosed.data).toBeNull();
+      expect(diagnosed.degraded).toBe(false);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The reason #5108 was split out of #5089. `listForIndex()` was written
+     * without a `try/catch` precisely so an unreadable store could not be
+     * served as "no endpoint declares this route" — but that only worked for
+     * loaders that actually report their failures. Against a real
+     * `DatabaseLoader` the seam was inert: the loader swallowed first, so
+     * `matchEndpoint` answered `undefined`, which the REST layer turns into a
+     * 404 — an availability failure rendered as a semantic "not declared".
+     */
+    it('matchEndpoint REJECTS on a broken DatabaseLoader instead of 404-shaped undefined', async () => {
+      const manager = managerOverBrokenDb();
+
+      await expect(
+        manager.matchEndpoint({ method: 'GET', path: '/api/v1/apps/showcase/tasks' }),
+      ).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('…even when the endpoint IS declared in another, healthy loader', async () => {
+      const manager = managerOverBrokenDb();
+      manager.registerInMemory('api', 'list_tasks', {
+        name: 'list_tasks',
+        path: '/api/v1/apps/showcase/tasks',
+        method: 'GET',
+        type: 'object_operation',
+        target: 'showcase_task',
+      });
+
+      // A partial read cannot prove the match it found is the right one.
+      await expect(
+        manager.matchEndpoint({ method: 'GET', path: '/api/v1/apps/showcase/tasks' }),
+      ).rejects.toThrow('read ECONNRESET');
+    });
+
+    it('an unprovisioned table is NOT an outage — matchEndpoint still answers a clean miss', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [new MemoryLoader()] });
+      manager.registerLoader(new DatabaseLoader({ driver: driverWithFailingReads(noSuchTable) }));
+
+      await expect(
+        manager.matchEndpoint({ method: 'GET', path: '/api/v1/apps/showcase/tasks' }),
+      ).resolves.toBeUndefined();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -5582,11 +5582,14 @@ export class ObjectStackProtocolImplementation implements
     /**
      * The per-record loop, shared by both arms of {@link batchData} (ADR-0119
      * D4) so atomic and non-atomic cannot drift apart. `atomic` changes exactly
-     * two things: it aborts on the first failure regardless of
+     * one thing: it aborts on the first failure regardless of
      * `continueOnError` (whose own contract text already scopes it to
-     * `atomic=false`), and it forbids the upsert fallback — inside an aborted
-     * transaction a fallback insert can only fail with a secondary error that
-     * masks the real cause.
+     * `atomic=false`). It used to change a second — forbidding the upsert
+     * fallback insert, whose failure inside an aborted transaction could only
+     * mask the real cause — until #5099 removed that fallback from BOTH arms:
+     * the upsert fork is decided by an existence probe before any write, so a
+     * fallback insert could only bury a real update failure under the
+     * duplicate-key error of inserting a row just proven to exist.
      */
     private async runBatchDataLoop(args: {
         object: string;
@@ -5640,25 +5643,34 @@ export class ObjectStackProtocolImplementation implements
                         break;
                     }
                     case 'upsert': {
-                        // Try update first, then create if not found
                         if (record.id) {
-                            try {
-                                const existing = await this.engine.findOne(object, { where: { id: record.id }, ...ctxOpt } as any);
-                                if (existing) {
-                                    const dropped: DroppedFieldsEvent[] = [];
-                                    const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
-                                    results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                                } else {
-                                    const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
-                                    results.push({ id: created.id, success: true, data: created, index });
-                                }
-                            } catch (err) {
-                                // ADR-0119 D4 — no blind fallback inside a
-                                // transaction: once the failing statement has
-                                // aborted it, this insert can only fail with a
-                                // secondary error ("current transaction is
-                                // aborted") that buries the real cause.
-                                if (atomic) throw err;
+                            // [#5099] The update-or-insert fork asks EXISTENCE,
+                            // not visibility. `findOne` under the CALLER's
+                            // context is the read RLS/sharing narrows (#3455),
+                            // so an existing row outside the caller's scope
+                            // answered null, took the insert arm, and either
+                            // duplicate-keyed — an authorization/update
+                            // scenario reported as a key collision — or, on a
+                            // store without a unique id constraint, wrote a
+                            // second row. Same probe as the update branch above
+                            // and the single-record path (#4620): it asks the
+                            // database a fact, and whether the caller may WRITE
+                            // the row it proves stays #1994's decision inside
+                            // `engine.update`.
+                            //
+                            // The old fallback (update threw → blind insert)
+                            // is gone with the fork's visibility read: with
+                            // existence decided BEFORE the write, a fallback
+                            // insert could only bury a real update failure
+                            // under the duplicate-key error of inserting a row
+                            // just proven to exist — the same masking ADR-0119
+                            // D4 forbade inside the atomic arm.
+                            const existing = await this.probeRecord(object, record.id);
+                            if (existing) {
+                                const dropped: DroppedFieldsEvent[] = [];
+                                const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                            } else {
                                 const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
                                 results.push({ id: created.id, success: true, data: created, index });
                             }
@@ -5923,6 +5935,17 @@ export class ObjectStackProtocolImplementation implements
                 //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
                 //     surfaces (#3431) happened silently here. Collect per row.
                 //
+                // [#5100] Same guard as `runBatchDataLoop`'s update branch
+                // (#4793), same classification: an id-less row is a CALLER
+                // error — VALIDATION_FAILED/400 — not a data-state one. The
+                // REST entrance already rejects it (`UpdateManyRecordSchema`
+                // requires `id`, #3939), but that invariant lives two packages
+                // away; unguarded, an in-process caller's malformed row
+                // reached the probe and the write as `{ id: undefined }`,
+                // whose reading is up to each driver's undefined-where-key
+                // handling — at best a 404 with `undefined` interpolated into
+                // the message, at worst a where-clause with no id at all.
+                if (!record.id) throw rowRequiredIdError('update');
                 // [#5088] Third gap, the same shape: no existence gate. A row
                 // naming no record went straight into `engine.update`, so the
                 // hook pipeline ran over a payload-only record and the row came
@@ -5933,7 +5956,7 @@ export class ObjectStackProtocolImplementation implements
                 const dropped: DroppedFieldsEvent[] = [];
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
-                const updated = await this.engine.update(object, record.data, opts);
+                const updated = await this.engine.update(object, record.data || {}, opts);
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
             } catch (err: any) {

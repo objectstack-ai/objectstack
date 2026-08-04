@@ -69,40 +69,115 @@ function refOf(def: any): string | undefined {
   return def?.reference || def?.reference_to;
 }
 
-// ─── Uniqueness declarations ────────────────────────────────────────
+// ─── Uniqueness declarations (ADR-0120) ─────────────────────────────
 
 export const UNIQUE_DOUBLE_DECLARATION = 'unique/double-declaration';
+export const UNIQUE_UNSCOPED_DECLARED_INDEX = 'unique/unscoped-declared-index';
 
 /** Is `unique` declared at all? Mirrors `isUniqueDeclared` in @objectstack/spec/data. */
 function uniqueDeclared(u: unknown): boolean {
-  return u === true || u === 'global';
+  return u === true || u === 'global' || u === 'organization';
 }
 
 /**
- * R10 — the same column carries BOTH a field-level `unique: true` and an
- * object-level single-column unique index (#3991).
+ * Which boundary does a FIELD-level `unique` ask for? Bare `true` is the
+ * positional synonym of `'organization'` (#3696, ADR-0120 D1 — valid
+ * indefinitely).
+ */
+function fieldUniqueScope(u: unknown): 'organization' | 'global' {
+  return u === 'global' ? 'global' : 'organization';
+}
+
+/**
+ * Which boundary does a DECLARED-index `unique` ask for? Bare `true` is the
+ * DEPRECATED positional spelling of `'global'` (verbatim columns — today's
+ * behavior; warned by `unique/unscoped-declared-index`, rejected at protocol
+ * 18, #5082). `'organization'` asks for the NULL-safe organization key part
+ * to be prepended at registration (ADR-0120 D1/D3).
+ */
+function indexUniqueScope(u: unknown): 'organization' | 'global' {
+  return u === 'organization' ? 'organization' : 'global';
+}
+
+/**
+ * R11 (ADR-0120 D5a) — a declared index carries bare `unique: true`: the one
+ * spelling whose scope is unstated.
  *
- * The two spellings are deliberately different (see `IndexSchema`): field-level
- * `unique: true` is tenant-scoped since #3696 — it materializes as
- * `(organization_id, col)`, unique *within* the tenant — while a declared index
- * is materialized over exactly the columns listed, i.e. platform-wide. Both are
- * legitimate on their own; together on one column they are never right:
+ * Positional intent is the #4986 trap: an author writes
+ * `indexes: [{ fields: ['name'], unique: true }]` on an organization-scoped
+ * object, intends "unique per organization", and silently gets
+ * installation-wide. This rule fires on the SPELLING alone — deliberately no
+ * tenancy or posture inference (`organization_id` is kernel-injected at
+ * registration, not authored, so an authoring-time guess would be wrong half
+ * the time; that dead end is documented on #4698). Both replacement words are
+ * checkable at authoring time, which is what makes this the first gate in the
+ * #4986 saga that can actually run here.
  *
- *   - On a tenant-scoped object they CONTRADICT. The stricter one wins
- *     physically, so the global index enforces uniqueness and the tenant
- *     composite becomes a constraint nothing can ever trip. One of the two
- *     intents the author wrote is silently discarded.
- *   - On a tenancy-less object they are exactly REDUNDANT — both describe the
- *     same single-column unique index, under the same generated name.
+ * 17.x: warning. Protocol 18 rejects the spelling at validate/publish (#5082).
+ * Advisory — never fails a build in 17.x.
  *
- * Tenancy is deliberately NOT inferred here: `organization_id` is injected by
- * the kernel at registration rather than authored, so an authoring-time guess
- * would be wrong half the time. The combination is worth flagging either way,
- * and the message names both readings so the author picks the one they meant.
+ * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
+ * calls it for `os lint` — each command reports each finding exactly once.
+ */
+export function lintUnscopedDeclaredIndexes(objects: any[]): LintIssue[] {
+  const issues: LintIssue[] = [];
+  if (!Array.isArray(objects) || objects.length === 0) return issues;
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj?.name) continue;
+    const declaredIndexes = Array.isArray(obj.indexes) ? obj.indexes : [];
+    for (let j = 0; j < declaredIndexes.length; j++) {
+      const idx = declaredIndexes[j];
+      if (idx?.unique !== true) continue; // fires on the bare spelling only
+      const cols = Array.isArray(idx?.fields)
+        ? idx.fields.filter((f: unknown) => typeof f === 'string').join(', ')
+        : '';
+      const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
+      issues.push({
+        severity: 'warning',
+        rule: UNIQUE_UNSCOPED_DECLARED_INDEX,
+        message:
+          `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
+          `unstated (ADR-0120). Today the bare spelling materializes over exactly its \`fields\`, i.e. installation-wide; ` +
+          `an author who meant "unique per organization" gets no per-organization constraint and no error. ` +
+          `Protocol 18 rejects this spelling (#5082).`,
+        path: `objects[${i}].indexes[${j}]`,
+        fix:
+          `State the scope: \`unique: 'global'\` (installation-wide — exactly today's behavior) or ` +
+          `\`unique: 'organization'\` (one holder per organization — the driver prepends the NULL-safe ` +
+          `organization key part at registration).`,
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * R10 (ADR-0120 D5b) — the same single column carries BOTH a field-level
+ * `unique` and a declared single-column unique index (#3991), judged in the
+ * scope vocabulary. Each side states (or positionally implies) a boundary —
+ * field: `true`/`'organization'` = per-organization, `'global'` =
+ * installation-wide; declared index: `'global'` (or bare `true`, its
+ * deprecated spelling) = installation-wide, `'organization'` =
+ * per-organization — giving four quadrants:
  *
- * A field declared `unique: 'global'` is exempt: it already says
- * platform-wide, so the declared index restates the same intent rather than
- * contradicting it (still redundant, but not a silent loss of meaning).
+ *   - Different scopes (field per-organization × index `'global'`, or field
+ *     `'global'` × index `'organization'`): CONTRADICTION. The installation-wide
+ *     index is physically stricter and wins; the per-organization constraint
+ *     can never be tripped. One declared intent is silently dead.
+ *   - Same scope (both per-organization, or both installation-wide):
+ *     REDUNDANCY — the same index declared twice.
+ *
+ * Tenancy is deliberately NOT inferred here — the quadrants are judged from
+ * the two spellings alone, which is exactly what the vocabulary buys
+ * (pre-ADR-0120, the contradiction quadrant could only be described
+ * conditionally on unknowable tenancy).
+ *
+ * A composite declared index (`['organization_id', 'email']`) stays exempt:
+ * it is the legacy hand-written organization spelling and agrees with the
+ * field-level default (its `'organization'` respelling nudge is ADR-0120 D5c,
+ * a separate wave).
  *
  * Advisory. The resulting stack is well-defined — the cost is an intent that
  * never takes effect, not a broken artifact — so this never fails a build.
@@ -118,8 +193,8 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
     if (declaredIndexes.length === 0) continue;
 
     // Columns covered by a declared SINGLE-column unique index. A composite
-    // (`['organization_id', 'email']`) is the explicit tenant-scoped spelling —
-    // it agrees with the field-level default rather than fighting it.
+    // (`['organization_id', 'email']`) is the legacy hand-written organization
+    // spelling — it agrees with the field-level default rather than fighting it.
     const singleColumnUniqueIndexes = new Map<string, any>();
     for (const idx of declaredIndexes) {
       if (!uniqueDeclared(idx?.unique)) continue;
@@ -131,24 +206,50 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
 
     for (const { name, def } of fieldEntries(obj.fields)) {
       if (!uniqueDeclared(def?.unique)) continue;
-      if (def.unique === 'global') continue; // already says platform-wide — no lost intent
       const idx = singleColumnUniqueIndexes.get(name);
       if (!idx) continue;
+
+      const fScope = fieldUniqueScope(def.unique);
+      const iScope = indexUniqueScope(idx.unique);
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
+      const fieldSpelling = `\`unique: ${typeof def.unique === 'string' ? `'${def.unique}'` : def.unique}\``;
+      const indexSpelling = `\`unique: ${typeof idx.unique === 'string' ? `'${idx.unique}'` : idx.unique}\``;
+
+      let message: string;
+      let fix: string;
+      if (fScope === iScope) {
+        // Same scope on both sides — the same index declared twice.
+        const boundary = fScope === 'global' ? 'installation-wide' : 'per-organization';
+        message =
+          `"${obj.name}.${name}" declares field-level ${fieldSpelling} AND a single-column unique index${indexLabel} ` +
+          `(${indexSpelling}) on the same column. Both ask for the same ${boundary} boundary — the same unique ` +
+          `index declared twice (ADR-0120 D5b). Redundant, not contradictory: drop one so the intent has a single home.`;
+        fix =
+          fScope === 'global'
+            ? `Keep ONE spelling of installation-wide uniqueness: \`unique: 'global'\` on '${name}', or the declared index — not both.`
+            : `Keep ONE spelling of per-organization uniqueness: \`unique: 'organization'\` on '${name}' (preferred), or the declared \`'organization'\` index — not both.`;
+      } else {
+        // Different scopes — the installation-wide side is physically stricter
+        // and wins; the per-organization intent is dead on arrival.
+        const globalSide = fScope === 'global' ? `field-level ${fieldSpelling}` : `declared index${indexLabel} (${indexSpelling})`;
+        const orgSide = fScope === 'global' ? `declared index${indexLabel} (${indexSpelling})` : `field-level ${fieldSpelling}`;
+        message =
+          `"${obj.name}.${name}" declares an installation-wide unique (${globalSide}) AND a per-organization unique ` +
+          `(${orgSide}) on the same column — the two scopes CONTRADICT (ADR-0120 D5b). The installation-wide index is ` +
+          `physically stricter and wins; the per-organization constraint can never be tripped, so one of the two ` +
+          `intents you wrote is silently dead.`;
+        fix =
+          `Pick ONE scope and say it once: for installation-wide uniqueness keep \`unique: 'global'\` and drop the ` +
+          `per-organization declaration; for per-organization uniqueness set \`unique: 'organization'\` (field-level on ` +
+          `'${name}', or on the declared index) and drop the installation-wide one.`;
+      }
+
       issues.push({
         severity: 'warning',
         rule: UNIQUE_DOUBLE_DECLARATION,
-        message:
-          `"${obj.name}.${name}" declares field-level \`unique: true\` AND a single-column unique index${indexLabel} on the same column. ` +
-          `Since #3696 the field-level form is scoped per tenant — \`(tenant, ${name})\` — while a declared index is materialized ` +
-          `over exactly its \`fields\`, i.e. platform-wide. On a tenant-scoped object the global index wins and the per-tenant ` +
-          `constraint can never be reached; on a tenancy-less object the two are the same index declared twice. Either way one of ` +
-          `the two declarations has no effect.`,
+        message,
         path: `objects[${i}]`,
-        fix:
-          `Pick the intent: for platform-wide uniqueness set \`unique: 'global'\` on '${name}' and drop the duplicate index; ` +
-          `for per-tenant uniqueness drop the index (the field-level declaration already builds the tenant composite), ` +
-          `or spell the index out as \`fields: ['organization_id', '${name}']\` if you want it explicit.`,
+        fix,
       });
     }
   }
@@ -163,9 +264,13 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  // R10 lives in its own exported function so `os build` can run that ONE rule
-  // without pulling in the whole best-practice sweep (#3991).
-  const issues: LintIssue[] = lintUniqueDeclarations(objects);
+  // R10/R11 live in their own exported functions so `os validate`/`os build`
+  // can run those rules without pulling in the whole best-practice sweep
+  // (#3991, ADR-0120 D5a) — here `os lint` picks both up.
+  const issues: LintIssue[] = [
+    ...lintUnscopedDeclaredIndexes(objects),
+    ...lintUniqueDeclarations(objects),
+  ];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
   // Index: parent object name → child relationships pointing at it.

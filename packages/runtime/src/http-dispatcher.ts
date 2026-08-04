@@ -1658,18 +1658,32 @@ export class HttpDispatcher {
 
         // /share-links moved to the domain registry (D11 step ③).
 
-        // OpenAPI Specification
-        if (cleanPath === '/openapi.json' && method === 'GET') {
-             try {
-                const metaSvc = await this.resolveService('metadata', context.environmentId);
-                if (metaSvc && typeof (metaSvc as any).generateOpenApi === 'function') {
-                    const result = await (metaSvc as any).generateOpenApi({});
-                    return { handled: true, response: this.success(result) };
-                }
-             } catch (e) {
-                // If not implemented, fall through or return 404
-             }
-        }
+        // OpenAPI specification — REMOVED in #5093 (#5078), NOT relocated.
+        //
+        // A `GET /openapi.json` branch used to sit here. It resolved the
+        // metadata service and duck-typed a `generateOpenApi` method that no
+        // implementation has ever provided — not `MetadataManager`, not
+        // `NodeMetadataManager`, not a plugin, not either sibling repo. The
+        // only other repo-wide hits for the name are an unrelated boolean
+        // config key (`api/ApiDocumentationConfig.generateOpenApi`) and its
+        // tests. So the `if` was constant-false on every request ever served.
+        //
+        // It was dead a second way too, which is what settles the disposition:
+        // a real boot (#5078 — showcase, 47 plugins, RestAPI and Dispatcher
+        // co-mounted) showed NOTHING routes `/openapi.json` into `dispatch()`
+        // at all. `packages/rest` owns and answers it — `rest-server.ts`
+        // returned a 355KB OpenAPI 3.1 document with a Host-injected
+        // `servers[0]`, 199 expanded paths and two `x-template` markers, every
+        // one of them a rest-server fingerprint.
+        //
+        // Deleted rather than implemented, per ADR-0076 "one route, one owner":
+        // a second implementation of a path another package already serves is
+        // code `grep` finds and the runtime never runs — the exact input that
+        // makes the next reader reason confidently from dead code. The declared
+        // endpoints' `summary`/`description` reach the document through the
+        // owner's own enrichment pipeline instead (#5040 E6,
+        // `packages/rest/src/openapi-endpoints.ts`). Do not re-add a branch
+        // here; the ledger row went with it.
 
         // 2. Metadata-declared custom endpoints (`apis:`) — REMOVED in #4936.
         //

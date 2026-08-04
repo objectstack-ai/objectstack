@@ -159,15 +159,44 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
     expect(findings).toEqual([]);
   });
 
-  it('checks per-widget actionUrl buttons (script)', () => {
+  // #5010 — the widget branch is GONE, and this is the pin that keeps it gone.
+  //
+  // Until 17.0.0 this rule raised an ERROR (a failed build) for a dangling
+  // `widgets[].actionUrl` target, on the docblock's claim that it mirrored the
+  // objectui runtime dispatch. It did not: no renderer draws a per-widget action
+  // button, so the strictest arm of the rule guarded a control that cannot
+  // render. The keys are now tombstoned in the spec, which owns the rejection —
+  // this rule must stay silent rather than fail a build a second time over.
+  it('does NOT check per-widget actionUrl: no per-widget button exists (#5010)', () => {
     const findings = validateDashboardActionRefs({
       dashboards: [
         {
           name: 'ops',
           label: 'Ops',
           widgets: [
+            // A target that would have been an ERROR before #5010: `ghost_action`
+            // is defined nowhere in this stack.
             { id: 'kpi', dataset: 'd', values: ['x'], actionType: 'script', actionUrl: 'ghost_action' },
             { id: 'noaction', dataset: 'd', values: ['x'] },
+          ],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('still checks header actions when a widget carries a legacy action key (#5010)', () => {
+    // Mixed stack: the header target is dead AND a stale widget key survives in
+    // a stored document. Exactly one finding, and it belongs to the header —
+    // proving the widget key is ignored rather than merely out-prioritised.
+    const findings = validateDashboardActionRefs({
+      dashboards: [
+        {
+          name: 'ops',
+          label: 'Ops',
+          header: { actions: [{ label: 'Export', actionType: 'script', actionUrl: 'ghost_header' }] },
+          widgets: [
+            { id: 'kpi', dataset: 'd', values: ['x'], actionType: 'script', actionUrl: 'ghost_widget' },
           ],
         },
       ],
@@ -176,8 +205,7 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
     expect(findings[0]).toMatchObject({
       severity: 'error',
       rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
-      where: 'dashboard "ops" · widget "kpi" action',
-      path: 'dashboards[0].widgets[0].actionUrl',
+      path: 'dashboards[0].header.actions[0].actionUrl',
     });
   });
 
