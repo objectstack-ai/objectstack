@@ -1,0 +1,142 @@
+{
+  "type": "api",
+  "_note": "ApiEndpointSchema (packages/spec/src/api/endpoint.zod.ts). Seeded 2026-08-04 (#5271, part of #5206) in the same change that made `api` a REGISTERED metadata type — governance and registration land together, which is the whole lesson of `datasource` (#4487): it went ungoverned long enough to accumulate six inert keys that had to be found by hand. Consumers, by layer: the MATCHER (`packages/metadata/src/endpoint-matcher.ts`) indexes `name`/`path`/`method`; the EXECUTOR (`packages/runtime/src/endpoint-executor.ts`) dispatches on `type` and reads `target` / `objectParams`; the POLICY chain (`packages/runtime/src/endpoint-policy.ts` + `security/inbound-rate-limit.ts`) enforces `authRequired` / `rateLimit` / `cacheTtl`; the MAPPING layer (`packages/runtime/src/api-mapping.ts`) applies `inputMapping` / `outputMapping`; and the OpenAPI enrichment (`packages/rest/src/openapi-endpoints.ts`) emits `summary` / `description`. This is the cheapest possible moment to govern the type: #5040's E-series built every one of those consumers and all of it is on main, so each key has a real evidence path today rather than a promise. Nothing here is `dead`. The two `transform` keys are `planned`, not `dead`, and the distinction is load-bearing — see their notes. No `api` property is a bound HIGH_RISK class in proof-registry.mts, so no entry carries a `proof`; none is invented to look thorough. The protection-envelope keys (`_lock*`, `_provenance`, `_packageId/Version`) are auto-classified live by the gate (ADR-0010) and are deliberately absent from this file.",
+  "props": {
+    "name": {
+      "status": "live",
+      "evidence": "packages/metadata/src/endpoint-matcher.ts:210",
+      "verifiedAt": "2026-08-04",
+      "note": "The metadata item key, and the tiebreaker with real consequences: when two stored declarations claim the same METHOD + normalized path, the lexicographically-first `name` keeps the route and the loser is named at `error` level. Also the subject of every publish-gate and matcher message, so a rename changes what an author is told."
+    },
+    "path": {
+      "status": "live",
+      "evidence": "packages/metadata/src/endpoint-matcher.ts:199 (endpointIndexKey → normalizeEndpointPath)",
+      "verifiedAt": "2026-08-04",
+      "note": "Half the index key. Compared as a WHOLE STRING with exactly one trailing slash trimmed — no percent-decoding, no Unicode normalization, no case folding in 17.x. ADR-0121 D1 additionally confines it to the stack's `apps/<namespace>/` carve-out at publish; that is a gate, not a second consumer."
+    },
+    "method": {
+      "status": "live",
+      "evidence": "packages/metadata/src/endpoint-matcher.ts:115 (normalizeEndpointMethod), :199",
+      "verifiedAt": "2026-08-04",
+      "note": "The other half of the index key, upper-cased before comparison. Also read by the policy layer: `cacheTtl` is GET-only, so `method` decides whether a Cache-Control header can be emitted at all."
+    },
+    "summary": {
+      "status": "live",
+      "evidence": "packages/rest/src/openapi-endpoints.ts:214",
+      "verifiedAt": "2026-08-04",
+      "note": "Emitted as the OpenAPI operation's `summary` (#5040 E6). Documentation-shaped rather than behavioural, but it genuinely reaches a served artifact — /openapi.json — so it is live, not decorative."
+    },
+    "description": {
+      "status": "live",
+      "evidence": "packages/rest/src/openapi-endpoints.ts:215",
+      "verifiedAt": "2026-08-04",
+      "note": "Emitted as the OpenAPI operation's `description` (#5040 E6). Same reasoning as `summary`."
+    },
+    "type": {
+      "status": "live",
+      "evidence": "packages/runtime/src/endpoint-executor.ts:216 (object_operation), :232 (flow)",
+      "verifiedAt": "2026-08-04",
+      "note": "The executor's dispatch key. NOTE the enum is wider than the runtime: only 'object_operation' and 'flow' execute; 'script' and 'proxy' are REFUSED at publish (endpoint-publish-gate.ts targetGate) and again by planEndpointTarget at :246. The KEY is live — it is the two rejected VALUES that are not, which is why this is a `live` row and not a qualified one."
+    },
+    "target": {
+      "status": "live",
+      "evidence": "packages/runtime/src/endpoint-executor.ts:233",
+      "verifiedAt": "2026-08-04",
+      "note": "The flow name a `type: 'flow'` endpoint triggers, delegated through the same automation pipeline as POST /automation/<name>/trigger (ADR-0121 D5 — no second execution dialect). For `object_operation` the routing comes from `objectParams` instead, so an empty `target` is only refused on the flow branch."
+    },
+    "objectParams": {
+      "children": {
+        "object": {
+          "status": "live",
+          "evidence": "packages/runtime/src/endpoint-executor.ts:217, :394",
+          "verifiedAt": "2026-08-04",
+          "note": "The object an `object_operation` endpoint reads or writes. Line 394 is the one that matters for security: `object` comes from the DECLARATION, never from the request, so a caller cannot redirect a declared endpoint at another object."
+        },
+        "operation": {
+          "status": "live",
+          "evidence": "packages/runtime/src/endpoint-executor.ts:218, :368",
+          "verifiedAt": "2026-08-04",
+          "note": "find / get / create / update / delete, delegated to the same callData pipeline the built-in /data route uses. Also decides whether a request body is read at all, which is what makes `inputMapping` inert on the bodyless operations (publish refuses that combination — #5111)."
+        }
+      }
+    },
+    "inputMapping": {
+      "children": {
+        "source": {
+          "status": "live",
+          "evidence": "packages/runtime/src/api-mapping.ts:318 (readPath)",
+          "verifiedAt": "2026-08-04",
+          "note": "Dot path read out of the request body, before delegation — so a mapping can never buy a caller past `authRequired` or the rate limiter."
+        },
+        "target": {
+          "status": "live",
+          "evidence": "packages/runtime/src/api-mapping.ts:322 (writePath)",
+          "verifiedAt": "2026-08-04",
+          "note": "Dot path written into the params the executor sees. Prototype keys and colliding targets are refused rather than silently discarded (:291)."
+        },
+        "transform": {
+          "status": "planned",
+          "evidence": "packages/runtime/src/api-mapping.ts:259",
+          "verifiedAt": "2026-08-04",
+          "note": "PLANNED, deliberately not `dead`, and the difference is the point. `dead` in this ledger means 'parsed, no consumer' — a silent no-op. `transform` is the opposite: it is parsed and then LOUDLY REFUSED, at publish (endpoint-publish-gate.ts mappingGate) and again at runtime (:259), because there is no transformation-function registry anywhere in the platform. An author who writes it is told so and told what to do instead. It stays in the vocabulary rather than being removed because admitting it needs a function registry AND a sandbox ruling of its own (#5040 §3.4) — that is a design decision to make, not a key to quietly delete. Nothing enforce-or-remove has to chase: it is already refused."
+        }
+      }
+    },
+    "outputMapping": {
+      "children": {
+        "source": {
+          "status": "live",
+          "evidence": "packages/runtime/src/api-mapping.ts:318 (readPath, via applyOutputMapping at :358)",
+          "verifiedAt": "2026-08-04",
+          "note": "Dot path read out of the SUCCESS body only. An error answer is never remapped — a projection able to reshape a 401/429/500 into data could disguise a failure as a result."
+        },
+        "target": {
+          "status": "live",
+          "evidence": "packages/runtime/src/api-mapping.ts:322 (writePath, via applyOutputMapping at :358)",
+          "verifiedAt": "2026-08-04",
+          "note": "Dot path written into the response body. Validated BEFORE delegation, so a broken projection cannot let a `create` insert a record and then fail to answer."
+        },
+        "transform": {
+          "status": "planned",
+          "evidence": "packages/runtime/src/api-mapping.ts:259",
+          "verifiedAt": "2026-08-04",
+          "note": "Same key, same gate, same reasoning as `inputMapping.transform` — the mapping validator walks both arrays through one code path. See that entry."
+        }
+      }
+    },
+    "authRequired": {
+      "status": "live",
+      "evidence": "packages/runtime/src/endpoint-policy.ts:354",
+      "verifiedAt": "2026-08-04",
+      "note": "The default-deny gate, and the key whose history is the reason this whole surface was refused for a release: #4936 measured it parsing green and gating NOTHING (no route was mounted, no matcher existed) — declared security that enforced nothing, i.e. false compliance. It is enforced now. It DEFAULTS to true, so `false` is the only way to open an anonymous entry point, and ADR-0121 D6 pairs that with a mandatory armed `rateLimit`. Note the deliberate omission at the call site: no anonymous-exemption argument is passed, so a declared path can never exempt itself from its own default deny."
+    },
+    "rateLimit": {
+      "children": {
+        "enabled": {
+          "status": "live",
+          "evidence": "packages/runtime/src/security/inbound-rate-limit.ts:88 (deriveBucketConfig), consumed via packages/runtime/src/endpoint-policy.ts:148",
+          "verifiedAt": "2026-08-04",
+          "note": "ARMS the budget, and it defaults to FALSE — so `rateLimit: { windowMs, maxRequests }` written without it parses into a budget that meters nothing. That is exactly why ADR-0121 D6's gate tests `enabled === true` rather than the presence of `rateLimit`: a presence check would be vacuous."
+        },
+        "windowMs": {
+          "status": "live",
+          "evidence": "packages/runtime/src/security/inbound-rate-limit.ts:91",
+          "verifiedAt": "2026-08-04",
+          "note": "Budget window in milliseconds; with `maxRequests` it sizes the token bucket (refillPerSec = maxRequests / (windowMs / 1000)). A zero-or-negative window is an armed-but-unusable budget and fails CLOSED (:102) rather than silently disabling metering."
+        },
+        "maxRequests": {
+          "status": "live",
+          "evidence": "packages/runtime/src/security/inbound-rate-limit.ts:90",
+          "verifiedAt": "2026-08-04",
+          "note": "Bucket capacity. Same fail-closed rule as `windowMs` (:95): 'the author asked for metering and got none' is the worse outcome, so an impossible budget errors rather than passing traffic."
+        }
+      }
+    },
+    "cacheTtl": {
+      "status": "live",
+      "evidence": "packages/runtime/src/endpoint-policy.ts:252 (cacheControlHeader)",
+      "verifiedAt": "2026-08-04",
+      "note": "Seconds, emitted as a Cache-Control response header and nothing more (#5091 narrowed the original design to header semantics only — there is no response store). Applied to SUCCESSFUL answers only: telling a client to reuse a 401/429/5xx for half a minute is worse than saying nothing. GET-only — on any other method publish refuses it (#5040 §3.3) and the runtime warns instead of emitting."
+    }
+  }
+}
