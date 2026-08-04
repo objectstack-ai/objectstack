@@ -248,6 +248,11 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         // situation where a hand-rolled copy is tempting; the scan is what makes
         // "restate" mean "call the same builder".
         './endpoint-policy.ts',
+        // [#5092] The endpoint executor maps a delegated pipeline's failure onto
+        // this wire surface — a restatement of `errorFromThrown` outside the
+        // dispatcher class, which is exactly the kind of second copy this scan
+        // exists to keep honest. Listed the day it was written.
+        './endpoint-executor.ts',
     ];
 
     for (const file of MODULES) {

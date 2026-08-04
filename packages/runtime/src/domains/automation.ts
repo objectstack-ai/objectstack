@@ -41,8 +41,15 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * a `runAs:'user'` flow enforces RLS exactly as the triggering user — their
  * positions/permissions/tenant, not a member fallback (#1888). The engine
  * elevates to a system principal only when the flow declares `runAs:'system'`.
+ *
+ * [#5040 E5] Exported — the declarative endpoint executor
+ * (`../endpoint-executor.ts`) triggers flows too, and must send the SAME
+ * context this route sends or a `type: 'flow'` endpoint becomes a second
+ * trigger dialect with its own identity-forwarding bugs. Exporting it is the
+ * whole point: the alternative (a second builder over there) is the shape
+ * #4127 above was written to remove.
  */
-function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
+export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
     const ctxBody = body && typeof body === 'object' ? body : {};
     // `{recordId, objectName, params}` (the UI/SDK request shape) → the
     // canonical AutomationContext shape:

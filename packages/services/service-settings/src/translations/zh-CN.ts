@@ -28,11 +28,12 @@ export const zhCN: TranslationData = {
       keys: {
         provider: {
           label: '服务商',
+          help: '此处只列出本服务器真正能投递的服务商。SendGrid 与 Amazon SES 通过 SMTP 配置。',
           options: {
             smtp: 'SMTP',
-            sendgrid: 'SendGrid',
-            ses: 'Amazon SES',
+            resend: 'Resend',
             postmark: 'Postmark',
+            log: '不发送(仅记录日志,不真正投递)',
           },
         },
         smtp_host: { label: '主机', help: '示例:smtp.example.com' },

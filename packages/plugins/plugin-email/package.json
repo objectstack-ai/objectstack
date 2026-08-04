@@ -25,6 +25,7 @@
     "nodemailer": "^9.0.3"
   },
   "devDependencies": {
+    "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
     "typescript": "^6.0.3",

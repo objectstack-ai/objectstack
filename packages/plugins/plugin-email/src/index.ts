@@ -4,9 +4,14 @@
  * @objectstack/plugin-email
  *
  * Outbound email delivery for ObjectStack. Registers an `IEmailService`
- * implementation backed by a pluggable `IEmailTransport` (SMTP via
- * nodemailer, SendGrid, Resend, SES, …) and persists each attempt to
- * the `sys_email` system object for audit / activity-stream display.
+ * implementation backed by a pluggable `IEmailTransport` — SMTP via
+ * nodemailer, Resend, Postmark — and persists each attempt to the
+ * `sys_email` system object for audit / activity-stream display.
+ *
+ * The list above is exhaustive on purpose: it used to read "SendGrid, …",
+ * which no transport here has ever implemented (#5094). SendGrid and Amazon
+ * SES are delivered through `SmtpTransport` against their published SMTP
+ * endpoints. `EMAIL_TRANSPORT_PROVIDERS` is the machine-readable form.
  */
 
 export { EmailServicePlugin } from './email-plugin.js';
@@ -20,6 +25,11 @@ export {
   SmtpTransport,
   makeTransport,
   smtpOptionsFromMailSettings,
+  EMAIL_TRANSPORT_PROVIDERS,
+  RETIRED_EMAIL_PROVIDERS,
+  isEmailTransportProvider,
+  retiredProviderGuidance,
+  unsupportedProviderFix,
   type ResendTransportOptions,
   type PostmarkTransportOptions,
   type SmtpTransportOptions,

@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, LogTransport } from './email-service.js';
 import { SmtpTransport } from './transports/smtp.js';
+import { ResendTransport } from './transports/resend.js';
 
 const nm = vi.hoisted(() => ({ createTransport: vi.fn(), sendMail: vi.fn() }));
 vi.mock('nodemailer', () => ({
@@ -221,6 +222,110 @@ describe('applyMailSettings — provider=smtp that cannot be built', () => {
   });
 });
 
+// ── stored provider values with no transport (#5094) ───────────────────────
+//
+// `sendgrid` and `ses` sat in the settings dropdown for several releases with
+// no transport behind either. #5094 removed the options; it cannot remove the
+// rows. A workspace that saved one still resolves `provider: 'sendgrid'` on
+// every boot, so this is the one part of that change with live data behind it:
+// the read must not throw, must not quietly look configured, and must say what
+// to do — SendGrid and SES both publish SMTP endpoints, which is now the route.
+
+describe('applyMailSettings — a stored provider this build cannot deliver with', () => {
+  const RETIRED: Array<[string, RegExp]> = [
+    ['sendgrid', /smtp\.sendgrid\.net/],
+    ['ses', /email-smtp\.<region>\.amazonaws\.com/],
+  ];
+
+  for (const [provider, migration] of RETIRED) {
+    it(`keeps the transport, never throws, and names the SMTP migration for provider=${provider}`, async () => {
+      const { service, ctx } = await boot({
+        provider: { value: provider, source: 'global' },
+        api_key: { value: 'legacy-key', source: 'global' },
+      });
+
+      // A settings row written by an older release must never be able to kill
+      // a running server: previous transport kept, boot completed.
+      expect(transportOf(service)).toBeInstanceOf(LogTransport);
+
+      expect(ctx.logger.error).toHaveBeenCalledTimes(1);
+      const line = ctx.logger.error.mock.calls[0][0] as string;
+      expect(line).toContain(`provider='${provider}'`);
+      // Consequence…
+      expect(line).toMatch(/NO mail is delivered through it/);
+      // …and the fix, in the same line (AGENTS.md degradation-log-level).
+      expect(line).toMatch(/Fix:/);
+      expect(line).toMatch(migration);
+    });
+  }
+
+  it('reports the missing transport, not a missing api_key, when both are absent', async () => {
+    // "Set an API key" is the wrong instruction for a provider that has
+    // nothing to hand the key to — so the unsupported-provider check runs
+    // before the api_key check.
+    const { ctx } = await boot({ provider: { value: 'sendgrid', source: 'global' } });
+    const line = ctx.logger.error.mock.calls[0][0] as string;
+    expect(line).not.toMatch(/api_key is empty/);
+    expect(line).toMatch(/smtp\.sendgrid\.net/);
+  });
+
+  it('leaves a working boot-configured SMTP transport in place', async () => {
+    // Mail may well still be going out (OS_EMAIL_SMTP_* configured the
+    // transport at boot). The stored provider is still unusable and the
+    // operator still has to fix it, so it is reported — but nothing that
+    // currently delivers is torn down on the way.
+    const { service, ctx } = await boot(
+      { provider: { value: 'ses', source: 'global' }, api_key: { value: 'k', source: 'global' } },
+      { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } },
+    );
+    expect((transportOf(service) as SmtpTransport).describe()).toMatchObject({ host: 'smtp.boot.test' });
+    expect(ctx.logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a typo the same way, naming the providers that do work', async () => {
+    const { ctx } = await boot({
+      provider: { value: 'postmarkk', source: 'global' },
+      api_key: { value: 'k', source: 'global' },
+    });
+    const line = ctx.logger.error.mock.calls[0][0] as string;
+    expect(line).toMatch(/log \/ resend \/ postmark \/ smtp/);
+  });
+
+  it('recovers on the next save — the bad value is not sticky', async () => {
+    const { service, settings } = await boot({
+      provider: { value: 'sendgrid', source: 'global' },
+      api_key: { value: 'legacy-key', source: 'global' },
+    });
+    expect(transportOf(service)).toBeInstanceOf(LogTransport);
+
+    await settings.save({
+      provider: { value: 'smtp', source: 'global' },
+      smtp_host: { value: 'smtp.sendgrid.net', source: 'global' },
+      smtp_user: { value: 'apikey', source: 'global' },
+      smtp_password: { value: 'legacy-key', source: 'global' },
+    });
+
+    expect((transportOf(service) as SmtpTransport).describe()).toMatchObject({
+      host: 'smtp.sendgrid.net',
+      auth: { user: 'apikey' },
+    });
+  });
+});
+
+describe('applyMailSettings — provider=resend', () => {
+  it('builds the transport the settings page can finally select', async () => {
+    // The reverse half of the same invariant: `resend` had a working transport
+    // all along and was missing from the dropdown (#5094). Now that it can be
+    // picked, prove picking it does something.
+    const { service, ctx } = await boot({
+      provider: { value: 'resend', source: 'global' },
+      api_key: { value: 're_live_key', source: 'global' },
+    });
+    expect(transportOf(service)).toBeInstanceOf(ResendTransport);
+    expect(ctx.logger.error).not.toHaveBeenCalled();
+  });
+});
+
 describe('EmailServicePlugin constructor path (CLI / os serve)', () => {
   it('THROWS when provider=smtp has no host — a boot that cannot deliver fails loudly', async () => {
     const ctx = fakeCtx({ manifest: { register: () => {} } });
@@ -289,6 +394,29 @@ describe('mail/test action', () => {
     expect(result.message).toMatch(/SMTP host is required/);
     expect(nm.sendMail).not.toHaveBeenCalled();
   });
+
+  it.each(['sendgrid', 'ses'])(
+    'refuses to "test" a stored provider=%s and points at SMTP instead',
+    async (provider) => {
+      const { settings } = await boot({
+        provider: { value: provider, source: 'global' },
+        api_key: { value: 'legacy-key', source: 'global' },
+      });
+      const result = await settings.action('test')!({
+        values: { provider, api_key: 'legacy-key', from_email: 'no-reply@example.test' },
+        payload: { to: 'admin@example.test' },
+      });
+
+      expect(result).toMatchObject({ ok: false, severity: 'error' });
+      // Not "Failed to build sendgrid transport: unknown provider" — the
+      // operator needs the route that works, not the internal symptom.
+      expect(result.message).toMatch(provider === 'sendgrid' ? /smtp\.sendgrid\.net/ : /email-smtp/);
+      expect(result.message).toMatch(/NOTHING was sent/);
+      expect(nm.sendMail).not.toHaveBeenCalled();
+      // ...and it does not ask for an API key it cannot use.
+      expect(result.message).not.toMatch(/api_key is required/);
+    },
+  );
 
   it('never reports success while only the LogTransport is active', async () => {
     const { settings } = await boot({ provider: { value: 'log', source: 'global' } });
