@@ -122,6 +122,7 @@ import { validateSecurityPosture } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
+import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -845,6 +846,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'that snapshot, not new wiring. Recorded as pending rather than done, because a rule that has '
       + 'never run at a door should not claim it.',
     run: (stack) => validateRlsPredicateEnforceability(stack),
+  },
+  // #4762 — the same "declared but enforces nothing" question, for the two
+  // STATIC artifacts an object validation rule carries. A `format` rule's
+  // `regex` that `new RegExp(...)` throws on, and a `json_schema` rule's schema
+  // ajv cannot compile, are both logged and SKIPPED on the write path
+  // (`rule-validator.ts`), so the rule ships, lists, and protects nothing.
+  // Neither needs a record to judge, so the authoring door is the right one:
+  // rejecting a broken regex at RUNTIME instead would reject every write
+  // touching that field for as long as the metadata is deployed (#4762's own
+  // analysis — the runtime-backstop question stays open for the maintainer).
+  // Gating for the `lint-flow-patterns.ts` bar: no reading of the metadata
+  // behaves as written, because the rule does not run at all.
+  {
+    name: 'validateRuleCompilability',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-rule-compilability.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    run: (stack) => validateRuleCompilability(stack),
   },
 ];
 

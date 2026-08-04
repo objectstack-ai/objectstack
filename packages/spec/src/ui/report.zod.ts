@@ -49,7 +49,37 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
  * a contract an author should have to rely on. The renderer lowers the list to
  * `DatasetSelection.order` in list order — see {@link reportSelectionOrder}.
  */
-export const ReportSortSchema = lazySchema(() => z.object({
+export const ReportSortSchema = lazySchema(() => strictObject({
+  surface: 'this report order key',
+  history:
+    'Until #4001 批 14 closed this shape these were dropped silently — the key still parsed, '
+    + '`direction` fell back to `asc`, and the report rendered in an order nobody asked for '
+    + '(the `SortNodeSchema` failure of #4721, one layer up).',
+  // Anchored on the two named sibling ordering contracts, not on edit distance.
+  // A report's `order` is the THIRD spelling of "sort" an author meets, and the
+  // other two are both correct where they live:
+  //   • `data/query.zod.ts` `SortNodeSchema` — `{ field, order }` (closed by
+  //     #4721, whose own alias table maps `direction` → `order`; the mapping
+  //     runs the OTHER way here, which is exactly why neither can be inferred).
+  //   • `dashboard.zod.ts` `DashboardWidget` — flat `sortBy` / `sortOrder`.
+  // `asc` / `desc` as a bare boolean-ish key is the Mongo/objectql habit.
+  aliases: {
+    field: 'by',
+    key: 'by',
+    column: 'by',
+    dimension: 'by',
+    measure: 'by',
+    name: 'by',
+    sortBy: 'by',
+    order: 'direction',
+    sortOrder: 'direction',
+    dir: 'direction',
+    sort: 'direction',
+    desc: 'direction',
+    descending: 'direction',
+    ascending: 'direction',
+  },
+}, {
   /** A dimension (`rows`/`columns`) or measure (`values`) name this report selects. */
   by: z.string().describe('Dimension or measure name to order by (must be selected by this report)'),
   /** Sort direction. Null/empty cells sort LAST in both directions. */
@@ -133,7 +163,55 @@ export function reportSelectionOrder(
  * - The schema is intentionally permissive about the column shape: blocks
  *   are not allowed to be themselves `joined` (no recursion).
  */
-export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => z.object({
+export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObject({
+  surface: 'this joined report block',
+  history:
+    'Until #4001 批 14 closed this shape these were dropped silently — the block still rendered, '
+    + 'minus whatever the key was meant to select, scope or order.',
+  // A block is a sub-report, so the vocabulary an author brings is the CONTAINER's
+  // (`ReportSchema`, thirty lines below) — and the two shapes deliberately differ:
+  // a block has no `drilldown`, no `protection`, no nested `blocks`, and its type
+  // enum excludes `joined` (no recursion). Those are the entries below: each one
+  // is a key that is correct one level up and wrong here, which edit distance
+  // reads as a near-match to something unrelated rather than as a layer mistake.
+  aliases: {
+    // ADR-0021 single-form: the legacy inline query was removed in the cutover.
+    // These are the spellings that cutover retired, aimed at their successors.
+    objectName: 'dataset',
+    object: 'dataset',
+    dataSet: 'dataset',
+    source: 'dataset',
+    // A block selects measures by name; `columns` is a real key here (the matrix
+    // across-axis), so the value list cannot borrow it — hence the explicit map.
+    fields: 'values',
+    measures: 'values',
+    metrics: 'values',
+    groupings: 'rows',
+    groupBy: 'rows',
+    dimensions: 'rows',
+    // Scope filter. `runtimeFilter` is camelCase, so the fallback under-reaches
+    // every one of these (#4990).
+    filter: 'runtimeFilter',
+    filters: 'runtimeFilter',
+    where: 'runtimeFilter',
+    criteria: 'runtimeFilter',
+    // Ordering, spelled as the container/objectql/dashboard surfaces spell it.
+    sort: 'order',
+    orderBy: 'order',
+    sortBy: 'order',
+  },
+  guidance: {
+    // Wrong-layer pointers, all three verified against this schema's own shape
+    // and the container's: writing them here is not a typo, it is a level
+    // mistake, and a rename suggestion would send the author somewhere worse.
+    blocks:
+      'a block cannot contain blocks — `type: \'joined\'` is excluded from a block\'s type enum on purpose (no recursion). Declare sibling blocks on the CONTAINER report\'s `blocks` list instead.',
+    drilldown:
+      '`drilldown` is a container-level key on the report, not per block — move it to the top-level report. A joined report drills through from the container.',
+    protection:
+      '`protection` is the ADR-0010 package-author lock policy, declared once on the REPORT — a block is not separately lockable. Move it to the top-level report.',
+  },
+}, {
   /** Stable id for the block (used as react key, telemetry, deeplinks). */
   name: SnakeCaseIdentifierSchema,
   /** Human label shown above the block. Falls back to `name`. */

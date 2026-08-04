@@ -325,8 +325,9 @@ properties fan out over arrays (each flow node, each dataset measure).
 A property is classified at the top level by default. A **container** property (object /
 record / array-of-object) may be drilled one level via `"children"` to keep sub-properties
 distinguishable — e.g. `permission.objects.allowCreate` (live) vs `allowTransfer` (experimental),
-or `flow.errorHandling.fallbackNodeId` (dead) vs the rest (live). Drill only where the
-audit gives divergent sub-statuses; otherwise the top-level entry covers the whole subtree.
+or `flow.errorHandling.fallbackNodeId` (dead) vs the rest (live). Drill where the
+audit gives divergent sub-statuses; otherwise the top-level entry covers the whole subtree —
+but that inheritance must now be **declared**, not assumed (below).
 
 ```jsonc
 // packages/spec/liveness/permission.json
@@ -338,6 +339,73 @@ audit gives divergent sub-statuses; otherwise the top-level entry covers the who
   } }
 } }
 ```
+
+### Undrilled containers must be DECLARED (#4956)
+
+"The top-level entry covers the whole subtree" is a real granularity, and forcing every
+container to drill would mean inventing hundreds of per-key verdicts with no evidence —
+worse than an honest coarse one. What is *not* acceptable is inheriting that coverage
+**silently**, because silence is indistinguishable from having looked:
+
+> `dashboard.widgets` carried `{"status": "live"}` and a `note` saying the per-widget
+> props were *"classified in the DashboardWidgetSchema subtree"*. **No such subtree has
+> ever existed** — `DashboardWidget` appeared in exactly two files, this README and that
+> claim. The walk drills one level and only through an explicit `children`, so all 22 keys
+> of the strict `DashboardWidgetSchema` were never asked about, the `unclassified` count
+> never mentioned them, and the run printed *"all governed-type properties are
+> classified"*. That is how `widgets[].responsive` survived the #3896 sweep that removed
+> its own sibling `widgets[].performance` **and its literal namesake `view.responsive`** —
+> `view` is drilled through `children`, so `list.responsive` got a verdict and went out.
+> The ledger could not say why it kept the key, because it had never had an opinion.
+> Retired four days late in #4876 / PR #4995, by hand.
+
+So the gate now asks a **third** question, alongside schema → ledger and ledger → schema:
+*is every blanket container verdict a declared one?* Exactly three dispositions are legal,
+all of them data:
+
+| Disposition | Meaning |
+|---|---|
+| **drilled** — `children` on the entry | per-key verdicts, as before |
+| **deferred** — a `{ container, to }` row in `../scripts/liveness/undrilled-containers.baseline.json` | the subtree is classified at another coordinate, and the gate **resolves** the reference |
+| **recorded** — a coordinate in that file's `containers` list | genuinely classified nowhere; a counted, shrink-only debt |
+
+A container in **none** of the three fails, printing the child keys its verdict silently
+covers. A baseline row whose container **now drills** also fails — the same rot as an orphan
+row, opposite direction (an overstated debt misleads as much as an unrecorded one). Every
+run prints both populations, the success line no longer claims a completeness it does not
+have, and `check:liveness --undrilled` prints the worklist.
+
+**Why `deferred` exists, and why it is resolved rather than believed.** "Classified
+elsewhere" is the exact sentence that caused #4956 — but it is sometimes *true*:
+`object.fields[]` really is `FieldSchema`, which the `field` ledger classifies in full, and
+`object.listViews[]` is the same ListView surface `view.list` already drills. Six containers
+(248 child keys, nearly half the population) are in that position, so recording them as
+"classified nowhere" would have been this file's own false claim. What separates a legal
+deferral from the #4956 defect is not the claim but **who checks it**: a deferral names its
+target as data, and the gate requires that target to exist (a governed type root, or a
+drilled `type/prop` coordinate) and to classify **exactly** this container's child keys.
+A dangling target fails; so does a drifted one — equality, not subset, because a container
+that grows a key its target never classifies is #4956 one level down. Pointing a deferral at
+`DashboardWidgetSchema` today produces:
+
+```
+✗ 1 broken deferral(s) — a "classified elsewhere" claim that does not resolve:
+    object/fields defers to 'DashboardWidgetSchema', which does not exist — no governed
+    type and no drilled ledger coordinate of that name
+```
+
+At landing: **58 containers / 292 child keys classified nowhere**, plus 6 resolved
+deferrals covering 248. Adding a row is a visible edit to a file named for the debt it
+records — the point, since the thing it replaced (a reassuring sentence in a `note`) cost
+nothing to write and could not be checked. Logic and rationale live in
+`../scripts/liveness/drill.mts`; it is pure and unit-tested, because a tree that is fully
+reconciled by construction would otherwise prove only that the check is quiet.
+
+**Drilling a container is EVIDENCE work, not bookkeeping.** The 22 widget keys took a
+call-graph pass across both repos and produced six dead verdicts and one one-path-only
+`live` — and `requiresService`, which every objectui measurement calls dead, is enforced
+server-side (`filterDashboardForUser`, ADR-0057 D10). Do not drill by fanning a parent's
+status out over its children; that manufactures verdicts, which is worse than the gap.
 
 ## Empty-state semantics — the sibling gate (#3896)
 
@@ -438,6 +506,9 @@ over-share.
 - `../scripts/liveness/orphans.mts` — the reverse (ledger → schema) scan: rows whose
   property is gone. Pure + unit-tested, because the tree was orphan-free when it
   landed, so a green gate proves nothing about whether the scan can fire.
+- `../scripts/liveness/drill.mts` + `undrilled-containers.baseline.json` — the third
+  direction (#4956): a container entry may not inherit coverage for its subtree
+  silently. Same "pure + unit-tested" reasoning as `orphans.mts`, for the same reason.
 - `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
   `empty-state-registry.mts` is its source of truth.
 
@@ -504,7 +575,7 @@ for t, v in r['types'].items():
 | view | 79 | 0 | 4 | – | list/form drilled via `children` (#2998 Track B); list.{responsive,performance} + form.{defaultSort,aria} REMOVED 2026-07-30 (#3896 close-out sweep — list aria/data stay live); **form.data was that sweep's one CORRECTION** — the removal attempt broke the build (`defineForm` writes `data.provider='schema'` onto every metadata form, `metadata-protocol` serves it), so it stands `live` with re-verified evidence; form.{buttons,defaults} live (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification; level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |
 
 | report | 21 | 0 | 0 | – | dataset-bound (ADR-0021); the aria/performance LEDGER entries were stale — the keys left the schema in the report-liveness close-out; deleted 2026-07-30 as hygiene. Audit-era `chart` DEAD superseded (framework#1890 / #3441) |
-| dashboard | 18 | 0 | 2 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) |
+| dashboard | 33 | 0 | 8 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) | **#4956**: `widgets` DRILLED — the row jumps 20 → 41 classified because all 22 widget-level keys enter the count at once. They had never been classified at all: the entry carried one blanket `live` plus a `note` asserting they were classified "in the DashboardWidgetSchema subtree", and no such subtree existed in any of the 28 ledger files. That gap, not any evidence, is what carried `widgets[].responsive` through the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` — `view` is drilled, so `list.responsive` got asked and went out. New dead 6 = `responsive` (retired #4876/#4995, tombstone keeps the row) + `colorVariant` + `actionUrl`/`actionType`/`actionIcon` + `aria`. The action trio is the sharpest: no renderer draws a per-widget action button at all (every `actionUrl` read in DashboardRenderer is scoped to `header.actions[]`), yet `validate-dashboard-action-refs.ts` enforces reference integrity on it and its docblock calls it "the per-widget button" — a lint guarding an affordance that does not exist. `requiresService` is the counter-example worth remembering: dead by every objectui measurement, and LIVE server-side (`filterDashboardForUser`, ADR-0057 D10) — judging a widget key from the renderer repo alone would have retired an enforced gate. `compareTo` is `live` on ONE path only (inline object-provider charts); on the ADR-0021 dataset path the string arms are dropped and `{ offset }` throws in the executor |
 | query | 16 | 1 | 4 | – | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The gate's one-level walk resolves 1 experimental; the 7 marker-experimental search affordances sit one level deeper, below the walk — resolved from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2) |
 | datasource | 30 | 0 | 0 | 0 | seeded 2026-08-01 (#4487) — the **highest dead ratio of any governed type** (20 of 43), and it was ungoverned until now, which is not a coincidence: #4410/#4465/#4481 found six inert keys here by hand, two security-shaped (`schemaMode` left an external DB constructible as `managed` with DDL ungated; `ssl` configured nothing while looking configured). Dead set = `capabilities.*` (all 11 — the engine gates pushdown on the runtime driver's `supports.*` object, a non-overlapping vocabulary), `healthCheck.*` (3 — nothing schedules a datasource probe; the 20 `healthCheck` hits in the repo all belong to the PLUGIN health monitor and other surfaces), `retryPolicy.*` (4 — `retryPolicy` IS enforced on `hook` and `job`, which is what makes this one read alive; the shapes differ), `external.label`, `external.requirePermission`. **`capabilities.readOnly` is the one to know**: it reads as a safety switch, gates nothing, and two shipped prescriptions pointed authors at it until #4487 — `external.allowWrites: false` is the enforced write gate. `config` is a `z.record`, so its per-driver keys sit outside the walk (recorded in the entry's note, not silently skipped) **批 A CLOSED 2026-08-02 (#4583)**: the `capabilities` block — 11 flags, every one dead and authorWarn'd — was REMOVED rather than bridged; pushdown comes from the runtime driver's own `supports.*`, so there was nothing to connect it to. Its rows are deleted (strict-removal route), which is why dead falls 20 → 9. `readOnly` was the reason the audit was worth doing: it read as a safety switch, gated nothing, and had already been MOVED twice toward somewhere it might be enforced (#4410, #4465) — the shipped CRM example called a datasource a read replica on the strength of it while the datasource took writes. Removing it does NOT hand the author a working alternative: `external.allowWrites` only gates FEDERATED datasources, so a managed one has no read-only gate at all (#4584). Remaining 9 = healthCheck ×3 + retryPolicy ×4 + external ×2, batches B/C/D of #4583 **BATCHES B/C/D CLOSED 2026-08-02 — datasource now has ZERO dead properties**, down from the 20 it was seeded with (the highest dead ratio of any governed type). `retryPolicy` ×4 and `healthCheck` ×3 went as whole blocks, `external.label` / `external.requirePermission` as keys. None was bridgeable: each already had a different LIVE mechanism doing the job — the boot policy, the driver handle's on-demand `ping()`/`checkHealth()`, the top-level `label`, and ordinary permission sets + RLS. The `retryPolicy` rejection deliberately refuses to offer a rename: `hook`/`job` retryPolicy ARE enforced but spell the delay `backoffMs`, and that inconsistency is itself the evidence nothing read the datasource one (#4488's sharpest trap) |
 | webhook | 11 | 0 | 0 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema`; folding it onto the registry is the #3490 reassessment. This row once read 0/1/16 ("the ENTIRE authoring surface is dead", #3461) and both halves of that were CLOSED same-quarter: #3489 built the materializer bridge (authored `webhooks:` entries now land as `sys_webhook` dispatcher rows) and #3494 pruned the aspirational props outright — so the surviving surface is fully live. Kept in the table as the worked example that a dead verdict is a worklist entry, not a tombstone: enforce-or-remove resolved this one by ENFORCING |

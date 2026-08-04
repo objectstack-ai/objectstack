@@ -14,6 +14,13 @@ import {
   type PluralRule,
   type LocaleConfig,
 } from './i18n.zod';
+import { measureDoors } from './door-reachability.testkit';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { PageSchema } from './page.zod';
+import { ComponentAnimationSchema } from './animation.zod';
+import { DropZoneSchema, DragItemSchema } from './dnd.zod';
+import { KeyboardNavigationConfigSchema } from './keyboard.zod';
+import { TouchInteractionSchema } from './touch.zod';
 
 describe('I18nObjectSchema', () => {
   it('should accept valid i18n object with key only', () => {
@@ -243,5 +250,186 @@ describe('LocaleConfigSchema', () => {
   });
   it('should reject locale without code', () => {
     expect(() => LocaleConfigSchema.parse({})).toThrow();
+  });
+});
+
+// ============================================================================
+// #4001 批 16 — the SPLIT verdict for this file, both halves pinned.
+//
+// `AriaPropsSchema` is closed on a measured door; the other five shapes are
+// `no door` and stay open. Both halves can regress, in OPPOSITE directions:
+// the closed half by someone reopening it, the open half by a later sweep
+// "finishing the file" with a `strictObject` that gates nothing (#4583). The
+// same split is recorded in `i18n.zod.ts`'s header and in the ui/ row of
+// `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+// ============================================================================
+
+/** Reject `value` and hand back the serialized issues, so a pin reads what an author would. */
+function reject(schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string {
+  const r = schema.safeParse(value);
+  expect(r.success, `expected ${JSON.stringify(value)} to be REJECTED`).toBe(false);
+  return JSON.stringify(r.error?.issues ?? []);
+}
+
+describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => {
+  it('the controls parse — this suite fails closed, not by rejecting everything', () => {
+    expect(AriaPropsSchema.safeParse({}).success).toBe(true);
+    expect(AriaPropsSchema.safeParse({ ariaLabel: 'Close dialog' }).success).toBe(true);
+    expect(AriaPropsSchema.safeParse({ ariaLabel: 'x', ariaDescribedBy: 'y', role: 'dialog' }).success).toBe(true);
+  });
+
+  it('rejects an undeclared key and names the surface', () => {
+    const msg = reject(AriaPropsSchema as never, { ariaLabel: 'x', notAnAriaKey: 1 });
+    expect(msg).toContain('notAnAriaKey');
+    expect(msg).toContain('these ARIA attributes');
+  });
+
+  // ---- the door: a strict schema nobody parses gates nothing --------------
+  it('binds through the `view` metadata root, at the real carrier slot path', () => {
+    const view = getMetadataTypeSchema('view');
+    expect(view, 'the view root must resolve — this is the parse door').toBeTruthy();
+    const doc = (aria: unknown) => ({ listViews: { my_view: { type: 'grid', columns: ['name'], aria } } });
+
+    const control = view!.safeParse(doc({ ariaLabel: 'Accounts' }));
+    expect(control.success, 'control: a declared key still parses through the root').toBe(true);
+
+    const r = view!.safeParse(doc({ ariaLabel: 'Accounts', describedBy: 'accounts-help' }));
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain('listViews');
+  });
+
+  it('is what was silently stripping BEFORE this batch — the legacy pair vanished whole', () => {
+    // Regression narrative, asserted rather than told: this exact document used
+    // to parse clean and come back `aria: {}`. The accessible name the author
+    // wrote existed in the source file and nowhere else.
+    const msg = reject(AriaPropsSchema as never, { label: 'Accounts', describedBy: 'accounts-help' });
+    expect(msg).toContain('`label` → `ariaLabel`');
+    expect(msg).toContain('`describedBy` → `ariaDescribedBy`');
+  });
+
+  // ---- curation, each entry anchored to a NAMED sibling contract ----------
+  it('renames objectui\'s stored legacy spellings (its own ARIA_KEY_ALIASES)', () => {
+    expect(reject(AriaPropsSchema as never, { label: 'x' })).toContain('`label` → `ariaLabel`');
+    expect(reject(AriaPropsSchema as never, { describedBy: 'x' })).toContain('`describedBy` → `ariaDescribedBy`');
+  });
+
+  it('renames the shape\'s own over-generalised prefix (`ariaRole` → `role`)', () => {
+    expect(reject(AriaPropsSchema as never, { ariaRole: 'dialog' })).toContain('`ariaRole` → `role`');
+  });
+
+  it('leaves the reachable typos to edit distance rather than hand-writing them', () => {
+    // Measured before any alias was written: these four the fallback already
+    // reaches, so an alias entry for them would be transcription, not judgement.
+    expect(reject(AriaPropsSchema as never, { arialabel: 'x' })).toContain('`arialabel` → `ariaLabel`');
+    expect(reject(AriaPropsSchema as never, { ariaLabell: 'x' })).toContain('`ariaLabell` → `ariaLabel`');
+    expect(reject(AriaPropsSchema as never, { ariadescribedby: 'x' })).toContain('`ariadescribedby` → `ariaDescribedBy`');
+    expect(reject(AriaPropsSchema as never, { roles: 'x' })).toContain('`roles` → `role`');
+  });
+
+  // ---- the two protocol gaps, prescribed WITHOUT a wrong rename ----------
+  it('`live` gets a prescription, never a rename — it is a key this schema cannot accept', () => {
+    // The ledger's finding 7: this campaign's own fix once signposted the way
+    // into the failure mode it exists to kill. `live` is real and rendered — by
+    // objectui's ListView alone — so the message says where it IS valid instead
+    // of pointing at a declared key that means something else.
+    const msg = reject(AriaPropsSchema as never, { live: 'polite' });
+    expect(msg).toContain('objectui');
+    expect(msg).toContain('#5058');
+    expect(msg, 'must not suggest a rename for a key with no correct target').not.toContain('`live` →');
+  });
+
+  it('never offers `live` as a suggestion for a NEIGHBOURING typo either', () => {
+    // `extraKeys: ['live']` would have made the objectui-extended surface's
+    // suggestions richer and this surface's suggestions WRONG. It is deliberately
+    // not used: `live` is not a key this schema accepts.
+    for (const typo of ['liv', 'lives', 'Live']) {
+      expect(reject(AriaPropsSchema as never, { [typo]: 'polite' })).not.toContain('→ `live`');
+    }
+  });
+
+  it('`aria-labelledby` names the gap instead of renaming to a different concept', () => {
+    for (const key of ['ariaLabelledBy', 'labelledBy']) {
+      const msg = reject(AriaPropsSchema as never, { [key]: 'other-element' });
+      expect(msg).toContain('#5058');
+      expect(msg, 'labelledby references an id; ariaLabel is a literal string').not.toContain(`\`${key}\` → \`ariaLabel\``);
+    }
+  });
+
+  // ---- what the strictness RIDES onto, in both directions -----------------
+  it('rides `.extend()` onto objectui\'s list-view aria — which is why `live` still works there', () => {
+    // objectui declares `SpecAriaPropsSchema.extend({ live })`. `.extend()`
+    // inherits `.strict()` AND the error map, so that surface accepts exactly
+    // `ariaLabel | ariaDescribedBy | role | live` and rejects the rest with this
+    // batch's message. Asserted on a local reconstruction because objectui is a
+    // separate repo — the mechanic is what matters and it is the finding-16 one.
+    const objectuiAria = AriaPropsSchema.extend({ live: z.enum(['polite', 'assertive', 'off']).optional() });
+    expect(objectuiAria.safeParse({ ariaLabel: 'x', live: 'polite' }).success).toBe(true);
+    expect(reject(objectuiAria as never, { ariaLabel: 'x', bogus: 1 })).toContain('these ARIA attributes');
+  });
+
+  it('does NOT ride `.merge()` into the four no-door files — they stay open', () => {
+    // `X.merge(AriaPropsSchema.partial())` adopts the INCOMING posture, so
+    // closing this shape silently closed `animation` / `dnd` / `keyboard` /
+    // `touch` too — with zod's generic message, no changeset, and against
+    // #4988's measured verdict that nothing parses them. The explicit `.strip()`
+    // in those four files is what holds this line; this is its pin.
+    expect(ComponentAnimationSchema.safeParse({ name: 'a', notAnAnimationKey: 1 }).success).toBe(true);
+    expect(DropZoneSchema.safeParse({ accept: ['card'], notADropZoneKey: 1 }).success).toBe(true);
+    expect(DragItemSchema.safeParse({ type: 'card', notADraggableKey: 1 }).success).toBe(true);
+    expect(KeyboardNavigationConfigSchema.safeParse({ notAKeyboardKey: 1 }).success).toBe(true);
+    expect(TouchInteractionSchema.safeParse({ notATouchKey: 1 }).success).toBe(true);
+  });
+});
+
+describe('#4001 批 16 — the other five shapes have no authoring door', () => {
+  const NO_DOOR: Array<[string, unknown]> = [
+    ['I18nObjectSchema', I18nObjectSchema],
+    ['PluralRuleSchema', PluralRuleSchema],
+    ['NumberFormatSchema', NumberFormatSchema],
+    ['DateFormatSchema', DateFormatSchema],
+    ['LocaleConfigSchema', LocaleConfigSchema],
+  ];
+
+  it('measures: AriaProps reachable, the other five not — controls in the same run', () => {
+    const { verdict, nodeCount, rootCount } = measureDoors();
+    expect(rootCount).toBeGreaterThan(20);
+    expect(nodeCount).toBeGreaterThan(1000);
+    expect(verdict(PageSchema), 'positive control').toBe('direct');
+    expect(verdict(AriaPropsSchema), 'the half of this file that HAS a door').toBe('direct');
+    expect(verdict(z.object({ a: z.string() })), 'negative control').toBe('unreachable');
+    for (const [name, schema] of NO_DOOR) {
+      expect(verdict(schema), `${name} must have no door`).toBe('unreachable');
+    }
+  });
+
+  it('a synthetic carrier flips all five — the verdict is the graph, not the walker', () => {
+    const carrier = z.object({
+      i18nObject: I18nObjectSchema,
+      plural: PluralRuleSchema,
+      numberFormat: NumberFormatSchema,
+      dateFormat: DateFormatSchema,
+      locale: LocaleConfigSchema,
+    });
+    const { verdict } = measureDoors([carrier]);
+    for (const [name, schema] of NO_DOOR) {
+      expect(verdict(schema), `${name} must become reachable once something carries it`).toBe('direct');
+    }
+  });
+
+  it('they still accept undeclared keys — this pins "open", not "broken"', () => {
+    expect(I18nObjectSchema.safeParse({ key: 'k', notAnI18nKey: 1 }).success).toBe(true);
+    expect(PluralRuleSchema.safeParse({ key: 'k', other: 'x', notAPluralForm: 1 }).success).toBe(true);
+    expect(NumberFormatSchema.safeParse({ notANumberFormatKey: 1 }).success).toBe(true);
+    expect(DateFormatSchema.safeParse({ notADateFormatKey: 1 }).success).toBe(true);
+    expect(LocaleConfigSchema.safeParse({ code: 'en-US', notALocaleKey: 1 }).success).toBe(true);
+  });
+
+  it('`I18nObject.params` stays a record ON PURPOSE — openness there is the contract', () => {
+    // The remeasure's standing warning for this file. `params` is an
+    // interpolation bag whose key space is whatever the message template names;
+    // it is not a site this ratchet could close and must not become one.
+    const r = I18nObjectSchema.safeParse({ key: 'items.count', params: { count: 5, anything: 'at all', ok: true } });
+    expect(r.success).toBe(true);
+    expect((r.data as { params?: Record<string, unknown> }).params).toEqual({ count: 5, anything: 'at all', ok: true });
   });
 });

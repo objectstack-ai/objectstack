@@ -31,6 +31,27 @@
  * Pure `(stack) => Finding[]`; accepts the NORMALIZED stack input (works both
  * pre- and post-zod-parse, so `os lint` catches what the zod gate would
  * reject in `os compile` — with a better message).
+ *
+ * ## Scope — the keys this rule reads, and the ones it deliberately does not
+ *
+ * Registered `input: 'parsed'` (`authoring-rules.ts`), so on the compile path
+ * it sees `ObjectStackSchema`'s output. Every key it reads is one the spec
+ * DECLARES, checked structurally against the live `.shape` in
+ * `validate-security-posture.test.ts`. Two reads that were not, until #5017:
+ *
+ * - `objects[].security.sharingModel` — **there is no `security` envelope on an
+ *   object.** `ObjectSchema` declares the OWD dials flat (`sharingModel`,
+ *   `externalSharingModel`, `publicSharing`) and is strict, so a stack nesting
+ *   one under `security` is refused by name rather than stripped. Nothing could
+ *   reach that fallback; what it did instead was describe an authorization
+ *   surface that does not exist, in the security linter of all places.
+ * - `objects[].fields[].reference_to` — a rejected alias of `reference`
+ *   (`field.zod.ts:331`).
+ *
+ * Alias tolerance belongs at the schema's refusal, not in a consumer (Prime
+ * Directive #12). Here it also silently downgraded a NAMED rejection into an
+ * inert branch — and an inert branch in a security linter reads, to the next
+ * author, as a gate that is watching (#4984, #5009, #5017).
  */
 
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
@@ -90,8 +111,20 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
+/**
+ * The object's org-wide default.
+ *
+ * `sharingModel` is the whole of it. There is no `objects[].security` envelope
+ * to fall back to and there never was: `ObjectSchema.shape` carries
+ * `sharingModel` / `externalSharingModel` / `publicSharing` flat, declares no
+ * `security` key, and is strict — a stack nesting the OWD under `security` is
+ * REFUSED ("Unrecognized key(s) on this object: `security`"), not stripped. So
+ * the fallback removed in #5017 could not run for any stack an author can ship;
+ * what it could do is tell the next reader that `object.security.sharingModel`
+ * is a real authorization surface. See the `## Scope` note on this module.
+ */
 function owdOf(obj: AnyRec): unknown {
-  return obj.sharingModel ?? (obj.security as AnyRec | undefined)?.sharingModel;
+  return obj.sharingModel;
 }
 
 function isSystemObject(obj: AnyRec): boolean {
@@ -113,9 +146,15 @@ function labelHasRoleWord(label: unknown): boolean {
   return /\brole(s)?\b/i.test(label);
 }
 
-/** The `reference`/`reference_to` target a relationship field points at. */
+/**
+ * The `reference` target a relationship field points at.
+ *
+ * `reference` is the only spelling `FieldSchema` declares; `reference_to` (like
+ * `referenceTo` / `relatedTo` / `target`) is a rejected alias the strict error
+ * map renames for the author, so a field carrying it does not parse (#5017).
+ */
 function refOf(def: AnyRec): string | undefined {
-  const r = (def.reference ?? def.reference_to) as unknown;
+  const r = def.reference as unknown;
   return typeof r === 'string' && r ? r : undefined;
 }
 

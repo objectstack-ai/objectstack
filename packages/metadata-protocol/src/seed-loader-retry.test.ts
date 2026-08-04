@@ -229,7 +229,13 @@ describe('seed batched path — partial-success engine (framework#3172)', () => 
   });
 });
 
-describe('seed batched path — summary recompute failure is a warning, not an error (framework#3147)', () => {
+// The RECOVERY pinned here is framework#3147's and is unchanged: the rows were
+// written, so re-writing them would duplicate. Its loudness is not — a stale
+// roll-up column is persisted data disagreeing with its detail rows, so the
+// seam logs at `error` and counts into `summariesStale` (framework#4998, pinned
+// in seed-loader-summary-stale.test.ts). It is still not a WRITE error, which
+// is what `totalErrored: 0` below says.
+describe('seed batched path — a recompute failure is recovered, not re-written (framework#3147)', () => {
   it('records the rows as inserted (not errored) and does not re-insert on ERR_SUMMARY_RECOMPUTE', async () => {
     const { engine, store } = createFaithfulEngine();
     const metadata = createMetadata();

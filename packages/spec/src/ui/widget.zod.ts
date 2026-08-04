@@ -6,6 +6,41 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { retiredKey } from '../shared/retired-key';
 
+// ⛔ #4001 批 16 — EVERY shape in this file is `no door`. Do NOT `.strict()` them.
+//
+// The ledger scheduled this file as `authorable (p)` / 9 sites. Resolving the
+// `(p)` found no authoring door at all, measured three independent ways on
+// 2026-08-04, with positive AND negative controls in the same run:
+//
+//  1. **No carrier key.** Nothing under `packages/spec/src` imports this module
+//     except the `ui/index.ts` barrel, so no schema anywhere declares a key
+//     whose value is a widget shape. `field.widget` is a `z.string()` naming a
+//     registered *component*; it has never referenced `WidgetManifest`.
+//  2. **Unreachable.** A BFS over this build's in-memory Zod graph from all 24
+//     metadata-type roots plus `defineStack`'s `ObjectStackSchema` (4 766 nodes)
+//     reaches none of them, while `PageSchema` / `ObjectListViewSchema` resolve
+//     in the same run and a synthetic carrier flips every one of them to
+//     reachable — so the verdict is a fact about the graph, not a broken walker.
+//  3. **Never parsed.** No `.parse()` / `.safeParse()` on any of these exists in
+//     `objectstack`, `objectui` or `cloud` outside this file's own unit tests.
+//     objectui re-exports the inferred TYPES only, under different names
+//     (`RuntimeWidgetManifest` / `FieldWidgetComponentProps`, #4115 / #3161).
+//
+// `.strict()` is a property of a PARSE. With no parse it enforces nothing and
+// only makes a dead slot look load-bearing — "a precisely validated dead slot,
+// the more convincing lie" (#4583). The live question here is ADR-0049
+// enforce-or-remove, filed as #5055 (same class as #4988), NOT this ratchet.
+//
+// ⚠️ The campaign's own BFS reported `WidgetManifestSchema` as REACHABLE on the
+// first run. That was a false positive in the walker's derived-clone bridge, not
+// a door: zod's `.describe()` returns a clone that SHARES the original `_zod.def`
+// object, so `WidgetManifestSchema.name` (a described `SnakeCaseIdentifierSchema`)
+// and `.label` (a described `I18nLabelSchema`) are def-identical to the same
+// leaves on live schemas, and a bridge that fires on ANY one shared property
+// under a shared name links two unrelated shapes. Filed as #5056; `widget.test.ts`
+// pins the corrected (whole-shape overlap) form. Same verdict recorded in the
+// ui/ row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+
 /**
  * Widget Lifecycle Hooks Schema
  * 

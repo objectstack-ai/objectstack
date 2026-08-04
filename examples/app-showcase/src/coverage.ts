@@ -180,10 +180,10 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     notes: 'Merged into showcase_account by the ObjectQL engine at registerApp (priority overlay).',
   },
   apis: {
-    status: 'demonstrated',
-    files: ['src/system/apis/index.ts'],
-    notes:
-      'Declarative ApiEndpoint metadata (object_operation + flow targets), executed by the runtime dispatcher (handleApiEndpoint). Complements the code-mounted endpoint in src/system/server/ (router kind stays waived: code-only).',
+    status: 'waived',
+    reason:
+      'NOT demonstrable: the runtime has no executor for declarative `apis:`. This entry read "demonstrated … executed by the runtime dispatcher (handleApiEndpoint)" until #4936 measured it on a real boot — the two declared endpoints returned a bare 404 (no route was ever mounted for them) while a control request on the same cookie and prefix returned 200, and the dispatcher branch named here called a `matchEndpoint` that no implementation in the repo provided. That made this the exact false-coverage claim Prime Directive #10 forbids, on a surface whose keys include `authRequired`. Per the 2026-08-04 verdict the vocabulary is kept but a non-empty `apis:` is now rejected at publish/validate, so the showcase declares none; src/system/apis/index.ts keeps both definitions commented, ready to restore. HTTP endpoints are still demonstrated the honest way, in code, by src/system/server/recalc-endpoint.ts (the router kind stays waived: code-only). Flip this back to `demonstrated` in the same PR that lands the executor.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/5040',
   },
   connectors: {
     status: 'demonstrated',

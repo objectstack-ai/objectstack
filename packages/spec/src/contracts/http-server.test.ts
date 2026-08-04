@@ -177,6 +177,139 @@ describe('HTTP Server Contract', () => {
       await expect(server.close!()).resolves.toBeUndefined();
     });
 
+    describe('optional setFallbackHandler (#5040 E1)', () => {
+      /** A server with only the REQUIRED members. */
+      const baseServer = (): IHttpServer => ({
+        get: () => {},
+        post: () => {},
+        put: () => {},
+        delete: () => {},
+        patch: () => {},
+        use: () => {},
+        listen: async () => {},
+      });
+
+      it('is optional — an adapter without it still satisfies the contract', () => {
+        const server = baseServer();
+
+        expect(typeof server.setFallbackHandler).toBe('undefined');
+        expect(typeof server.setFallbackHandler === 'function').toBe(false);
+      });
+
+      it('is feature-detected with typeof === "function" when provided', () => {
+        const server: IHttpServer = {
+          ...baseServer(),
+          setFallbackHandler: (_handler) => {},
+        };
+
+        expect(typeof server.setFallbackHandler).toBe('function');
+      });
+
+      it('accepts a RouteHandler — the same handler shape routes take', () => {
+        let installed: RouteHandler | undefined;
+
+        const server: IHttpServer = {
+          ...baseServer(),
+          setFallbackHandler: (handler) => { installed = handler; },
+        };
+
+        const fallback: RouteHandler = async (_req, res) => {
+          res.status(404).json({ error: { code: 'ROUTE_NOT_FOUND' } });
+        };
+        server.setFallbackHandler!(fallback);
+
+        expect(installed).toBe(fallback);
+      });
+
+      it('runs only after every registered route misses', async () => {
+        const registered = new Set<string>();
+        let fallback: RouteHandler | undefined;
+
+        const server: IHttpServer = {
+          ...baseServer(),
+          get: (path) => { registered.add(`GET ${path}`); },
+          setFallbackHandler: (handler) => { fallback = handler; },
+        };
+
+        server.get('/api/v1/data/showcase_task', async (_req, res) => res.json([]));
+
+        const answered: string[] = [];
+        server.setFallbackHandler!(async (req, res) => {
+          answered.push(`${req.method} ${req.path}`);
+          res.status(404).json({ error: { code: 'ROUTE_NOT_FOUND' } });
+        });
+
+        const dispatch = async (method: string, path: string) => {
+          const res: IHttpResponse = {
+            json: () => {}, send: () => {},
+            status: function () { return this; },
+            header: function () { return this; },
+          };
+          if (registered.has(`${method} ${path}`)) return 'route';
+          await fallback!(
+            { params: {}, query: {}, headers: {}, method, path, body: { note: 'readable' } },
+            res,
+          );
+          return 'fallback';
+        };
+
+        // A registered route is never shadowed by the fallback.
+        expect(await dispatch('GET', '/api/v1/data/showcase_task')).toBe('route');
+        expect(answered).toEqual([]);
+
+        // Only the unmatched request reaches it.
+        expect(await dispatch('GET', '/api/v1/apps/showcase/tasks')).toBe('fallback');
+        expect(answered).toEqual(['GET /api/v1/apps/showcase/tasks']);
+      });
+
+      it('receives a request whose body is readable (unlike the use() middleware seam)', async () => {
+        let seenBody: unknown;
+
+        const fallback: RouteHandler = async (req, res) => {
+          seenBody = req.body;
+          res.status(200).json({ ok: true });
+        };
+
+        const res: IHttpResponse = {
+          json: () => {}, send: () => {},
+          status: function () { return this; },
+          header: function () { return this; },
+        };
+
+        await fallback(
+          {
+            params: {},
+            query: {},
+            headers: { 'content-type': 'application/json' },
+            method: 'POST',
+            path: '/api/v1/apps/showcase/inquiries/purge',
+            body: { olderThanDays: 30 },
+          },
+          res,
+        );
+
+        expect(seenBody).toEqual({ olderThanDays: 30 });
+      });
+
+      it('installing twice replaces the handler — there is one fallback, not a chain', () => {
+        let current: RouteHandler | undefined;
+
+        const server: IHttpServer = {
+          ...baseServer(),
+          setFallbackHandler: (handler) => { current = handler; },
+        };
+
+        const first: RouteHandler = () => {};
+        const second: RouteHandler = () => {};
+
+        server.setFallbackHandler!(first);
+        expect(current).toBe(first);
+
+        server.setFallbackHandler!(second);
+        expect(current).toBe(second);
+      });
+    });
+
     it('should listen on a port', async () => {
       let listenedPort: number | undefined;
 

@@ -281,6 +281,23 @@ export {
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
 
+// #4762 — the two STATIC artifacts an object validation rule carries (a
+// `format` rule's `regex`, a `json_schema` rule's `schema`) are fail-OPEN at
+// runtime: one that does not compile is logged and skipped, so the rule is
+// declared and enforces nothing. Both are decidable without a record, so they
+// are rejected at authoring/publish time — with the REAL compilers, and for ajv
+// with the runtime's own options.
+export {
+  validateRuleCompilability,
+  RUNTIME_AJV_OPTIONS,
+  VALIDATION_RULE_REGEX_UNCOMPILABLE,
+  VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
+} from './validate-rule-compilability.js';
+export type {
+  RuleCompilabilityFinding,
+  RuleCompilabilitySeverity,
+} from './validate-rule-compilability.js';
+
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
 

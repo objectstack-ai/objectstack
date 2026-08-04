@@ -155,7 +155,7 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`protocol.zod.ts`](src/api/protocol.zod.ts) | ⭐ | **Stack Protocol**. valid requests and responses for the platform. |
 | [`dispatcher.zod.ts`](src/api/dispatcher.zod.ts) | ⭐ | **HttpDispatcher**. Route-to-service mapping for API routing. |
 | [`discovery.zod.ts`](src/api/discovery.zod.ts) | ⭐ | **Service Discovery**. Service registration and API routes discovery. |
-| [`endpoint.zod.ts`](src/api/endpoint.zod.ts) | | **API Endpoints**. REST API route definitions. |
+| [`endpoint.zod.ts`](src/api/endpoint.zod.ts) | | **API Endpoints**. REST API route definitions. ⚠️ Vocabulary only in v17: no executor exists, so a non-empty `apis:` is rejected at publish/validate (#4936); the executor is tracked by #5040. |
 | [`rest-server.zod.ts`](src/api/rest-server.zod.ts) | | **REST Server**. REST-specific server settings. |
 | [`auth.zod.ts`](src/api/auth.zod.ts) | | **API Auth**. Authentication schemes for APIs. |
 | [`analytics.zod.ts`](src/api/analytics.zod.ts) | | **API Analytics**. Usage tracking for APIs. |
@@ -170,7 +170,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`batch.zod.ts`](src/api/batch.zod.ts) | | **Batch API**. Bulk request processing. |
 | [`contract.zod.ts`](src/api/contract.zod.ts) | | **API Contracts**. Versioned API signatures. |
 | [`storage.zod.ts`](src/api/storage.zod.ts) | | **Storage API**. File upload/download endpoints. |
-| [`registry.zod.ts`](src/api/registry.zod.ts) | | **Registry API**. Package registry interface. |
 | [`package-api.zod.ts`](src/api/package-api.zod.ts) | | **Package API**. Package lifecycle endpoints (`/api/v1/packages`). |
 
 ---

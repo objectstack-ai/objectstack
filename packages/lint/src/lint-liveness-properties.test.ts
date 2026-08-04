@@ -400,4 +400,77 @@ describe('lintLivenessProperties', () => {
     });
     expect(findings).toEqual([]);
   });
+
+  // ── #4956: the dashboard widget subtree ────────────────────────────────────
+  //
+  // These assertions are what make the drill worth doing on the AUTHOR side.
+  // Until #4956 the ledger classified `dashboard.widgets` with one blanket
+  // `live` and claimed in prose that the per-widget keys were classified in a
+  // "DashboardWidgetSchema subtree" that never existed — so no widget key had a
+  // verdict, and this lint (which is ledger-driven by design) had nothing to
+  // say about any of them. Two things had to change together: the ledger gained
+  // 22 child verdicts, and `dashboard` was registered in TYPE_COLLECTIONS.
+  // Registering the type is the half that is easy to forget and impossible to
+  // notice — the ledger would read correct and warn nobody.
+  describe('dashboard widgets (#4956)', () => {
+    const dash = (widget: Record<string, unknown>) => ({
+      dashboards: [{
+        name: 'sales_overview',
+        label: 'Sales',
+        widgets: [{ id: 'total_pipe', type: 'metric', dataset: 'orders', values: ['total'], ...widget }],
+      }],
+    });
+
+    it('warns on a widget action button that no renderer draws (`actionUrl`)', () => {
+      const findings = lintLivenessProperties(dash({ actionUrl: '/apps/sales/orders' }));
+      const hit = findings.find((f) => f.message.includes('widgets.actionUrl'));
+      expect(hit).toBeDefined();
+      expect(hit!.where).toContain('sales_overview');
+      expect(hit!.hint).toMatch(/header\.actions/);
+    });
+
+    it('warns on `colorVariant`, the key this repo\'s own system dashboard authors 7 times', () => {
+      const findings = lintLivenessProperties(dash({ colorVariant: 'teal' }));
+      const hit = findings.find((f) => f.message.includes('widgets.colorVariant'));
+      expect(hit).toBeDefined();
+      // The hint has to name the surviving home, or the author reads it as
+      // "widgets cannot be coloured".
+      expect(hit!.hint).toMatch(/options/);
+    });
+
+    it('warns on a widget `aria` block that never reaches the DOM', () => {
+      const findings = lintLivenessProperties(dash({ aria: { ariaLabel: 'Total pipeline' } }));
+      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.aria'))).toBe(true);
+    });
+
+    it('fans out over EVERY widget, not just the first', () => {
+      const findings = lintLivenessProperties({
+        dashboards: [{
+          name: 'ops',
+          widgets: [
+            { id: 'a', type: 'metric', dataset: 'd', values: ['v'] },
+            { id: 'b', type: 'metric', dataset: 'd', values: ['v'], actionIcon: 'plus' },
+          ],
+        }],
+      });
+      // The dead key is on the SECOND widget — a walk that only looked at
+      // `widgets[0]` would be silently half-blind on every real dashboard.
+      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.actionIcon'))).toBe(true);
+    });
+
+    it('stays silent on a widget built entirely from live keys', () => {
+      const findings = lintLivenessProperties(dash({
+        title: 'Total Pipe',
+        dimensions: ['region'],
+        filter: { stage: 'closed_won' },
+        layout: { x: 0, y: 0, w: 3, h: 2 },
+        options: { limit: 10, sortBy: 'total' },
+        requiresObject: 'order',
+        requiresService: 'analytics',
+        filterBindings: { dateRange: 'closed_at' },
+        suppressWarnings: ['table-count-only'],
+      }));
+      expect(findings).toEqual([]);
+    });
+  });
 });

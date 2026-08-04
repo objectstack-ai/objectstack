@@ -34,9 +34,85 @@ import { AggregationFunction, DateGranularity } from '../data/query.zod';
  */
 
 /**
+ * Shared history for the semantic-layer sub-shapes in this file (#4001 批 14).
+ *
+ * `DatasetSchema` (the container) has been strict since the ADR-0021 cutover;
+ * the two shapes that carry the actual semantic contract — the dimension and
+ * measure entries every presentation binds to BY NAME — were not. A strict
+ * container around strip children is the silhouette of a closed surface, not a
+ * closed surface (the nested-hole shape 批 13 found on `page.components[]`).
+ */
+const DATASET_HISTORY =
+  'Until #4001 批 14 closed this shape these were dropped silently — the dataset still '
+  + 'compiled and every report and widget bound to it still rendered, computing something '
+  + 'other than what was declared.';
+
+/**
+ * The competing vocabulary these two shapes are curated against is NAMED by this
+ * module's own header: `data/analytics.zod.ts`'s Cube layer (`DimensionSchema` /
+ * `MetricSchema`), which the two coexist with by design during ADR-0021 Phase 1.
+ * That is the anchor for the aliases below — a sibling contract in this repo,
+ * not an edit-distance guess:
+ *
+ *   Cube dimension  `{ name, label, description, type, sql, granularities }`
+ *   Cube metric     `{ name, label, description, type, sql, filters, format }`
+ *
+ * Two of those overlaps are actively dangerous rather than merely different, and
+ * neither is a typo any distance metric can reach:
+ *
+ * - **`type` means different things in the two layers.** On a Cube *metric* it
+ *   is the AGGREGATION (`sum`/`avg`/…); on a dataset *dimension* it is the
+ *   DATATYPE. So `{ name: 'revenue', type: 'sum', field: 'amount' }` — a
+ *   perfectly sensible thing to write, and what an LLM trained on Cube/LookML
+ *   emits — parsed clean on a measure and computed a `count`, because
+ *   `aggregate` was absent and `type` was stripped.
+ * - **`sql` has no destination here at all.** The dataset layer is deliberately
+ *   SMALLER than a query: no raw SQL, no hand-authored predicates (see the
+ *   module header). Aliasing it to `field` would be finding 7's trap — pointing
+ *   an author who wrote `sql: 'SUM(amount)'` at a slot that takes a field PATH,
+ *   where the same content is wrong again. It gets `guidance` instead.
+ */
+const DATASET_NO_SQL =
+  'the dataset layer takes no raw SQL — it is deliberately smaller than a query (ADR-0021). '
+  + 'A dimension names a `field` (a base field or a `relationship[.relationship].field` path); '
+  + 'a measure names an `aggregate` + `field`, and the only computed form is '
+  + '`derived: { op, of: [...] }`, which combines OTHER measures in this dataset by name. '
+  + 'Joins are compiled from `Dataset.include` — you never write an ON clause.';
+
+/**
  * Dimension — a groupable axis (e.g. "region", "close_date by quarter").
  */
-export const DatasetDimensionSchema = lazySchema(() => z.object({
+export const DatasetDimensionSchema = lazySchema(() => strictObject({
+  surface: 'this dataset dimension',
+  history: DATASET_HISTORY,
+  aliases: {
+    // The source. A dimension names a field PATH; these are the words the Cube
+    // layer, objectql and the chart surfaces use for the same slot.
+    column: 'field',
+    path: 'field',
+    source: 'field',
+    fieldName: 'field',
+    property: 'field',
+    // Bucketing. Cube spells it `granularities` (an ARRAY of supported ones);
+    // here it is one default bucket, so the rename also changes the shape —
+    // which is why it must be said rather than guessed.
+    granularity: 'dateGranularity',
+    granularities: 'dateGranularity',
+    dateBucket: 'dateGranularity',
+    bucket: 'dateGranularity',
+    interval: 'dateGranularity',
+    // Identity/display.
+    title: 'label',
+    displayName: 'label',
+  },
+  guidance: {
+    sql: DATASET_NO_SQL,
+    expression: DATASET_NO_SQL,
+    formula: DATASET_NO_SQL,
+    description:
+      'a dimension has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
+  },
+}, {
   /** Referenced by presentations (report rows/columns, widget dimensions). */
   name: SnakeCaseIdentifierSchema.describe('Dimension name — referenced by presentations'),
   label: I18nLabelSchema.optional(),
@@ -63,7 +139,47 @@ export const DerivedMeasureOp = z.enum(['ratio', 'sum', 'difference', 'product']
  * Measure — an aggregatable value (e.g. "revenue = sum(amount)"). Defined ONCE
  * here; every presentation references it by name.
  */
-export const DatasetMeasureSchema = lazySchema(() => z.object({
+export const DatasetMeasureSchema = lazySchema(() => strictObject({
+  surface: 'this dataset measure',
+  history: DATASET_HISTORY,
+  aliases: {
+    // THE dangerous one — see the note above `DATASET_NO_SQL`. A Cube metric's
+    // `type` IS the aggregation, and `type` is not declared here at all, so an
+    // author who brings that habit silently loses the aggregation.
+    type: 'aggregate',
+    aggregation: 'aggregate',
+    agg: 'aggregate',
+    fn: 'aggregate',
+    func: 'aggregate',
+    function: 'aggregate',
+    operation: 'aggregate',
+    // The aggregated column.
+    column: 'field',
+    source: 'field',
+    fieldName: 'field',
+    property: 'field',
+    // Measure-scoped filter — singular here, plural on the Cube metric.
+    filters: 'filter',
+    where: 'filter',
+    criteria: 'filter',
+    // Formatting / display.
+    numberFormat: 'format',
+    displayFormat: 'format',
+    currencyCode: 'currency',
+    title: 'label',
+    displayName: 'label',
+    // Computed measures.
+    calculated: 'derived',
+    computed: 'derived',
+  },
+  guidance: {
+    sql: DATASET_NO_SQL,
+    expression: DATASET_NO_SQL,
+    formula: DATASET_NO_SQL,
+    description:
+      'a measure has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
+  },
+}, {
   name: SnakeCaseIdentifierSchema.describe('Measure name — e.g. "revenue"; defined once'),
   label: I18nLabelSchema.optional(),
   /** Aggregation function — reuses the canonical query.zod enum. */
@@ -87,7 +203,39 @@ export const DatasetMeasureSchema = lazySchema(() => z.object({
    * Mutually exclusive with `field`/`aggregate` semantics: when `derived` is
    * set, `aggregate` is ignored at compile time.
    */
-  derived: z.object({
+  derived: strictObject({
+    surface: 'this derived-measure spec',
+    history: DATASET_HISTORY,
+    // Two keys, both terse, both therefore out of edit-distance reach of the
+    // words an author reaches for. `of` in particular: a two-character key has
+    // a distance budget of 2, so `operands` (8 edits away) can never suggest it.
+    aliases: {
+      operator: 'op',
+      operation: 'op',
+      type: 'op',
+      kind: 'op',
+      fn: 'op',
+      func: 'op',
+      function: 'op',
+      measures: 'of',
+      operands: 'of',
+      args: 'of',
+      arguments: 'of',
+      inputs: 'of',
+      refs: 'of',
+      from: 'of',
+      over: 'of',
+    },
+    guidance: {
+      // The refs are measure NAMES; pointing a field/SQL author at `of` would
+      // hand them a slot where their content is wrong again (finding 7).
+      sql: DATASET_NO_SQL,
+      expression: DATASET_NO_SQL,
+      formula: DATASET_NO_SQL,
+      field:
+        'a derived measure references OTHER MEASURES by name, never raw fields — that is what keeps it enumerable and reviewable (ADR-0021 Q1). List the measure names in `of`, and declare the underlying field on the measure being referenced.',
+    },
+  }, {
     op: DerivedMeasureOp,
     /** Names of other measures in this dataset (2+ for ratio/difference). */
     of: z.array(SnakeCaseIdentifierSchema).min(1),

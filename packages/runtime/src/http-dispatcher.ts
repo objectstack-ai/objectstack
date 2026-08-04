@@ -11,7 +11,10 @@ import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api'
 import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
-import * as actionExec from './action-execution.js';
+// `import * as actionExec from './action-execution.js'` was dropped in #4936:
+// the dispatcher's own `callData` delegate was its last consumer here, and the
+// delegate died with the `handleApiEndpoint` branch. The domain modules import
+// `action-execution` for themselves.
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -568,16 +571,13 @@ export class HttpDispatcher {
         });
     }
 
-    /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
-    private async callData(
-        action: string,
-        params: any,
-        dataDriver?: any,
-        scopeId?: string,
-        executionContext?: ExecutionContext,
-    ): Promise<any> {
-        return actionExec.callData(this.domainDeps, action, params, dataDriver, scopeId, executionContext);
-    }
+    // The private `callData` delegate that stood here was removed with
+    // `handleApiEndpoint` in #4936 — that dead branch was its ONLY caller, and
+    // `tsc` said so (TS6133) the moment the branch went. Every live data path
+    // calls `actionExec.callData(deps, …)` directly from its domain module
+    // (`domains/data.ts`, `domains/mcp.ts`, `domains/actions.ts`), which is the
+    // D11③ shape anyway; the wrapper was a leftover of the pre-extraction
+    // dispatcher.
 
     /** Thin delegate — body extracted to `./domains/mcp.ts` (D11③ PR-9). */
     async handleMcp(body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
@@ -1619,10 +1619,23 @@ export class HttpDispatcher {
              }
         }
 
-        // 2. Custom API Endpoints (Registry lookup)
-        // Check if there is a custom endpoint defined for this path
-        const result = await this.handleApiEndpoint(cleanPath, method, body, query, context);
-        if (result.handled) return result;
+        // 2. Metadata-declared custom endpoints (`apis:`) — REMOVED in #4936.
+        //
+        // A `handleApiEndpoint` branch used to sit here. It resolved the
+        // metadata service and called `matchEndpoint` on it — a method NO
+        // implementation in this repo has ever provided (`MetadataManager` /
+        // `NodeMetadataManager` and every plugin alike), so the branch was
+        // `{ handled: false }` on every request ever served. It could not even
+        // be reached: the declared paths were never mounted, so a request for
+        // one died at Hono's `notFound` long before `dispatch()` saw it.
+        //
+        // That is precisely the input ADR-0076 "one route, one owner" warns
+        // about — code `grep` finds and the runtime never runs, which an agent
+        // (or a human) then reasons confidently from. Deleted rather than
+        // repaired so the absence is LOUD: a non-empty `apis:` is now rejected
+        // at publish/validate with a prescription (`stack.zod.ts`), instead of
+        // parsing clean and 404ing at runtime. The executor is being built
+        // under #5040 and will re-mount this surface for real.
 
         // 3. Fallback — return semantic 404 with diagnostic info
         return {
@@ -1638,82 +1651,5 @@ export class HttpDispatcher {
             }
             throw e;
         }
-    }
-
-    /**
-     * Handles Custom API Endpoints defined in metadata
-     */
-    async handleApiEndpoint(path: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
-        try {
-            // Attempt to find a matching endpoint in the registry
-            const metaSvc = await this.resolveService('metadata', context.environmentId);
-            if (!metaSvc || typeof (metaSvc as any).matchEndpoint !== 'function') {
-                return { handled: false };
-            }
-            const endpoint = await (metaSvc as any).matchEndpoint({ path, method });
-            
-            if (endpoint) {
-                // Execute the endpoint target logic
-                if (endpoint.type === 'flow') {
-                    const automationSvc = await this.resolveService('automation');
-                    if (!automationSvc || typeof (automationSvc as any).runFlow !== 'function') {
-                        return { handled: true, response: this.error('Automation service not available', 503) };
-                    }
-                    const result = await (automationSvc as any).runFlow({ 
-                        flowId: endpoint.target, 
-                        inputs: { ...query, ...body, _request: context.request } 
-                    });
-                     return { handled: true, response: this.success(result) };
-                }
-                
-                if (endpoint.type === 'script') {
-                    const automationSvc = await this.resolveService('automation');
-                    if (!automationSvc || typeof (automationSvc as any).runScript !== 'function') {
-                        return { handled: true, response: this.error('Automation service not available', 503) };
-                    }
-                     const result = await (automationSvc as any).runScript({ 
-                        scriptName: endpoint.target, 
-                        context: { ...query, ...body, request: context.request } 
-                    });
-                     return { handled: true, response: this.success(result) };
-                }
-
-                if (endpoint.type === 'object_operation') {
-                    // e.g. Proxy to an object action
-                    if (endpoint.objectParams) {
-                        const { object, operation } = endpoint.objectParams;
-                        // Map standard CRUD operations
-                        if (operation === 'find') {
-                             const result = await this.callData('query', { object, query });
-                             // Spec: FindDataResponse = { object, records, total?, hasMore? }
-                             return { handled: true, response: this.success(result.records, { total: result.total }) };
-                        }
-                        if (operation === 'get' && query.id) {
-                             const result = await this.callData('get', { object, id: query.id });
-                             return { handled: true, response: this.success(result) };
-                        }
-                         if (operation === 'create') {
-                             const result = await this.callData('create', { object, data: body });
-                             return { handled: true, response: this.success(result) };
-                        }
-                    }
-                }
-
-                if (endpoint.type === 'proxy') {
-                     return { 
-                         handled: true, 
-                         response: { 
-                             status: 200, 
-                             body: { proxy: true, target: endpoint.target, note: 'Proxy execution requires http-client service' } 
-                         } 
-                     };
-                }
-            }
-        } catch (e) {
-            // If matchEndpoint fails (e.g. not found), we just return not handled
-            // so we can fallback to 404 or other handlers
-        }
-
-        return { handled: false };
     }
 }
