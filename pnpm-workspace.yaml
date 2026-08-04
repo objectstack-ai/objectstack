@@ -29,6 +29,16 @@ onlyBuiltDependencies:
 #     dropped requestTls in SOCKS5 ProxyAgent. Pulled 7.27.2 through
 #     @vscode/vsce > cheerio (declares undici ^7.19.0); force the patched
 #     7.28.0 line (stays in the 7.x major cheerio supports). CI audit gate.
+#     Then five more advisories landed on 7.28.0 itself — the version this pin
+#     had settled on (GHSA-4cwx-7wf7-3272 7.4 high, GHSA-jr45-8vmc-qm54 5.9,
+#     GHSA-8xcm-r25x-g524 / GHSA-v3r7-h72x-cjcm 4.8, GHSA-m8rv-5g2x-5cg5 4.2) —
+#     so the bound moves to <7.29.0 / ^7.29.0 (#5032). NOTE the recurring trap:
+#     an exclusive upper bound stops covering the very version it pinned once
+#     that version is itself flagged, so the selector AND the target must move
+#     together — same shape as the brace-expansion 5.0.8 → 5.0.9 lift (#4945).
+#     Still transitive-only via cheerio; @ai-sdk/provider-utils already resolves
+#     7.29.0, so the two dedupe. jsdom's undici 8.9.0 is outside the selector
+#     and unaffected.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
 #     takeover. The advisory is patched only in >=1.7.0-beta.4 — there is NO
 #     stable patched release yet (npm `latest` is still on the 1.6.x line), so
@@ -83,7 +93,7 @@ overrides:
   'minimatch@<10.2.3': '10.2.3'
   'tar@>=2.0.0 <7.5.11': '^7.5.11'
   'form-data@<4.0.6': '>=4.0.6'
-  'undici@>=7.23.0 <7.28.0': '^7.28.0'
+  'undici@>=7.23.0 <7.29.0': '^7.29.0'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   'better-auth@<1.7.0-rc.2': '1.7.0-rc.2'
   '@better-auth/core@<1.7.0-rc.2': '1.7.0-rc.2'
@@ -119,3 +129,22 @@ overrides:
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<2.0.5': '^2.0.10'
+  # OSV batch 2026-08 (#5032) — all three name a fixed version, so they are
+  # upgrades, not exemptions (the osv-scanner.toml route #4965 defines is for
+  # advisories with NO fix and does not apply here):
+  #   fast-uri GHSA-7p8r-x3mc-p8w7 (7.5 high) — transitive-only via ajv@8.20.0
+  #     (declares ^3.0.1), which reaches @modelcontextprotocol/sdk, objectql,
+  #     secretlint and table. Nothing declares fast-uri directly.
+  #   hono GHSA-8j4g-w8fx-2239 (5.3) — the one entry here that is NOT
+  #     transitive-only: two versions resolved, 4.12.32 from our own packages
+  #     and 4.12.33 pulled by @modelcontextprotocol/sdk. The override moves the
+  #     transitive copy; the declared ranges are bumped to ^4.12.34 in lockstep
+  #     (plugin-hono-server dependency, plugin-auth + @objectstack/hono
+  #     devDependencies) so a downstream install — which never sees these
+  #     overrides — resolves the same patched line that CI tested. The
+  #     @objectstack/hono PEER range stays the permissive ^4.12.8 on purpose: a
+  #     peer states what host hono we work against, and a host that pins an old
+  #     hono owns that copy; narrowing it fixes nothing here and only breaks
+  #     compatibility. check-override-consistency.mjs covers both forms.
+  'fast-uri@<3.1.5': '^3.1.5'
+  'hono@<4.12.34': '^4.12.34'

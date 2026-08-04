@@ -21,8 +21,15 @@ export function createAuthDomain(deps: DomainHandlerDeps): DomainRoute {
 /**
  * Handles Auth requests
  * path: sub-path after /auth/
+ *
+ * `_path` / `_method` / `_body` are unread by design and kept only for
+ * positional symmetry with the other domain handlers: since #4113 removed the
+ * mock session, this domain does not route on the sub-path at all — it hands
+ * `context.request` to the auth service whole, and that service owns the
+ * routing. They stay in the signature (rather than being dropped) because
+ * every caller passes them positionally, `createAuthDomain` included.
  */
-export async function handleAuthRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, _method: string, _body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     // 1. Try generic Auth Service.
     //
     // [#4127] This probed `authService.handler(request, response)` — a method

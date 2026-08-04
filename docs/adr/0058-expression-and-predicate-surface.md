@@ -56,6 +56,60 @@
 
 ---
 
+> **Addendum (2026-08, #4800 / #4862 / #5037) — BULK-WRITE SCOPE: on a predicate
+> (`multi: true`) write, after-hooks and record-change flow triggers evaluate and
+> fire PER ROW.** _Contract recorded here; implementation tracked by #5038; the
+> rc window ships a named diagnostic in its place._
+>
+> The addendum above settles what happens when a write-path predicate cannot be
+> evaluated. It does not settle **what the evaluation is even over** when one
+> write touches N rows — and that is a scope question this ADR owns, because
+> "the same CEL means the same thing on every surface" is D6's premise.
+>
+> **The decision.** A bulk write is N record changes, so every record-scoped
+> declaration on it is evaluated **per row**, with `record` = that row's state
+> and `previous` = that row's pre-write state. This is not a new idea on the
+> platform: validation predicates have worked this way on bulk writes since
+> #3106 (`rulesNeedRows` fetches the matched rows and `evaluateValidationRules`
+> runs once per row). Hook `condition`s — and the record-change flow triggers
+> that ride the same lifecycle hooks — join them. An author writes one
+> transition condition (`previous.done != true && record.done == true`) and it
+> means the same thing whether the write carries an id or a predicate.
+>
+> **What the engine does today, measured (#4862).** A `multi: true` update
+> reaches `driver.updateMany`, which resolves an affected COUNT; the lifecycle
+> hook fires **once**, `hookContext.previous` is never assigned (only the
+> single-id branch fetches a prior row), and `record` degrades to the write's
+> bare payload. So a condition naming `previous` is unevaluable and — since the
+> #4775 row above — **rejects the write**.
+>
+> **The rc-window stopgap (#5037).** The rejection stands: fail loud takes no
+> exception here (the alternatives — logging an error and skipping the hook, or
+> skipping it silently — were considered and refused on #4800, because a missing
+> audit row is the one failure nobody goes looking for). What changed is that it
+> must no longer read as an author's mistake. `HookConditionError` carries a
+> machine-readable `limitation` (`bulk_write_previous_unbound`,
+> `bulk_write_stored_state_unavailable`) and a message that names the batch, says
+> the CURRENT VERSION is what cannot bind the row's prior state, points at the
+> contract above, and gives the route that works today (target the write at one
+> record). It is a stopgap with an expiry: when #5038 lands per-row evaluation
+> the condition evaluates as authored and this rejection has nothing left to
+> report.
+>
+> **Deliberately not written into that message:** "use a record-change flow
+> trigger instead". Verified, not assumed — that trigger subscribes to these very
+> lifecycle hooks, so on a bulk write it fires once with the same unbound
+> `previous` (#4862). Naming it would have made the error that fixes a
+> `declared ≠ delivered` into another one.
+>
+> **Consequences to price when #5038 implements this**: an after-hook that fires
+> once per batch today fires N times (notification hooks send N messages,
+> cache-invalidation hooks run N times), so the shape of `ctx.result` per row,
+> the per-row meaning of `onError`, and a ceiling on very large matched sets are
+> part of that implementation, not free riders on it.
+
+---
+
 ## TL;DR
 
 ObjectStack exposes **~50 authorable declarations** that hold an expression — formulas, visibility/required/readonly predicates, validation rules, hook conditions, flow/edge conditions, sharing-rule conditions, RLS `using`/`check`, action/view/app visibility, notification/ETL/export/sync/connector conditions — and they all funnel through **one authoring primitive** (`ExpressionInputSchema` → `{ dialect: 'cel', source }`, helpers `cel`/`F`/`P`). The authoring surface is already unified and clean.

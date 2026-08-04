@@ -181,19 +181,96 @@ export class AuditPlugin implements Plugin {
    * it is absent (and alters to add columns) — so this is safe on every boot,
    * and a no-op for objects whose table already exists. Per-object failures are
    * isolated so one bad object can't block the rest.
+   *
+   * ## Why this method reports where each table landed (#4887)
+   *
+   * `syncObjectSchema` returns `void` and exits SILENTLY on three conditions
+   * the plugin cannot see from the outside: the object is not in the registry,
+   * no driver resolves for it, or the resolved driver has no `syncSchema`. A
+   * caller that only catches throws therefore cannot tell "created" from "did
+   * nothing" — and neither could a reader of the log, because this method said
+   * nothing at all on success.
+   *
+   * That silence cost a whole misdiagnosis. #4887 reported these tables as
+   * "never provisioned" because they were absent from the primary SQLite file,
+   * and concluded the guard below had bailed out. It had not: `sys_audit_log`
+   * (`lifecycle.class: 'audit'`) and `sys_activity` (`lifecycle.class:
+   * 'telemetry'`) are routed by ADR-0057 §3.6 to the dedicated `telemetry`
+   * datasource whenever one is registered — which `os dev` provisions by
+   * default as a SIBLING FILE (`dev.db` → `dev.telemetry.db`). Their tables
+   * were created, in that other store. `sys_comment` carries no lifecycle
+   * class, stays on the primary, and was the one the reporter found. So the
+   * provisioning loop reports the resolved datasource per object, and calls out
+   * the split explicitly when it is in effect: a table that is "missing" from
+   * the database you are looking at, and a table that was never created, are
+   * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
     // `syncObjectSchema` lives on the concrete ObjectQL engine, not the
     // IDataEngine contract; engines/drivers without on-demand DDL (e.g. an
     // in-memory test double) simply skip provisioning.
     const sync = (engine as unknown as { syncObjectSchema?: (name: string) => Promise<void> }).syncObjectSchema;
-    if (typeof sync !== 'function') return;
+    if (typeof sync !== 'function') {
+      // #4887 — this return used to be silent, so "provisioning was skipped
+      // wholesale" and "provisioning ran fine" produced identical logs. Name
+      // the consequence, not just the condition.
+      ctx.logger.warn(
+        'AuditPlugin: this engine exposes no syncObjectSchema() — sys_audit_log / sys_activity / sys_comment were NOT ' +
+          'provisioned up-front and stay lazy-created on first WRITE. An env that READS one first (the home page ' +
+          'activity feed queries sys_activity before any mutation) will log "no such table" until something writes to it.',
+      );
+      return;
+    }
+    // Same optional-probe posture as `syncObjectSchema` above: `getDriverForObject`
+    // is public on the concrete ObjectQL engine but not part of IDataEngine, so
+    // engines that lack it simply report no datasource — never an error.
+    const resolveDriver = (engine as unknown as {
+      getDriverForObject?: (name: string) => { name?: string } | undefined;
+    }).getDriverForObject;
+    // Declared on IDataEngine (optional — engines with no named-driver registry
+    // omit it), so no cast is needed here.
+    const defaultDatasource = engine.getDefaultDriverName?.();
+
+    const placements: string[] = [];
+    const offDefault: string[] = [];
     for (const obj of [SysAuditLog, SysActivity, SysComment]) {
       try {
         await sync.call(engine, obj.name);
       } catch (err) {
         ctx.logger.warn(`AuditPlugin: could not provision ${obj.name} storage — ${(err as Error)?.message ?? err}`);
+        continue;
       }
+      if (typeof resolveDriver !== 'function') continue;
+      let datasource: string | undefined;
+      try {
+        datasource = resolveDriver.call(engine, obj.name)?.name;
+      } catch {
+        datasource = undefined;
+      }
+      if (!datasource) {
+        // The second of the two silent exits #4887 asked to make audible: the
+        // call above resolved without throwing, but no driver backs this object,
+        // so `syncObjectSchema` returned having issued no DDL at all.
+        ctx.logger.warn(
+          `AuditPlugin: ${obj.name} resolves to NO datasource driver — syncObjectSchema() returned without creating its ` +
+            'storage. Reads and writes against it will fail with "no such table" until a driver backs its datasource.',
+        );
+        continue;
+      }
+      placements.push(`${obj.name}→${datasource}`);
+      if (defaultDatasource !== undefined && datasource !== defaultDatasource) offDefault.push(`${obj.name}→${datasource}`);
+    }
+
+    if (placements.length > 0) {
+      ctx.logger.info(`AuditPlugin: system tables provisioned — ${placements.join(', ')}`);
+    }
+    if (offDefault.length > 0) {
+      ctx.logger.info(
+        `AuditPlugin: ${offDefault.join(', ')} live on a NON-default datasource (ADR-0057 §3.6 lifecycle-class ` +
+          `separation), not on '${defaultDatasource}'. Their tables exist in that store — on SQLite, a different FILE. ` +
+          'Anything that reads them without naming the object (raw SQL on the default datasource) will report ' +
+          '"no such table" even though provisioning succeeded.',
+      );
     }
   }
 }

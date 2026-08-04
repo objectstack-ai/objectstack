@@ -17,9 +17,28 @@
  *   3. Reads the lock policy from each request's `node_config_json` snapshot:
  *      - `lockRecord === false` → allow.
  *      - otherwise block, EXCEPT when the only changed field is the configured
- *        `approvalStatusField` (so the status mirror is never blocked), the
- *        caller is an `admin`, or the writer is the run that opened the request
- *        (`flowRunId`, #3456 / #3712).
+ *        `approvalStatusField` (so the status mirror is never blocked) or the
+ *        writer is the run that opened the request (`flowRunId`, #3456 / #3712).
+ *
+ * ## There is no admin exemption — by design (#4839)
+ *
+ * The lock applies to a platform/tenant admin exactly as it applies to anyone
+ * else. An admin who must release a locked record does it through the
+ * **sanctioned rescue path** (#3424): `ApprovalService.recall` / `decideNode`
+ * (reject) / `reassign`, all gated by `isOverrideActor` and all audited
+ * (`via_override`, #4466). Finalising the request is what releases the lock —
+ * the record is never edited *under* a live approval, which is precisely the
+ * guarantee a compliance-minded tenant buys the lock for.
+ *
+ * This is also not a behaviour change. The hook used to open with
+ * `if (session.roles?.includes('admin')) return`, but `roles` has no producer:
+ * ObjectQL's `buildSession()` never writes it, so the branch was dead on every
+ * real engine path and the lock has always applied to admins. Deleting it makes
+ * the code say what the runtime does — and closes a second, forbidden admin
+ * dialect: privilege in this codebase is judged by the ADR-0095 vocabulary
+ * (`permissions` / `positions` / derived posture), never by a string comparison
+ * against `'admin'` (ADR-0090 D3 bans the `role` spelling outright). See
+ * {@link file://./approval-service.ts} `isOverrideActor` for the one predicate.
  *
  * ## Step 2 is per-row, and it covers PREDICATE writes (#4778)
  *
@@ -30,8 +49,8 @@
  * resolved"* as *"there is nothing to authorize"* when the truth was *"nothing
  * was ever queried"* — the same fail-open reasoning as #4757 (`sys_attachment`)
  * and #4630 (`sys_comment`). Rewriting the very same edit as `multi: true` then
- * bypassed the lock with **no privilege at all**: no admin role, no `isSystem`,
- * no `lockRecord: false`, no whitelisted field.
+ * bypassed the lock with **no privilege at all**: no `isSystem`, no
+ * `lockRecord: false`, no whitelisted field.
  *
  * So the hook now resolves the row set the way the attachment/comment guards
  * do, with one difference the record lock forces: it is a **per-row** guard
@@ -305,9 +324,10 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
     // Allow engine self-writes (status mirror from the approvals service, etc).
     if ((ctx?.session as any)?.isSystem) return;
 
-    // Allow admin override.
-    const roles = (ctx?.session?.roles ?? []) as string[];
-    if (Array.isArray(roles) && roles.includes('admin')) return;
+    // NOTE (#4839): there is deliberately NO admin exemption here. A privileged
+    // admin releases a locked record through the audited #3424 rescue path
+    // (recall / reject / reassign, gated by `isOverrideActor`), not by editing
+    // the record while its approval is live. See the module docstring.
 
     // ── Which rows does this write touch, and which of them are locked?
     const gating = await gatingRequests(engine, ctx, object);
@@ -371,9 +391,33 @@ export const DELEGATION_OBJECT = 'sys_approval_delegation';
  * themselves as the delegator:
  *
  *   - **system** context (service / seed / import) → bypass;
- *   - **admin** (`roles` includes `'admin'`) → may set `delegator_id` to anyone;
  *   - otherwise `delegator_id` must equal the acting user — an absent delegator
  *     on insert is stamped to the caller, a foreign delegator is rejected.
+ *
+ * ## Delegation is SELF-MANAGED — there is no admin exemption (#4839)
+ *
+ * The guard used to bypass for `session.roles?.includes('admin')`, so an admin
+ * could declare an out-of-office delegation *on behalf of* another user. That
+ * branch never ran (`roles` has no producer — ObjectQL's `buildSession()` never
+ * writes it), and it is not being restored, for two reasons:
+ *
+ *   1. **It could not do the job it was written for.** A delegation is consulted
+ *      at *slate-resolution* time only: `applyOooDelegation` runs inside
+ *      `resolveApproverSpec` while a request is being OPENED. Declaring a
+ *      delegation for an approver who has *already* gone unavailable does not
+ *      touch the approvals pending against them — it only redirects future ones.
+ *   2. **The in-flight case already has a sanctioned path.** For the approvals
+ *      an unavailable approver is *currently* holding, a privileged admin uses
+ *      `ApprovalService.reassign` (hand that approver's slot to a substitute —
+ *      it even carries the slot's per_group membership over), `recall`, or
+ *      `decideNode` with `reject`; all three are gated by `isOverrideActor`'s
+ *      ADR-0095 criteria and audited via `via_override` (#4466). That is the
+ *      operation an admin actually needs, and it exists.
+ *
+ * So the semantic is final: **a delegation names its own author as delegator**;
+ * acting for someone else is done through the approval-level override, in the
+ * one privilege vocabulary this codebase has (ADR-0090 D3 / ADR-0095 D3) — never
+ * by comparing a session field against the string `'admin'`.
  *
  * Row-level ownership on update/delete (you can only touch a delegation you
  * created) is already enforced by `member_default`'s wildcard
@@ -386,8 +430,10 @@ export function bindDelegationWriteGuard(engine: MinimalEngine, logger?: Minimal
   const makeGuard = (isInsert: boolean) => async (ctx: any) => {
     const session = (ctx?.session ?? {}) as any;
     if (session.isSystem) return;                                    // service / seed / import
-    const roles = (session.roles ?? []) as unknown[];
-    if (Array.isArray(roles) && roles.includes('admin')) return;     // admin may act for anyone
+    // NOTE (#4839): no admin exemption — a delegation names its own author as
+    // delegator. Acting on another user's in-flight approvals is the approval
+    // service's audited override (reassign / recall / reject), not a forged
+    // delegation row. See the docstring above.
     const userId = session.userId != null ? String(session.userId) : '';
     const data = ctx?.input?.data;
     const rows = Array.isArray(data) ? data : (data && typeof data === 'object' ? [data] : []);

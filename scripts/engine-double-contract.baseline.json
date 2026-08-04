@@ -46,6 +46,13 @@
       "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "MEASURED (#4981): identical to the sibling `sys-metadata-repository.history-counters.test.ts` entry below, and closed by the same route. The devDependency this ledger's other metadata-protocol entries prescribe is CYCLIC, not merely unreviewed: @objectstack/objectql depends on @objectstack/metadata-protocol in `dependencies` (re-verified statically on this branch), so adding objectql to metadata-protocol's devDependencies makes turbo refuse the graph outright — `Cyclic dependency detected: @objectstack/metadata-protocol#build, @objectstack/objectql#build`, measured in #4867 by adding the edge and reverting it, and deliberately NOT re-run here. The fake's delete is exercised only by the #4981 drain path and is a by-id delete routed through SysMetadataRepository.delete, but that is an argument about this file, not about the contract, so the entry stays DEBT rather than EXEMPT per this ledger's own rule.",
+      "closes": "sink assertEngineDeleteDispatch into a package BOTH sides already depend on (@objectstack/metadata-core is the common dep; @objectstack/spec/contracts is the other candidate) — tracked as #4987 — then open the fake's delete with it; the devDependency route is closed by the cycle above, for this file and for the five sibling metadata-protocol entries alike"
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts",
       "unguarded": 1,
       "kind": "DEBT",

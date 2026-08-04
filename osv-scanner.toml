@@ -1,0 +1,85 @@
+# OSV-Scanner exemption ledger — the only escape hatch for the OSV gate.
+#
+# The `Validate Package Dependencies` workflow (.github/workflows/
+# validate-deps.yml) runs OSV-Scanner against pnpm-lock.yaml and blocks on any
+# advisory at any severity. When an advisory HAS a fixed version, you take the
+# fix — that path stays untouched (#4945 was cleared in ten minutes that way).
+# This file exists for the other case only: an advisory with no fix available
+# yet, where the alternative is pinning a required check red indefinitely, and
+# a permanently red required check is worth exactly as much as no scan at all.
+#
+# This ledger currently holds ZERO exemptions. That is the intended steady
+# state, not a coincidence — read the whole header before you change it.
+#
+# ---------------------------------------------------------------------------
+# Three conventions govern every entry (decided on #4965)
+# ---------------------------------------------------------------------------
+#
+# 1. `ignoreUntil` is MANDATORY. Default 30 days, hard ceiling 90.
+#
+#    OSV-Scanner treats a missing `ignoreUntil` as "ignore forever" (verified
+#    against v2.3.8: an entry with no `ignoreUntil` filters the advisory out
+#    and the scan exits 0, with no warning, for the rest of the repo's life).
+#    A silent permanent exemption is the same failure as a permanently red
+#    job, only quieter — nobody ever looks again. With a date set, the scanner
+#    stops filtering the moment it passes and the gate goes red on its own,
+#    which is the one mechanical device that keeps "temporary" temporary.
+#
+#    Enforced by scripts/check-osv-exemptions.mjs: a missing, quoted, expired,
+#    or too-distant `ignoreUntil` fails the gate before the scanner runs.
+#
+# 2. `reason` is MANDATORY and has a format:
+#
+#        "<advisory URL> — <one sentence on why it cannot be fixed or routed
+#         around right now>"
+#
+#    The URL and the sentence are for whoever reads this at renewal time: they
+#    have to decide whether the premise still holds, and "not exploitable"
+#    with no link and no argument gives them nothing to check. Say what blocks
+#    the fix (no upstream release / the patch is only in a major we cannot
+#    take yet / transitive through X) — not merely that it is inconvenient.
+#
+#    Enforced by scripts/check-osv-exemptions.mjs: the reason must carry at
+#    least one https:// link and a real sentence beside it.
+#
+# 3. An exemption lands in its OWN pull request, labelled `osv-exemption`.
+#
+#    Never bundled into a feature or dependency-bump PR. Accepting a known
+#    vulnerability is a security decision and it needs a review that is about
+#    exactly that decision — inside a 40-file PR it gets rubber-stamped along
+#    with everything else. The same applies to renewing one: a renewal is the
+#    original decision made again, with the same review.
+#
+#    This one is DISCIPLINE, not a gate — no cheap mechanical check exists for
+#    it, and a naive "osv-scanner.toml must change alone" rule would punish
+#    the good case of deleting an exemption in the PR that finally fixes the
+#    dependency. Removing an exemption may ride along with the fix; adding or
+#    renewing one may not.
+#
+# ---------------------------------------------------------------------------
+# Template — copy the block below, uncomment, fill in
+# ---------------------------------------------------------------------------
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-09-02
+# reason = "https://github.com/advisories/GHSA-xxxx-xxxx-xxxx — upstream has no fixed release; the only patched version is foo@6, which needs the ESM migration tracked in #1234. Re-check when foo 6 lands."
+#
+# Notes on the syntax, both learned the hard way from v2.3.8:
+#
+#   * `ignoreUntil` must be a BARE TOML date (2026-09-02), never quoted. A
+#     quoted value makes the scanner discard THIS ENTIRE FILE — it prints
+#     "Ignored invalid config file ... because: toml: ..." and scans on as if
+#     no config existed. Fail-safe in direction, but every other exemption in
+#     the file silently stops applying.
+#   * An exemption also covers the advisory's aliases, so one GHSA id is
+#     usually enough; do not add the CVE alias as a second entry (the scanner
+#     only warns about duplicate ids and honours the first).
+#
+# Before you add an entry, check the fix really does not exist: `pnpm why
+# <pkg>` for the path, then the advisory page for a patched range. Most of the
+# time an override in pnpm-workspace.yaml is the answer and no exemption is
+# needed at all.
+#
+# Verify locally:  node scripts/check-osv-exemptions.mjs
+# Prove the check: node scripts/check-osv-exemptions.mjs --self-test

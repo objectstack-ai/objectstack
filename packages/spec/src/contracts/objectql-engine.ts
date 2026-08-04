@@ -50,7 +50,7 @@ import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 
 /**
- * The engine's schema-registry view — the eight members reached through the
+ * The engine's schema-registry view — the members reached through the
  * `objectql` slot from outside the engine package.
  *
  * ObjectQL exposes the registry as a public `registry` getter over a private
@@ -58,6 +58,15 @@ import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-f
  * handler reaching `_registry` through `as any` while its sibling handler read
  * the public getter (B2), and plugin-security's declared-metadata readers doing
  * the same, are the reaches this view retires.
+ *
+ * The package-lifecycle block below was missing from the original eight (#4404)
+ * and added by #4311's runtime slice. `SchemaRegistry` has always implemented
+ * all six; three packages outside the engine have always called them — the
+ * `/packages` domain handler in `runtime` (the REST owner of the whole family),
+ * `metadata-protocol`'s install/update primitives, and `service-package`'s
+ * hydration. Nothing caught the omission because `runtime` had no `typecheck`
+ * script, which is #4311's thesis in one line: the narrowing compiled only
+ * because no `tsc` ever read the caller.
  */
 export interface EngineSchemaRegistryView {
     /** The registered object schema, or `undefined`. */
@@ -76,6 +85,26 @@ export interface EngineSchemaRegistryView {
     unregisterItem(type: string, name: string): void;
     /** Seed the persisted disabled-package set before artifact load (AppPlugin boot). */
     setInitialDisabledPackageIds(ids: Iterable<string>): void;
+
+    // ── Package lifecycle (the in-memory half of `/packages`) ────────────
+    // The durable half lives in `sys_packages` and is the protocol service's;
+    // these six are the registry side the REST handlers fall back to and the
+    // protocol service writes through.
+    /** One installed package by id, or `undefined` — the duplicate-install guard's reader. */
+    getPackage(id: string): unknown;
+    /** Register a package manifest in the in-memory registry. */
+    installPackage(manifest: unknown, settings?: Record<string, unknown>): unknown;
+    /** Drop a package from the registry; `false` when no package had that id. */
+    uninstallPackage(id: string): boolean;
+    /** Flip a package to enabled; `undefined` when no package had that id. */
+    enablePackage(id: string): unknown;
+    /** Flip a package to disabled; `undefined` when no package had that id. */
+    disablePackage(id: string): unknown;
+    /** Merge the human-editable manifest fields (name / description / version) — a metadata edit, not a reinstall. */
+    updatePackageManifest(
+        id: string,
+        patch: { name?: string; description?: string; version?: string },
+    ): unknown;
 }
 
 /**
