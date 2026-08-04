@@ -144,3 +144,49 @@ describe('[#5112] ADR-0121 D6 — anonymous is served, and metered', () => {
     ).toBe(200);
   });
 });
+
+// ============================================================================
+// The second door — a direct metadata write is not a publish (#5189 / E7b)
+// ============================================================================
+
+describe('[#5112] an ungated direct write never becomes a live route (#5040 E7b)', () => {
+  it('excludes an api item stored WITHOUT passing the publish gates', async () => {
+    // E7 hung the five per-endpoint gates on `ObjectStackDefinitionSchema`,
+    // which covers every path that parses a STACK — and a stored `api` item
+    // need never have been part of one. #5189 closed that with a second door
+    // at load time, and D6 is the reason it had to exist: the runtime honours
+    // `authRequired: false` faithfully and builds no bucket for a budget whose
+    // `enabled` is not `true`, so a bypassed D6 mints an anonymous, ZERO-QUOTA
+    // execution entry point — the exact shape D6 forbids.
+    //
+    // So: write one straight into the store, bypassing publish entirely, in the
+    // shape that would be most dangerous if served, and assert the route stays
+    // dead. This is the one case in this file that cannot be expressed as a
+    // fixture declaration, because a fixture goes through publish by
+    // construction.
+    const metadata = await stack.kernel.getServiceAsync<{
+      register(type: string, name: string, item: unknown): Promise<unknown>;
+    }>('metadata');
+    await metadata.register('api', 'e8policy_backdoor', {
+      name: 'e8policy_backdoor',
+      path: '/api/v1/apps/e8policy/backdoor',
+      method: 'GET',
+      type: 'object_operation',
+      target: 'e8policy_note',
+      objectParams: { object: 'e8policy_note', operation: 'find' },
+      // The D6 violation, stated plainly: anonymous, and no armed budget.
+      authRequired: false,
+    });
+
+    const anon = await stack.api('/apps/e8policy/backdoor', { method: 'GET' });
+    expect(
+      anon.status,
+      'an anonymous, unmetered endpoint that never passed publish must answer 404, not data',
+    ).toBe(404);
+
+    // And not merely "401 because anonymous" — it must be UNROUTED, identical
+    // to any other undeclared path, so no authenticated caller reaches it either.
+    const authed = await stack.apiAs(adminToken, 'GET', '/apps/e8policy/backdoor');
+    expect(authed.status).toBe(404);
+  });
+});
