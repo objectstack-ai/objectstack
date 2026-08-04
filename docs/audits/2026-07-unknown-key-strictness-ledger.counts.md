@@ -280,4 +280,4 @@ directory rather than per file.
 | `kernel/` | 319 |
 | `qa/` | 6 |
 | `shared/` | 25 |
-| `system/` | 368 |
+| `system/` | 366 |

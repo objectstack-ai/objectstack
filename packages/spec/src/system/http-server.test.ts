@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as httpServer from './http-server.zod';
 import {
-  HttpServerConfigSchema,
   RouteHandlerMetadataSchema,
   MiddlewareType,
   MiddlewareConfigSchema,
@@ -9,44 +9,73 @@ import {
   ServerCapabilitiesSchema,
   ServerStatusSchema,
 } from './http-server.zod';
+import * as sharedHttp from '../shared/http.zod';
+import { RouterConfigSchema } from '../api/router.zod';
+import { ApiEndpointSchema } from '../api/endpoint.zod';
 
-describe('HttpServerConfigSchema', () => {
-  it('should accept minimal config with defaults', () => {
-    const config = HttpServerConfigSchema.parse({});
-
-    expect(config.port).toBe(3000);
-    expect(config.host).toBe('0.0.0.0');
-    expect(config.requestTimeout).toBe(30000);
-    expect(config.bodyLimit).toBe('10mb');
-    expect(config.compression).toBe(true);
-    expect(config.trustProxy).toBe(false);
+/**
+ * `HttpServerConfigSchema` was retired in v17 (#4938, ADR-0049
+ * enforce-or-remove): nine keys, zero runtime readers, and — the condition that
+ * made it worse than the ordinary declared-but-unread defect — zero authoring
+ * entry, so the configuration the docs promised could not even be written down.
+ *
+ * These are the removal's pin tests. There is deliberately NO `retiredKey()`
+ * tombstone to assert against: a tombstone is a message to whoever writes the
+ * key, and the only surface on which anyone can write a server key is
+ * `StackServerConfigSchema`, which is `strictObject` and already answers for
+ * all seven by name. Those prescriptions are pinned in `stack-server.test.ts`;
+ * what is pinned HERE is that the export is gone and that nothing else went
+ * with it.
+ */
+describe('HttpServerConfig retirement (#4938)', () => {
+  // `HttpServerConfigSchema` and `HttpServerConfig` were both runtime VALUES
+  // (the latter via `Object.assign(HttpServerConfigSchema, { create })`), so a
+  // runtime `in` check is a real witness for them — reverse-verified by pasting
+  // the removed limb back, which turns these red plus the barrel assertion
+  // below. `HttpServerConfigInput` is type-only and cannot be seen from here at
+  // all: a `@ts-expect-error` pin would be a PHANTOM check, because this
+  // package's tsconfig excludes `**/*.test.ts` from `tsc --noEmit`. Its witness
+  // is `api-surface.json`, which lost all three entries in this change and is
+  // ratcheted by `check:api-surface` against the built `dist/*.d.ts`.
+  it.each([
+    'HttpServerConfigSchema',
+    'HttpServerConfig',
+  ])('no longer exports the value `%s`', (name) => {
+    expect(name in httpServer).toBe(false);
   });
 
-  it('should accept full configuration', () => {
-    const config = HttpServerConfigSchema.parse({
-      port: 8080,
-      host: '127.0.0.1',
-      cors: { enabled: true, origins: ['http://localhost:3000'] },
-      requestTimeout: 60000,
-      bodyLimit: '50mb',
-      compression: false,
-      security: {
-        helmet: false,
-        rateLimit: { windowMs: 60000, maxRequests: 100 },
-      },
-      trustProxy: true,
-    });
-
-    expect(config.port).toBe(8080);
-    expect(config.host).toBe('127.0.0.1');
-    expect(config.compression).toBe(false);
-    expect(config.trustProxy).toBe(true);
+  it('does not re-export the removed shape from the system barrel either', async () => {
+    const system = await import('./index');
+    expect('HttpServerConfigSchema' in system).toBe(false);
+    expect('HttpServerConfig' in system).toBe(false);
   });
 
-  it('should reject invalid port numbers', () => {
-    expect(() => HttpServerConfigSchema.parse({ port: 0 })).toThrow();
-    expect(() => HttpServerConfigSchema.parse({ port: 70000 })).toThrow();
-    expect(() => HttpServerConfigSchema.parse({ port: -1 })).toThrow();
+  it('keeps the sibling exports that DO have consumers outside spec', () => {
+    // The removal is the container, not the file: `RouteHandlerMetadata` is
+    // consumed by `packages/rest/src/route-manager.ts` and `MiddlewareType` /
+    // `MiddlewareConfig` by `packages/runtime/src/middleware.ts`. A whole-file
+    // retirement would have broken both.
+    for (const name of [
+      'RouteHandlerMetadataSchema',
+      'MiddlewareType',
+      'MiddlewareConfigSchema',
+      'MiddlewareConfig',
+    ]) {
+      expect(name in httpServer).toBe(true);
+    }
+  });
+
+  it('leaves the shared value schemas it embedded in place — they are not orphaned', () => {
+    // Each has at least one live consumer elsewhere, so none of them became
+    // dead weight when their only `system/` embed point went away.
+    expect('CorsConfigSchema' in sharedHttp).toBe(true);
+    expect('StaticMountSchema' in sharedHttp).toBe(true);
+    expect('RateLimitConfigSchema' in sharedHttp).toBe(true);
+
+    const routerShape = (RouterConfigSchema as never as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(routerShape)).toEqual(expect.arrayContaining(['cors', 'staticMounts']));
+    const endpointShape = (ApiEndpointSchema as never as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(endpointShape)).toContain('rateLimit');
   });
 });
 
