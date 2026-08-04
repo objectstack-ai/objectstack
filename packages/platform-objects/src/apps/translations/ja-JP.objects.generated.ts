@@ -2045,6 +2045,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       body_html: {
         label: "本文（HTML）"
       },
+      headers_json: {
+        label: "ヘッダー（JSON）",
+        help: "IEmailService.send に渡されたカスタムヘッダーを、name → value の JSON オブジェクトとして保持します。両方の配信モードで書き込まれます（配信の入力であると同時に監査証跡でもあるため）。この列が存在する前に書き込まれた行には値がなく、「カスタムヘッダーなし」として読み戻されます。"
+      },
+      attachments_json: {
+        label: "添付ファイル（JSON）",
+        help: "添付ファイルの JSON 配列で、要素は { filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? } の形をとり、内容は base64 で `inline` に格納されます。添付の合計生サイズが plugin-email の予算（SYS_EMAIL_ATTACHMENT_LIMIT_BYTES、256 KiB —— 最悪でも base64 で約 350 KB）に収まる場合にのみ書き込まれます。上限を超えるメッセージはインライン配信され、この列には何も保存されないため、行のサイズは有界に保たれます。`storageKey`（行外の内容）にはまだプロデューサーがありません —— objectstack#5172。"
+      },
       status: {
         label: "ステータス",
         help: "ライフサイクル状態 — トランスポート呼び出し前に IEmailService.send がキューに入れます",
