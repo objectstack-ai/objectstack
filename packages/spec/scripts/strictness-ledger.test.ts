@@ -184,4 +184,82 @@ describe('posture reading, with a red control for each', () => {
     const dash = analyzeSites(at('ui/dashboard.zod.ts'));
     expect(dash.filter((s) => s.posture === 'passthrough')).toHaveLength(1);
   });
+
+  /**
+   * #5072. `postureOf` short-circuited on the campaign's OWN helper: it returned
+   * `strict` for `strictObject(` before looking at the chain, so
+   * `strictObject(…).passthrough()` — open at runtime, deliberately — was drawn on
+   * the map as closed. Only `z.object(` ever walked the chain.
+   *
+   * The two real sites are the anchors here, because the point is not "the parser
+   * handles a chain" but "the map stopped lying about these two". Each is paired
+   * with the plain-helper control in the same file, so the two readings must
+   * differ — a test that only asserted `passthrough` would still pass if the
+   * reader started calling everything passthrough.
+   */
+  it('does not stop at the strictObject( idiom — .passthrough() on it wins (#5072)', () => {
+    const view = analyzeSites(at('ui/view.zod.ts'));
+
+    for (const name of ['GanttConfigSchema', 'TreeConfigSchema']) {
+      const site = view.find((s) => s.name === name);
+      expect(site, `${name} is not a site any more — re-point this test, do not delete it`).toBeDefined();
+      // The idiom is still the helper; only the READING of the chain changed.
+      expect(site?.idiom).toBe('strictObject');
+      expect(site?.posture, `${name} must read as passthrough — it is open at runtime`).toBe('passthrough');
+    }
+
+    // The control, in the same file and the same idiom: a bare `strictObject(`
+    // with nothing chained on is still strict. Without this the assertion above
+    // is satisfied by a reader that has simply stopped distinguishing.
+    const plain = view.find((s) => s.name === 'GanttQuickFilterSchema');
+    expect(plain?.idiom).toBe('strictObject');
+    expect(plain?.posture).toBe('strict');
+
+    // Exactly two, and exactly these two. Pinned as a SET rather than a count so
+    // a future batch adding a deliberate `.passthrough()` has to come through
+    // here and say so, instead of quietly widening a number.
+    expect(view.filter((s) => s.posture === 'passthrough').map((s) => s.name)).toEqual([
+      'GanttConfigSchema',
+      'TreeConfigSchema',
+    ]);
+
+    // And the claim the ledger rests on: no STRIP site moved. Both postures
+    // involved are non-strip, so the remaining-strip map — the thing every batch
+    // is planned against — is untouched by this fix.
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(6);
+  });
+
+  it('lets a chained posture override the idiom in either direction (#5072)', () => {
+    // Synthetic, because the repo has no `.strict()` on a loose object and no
+    // `z.looseObject(` under a triaged directory — the early return for
+    // `z.looseObject` was the same defect waiting for its first instance, so it
+    // is covered before that instance exists rather than after.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strictness-idiom-'));
+    const file = path.join(dir, 'synthetic.zod.ts');
+    fs.writeFileSync(
+      file,
+      [
+        'export const A = strictObject({ a: 1 }).passthrough();',
+        'export const B = strictObject({ b: 1 });',
+        'export const C = z.looseObject({ c: 1 }).strict();',
+        'export const D = z.looseObject({ d: 1 });',
+        'export const E = z.strictObject({ e: 1 }).catchall(z.unknown());',
+        // Last explicit call wins, not the first.
+        'export const F = strictObject({ f: 1 }).passthrough().strict();',
+      ].join('\n'),
+    );
+    try {
+      const posture = Object.fromEntries(analyzeSites(file).map((s) => [s.name, s.posture]));
+      expect(posture).toEqual({
+        A: 'passthrough',
+        B: 'strict',
+        C: 'strict',
+        D: 'passthrough',
+        E: 'catchall',
+        F: 'strict',
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

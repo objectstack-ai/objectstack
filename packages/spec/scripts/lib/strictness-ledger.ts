@@ -51,12 +51,44 @@ function idiomOf(call: ts.CallExpression): string | null {
   return null;
 }
 
-/** Posture from the method chain applied to the site (`.strict()`, `.passthrough()`, …). */
+/**
+ * Posture from the method chain applied to the site (`.strict()`, `.passthrough()`, …).
+ *
+ * ## The idiom decides the START of the walk, never its end (#5072)
+ *
+ * This used to `return 'strict'` on the first line for `strictObject(` /
+ * `z.strictObject(` — the campaign's own helper — and `return 'passthrough'` for
+ * `z.looseObject(`, without looking at what was chained onto them. Only
+ * `z.object(` ever walked the chain. So `strictObject(…).passthrough()` — a shape
+ * that is **open at runtime**, deliberately — was recorded as `strict`.
+ *
+ * Two sites in the repo, both in `ui/view.zod.ts` (`GanttConfigSchema`,
+ * `TreeConfigSchema`), both open on purpose so renderer-ahead config knobs reach
+ * `plugin-gantt` / `plugin-tree` without waiting on a spec release. Measured, not
+ * inferred: `GanttConfigSchema.parse({ …required, lockField: 'x' })` returns
+ * `lockField` untouched.
+ *
+ * Two things made it worth fixing rather than rounding away. It **inflated the
+ * strict count**, which is the number the campaign schedules against; and, the
+ * worse half, it drew an OPEN shape on the map as a CLOSED one — the exact
+ * question this instrument exists to answer, answered backwards. Same shape as
+ * the #4852 defect (a counter returning a wrong reading that the walk then
+ * correctly honoured), one field over: there the blind spot was in `count`, here
+ * in `posture`. #4852 rebuilt `idiomOf`/`nameOf` on the AST and left this one
+ * short-circuit behind.
+ *
+ * So the idiom now seeds the initial posture and the chain is ALWAYS walked, with
+ * the last explicit call winning. `strictObject({}).passthrough()` reads
+ * `passthrough`; a bare `strictObject({})` still reads `strict`.
+ */
 function postureOf(call: ts.CallExpression, idiom: string): Posture {
-  if (idiom === 'strictObject' || idiom === 'z.strictObject') return 'strict';
-  if (idiom === 'z.looseObject') return 'passthrough';
   let node: ts.Node = call;
-  let posture: Posture = 'strip';
+  let posture: Posture =
+    idiom === 'strictObject' || idiom === 'z.strictObject'
+      ? 'strict'
+      : idiom === 'z.looseObject'
+        ? 'passthrough'
+        : 'strip';
   for (;;) {
     const parent: ts.Node | undefined = node.parent;
     if (!parent) return posture;

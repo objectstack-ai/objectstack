@@ -55,6 +55,16 @@ const GATED: ReadonlyArray<{ check: string; gen: string; artifact: string; reads
   // failure explains itself instead of sending the next reader after a ghost.
   { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface.json', readsDist: true },
   { check: 'check:docs', gen: 'gen:docs', artifact: 'content/docs/references/**' },
+  // Moved out of NO_GENERATOR at #5107: the strictness ledger's numbers became a
+  // generated artifact, so this gate now has something to regenerate. It still
+  // audits source too (a hand-written row must name a live sited file), which is
+  // why the `gen:` fixes only half of what it can report — the other half is a
+  // ledger edit, and the failure says which.
+  {
+    check: 'check:strictness-ledger',
+    gen: 'gen:strictness-ledger',
+    artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+  },
 ];
 
 /**
@@ -76,15 +86,13 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   // failing on `main` itself. The doc it checks against is hand-written, so there
   // is no generator to name.
   { check: 'check:variant-docs', why: 'audits that each schema variant appears in its hand-written doc — no artifact' },
-  // The #4177 story again, one day after #4203 closed it: #4232 added this script
-  // and nothing in CI runs this reconciliation, so `main` went red for every local
-  // wrapper run a second time. Caught while wiring `--reconcile-only` into
-  // lint.yml's unfiltered job — the fix for exactly this class. The ledger it
-  // audits is a hand-maintained doc (docs/audits/), so there is no generator.
-  {
-    check: 'check:strictness-ledger',
-    why: 'audits the hand-written strictness ledger against the code it describes — no artifact',
-  },
+  // `check:strictness-ledger` used to sit here — "the ledger it audits is a
+  // hand-maintained doc, so there is no generator". #5107 gave it one (the ledger's
+  // NUMBERS became an artifact; its VERDICTS stayed hand-written), so it moved to
+  // GATED above. The story that put it here is still worth keeping: it landed in
+  // #4232 while nothing in CI ran this reconciliation, so `main` went red for every
+  // local wrapper run — the second time in three days after #4177 — and the fix was
+  // wiring `--reconcile-only` into lint.yml's unfiltered job.
   // The odd one out: it audits the source's TYPES, but reads them from the BUILT
   // `dist/*.d.ts` — the surface a consumer's import actually resolves to, which
   // is the only place the defect is visible (#4171). So the `readsDist` caveat

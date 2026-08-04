@@ -915,8 +915,8 @@ Verdict per issue:
 
 **A. 碰生成物的 PR,入队前必须先同步 + 整体重生成。** 第 3 步只保证**同一批内**
 file-disjoint;它管不到**先后两单都碰 `packages/spec` 生成物**的情形 —— 而协议变更
-几乎必然如此。`.gitattributes` 把这七条路径路由到 `merge=os-regen`(⛔ 别只记住前
-五条 —— 后两条是文档产物,同样会被静默吞):
+几乎必然如此。`.gitattributes` 把这八条路径路由到 `merge=os-regen`(⛔ 别只记住前
+五条 —— 后三条是文档产物,同样会被静默吞):
 
 ```
 packages/spec/spec-changes.json
@@ -925,8 +925,13 @@ packages/spec/json-schema.manifest.json
 packages/spec/api-surface.json
 packages/spec/api-surface-signatures.json
 docs/protocol-upgrade-guide.md
+docs/audits/2026-07-unknown-key-strictness-ledger.counts.md
 content/docs/references/**
 ```
+
+最后那条是 #5107 加的:strictness 台账的**数字**转成了生成物(`gen:strictness-ledger`),
+散文仍手写在同名的 `.md` 里。派 #4001 后续批次时要分清 —— **台账正文照常文本合并
+(它一直合得很干净),只有 `.counts.md` 走驱动**。
 
 权威清单是 `.gitattributes` 本身(`grep os-regen .gitattributes`),不是这份拷贝 ——
 它增删过,以文件为准。
