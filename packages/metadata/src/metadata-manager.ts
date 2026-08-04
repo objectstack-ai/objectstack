@@ -49,6 +49,13 @@ import {
   MetadataEventSchema,
   type MetadataEvent as RealtimeMetadataEvent,
 } from '@objectstack/spec/api';
+// [#5189, #5040 E7b] The endpoint publish gates, reused verbatim — see
+// `gateApiItemsForPublish`.
+import {
+  ApiEndpointSchema,
+  validateApiEndpointDeclarations,
+  type ApiEndpoint,
+} from '@objectstack/spec/api';
 import { createLogger, type Logger } from '@objectstack/core';
 import { JSONSerializer } from './serializers/json-serializer.js';
 import { YAMLSerializer } from './serializers/yaml-serializer.js';
@@ -70,6 +77,19 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * [#5189] Appended to the namespace gate's message when `publishPackage` was
+ * called without one, because the gate's own text ("declare an explicit
+ * `manifest.namespace`") describes a stack file this caller may not have.
+ */
+const PUBLISH_NAMESPACE_REMEDY =
+  'From `MetadataManager.publishPackage` specifically: this method indexes items by `packageId` and '
+  + 'carries no manifest, so it cannot prove a namespace on its own and will not infer one from the '
+  + 'items being published (an author-supplied value would make the carve-out gate vacuous). Pass the '
+  + "package's explicit namespace as `publishPackage(id, { namespace })`, or publish the endpoints as "
+  + 'part of a stack artifact (`defineStack` → compile → artifact ingest), which carries the manifest '
+  + 'and runs these same gates at parse time.';
 
 /**
  * RFC-4122 v4 uuid for realtime `MetadataEvent.id` (#4602).
@@ -805,11 +825,32 @@ export class MetadataManager implements IMetadataService {
    * 2. Snapshot all items in the package (publishedDefinition = clone(metadata))
    * 3. Increment version
    * 4. Set all items state → active
+   *
+   * [#5189, #5040 E7b] Step 1 additionally runs the **endpoint publish gates**
+   * over every `api` item — see {@link gateApiItemsForPublish}. That pass is
+   * NOT governed by `options.validate`: the gates are a contract, not a
+   * lint (ADR-0121 D6 says publish REJECTS an unmetered anonymous endpoint),
+   * and an opt-out flag on a security gate is the bypass this issue closed.
    */
   async publishPackage(packageId: string, options?: {
     changeNote?: string;
     publishedBy?: string;
     validate?: boolean;
+    /**
+     * [#5189] The package manifest's EXPLICIT `manifest.namespace` (ADR-0121
+     * D2), supplied by a caller that holds the manifest.
+     *
+     * `MetadataManager` has no manifest concept — it indexes items by
+     * `packageId` and nothing else — so it cannot prove a namespace on its
+     * own, and an `api` item's own `namespace`-ish fields are author-supplied
+     * data, not identity (reading them would make the D1/D2 carve-out gate
+     * vacuous: an author would simply declare the namespace their path
+     * already uses). Absent this option the namespace gate fails and `api`
+     * items in the package cannot publish through this path — which is the
+     * correct outcome, not a limitation to route around: a publish that
+     * cannot prove a namespace must not mint a URL under one.
+     */
+    namespace?: string;
   }): Promise<PackagePublishResult> {
     const now = new Date().toISOString();
     const shouldValidate = options?.validate !== false;
@@ -837,10 +878,19 @@ export class MetadataManager implements IMetadataService {
       };
     }
 
+    const validationErrors: Array<{ type: string; name: string; message: string }> = [];
+
+    // [#5189, #5040 E7b] Endpoint publish gates — ALWAYS, `validate: false`
+    // included. Every other check in this method is a best-effort quality
+    // check whose opt-out is a convenience; these gates decide whether an
+    // externally reachable, possibly ANONYMOUS execution entry point comes
+    // into existence, and ADR-0121 D6 has no runtime counterpart to catch what
+    // slips through. A flag that turns them off would be exactly the bypass
+    // #5189 filed.
+    validationErrors.push(...this.gateApiItemsForPublish(packageItems, options?.namespace));
+
     // Validation pass
     if (shouldValidate) {
-      const validationErrors: Array<{ type: string; name: string; message: string }> = [];
-
       // Schema validation
       for (const item of packageItems) {
         const result = await this.validate(item.type, item.data);
@@ -883,17 +933,17 @@ export class MetadataManager implements IMetadataService {
           }
         }
       }
+    }
 
-      if (validationErrors.length > 0) {
-        return {
-          success: false,
-          packageId,
-          version: 0,
-          publishedAt: now,
-          itemsPublished: 0,
-          validationErrors,
-        };
-      }
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        packageId,
+        version: 0,
+        publishedAt: now,
+        itemsPublished: 0,
+        validationErrors,
+      };
     }
 
     // Determine the next version by finding the max current version across items
@@ -924,6 +974,98 @@ export class MetadataManager implements IMetadataService {
       publishedAt: now,
       itemsPublished: packageItems.length,
     };
+  }
+
+  /**
+   * [#5189, #5040 E7b] Run the endpoint publish gates over a package's `api`
+   * items and report every failure as a publish-blocking validation error.
+   *
+   * ## Why this exists at all
+   *
+   * E7 (#5111) hung the five per-endpoint gates on
+   * `ObjectStackDefinitionSchema`, which covers every path that parses a
+   * STACK — `defineStack`, `os validate`, the lint scorer, artifact ingest,
+   * `EnvironmentArtifactSchema.metadata`. It does not cover this one: an `api`
+   * item can be minted item-by-item (`metadata.register()`, a Studio write)
+   * and published here without a stack ever being parsed. Three of the gates
+   * degrade safely when bypassed (the executor answers a structured 501; a
+   * mis-namespaced path matches nothing), but **ADR-0121 D6 has no runtime
+   * counterpart**: `authRequired: false` is honoured faithfully and an
+   * unarmed `rateLimit` meters nothing, so the bypass mints an anonymous,
+   * zero-quota execution entry point. Hence a gate here, on the same
+   * function, rather than a second set of criteria that would drift.
+   *
+   * ## What it judges, and on what
+   *
+   * The registry stores either a raw spec document or a publish envelope
+   * (`{ name, packageId, state, metadata: {…spec} }`); the endpoint is read
+   * out with the SAME rule this method's caller uses for
+   * `publishedDefinition` (`data.metadata ?? data`), so publish gates exactly
+   * the document publish is about to snapshot. An item that does not satisfy
+   * `ApiEndpointSchema` fails here too — not extra strictness but a
+   * precondition: an unparsed shape cannot be gated, and it could never be
+   * served either (the matcher's own loud skip refuses it at load).
+   *
+   * @param packageItems every item collected for this package (all types).
+   * @param namespace the caller-supplied `manifest.namespace`; `undefined`
+   *   fails the namespace gate, deliberately — see `publishPackage`'s option.
+   * @returns one entry per gate failure, `[]` when the package declares no
+   *   `api` items (a package without endpoints is untouched by this pass).
+   */
+  private gateApiItemsForPublish(
+    packageItems: Array<{ type: string; name: string; data: any }>,
+    namespace: string | undefined,
+  ): Array<{ type: string; name: string; message: string }> {
+    const apiItems = packageItems.filter(i => i.type === MetadataManager.ENDPOINT_METADATA_TYPE);
+    if (apiItems.length === 0) return [];
+
+    const errors: Array<{ type: string; name: string; message: string }> = [];
+    /** Parsed endpoints, index-aligned with the items that produced them. */
+    const endpoints: ApiEndpoint[] = [];
+    const gatedItems: Array<{ name: string }> = [];
+
+    for (const item of apiItems) {
+      const document = item.data?.metadata ?? item.data;
+      const parsed = ApiEndpointSchema.safeParse(document);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          errors.push({
+            type: item.type,
+            name: item.name,
+            message:
+              `api item '${item.name}' does not satisfy ApiEndpointSchema and cannot be published: `
+              + `${issue.message} (at ${issue.path.join('.') || '<root>'}). An endpoint that does not `
+              + `parse cannot be gated and would be excluded from endpoint matching at load anyway.`,
+          });
+        }
+        continue;
+      }
+      endpoints.push(parsed.data);
+      gatedItems.push({ name: item.name });
+    }
+
+    for (const issue of validateApiEndpointDeclarations(endpoints, { namespace })) {
+      // The gate reports per-endpoint issues at `['apis', <index>, …]` and the
+      // namespace PRECONDITION once at `['apis']` — the latter is a property of
+      // the publish call, not of any one endpoint, so it is reported once with
+      // this path's own remedy appended.
+      const index = typeof issue.path[1] === 'number' ? issue.path[1] : undefined;
+      if (index === undefined) {
+        errors.push({
+          type: MetadataManager.ENDPOINT_METADATA_TYPE,
+          name: '',
+          message: `${issue.message} ${PUBLISH_NAMESPACE_REMEDY}`,
+        });
+        continue;
+      }
+      errors.push({
+        type: MetadataManager.ENDPOINT_METADATA_TYPE,
+        name: gatedItems[index]?.name ?? '',
+        message: issue.message,
+      });
+    }
+
+    return errors;
   }
 
   /**
