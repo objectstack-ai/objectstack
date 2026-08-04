@@ -99,8 +99,12 @@ describe('site counting reads the AST, not the source text', () => {
 
   it('counts a call the source wraps across lines (`z\\n  .object({`)', () => {
     // ChartAggregateSchema is written wrapped; the old `z\.object\(` missed it.
+    // 7 → 8 at #5022, which ADDED `ChartDrillDownSchema` (a strictObject site).
+    // The count is incidental to what this case actually pins — that a wrapped
+    // call is seen at all — so the assertion that carries the meaning is the
+    // one below it, not this number.
     const chart = analyzeSites(at('ui/chart.zod.ts'));
-    expect(chart).toHaveLength(7);
+    expect(chart).toHaveLength(8);
     expect(chart.map((s) => s.name)).toContain('ChartAggregateSchema');
 
     // The one that was hidden ENTIRELY: a wrapped call was this file's only

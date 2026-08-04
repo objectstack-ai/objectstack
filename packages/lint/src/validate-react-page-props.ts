@@ -39,6 +39,7 @@ import {
   REACT_BLOCKS,
   RECORD_CONTEXT_BLOCK_TAGS,
   REACT_RECORD_BLOCK_ALTERNATIVES,
+  ChartDrillDownSchema,
   chartAggregateResultKeys,
   isRecordContextBlockType,
 } from '@objectstack/spec/ui';
@@ -254,6 +255,48 @@ function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribut
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
 export const REACT_CHART_AGGREGATE_INVALID = 'react-chart-aggregate-invalid';
 export const REACT_CHART_AXIS_UNKNOWN = 'react-chart-axis-unknown';
+export const REACT_CHART_DRILLDOWN_INVALID = 'react-chart-drilldown-invalid';
+
+/**
+ * `<ObjectChart drillDown={{…}}>` against `ChartDrillDownSchema` (#5022).
+ *
+ * The block's segment drill is the one react-tier prop whose whole VALUE is a
+ * declared protocol shape, so this is the gate that makes `declared = enforced`
+ * true for it: without a parse, a strict schema is just a type — `.strict()` is
+ * a property of a parse, and nothing else on this surface calls one.
+ *
+ * Only a fully static object literal is judged. `staticValue` collapses an
+ * object to `NOT_STATIC` when ANY member is unresolvable, which is the right
+ * conservatism here: a `filter` built from React state makes the surrounding
+ * keys unknowable too, and an unresolvable binding is not a wrong one
+ * (ADR-0072 D1).
+ */
+function checkChartDrillDown(
+  raw: unknown,
+  push: (severity: ReactPropSeverity, rule: string, message: string, hint: string) => void,
+): void {
+  if (raw === undefined || raw === NOT_STATIC) return;
+  if (!isRec(raw)) {
+    push(
+      'error',
+      REACT_CHART_DRILLDOWN_INVALID,
+      `drillDown must be a configuration object, not ${Array.isArray(raw) ? 'an array' : typeof raw}.`,
+      "Write drillDown={{ … }} — or, to turn the drill on with all defaults, drillDown={{}}. Omit the prop entirely to leave drill off.",
+    );
+    return;
+  }
+  const parsed = ChartDrillDownSchema.safeParse(raw);
+  if (parsed.success) return;
+  for (const issue of parsed.error.issues) {
+    const at = issue.path.length ? `drillDown.${issue.path.join('.')}` : 'drillDown';
+    push(
+      'error',
+      REACT_CHART_DRILLDOWN_INVALID,
+      `${at}: ${issue.message}`,
+      'The drill config is declared by ChartDrillDownSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
+    );
+  }
+}
 
 const CHART_FUNCTIONS = ['count', 'sum', 'avg', 'min', 'max'] as const;
 
@@ -278,6 +321,22 @@ function checkObjectChart(
   const { values, where, path } = attrs;
   const push = (severity: ReactPropSeverity, rule: string, message: string, hint: string) =>
     findings.push({ severity, rule, where, path, message, hint });
+
+  // 0. `drillDown` — checked by PARSING the schema, not by re-deriving it.
+  //
+  // Runs before every early return below because the drill config is
+  // independent of how the chart is bound: an inline `data={…}` chart drills
+  // just as an aggregate-bound one does.
+  //
+  // This is the one rule in this file that does not restate its schema's
+  // vocabulary in local constants. `CHART_FUNCTIONS` above is the alternative,
+  // and the strictness ledger's `chart.zod.ts` row already names it as the
+  // weakness: a gate that re-derives the rules cannot inherit the schema's
+  // unknown-key handling, so `groupby` sails through it. Parsing inherits all
+  // of it for free — the surface name, the near-key guidance, the
+  // `target: 'navigate'` prescription — which is why #5022 declared the shape
+  // as Zod rather than as another list here.
+  checkChartDrillDown(values.get('drillDown'), push);
 
   // Inline `data` wins over the aggregate query: the columns then come from
   // the author's own rows, which this rule cannot see. Nothing further to say.

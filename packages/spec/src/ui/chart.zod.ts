@@ -310,13 +310,23 @@ export const ChartAnnotationSchema = lazySchema(() => strictObject(
 // form: not the file's FIRST block, but internal prose inside a published one).
 //
 // That `clickAction` paragraph read "Migration: `drillDown`" from #3752 until
-// #4001 批 15, and **`drillDown` is not a key this protocol declares
-// anywhere** — it is an untyped `(schema as any).drillDown` read inside
-// objectui's `ObjectChart`. Promoting that sentence into the strict rejection
-// message below would have handed an author the platform's authority for a key
-// the very same gate then rejects: the ledger's finding 7, third occurrence.
-// The underlying gap — a live renderer capability with no spec declaration —
-// is filed, not fixed here.
+// #4001 批 15, when `drillDown` was not a key this protocol declared anywhere —
+// it was an untyped `(schema as any).drillDown` read inside objectui's
+// `ObjectChart`. Promoting that sentence into the strict rejection message
+// below would have handed an author the platform's authority for a key the very
+// same gate then rejects: the ledger's finding 7, third occurrence.
+//
+// #5022 closed the gap — see `ChartDrillDownSchema` below — but the
+// prescription here STILL must not read "Migration: `drillDown`", and the pin
+// in `chart.test.ts` still holds. The reason changed, it did not go away: the
+// declared key is a REACT-TIER PROP (`<ObjectChart drillDown={…}>`), and this
+// schema is reached from BOTH tiers — `chartConfig.interaction` on a dashboard
+// widget and the react block — with no way to tell which one the author is on.
+// A bare `drillDown` here would be right for half its readers and inert advice
+// for the other half, which is finding 7 wearing a different hat. The
+// surface-qualified prescription lives where the surface IS knowable: on
+// `ChartConfigSchema`'s `guidance` (chart-config level) and on the dashboard
+// widget's strict error (`dashboard.zod.ts`).
 export const ChartInteractionSchema = lazySchema(() => strictObject(
   {
     surface: 'this chart interaction block',
@@ -338,6 +348,143 @@ export const ChartInteractionSchema = lazySchema(() => strictObject(
   {
     tooltips: z.boolean().default(true).describe('Show the hover tooltip'),
     brush: z.boolean().default(false).describe('Show the range selector under the plot'),
+  },
+));
+
+/**
+ * Chart segment drill-down — the `<ObjectChart drillDown={…}>` REACT-TIER prop.
+ *
+ * Clicking a bar / slice / point opens the underlying records, filtered by the
+ * click context, in a side drawer (default) or a dialog. Absent means OFF; an
+ * empty object `{}` is enough to turn it on.
+ *
+ * ```jsx
+ * <ObjectChart objectName="opportunity"
+ *              aggregate={{ function: 'sum', field: 'amount', groupBy: 'stage' }}
+ *              drillDown={{ columns: ['name', 'amount'], maxRows: 50 }} />
+ * ```
+ *
+ * ## Which surface this is for
+ *
+ * This is the react tier only (ADR-0081) — the surface where a chart's config
+ * props ARE the flat props the renderer reads. On a DASHBOARD widget there is
+ * no per-widget drill configuration at all: an ADR-0021 dataset-bound widget
+ * drills through the semantic layer, deriving the drill target and filter from
+ * the dataset row that was clicked, and honours none of the keys below. That is
+ * why `drillDown` is deliberately NOT a member of `ChartConfigSchema` — writing
+ * it inside a widget's `chartConfig` is rejected, with a pointer, rather than
+ * accepted-and-ignored (#5022).
+ *
+ * ## Not to be confused with `ReportSchema.drilldown`
+ *
+ * Same word, three differences, and they are two unrelated capabilities:
+ *
+ * - **spelling** — `drillDown` (camelCase) here; `drilldown` (all lowercase) on a report.
+ * - **type** — a configuration OBJECT here; a plain BOOLEAN on a report.
+ * - **surface** — a react `<ObjectChart>` prop here; a top-level key on
+ *   `ReportSchema` there (ADR-0021 D2, on by default, switching row/cell click
+ *   drill on or off for a `summary`/`matrix` report).
+ *
+ * ## Keys that belong to other widgets, not to a chart
+ *
+ * objectui's renderer carries a wider drill config shared by its table / pivot /
+ * metric widgets (`mode`, `report`, and a `target: 'navigate'` arm). A chart
+ * reads none of them, so they are not declared here — see the `guidance`
+ * entries, which name each one and where it does apply.
+ */
+export const ChartDrillDownSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this chart drill-down block',
+    history:
+      'Until #5022 `drillDown` was not declared anywhere in this protocol at all — objectui\'s ObjectChart read it as an untyped `(schema as any).drillDown`, so every key inside it, right or wrong, reached the renderer unchecked and a misspelling was simply ignored at click time.',
+    aliases: {
+      enable: 'enabled', on: 'enabled', active: 'enabled',
+      where: 'filter', criteria: 'filter', filters: 'filter',
+      label: 'title', heading: 'title', drawerTitle: 'title',
+      display: 'target', open: 'target', openIn: 'target', presentation: 'target',
+      fields: 'columns', columnList: 'columns', select: 'columns',
+      limit: 'maxRows', pageSize: 'maxRows', rowLimit: 'maxRows', max: 'maxRows',
+    },
+    guidance: {
+      // The near-key. Bidirectional: `ReportSchema`'s own strict gate carries
+      // the mirror of this sentence for an author who writes `drillDown` there.
+      drilldown:
+        '`drilldown` (all lowercase) is a different capability on a different surface: it is `ReportSchema.drilldown`, a BOOLEAN that switches row/cell drill on a `summary`/`matrix` report (ADR-0021 D2, on by default). The chart\'s drill-down is `drillDown` (camelCase) and takes a configuration OBJECT. If you meant the chart, fix the capital D; if you meant the report, move the key to the report and write `true`/`false`.',
+      // Keys of objectui's wider renderer-side drill config. Each is real —
+      // on another widget — so a rename suggestion would be actively wrong.
+      mode:
+        '`mode` (`\'filter\'` | `\'record\'`) is a TABLE / PIVOT / METRIC drill key, not a chart one: it chooses whether a click drills through an aggregate to a filtered list or straight to one record. A chart segment is always an aggregate, so a chart drill is always the filtered-list kind and there is nothing to discriminate. Delete the key.',
+      report:
+        '`report` (drill into an analytical report instead of the record list) is a METRIC / PIVOT widget capability in the objectui renderer; `<ObjectChart>` does not read it and renders the record list regardless. Delete the key, or drill from a metric widget instead.',
+      view:
+        '`view` (render a named list view inside the drill drawer) is declared in objectui\'s renderer-side type as reserved and is read by no renderer at all (objectui#3354). It has never done anything — delete it and use `columns` to choose what the drill list shows.',
+      sort:
+        '`sort` (default ordering for the drill list) is declared in objectui\'s renderer-side type and read by no renderer (objectui#3354). Delete it; the drill list uses the object\'s own default ordering.',
+    },
+  },
+  {
+    /**
+     * Master switch. OMITTING the whole `drillDown` block is what turns drill
+     * off; once the block is present the default is ON, so `{}` enables it and
+     * only an explicit `enabled: false` disables it again (which is what you
+     * want when the block carries `columns`/`maxRows` you are toggling around).
+     */
+    enabled: z.boolean().optional()
+      .describe('Turn the segment drill on/off; the block being present already means on, so this is only needed to force it off'),
+
+    /**
+     * Filter applied to the drilled record list. Every value supports
+     * `${event.*}` interpolation against the click payload — a chart click
+     * exposes `category` (the raw grouped value), `categoryLabel` (its display
+     * label), `series` and `value`.
+     *
+     * OMIT IT for the common case: with no `filter` the drill derives one from
+     * the chart's own grouping (`aggregate.groupBy`, else the x-axis field)
+     * equal to the clicked category, which is what a segment click means.
+     */
+    filter: z.record(z.string(), z.unknown()).optional()
+      .describe('Filter for the drilled list; values support ${event.*}. Omit to derive it from the clicked category'),
+
+    /**
+     * Drawer/dialog heading. Supports `${event.*}` interpolation
+     * (e.g. `'${event.categoryLabel} deals'`). Falls back to the clicked
+     * category label, then to the chart's own title.
+     */
+    title: z.string().optional()
+      .describe('Drill drawer/dialog heading; supports ${event.*} interpolation'),
+
+    /**
+     * Where the drilled list is rendered. `'drawer'` (default) is an in-place
+     * side sheet; `'dialog'` is a centered modal, for when the chart is already
+     * inside a drawer and a second sheet would stack badly.
+     *
+     * There is no `'navigate'` arm here even though objectui's shared renderer
+     * type has one: `<ObjectChart>` does not implement it and silently renders
+     * the drawer instead (objectui#3354). Escalating to the object's full list
+     * page is available anyway, and needs no config — the drill drawer shows an
+     * "Open in list" action whenever the host app provides drill navigation.
+     */
+    target: z.enum(['drawer', 'dialog'], {
+      error: (issue) =>
+        issue.code === 'invalid_value' && issue.input === 'navigate'
+          ? "`drillDown.target: 'navigate'` is not supported by a chart. objectui's shared drill type offers it for the table/pivot/metric widgets, but `<ObjectChart>` does not implement that arm — it renders the drawer regardless (objectui#3354), so declaring it here would promise a jump that never happens. Use 'drawer' (the default) or 'dialog'; the drawer already offers an \"Open in list\" action when the host app wires drill navigation."
+          : undefined,
+    }).optional()
+      .describe("Where the drilled list opens: 'drawer' (default, side sheet) or 'dialog' (centered modal)"),
+
+    /**
+     * Whitelist of field names shown as columns in the drilled list, in order.
+     * Omit to let the record table pick its default columns.
+     */
+    columns: z.array(z.string()).optional()
+      .describe('Field names to show as columns in the drilled list (default: the table\'s own columns)'),
+
+    /**
+     * Page size for the drilled list. The list is paginated, so this caps what
+     * one page fetches rather than truncating the result set.
+     */
+    maxRows: z.number().int().positive().optional()
+      .describe('Rows per page in the drilled list'),
   },
 ));
 
@@ -387,6 +534,13 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
         '`axes` is not a key — the two axes are declared separately and asymmetrically: `xAxis` is a single axis, `yAxis` is an ARRAY (that is how dual-axis and combo charts are configured).',
       options:
         '`options` is not part of the chart config — renderer-only presentation extras belong in the dashboard widget\'s `options` bag, which is deliberately open for exactly that.',
+      // #5022. The one key on this list that IS declared elsewhere in this very
+      // file, so the pointer has to name the SURFACE, not just the key — the
+      // #4410 lesson. `drillDown` is real (ChartDrillDownSchema) and it is a
+      // react-tier PROP; inside a dashboard widget's `chartConfig` it would be
+      // parsed-and-ignored, which is the silence this campaign exists to kill.
+      drillDown:
+        '`drillDown` is not part of the chart config — it is a REACT-TIER prop, written beside `objectName`/`aggregate`: `<ObjectChart objectName="…" drillDown={{ columns: [\'name\'], maxRows: 50 }} />`. On a DASHBOARD widget there is no per-widget drill configuration at all: an ADR-0021 dataset-bound widget drills through the semantic layer (the drill target and filter come from the clicked dataset row), so a `drillDown` written here would parse and then do nothing. On a REPORT the switch is `drilldown` — all lowercase, and a boolean.',
     },
   },
   {
@@ -568,3 +722,4 @@ export type ChartAxis = z.infer<typeof ChartAxisSchema>;
 export type ChartSeries = z.infer<typeof ChartSeriesSchema>;
 export type ChartAnnotation = z.infer<typeof ChartAnnotationSchema>;
 export type ChartInteraction = z.infer<typeof ChartInteractionSchema>;
+export type ChartDrillDown = z.infer<typeof ChartDrillDownSchema>;
