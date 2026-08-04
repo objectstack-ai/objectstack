@@ -860,14 +860,16 @@ type GitRun = (...args: string[]) => { status: number | null; stdout: string; st
  * commit under test controls:
  *
  *   1. `baseRev` is an ancestor of origin/main — a PR cannot point it at one of
- *      its own commits, because its own commits are not upstream;
- *   2. the recorded keys ARE that commit's `authorable-surface.json` keys.
+ *      its own commits, because its own commits are not upstream. Decidable only
+ *      where history is walkable, so a shallow checkout says so and skips it;
+ *   2. the recorded keys ARE that commit's `authorable-surface.json` keys. This
+ *      one holds everywhere the object can be read, shallow included.
  *
  * Together those make hand-editing the anchor pointless: the only way to shed a
  * line from it is to shed the line from an already-merged upstream commit, which
- * a PR cannot do. A shallow clone may not hold the object; the run then says so
- * and continues, because in that environment the merge-base anchor — not this
- * file — is what the deletion check ran on anyway.
+ * a PR cannot do. A shallow clone may not hold the object at all; the run then
+ * says so and continues, because in that environment the merge-base anchor — not
+ * this file — is what the deletion check ran on anyway.
  */
 function verifyCommittedSurfaceBase(
   git: GitRun,
@@ -904,7 +906,18 @@ function verifyCommittedSurfaceBase(
     );
     return;
   }
-  if (git('merge-base', '--is-ancestor', rev, tip).status !== 0) {
+  // Ancestry is only decidable where history is WALKABLE. CI checks out shallow
+  // (depth 1) and the fetch above grafts `rev` as its own shallow root, so
+  // `merge-base --is-ancestor` answers "not an ancestor" for a commit that
+  // demonstrably is one — the same truncation the merge-base fallback above
+  // already accounts for, and it fails the whole build if trusted (caught on this
+  // change's own first CI run). Ask whether the answer can mean anything first.
+  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+    console.log(
+      `ℹ️  ${SURFACE_BASE_FILE_NAME}: shallow checkout — cannot walk history to confirm ${short} is\n` +
+        `   on origin/main, so only its recorded keys are verified here (#5235). A full clone checks both.`,
+    );
+  } else if (git('merge-base', '--is-ancestor', rev, tip).status !== 0) {
     console.error(
       `\n❌ ${SURFACE_BASE_FILE_NAME} names a baseRev (${short}) that is NOT an ancestor of\n` +
         `   origin/main (#5235).\n\n` +

@@ -730,6 +730,58 @@ describe('build-schemas.ts — an in-tree anchor carries the deletion gate offli
   );
 
   it(
+    'does not mistake a shallow checkout for a forged baseRev — CI is shallow, and ancestry there is unwalkable',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The shape that broke this change's own first CI run. CI checks out
+      // depth 1, the anchor's commit is fetched as its own shallow root, and
+      // `merge-base --is-ancestor` then answers "not an ancestor" about a commit
+      // that plainly is one. Trusting that answer fails every build.
+      //
+      // `$GIT_DIR/shallow` is what makes a repository shallow, so writing the
+      // current tip into it truncates history exactly the way `--depth=1` does —
+      // no clone, and `git show BASEREV:file` still works, which is what keeps
+      // the KEYS half of the verification alive here.
+      const older = head;
+      const tip = seedBase((s) => s);
+      seedSurface((s) => s);
+      seedSurfaceBase(older, (k) => k);
+      fs.writeFileSync(path.join(sandbox, '.git', 'shallow'), `${tip}\n`);
+      try {
+        expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+        const { status, output } = run(['--check']);
+
+        expect(output).toContain('shallow checkout');
+        expect(output).not.toContain('NOT an ancestor of');
+        expect(status).toBe(0);
+      } finally {
+        fs.rmSync(path.join(sandbox, '.git', 'shallow'), { force: true });
+      }
+    },
+  );
+
+  it(
+    'still compares the anchor keys in a shallow checkout — the half that survives truncation',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const older = head;
+      const tip = seedBase((s) => s);
+      seedSurface((s) => s);
+      seedSurfaceBase(older, (k) => k.filter((x) => x !== SHED_FROM_ANCHOR));
+      fs.writeFileSync(path.join(sandbox, '.git', 'shallow'), `${tip}\n`);
+      try {
+        const { status, output } = run(['--check']);
+
+        expect(status).toBe(1);
+        expect(output).toContain('is not the baseline it claims to be');
+        expect(output).toContain(SHED_FROM_ANCHOR);
+      } finally {
+        fs.rmSync(path.join(sandbox, '.git', 'shallow'), { force: true });
+      }
+    },
+  );
+
+  it(
     'is a committed artifact: --check reports it missing without writing it, gen:schema creates it from the git baseline',
     { timeout: SPAWN_TIMEOUT_MS * 2 },
     () => {
