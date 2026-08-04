@@ -2541,6 +2541,8 @@
     "EnablePackageRequestSchema (const)",
     "EnablePackageResponse (type)",
     "EnablePackageResponseSchema (const)",
+    "EndpointGateIdentity (interface)",
+    "EndpointGateIssue (interface)",
     "EndpointMapping (const)",
     "EndpointMappingKey (type)",
     "EndpointRegistry (type)",
@@ -3124,9 +3126,11 @@
     "envelopeViolations (function)",
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
+    "identityFreeEndpointGateFailure (function)",
     "normalizeEndpointPath (function)",
     "readServiceSelfInfo (function)",
-    "standardErrorCodeForHttpStatus (function)"
+    "standardErrorCodeForHttpStatus (function)",
+    "validateApiEndpointDeclarations (function)"
   ],
   "./ui": [
     "ACTION_LOCATIONS (const)",

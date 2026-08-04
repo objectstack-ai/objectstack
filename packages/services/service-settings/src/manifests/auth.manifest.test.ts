@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
+import { SettingsService } from '../settings-service.js';
 import { authSettingsManifest } from './auth.manifest.js';
 
 describe('authSettingsManifest', () => {
@@ -31,6 +32,49 @@ describe('authSettingsManifest', () => {
       'require_email_verification',
       'signup_enabled',
     ]);
+  });
+
+  // #5152 / ADR-0093 D1 — `signup_enabled` says whether people may
+  // self-register; this says what they join when they do. Without it a
+  // self-hosted stack could not express `invite-only` at all: the policy was
+  // an `AuthPlugin` constructor option and the CLI-injected plugin never
+  // passed one.
+  it('exposes membership_policy as a closed two-value select (#5152)', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const policy = specs.find((s) => s.key === 'membership_policy');
+
+    expect(policy.type).toBe('select');
+    expect(policy.default).toBe('auto');
+    // The option table is the enforcement surface, not a front-end
+    // convention: `SettingsService.setMany` rejects a value outside it
+    // (`invalid_option`), which is what keeps a script or AI-authored
+    // bootstrap from writing a policy the reconciler has no branch for.
+    expect(policy.options.map((o: any) => o.value)).toEqual(['auto', 'invite-only']);
+
+    // Membership is decided on EVERY creation path — SSO just-in-time
+    // provisioning, admin create-user and bulk import included — so it must
+    // not be hidden behind the email/password provider the way the password
+    // keys are. An SSO-only deployment is precisely the one that needs it.
+    expect(policy.visible).toBeUndefined();
+    expect(specs.filter((s) => s.type === 'group').map((s) => s.id)).toContain('membership');
+  });
+
+  it('refuses a membership policy outside the option table at the write API (#5152)', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest as any);
+
+    await expect(svc.setMany('auth', { membership_policy: 'invite_only' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'membership_policy',
+          code: 'invalid_option',
+          constraint: { allowed: 'auto, invite-only' },
+        },
+      ],
+    });
+    await expect(svc.setMany('auth', { membership_policy: 'invite-only' })).resolves.toBeDefined();
+    expect((await svc.get('auth', 'membership_policy')).value).toBe('invite-only');
   });
 
   it('exposes password-policy + session number fields with bounds and defaults', () => {

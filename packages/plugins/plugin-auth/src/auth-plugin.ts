@@ -30,7 +30,12 @@ import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
-import { backfillMemberships, type MembershipPolicy } from './reconcile-membership.js';
+import {
+  backfillMemberships,
+  isMembershipPolicy,
+  MEMBERSHIP_POLICIES,
+  type MembershipPolicy,
+} from './reconcile-membership.js';
 import {
   registerIdentityWriteGuard,
   registerManagedUpdateWhitelist,
@@ -233,6 +238,11 @@ export class AuthPlugin implements Plugin {
   // the kernel-cache adapter wired in init). The identity write guard's
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
   private effectiveSecondaryStorage: AuthManagerOptions['secondaryStorage'];
+
+  /**
+   * Memoized `bindAuthSettings()` run — see {@link ensureAuthSettingsBound}.
+   */
+  private authSettingsBinding: Promise<void> | null = null;
 
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
@@ -589,7 +599,7 @@ export class AuthPlugin implements Plugin {
         // / sendMagicLink) can actually deliver mail. Resolved here on
         // kernel:ready so EmailServicePlugin has had a chance to register.
         if (this.authManager) {
-          await this.bindAuthSettings(ctx);
+          await this.ensureAuthSettingsBound(ctx);
 
           let emailSvc: IEmailService | undefined;
           try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
@@ -855,11 +865,27 @@ export class AuthPlugin implements Plugin {
       const runBackfill = (source: string): Promise<void> => {
         backfillChain = backfillChain.then(async () => {
           try {
+            // #5152 — the policy this pass runs under is a SETTING, so bind the
+            // namespace before reading it. This hook is registered in `init()`
+            // and therefore fires ahead of the one in `start()` that normally
+            // binds; without this the first pass of a fresh boot would run the
+            // pre-settings policy. Idempotent and shared with that hook.
+            await this.ensureAuthSettingsBound(ctx);
             const ql = ctx.getService<IDataEngine>('objectql');
             const tenancy = this.tenancy;
-            if (!ql || !tenancy) return;
+            // #5152 — the policy is read off the AuthManager, the same object
+            // the sign-up reconciler reads and the same one `applyConfigPatch`
+            // targets. It used to be `this.options.membershipPolicy`, a
+            // constructor option that no settings change can reach: an admin
+            // switching to `invite-only` stopped sign-up auto-binds while this
+            // pass kept bulk-binding every member-less user. No `??` fallback
+            // to the options here on purpose — a second reading of the policy
+            // is exactly the defect. The manager exists from `init()`, so the
+            // guard is a precondition, not a degraded mode.
+            const manager = this.authManager;
+            if (!ql || !tenancy || !manager) return;
             const res = await backfillMemberships(ql, {
-              policy: this.options.membershipPolicy ?? 'auto',
+              policy: manager.getMembershipPolicy(),
               resolveTargetOrg: () => tenancy.defaultOrgId(),
               logger: ctx.logger,
             });
@@ -988,11 +1014,34 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * Bind the auth settings namespace once, whoever asks first.
+   *
+   * Two `kernel:ready` hooks need the settings applied, and they fire in
+   * REGISTRATION order, which is the opposite of the order they need
+   * (#5152): the ADR-0093 D6 membership backfill is registered in `init()`,
+   * the settings binding in `start()`. Left alone, the very first backfill of
+   * a fresh boot would read the pre-settings policy and bulk-bind every
+   * pre-existing member-less user on a deployment whose stored setting says
+   * `invite-only` — the exact failure the setting exists to prevent, on the
+   * one pass nobody gets to observe before it has happened.
+   *
+   * So neither hook owns the binding: both await this, the first one through
+   * performs it, and the memoized promise keeps `settings.subscribe` from
+   * being registered twice.
+   */
+  private ensureAuthSettingsBound(ctx: PluginContext): Promise<void> {
+    this.authSettingsBinding ??= this.bindAuthSettings(ctx);
+    return this.authSettingsBinding;
+  }
+
+  /**
    * Bind the small open-source auth settings namespace to better-auth config.
    *
    * Only explicit settings values (stored or OS_AUTH_* env overrides) affect
    * runtime config. Manifest defaults are UI defaults and do not mask code or
    * deployment configuration.
+   *
+   * Call through {@link ensureAuthSettingsBound}, never directly.
    */
   private async bindAuthSettings(ctx: PluginContext): Promise<void> {
     if (!this.authManager) return;
@@ -1046,6 +1095,33 @@ export class AuthPlugin implements Plugin {
             values.require_email_verification,
             false,
           );
+        }
+
+        // ADR-0093 D1 / #5152 — membership policy. `signup_enabled` says whether
+        // people may self-register; this says what they join when they do, and
+        // the two are halves of one platform posture, so it rides the same
+        // settings seam. Only an EXPLICIT value applies: the manifest default
+        // (`auto`) is a UI default and must not mask a deployment that set the
+        // policy at construction.
+        //
+        // An unrecognised value is REJECTED, never coerced to `auto`. The
+        // settings service enforces the option table on `setMany`, but an
+        // `OS_AUTH_MEMBERSHIP_POLICY` env value bypasses that path entirely, and
+        // silently reading a typo'd `invite_only` as `auto` would leave an
+        // operator believing the wall is up while every sign-up is auto-bound —
+        // invisible until someone finds a stranger in their org. `error`, not
+        // `warn`: nothing looks broken afterwards.
+        if (isExplicit('membership_policy')) {
+          const raw = values.membership_policy;
+          if (isMembershipPolicy(raw)) {
+            patch.membershipPolicy = raw;
+          } else {
+            ctx.logger.error(
+              `[auth] membership_policy '${String(raw)}' is not a valid policy — IGNORED, the deployment keeps its current policy ` +
+                `('${this.authManager.getMembershipPolicy()}') and new sign-ups will continue to follow it. ` +
+                `Set auth.membership_policy (or OS_AUTH_MEMBERSHIP_POLICY) to one of: ${MEMBERSHIP_POLICIES.join(', ')}.`,
+            );
+          }
         }
         // Password policy — better-auth enforces these bounds on sign-up and
         // password reset. Ignore malformed/non-positive values (keep the default).

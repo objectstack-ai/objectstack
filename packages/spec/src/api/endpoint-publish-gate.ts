@@ -208,6 +208,46 @@ export function validateApiEndpointDeclarations(
     return issues;
 }
 
+/**
+ * The IDENTITY-FREE gates for ONE already-parsed endpoint (#5189, #5040 E7b).
+ *
+ * Everything {@link validateApiEndpointDeclarations} judges EXCEPT the two
+ * gates that need a stack identity the caller may not have:
+ *
+ *  - the **namespace** gate (ADR-0121 D1/D2) needs `manifest.namespace`, and
+ *  - the **uniqueness** gate needs the sibling declarations of the same stack.
+ *
+ * Everything else — supported subset, mapping, policy (D6 included) — is
+ * judgeable from the endpoint alone, so a consumer holding a single stored
+ * declaration and no manifest can still refuse the shapes the runtime cannot
+ * serve. The load-time backstop in the endpoint matcher
+ * (`packages/metadata/src/endpoint-matcher.ts`) is exactly that consumer: a
+ * declaration reaches the store through paths that never saw a manifest
+ * (a direct `metadata.register()`, a Studio write), and D6 is the one gate
+ * with no runtime counterpart — an unmetered anonymous endpoint executes
+ * faithfully, which is precisely what D6 exists to prevent (#5189).
+ *
+ * Additive on purpose: it delegates to the SAME {@link firstFailure} the
+ * full gate runs, so publish-time and load-time can never grow two opinions
+ * of what is servable. The issue `path` it returns is relative to the
+ * endpoint itself (`['rateLimit']`), not to a stack's `apis:` array.
+ *
+ * @returns the first gate failure, or `undefined` when the endpoint passes
+ *          every identity-free gate.
+ */
+export function identityFreeEndpointGateFailure(endpoint: ApiEndpoint): EndpointGateIssue | undefined {
+    return firstFailure(
+        endpoint,
+        `Endpoint '${endpoint.name}'`,
+        (...rest) => rest,
+        // No mount → `namespaceGate` returns undefined (it is "already reported
+        // once, against `apis`" in the full run); no claims → `uniquenessGate`
+        // has nothing to collide with. Both asymmetries are the point.
+        undefined,
+        new Map(),
+    );
+}
+
 /** The normalized claim key — the matcher's own index key (`endpointIndexKey`). */
 function claimKey(endpoint: ApiEndpoint): string {
     return `${endpoint.method.toUpperCase()} ${normalizeEndpointPath(endpoint.path)}`;

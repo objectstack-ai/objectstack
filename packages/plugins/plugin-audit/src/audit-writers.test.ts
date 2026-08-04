@@ -242,6 +242,117 @@ describe('audit writers — actor attribution (ADR-0014 D2, cloud#340)', () => {
   });
 });
 
+describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5)', () => {
+  // The queue table as `DbQueueAdapter` writes it, alongside the two audit
+  // sinks. Everything here goes through the SAME wildcard hooks a business
+  // object does — `SKIP_OBJECTS` is the only thing standing between the queue
+  // and the ledger (there is no "system context writes are not audited" rule).
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_job_queue: ['id', 'queue', 'status', 'attempts', 'locked_by', 'locked_until', 'completed_at'],
+    crm_lead: ['id', 'name'],
+  };
+  // Every write `service-queue` performs for ONE message, in order: publish,
+  // lease (`pending→running`), terminal (`→completed`), and the #5192 reaper's
+  // periodic DELETE of completed rows.
+  const QUEUE_MESSAGE_LIFECYCLE: Array<[string, Record<string, any>]> = [
+    [
+      'afterInsert',
+      {
+        input: { id: 'msg-1' },
+        result: { id: 'msg-1', queue: 'email_delivery', status: 'pending', attempts: 0 },
+      },
+    ],
+    [
+      'afterUpdate',
+      {
+        input: { id: 'msg-1', status: 'running' },
+        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'pending', attempts: 0 },
+        result: { id: 'msg-1', queue: 'email_delivery', status: 'running', attempts: 1, locked_by: 'worker-1' },
+      },
+    ],
+    [
+      'afterUpdate',
+      {
+        input: { id: 'msg-1', status: 'completed' },
+        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'running', attempts: 1, locked_by: 'worker-1' },
+        result: { id: 'msg-1', queue: 'email_delivery', status: 'completed', attempts: 1, completed_at: '2026-08-04T00:00:00.000Z' },
+      },
+    ],
+    [
+      'afterDelete',
+      {
+        input: { id: 'msg-1' },
+        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'completed', attempts: 1 },
+        result: { id: 'msg-1' },
+      },
+    ],
+  ];
+
+  it('writes NO audit/activity row for a full sys_job_queue message lifecycle', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    for (const [event, ctx] of QUEUE_MESSAGE_LIFECYCLE) {
+      await fire(event, { object: 'sys_job_queue', session: { isSystem: true }, ...ctx });
+    }
+
+    // Not "fewer rows" — zero. One email used to cost ≥3 audit + ≥3 activity
+    // rows here, and the reaper's sweep another delete row apiece (#5160).
+    expect(created).toEqual([]);
+  });
+
+  it('pins sys_job_queue in the same exemption group as its siblings sys_job / sys_job_run', async () => {
+    const SIBLINGS = ['sys_job', 'sys_job_run', 'sys_job_queue', 'sys_automation_run'];
+    for (const object of SIBLINGS) {
+      const { engine, fire, created } = makeEngine({ ...SCHEMA, [object]: ['id', 'status'] });
+      installAuditWriters(engine as any, 'test.audit');
+      await fire('afterInsert', {
+        object,
+        input: { id: 'row-1' },
+        result: { id: 'row-1', status: 'pending' },
+        session: { isSystem: true },
+      });
+      expect(created, `${object} must not reach the audit ledger`).toEqual([]);
+    }
+  });
+
+  it('does not pay the beforeUpdate snapshot read for a skipped object', async () => {
+    const { engine, fire } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    const reads: string[] = [];
+    const ql = {
+      async findOne(object: string) {
+        reads.push(object);
+        return { id: 'msg-1' };
+      },
+    };
+
+    // Every queue state transition would otherwise re-read its own row…
+    await fire('beforeUpdate', { object: 'sys_job_queue', input: { id: 'msg-1', status: 'running' }, ql });
+    await fire('beforeDelete', { object: 'sys_job_queue', input: { id: 'msg-1' }, ql });
+    expect(reads).toEqual([]);
+
+    // …and the control proves the assertion above can fail: a business object
+    // on the same harness DOES get snapshotted.
+    await fire('beforeUpdate', { object: 'crm_lead', input: { id: 'lead-1', name: 'Acme' }, ql });
+    expect(reads).toEqual(['crm_lead']);
+  });
+
+  it('still audits ordinary business writes (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+});
+
 describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', () => {
   // crm_opportunity with a tracked select field (Stage) carrying option labels.
   const SCHEMA = {

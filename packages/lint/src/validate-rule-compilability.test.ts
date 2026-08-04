@@ -363,8 +363,112 @@ describe('validateRuleCompilability — parity with the write path (#4762)', () 
     ]);
     expect(RUNTIME_AJV_OPTIONS).toEqual({ allErrors: true, strict: false });
 
+    // …and the PLUGINS half (#5029). Options alone stopped describing the
+    // environment the day the runtime registered `ajv-formats`: the plugin adds
+    // the `format` implementations AND the `formatMinimum`/`formatMaximum`
+    // keywords, so two instances built from identical options can still disagree
+    // about whether a schema compiles. Read the registration out of the runtime's
+    // source for the same reason the options are read out of it.
+    expect(
+      source,
+      'the runtime no longer registers ajv-formats — this gate must drop it too, or it starts disagreeing',
+    ).toContain('addFormats(ajv)');
+    // The default (full) format set, not `fast` mode: a plugin call carrying an
+    // options object is a different environment and must be mirrored, not
+    // assumed. (`addFormats(ajv, {...})` would fail this.)
+    expect(source).toMatch(/addFormats\(ajv\)\s*;/);
+
     // …and the regex half: the runtime compiles the raw source with no flags.
     expect(source).toContain('new RegExp(rule.regex)');
+  });
+
+  it('compiles a `format`-bearing schema exactly as before — the gate publishes it (#5029)', () => {
+    // The #5029 change is a RUNTIME enforcement change, not an authoring
+    // restriction: `format: 'email'` is standard JSON Schema and stays
+    // publishable. Option 2 on that issue (refuse `format` at publish time) was
+    // rejected, and this is the pin that says so — if the gate ever starts
+    // rejecting these, it is rejecting legal metadata the write path enforces.
+    expect(
+      ids(
+        objectWith({
+          type: 'json_schema',
+          name: 'support_config_shape',
+          field: 'support_config',
+          message: 'm',
+          schema: {
+            type: 'object',
+            properties: {
+              email: { type: 'string', format: 'email' },
+              id: { type: 'string', format: 'uuid' },
+              at: { type: 'string', format: 'date-time' },
+              site: { type: 'string', format: 'uri' },
+            },
+            required: ['email'],
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('a MISSPELLED format name is published, not refused — pinned as-is, not changed (#5029)', () => {
+    // Under `strict: false` ajv logs `unknown format "emial" ignored` and drops
+    // the keyword — in the runtime AND here. So the gate must publish it: a
+    // finding would be this gate inventing a verdict the write path does not
+    // share, which is the `strict: true` mistake wearing a different hat. This
+    // records the residual gap (a typo'd format still enforces nothing) as a
+    // KNOWN, deliberate boundary of #5029 rather than an oversight; closing it
+    // is an authoring-time decision of its own.
+    expect(
+      ids(
+        objectWith({
+          type: 'json_schema',
+          name: 'typo_format',
+          field: 'support_config',
+          message: 'm',
+          schema: { type: 'object', properties: { email: { type: 'string', format: 'emial' } } },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('judges `formatMinimum` the way the runtime does — the keyword only EXISTS with ajv-formats (#5029)', () => {
+    // The case that makes the plugin half of the parity load-bearing rather
+    // than tidy. `ajv-formats` registers `formatMinimum`/`formatMaximum` with a
+    // metaschema; without the plugin they are unknown keywords, and
+    // `strict: false` ignores an unknown keyword silently. So a gate lacking the
+    // plugin publishes a malformed `formatMinimum` that the runtime then refuses
+    // to compile — the rule ships, is skipped for every record, and this file's
+    // whole reason for existing is defeated. A WELL-FORMED use stays green.
+    expect(
+      ids(
+        objectWith({
+          type: 'json_schema',
+          name: 'window_ok',
+          field: 'support_config',
+          message: 'm',
+          schema: {
+            type: 'object',
+            properties: { from: { type: 'string', format: 'date', formatMinimum: '2020-01-01' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+    // …and the malformed one is refused, which is only possible because the
+    // keyword is registered.
+    expect(
+      ids(
+        objectWith({
+          type: 'json_schema',
+          name: 'window_bad',
+          field: 'support_config',
+          message: 'm',
+          schema: {
+            type: 'object',
+            properties: { from: { type: 'string', format: 'date', formatMinimum: 42 } },
+          },
+        }),
+      ),
+    ).toEqual([VALIDATION_RULE_SCHEMA_UNCOMPILABLE]);
   });
 
   it('rejects exactly the two artifacts the runtime still skips', () => {

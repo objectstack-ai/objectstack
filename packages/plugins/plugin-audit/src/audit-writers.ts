@@ -108,6 +108,17 @@ const SKIP_OBJECTS = new Set<string>([
   // (2) operational telemetry / plumbing (ADR-0057 — telemetry/transient/event)
   'sys_job',                     // schedule heartbeats (last_run_at churn)
   'sys_job_run',                 // one row per scheduled execution
+  // [#5193, ADR-0057 D5 "stop the amplifier"] `sys_job_queue` is `sys_job_run`'s
+  // sibling — `lifecycle.class: 'transient'` since #5179 — and the highest-volume
+  // table of this family. It is engine-owned plumbing (`managedBy:
+  // 'engine-owned'`, `enable.apiMethods: ['get','list']`), written ONLY by
+  // `DbQueueAdapter` under SYSTEM_CTX, so no row here is a user-attributable,
+  // compliance-relevant change. Every message costs at least three writes —
+  // publish insert, lease `pending→running`, terminal `→completed` (plus a retry
+  // update per failure and the #5192 reaper's periodic DELETE of completed rows)
+  // — and each one mirrored into `sys_audit_log` AND `sys_activity`. Since #5160
+  // routes email through the queue, that is the amplifier on every single mail.
+  'sys_job_queue',               // durable queue/DLQ messages (≥3 writes each)
   'sys_automation_run',          // one row per automation execution
   'sys_notification',            // messaging-owned (ADR-0030); its own lifecycle
   'sys_notification_delivery',
