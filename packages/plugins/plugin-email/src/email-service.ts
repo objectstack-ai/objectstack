@@ -545,6 +545,26 @@ export class EmailService implements IEmailService {
   }
 
   /**
+   * Hand an ALREADY-PERSISTED `sys_email` row to the durable queue — the boot
+   * sweep's producer entry point (#5161). Returns `false` when queue delivery
+   * is not in force (or the publish failed), which is the caller's signal to
+   * deliver the row inline instead.
+   *
+   * Deliberately routed through the same {@link publishRow} as `send()`: ONE
+   * producer of {@link EmailSendQueuePayload}, one set of publish options, one
+   * `sys_email:<id>` idempotency key. A second publisher spelling the payload
+   * its own way is exactly how the two halves of a queue drift apart — and the
+   * shared key is what makes sweeping a row that still has a pending job
+   * collapse onto that job instead of racing a second worker onto the row.
+   */
+  async enqueuePersistedRow(rowId: string): Promise<boolean> {
+    if (!rowId) return false;
+    const queue = this.options.queueDelivery?.resolve();
+    if (!queue) return false;
+    return this.publishRow(queue, rowId);
+  }
+
+  /**
    * State a queue-delivery degradation once, at `error`.
    *
    * `error` and not `warn`: from the outside everything still looks normal —

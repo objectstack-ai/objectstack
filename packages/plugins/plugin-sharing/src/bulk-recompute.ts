@@ -195,6 +195,70 @@ export async function resolveAffectedRows(
 }
 
 /**
+ * [#4779] Shared-`HookContext` key holding the row set the write is about to
+ * change, stashed by the `before` hook for the `after` hook to consume.
+ *
+ * The stash is necessary, not a convenience: an update that moves rows OUT of
+ * a rule's criteria makes them unfindable by the write's own predicate the
+ * instant it lands, and a delete removes them outright — so `afterUpdate` /
+ * `afterDelete` are structurally too late to ask "which rows was this?".
+ * `ObjectQL.update()` / `.delete()` reuse ONE `HookContext` instance across
+ * each before/after pair (they mutate `ctx.event` in place), which is the same
+ * seam `primary-bu-projection.ts`'s `__primaryBuUserId` rides on.
+ *
+ * [#5103] Lives HERE, next to the resolver, rather than in `rule-hooks.ts`
+ * where it started: two independent hook packages now need the same answer for
+ * the same write (the rule recompute, and the record-delete share cascade),
+ * and each resolving it separately would double the predicate query on every
+ * bulk write for no gain — the row set is a property of the WRITE, not of
+ * either subscriber.
+ */
+export const AFFECTED_ROWS_STASH_KEY = '__sharingAffectedRows';
+
+/**
+ * Resolve (or reuse) the row set a `before` hook's write is about to change and
+ * park it on the shared `HookContext`.
+ *
+ * **Reuse is the point.** The first plugin-sharing `before` hook to run on a
+ * write resolves; every later one reads that answer back. Recomputing would be
+ * wasteful and — worse — could disagree, because a resolve issued after an
+ * earlier hook has already changed something is answering a different question.
+ *
+ * Never throws: `resolveAffectedRows` already fails safe to `unbounded`, and
+ * this adds the belt for a genuinely unexpected throw. "Unknown" must never
+ * degrade to "no rows" — that is the direction that silently skips cleanup.
+ */
+export async function stashAffectedRows(
+  engine: RecomputeEngine | { find?: RecomputeEngine['find'] },
+  objectName: string,
+  hookCtx: any,
+  logger?: MinimalLogger,
+): Promise<AffectedRows> {
+  const already = hookCtx?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined;
+  if (already) return already;
+  let resolved: AffectedRows;
+  try {
+    resolved = typeof engine?.find === 'function'
+      ? await resolveAffectedRows(engine as RecomputeEngine, objectName, hookCtx, logger)
+      : { kind: 'unbounded', reason: 'resolve-failed', detail: 'engine has no find()' };
+  } catch (err: any) {
+    resolved = { kind: 'unbounded', reason: 'resolve-failed', detail: err?.message };
+  }
+  if (hookCtx && typeof hookCtx === 'object') hookCtx[AFFECTED_ROWS_STASH_KEY] = resolved;
+  return resolved;
+}
+
+/**
+ * What an `after` hook should act on. A missing stash means no `before` hook of
+ * ours ran for this write, which is not "nothing changed" — it is "we do not
+ * know", and it reads as `unbounded` so the caller takes its safe branch.
+ */
+export function readAffectedRows(hookCtx: any): AffectedRows {
+  return (hookCtx?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined)
+    ?? { kind: 'unbounded', reason: 'resolve-failed', detail: 'no before-hook stash' };
+}
+
+/**
  * The asynchronous half of the ruling: re-grant after the synchronous revoke.
  *
  * Deliberately in-process and dependency-free rather than routed through

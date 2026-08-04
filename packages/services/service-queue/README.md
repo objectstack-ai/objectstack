@@ -70,6 +70,29 @@ new QueueServicePlugin({
 new QueueServicePlugin({ adapter: 'memory' });
 ```
 
+### Retention — how `sys_job_queue` stays bounded
+
+Delivered messages are not kept forever. `sys_job_queue` declares an ADR-0057
+lifecycle policy and the platform `LifecycleService` (shipped with
+`@objectstack/objectql`, armed on every kernel that has data) enforces it — no
+configuration, no extra scheduler:
+
+| Row state | What happens |
+|---|---|
+| `completed` | deleted **7 days** after `created_at` |
+| `pending` / `running` | never swept — live work |
+| `failed` / `dlq` | never swept — the dead-letter queue waits for a human (`listFailed` / `replay` / `purgeFailed`) |
+
+Two consequences worth knowing:
+
+- **`idempotencyWindowMs` must not exceed the retention window.** Dedup against
+  a terminal message compares its `created_at` to that window, so a longer
+  setting would start accepting duplicates the moment the row was swept. The
+  `db` adapter throws at construction instead of degrading quietly.
+- **The window is overridable per environment** through the `lifecycle`
+  settings namespace (`maxAge` per object), like every other ADR-0057 policy.
+  Keep it ≥ your idempotency window.
+
 ## Service API
 
 Implements `IQueueService` from `@objectstack/spec/contracts`:

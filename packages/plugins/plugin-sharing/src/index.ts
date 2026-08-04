@@ -13,8 +13,11 @@ export { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js
 export { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 export {
   SharingService,
+  effectiveSharingModel,
   type SharingEngine,
   type SharingServiceOptions,
+  type OrphanShareSweepOptions,
+  type OrphanShareSweepResult,
 } from './sharing-service.js';
 export {
   SharingRuleService,
@@ -43,10 +46,21 @@ export {
   RuleRegrantQueue,
   resolveAffectedRows,
   idsFromHookInput,
+  stashAffectedRows,
+  readAffectedRows,
+  AFFECTED_ROWS_STASH_KEY,
   type AffectedRows,
   type UnboundedReason,
   type RecomputeEngine,
 } from './bulk-recompute.js';
+export {
+  bindRecordShareCascade,
+  unbindRecordShareCascade,
+  objectCanCarryRecordShares,
+  orphanShareSweepQueue,
+  RECORD_SHARE_CASCADE_PACKAGE,
+  type CascadeEngine,
+} from './record-share-cascade.js';
 export {
   parseCriteria,
   isMatchAllCriteria,

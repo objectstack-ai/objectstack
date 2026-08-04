@@ -13,6 +13,7 @@ import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
+import { bindRecordShareCascade } from './record-share-cascade.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 
 export interface SharingPluginOptions {
@@ -434,6 +435,7 @@ export class SharingServicePlugin implements Plugin {
       this.service = new SharingService({
         engine: engine as SharingEngine,
         bypassObjects: this.options.bypassObjects,
+        logger: ctx.logger as any,
         // [ADR-0057] Late-bound lookup of the enterprise hierarchy resolver.
         // Open edition: not registered → hierarchy scopes fail closed to own.
         hierarchyResolver: () => {
@@ -461,6 +463,31 @@ export class SharingServicePlugin implements Plugin {
         }
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: primary-bu projection not started', { error: err?.message });
+      }
+
+      // [#5103] Record delete ⇒ every share on that record is revoked, whatever
+      // its source. Bound REGARDLESS of `enforce`, and deliberately: with
+      // enforcement off the rows are not consulted, but they are still written
+      // (by rules, by the share REST surface in a host that mounts it) and
+      // still accumulate — and a deployment that flips `enforce` back on must
+      // not inherit a table of dangling grants. Same reasoning as the primary-BU
+      // projection above: this is data hygiene on a table this plugin owns, not
+      // an access-control surface.
+      //
+      // Not bound per object: the posture is judged per delete from live
+      // metadata, so an object that gains `sharingModel` after boot is covered
+      // without a rebind (see record-share-cascade.ts).
+      try {
+        if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
+          bindRecordShareCascade(engine, this.service, ctx.logger as any);
+        } else {
+          ctx.logger.warn(
+            'SharingServicePlugin: engine has no hook API — record deletes will NOT revoke their ' +
+              'sys_record_share rows; the kernel:bootstrapped orphan sweep is the only reclaim',
+          );
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: record-share delete cascade not bound', { error: err?.message });
       }
 
       // Enforcement (read-filter middleware + sharing-rule hooks) is opt-out
@@ -630,6 +657,32 @@ export class SharingServicePlugin implements Plugin {
         if (this.engine) await backfillRetiredAccessLevels(this.engine, ctx.logger as any);
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: access-level backfill (kernel:bootstrapped) failed', { error: err?.message });
+      }
+
+      // [#5103] Reclaim share rows whose RECORD no longer exists — the
+      // convergence path for orphans the cascade could not have caught: rows
+      // that predate it, a hook that failed, a process that died between the
+      // delete and the revoke, and deletes on the one posture the cascade
+      // deliberately skips (an unmarked system object). Runs BEFORE the
+      // rule-grant passes and outside the `ruleService` guard: this sweep is
+      // source-agnostic and must also run in the `enforce: false` posture,
+      // where there is no rule service at all.
+      //
+      // Bounded per boot (keyset pages + a scan cap that reports itself) so a
+      // table that only grows cannot make startup cost grow with it.
+      try {
+        if (this.service) {
+          const swept = await this.service.sweepOrphanedRecordShares();
+          if (swept.truncated) {
+            ctx.logger.info(
+              'SharingServicePlugin: orphaned share sweep hit its per-boot scan cap — the remaining ' +
+                'rows are examined on the next boot',
+              { scanned: swept.scanned, revoked: swept.revoked },
+            );
+          }
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: orphaned record-share sweep (kernel:bootstrapped) failed', { error: err?.message });
       }
 
       if (!this.ruleService) return;
