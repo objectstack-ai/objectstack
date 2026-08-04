@@ -239,6 +239,11 @@ export class AuthPlugin implements Plugin {
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
   private effectiveSecondaryStorage: AuthManagerOptions['secondaryStorage'];
 
+  /**
+   * Memoized `bindAuthSettings()` run — see {@link ensureAuthSettingsBound}.
+   */
+  private authSettingsBinding: Promise<void> | null = null;
+
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
       registerRoutes: true,
@@ -594,7 +599,7 @@ export class AuthPlugin implements Plugin {
         // / sendMagicLink) can actually deliver mail. Resolved here on
         // kernel:ready so EmailServicePlugin has had a chance to register.
         if (this.authManager) {
-          await this.bindAuthSettings(ctx);
+          await this.ensureAuthSettingsBound(ctx);
 
           let emailSvc: IEmailService | undefined;
           try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
@@ -860,6 +865,12 @@ export class AuthPlugin implements Plugin {
       const runBackfill = (source: string): Promise<void> => {
         backfillChain = backfillChain.then(async () => {
           try {
+            // #5152 — the policy this pass runs under is a SETTING, so bind the
+            // namespace before reading it. This hook is registered in `init()`
+            // and therefore fires ahead of the one in `start()` that normally
+            // binds; without this the first pass of a fresh boot would run the
+            // pre-settings policy. Idempotent and shared with that hook.
+            await this.ensureAuthSettingsBound(ctx);
             const ql = ctx.getService<IDataEngine>('objectql');
             const tenancy = this.tenancy;
             // #5152 — the policy is read off the AuthManager, the same object
@@ -1003,11 +1014,34 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * Bind the auth settings namespace once, whoever asks first.
+   *
+   * Two `kernel:ready` hooks need the settings applied, and they fire in
+   * REGISTRATION order, which is the opposite of the order they need
+   * (#5152): the ADR-0093 D6 membership backfill is registered in `init()`,
+   * the settings binding in `start()`. Left alone, the very first backfill of
+   * a fresh boot would read the pre-settings policy and bulk-bind every
+   * pre-existing member-less user on a deployment whose stored setting says
+   * `invite-only` — the exact failure the setting exists to prevent, on the
+   * one pass nobody gets to observe before it has happened.
+   *
+   * So neither hook owns the binding: both await this, the first one through
+   * performs it, and the memoized promise keeps `settings.subscribe` from
+   * being registered twice.
+   */
+  private ensureAuthSettingsBound(ctx: PluginContext): Promise<void> {
+    this.authSettingsBinding ??= this.bindAuthSettings(ctx);
+    return this.authSettingsBinding;
+  }
+
+  /**
    * Bind the small open-source auth settings namespace to better-auth config.
    *
    * Only explicit settings values (stored or OS_AUTH_* env overrides) affect
    * runtime config. Manifest defaults are UI defaults and do not mask code or
    * deployment configuration.
+   *
+   * Call through {@link ensureAuthSettingsBound}, never directly.
    */
   private async bindAuthSettings(ctx: PluginContext): Promise<void> {
     if (!this.authManager) return;
