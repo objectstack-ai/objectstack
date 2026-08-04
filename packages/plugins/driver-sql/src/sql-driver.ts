@@ -671,6 +671,41 @@ function assertFilterNode(value: unknown, path: string): asserts value is Record
   );
 }
 
+/**
+ * [#5240] `{ field: {} }` — a field constrained by ZERO operators.
+ *
+ * One declared shape, three answers across this repo: THIS driver refused it at
+ * the top level (the #5041 comparand gate) while DROPPING it inside
+ * `$and`/`$or`/`$not` — where a predicate that emits nothing means "matches
+ * every row" — and `driver-memory` / `@objectstack/formula` both answered
+ * "matches nothing". So `{ $or: [ { a: {} }, { b: 2 } ] }` returned a different
+ * row set per backend, and this driver contradicted ITSELF depending on whether
+ * the same constraint sat at the top level or one combinator deep.
+ *
+ * Ruled on #5240: refuse it everywhere, in the ADR-0112 envelope every sibling
+ * filter refusal here speaks. Not TRUE and not FALSE — because the shape is
+ * almost always an authoring accident (a filter builder that recorded a field
+ * and no operator, or generated metadata that lost its operator), and both
+ * silent readings answer it with a row count the author never asked for. The
+ * same reasoning #5041 applied one position over: a filter that cannot be given
+ * one meaning is refused at the producer, loudly, at authoring time.
+ */
+function emptyFieldConstraintError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
+      `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
+      `comparand (e.g. { "${field}": "value" }). It is refused rather than ignored because the ` +
+      `backends disagreed on what it means — this driver dropped it inside $and/$or/$not (matching ` +
+      `EVERY row) while refusing it at the top level, and driver-memory / @objectstack/formula ` +
+      `answered "matches nothing". #5240.`,
+  );
+}
+
+/** [#5240] Is this field spec the zero-operator constraint refused above? */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  return isFilterNode(spec) && Object.keys(spec).length === 0;
+}
+
 /** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
 function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
   if (Array.isArray(value)) return;
@@ -743,15 +778,24 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
   }
 
-  // A field key always contributes a predicate. Note this stays `'clause'` even
-  // for `{ field: {} }` (a field constrained by zero operators), which compiles
-  // to no SQL today. That shape is a SEPARATE divergence tracked in #5240 —
-  // `matchesFilter` and `driver-memory` both answer FALSE for it, this driver's
-  // combinator path answers TRUE, and its own top-level `applyFilters` path
-  // refuses it outright via `assertCompilableComparand` — and picking the winner
-  // is a semantic ruling, not this change's call. Classifying it as `'clause'`
-  // rather than `'true'` is precisely what keeps the identity reduction from
-  // silently ruling on it: the shape compiles exactly as it did before.
+  // [#5240] `{ field: {} }` is refused HERE — on the validating walk, beside
+  // `assertFilterNode` / `assertFilterNodeList` — rather than in the emitter
+  // below, for the same reason those two sit here: the walk is exhaustive and
+  // does NOT short-circuit, so the refusal cannot be skipped by an identity that
+  // resolves the enclosing node first. Gating it in the compile branch instead
+  // would let `{ $or: [ { a: {} }, {} ] }` slip through untouched — the `{}`
+  // disjunct reduces the whole `$or` to TRUE, the emitter returns before it ever
+  // reaches `{ a: {} }`, and the shape would be refused or ignored depending on
+  // its SIBLINGS. That is the "gate conditional on evaluation order" this
+  // function's own doc comment warns against.
+  //
+  // Note what is deliberately NOT changed: the VERDICT. A field key still
+  // contributes `'clause'`, exactly as #5134 classified it. This adds a refusal,
+  // it does not reclassify a surviving shape, so every filter that compiled
+  // before compiles byte-identically now.
+  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+
+  // A field key always contributes a predicate.
   return 'clause';
 }
 
@@ -829,10 +873,13 @@ function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
   if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
-  // `{ field: {} }` compiles to no SQL at all. Guarding it would turn a shape
-  // that emits nothing into a live `IS NULL` predicate — i.e. would RULE on
-  // #5240 from here. Left exactly as it compiles today.
-  if (entries.length === 0) return 'none';
+  // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
+  // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
+  // emits nothing into a live `IS NULL` predicate, i.e. would RULE on #5240 from
+  // here" — is GONE, together with the ambiguity it was protecting. #5240 ruled
+  // the shape REFUSED, and `reduceFilterKey` raises that refusal while validating
+  // the tree, which `applyFilterCondition` does BEFORE its `$not` branch calls
+  // this rewrite. So an empty spec can no longer reach this function at all.
   let total = true;
   let nullSatisfies = true;
   for (const [op, value] of entries) {
@@ -5967,6 +6014,13 @@ export class SqlDriver implements IDataDriver {
       for (const [key, value] of Object.entries(filters)) {
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
         const column = this.remoteColumn(table, key, key);
+        // #5240 — `{ field: {} }` reaches this loop when NO key of the filter
+        // carries an operator; the combinator path refuses it on the reduction
+        // walk. Refused here with the SAME message so one condition has one
+        // wording wherever the author wrote it — this position used to answer
+        // with #5041's generic "cannot be bound as a SQL parameter", which
+        // describes a comparand and not a constraint with no operator at all.
+        if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, `filter.${key}`);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         assertCompilableComparand(column, '=', value);
@@ -6258,6 +6312,14 @@ export class SqlDriver implements IDataDriver {
    * `'false'` members of a `$or` are dropped as their identities, and a node
    * that reduces to `'false'` never reaches the loop at all. So Knex is never
    * again in a position to silently discard a group.
+   *
+   * # Zero-operator field constraints (#5240)
+   *
+   * `{ field: {} }` is REFUSED by that same reduction walk, in every position.
+   * It used to be this method's last remaining way to emit nothing for a key
+   * that looked like a predicate — so it read as TRUE here while the top-level
+   * `applyFilters` path refused it and the two JS backends answered FALSE. One
+   * declared shape, three answers; see {@link emptyFieldConstraintError}.
    *
    * # NULL-safe negation (#5146)
    *

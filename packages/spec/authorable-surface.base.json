@@ -1,5 +1,6 @@
 {
-  "description": "Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which for this platform IS the third-party API. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 §5.",
+  "description": "In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the keys in authorable-surface.json as they stood at `baseRev`, a commit on origin/main. A build that CAN reach origin/main anchors on the merge base instead, and re-verifies this file against `baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) anchors here instead of failing. Written only by `gen:schema`, only from a git-resolved baseline — never from the build that is being checked. See #5235.",
+  "baseRev": "26e1029f5cdf7f63719e3f58eb661b19f65b78fe",
   "keys": [
     "ai/AIModelConfig:maxTokens",
     "ai/AIModelConfig:model",
