@@ -161,6 +161,17 @@ export interface LazyCounterStoreOptions extends LazyCacheRateLimitStorageOption
    * self-explanatory when the currency is paid SMS.
    */
   degradedImpact?: string;
+  /**
+   * Log-line prefix identifying the SUBSYSTEM that degraded, e.g. `'[auth]'`
+   * (the default) or `'[dispatcher]'`.
+   *
+   * Added in #4910, when the inbound rate limiter started counting through this
+   * same resolution path: without it the runtime's degradation announced itself
+   * as `[auth] …`, sending an operator to inspect the auth plugin for a
+   * dispatcher problem. A misattributed log is worse than a terse one — the
+   * whole value of these two lines is that they name what to go fix.
+   */
+  logPrefix?: string;
 }
 
 /**
@@ -182,6 +193,7 @@ export interface LazyCounterStoreOptions extends LazyCacheRateLimitStorageOption
  */
 export function createLazyCounterStore(opts: LazyCounterStoreOptions): () => Promise<CounterStore> {
   const fallback = new InProcessCounterStore();
+  const prefix = opts.logPrefix ?? '[auth]';
   let cache: CounterStore | undefined;
   let boundAnnounced = false;
   let degradedWarned = false;
@@ -196,7 +208,7 @@ export function createLazyCounterStore(opts: LazyCounterStoreOptions): () => Pro
       if (cache && !boundAnnounced) {
         boundAnnounced = true;
         opts.logger?.info?.(
-          `[auth] ${opts.subject} bound to the kernel cache service — enforced against ONE store across nodes iff the cache is shared (ADR-0069 D2)`,
+          `${prefix} ${opts.subject} bound to the kernel cache service — enforced against ONE store across nodes iff the cache is shared (ADR-0069 D2)`,
         );
       }
     }
@@ -204,7 +216,7 @@ export function createLazyCounterStore(opts: LazyCounterStoreOptions): () => Pro
     if (!degradedWarned) {
       degradedWarned = true;
       opts.logger?.warn?.(
-        `[auth] ${opts.subject}: no cache service to count in — falling back to a per-process store. ` +
+        `${prefix} ${opts.subject}: no cache service to count in — falling back to a per-process store. ` +
           'This deployment has no `cache` service registered at all; a multi-node deployment needs a shared cache ' +
           '(Redis via @objectstack/service-cache) or each node enforces the limit independently (ADR-0069 D2)' +
           (opts.degradedImpact ? `. ${opts.degradedImpact}` : ''),

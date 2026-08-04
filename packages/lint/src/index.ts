@@ -209,6 +209,22 @@ export type {
   SharingRuleEnforceabilitySeverity,
 } from './validate-sharing-rule-enforceability.js';
 
+// #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
+// `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
+// only applicable policy, replaced by the deny sentinel), so the policy reads
+// as an authorization and behaves as a blanket refusal. The verdict is
+// `isSupportedRlsExpression` — the runtime's own, hoisted into
+// `@objectstack/formula` in the same change so lint can reach it.
+export {
+  validateRlsPredicateEnforceability,
+  RLS_PREDICATE_UNENFORCEABLE,
+  RLS_PREDICATE_UNPARSEABLE,
+} from './validate-rls-predicate-enforceability.js';
+export type {
+  RlsPredicateFinding,
+  RlsPredicateSeverity,
+} from './validate-rls-predicate-enforceability.js';
+
 export {
   validateDashboardActionRefs,
   DASHBOARD_ACTION_TARGET_UNDEFINED,
