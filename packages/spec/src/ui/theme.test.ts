@@ -7,9 +7,11 @@ import {
   TypographySchema,
   BorderRadiusSchema,
   ShadowSchema,
+  defineTheme,
   type Theme,
   type ColorPalette,
 } from './theme.zod';
+import { ObjectStackSchema } from '../stack.zod';
 
 describe('ThemeMode', () => {
   it('should accept valid theme modes', () => {
@@ -458,5 +460,159 @@ describe('ThemeModeSchema (canonical name)', () => {
 
   it('should be the same as deprecated ThemeMode alias', () => {
     expect(ThemeModeSchema).toBe(ThemeMode);
+  });
+});
+
+// ============================================================================
+// #4001 批 15 — unknown keys are REJECTED, and the rejection is fixable.
+//
+// These assertions are the third of the three places this batch's verdict is
+// recorded (the other two: the header comment in `theme.zod.ts`, and the ui/
+// row in `docs/audits/2026-07-unknown-key-strictness-ledger.md`). They pin
+// three separate things, because each can regress on its own:
+//
+//   1. THE DOOR. Strictness is a property of a PARSE; a strict schema nobody
+//      parses gates nothing (#4583). So the first block asserts the parse
+//      exists — `defineTheme()` and `defineStack({ themes })` — rather than
+//      only asserting the schema is strict.
+//   2. EVERY ONE of the 14 object sites is closed. Strictness does NOT recurse
+//      (the 批 13 finding: a strict shell around strip sub-blocks is the
+//      silhouette of a closed surface, not a closed surface), so each nested
+//      block is probed at its own path.
+//   3. The CURATION — the aliases and tombstones that make the rejection
+//      fixable. Each entry here was measured against a named sibling contract,
+//      not guessed; the comments in `theme.zod.ts` say which.
+// ============================================================================
+describe('#4001 批 15 — ThemeSchema unknown-key strictness', () => {
+  const base = { name: 'brand_theme', label: 'Brand', colors: { primary: '#000000' } };
+  const reject = (theme: unknown): string => {
+    const r = ThemeSchema.safeParse(theme);
+    expect(r.success, 'expected this theme to be REJECTED').toBe(false);
+    return JSON.stringify(r.error?.issues ?? []);
+  };
+
+  it('the control parses — these tests fail closed, not by rejecting everything', () => {
+    expect(ThemeSchema.safeParse(base).success).toBe(true);
+  });
+
+  // ---- 1. the door ----------------------------------------------------
+  it('defineTheme() is a real parse door — it throws on an undeclared key', () => {
+    expect(() => defineTheme({ ...base, spacing: {} } as never)).toThrow(/Unrecognized key/);
+  });
+
+  it('defineStack({ themes }) is the second door — ObjectStackSchema carries ThemeSchema', () => {
+    const shape = (ObjectStackSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape;
+    expect(Object.keys(shape), 'the carrier key this file is reachable through').toContain('themes');
+  });
+
+  // ---- 2. all fourteen sites, each at its own path ---------------------
+  it('rejects an undeclared key at the TOP level', () => {
+    expect(reject({ ...base, extraKey: 1 })).toContain('extraKey');
+  });
+
+  it('rejects an undeclared key in `colors` — strictness does not stop at the shell', () => {
+    expect(reject({ ...base, colors: { primary: '#000', notAColor: '#fff' } })).toContain('notAColor');
+  });
+
+  it.each([
+    ['typography', { notATypographyKey: 1 }],
+    ['borderRadius', { notARadius: '1px' }],
+    ['shadows', { notAShadow: 'x' }],
+    ['animation', { notAnAnimationKey: 1 }],
+    ['zIndex', { notALayer: 1 }],
+  ])('rejects an undeclared key in `%s`', (block, value) => {
+    expect(reject({ ...base, [block]: value })).toContain(Object.keys(value)[0]);
+  });
+
+  it.each([
+    ['fontFamily', { notAFamily: 'x' }],
+    ['fontSize', { notASize: 'x' }],
+    ['fontWeight', { notAWeight: 1 }],
+    ['lineHeight', { notALeading: 'x' }],
+    ['letterSpacing', { notATracking: 'x' }],
+  ])('rejects an undeclared key in the nested `typography.%s` scale', (block, value) => {
+    expect(reject({ ...base, typography: { [block]: value } })).toContain(Object.keys(value)[0]);
+  });
+
+  it.each([
+    ['duration', { notADuration: 'x' }],
+    ['timing', { notATiming: 'x' }],
+  ])('rejects an undeclared key in the nested `animation.%s` block', (block, value) => {
+    expect(reject({ ...base, animation: { [block]: value } })).toContain(Object.keys(value)[0]);
+  });
+
+  // ---- 3. curation ----------------------------------------------------
+  it('renames the shadcn colour vocabulary onto the palette keys it maps to', () => {
+    // MEASURED against objectui's COLOR_TO_CSS_MAP: `surface` is emitted as
+    // `--card`, `text` as `--foreground`, `disabled` as `--muted`, `error` as
+    // `--destructive`. An author reading the rendered CSS writes the shadcn
+    // name back, which no edit distance can reach.
+    const msg = reject({ ...base, colors: { primary: '#000', card: '#fff', foreground: '#111', destructive: '#f00' } });
+    expect(msg).toContain('`card` → `surface`');
+    expect(msg).toContain('`foreground` → `text`');
+    expect(msg).toContain('`destructive` → `error`');
+  });
+
+  it('renames `md` onto `base` in the font-size scale — the same-file scale disagreement', () => {
+    // `borderRadius` and `shadows` declare `md`; `fontSize` jumps sm → base → lg.
+    expect(reject({ ...base, typography: { fontSize: { md: '1rem' } } })).toContain('`md` → `base`');
+    // …and the mirror: three scales spell the middle stop `base`, fontWeight
+    // spells it `normal`.
+    expect(reject({ ...base, typography: { fontWeight: { base: 400 } } })).toContain('`base` → `normal`');
+  });
+
+  it('renames camelCase easing onto the snake_case keys this one block uses', () => {
+    // The file's single snake_case vocabulary, against Prime Directive #3 —
+    // so `easeIn` is an author obeying the repo's naming rule, not a typo.
+    const msg = reject({ ...base, animation: { timing: { easeIn: 'x', easeInOut: 'y' } } });
+    expect(msg).toContain('`easeIn` → `ease_in`');
+    expect(msg).toContain('`easeInOut` → `ease_in_out`');
+  });
+
+  it('renames onto the camelCase targets the distance fallback is weak on (#4990)', () => {
+    // `findClosestMatches` lowercases the input but not the candidates, so a
+    // capital costs an edit. These land through the explicit table instead.
+    expect(reject({ ...base, zIndex: { backdrop: 10 } })).toContain('`backdrop` → `modalBackdrop`');
+    expect(reject({ ...base, radius: {} })).toContain('`radius` → `borderRadius`');
+    expect(reject({ ...base, cssVars: {} })).toContain('`cssVars` → `customVars`');
+  });
+
+  it('renames `inset` onto `inner` — CSS\'s word for what this scale calls inner', () => {
+    expect(reject({ ...base, shadows: { inset: '0 0 1px' } })).toContain('`inset` → `inner`');
+  });
+
+  it('carries a TOMBSTONE, not a rename, for each of the eight props #3494 removed', () => {
+    for (const key of ['spacing', 'breakpoints', 'logo', 'density', 'wcagContrast', 'rtl', 'touchTarget', 'keyboardNavigation']) {
+      const msg = reject({ ...base, [key]: 'x' });
+      expect(msg, `${key} must carry its own #3494 prescription`).toContain('#3494');
+      expect(msg, `${key} must be named in its own prescription`).toContain('`' + key + '` was removed');
+    }
+  });
+
+  it('gives each retired key its OWN sentence — a shared string prints N times (批 10)', () => {
+    const msg = reject({ ...base, rtl: true, density: 'compact' });
+    expect(msg).toContain('text direction follows the document');
+    expect(msg).toContain('compact/comfortable spacing');
+    // Two keys, two DISTINCT bullets.
+    expect(msg.split('• ').length - 1).toBe(2);
+  });
+
+  it('never prescribes a vocabulary with no carrier key (the ledger\'s finding 7)', () => {
+    // `touchTarget` / `keyboardNavigation` look like they should point at
+    // `ui/touch.zod.ts` / `ui/keyboard.zod.ts`. 批 13 measured both as having
+    // NO carrier (#4988), so prescribing them would walk an author out of a
+    // loud rejection into a silent one.
+    const msg = reject({ ...base, touchTarget: 1, keyboardNavigation: true });
+    expect(msg).not.toContain('touch.zod');
+    expect(msg).not.toContain('keyboard.zod');
+  });
+
+  it('every suggestion it makes is a key the schema actually accepts', () => {
+    // The `triggerPhrases` lesson in `shared/strict-object.ts`: never point an
+    // author at a key that will reject them a second time. Walk the whole
+    // alias table and prove each target parses.
+    const targets = ['colors', 'typography', 'borderRadius', 'shadows', 'animation', 'zIndex', 'customVars', 'extends', 'label', 'name', 'mode'];
+    const shape = (ThemeSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape;
+    for (const t of targets) expect(Object.keys(shape), `alias target "${t}" must be declared`).toContain(t);
   });
 });

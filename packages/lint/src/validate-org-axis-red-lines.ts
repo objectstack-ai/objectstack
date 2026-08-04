@@ -39,6 +39,52 @@
  * so the lint moves the failure from silent-wrong-answer to author-time fix-it.
  *
  * Pure `(stack) => Finding[]`; accepts the NORMALIZED stack input.
+ *
+ * ## Scope — the keys this rule reads, and the ones it deliberately does not
+ *
+ * Every key below is one `@objectstack/spec` DECLARES. That is a contract, not
+ * a style preference: the rule is registered `input: 'parsed'`, so what it sees
+ * is what `ObjectStackSchema` returned. An undeclared key never survives to be
+ * read — the stack root strips it, and the `.strict()` sub-schemas reject the
+ * whole stack outright — so a branch keyed on one is inert for every stack an
+ * author can actually ship (#4984, #5009).
+ *
+ * | Read                                  | Declared by                        |
+ * |---------------------------------------|------------------------------------|
+ * | `permissions[]`                       | `ObjectStackSchema`                |
+ * | `permissions[].rowLevelSecurity[]`    | `PermissionSetSchema`              |
+ * | `…[].using` / `…[].check`             | `RowLevelSecurityPolicySchema`     |
+ * | `sharingRules[]`                      | `ObjectStackSchema`                |
+ * | `sharingRules[].condition` / `.sharedWith` / `.object` | `SharingRuleSchema` |
+ * | `objects[].tenancy` / `.systemFields` | `ObjectSchema`                     |
+ *
+ * NOT read, and each for a reason that is a schema fact:
+ *
+ * - `permissionSets` / `sharing` — not declared on the stack root. The root
+ *   STRIPS them, so after parse they are `undefined` no matter what the author
+ *   wrote. The declared spellings are `permissions` and `sharingRules`.
+ * - `sharingRules[].objectName` — `SharingRuleSchema` is `.strict()` and knows
+ *   it only as a rejected name; `object` is required, so the canonical read can
+ *   never be missing on a rule that parsed.
+ * - `objects[].rowLevelSecurity` / `objects[].rls` — **object-level RLS is not
+ *   an authoring surface at all.** `ObjectSchema` declares neither key (nor
+ *   does `authorable-surface.json` list one: the sole entry is
+ *   `security/PermissionSet:rowLevelSecurity`), and `ObjectSchema` is
+ *   `.strict()`, so a stack carrying one does not parse — it is refused with
+ *   "Unrecognized key(s) on this object". Until #5009 this file walked that
+ *   non-existent surface for ~20 lines, complete with an `objects[N].
+ *   rowLevelSecurity[M].using` diagnostic path. Nothing could reach it, and the
+ *   cost was never the missed finding: the next author to read this rule (human
+ *   or AI) came away believing object-level RLS was a real authorization
+ *   surface and wrote more code against it (#5008 nearly did). RLS policies
+ *   live on a permission set; that is the branch above.
+ *
+ * Alias tolerance belongs at the schema's refusal, not in a consumer (Prime
+ * Directive #12) — where it also converts a loud, named rejection into a
+ * silently-inert gate. `validate-org-axis-red-lines.test.ts` pins all of this
+ * structurally: every key read here is checked against the declaring schema's
+ * own `.shape`, and every `findings.push` site must be reachable by a fixture
+ * that passed `safeParse`.
  */
 
 export const ORG_AXIS_PERMISSION_INHERITANCE = 'org-axis-permission-inheritance';
@@ -162,9 +208,11 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
 
   // ── ① No permission inheritance along the org axis ────────────────────────
   //
-  // RLS policies may live on a permission set (`rowLevelSecurity`) or be
-  // authored per object; both reach the same compiler, so both are checked.
-  const permissionSets = asArray(cfg.permissions ?? cfg.permissionSets);
+  // RLS policies live on a PERMISSION SET (`permissions[].rowLevelSecurity`) —
+  // the one place `ObjectSchema` does not offer and `PermissionSetSchema` does.
+  // See the `## Scope` table above for the object-level surface that looked
+  // like a second home for them and never was (#5009).
+  const permissionSets = asArray(cfg.permissions);
   permissionSets.forEach((ps, psIndex) => {
     asArray(ps.rowLevelSecurity).forEach((policy, pIndex) => {
       for (const clause of ['using', 'check'] as const) {
@@ -174,27 +222,6 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
           rule: ORG_AXIS_PERMISSION_INHERITANCE,
           where: `permission set "${str(ps.name) || psIndex}" policy "${str(policy.name) || pIndex}"`,
           path: `permissions[${psIndex}].rowLevelSecurity[${pIndex}].${clause}`,
-          message:
-            `RLS ${clause} reads \`${ORG_PARENT_FIELD}\`, which builds a permission hierarchy along the ` +
-            `organization axis. ADR-0105 D6 forbids it: the org tree is a REPORTING dimension only.`,
-          hint: INHERITANCE_HINT,
-        });
-      }
-    });
-  });
-
-  const objects = asArray(cfg.objects);
-  objects.forEach((object, oIndex) => {
-    const objectName = str(object.name) || String(oIndex);
-
-    asArray(object.rowLevelSecurity ?? object.rls).forEach((policy, pIndex) => {
-      for (const clause of ['using', 'check'] as const) {
-        if (!str(policy[clause]).includes(ORG_PARENT_FIELD)) continue;
-        findings.push({
-          severity: 'error',
-          rule: ORG_AXIS_PERMISSION_INHERITANCE,
-          where: `object "${objectName}" policy "${str(policy.name) || pIndex}"`,
-          path: `objects[${oIndex}].rowLevelSecurity[${pIndex}].${clause}`,
           message:
             `RLS ${clause} reads \`${ORG_PARENT_FIELD}\`, which builds a permission hierarchy along the ` +
             `organization axis. ADR-0105 D6 forbids it: the org tree is a REPORTING dimension only.`,
@@ -215,7 +242,9 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // made this red line inert for every spec-valid stack (#4984): after parse
   // they are always `undefined`, so the gate never fired. Alias tolerance
   // belongs at the schema's refusal, not in a consumer (Prime Directive #12).
-  asArray(cfg.sharingRules ?? cfg.sharing).forEach((rule, rIndex) => {
+  // The collection itself is `sharingRules`; `sharing` was the same mistake one
+  // level up, and is gone with the rest of them (#5009).
+  asArray(cfg.sharingRules).forEach((rule, rIndex) => {
     const slots: Array<{ key: string; text: string }> = [
       { key: 'condition', text: expressionText(rule.condition) },
       { key: 'sharedWith', text: JSON.stringify(rule.sharedWith ?? '') ?? '' },
@@ -242,10 +271,12 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // Both BU recipients count — see `BU_TREE_RECIPIENT_TYPES` for why that word
   // list is two long and which three of `ShareRecipientType` it lets past.
   const tenancyDisabledObjects = new Set(
-    objects.filter((o) => isTenancyDisabled(o)).map((o) => str(o.name)).filter(Boolean),
+    asArray(cfg.objects).filter((o) => isTenancyDisabled(o)).map((o) => str(o.name)).filter(Boolean),
   );
-  asArray(cfg.sharingRules ?? cfg.sharing).forEach((rule, rIndex) => {
-    const target = str(rule.object ?? rule.objectName);
+  asArray(cfg.sharingRules).forEach((rule, rIndex) => {
+    // `object` is REQUIRED by `SharingRuleSchema`, so a rule that parsed always
+    // has it; `objectName` is not a spelling the schema accepts (#5009).
+    const target = str(rule.object);
     if (!target || !tenancyDisabledObjects.has(target)) return;
     // `sharedWith` is the declared recipient key; `sharedTo` / `recipient` are
     // spelt out only in the schema's rejection message (#4984).

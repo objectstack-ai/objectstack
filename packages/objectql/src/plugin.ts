@@ -432,7 +432,17 @@ export class ObjectQLPlugin implements Plugin {
         const services = ctx.getServices();
         for (const [name, service] of services.entries()) {
             if (name.startsWith('driver.')) {
-                 // Register Driver
+                 // Register Driver.
+                 //
+                 // For the standalone `default` this is the SECOND leg of a
+                 // round trip, not a new registration (#4773):
+                 // `DefaultDatasourcePlugin.init()` already registered the
+                 // driver through `DatasourceConnectionService`, then
+                 // republished that same instance as this `driver.<name>`
+                 // service for `os migrate` / serve storage detection. Handing
+                 // it back is a deliberate no-op — see `registerDriver`, which
+                 // distinguishes this identical re-entry (quiet) from a real
+                 // name collision between two different instances (loud).
                  this.ql.registerDriver(service);
                  ctx.logger.debug('Discovered and registered driver service', { serviceName: name });
             }

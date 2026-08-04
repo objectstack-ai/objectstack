@@ -57,12 +57,16 @@
     "build": "tsc -p ./tsconfig.json",
     "watch": "tsc -watch -p ./tsconfig.json",
     "package": "vsce package",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p ./tsconfig.test.json"
   },
   "devDependencies": {
+    "@objectstack/spec": "workspace:*",
+    "@types/node": "^26.1.2",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "objectstack",
