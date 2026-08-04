@@ -648,7 +648,7 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  *
  * ⚠️ Scope of the promotion: `allowAddTab` declares that the tab bar RENDERS an
  * add-tab affordance. The button objectui renders today carries no click
- * handler, so it is presentational — filed against the renderer, and
+ * handler, so it is presentational — filed against the renderer as #5236, and
  * deliberately NOT written into the `.describe()`, because a contract that
  * promises "end users can add presets" would be advertising a capability the
  * runtime does not deliver (PD#10).
