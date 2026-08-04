@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsup --config tsup.config.ts",
     "dev": "tsc -w",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
