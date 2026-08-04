@@ -1272,39 +1272,325 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
 export type ComposeStacksOptions = z.input<typeof ComposeStacksOptionsSchema>;
 
 /**
- * All array fields on `ObjectStackDefinition` that are simply concatenated.
+ * How {@link composeStacks} treats one top-level key (#5005).
+ *
+ * - `'concat'`    — array collection; concatenated in stack order.
+ * - `'single'`    — one scalar/object value; identical declarations pass
+ *                   through, differing ones are a composition ERROR.
+ * - `'manifest'`  — chosen by the `manifest` option.
+ * - `'objects'`   — merged by the `objectConflict` strategy.
+ * - `'i18n'`      — last-wins (pre-existing; see the table note below).
+ * - `'functions'` — named-handler collection; merged by name.
  * @internal
  */
-const CONCAT_ARRAY_FIELDS = [
-  'datasources',
-  'translations',
-  'objectExtensions',
-  'apps',
-  'views',
-  'pages',
-  'dashboards',
-  'reports',
-  'actions',
-  'themes',
-  'flows',
-  'positions',
-  'permissions',
-  'capabilities',
-  'sharingRules',
-  'apis',
-  'webhooks',
-  'agents',
-  'skills',
-  'tools',
-  'hooks',
-  'mappings',
-  'analyticsCubes',
-  'connectors',
-  'data',
-  'plugins',
-  'devPlugins',
-  'requires',
-] as const satisfies readonly (keyof ObjectStackDefinition)[];
+type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'i18n' | 'functions';
+
+/**
+ * The composition rule for EVERY top-level key of `ObjectStackDefinition`
+ * (#5005).
+ *
+ * ## Why a total table and not a list
+ *
+ * `composeStacks` used to build its result from an empty object by filling in
+ * `manifest`, `i18n`, `objects` and a hand-maintained array whitelist. Anything
+ * absent from that whitelist was not "left alone" — it was **deleted**, with no
+ * error, no warning, and no way for a consumer to tell "the composer dropped it"
+ * apart from "the author never wrote it". Composition is the platform's
+ * app-packaging / install story, so that silence reached real security config:
+ * `api.enforceProjectMembership` (the per-environment 403 gate) and, as of
+ * #4910, `server.security.rateLimit` both vanished the moment a stack was
+ * composed with any other one. Seven declared array collections
+ * (`datasourceMapping`, `datasets`, `jobs`, `emailTemplates`, `docs`, `books`,
+ * `tiers`) and the whole `functions` handler map went the same way; `tools`
+ * escaped the same fate only because ADR-0109 noticed and patched the list.
+ *
+ * A whitelist makes forgetting the default. This table makes it a **type
+ * error**: it is `Record< keyof ObjectStackDefinition, … >`, so a new top-level
+ * key does not compile until someone states what composing it means. That is
+ * the structural half of the fix; {@link composeStacks} carries the runtime
+ * half (an undeclared key warns rather than disappearing), so a key that
+ * reaches composition without a rule — via `strict: false`, or a raw object —
+ * still reports itself.
+ *
+ * ## Note on `i18n`
+ *
+ * `i18n` keeps its pre-existing last-wins. It is the one key here that already
+ * had a deliberate, working strategy, so #5005 (whose subject is keys that were
+ * *dropped*) deliberately leaves it alone rather than breaking compositions
+ * that rely on it. It is nonetheless the same silent-override shape the
+ * maintainer rejected for `api`/`server` — tracked separately.
+ *
+ * @internal
+ */
+const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDisposition> = {
+  // ── Bespoke strategies (unchanged by #5005) ──
+  manifest: 'manifest',
+  objects: 'objects',
+  i18n: 'i18n',
+  functions: 'functions',
+
+  // ── Array collections — concatenated in stack order ──
+  datasources: 'concat',
+  datasourceMapping: 'concat',
+  translations: 'concat',
+  objectExtensions: 'concat',
+  apps: 'concat',
+  views: 'concat',
+  pages: 'concat',
+  dashboards: 'concat',
+  reports: 'concat',
+  datasets: 'concat',
+  actions: 'concat',
+  themes: 'concat',
+  flows: 'concat',
+  jobs: 'concat',
+  emailTemplates: 'concat',
+  docs: 'concat',
+  books: 'concat',
+  positions: 'concat',
+  permissions: 'concat',
+  capabilities: 'concat',
+  sharingRules: 'concat',
+  apis: 'concat',
+  webhooks: 'concat',
+  agents: 'concat',
+  tools: 'concat',
+  skills: 'concat',
+  hooks: 'concat',
+  mappings: 'concat',
+  analyticsCubes: 'concat',
+  connectors: 'concat',
+  data: 'concat',
+  plugins: 'concat',
+  requires: 'concat',
+  tiers: 'concat',
+  devPlugins: 'concat',
+
+  // ── Single-valued configuration — same value passes, difference throws ──
+  api: 'single',
+  server: 'single',
+  runtimeModule: 'single',
+};
+
+/**
+ * All array fields on `ObjectStackDefinition` that are simply concatenated.
+ * Derived from {@link COMPOSE_KEY_DISPOSITIONS} so the two cannot drift.
+ * @internal
+ */
+const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof ObjectStackDefinition)[])
+  .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
+
+/**
+ * Structural deep equality for the "same value composes fine" rule (#5005).
+ *
+ * Deliberately strict and deliberately small: it decides only whether two
+ * authored declarations are the SAME, never how to reconcile two different
+ * ones. Keys explicitly set to `undefined` are treated as absent, matching how
+ * the composer reads a declaration in the first place. Callables compare by
+ * reference (`Object.is`) — two distinct closures are two distinct
+ * declarations, which is the honest answer for a config value.
+ * @internal
+ */
+function deepEqualDeclarations(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => deepEqualDeclarations(item, b[i]));
+  }
+
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left).filter((k) => left[k] !== undefined);
+  const rightKeys = Object.keys(right).filter((k) => right[k] !== undefined);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((k) => deepEqualDeclarations(left[k], right[k]));
+}
+
+/**
+ * Name a stack the way its author would recognise it (#5005).
+ *
+ * A composition error is only actionable if it says WHICH stacks disagree, and
+ * at compose time the only identity a stack carries is its manifest. Falls back
+ * to the positional index for the manifest-less stacks that composition also
+ * accepts.
+ * @internal
+ */
+function stackLabel(stack: ObjectStackDefinition, index: number): string {
+  const id = stack.manifest?.id ?? stack.manifest?.name;
+  return id ? `'${id}' (stack #${index})` : `stack #${index}`;
+}
+
+/**
+ * Compose a single-valued (non-array) top-level key across stacks (#5005).
+ *
+ * Same value everywhere ⇒ that value. Any disagreement ⇒ throw, naming the key,
+ * both source stacks and the two ways out. NOT last-wins: silently preferring
+ * the later stack is a security downgrade — it is precisely how an earlier
+ * stack's `enforceProjectMembership` 403 gate or a tighter rate-limit budget
+ * would be switched off by an add-on package. NOT a deep merge either: that
+ * invents a third value neither author wrote.
+ * @internal
+ */
+function composeSingleValue(
+  stacks: ObjectStackDefinition[],
+  key: string,
+): { declared: boolean; value: unknown } {
+  let holder = -1;
+
+  for (let i = 0; i < stacks.length; i++) {
+    const value = (stacks[i] as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (holder === -1) {
+      holder = i;
+      continue;
+    }
+    const held = (stacks[holder] as Record<string, unknown>)[key];
+    if (deepEqualDeclarations(held, value)) continue;
+
+    throw new Error(
+      `composeStacks conflict: top-level key '${key}' is declared with different values by ` +
+        `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.\n` +
+        `composeStacks does not pick a winner for single-valued top-level configuration: ` +
+        `overriding would silently disable whichever stack declared the stricter setting ` +
+        `(an 'api.enforceProjectMembership' 403 gate, a 'server.security.rateLimit' budget), ` +
+        `and deep-merging would produce a value neither stack declared.\n` +
+        `Fix: make the two '${key}' declarations identical, or remove it from every stack ` +
+        `except the one that should own it.`,
+    );
+  }
+
+  return holder === -1
+    ? { declared: false, value: undefined }
+    : { declared: true, value: (stacks[holder] as Record<string, unknown>)[key] };
+}
+
+/**
+ * Compose the `functions` handler collection across stacks (#5005).
+ *
+ * `functions` is a named collection, not an opaque config blob: composing CRM +
+ * Todo must yield BOTH packages' handlers, or every declarative hook, action
+ * and script node that resolves a handler by name breaks at boot. So it merges
+ * by name — and a name declared twice throws rather than picking a winner,
+ * matching `objectConflict: 'error'`.
+ *
+ * The two authored shapes (map and array) are merged in kind. They are NOT
+ * converted into one another: an array entry carries a `packageId` that the map
+ * entry has no place for, so a conversion would drop provenance. Mixing the two
+ * shapes across composed stacks therefore throws with that instruction.
+ * @internal
+ */
+function composeFunctions(
+  stacks: ObjectStackDefinition[],
+): { declared: boolean; value: unknown } {
+  type ArrayEntry = { name: string };
+  const declaring: { index: number; value: unknown }[] = [];
+
+  for (let i = 0; i < stacks.length; i++) {
+    const value = (stacks[i] as Record<string, unknown>).functions;
+    if (value !== undefined) declaring.push({ index: i, value });
+  }
+  if (declaring.length === 0) return { declared: false, value: undefined };
+  if (declaring.length === 1) return { declared: true, value: declaring[0].value };
+
+  const arrayForm = declaring.filter((d) => Array.isArray(d.value));
+  if (arrayForm.length !== 0 && arrayForm.length !== declaring.length) {
+    const mapSide = declaring.find((d) => !Array.isArray(d.value))!;
+    throw new Error(
+      `composeStacks conflict: top-level key 'functions' is declared in the map form by ` +
+        `${stackLabel(stacks[mapSide.index], mapSide.index)} and in the array form by ` +
+        `${stackLabel(stacks[arrayForm[0].index], arrayForm[0].index)}.\n` +
+        `The two shapes cannot be merged without losing information (an array entry carries ` +
+        `'packageId', the map entry does not).\n` +
+        `Fix: author 'functions' in the same shape in both stacks — the map form ` +
+        `({ my_handler: fn }) is preferred.`,
+    );
+  }
+
+  const seen = new Map<string, number>();
+  const claim = (name: string, index: number): void => {
+    const first = seen.get(name);
+    if (first !== undefined) {
+      throw new Error(
+        `composeStacks conflict: function '${name}' is defined by both ` +
+          `${stackLabel(stacks[first], first)} and ${stackLabel(stacks[index], index)}.\n` +
+          `Handlers are resolved by name at boot, so one would silently shadow the other.\n` +
+          `Fix: rename one of them (prefix it with its package, e.g. 'crm_${name}'), or ` +
+          `declare it in exactly one stack.`,
+      );
+    }
+    seen.set(name, index);
+  };
+
+  if (arrayForm.length === declaring.length) {
+    const merged: ArrayEntry[] = [];
+    for (const { index, value } of declaring) {
+      for (const entry of value as ArrayEntry[]) {
+        claim(entry.name, index);
+        merged.push(entry);
+      }
+    }
+    return { declared: true, value: merged };
+  }
+
+  const merged: Record<string, unknown> = {};
+  for (const { index, value } of declaring) {
+    for (const [name, handler] of Object.entries(value as Record<string, unknown>)) {
+      claim(name, index);
+      merged[name] = handler;
+    }
+  }
+  return { declared: true, value: merged };
+}
+
+const warnedMalformedCollectionKeys = new Set<string>();
+
+/**
+ * Report a collection key that carried a non-array value (#5005).
+ *
+ * The concat rule can only concatenate arrays, so such a value is skipped —
+ * and skipping it silently is the same defect in miniature. Only reachable
+ * with an unparsed stack (`strict: false`, hand-built object); the strict
+ * `defineStack` path rejects the shape outright.
+ * @internal
+ */
+function warnMalformedCollectionKey(key: string): void {
+  if (warnedMalformedCollectionKeys.has(key)) return;
+  warnedMalformedCollectionKeys.add(key);
+  console.warn(
+    `composeStacks: top-level key '${key}' is a collection (concatenated across stacks) but at ` +
+      `least one stack carries a non-array value for it — that value cannot be composed and was ` +
+      `skipped. Author it as an array, or run the stack through strict \`defineStack\` to have ` +
+      `the shape rejected where it is written. See objectstack-ai/objectstack#5005.`,
+  );
+}
+
+const warnedUncomposedStackKeys = new Set<string>();
+
+/**
+ * Report a top-level key that reached composition with no declared rule (#5005).
+ *
+ * The invariant this restores: composition is never silent about a key it did
+ * not know what to do with. It still composes the key by the default rule
+ * (arrays concatenate, everything else follows the single-value rule) so
+ * nothing is lost — but the NEXT top-level key someone adds without teaching
+ * `composeStacks` about it announces itself here, instead of being discovered
+ * by accident during unrelated work the way `server:` was.
+ *
+ * Warn-once per key, like the other authoring-time notices in this module.
+ * @internal
+ */
+function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
+  if (warnedUncomposedStackKeys.has(key)) return;
+  warnedUncomposedStackKeys.add(key);
+  console.warn(
+    `composeStacks: top-level key '${key}' has no declared composition rule — composed with ` +
+      `the default (${rule === 'concat' ? 'arrays are concatenated' : 'single value; conflicting declarations throw'}). ` +
+      `Declare what composing it means in COMPOSE_KEY_DISPOSITIONS (packages/spec/src/stack.zod.ts) ` +
+      `in the same change that declares the key — see objectstack-ai/objectstack#5005.`,
+  );
+}
 
 /**
  * Merge objects from multiple stacks according to the chosen conflict strategy.
@@ -1424,7 +1710,8 @@ export function composeStacks(
   // 1. Manifest — pick based on strategy
   composed.manifest = selectManifest(stacks, opts.manifest);
 
-  // 2. i18n — last-wins (single object, not array)
+  // 2. i18n — last-wins (single object, not array). Pre-existing strategy,
+  //    deliberately untouched by #5005; see COMPOSE_KEY_DISPOSITIONS.
   for (let i = stacks.length - 1; i >= 0; i--) {
     if (stacks[i].i18n) {
       composed.i18n = stacks[i].i18n;
@@ -1438,14 +1725,67 @@ export function composeStacks(
     composed.objects = objects;
   }
 
-  // 4. All other array fields — simple concatenation
+  // 4. Array collections — simple concatenation, in stack order.
   for (const field of CONCAT_ARRAY_FIELDS) {
-    const arrays = stacks
+    const declared = stacks
       .map((s) => (s as Record<string, unknown>)[field])
-      .filter((v): v is unknown[] => Array.isArray(v));
+      .filter((v) => v !== undefined);
+    const arrays = declared.filter((v): v is unknown[] => Array.isArray(v));
     if (arrays.length > 0) {
       composed[field] = arrays.flat();
     }
+    // A collection key holding something that is not an array cannot be
+    // concatenated. `defineStack` rejects that shape, so this is only
+    // reachable via `strict: false` or a hand-built stack object — but
+    // dropping it without a word is the exact defect #5005 closes.
+    if (declared.length !== arrays.length) {
+      warnMalformedCollectionKey(field);
+    }
+  }
+
+  // 5. Named handler functions — merged by name (#5005).
+  const functions = composeFunctions(stacks);
+  if (functions.declared) {
+    composed.functions = functions.value;
+  }
+
+  // 6. Every remaining top-level key (#5005).
+  //
+  //    This loop is the reason composition can no longer eat a key. It walks
+  //    what the STACKS actually carry rather than a whitelist, so a key with a
+  //    declared rule gets it, and a key without one is composed by the default
+  //    AND reported — instead of being deleted in silence the way `api:` and
+  //    `server:` were.
+  const remainingKeys: string[] = [];
+  for (const stack of stacks) {
+    for (const key of Object.keys(stack as Record<string, unknown>)) {
+      if ((stack as Record<string, unknown>)[key] === undefined) continue;
+      if (key in composed) continue;
+      const rule = COMPOSE_KEY_DISPOSITIONS[key as keyof ObjectStackDefinition];
+      // Handled above (a declared key whose value happened to be absent from
+      // every stack lands here too — nothing to compose, so skip it).
+      if (rule !== undefined && rule !== 'single') continue;
+      if (!remainingKeys.includes(key)) remainingKeys.push(key);
+    }
+  }
+
+  for (const key of remainingKeys) {
+    const rule = COMPOSE_KEY_DISPOSITIONS[key as keyof ObjectStackDefinition];
+    if (rule === undefined) {
+      // Not declared on ObjectStackDefinitionSchema at all — reachable via
+      // `defineStack(..., { strict: false })` or a hand-built stack object.
+      const isArray = stacks.some((s) => Array.isArray((s as Record<string, unknown>)[key]));
+      warnUncomposedStackKey(key, isArray ? 'concat' : 'single');
+      if (isArray) {
+        composed[key] = stacks
+          .map((s) => (s as Record<string, unknown>)[key])
+          .filter((v): v is unknown[] => Array.isArray(v))
+          .flat();
+        continue;
+      }
+    }
+    const single = composeSingleValue(stacks, key);
+    if (single.declared) composed[key] = single.value;
   }
 
   return mergeActionsIntoObjects(composed as ObjectStackDefinition);

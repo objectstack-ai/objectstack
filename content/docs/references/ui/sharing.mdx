@@ -9,9 +9,31 @@ description: Sharing protocol schemas
 
 Sharing & Embedding Protocol
 
-Defines schemas for public link sharing, embed configuration,
+Public-link sharing and iframe-embed configuration. The module name is
 
-domain restrictions, and password protection for apps, pages, and forms.
+plural, but the two shapes below are in **opposite** postures, and #4001 批 14
+
+measured why rather than assuming a file-level verdict:
+
+- `SharingConfigSchema` has a **live authoring door**. `FormViewSchema.sharing`
+
+carries it (`view.zod.ts`), `view` is a metadata-type root, and the runtime
+
+really reads it: `rest-server.ts` mounts the anonymous form endpoints only
+
+when `sharing.allowAnonymous === true` and a `sharing.publicLink` slug
+
+matches. Both example apps author it (`app-showcase` `inquiry.view.ts`,
+
+`app-crm` `lead.view.ts`). It is `strictObject` as of #4001 批 14.
+
+- `EmbedConfigSchema` has **no door at all** — see its own block below.
+
+That split is the point. The ledger's classification question is *"who writes
+
+this schema's input?"*, and it is answered per SCHEMA, not per file; before
+
+批 14 this file's row carried one verdict for both.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/sharing.zod.ts`

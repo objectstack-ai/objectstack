@@ -1,6 +1,6 @@
 {
   "type": "dashboard",
-  "_note": "DashboardSchema (UI, ADR-0021 dataset-bound). Live path: objectui DashboardView → DashboardRenderer → DatasetWidget. Seeded from docs/audits/2026-06-dashboardschema-property-liveness.md and re-verified against objectui HEAD — several audit-era findings are superseded: the ADR-0021 widget migration shipped (Studio WidgetConfigPanel + DashboardRenderer on dataset/dimensions/values, framework#3251; DashboardWidgetSchema is now `.strict()`); `globalFilters`/`dateRange` are LIVE (dashboard-level filters, framework#2501); the `title`↔`label` drift is fixed (renderer falls back to `label`, objectui#2806); the undeclared widget props were reconciled (#1894). objectui paths cited as prose in `note` (not `evidence`). Framework provenance/lock fields auto-classify live (ADR-0010). Widget-level props are classified in the DashboardWidgetSchema subtree, not drilled here. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. 2026-08-03 (#4876): `widgets[].responsive` REMOVED — tombstoned (retiredKey) and stripped by the protocol-17 `dashboard-widget-responsive-removed` conversion. It carries NO row here, deliberately, exactly like `widgets[].performance` in the #3896 sweep: the walk drills only one level through an explicit `children`, and `widgets` declares none, so a widget-level row would be an ORPHAN rather than a classification. That gap — not evidence of liveness — is why this key outlived the sweep; it is filed as #4956 and fixed there, and closing it is what will finally bring the 22 widget-level keys under the ratchet.",
+  "_note": "DashboardSchema (UI, ADR-0021 dataset-bound). Live path: objectui DashboardView → DashboardRenderer → DatasetWidget. Seeded from docs/audits/2026-06-dashboardschema-property-liveness.md and re-verified against objectui HEAD — several audit-era findings are superseded: the ADR-0021 widget migration shipped (Studio WidgetConfigPanel + DashboardRenderer on dataset/dimensions/values, framework#3251; DashboardWidgetSchema is now `.strict()`); `globalFilters`/`dateRange` are LIVE (dashboard-level filters, framework#2501); the `title`↔`label` drift is fixed (renderer falls back to `label`, objectui#2806); the undeclared widget props were reconciled (#1894). objectui paths cited as prose in `note` (not `evidence`) on the dashboard-level entries; the widget children added in #4956 use the realm-marked `evidence` form (`objectui @91757a7: …`) that the gate can attribute. Framework provenance/lock fields auto-classify live (ADR-0010). 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent. 2026-08-03 (#4876): `widgets[].responsive` REMOVED — tombstoned (retiredKey) and stripped by the protocol-17 `dashboard-widget-responsive-removed` conversion. 2026-08-03 (#4956, landed after #4876): the widget subtree is DRILLED — `widgets.children` classifies all 22 authorable DashboardWidgetSchema keys. This SUPERSEDES two sentences that stood here. The first, for a release: 'Widget-level props are classified in the DashboardWidgetSchema subtree, not drilled here' — FALSE in the only way that mattered, because no such subtree existed in any ledger file, the walk drills one level and only through an explicit `children`, and `widgets` declared none, so all 22 keys sat outside the map while the gate printed green; `widgets[].responsive` survived the #3896 sweep on that gap alone, not on evidence. The second, from #4876 itself: that `responsive` deliberately carries NO row here because one would be an ORPHAN. That was correct only while `widgets` was undrilled — the retiredKey tombstone KEEPS the key in the walked shape, so now that the drill has landed the row is REQUIRED (omitting it reports UNCLASSIFIED), and it is present below with the dead verdict the sweep never got to record. The gate now refuses an undeclared container inheritance outright (scripts/liveness/drill.mts), so this class of claim cannot be re-asserted in prose.",
   "props": {
     "name": {
       "status": "live",
@@ -19,8 +19,145 @@
       "note": "objectui: DashboardRenderer.tsx:778-796 — showTitle/showDescription gates + header.actions row."
     },
     "widgets": {
-      "status": "live",
-      "note": "objectui: the widget grid — DashboardRenderer maps each to DatasetWidget/metric/etc. Per-widget props live in the DashboardWidgetSchema subtree (strict, ADR-0021)."
+      "note": "objectui: the widget grid — DashboardRenderer maps each to DatasetWidget/metric/etc. DRILLED since #4956: the 22 authorable keys of the strict DashboardWidgetSchema (ADR-0021) are classified below, one verdict + evidence each, re-measured against objectui @91757a7 and this checkout on 2026-08-03. Before that this entry carried a single blanket `live` and a note claiming the keys were classified 'in the DashboardWidgetSchema subtree' — a subtree that never existed in any of the 28 ledger files — so no widget key had ever been asked the question. That is how `widgets[].responsive` survived the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` (drilled via `children`, judged dead, removed).",
+      "children": {
+        "id": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:298-299 (widget-title i18n key), :401-402 (drag reorder match), :656-667 (render key + design-mode selection / data-widget-id), :733 (sortable id)",
+          "note": "widget identity — the key every per-widget affordance (i18n, reorder, selection, drill) is looked up by."
+        },
+        "title": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:297 + :525 (metric label fallback); packages/plugin-dashboard/src/DatasetWidget.tsx:383,389 (drill-drawer title), :418 (CSV export filename)",
+          "note": "rendered as the widget card heading; also the drill-drawer title and the export filename."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:306-308 (tWidgetDescription → card sub-heading)",
+          "note": "rendered under the widget title, localized per dashboard+widget id."
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/widgetDispatch.ts (classifyWidgetType — series/metric/table/custom families + spec aliases); objectui: packages/plugin-dashboard/src/DashboardRenderer.tsx:419 and :438; objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:169-175",
+          "note": "the render dispatch key — chooses the renderer family and, with it, the grid span."
+        },
+        "chartConfig": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:602-603 (chart-config bag forwarded to the chart renderer)",
+          "note": "chart presentation config; read on the dataset-bound chart path."
+        },
+        "colorVariant": {
+          "status": "dead",
+          "authorWarn": true,
+          "verifiedAt": "2026-08-03",
+          "authorHint": "No dashboard render path reads the top-level `colorVariant`. The inline metric card takes its accent from `options` (MetricWidget's `colorVariant` prop is fed by the `...options` spread in DashboardRenderer), and the ADR-0021 dataset-bound path (DatasetWidget) has no colour affordance at all — so move it under `options`, or drop it.",
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). Every read of `widget.colorVariant` is an AUTHORING surface — WidgetConfigPanel.tsx:407, plugin-designer/DashboardEditor.tsx:266-267, metadata-admin/inspectors/DashboardWidgetInspector.tsx:380, DashboardWithConfig.tsx:113 (config-panel draft) — i.e. the designers write the key back out and no renderer consults it. DashboardRenderer builds the metric/object-metric component schema explicitly (`{ type: 'metric', ...options, label, value }`), so only `options.colorVariant` ever reaches MetricWidget. This repo's own packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts authors it 7 times, which is the cost of the gap being invisible. ADR-0049 enforce-or-remove tracked in #5010."
+        },
+        "requiresObject": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/app-shell/src/views/DashboardView.tsx:143-147 (prunes widgets whose requiresObject is not in the runtime SchemaRegistry)",
+          "note": "client-side capability gate. NOT gated server-side — packages/rest/src/rest-server.ts:1818 names `requiresObject` as deliberately not filtered there, unlike its `requiresService` sibling."
+        },
+        "requiresService": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "packages/rest/src/rest-server.ts:1921-1931 (filterDashboardForUser — ADR-0057 D10), called at :3037 and :3476; packages/rest/src/rest.test.ts:3271-3305",
+          "note": "server-side capability gate: the widget is stripped from the payload when the named kernel service is not registered (fail-open when the kernel cannot be probed). The authoritative half of the pair — read it as the counter-example to judging a widget key from the renderer repo alone."
+        },
+        "actionUrl": {
+          "status": "dead",
+          "authorWarn": true,
+          "verifiedAt": "2026-08-03",
+          "authorHint": "No renderer draws a per-widget action button — only `dashboard.header.actions[]` is dispatched. Move the affordance to a header action, or drop the key.",
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (:242-245 ActionDef build, :282-284 label i18n, :767-792 dispatch) — that is the DashboardHeaderAction schema, a different shape. Nothing anywhere reads `widget.actionUrl`. Note the second-order cost: packages/lint/src/validate-dashboard-action-refs.ts:328-333 enforces reference integrity on this key and its docblock calls it 'the per-widget button', mirroring a runtime dispatch that does not exist — so a dangling target fails the build for an affordance that never renders. ADR-0049 enforce-or-remove tracked in #5010."
+        },
+        "actionType": {
+          "status": "dead",
+          "authorWarn": true,
+          "verifiedAt": "2026-08-03",
+          "authorHint": "Pairs with the dead `actionUrl` — no per-widget action button exists. Use `dashboard.header.actions[]`.",
+          "note": "Same absence as `actionUrl`, same measurement (objectui @91757a7): every `actionType` read in the dashboard renderer belongs to `header.actions[]`. Read only by packages/lint/src/validate-dashboard-action-refs.ts:331 to pick which resolution rule to apply to the (unrendered) `actionUrl`. ADR-0049 enforce-or-remove tracked in #5010."
+        },
+        "actionIcon": {
+          "status": "dead",
+          "authorWarn": true,
+          "verifiedAt": "2026-08-03",
+          "authorHint": "No per-widget action button renders, so its icon reaches nothing. Use `dashboard.header.actions[].icon`.",
+          "note": "The starkest of the three: zero references in either repo outside this schema declaration and one objectui type comment listing spec-derived keys (packages/types/src/complex.ts:676). Not even the action-ref lint looks at it. ADR-0049 enforce-or-remove tracked in #5010."
+        },
+        "filter": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:221 (→ DatasetSelection.runtimeFilter); packages/plugin-dashboard/src/DashboardRenderer.tsx:484,539,567 (inline paths) and :646 (AND-merged with the dashboard-scoped filter)",
+          "note": "presentation-scope filter, ANDed into the dataset query; also the base a dashboard global filter merges into."
+        },
+        "compareTo": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:495 (passed into the object-chart schema); objectui: packages/core/src/utils/compare-to.ts:23-25 — shiftFilterByCompareTo honours all three declared arms; objectui: packages/plugin-charts/src/ObjectChart.tsx:468-477",
+          "note": "LIVE ON ONE PATH ONLY — recorded rather than smoothed over, the `action.disabled` precedent. The inline object-provider chart path honours all three arms ('previousPeriod' / 'previousYear' / { offset }) via shiftFilterByCompareTo. The ADR-0021 dataset-bound path — which the spec calls the single author-facing analytics shape — does NOT: DatasetWidget.tsx:163-168 deliberately DROPS the two string arms, and forwards the `{ offset }` object into DatasetSelection.compareTo, whose contract (packages/spec/src/contracts/analytics-service.ts:104-109) is `{ kind, dimension }` — so packages/services/service-analytics/src/dataset-executor.ts:870-876 throws 'compareTo requires a timeDimension \"undefined\"'. Filed as #5011; do not read this `live` as 'works on a dataset widget'."
+        },
+        "dataset": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:160 (dataset name → queryDataset)",
+          "note": "ADR-0021 binding — the semantic-layer dataset the widget selects from."
+        },
+        "dimensions": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:161, :170-175 (also decides metric vs matrix shape), :267 (posted selection)",
+          "note": "ADR-0021 dimension selection by name."
+        },
+        "values": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:162 (measure names → DatasetSelection.measures)",
+          "note": "ADR-0021 measure selection by name."
+        },
+        "layout": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:210-212 — column-count inference, and :423 the effective grid span with an auto-flow fallback when absent; objectui: packages/plugin-dashboard/src/DashboardGridLayout.tsx",
+          "note": "grid position; absence means auto-place, which is the Studio designer's default path."
+        },
+        "options": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:439 — spread into every component schema; objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:190-191 — declared query keys lowered into the DatasetSelection",
+          "note": "the renderer-extras bag; its four DECLARED keys (dateGranularity / sortBy / sortOrder / limit, framework#3588) reach the analytics query, the rest pass through to the renderer."
+        },
+        "filterBindings": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "objectui @91757a7: packages/core/src/utils/dashboard-filters.ts:343 (resolveBoundField), :380-386 (explicit binding honoured, unbound reported); framework: packages/lint/src/validate-widget-bindings.ts:280",
+          "note": "per-widget binding of a dashboard-level filter to one of this widget's fields, or `false` to opt out (framework#2501)."
+        },
+        "suppressWarnings": {
+          "status": "live",
+          "verifiedAt": "2026-08-03",
+          "evidence": "packages/lint/src/validate-widget-bindings.ts:367 (rule-id suppression consulted by every widget-binding diagnostic; ids emitted at :346, :417, :610, :640)",
+          "note": "build-time only, and that IS its contract — the key exists to silence a named build diagnostic, so the lint reading it is the whole feature (contrast `actionUrl`, where a lint reads the key but the promised runtime affordance does not exist)."
+        },
+        "responsive": {
+          "status": "dead",
+          "verifiedAt": "2026-08-03",
+          "note": "The key this drill exists for. Nothing in either repo ever read `widget.responsive` — DashboardRenderer / DashboardEditor / plugin-designer name it only in comments, and objectui's one real per-breakpoint consumer (useResponsiveConfig) is fed by `page.components[].responsive`. Its literal namesake `view.list.responsive` was judged dead and removed in the 2026-07-30 #3896 sweep precisely because `view` IS drilled through `children`; this one was never asked, and survived on that silence alone. Retired 2026-08-03 via #4876 / PR #4995 (retiredKey tombstone + the protocol-17 `dashboard-widget-responsive-removed` conversion). The row stays because the tombstone keeps the key in the walked shape — the rls.priority precedent — and no authorWarn is needed: authoring it is now a tsc error and a parse error."
+        },
+        "aria": {
+          "status": "dead",
+          "authorWarn": true,
+          "verifiedAt": "2026-08-03",
+          "authorHint": "Declared ARIA attributes never reach the DOM on a dashboard widget — no renderer applies them. Delete the key; the renderer emits its own aria-* attributes.",
+          "note": "CALL GRAPH CLOSED BY HAND 2026-08-03 across both repos: no consumer of `widget.aria` anywhere. The `aria-*` attributes in DashboardRenderer / DatasetWidget are the renderer's own DOM attributes, and objectui's one `.aria` read (plugin-view/src/ObjectView.tsx:989) is the VIEW's. Same false-compliance shape as the dashboard-level `aria` removed in the #3896 sweep — an accessibility guarantee an author can declare and nothing honours. ADR-0049 enforce-or-remove tracked in #5010."
+        }
+      }
     },
     "columns": {
       "status": "live",
