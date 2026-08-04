@@ -736,6 +736,7 @@
     "data/FilePersistenceConfig",
     "data/FileReferenceIdValue",
     "data/FileValue",
+    "data/FilterArray",
     "data/FilterCondition",
     "data/FormatValidation",
     "data/FullTextSearch",

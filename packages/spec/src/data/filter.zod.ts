@@ -419,8 +419,16 @@ export const NormalizedFilterSchema: z.ZodType<NormalizedFilter, NormalizedFilte
  * carries. `ui/` imports `data/`, so this file cannot import that vocabulary to
  * derive from it; `filter-view-operator-parity.test.ts` asserts the coverage
  * instead. Do not hand-add a view operator without running it.
+ *
+ * Typed with `satisfies` rather than an `Record< string, string >` annotation so
+ * the KEY SET survives inference: {@link FilterArrayOperator} is
+ * `keyof typeof AST_OPERATOR_MAP`, which is how the authoring type for a
+ * comparison node's operator position stays derived from this one table instead
+ * of becoming the third hand-written copy of the vocabulary (#3948 is what two
+ * copies cost). Lookups by a runtime `string` go through
+ * {@link astOperatorLowering}.
  */
-const AST_OPERATOR_MAP: Record<string, string> = {
+const AST_OPERATOR_MAP = {
   '=': '$eq',
   '==': '$eq',
   'equals': '$eq',
@@ -476,7 +484,19 @@ const AST_OPERATOR_MAP: Record<string, string> = {
   'is_not_empty': '$null',
   'isempty': '$null',
   'isnotempty': '$null',
-};
+} satisfies Record<string, string>;
+
+/**
+ * `$`-operator lowering for one infix spelling, or `undefined` when the spelling
+ * is not in the vocabulary.
+ *
+ * {@link AST_OPERATOR_MAP} keeps its literal key set (see its note), so it can
+ * no longer be indexed by an arbitrary runtime `string`. This is the one place
+ * that widens it back, so the widening is visible instead of scattered.
+ */
+function astOperatorLowering(op: string): string | undefined {
+  return (AST_OPERATOR_MAP as Record<string, string>)[op];
+}
 
 /**
  * Set of valid AST comparison operators (case-insensitive).
@@ -527,7 +547,7 @@ export function canonicalAstOperator(op: string): string {
   // the wildcards. Folding them onto `contains` would silently wrap the value in
   // `%…%` and change what the query means.
   if (lower === 'like' || lower === 'ilike') return lower;
-  const dollar = AST_OPERATOR_MAP[lower];
+  const dollar = astOperatorLowering(lower);
   if (!dollar) return lower;
   return CANONICAL_INFIX[dollar] ?? lower;
 }
@@ -608,7 +628,7 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
     return { [field]: { $null: false } } as FilterCondition;
   }
 
-  const mapped = AST_OPERATOR_MAP[op];
+  const mapped = astOperatorLowering(op);
   if (mapped) {
     return { [field]: { [mapped]: value } } as FilterCondition;
   }
@@ -675,6 +695,182 @@ export function parseFilterAST(filter: unknown): FilterCondition | undefined {
 
   return undefined;
 }
+
+// ============================================================================
+// FilterArray — the INPUT-ONLY authoring sugar (#5158, maintainer ruling C)
+// ============================================================================
+
+/**
+ * Canonical operator spellings a {@link FilterArrayComparison} may carry.
+ *
+ * Derived from {@link AST_OPERATOR_MAP} — the same table `VALID_AST_OPERATORS`
+ * is derived from — so the authoring type cannot drift from the lowering the
+ * way two hand-written lists did in #3948.
+ *
+ * **Canonical, not exhaustive-of-what-parses.** Every door folds case before
+ * looking an operator up, so already-stored metadata and older authoring tools
+ * legitimately carry camelCase spellings (`startsWith`, `notEquals`,
+ * `greaterThan`) that this type does not name. {@link FilterArraySchema}
+ * accepts them; this type steers new producers to the canonical form. That
+ * split is the established pattern next door — `ViewFilterOperator` names the
+ * canonical vocabulary while `VIEW_FILTER_OPERATOR_ALIASES` (`ui/view.zod.ts`)
+ * carries the deprecated bridge — not a new convention.
+ */
+export type FilterArrayOperator = keyof typeof AST_OPERATOR_MAP;
+
+/**
+ * The two keywords that open a {@link FilterArrayGroup}. Matched
+ * case-insensitively at every door, so a field genuinely named `and` or `or`
+ * cannot occupy a comparison node's field position — see
+ * {@link FilterArraySchema}.
+ */
+export const FILTER_ARRAY_LOGIC_KEYWORDS = ['and', 'or'] as const;
+
+/** `'and' | 'or'` — see {@link FILTER_ARRAY_LOGIC_KEYWORDS}. */
+export type FilterArrayLogicKeyword = typeof FILTER_ARRAY_LOGIC_KEYWORDS[number];
+
+/**
+ * One comparison: `[field, operator, value]`.
+ *
+ * The two-element form is real and deliberate — the null predicates take their
+ * direction from the operator NAME, so `['deleted_at', 'is_null']` carries no
+ * value to give. `convertComparison` ignores the value position for those, and
+ * every door accepts the short form.
+ */
+export type FilterArrayComparison =
+  | [field: string, operator: FilterArrayOperator, value: unknown]
+  | [field: string, operator: FilterArrayOperator];
+
+/** `['and' | 'or', ...conditions]` — at least one condition, or it joins nothing. */
+export type FilterArrayGroup =
+  [logic: FilterArrayLogicKeyword, first: FilterArray, ...rest: FilterArray[]];
+
+/** `[[…], […]]` — a bare list of conditions, combined with implicit AND. */
+export type FilterArrayList = [first: FilterArray, ...rest: FilterArray[]];
+
+/**
+ * **Input-only** authoring sugar for a filter: the nested tuple/group array form
+ * that React block props (`filters={['status', '=', stage]}`), the client
+ * `FilterBuilder`, and the wire `$filter` face accept.
+ *
+ * ## It is sugar, and it is INPUT-only
+ *
+ * A `FilterArray` is not a storage shape and not a protocol shape. It is
+ * lowered to a {@link FilterCondition} at the single sink
+ * {@link parseFilterAST} (`@objectstack/spec/data`) the moment it arrives, and
+ * only the lowered `FilterCondition` travels any further. `where` on a query
+ * (`QuerySchema`, `data/query.zod.ts`) is a `FilterCondition` and **stays** one:
+ * this shape is deliberately NOT part of that union, so nothing downstream — no
+ * driver, no transport, no stored row — ever has to understand two filter
+ * dialects. `filter-array-declaration.test.ts` pins that exclusion.
+ *
+ * Why it is declared here at all: four published contracts (three READMEs,
+ * `llms.txt`, four skills, this package's own react-blocks prop table) have been
+ * teaching authors to write `FilterArray` while the protocol never declared it —
+ * a name with no definition, which is a pure trap for an AI author following the
+ * contract it was given. #5158's ruling C keeps the ergonomics and gives the
+ * name a definition, rather than widening the wire contract (rejected option A)
+ * or tearing up the published contracts (rejected option B).
+ *
+ * ## Producers, measured
+ *
+ * - `FilterBuilder` (`@objectstack/client`) — emits comparison tuples and
+ *   `['and', ...]` groups.
+ * - React block props declared `FilterArray` in `ui/react-blocks.ts`
+ *   (`ListView.filters`, `ObjectChart.filter`).
+ * - The wire `$filter` face — `metadata-protocol` runs {@link isFilterAST} and
+ *   converts through {@link parseFilterAST}, or answers `400 INVALID_FILTER`.
+ *
+ * @example
+ * // Comparison
+ * const f: FilterArray = ['status', '=', 'active'];
+ * @example
+ * // Group
+ * const g: FilterArray = ['and', ['stage', '=', 'won'], ['amount', '>', 1000]];
+ * @example
+ * // Bare list, implicit AND
+ * const l: FilterArray = [['stage', '=', 'won'], ['amount', '>', 1000]];
+ *
+ * @see parseFilterAST — the single lowering sink; the ONLY way this shape
+ *   becomes something the runtime stores or executes.
+ * @see FilterCondition — what it lowers to, and what `where` actually holds.
+ * @see https://github.com/objectstack-ai/objectstack/issues/5158
+ */
+export type FilterArray = FilterArrayComparison | FilterArrayGroup | FilterArrayList;
+
+/** Field position: non-empty, and never a logic keyword (that reading is taken). */
+const FilterArrayFieldSchema = z.string().min(1).refine(
+  (field) => !(FILTER_ARRAY_LOGIC_KEYWORDS as readonly string[]).includes(field.toLowerCase()),
+  {
+    message:
+      `'and' / 'or' in the first position open a logical group, so they cannot name a field. `
+      + `Write the comparison inside the group: ["and", ["field", "=", value]].`,
+  },
+);
+
+/** Operator position: the vocabulary `isFilterAST` gates on, folded the same way. */
+const FilterArrayOperatorSchema = z.string().refine(
+  (op) => VALID_AST_OPERATORS.has(op.toLowerCase()),
+  {
+    error: (issue) =>
+      `Unknown filter operator '${String(issue.input)}'. Recognised operators: `
+      + `${[...VALID_AST_OPERATORS].sort().join(', ')}.`,
+  },
+);
+
+/** Logic keyword position, folded case-insensitively like every door folds it. */
+const FilterArrayLogicSchema = z.string().refine(
+  (kw) => (FILTER_ARRAY_LOGIC_KEYWORDS as readonly string[]).includes(kw.toLowerCase()),
+  { message: `A logical group opens with 'and' or 'or'.` },
+);
+
+/**
+ * Zod schema for {@link FilterArray} — the authoring gate for the input-only
+ * sugar. Recursive, so the type above is written out by hand and this is
+ * annotated with it (the #4171 rule: a `z.ZodType< any >` annotation would throw
+ * the type away silently). Both type arguments are given (#4195) — no
+ * `.default()`, no `.transform()`, so input and output are the same shape.
+ *
+ * ## Relationship to `isFilterAST`
+ *
+ * {@link isFilterAST} stays the RUNTIME detector at the doors; this is the
+ * stricter AUTHORING gate. They share one operator vocabulary and one case
+ * fold, and differ in exactly TWO places — each a shape `isFilterAST` tolerates
+ * by accident and no measured producer emits, both pinned in
+ * `filter-array-declaration.test.ts` so the list cannot silently grow:
+ *
+ * | shape | `isFilterAST` | this schema |
+ * |---|---|---|
+ * | `['a', '=', 1, 2]` (trailing elements) | accepts, `convertComparison` drops the tail | rejects |
+ * | `['', '=', 1]` (empty field name) | accepts | rejects |
+ *
+ * An empty `[]` is refused by both, and is called out because the flat-list
+ * branch would otherwise swallow it: `[]` means "no filter", which is the
+ * absence of this shape rather than an instance of it.
+ *
+ * Nothing consumes this schema as a door predicate today. It is the declaration
+ * the published contracts were already citing, and the gate an authoring/publish
+ * lint can hold producers to.
+ */
+export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() =>
+  z.union([
+    // Comparison — three-element form, then the two-element null-predicate form.
+    z.tuple([FilterArrayFieldSchema, FilterArrayOperatorSchema, z.unknown()]),
+    z.tuple([FilterArrayFieldSchema, FilterArrayOperatorSchema]),
+    // Logical group: the keyword plus at least one condition.
+    z.tuple([FilterArrayLogicSchema, FilterArraySchema], FilterArraySchema),
+    // Legacy flat list of conditions, implicit AND. `.min(1)` because an empty
+    // array means "no filter", not "a filter that matches nothing".
+    z.array(FilterArraySchema).min(1),
+  ]).describe(
+    'Input-only authoring sugar for a filter: [field, operator, value], '
+    + '["and"|"or", ...conditions], or a bare list of those. Lowered to a '
+    + 'FilterCondition at the single sink parseFilterAST (@objectstack/spec/data) '
+    + 'the moment it arrives; it is never stored and never travels the wire as '
+    + 'an array. A query "where" is a FilterCondition and does not accept this '
+    + 'shape (#5158).'
+  )
+) as z.ZodType<FilterArray, FilterArray>;
 
 // ============================================================================
 // Constants & Metadata
