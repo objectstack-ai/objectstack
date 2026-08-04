@@ -104,8 +104,25 @@ export interface CubeMeta {
 export interface DatasetCompareTo {
     /** previousPeriod = equal-length window immediately before; previousYear = same window −1y. */
     kind: 'previousPeriod' | 'previousYear';
-    /** The time dimension (by name) whose dateRange is shifted. */
-    dimension: string;
+    /**
+     * The time dimension (by name) whose `dateRange` is shifted.
+     *
+     * **Optional since #5011, resolved by the EXECUTOR — not by any consumer.**
+     * When omitted the executor takes the selection's shiftable time dimensions
+     * (its own long-standing criterion: a `timeDimensions` entry carrying a
+     * `dateRange`) and:
+     *
+     * - exactly one candidate → that one is shifted;
+     * - zero candidates → throws, saying a comparison needs a dated window;
+     * - two or more → throws, listing the candidates by name so the author can
+     *   pick one.
+     *
+     * The ambiguous and empty cases are LOUD by design. A consumer must never
+     * paper over them by guessing a dimension (PD #12): the resolution rule
+     * lives at the producer of the comparison — the executor — precisely so
+     * every caller gets the same answer or the same error.
+     */
+    dimension?: string;
 }
 
 /**
