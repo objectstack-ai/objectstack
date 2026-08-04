@@ -461,6 +461,147 @@ function unsupportedFilterError(message: string): Error {
   return err;
 }
 
+/**
+ * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
+ * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
+ * `data/filter.zod.ts`), else `null`.
+ *
+ * The predicate deliberately mirrors `@objectstack/formula`'s `resolveValue`
+ * (`matches-filter.ts`): an object, not an array, carrying a `$field` key. The
+ * two execution paths must agree on **what a field reference is**; they differ
+ * only in what they DO with one — the in-memory evaluator resolves it against
+ * the record, this driver refuses it (below). A driver that recognised a
+ * narrower shape than the evaluator would silently bind the remainder as
+ * literal values again, which is precisely the defect being closed.
+ */
+function fieldReferenceOf(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const ref = (value as Record<string, unknown>).$field;
+  return typeof ref === 'string' ? ref : null;
+}
+
+/**
+ * [#5041] `{ $field }` reached a comparison this driver compiles to SQL.
+ *
+ * `FieldReferenceSchema` is declared in the spec and really is PRODUCED —
+ * `compileCelToFilter` emits `{ $field: path }` for a field-to-field comparison
+ * in a CEL permission/RLS rule — but the only implementation in the repo is the
+ * in-memory evaluator. Pushed down to SQL, the reference object was handed to
+ * Knex as a BIND VALUE, so sqlite answered with a bare `TypeError` ("can only
+ * bind numbers, strings, bigints, buffers, and null") carrying no `code` and no
+ * `status` — outside the ADR-0112 envelope every sibling filter refusal in this
+ * driver speaks, and therefore served as an opaque 500-shaped body.
+ *
+ * Refusing loudly is the whole fix here (maintainer adjudication on #5041):
+ * column-to-column compilation is a capability tracked separately, and until it
+ * lands the honest answer to "this filter cannot run on this backend" is the
+ * catalogued `INVALID_FILTER`, not a crash and not a silent wrong answer.
+ */
+function crossFieldComparisonError(field: string, op: string, ref: string, index?: number): Error {
+  const position = index === undefined ? '' : ` at index ${index} of its value list`;
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" compares against another field ` +
+      `({ "$field": "${ref}" })${position}. Cross-field comparison is currently supported ` +
+      `only on the in-memory evaluation path (matchesFilter); it cannot be compiled to SQL, ` +
+      `so this filter cannot be pushed down to the database. Compare against a literal value ` +
+      `instead, or evaluate the rule in memory.`,
+  );
+}
+
+/**
+ * [#5041] Operators whose comparand is a single bound VALUE, in both spellings
+ * this driver accepts — the Filter Protocol `$`-form read by
+ * {@link SqlDriver.applyFilterCondition} and the canonicalised infix form read
+ * by {@link SqlDriver.applyAstComparison}.
+ *
+ * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
+ * ABSENT: an array is their legitimate comparand, and they compile through
+ * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected
+ * (for `$field`), never their arity — the existing descriptive `$between`
+ * refusal stays the one that answers a malformed range.
+ */
+const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+  '=', '==', '!=', '<>', '>', '>=', '<', '<=', 'like', 'ilike',
+]);
+
+/**
+ * Can this value be handed to a driver as a bound parameter at all?
+ *
+ * Same classification the write path applies in `formatInput` — anything that
+ * is not a primitive, a `Date` or a binary buffer is a shape better-sqlite3
+ * refuses outright and the other dialects mangle. (`ArrayBuffer.isView` covers
+ * `Buffer`, which is a `Uint8Array`.)
+ */
+function isBindableComparand(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  const kind = typeof value;
+  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+  return value instanceof Date || ArrayBuffer.isView(value);
+}
+
+/**
+ * [#5041] The one gate every comparison comparand passes before it becomes a
+ * bind parameter, covering both halves of the gap the issue measured:
+ *
+ * 1. **`{ $field }`** — declared, produced, and implemented only in memory.
+ *    Refused wherever it appears, including inside an `$in` / `$nin` / `$between`
+ *    list. The list case matters more than it looks: a `$field` member did not
+ *    even crash — the query compiled, ran, and returned ZERO ROWS. A silent
+ *    wrong answer is what #3948 / #4209 settled is strictly worse than an error
+ *    on a permission-scoped read.
+ *
+ * 2. **The general arm** — a known operator whose comparand is a shape no
+ *    dialect can bind (a plain object, an array where one value belongs). The
+ *    issue noted this branch had no rejection arm at all; measured, every such
+ *    shape produced the same bare `TypeError`. Scoped to
+ *    {@link SCALAR_COMPARAND_OPERATORS} so the legitimate array binds keep
+ *    working untouched.
+ *
+ * Deliberately NOT extended to two neighbouring shapes, both of which return
+ * zero rows today rather than failing to bind: a non-`$field` object MEMBER of
+ * an `$in`/`$nin` list, and the `LIKE` family (`$contains`/`$startsWith`/…),
+ * which stringifies its comparand to `[object Object]`. Those are a different
+ * defect class — a filter applied nonsensically, not one that cannot be applied
+ * — and their direction is fail-closed (they narrow the result set, so they are
+ * not a filter bypass). Widening this guard to cover them would change the
+ * behaviour of paths that do not throw today, beyond what #5041 measured; see
+ * the #5041 PR discussion for the measurement.
+ */
+function assertCompilableComparand(field: string, op: string, value: unknown): void {
+  const ref = fieldReferenceOf(value);
+  if (ref !== null) throw crossFieldComparisonError(field, op, ref);
+
+  if (Array.isArray(value)) {
+    for (const [index, member] of value.entries()) {
+      const memberRef = fieldReferenceOf(member);
+      if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, index);
+    }
+    // An array IS the comparand for the list operators; only a scalar operator
+    // is wrong to receive one, and that falls through to the check below.
+  }
+
+  if (!SCALAR_COMPARAND_OPERATORS.has(op) || isBindableComparand(value)) return;
+
+  throw unsupportedFilterError(
+    `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
+      `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
+      `bound as a SQL parameter. Use a string, number, boolean, null, Date or binary value; ` +
+      `for a list use $in/$nin, and for a range use $between.`,
+  );
+}
+
+/** A short, non-throwing rendering of an offending comparand for the message. */
+function safeShapePreview(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== 'string') return typeof value;
+    return json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    return typeof value;
+  }
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -5216,6 +5357,9 @@ export class SqlDriver implements IDataDriver {
       for (const [key, value] of Object.entries(filters)) {
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
         const column = this.remoteColumn(table, key, key);
+        // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
+        // so it is a comparison emitter too and gets the same gate.
+        assertCompilableComparand(column, '=', value);
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -5381,6 +5525,13 @@ export class SqlDriver implements IDataDriver {
     // driver and driver-memory drifted apart. #3948.
     const opLower = canonicalAstOperator(String(op));
 
+    // #5041 — the array (`[field, op, value]`) spelling reaches Knex through a
+    // different emitter than the Filter Protocol one, and measured identically:
+    // `[['amount', 'gt', { $field: 'budget' }]]` also threw a bare TypeError.
+    // One filter condition gets one answer however it was spelled, so the same
+    // gate runs here, on the RAW value (pre-coercion).
+    assertCompilableComparand(field, opLower, rawValue);
+
     // Value comparisons on a mixed-storage column read it through the CASE; every
     // other operator (null predicates, the LIKE family, a malformed `between`)
     // declines and falls through to the ordinary handling below.
@@ -5535,6 +5686,10 @@ export class SqlDriver implements IDataDriver {
         const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // #5041 — reject a comparand that cannot become a bind parameter
+          // BEFORE any rewrite or coercion touches it, so the message names the
+          // shape the caller actually sent.
+          assertCompilableComparand(field, rawOp, opValue);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —

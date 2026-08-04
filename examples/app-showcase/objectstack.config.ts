@@ -234,13 +234,14 @@ export default defineStack({
   },
   jobs: allJobs,
   emailTemplates: allEmails,
-  // Declarative REST endpoints — SUSPENDED and therefore EMPTY (#4936). The
-  // two definitions this used to carry are preserved, commented, in
-  // src/system/apis/index.ts with the full rationale: the surface parsed
-  // perfectly and executed nothing, so a non-empty `apis:` is now rejected at
-  // publish/validate. The code-mounted recalc endpoint
-  // (src/system/server/recalc-endpoint.ts) is the working path meanwhile; the
-  // executor that makes this key usable again is tracked by #5040.
+  // Declarative REST endpoints (object_operation + flow) — LIVE again since
+  // #5040 landed the executor and E7 narrowed #4936's blanket refusal to
+  // per-endpoint publish gates. Both paths sit under this app's ADR-0121 D1
+  // carve-out `/api/v1/apps/<manifest.namespace>/…`, which is why
+  // `manifest.namespace: 'showcase'` above is load-bearing rather than
+  // decorative: publish rejects an `apis:` block without it. See
+  // src/system/apis/ for the declarations and the `authRequired` reasoning;
+  // src/system/server/recalc-endpoint.ts remains the code-mounted counterpart.
   apis: allApis,
   // Declarative `connectors:` — both kinds (ADR-0097): provider-bound
   // INSTANCES (StatusApiConnector via `rest`; StatusOpenApiConnector via

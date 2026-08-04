@@ -63,42 +63,89 @@ describe('showcase gap fill — named import mapping (#2611)', () => {
 });
 
 /**
- * [#4936] Declarative api endpoints — the showcase declares NONE, on purpose.
+ * [#5040 E8 / #5112] Declarative api endpoints — declared again, and now LIVE.
  *
- * This block used to assert the opposite: that `showcase_task_feed` and
- * `showcase_inquiry_purge_api` were wired into the stack. They were — and that
- * was the problem. The metadata loaded perfectly (`GET /api/v1/meta/api`
- * returned both) while a real boot answered a bare 404 on each declared path,
- * because no route was ever mounted and the dispatcher branch behind them
- * called a `matchEndpoint` that no implementation provided. Every key was
- * declared ≠ enforced, `authRequired: true` included.
+ * The history in three lines, because it is the reason these assertions look
+ * the way they do. Originally: "both endpoints are wired into the stack" — true,
+ * and exactly the problem, because the metadata loaded perfectly while a real
+ * boot answered a bare 404 on each declared path (#4936: nothing mounted them,
+ * and the dispatcher branch behind them called a `matchEndpoint` no
+ * implementation provided). Then, for one release: "the stack declares NONE",
+ * asserting an empty `apis:`, because a non-empty one was refused at publish.
+ * Now: declared again, with the executor behind them.
  *
- * So the assertion is inverted rather than deleted. A test that merely stopped
- * checking would let the endpoints drift back in silently; this one fails if
- * they do — which matters because re-adding them is no longer just inert, it
- * now breaks `objectstack validate` for the whole example.
+ * These are STATIC assertions about the declaration — the executable proof that
+ * the endpoints actually answer lives where it can only be answered, on a real
+ * boot: `packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`.
+ * Keeping the two apart is deliberate: a static test that claims runtime
+ * behaviour is what #4936 caught, and no assertion in this file can tell you a
+ * route is mounted.
  */
-describe('[#4936] showcase declares no executable-less api endpoints', () => {
-  it('ships an EMPTY `apis:` — the shape publish/validate still accepts', () => {
+describe('[#5112] showcase declares its api endpoints again (#5040 E8)', () => {
+  it('is wired into the stack definition', () => {
     const apis = (stack as { apis?: Array<{ name: string }> }).apis ?? [];
-    expect(
-      apis,
-      'A non-empty `apis:` is rejected at publish/validate (#4936): the runtime has no ' +
-        'executor for declarative endpoints, so declaring one would fail `objectstack ' +
-        'validate` AND advertise a capability that does not exist (Prime Directive #10). ' +
-        'The two definitions this example used to ship are preserved, commented, in ' +
-        'src/system/apis/index.ts — restore them in the same PR that lands the executor (#5040).',
-    ).toEqual([]);
+    expect(apis.map((a) => a.name)).toEqual(
+      expect.arrayContaining(['showcase_task_feed', 'showcase_inquiry_purge_api']),
+    );
   });
 
-  it('still demonstrates HTTP endpoints the honest way — in code', () => {
-    // The replacement path the coverage waiver points at. If this file ever
-    // disappears the waiver is lying too, so pin it here rather than trusting
-    // the note alone. (vitest runs with cwd = the package root, as
+  it('declares every path inside this app’s ADR-0121 D1 namespace carve-out', () => {
+    // The one edit the restoration made to the pre-#4936 declarations, and the
+    // gate publish enforces: a path outside `/api/v1/apps/<namespace>/` parses
+    // fine and matches NOTHING, because the endpoint step only ever consults
+    // declarations under that mount.
+    const namespace = (stack as { manifest?: { namespace?: string } }).manifest?.namespace;
+    expect(namespace, '`apis:` requires an explicit manifest.namespace (ADR-0121 D2)').toBe('showcase');
+    const apis = (stack as { apis?: Array<{ name: string; path: string }> }).apis ?? [];
+    for (const api of apis) {
+      expect(api.path, `endpoint '${api.name}' must live under this app's carve-out`).toMatch(
+        new RegExp(`^/api/v1/apps/${namespace}/.+`),
+      );
+    }
+  });
+
+  it('opens no anonymous surface — every endpoint is session-gated', () => {
+    // `authRequired` DEFAULTS to true, so this passes for an omitted key too.
+    // The assertion is about `false`: it is the only thing that opens an
+    // anonymous execution entry point, and ADR-0121 D6 pairs it with a
+    // mandatory ARMED rate limit. Neither of these endpoints was ever
+    // anonymous; an example must not grow a public surface it never had.
+    const apis = (stack as { apis?: Array<{ name: string; authRequired?: boolean; rateLimit?: { enabled?: boolean } }> }).apis ?? [];
+    for (const api of apis) {
+      if (api.authRequired === false) {
+        expect(
+          api.rateLimit?.enabled,
+          `endpoint '${api.name}' is anonymous, so ADR-0121 D6 requires an ARMED rateLimit`,
+        ).toBe(true);
+      }
+    }
+    expect(apis.filter((a) => a.authRequired === false)).toEqual([]);
+  });
+
+  it('flow-typed endpoints target flows that actually exist (no 500 at dispatch)', () => {
+    const apis = (stack as { apis?: Array<{ type: string; target: string }> }).apis ?? [];
+    const flowNames = ((stack as { flows?: Array<{ name: string }> }).flows ?? []).map((f) => f.name);
+    for (const api of apis.filter((a) => a.type === 'flow')) {
+      expect(flowNames, `api endpoint targets missing flow '${api.target}'`).toContain(api.target);
+    }
+  });
+
+  it('object_operation endpoints target objects that exist', () => {
+    const apis = (stack as { apis?: Array<{ type: string; target: string }> }).apis ?? [];
+    const objectNames = ((stack as { objects?: Array<{ name: string }> }).objects ?? []).map((o) => o.name);
+    for (const api of apis.filter((a) => a.type === 'object_operation')) {
+      expect(objectNames, `api endpoint targets missing object '${api.target}'`).toContain(api.target);
+    }
+  });
+
+  it('still demonstrates HTTP endpoints in code as well', () => {
+    // The code-mounted counterpart the coverage note points at. If this file
+    // ever disappears the note is lying too, so pin it here rather than
+    // trusting the prose alone. (vitest runs with cwd = the package root, as
     // test/coverage.test.ts also relies on.)
     expect(
       existsSync(`${process.cwd()}/src/system/server/recalc-endpoint.ts`),
-      "the code-mounted endpoint is the showcase's live HTTP proof",
+      'the code-mounted endpoint is the showcase’s other live HTTP proof',
     ).toBe(true);
   });
 });
