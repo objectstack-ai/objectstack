@@ -18,7 +18,7 @@ import {
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
 } from './component.zod';
-import { PageComponentSchema } from './page.zod';
+import { PageComponentSchema, PageSchema } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -863,5 +863,74 @@ describe('ComponentPropsMap record:chatter', () => {
     });
     expect(result.types).toEqual(['comment', 'field_change', 'task']);
     expect(result.unifiedTimeline).toBe(true);
+  });
+});
+
+/**
+ * ── #4001 批 17: the `no gate` verdict, pinned ──────────────────────────────
+ *
+ * These schemas are NOT a pending `.strict()` batch. Nothing parses them, so
+ * closing them would enforce nothing (#4583). The full measurement and the
+ * reasoning live in `component.zod.ts`'s file header and in the `ui/` tables of
+ * `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+ *
+ * This block exists so the verdict cannot outlive its truth. Each assertion is
+ * written to go RED the day the world changes underneath it — at which point the
+ * correct response is to update all three places together, not to relax the test.
+ */
+describe('#4001 批 17 — component props are `no gate` (carrier live, parse absent)', () => {
+  it('the carrier is still an OPEN bag — goes red the day `properties` gets a typed dispatch', () => {
+    // `PageComponentSchema` is `.strict().transform(…)`, so unwrap the pipe to
+    // reach the object shape.
+    const def = (PageComponentSchema as any)._zod.def;
+    const shape = def.type === 'pipe' ? def.in._zod.def.shape : def.shape;
+    // `properties` is `z.record(z.string(), z.unknown()).optional().default({})`.
+    let node = shape.properties;
+    while (node?._zod?.def?.innerType) node = node._zod.def.innerType;
+    expect(node._zod.def.type).toBe('record');
+    // The value type must still be the fully-open `unknown`. A dispatch on
+    // `type` (the #5068 fix) replaces this, and that is the signal to reclassify
+    // this file back to `authorable` and schedule the ratchet.
+    expect(node._zod.def.valueType._zod.def.type).toBe('unknown');
+  });
+
+  it('an unknown key inside `properties` survives the LIVE page parse — with the strict sibling as negative control', () => {
+    const page = {
+      name: 'batch17_probe',
+      label: 'Probe',
+      type: 'home' as const,
+      regions: [
+        { name: 'header', components: [{ type: 'page:header', properties: { title: 'T' } }] },
+      ],
+    };
+
+    // A. unknown key INSIDE the carrier slot — accepted AND retained today.
+    const inside = structuredClone(page) as any;
+    inside.regions[0].components[0].properties.zzUndeclared = 'x';
+    const a = PageSchema.safeParse(inside);
+    expect(a.success).toBe(true);
+    expect((a as any).data.regions[0].components[0].properties.zzUndeclared).toBe('x');
+
+    // B. NEGATIVE CONTROL — the same key one level out, on the component node
+    // itself, which IS strict (ADR-0089 D3a). If this ever stops failing, the
+    // assertion above proves nothing and this whole block is measuring air.
+    const outside = structuredClone(page) as any;
+    outside.regions[0].components[0].zzUndeclared = 'x';
+    expect(PageSchema.safeParse(outside).success).toBe(false);
+  });
+
+  it('every ComponentPropsMap entry is still non-strict — a sweep that closes them without wiring #5068 fails here', () => {
+    const stillOpen: string[] = [];
+    for (const [type, schema] of Object.entries(ComponentPropsMap)) {
+      const def = (schema as any)._zod.def;
+      // zod records an unknown-key policy on the object def; `.strict()` sets a
+      // `never` catchall. Anything else means the site is still open.
+      if (def.catchall?._zod?.def?.type === 'never') continue;
+      stillOpen.push(type);
+    }
+    // All 31 registered component types are open. When #5068 wires the parse and
+    // a later batch closes them, this expectation flips — update the verdict in
+    // component.zod.ts and the ledger in the same PR.
+    expect(stillOpen.length).toBe(Object.keys(ComponentPropsMap).length);
   });
 });

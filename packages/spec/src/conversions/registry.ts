@@ -2285,6 +2285,117 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].compareTo (#5011) — a VOCABULARY convergence, not a
+ * removal: the widget's three declared arms are replaced by the one shape the
+ * analytics executor implements, `{ kind, dimension? }`
+ * (`DatasetSelection.compareTo`).
+ *
+ * Why a conversion rather than a plain tombstone: two of the three arms have an
+ * exact target, so leaving them for the author to retype would be make-work on
+ * a rewrite a machine can prove.
+ *
+ *   'previousPeriod'   → { kind: 'previousPeriod' }   value verbatim, container changed
+ *   'previousYear'     → { kind: 'previousYear' }     value verbatim, container changed
+ *   { offset: '1y' }   → { kind: 'previousYear' }     '1y' IS previousYear, by definition
+ *
+ * `dimension` is deliberately NOT synthesised. The conversion sees a stack, not
+ * a dataset — it cannot know which time dimension carries the window — and it
+ * does not need to: `dimension` is optional precisely so the executor can
+ * resolve it (one dated candidate) or refuse loudly (zero, or several). Writing
+ * a guess here would convert a loud runtime error into a wrong comparison.
+ *
+ * Every OTHER `{ offset }` (`'7d'`, `'1M'`, `'2w'`, …) is left UNTOUCHED, on
+ * purpose. There is no faithful target: `previousPeriod` shifts by the resolved
+ * window's own length, which equals `7d` only when the window happens to be
+ * seven days. Rewriting it would silently change which rows the comparison
+ * column counts — the failure class this issue exists to end. So the source
+ * keeps the key, the strict schema rejects it with `COMPARE_TO_OFFSET_RETIRED`
+ * (which prescribes kind + filter-window), and the residue is declared as the
+ * `dashboard-widget-compareto-offset` semantic migration.
+ *
+ * Measured before writing (#5011's adjudication asked for stored/authored
+ * instances first): repo-wide, four authored instances, all of them the string
+ * form, all in `examples/app-crm`; ZERO `{ offset }` instances in either repo.
+ * Expected — a canonical-path author who tried `{ offset }` got a thrown widget,
+ * so it could never accumulate there.
+ *
+ * `retiredFromLoadPath: true`: the old spellings get NO acceptance window. An
+ * auto-converting loader would let `compareTo: 'previousPeriod'` keep parsing
+ * clean, which is the lenient-consumer shape PD #12 forbids and the exact
+ * dynamic that let the widget and executor vocabularies drift apart unnoticed
+ * for a whole major. Stored `sys_metadata` rows are still covered — every
+ * rehydration seam replays retired entries via `applyConversionsToStoredItem`
+ * (#3903).
+ */
+const dashboardWidgetCompareToConverged: MetadataConversion = {
+  id: 'dashboard-widget-compareto-converged',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.widgets[].compareTo',
+  summary:
+    "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract "
+    + "(#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
+    + 'durations have no faithful target and are reported, not guessed)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const widget = w as Record<string, unknown>;
+        if (!('compareTo' in widget)) return w;
+        const cmp = widget.compareTo;
+        const at = `${path}.widgets[${i}].compareTo`;
+
+        // Arm 1/2 — the bare string form. The value survives verbatim.
+        if (cmp === 'previousPeriod' || cmp === 'previousYear') {
+          emit({ from: `'${cmp}'`, to: `{ kind: '${cmp}' }`, path: at });
+          touched = true;
+          return { ...widget, compareTo: { kind: cmp } };
+        }
+
+        // Arm 3 — `{ offset }`, and only the one duration with an exact target.
+        if (cmp && typeof cmp === 'object' && !Array.isArray(cmp)) {
+          const offset = (cmp as Record<string, unknown>).offset;
+          if (offset === '1y') {
+            emit({ from: "{ offset: '1y' }", to: "{ kind: 'previousYear' }", path: at });
+            touched = true;
+            return { ...widget, compareTo: { kind: 'previousYear' } };
+          }
+        }
+        return w;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'revenue_review',
+        widgets: [
+          { id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: 'previousPeriod' },
+          { id: 'w2', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: 'previousYear' },
+          { id: 'w3', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { offset: '1y' } },
+        ],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'revenue_review',
+        widgets: [
+          { id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousPeriod' } },
+          { id: 'w2', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousYear' } },
+          { id: 'w3', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousYear' } },
+        ],
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
  * agent.knowledge — a grounding claim nothing enforced (the RAG path reads
  * `sourceIds` from the LLM's tool-call arguments, never the agent record).
  * Absorbs the former `agent-knowledge-topics-to-sources` rename (#3855):
@@ -3727,6 +3838,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
+    dashboardWidgetCompareToConverged,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
     stackApiRequireAuthRemoved,

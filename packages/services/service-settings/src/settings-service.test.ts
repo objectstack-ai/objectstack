@@ -413,6 +413,188 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
   });
 });
 
+/**
+ * #5131 — a manifest's `options` table is enforced at SAVE time.
+ *
+ * Until this suite existed the enumeration was a front-end convention: the
+ * console dropdown only ever emitted legal values, so an admin going through
+ * the UI could not produce a bad one — but `PUT /api/settings/:ns` is an
+ * authorizable public surface, and a script, a migration or AI-authored
+ * bootstrap code could write any string at all into a `select` and have it
+ * stored, read back, and improvised over by each consumer in turn.
+ *
+ * The load-bearing case is `mail.provider`: #5094/#5133 retired `sendgrid`
+ * and `ses` from the option table because this server cannot deliver through
+ * them, and that manifest-side tightening had no matching gate on the API
+ * side — the very values just retired could be written straight back in.
+ */
+describe('SettingsService — save-time validation (declared options are enforced)', () => {
+  const mailService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(mailSettingsManifest);
+    return svc;
+  };
+
+  it('refuses a provider outside the declared table, naming the allowed set', async () => {
+    const svc = mailService();
+    // `sendgrid` left the table in #5094; before this gate it could be written
+    // back the same afternoon it was retired.
+    await expect(
+      svc.setMany('mail', { provider: 'sendgrid', from_email: 'a@b.com' }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'provider',
+          code: 'invalid_option',
+          label: 'Provider',
+          // The allowed set travels as a discrete constraint (ADR-0114), so a
+          // client branches on the machine value instead of parsing our prose.
+          constraint: { allowed: 'smtp, resend, postmark, log' },
+          value: 'sendgrid',
+        },
+      ],
+    });
+    // Atomic: the rejected batch persisted nothing, not even the legal key.
+    expect((await svc.get('mail', 'provider')).source).toBe('default');
+    expect((await svc.get('mail', 'from_email')).value).toBeNull();
+  });
+
+  it('accepts every value the table does declare', async () => {
+    for (const [provider, extra] of [
+      ['smtp', { smtp_host: 'smtp.example.com' }],
+      ['resend', { api_key: 're-key' }],
+      ['postmark', { api_key: 'pm-key' }],
+      ['log', {}],
+    ] as const) {
+      const svc = mailService();
+      await expect(
+        svc.setMany('mail', { provider, ...extra, from_email: 'a@b.com' }),
+      ).resolves.toBeDefined();
+      expect((await svc.get('mail', 'provider')).value).toBe(provider);
+    }
+  });
+
+  it('checks the option table only when the patch TOUCHES the key', async () => {
+    // A workspace that saved `sendgrid` while the option existed still carries
+    // it. Simulated exactly as it happened: write under the OLD table, then
+    // re-register the narrowed manifest (#5094) over the same namespace.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      ...mailSettingsManifest,
+      specifiers: mailSettingsManifest.specifiers.map((s: any) =>
+        s.key === 'provider'
+          ? { ...s, options: [...s.options, { value: 'sendgrid', label: 'SendGrid' }] }
+          : s,
+      ),
+    } as any);
+    await svc.setMany('mail', { provider: 'sendgrid', api_key: 'sg-key', from_email: 'a@b.com' });
+    svc.registerManifest(mailSettingsManifest);
+
+    // The stale value is still there …
+    expect((await svc.get('mail', 'provider')).value).toBe('sendgrid');
+    // … and it does NOT lock the workspace out of editing anything else. A
+    // patch that never mentions `provider` is not rejected on its account —
+    // the opposite rule would make the settings page unusable for every
+    // workspace carrying historical drift, which is worse than the gap.
+    await expect(svc.setMany('mail', { from_name: 'Acme Ops' })).resolves.toBeDefined();
+    expect((await svc.get('mail', 'from_name')).value).toBe('Acme Ops');
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('mail', { provider: 'sendgrid' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'provider', code: 'invalid_option' }],
+    });
+    // And a reset still clears it — an all-null patch is never blocked.
+    await expect(svc.resetNamespace('mail')).resolves.toBeGreaterThan(0);
+  });
+
+  it('leaves the value alone when the specifier declares no option table', async () => {
+    // `registerManifest` takes manifests as given (no Zod pass), so a
+    // hand-built select without `options` reaches the validator. It cannot say
+    // what is legal, so it stays lenient rather than rejecting every write.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'freeform',
+      label: 'Freeform',
+      specifiers: [{ type: 'select', key: 'mode', label: 'Mode' }],
+    } as any);
+    await expect(svc.setMany('freeform', { mode: 'whatever' })).resolves.toBeDefined();
+  });
+
+  it('enforces radio and multiselect from the same table, element-wise', async () => {
+    // All three types are covered because the SPEC requires an `options` table
+    // on all three; `radio`/`multiselect` have no producer manifest today and
+    // would otherwise be a hole the first one to author them falls into.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'shapes',
+      label: 'Shapes',
+      specifiers: [
+        { type: 'radio', key: 'tier', label: 'Tier',
+          options: [{ value: 'free', label: 'Free' }, { value: 'pro', label: 'Pro' }] },
+        { type: 'multiselect', key: 'channels', label: 'Channels',
+          options: [{ value: 'email', label: 'Email' }, { value: 'sms', label: 'SMS' }] },
+      ],
+    } as any);
+
+    await expect(svc.setMany('shapes', { tier: 'enterprise' })).rejects.toMatchObject({
+      fields: [{ field: 'tier', code: 'invalid_option', constraint: { allowed: 'free, pro' } }],
+    });
+    await expect(svc.setMany('shapes', { tier: 'pro' })).resolves.toBeDefined();
+
+    // Every element is checked, and the rejected one is the one reported.
+    await expect(
+      svc.setMany('shapes', { channels: ['email', 'carrier-pigeon'] }),
+    ).rejects.toMatchObject({
+      fields: [{ field: 'channels', code: 'invalid_option', value: 'carrier-pigeon' }],
+    });
+    await expect(svc.setMany('shapes', { channels: ['email', 'sms'] })).resolves.toBeDefined();
+    await expect(svc.setMany('shapes', { channels: [] })).resolves.toBeDefined();
+  });
+
+  it('matches option values by string form, so a number option survives JSON', async () => {
+    // A stored value has been through JSON and, over REST, a form post: an
+    // option declared `value: 30` legitimately reads back as '30'. Rejecting
+    // that would enforce the transport rather than the enumeration.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'retention',
+      label: 'Retention',
+      specifiers: [
+        { type: 'select', key: 'days', label: 'Days',
+          options: [{ value: 7, label: '7' }, { value: 30, label: '30' }] },
+        { type: 'select', key: 'archive', label: 'Archive',
+          options: [{ value: true, label: 'On' }, { value: false, label: 'Off' }] },
+      ],
+    } as any);
+    await expect(svc.setMany('retention', { days: 30 })).resolves.toBeDefined();
+    await expect(svc.setMany('retention', { days: '30' })).resolves.toBeDefined();
+    await expect(svc.setMany('retention', { archive: false })).resolves.toBeDefined();
+    await expect(svc.setMany('retention', { days: 45 })).rejects.toMatchObject({
+      fields: [{ field: 'days', code: 'invalid_option', constraint: { allowed: '7, 30' } }],
+    });
+  });
+
+  it('never echoes the rejected value for an encrypted specifier', async () => {
+    // `encrypted` is authorable on any specifier, and this message lands in
+    // logs — so the offending value is named only where it is safe to name.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vault',
+      label: 'Vault',
+      specifiers: [
+        { type: 'select', key: 'key_ref', label: 'Key', encrypted: true,
+          options: [{ value: 'primary', label: 'Primary' }] },
+      ],
+    } as any);
+    const err = await svc.setMany('vault', { key_ref: 's3cr3t-handle' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'key_ref', code: 'invalid_option' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('s3cr3t-handle');
+  });
+});
+
 describe('SettingsService — user-scoped values', () => {
   it('isolates writes by ctx.userId', async () => {
     const svc = new SettingsService({ env: {} });

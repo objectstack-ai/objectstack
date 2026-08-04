@@ -5,11 +5,13 @@ import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth';
-import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
+import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
-import { appEndpointMountPrefix, runAppEndpointStep } from './api-endpoint-step.js';
+import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
+import { callData } from './action-execution.js';
+import { createEndpointRateLimiterRegistry } from './endpoint-policy.js';
 import {
     buildSecurityHeaders,
     createInboundRateLimitMiddleware,
@@ -1265,36 +1267,147 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // semantic `ROUTE_NOT_FOUND` envelope is a separate decision and
             // deliberately NOT taken here (#5090).
             if (typeof rawServer.setFallbackHandler === 'function') {
+                // ── The endpoint rate-limit registry: built ONCE ─────────────
+                // Per-endpoint token buckets over one shared counter store.
+                // Building it per request would rebuild the lazy store handle
+                // every time, which re-emits the "no shared cache, so the
+                // effective limit is budget × nodes" warning on every request AND
+                // throws away the bucket cache the limiter keys its budget on —
+                // an endpoint budget that resets on every call is not a budget.
+                // Same `resolveCache` the server-level limiter uses, so one
+                // deployment has one counter backend, not two.
+                const endpointLimiters = createEndpointRateLimiterRegistry({
+                    resolveCache: async () => safeGetService<CounterStore>(ctx, 'cache'),
+                    logger: ctx.logger,
+                });
+
                 rawServer.setFallbackHandler(async (req: any, res: any) => {
                     try {
+                        const path: string = req.path ?? '';
+                        // ── Scoping test FIRST, before any resolution ────────
+                        // Everything below costs something (a kernel resolve, a
+                        // session lookup), and an unmatched request that is not
+                        // under the endpoint carve-out must keep costing exactly
+                        // what it costs today: nothing. The same predicate the
+                        // step itself applies — spelled once, in the step.
+                        if (!isAppEndpointPath(path, prefix)) return;
+
+                        // ── Per-request environment + identity ───────────────
+                        // The SAME resolution `dispatch()` performs, through the
+                        // same method (#5040 E5b). It must run BEFORE the match:
+                        // on a multi-tenant host `matchEndpoint` has to be asked
+                        // on the request's own kernel, or one tenant's
+                        // declarations decide another tenant's URLs. It also
+                        // yields the `executionContext` / `dataDriver` /
+                        // `environmentId` the delegated call needs to run as the
+                        // caller instead of as the system principal (#4936).
+                        const protocolContext: HttpProtocolContext = { request: req };
+                        await dispatcher.resolveRequestScope(protocolContext, path.replace(/\/$/, ''));
+
+                        // A multi-tenant host that could not place this request
+                        // in an environment DECLINES — writes nothing, so the
+                        // transport's own 404 stands. Serving it from the default
+                        // kernel would answer one tenant's URL out of another
+                        // tenant's data, which is worse than not answering.
+                        if (dispatcher.isMultiTenantHost() && !protocolContext.environmentId) {
+                            ctx.logger.warn(
+                                '[dispatcher] a declarative-endpoint path reached the fallback on a multi-tenant '
+                                + 'host but resolved to no environment; declining rather than serving it from the '
+                                + 'default kernel.',
+                                { path },
+                            );
+                            return;
+                        }
+
+                        // Both slots are resolved PER REQUEST and never cached:
+                        // during `start()` a slot may still be filling, and
+                        // recording "absent" as a verdict that outlives the
+                        // moment is the #4771 defect class.
+                        //
+                        // `metadata` is resolved WITH the environment id — the
+                        // same lookup `callData` performs for this very request's
+                        // ADR-0049 exposure gate. `automation` is resolved
+                        // WITHOUT one, which is what `POST /automation/:name/
+                        // trigger` does (`domains/automation.ts` reads it off the
+                        // request kernel): a declared endpoint must reach the same
+                        // occupant the built-in route reaches, or "same operation,
+                        // same answer" (#5040 §4) stops being true.
+                        const execDeps = dispatcher.actionExecutionDeps;
+                        const metadataService = await execDeps
+                            .resolveService('metadata', protocolContext.environmentId)
+                            .catch(() => undefined) as IMetadataService | undefined;
+                        const automationService = await execDeps
+                            .resolveService('automation')
+                            .catch(() => undefined);
+
                         const answer = await runAppEndpointStep({
                             method: req.method,
-                            path: req.path,
+                            path,
                             prefix,
-                            // Resolved PER REQUEST and never cached: during
-                            // `start()` the `metadata` slot may still be filling,
-                            // and recording "absent" as a verdict that outlives
-                            // the moment is the #4771 defect class. A read-only
-                            // probe per request is the sanctioned shape.
-                            //
-                            // It resolves this kernel's metadata service. A
-                            // multi-tenant host serves each request from a
-                            // per-environment kernel, and reaching THAT one means
-                            // running the resolver + kernel swap `dispatch()`
-                            // performs — which the executor needs anyway for its
-                            // `executionContext`, and which therefore lands with
-                            // it (#5040 E5). Nothing here reads data through the
-                            // service: the step only probes and reports 501, so
-                            // there is no wrong-environment answer to give.
-                            metadataService: safeGetService<IMetadataService>(ctx, 'metadata'),
+                            metadataService,
+                            policy: {
+                                headers: req.headers ?? {},
+                                ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
+                                // The SAME session query the server-level limiter
+                                // and the dispatcher's route mounts make (#4910).
+                                // Two answers to "who is calling" eventually
+                                // disagree about what counts as authenticated.
+                                resolvePrincipalId: (headers) =>
+                                    resolveSessionPrincipalId(
+                                        safeGetService<IAuthService>(ctx, 'auth'),
+                                        headers as Record<string, unknown>,
+                                    ),
+                                limiters: endpointLimiters,
+                                // The authored `server.trustProxy`, read from the
+                                // same declaration the server-level limiter reads.
+                                // A second trust switch is a second answer to
+                                // "may I believe X-Forwarded-For".
+                                trustProxy: config.rateLimit?.trustProxy === true,
+                                logger: ctx.logger,
+                            },
+                            execution: {
+                                request: {
+                                    method: req.method,
+                                    path,
+                                    query: req.query ?? {},
+                                    headers: req.headers ?? {},
+                                    body: req.body,
+                                    ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
+                                },
+                                deps: {
+                                    // `callData` with its `deps` bound — the same
+                                    // object, and therefore the same pipeline,
+                                    // `/data` calls (`domains/data.ts`).
+                                    callData: (action, params, driver, scope, ec) =>
+                                        callData(execDeps, action, params, driver, scope, ec),
+                                    ...(automationService !== undefined ? { automationService } : {}),
+                                },
+                                ...(protocolContext.executionContext !== undefined
+                                    ? { executionContext: protocolContext.executionContext }
+                                    : {}),
+                                ...(protocolContext.environmentId !== undefined
+                                    ? { environmentId: protocolContext.environmentId }
+                                    : {}),
+                                ...(protocolContext.dataDriver !== undefined
+                                    ? { dataDriver: protocolContext.dataDriver }
+                                    : {}),
+                            },
                         });
-                        // `undefined` = not an app-endpoint path, no matcher, or
-                        // no declaration owns it. Writing nothing is how this
-                        // handler says "not mine" (contract on setFallbackHandler).
+                        // `undefined` = no matcher, or no declaration owns it.
+                        // Writing nothing is how this handler says "not mine"
+                        // (contract on setFallbackHandler).
                         if (!answer) return;
                         res.status(answer.status);
                         if (securityHeaders) {
                             for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
+                        }
+                        // The answer's OWN headers — `Retry-After` on a 429,
+                        // `Cache-Control` on a success. Written after the security
+                        // headers so an answer-specific value wins, and written at
+                        // all because a 429 that loses its `Retry-After` has told
+                        // the client nothing it can act on.
+                        if (answer.headers) {
+                            for (const [k, v] of Object.entries(answer.headers)) res.header(k, v);
                         }
                         res.json(answer.body);
                     } catch (err: any) {
@@ -1307,9 +1420,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
                 ctx.logger.info('Declarative endpoint dispatch step armed', {
                     mount: appEndpointMountPrefix(prefix),
-                    // Said plainly so this line is never read as "endpoints work
-                    // now": the seam is mounted, execution is not built yet.
-                    executes: false,
+                    // True as of #5040 E5b: policy chain + target execution are
+                    // wired. Nothing can be DECLARED until the E7 publish flip, so
+                    // this still describes a surface no deployment can reach.
+                    executes: true,
                 });
             } else {
                 // `debug`, not `warn`: no stack can declare an endpoint yet (a

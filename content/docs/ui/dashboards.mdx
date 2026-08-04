@@ -104,7 +104,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
 | `chartConfig` | `object` | optional | Advanced chart configuration |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
-| `compareTo` | `enum \| object` | optional | Period-over-period comparison window |
+| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. |
 | `options` | `object` | optional | Renderer extras **plus** the query keys below |
 
 ### Widget `options`

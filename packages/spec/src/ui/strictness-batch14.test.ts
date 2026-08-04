@@ -179,59 +179,43 @@ describe('批 14 — curated prescriptions', () => {
   });
 
   /**
-   * `compareTo` is a UNION, and that changes what a rejection is worth — a fact
-   * this batch measured rather than assumed, after writing the assertion the
-   * obvious way and watching it go red on `'Invalid input'`.
+   * `compareTo` was a UNION when this batch closed its object arm, and that
+   * changed what a rejection was worth — a fact 批 14 measured rather than
+   * assumed, after writing the assertion the obvious way and watching it go red
+   * on `'Invalid input'`. Zod collapses a failed union into ONE top-level
+   * `invalid_union` issue whose message is the bare `'Invalid input'`; the arm
+   * errors — including the curated prescription — live in `issue.errors`, and
+   * `zodIssuesToFields` (`rest/src/rest-server.ts`) maps only top-level issues,
+   * so nothing carried them onto the wire (#5014).
    *
-   * Zod collapses a failed union into ONE top-level `invalid_union` issue whose
-   * message is the bare `'Invalid input'`; the arm errors — including the
-   * curated unknown-key prescription — live in `issue.errors`, one array per
-   * arm. And `zodIssuesToFields` (`rest/src/rest-server.ts`) maps only
-   * top-level issues, so nothing carries them onto the wire.
+   * ⚠️ #5011 DISSOLVED that limit for this slot, and the correction is recorded
+   * here rather than by deleting the finding: `compareTo` is no longer a union
+   * at all. It converged onto the analytics executor's own contract,
+   * `{ kind, dimension? }` — a plain strict object — because the three arms it
+   * declared were all broken on the ADR-0021 dataset path (two silently dropped,
+   * `{ offset }` throwing). The batch's measurement stands as the reason the
+   * union-free shape is worth something; #5014 still binds every OTHER curated
+   * message this campaign has put inside a union arm.
    *
-   * The closure is still worth having and still does #4001's job: the widget
-   * now FAILS at `compareTo` instead of silently discarding half the object.
-   * But the prescription is currently reachable only by walking sub-errors, so
-   * these two assertions are deliberately split — one for what an author sees
-   * today, one for the text that is there to be surfaced once the transport is
-   * fixed (filed separately). Asserting only the second would have been a green
-   * test over a message no consumer prints.
+   * What survives here is the pin that keeps the correction honest: this slot
+   * must not become a union again. The converged behaviour itself
+   * (prescriptions, aliases, the executor projection) is pinned in
+   * `dashboard-compareto.test.ts`.
    */
-  function unionSubMessages(schema: z.ZodTypeAny, payload: unknown): string {
-    const r = schema.safeParse(payload);
-    if (r.success) return '';
-    const out: string[] = [];
-    for (const issue of r.error.issues) {
-      const arms = (issue as { errors?: Array<Array<{ message: string }>> }).errors;
-      for (const arm of arms ?? []) for (const sub of arm) out.push(sub.message);
-    }
-    return out.join('\n');
-  }
-
-  it('dashboard compareTo: an undeclared key now FAILS the widget (what an author sees today)', () => {
+  it('dashboard compareTo: no longer a union — the #4001 arm-error limit does not apply to it (#5011)', () => {
     const r = DashboardWidgetSchema.safeParse({
       id: 'w1', dataset: 'sales', values: ['revenue'],
       compareTo: { offset: '7d', granularity: 'month' },
     });
     expect(r.success).toBe(false);
-    const union = r.success ? undefined : r.error.issues.find((i) => i.code === 'invalid_union');
-    expect(union).toBeDefined();
-    expect(union!.path).toEqual(['compareTo']);
-    // Pinning the CURRENT top-level text, so the day the transport starts
-    // surfacing arm errors this test says so instead of quietly improving.
-    expect(union!.message).toBe('Invalid input');
-  });
-
-  it('dashboard compareTo: the curated prescription exists in the arm errors', () => {
-    expect(unionSubMessages(DashboardWidgetSchema, {
-      id: 'w1', dataset: 'sales', values: ['revenue'],
-      compareTo: { offset: '7d', granularity: 'month' },
-    })).toContain('this comparison window');
-
-    expect(unionSubMessages(DashboardWidgetSchema, {
-      id: 'w1', dataset: 'sales', values: ['revenue'],
-      compareTo: { type: 'previousPeriod' },
-    })).toContain("compareTo: 'previousPeriod'");
+    const issues = r.success ? [] : r.error.issues;
+    expect(issues.some((i) => i.code === 'invalid_union'),
+      'a union here would put the prescription back out of reach').toBe(false);
+    // …and the prescription really is at the top level now, which is exactly
+    // what 批 14 could assert only about the arm errors.
+    const top = issues.map((i) => i.message).join('\n');
+    expect(top).not.toBe('Invalid input');
+    expect(top).toContain('this comparison window');
   });
 
   it('action option: guidance separates keys that exist one layer down from keys that exist nowhere', () => {
@@ -338,42 +322,6 @@ function shapeOf(schema: unknown, depth = 0): Record<string, unknown> | null {
   return null;
 }
 
-/**
- * The object arm of a union — the only arm an unknown-key error can come from.
- *
- * Unwraps the wrappers first: on the widget, `compareTo` is
- * `ZodOptional(ZodUnion([...]))`, so reading `def.options` off the schema handed
- * in finds nothing. The first draft did exactly that and the suite went red on
- * *"could not resolve the shape behind this comparison window"* rather than
- * quietly skipping the surface — the walker's hard-failure guard doing its job
- * (ledger finding 9: a walker going quiet is precisely when it stops covering
- * something).
- */
-function unionObjectArm(schema: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 12 || schema == null) return null;
-  const def = (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def;
-  if (!def) return null;
-  const options = (def as { options?: unknown[] }).options;
-  if (Array.isArray(options)) {
-    for (const arm of options) {
-      const shape = shapeOf(arm);
-      if (shape) return shape;
-    }
-    return null;
-  }
-  for (const key of ['innerType', 'in', 'out', 'schema'] as const) {
-    const inner = def[key];
-    if (inner && typeof inner === 'object') {
-      const found = unionObjectArm(inner, depth + 1);
-      if (found) return found;
-    }
-  }
-  if (typeof (def as { getter?: unknown }).getter === 'function') {
-    return unionObjectArm((def as { getter: () => unknown }).getter(), depth + 1);
-  }
-  return null;
-}
-
 describe('批 14 — no prescription points at a key the schema rejects', () => {
   /**
    * `surface` string → the DECLARED keys of the shape that surface names,
@@ -395,7 +343,9 @@ describe('批 14 — no prescription points at a key the schema rejects', () => 
       ['this dataset dimension', shapeOf(DatasetDimensionSchema)],
       ['this dataset measure', measure],
       ['this derived-measure spec', shapeOf(measure.derived)],
-      ['this comparison window', unionObjectArm(widget.compareTo)],
+      // #5011: `compareTo` converged from a union to a plain strict object,
+      // so the arm-unwrapper this entry used is gone with it.
+      ['this comparison window', shapeOf(widget.compareTo)],
       ['this widget layout box', shapeOf(widget.layout)],
     ];
     return new Map(entries.map(([surface, shape]) => {

@@ -752,6 +752,15 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (sawUnresolved) {
           if (config.dryRun) {
             // Dry-run: report the miss but leave the authored value untouched.
+            //
+            // Deliberately QUIET — no logger call, unlike the real-run branch
+            // below (#4997). A dry run writes nothing, so nothing was lost: its
+            // caller is by definition reading the result object (that is the
+            // whole point of `validate()`), and an `error` line about a
+            // SIMULATED outcome is the over-application AGENTS.md → "Degradation
+            // log levels" warns about — it trains readers to skim `error`, which
+            // is what made the #4420 log unreadable in the first place. Pinned by
+            // test so this stays a decision rather than an oversight.
             pushError(
               `[dry-run] Reference may not resolve: ${objectName}.${ref.field} = ` +
                 `'${String(unresolvedItem)}' → ${ref.targetObject}.${ref.targetField}`,
@@ -782,20 +791,40 @@ export class SeedLoaderService implements ISeedLoaderService {
             });
             referencesDeferred++;
           } else {
-            // Cannot resolve and no pass 2 will run — skip the whole record
-            // (LOUD: counted + reported). Writing it anyway would either
-            // carry the raw natural-key string into the FK column or, on
-            // update, corrupt the existing row.
+            // Cannot resolve and no pass 2 will run — skip the whole record.
+            // Writing it anyway would either carry the raw natural-key string
+            // into the FK column or, on update, corrupt the existing row.
             //
-            // "LOUD" here means counted + in `result.errors` ONLY — this path
-            // logs nothing at all, so a load that drops N records looks
-            // identical to a clean one in the console. Filed as #4997 rather
-            // than fixed under #4729, whose audit criterion was the file's
-            // `logger.warn` calls.
-            pushError(
+            // LOUD, and now in all three registers: COUNTED (`errored`, below),
+            // REPORTED (`result.errors` / `allErrors` → `success: false`) and
+            // LOGGED at `error`. Until #4997 the comment here claimed "LOUD:
+            // counted + reported" while this path logged nothing at all, so a
+            // load that dropped N records was indistinguishable from a clean one
+            // in the console — and `packages/runtime`'s seed call sites only
+            // `await` the result. `error` is the level AGENTS.md → "Degradation
+            // log levels" reserves for exactly this: the boot looks healthy while
+            // rows the seed declares are simply not there.
+            const error = pushError(
               `Cannot resolve reference: ${objectName}.${ref.field} = '${String(unresolvedItem)}' → ` +
                 `${ref.targetObject}.${ref.targetField} not found`,
               unresolvedItem,
+            );
+            this.logger.error(
+              `[SeedLoader] ${error.message}. ${objectName} record #${i} was NOT seeded AT ALL — the WHOLE ` +
+                `record is dropped, not just its \`${ref.field}\` link, because writing it would put the raw ` +
+                `natural key '${String(unresolvedItem)}' into the FK column (or, on an upsert UPDATE, corrupt ` +
+                `the row already there). Nothing retries this: pass 2 is off. Restore the record in one of ` +
+                `three ways, then re-run the seed — seed ${ref.targetObject} BEFORE ${objectName} so the ` +
+                `target row exists; or enable \`multiPass\` so pass 2 back-fills the reference once every ` +
+                `object is loaded; or fix the natural key in the ${objectName} seed data so it names a real ` +
+                `${ref.targetObject}.${ref.targetField}.`,
+              undefined,
+              {
+                object: objectName,
+                field: ref.field,
+                target: `${ref.targetObject}.${ref.targetField}`,
+                recordIndex: i,
+              },
             );
             unresolvedRefError = true;
           }
@@ -1146,8 +1175,33 @@ export class SeedLoaderService implements ISeedLoaderService {
         // Still unresolved after pass 2 — the target never materialized. Name
         // the element that missed: on a multi-value field only one of several
         // natural keys is usually at fault.
+        //
+        // Logged at `error` for the same reason the back-fill-write failure
+        // above is, and aligned with it under the same objective criterion
+        // (#4997, extending #4729/#5001): this outcome enters `allErrors` and
+        // bumps `errored`, and until now it was the file's other
+        // counted-but-never-logged branch. The row itself WAS seeded, so every
+        // row counter reads healthy while the association it declared is
+        // permanently absent.
+        const missedValue = this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue);
+        this.logger.error(
+          `[SeedLoader] Deferred reference UNRESOLVED after pass 2 — ${deferred.objectName}.${deferred.field} ` +
+            `stays NULL on record '${deferred.recordExternalId}'. The row itself was seeded, so every row ` +
+            `counter looks healthy while the relationship is MISSING: nothing links it to ` +
+            `${deferred.targetObject}.${deferred.targetField} = '${missedValue}', because no such ` +
+            `${deferred.targetObject} row exists — neither seeded in this load nor already in the database. ` +
+            `Nothing retries this: pass 2 is the last one. Add the missing ${deferred.targetObject} record to ` +
+            `the seed (or fix the natural key that names it) and re-run the seed to complete the link.`,
+          undefined,
+          {
+            object: deferred.objectName,
+            field: deferred.field,
+            target: `${deferred.targetObject}.${deferred.targetField}`,
+            recordIndex: deferred.recordIndex,
+          },
+        );
         this.recordDeferredError(deferred, allResults, allErrors,
-          `Deferred reference unresolved after pass 2: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField} not found`);
+          `Deferred reference unresolved after pass 2: ${deferred.objectName}.${deferred.field} = '${missedValue}' → ${deferred.targetObject}.${deferred.targetField} not found`);
       }
     }
   }

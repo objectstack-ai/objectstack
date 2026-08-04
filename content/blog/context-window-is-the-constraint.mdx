@@ -105,7 +105,7 @@ export const Opportunity = ObjectSchema.create({
     probability: Field.percent({ label: 'Probability', defaultValue: 0.5 }),
     expected_revenue: Field.formula({
       label: 'Expected Revenue',
-      expression: cel`amount * probability`,
+      expression: cel`record.amount * record.probability`,
     }),
   },
 });
