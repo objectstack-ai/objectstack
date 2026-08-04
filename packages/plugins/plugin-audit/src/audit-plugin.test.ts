@@ -39,8 +39,14 @@ function makeCtx(engine: unknown) {
     ['manifest', { register() {} }],
   ]);
   const readyHooks: Array<() => Promise<void> | void> = [];
+  // #4887 — the log IS the deliverable for the provisioning path: its silence
+  // is what made a working-but-elsewhere table read as a never-created one.
+  // Capture info/warn so the tests can assert on what an operator would see.
+  const logs = { info: [] as string[], warn: [] as string[] };
   const logger = {
-    info() {}, warn() {}, error() {}, debug() {},
+    info(msg: string) { logs.info.push(String(msg)); },
+    warn(msg: string) { logs.warn.push(String(msg)); },
+    error() {}, debug() {},
     child() { return logger; },
   };
   const ctx = {
@@ -51,7 +57,7 @@ function makeCtx(engine: unknown) {
       if (event === 'kernel:ready') readyHooks.push(fn);
     },
   } as any;
-  return { ctx, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
+  return { ctx, logs, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
 }
 
 describe('AuditPlugin — system table provisioning', () => {
@@ -86,6 +92,146 @@ describe('AuditPlugin — system table provisioning', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
     await expect(fireReady()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * #4887 — provisioning must SAY what it did.
+ *
+ * `syncObjectSchema` returns `void` and has three silent exits of its own
+ * (object not registered / no driver / driver without `syncSchema`), so a
+ * caller that only catches throws cannot distinguish "created the table" from
+ * "did nothing". Combined with a silent `typeof sync !== 'function'` bail on
+ * this side, a boot where provisioning was skipped WHOLESALE logged exactly
+ * the same thing as a boot where it worked: nothing.
+ *
+ * #4887 is what that costs. `sys_audit_log` / `sys_activity` were reported as
+ * "never provisioned" because they were absent from the primary SQLite file —
+ * but ADR-0057 §3.6 routes both (lifecycle classes `audit` / `telemetry`) to
+ * the `telemetry` datasource when one is registered, and `os dev` registers one
+ * by default as a sibling file. The tables existed; the log just never said
+ * where. These tests pin the three statements an operator now gets.
+ */
+describe('AuditPlugin — provisioning is audible (#4887)', () => {
+  /** Engine whose datasource routing mirrors ADR-0057 §3.6 in `os dev`. */
+  function makeRoutingEngine(routes: Record<string, string | undefined>, defaultName = 'sqlite') {
+    return {
+      async syncObjectSchema(_name: string) { /* DDL issued on the resolved driver */ },
+      getDriverForObject(name: string) {
+        const ds = routes[name];
+        return ds === undefined ? undefined : { name: ds };
+      },
+      getDefaultDriverName() { return defaultName; },
+    };
+  }
+
+  it('warns — instead of returning silently — when the engine has no syncObjectSchema', async () => {
+    const { ctx, logs, fireReady } = makeCtx({ async find() { return []; } });
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    const warned = logs.warn.find((m) => m.includes('no syncObjectSchema'));
+    expect(warned).toBeDefined();
+    // The warning must name the CONSEQUENCE, not just the missing method:
+    // nothing is provisioned and a read-first env logs "no such table".
+    expect(warned).toMatch(/sys_activity/);
+    expect(warned).toMatch(/no such table/);
+  });
+
+  it('reports the datasource each system table was provisioned into', async () => {
+    // The exact `os dev` shape: audit + activity split off to `telemetry`,
+    // comment stays on the primary.
+    const engine = makeRoutingEngine({
+      sys_audit_log: 'telemetry',
+      sys_activity: 'telemetry',
+      sys_comment: 'sqlite',
+    });
+    const { ctx, logs, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    expect(placement).toBeDefined();
+    expect(placement).toContain('sys_audit_log→telemetry');
+    expect(placement).toContain('sys_activity→telemetry');
+    expect(placement).toContain('sys_comment→sqlite');
+
+    // …and the split itself is called out, because "absent from the database I
+    // am looking at" is not "never created".
+    const split = logs.info.find((m) => m.includes('NON-default datasource'));
+    expect(split).toBeDefined();
+    expect(split).toContain('ADR-0057');
+    expect(split).toContain('sys_audit_log→telemetry');
+    expect(split).toContain('sys_activity→telemetry');
+    // sys_comment is ON the default datasource — it must not be listed as split.
+    expect(split).not.toContain('sys_comment');
+  });
+
+  it('says nothing about a split when every table is on the default datasource', async () => {
+    const engine = makeRoutingEngine({
+      sys_audit_log: 'sqlite',
+      sys_activity: 'sqlite',
+      sys_comment: 'sqlite',
+    });
+    const { ctx, logs, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    expect(logs.info.find((m) => m.includes('system tables provisioned'))).toBeDefined();
+    expect(logs.info.some((m) => m.includes('NON-default datasource'))).toBe(false);
+    expect(logs.warn.some((m) => m.includes('NO datasource driver'))).toBe(false);
+  });
+
+  it("warns when an object resolves to no driver — syncObjectSchema's own silent exit", async () => {
+    // `syncObjectSchema` returns without issuing DDL when no driver backs the
+    // object. It throws nothing, so the per-object catch never fires: the only
+    // way this is ever visible is from the outside, here.
+    const engine = makeRoutingEngine({
+      sys_audit_log: undefined,
+      sys_activity: 'sqlite',
+      sys_comment: 'sqlite',
+    });
+    const { ctx, logs, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    const warned = logs.warn.find((m) => m.includes('NO datasource driver'));
+    expect(warned).toBeDefined();
+    expect(warned).toContain('sys_audit_log');
+    // The other two still provisioned — one unroutable object does not stop them.
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    expect(placement).toContain('sys_activity→sqlite');
+    expect(placement).toContain('sys_comment→sqlite');
+    expect(placement).not.toContain('sys_audit_log');
+  });
+
+  it('keeps reporting placements when one object fails to sync', async () => {
+    const engine = {
+      async syncObjectSchema(name: string) {
+        if (name === 'sys_activity') throw new Error('disk I/O error');
+      },
+      getDriverForObject() { return { name: 'sqlite' }; },
+      getDefaultDriverName() { return 'sqlite'; },
+    };
+    const { ctx, logs, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    expect(logs.warn.some((m) => m.includes('could not provision sys_activity'))).toBe(true);
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    expect(placement).toContain('sys_audit_log→sqlite');
+    expect(placement).toContain('sys_comment→sqlite');
+    expect(placement).not.toContain('sys_activity');
   });
 });
 
