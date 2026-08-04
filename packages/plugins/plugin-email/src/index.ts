@@ -17,10 +17,14 @@ export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,
   PostmarkTransport,
+  SmtpTransport,
   makeTransport,
+  smtpOptionsFromMailSettings,
   type ResendTransportOptions,
   type PostmarkTransportOptions,
+  type SmtpTransportOptions,
   type MakeTransportOptions,
+  type EmailTransportProvider,
 } from './transports/index.js';
 export {
   bootstrapDeclaredEmailTemplates,
