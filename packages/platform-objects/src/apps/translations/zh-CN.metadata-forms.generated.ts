@@ -929,15 +929,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基础信息",
-        description: "标识、版本与图标"
+        description: "应用标识与启用状态"
       },
       navigation: {
         label: "导航",
-        description: "菜单结构与首页"
+        description: "侧边栏菜单项与分区分组"
       },
       content: {
         label: "内容",
-        description: "对象、API 与默认智能体"
+        description: "环境助手绑定。对象与接口在 stack 上声明,不在 app 上"
       },
       branding: {
         label: "品牌",
@@ -945,7 +945,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       access_and_sharing: {
         label: "访问与共享",
-        description: "权限、共享与嵌入"
+        description: "谁可以访问此应用。公开访问与嵌入按表单视图授予,不是应用级开关"
       }
     },
     fields: {
@@ -958,9 +958,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述"
-      },
-      version: {
-        label: "版本"
       },
       icon: {
         label: "图标",
@@ -981,22 +978,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "区域",
         helpText: "将菜单项组织为可折叠分组"
       },
-      homePageId: {
-        label: "首页 ID",
-        helpText: "应用打开时跳转的页面"
-      },
-      mobileNavigation: {
-        label: "移动端导航",
-        helpText: "移动端底部 Tab 栏配置"
-      },
-      objects: {
-        label: "对象权限",
-        helpText: "此应用暴露的对象名"
-      },
-      apis: {
-        label: "API",
-        helpText: "API 端点定义"
-      },
       defaultAgent: {
         label: "默认智能体",
         helpText: "右下角浮动助手按钮调用的 AI 智能体"
@@ -1008,18 +989,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiredPermissions: {
         label: "所需权限",
         helpText: "访问该应用需要的权限"
-      },
-      sharing: {
-        label: "共享",
-        helpText: "公开 / 内部 / 受限的访问控制"
-      },
-      embed: {
-        label: "嵌入",
-        helpText: "iFrame 嵌入配置"
-      },
-      aria: {
-        label: "无障碍",
-        helpText: "无障碍标签与角色"
       }
     }
   },

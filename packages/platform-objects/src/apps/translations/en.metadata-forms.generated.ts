@@ -937,7 +937,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       content: {
         label: "Content",
-        description: "Objects and APIs this app uses."
+        description: "Ambient assistant binding. Objects and endpoints are declared on the stack, not the app."
       },
       branding: {
         label: "Branding",
@@ -945,7 +945,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       access_and_sharing: {
         label: "Access & sharing",
-        description: "Who can access this app and how it can be embedded."
+        description: "Who can access this app. Public access and embedding are per form view, not app-level."
       }
     },
     fields: {
@@ -958,9 +958,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description"
-      },
-      version: {
-        label: "Version"
       },
       icon: {
         label: "Icon",
@@ -981,22 +978,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Areas",
         helpText: "Group items into collapsible areas"
       },
-      homePageId: {
-        label: "Home Page Id",
-        helpText: "Landing page when app opens"
-      },
-      mobileNavigation: {
-        label: "Mobile Navigation",
-        helpText: "Bottom tab bar config for mobile"
-      },
-      objects: {
-        label: "Objects",
-        helpText: "Object names this app exposes"
-      },
-      apis: {
-        label: "Apis",
-        helpText: "API endpoint definitions"
-      },
       defaultAgent: {
         label: "Default Agent",
         helpText: "AI agent for the ambient assistant button"
@@ -1008,18 +989,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       requiredPermissions: {
         label: "Required Permissions",
         helpText: "Permissions needed to access this app"
-      },
-      sharing: {
-        label: "Sharing",
-        helpText: "Public/internal/restricted access control"
-      },
-      embed: {
-        label: "Embed",
-        helpText: "iFrame embed configuration"
-      },
-      aria: {
-        label: "Aria",
-        helpText: "Accessibility labels"
       }
     }
   },

@@ -23,6 +23,14 @@ Resolution order in `serve.ts`:
 
 3. Default → provider='log' (LogTransport, no real send)
 
+SMTP delivery is built in (ADR-0012): select it with provider='smtp'
+
+and supply the connection through `options` (host / port / secure /
+
+user / password) or the matching OS_EMAIL_SMTP_HOST / _PORT /
+
+_SECURE / _USER / _PASSWORD environment variables.
+
 <Callout type="info">
 **Source:** `packages/spec/src/system/email-config.zod.ts`
 </Callout>
@@ -58,6 +66,7 @@ const result = EmailAddressConfigSchema.parse(data);
 * `log`
 * `resend`
 * `postmark`
+* `smtp`
 
 
 ---
@@ -68,12 +77,12 @@ const result = EmailAddressConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `Enum<'log' \| 'resend' \| 'postmark'>` | ✅ |  |
+| **provider** | `Enum<'log' \| 'resend' \| 'postmark' \| 'smtp'>` | ✅ | Transport to deliver through (OS_EMAIL_PROVIDER env). Default log — boots, sends nothing |
 | **apiKey** | `string` | optional | Provider API key (or OS_EMAIL_API_KEY env) |
 | **defaultFrom** | `{ name?: string; address: string }` | optional |  |
 | **retries** | `integer` | optional | Retry attempts on transport throw |
 | **persist** | `boolean` | optional | Persist to sys_email (default true) |
-| **options** | `Record<string, any>` | optional |  |
+| **options** | `Record<string, any>` | optional | Provider-specific extras. smtp: host (required) / port / secure / user / password, mirroring OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER / _PASSWORD. postmark: messageStream |
 
 
 ---
