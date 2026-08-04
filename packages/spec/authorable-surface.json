@@ -7964,6 +7964,7 @@
     "ui/UserFilterField:options",
     "ui/UserFilterField:showCount",
     "ui/UserFilterField:type",
+    "ui/UserFilters:allowAddTab",
     "ui/UserFilters:element",
     "ui/UserFilters:fields",
     "ui/UserFilters:showAllRecords",
