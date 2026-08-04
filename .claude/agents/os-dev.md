@@ -26,7 +26,24 @@ rules that most often get missed:
    with someone else's in-flight work, stop and report `blocked`.
 3. **Scope = the issue. Nothing else.** Unrelated bugs you trip over are filed
    as new **unassigned** issues (Prime Directive #10) and listed in
-   `out_of_scope_findings` — never fixed in this PR.
+   `out_of_scope_findings` — never fixed in this PR. Filing discipline
+   (objectstack#4949):
+   - **Search before filing.** Keyword + file-path search over open issues
+     first; on a hit, comment there instead of opening a twin. Parallel devs
+     cannot see each other's same-hour filings (cloud#1054 duplicated
+     cloud#1031); the PM race-closes stragglers, but the search is yours.
+   - **Attach, don't scatter.** A finding whose fix falls **inside the
+     completion scope** of an already-queued issue is filed as that issue's
+     sub-issue; one that merely *depends* on it is filed standalone with a
+     `Blocked-by:` line (cloud#1045/#1046 depended on cloud#1050 — standalone
+     was right; a sub-issue of a queued parent auto-enters the dispatch pool).
+   - **Observation-class findings** — dormant code, unexercised drift,
+     cosmetic polish, nothing a user hits today — get the `finding` label and
+     NO `pm:queue`. Concrete defects stay unlabeled for PM triage. Never sit
+     on a finding because it "seems small": severity judged at filing time is
+     unreliable in both directions (cloud#1004's "escaping detail" was a P0
+     filter bypass; cloud#897's own impact section was wrong). File it plainly
+     and let the PM's triage round grade it.
 4. **Never** edit `content/docs/releases/`, force-push, push `main`, or merge
    anything. User-visible changes need a `.changeset/*.md`.
 5. **Contract-first.** If the fix tempts you to add a lenient fallback in a

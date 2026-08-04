@@ -59,6 +59,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" || true
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" || true
+  gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" || true
 done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
@@ -377,9 +378,39 @@ label and classify each:
   sequencing, anything touching stored-data migration shape or removing a
   shipped capability. The label alone is the inbox entry; the deep two-axis
   analysis is written when the card is actually taken up.
+- **Hold (`finding`)**: observation-class findings — dormant code,
+  unexercised drift, cosmetic polish; real, but nothing a user hits today.
+  The label keeps the record **inside the state machine** (a comment thread
+  or a side-ledger issue is exactly the silent state ADR-0049 bans, and a
+  second tracker rule 5 prohibits) without occupying the dispatch queue or
+  the maintainer's inbox. It is a held state, not a verdict — the findings
+  triage round below is where it gets one.
 - **Repair first**: a body truncated by GitHub's sanitizer (bare `<x>`
   swallows the rest at rest) cannot be dispatched — comment the repair
   instruction and move on.
+
+#### 发现分诊轮 —— 队列的出水口(objectstack#4949)
+
+Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」和「关重复」两条
+出路 —— 没有任何机制裁定「不值得修」,总量于是只涨不落(cloud 分片一日实测:
+关 14 开 19,其中真缺陷当天闭环,涨出来的主要是观察类)。分诊轮补上出水口:
+
+- **触发**:每 ~5 轮一次;`finding` 存量超过 ~15 时插队执行。
+- **动作**:对每条 `finding`(以及久悬未分类的观察类 issue)先做过时前提
+  检查 —— main 一天 ~18 合并,发现的准确性半衰期以天计,囤积不是免费存档,
+  是负利息存款 —— 然后三选一:
+  1. **晋级**:摘 `finding` 换 `pm:queue`,进正常派发;
+  2. **关闭(not planned)**:附一句理由,列入当轮轮次报告 —— 维护者可
+     否决重开,但 PM 不等批准(否决窗口,同 step 8 的模式);
+  3. **持有**:留标签,记一行「为什么还留着」。
+- **判级发生在这里,不发生在立单时。** 立单的 dev 只有局部视野,判级最不准
+  (cloud#1004 的「转义细节」实为 P0 过滤器旁路;cloud#897 自己写的影响面
+  评估就是错的)。所以 os-dev 的纪律是「照实立单、不自行压级」,分级的责任
+  归本轮。
+- **归挂限定**:发现开成已排队 issue 的 sub-issue **仅当**它真属父单完成
+  范围 —— 已排队父单的 sub-issue 会自动成为派发候选(step 1),把仅有依赖
+  关系的发现挂进去等于让未分诊的东西静默入池;那种情况独立立单 +
+  `Blocked-by:`(cloud#1045/#1046 之于 cloud#1050 即此形)。
 
 ### 1. Fetch candidates
 
@@ -818,6 +849,14 @@ issue → verdict → PR link → notes, plus anything escalated. Then start the
 next round at step 1 (rework re-dispatches count against the next round's
 `batch` budget).
 
+Track three **bounded** health metrics in the report — total open-issue count
+is deliberately NOT one of them (discovery outruns closure in any debt-dense
+area; that is the loop working, not failing):
+
+- **dispatchable inventory** — open `pm:queue` unassigned, and its trend;
+- **decision inbox** — `needs-user-decision` count awaiting the maintainer;
+- **finding median age** — aging findings mean the 发现分诊轮 is overdue.
+
 ## Stop conditions
 
 Stop the loop and report when any of these hits:
@@ -861,5 +900,9 @@ Stop the loop and report when any of these hits:
 
 `open_questions` must be non-empty when `status` is `needs_decision`, and each
 entry becomes input to a `[决策]` issue. `out_of_scope_findings` should already
-be filed as unassigned issues by the dev (Prime Directive #10) — the PM only
-verifies they exist.
+be filed as unassigned issues by the dev per the filing discipline in the
+os-dev definition (search-first, sub-issue attachment, `finding` labeling —
+objectstack#4949). The PM verifies they exist **and cross-checks the round's
+parallel reports against each other**: two devs auditing adjacent code file
+twins within the hour (cloud#1054 duplicated cloud#1031 same-day), and only
+the PM sees both reports.

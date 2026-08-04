@@ -47,6 +47,11 @@ import * as tar from 'tar';
 
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir } from './template-copy.js';
+import {
+  readTemplateNamespace,
+  rewriteObjectNamePrefix,
+  findStaleNamespacePrefixes,
+} from './rewrite-identity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -227,26 +232,9 @@ async function loadRemote(pkgName: string, targetDir: string): Promise<string[]>
 }
 
 // ─── Field-aware rewrites ───────────────────────────────────────────
-
-/**
- * Walk every `*.ts` file under `dir` and apply `fn` to its contents.
- * Used to swap the bundled template's literal `blank_` object-name prefix
- * for the user-supplied namespace so the rendered objects satisfy the
- * `${namespace}_${shortName}` rule enforced by `objectstack validate`.
- */
-function walkAndRewriteTs(dir: string, fn: (src: string) => string) {
-  if (!fs.existsSync(dir)) return;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkAndRewriteTs(full, fn);
-    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
-      const before = fs.readFileSync(full, 'utf8');
-      const after = fn(before);
-      if (after !== before) fs.writeFileSync(full, after);
-    }
-  }
-}
+//
+// The object-name prefix walk moved to rewrite-identity.ts so it can be tested
+// without importing this module (which calls program.parse() on import).
 
 function rewriteProjectIdentity(
   targetDir: string,
@@ -255,18 +243,14 @@ function rewriteProjectIdentity(
 ) {
   const title = toTitleCase(projectName);
 
-  // Read the template's *original* namespace from the manifest before we
-  // overwrite it — we use this as the prefix to swap in src/**/*.ts files.
-  let templateNamespace: string | undefined;
-  const manifestPathPre = path.join(targetDir, 'objectstack.manifest.json');
-  if (fs.existsSync(manifestPathPre)) {
-    try {
-      const m = JSON.parse(fs.readFileSync(manifestPathPre, 'utf8'));
-      if (typeof m.namespace === 'string') templateNamespace = m.namespace;
-    } catch {
-      // ignore
-    }
-  }
+  // The template's *original* namespace, read before we overwrite it — this is
+  // the prefix we swap in src/**/*.ts. It comes from objectstack.config.ts
+  // first: a REMOTE template's objectstack.manifest.json is the template-
+  // REGISTRY document and carries no `namespace` at all, so reading only the
+  // manifest silently yielded undefined and skipped the whole rewrite below —
+  // shipping every remote template with a rewritten manifest namespace next to
+  // untouched object names (#4902). See rewrite-identity.ts for the account.
+  const templateNamespace = readTemplateNamespace(targetDir);
 
   // package.json — set .name and pin @objectstack/* deps to this scaffolder's
   // own release line. All @objectstack packages (including create-objectstack)
@@ -312,19 +296,32 @@ function rewriteProjectIdentity(
     fs.writeFileSync(configPath, cfg);
   }
 
-  // src/**/*.ts — swap the bundled template's `${templateNamespace}_` object-name
-  // prefix for the user's sanitized namespace so rendered objects satisfy
-  // the `${namespace}_${shortName}` rule. No-op if namespace already matches.
-  if (namespace !== templateNamespace && templateNamespace) {
-    const prefixRe = new RegExp(
-      `(\\bname:\\s*)(['"\`])${templateNamespace}_([a-z0-9_]+)\\2`,
-      'g',
-    );
-    walkAndRewriteTs(path.join(targetDir, 'src'), (src) =>
-      src.replace(prefixRe, (_m, prefix: string, q: string, rest: string) =>
-        `${prefix}${q}${namespace}_${rest}${q}`,
-      ),
-    );
+  // src/**/*.ts — swap the template's `${templateNamespace}_` object-name prefix
+  // for the user's sanitized namespace so rendered objects satisfy the
+  // `${namespace}_${shortName}` rule. No-op if the namespace already matches.
+  //
+  // Then VERIFY. A prefix rewrite that quietly does nothing looks exactly like
+  // one that was not needed, and that ambiguity is what let five broken
+  // templates ship (#4902). If any stale literal survives, the scaffold has
+  // produced a project that cannot build — fail here, where the cause is still
+  // legible, rather than in the user's first `objectstack build`.
+  if (templateNamespace && namespace !== templateNamespace) {
+    const srcDir = path.join(targetDir, 'src');
+    rewriteObjectNamePrefix(srcDir, templateNamespace, namespace);
+    const stale = findStaleNamespacePrefixes(srcDir, templateNamespace);
+    if (stale.length > 0) {
+      const shown = stale
+        .slice(0, 5)
+        .map((s) => `    src/${s.file}:${s.line}  ${s.text}`)
+        .join('\n');
+      const more = stale.length > 5 ? `\n    …and ${stale.length - 5} more` : '';
+      throw new Error(
+        `Scaffolding rewrote the namespace to '${namespace}' but ${stale.length} object ` +
+          `name(s) still carry the template's '${templateNamespace}_' prefix:\n${shown}${more}\n` +
+          `The generated project would fail 'objectstack build' on the ` +
+          `\${namespace}_\${shortName} rule. This is a bug in the scaffolder, not in your input.`,
+      );
+    }
   }
 
   // README.md — rewrite first H1

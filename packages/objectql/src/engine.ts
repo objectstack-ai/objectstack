@@ -2020,11 +2020,69 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Register a new storage driver
+   * Register a new storage driver.
+   *
+   * **Re-registering the SAME driver instance is by design, not an anomaly**
+   * (#4773). Every standalone boot does it exactly once, on two legs of one
+   * round trip:
+   *
+   *  1. `DatasourceConnectionService.attemptConnect()` builds the `default`
+   *     datasource's driver and registers it here with `isDefault: true`
+   *     (`service-datasource/src/datasource-connection-service.ts`), driven by
+   *     `DefaultDatasourcePlugin.init()`;
+   *  2. that plugin then republishes **the very object it just read back out of
+   *     this engine** as the `driver.<name>` kernel service — the surface
+   *     `os migrate` and serve's storage detection resolve the primary DB
+   *     through — and `ObjectQLPlugin.start()`'s `driver.*` discovery loop
+   *     bridges every such service into the engine, handing us back the
+   *     instance we already hold.
+   *
+   * So this guard has to answer two different questions, and the whole point of
+   * splitting it is that they deserve different voices:
+   *
+   *  - **Same instance** → leg 2 above. Nothing is decided and nothing is
+   *    discarded, and it happens on every boot: `debug`. Reporting a
+   *    no-anomaly, every-boot event at `warn` only teaches operators that
+   *    `warn` means nothing, which is what makes the next real one unreadable
+   *    (the degradation-log-level rule, #4632).
+   *  - **A DIFFERENT driver under a name we already hold** → two distinct
+   *    configurations claim one name and exactly one of them is silently
+   *    dropped. Whatever the loser carried — connection string, pool, tenant
+   *    scoping, capability set — is simply not in force, while every query
+   *    bound to that name keeps working against the winner. That is a real
+   *    caller-side defect and stays loud, now saying *which* config survived.
+   *  - **Same instance, but the caller asked for `isDefault` and something
+   *    else already is the default** → the caller's intent is being dropped,
+   *    so it is loud too rather than folded into the quiet path.
    */
   registerDriver(driver: IDataDriver, isDefault: boolean = false) {
-    if (this.drivers.has(driver.name)) {
-      this.logger.warn('Driver already registered, skipping', { driverName: driver.name });
+    const existing = this.drivers.get(driver.name);
+    if (existing) {
+      if (existing !== driver) {
+        this.logger.warn(
+          'Driver name collision — KEEPING the already-registered driver and DISCARDING the one just supplied. ' +
+            'Two different driver instances claim one name, so whatever configuration the discarded instance carried ' +
+            '(connection string, pool, capabilities) is NOT in force, while queries routed to this name keep working ' +
+            'against the one that was kept. Fix the caller: give the second datasource a name of its own.',
+          {
+            driverName: driver.name,
+            keptVersion: existing.version,
+            discardedVersion: driver.version,
+          },
+        );
+      } else if (isDefault && this.defaultDriver !== driver.name) {
+        this.logger.warn(
+          'Driver re-registered as DEFAULT but another driver already holds that role — the request is IGNORED and ' +
+            'the existing default stands. Unregister the current default first if the switch was intended.',
+          { driverName: driver.name, currentDefault: this.defaultDriver },
+        );
+      } else {
+        // The by-design round trip documented above — expected on every boot,
+        // so it must not reach the boot-diagnostics warning list.
+        this.logger.debug('Driver already registered — re-registering the same instance is a no-op', {
+          driverName: driver.name,
+        });
+      }
       return;
     }
 
