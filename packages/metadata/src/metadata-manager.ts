@@ -184,7 +184,10 @@ export class MetadataManager implements IMetadataService {
   // acquire a fresh knex connection while the transaction is still holding
   // SQLite's single connection — knex waits the full `acquireConnectionTimeout`
   // (60s) before returning []. The cache absorbs the repeated lookups so the
-  // loader is only hit once per TTL window.
+  // loader is only hit once per TTL window — for SEQUENTIAL callers. Nothing is
+  // written until a read completes, so calls issued concurrently with the first
+  // one all miss and each walk every loader (#5253); read that sentence as a
+  // statement about repeated lookups, not a concurrency guarantee.
   //
   // [#5184] That hazard is NOT historical — it was re-verified on the current
   // driver stack before this policy was chosen. `DatabaseLoader._find()` still
