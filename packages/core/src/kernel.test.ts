@@ -728,6 +728,146 @@ describe('ObjectKernel', () => {
 
             expect(handlerCalled).toBe(true);
         });
+
+        // #5274. `process.exit` is intercepted in all three tests below — the
+        // behaviour under test is precisely whether the kernel kills the host
+        // process, and an unintercepted `exit(1)` takes the vitest worker with
+        // it (which is why this pin could not land in #5257).
+        const spyOnExit = () =>
+            vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+        const spyOnLog = (k: ObjectKernel, level: 'error' | 'info') =>
+            vi.spyOn(
+                (k as unknown as { logger: Record<'error' | 'info', (...a: unknown[]) => void> }).logger,
+                level,
+            );
+
+        // The issue's reproduction, inverted into a pin. Before this, the first
+        // throwing `kernel:shutdown` handler ended the entire teardown: the
+        // probe recorded `reached=["process.exit(1)"]` — neither the second
+        // handler nor the plugin's destroy() ever ran. What is queued behind a
+        // failing shutdown handler is the rest of the cleanup (flush buffers,
+        // close connections, release locks), so one bad handler must not
+        // amplify into leaks and unflushed writes.
+        it('runs the remaining kernel:shutdown handlers, every destroy() and every onShutdown handler when one handler throws (#5274)', async () => {
+            const reached: string[] = [];
+            const exitSpy = spyOnExit();
+
+            const plugin: Plugin = {
+                name: 'shutdown-thrower',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    ctx.hook('kernel:shutdown', async () => {
+                        throw new Error('shutdown boom');
+                    });
+                    ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
+                },
+                destroy: async () => { reached.push('plugin-destroy'); },
+            };
+
+            try {
+                await kernel.use(plugin);
+                kernel.onShutdown(async () => { reached.push('shutdown-handler'); });
+                await kernel.bootstrap();
+                await kernel.shutdown();
+
+                // Every teardown step behind the failing handler still ran, in
+                // order: remaining subscribers → reverse-order destroy() →
+                // custom shutdown handlers.
+                expect(reached).toEqual(['later-shutdown', 'plugin-destroy', 'shutdown-handler']);
+                // …and the host process was left alone.
+                expect(exitSpy).not.toHaveBeenCalled();
+                expect(kernel.getState()).toBe('stopped');
+            } finally {
+                exitSpy.mockRestore();
+            }
+        });
+
+        // The second half of the same defect, pinned separately because it can
+        // regress on its own: the outer catch was written only for the timeout
+        // race, so a handler throw was reported as `Shutdown timed out —
+        // forcing exit` when nothing had timed out — sending whoever read that
+        // line straight to the `shutdownTimeout` config.
+        it('names the failing handler and never reports a timeout that did not happen (#5274)', async () => {
+            const exitSpy = spyOnExit();
+            const errorSpy = spyOnLog(kernel, 'error');
+            const infoSpy = spyOnLog(kernel, 'info');
+
+            const plugin: Plugin = {
+                name: 'shutdown-thrower-logs',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    ctx.hook('kernel:shutdown', async () => {
+                        throw new Error('shutdown boom');
+                    });
+                },
+            };
+
+            try {
+                await kernel.use(plugin);
+                await kernel.bootstrap();
+                await kernel.shutdown();
+
+                const errors = errorSpy.mock.calls.map((c) => String(c[0]));
+                // The failure is reported where it happened, naming the hook —
+                // same line LiteKernel's isolating dispatcher logs.
+                expect(errors).toContain('Hook handler failed: kernel:shutdown');
+                // …and NOT as a timeout.
+                expect(errors.some((m) => m.includes('Shutdown timed out'))).toBe(false);
+                expect(exitSpy).not.toHaveBeenCalled();
+
+                // Teardown really did complete, so it says so.
+                const infos = infoSpy.mock.calls.map((c) => String(c[0]));
+                expect(infos.some((m) => m.includes('Graceful shutdown complete'))).toBe(true);
+            } finally {
+                exitSpy.mockRestore();
+                errorSpy.mockRestore();
+                infoSpy.mockRestore();
+            }
+        });
+
+        // The other side of the discrimination, and the reason it is drawn by
+        // identity on the timer's own rejection: a GENUINE timeout keeps the
+        // hard exit. `performShutdown()` is still running and has stopped
+        // making progress, so the process would hang holding whatever it failed
+        // to release. This behaviour is unchanged by #5274 — pinned so the
+        // narrowing of the catch cannot quietly take it along.
+        it('still logs the timeout and still forces exit(1) when shutdown genuinely times out (#5274)', async () => {
+            const slowKernel = new ObjectKernel({
+                logger: { level: 'error' },
+                gracefulShutdown: false,
+                skipSystemValidation: true,
+                shutdownTimeout: 20,
+            });
+
+            const exitSpy = spyOnExit();
+            const errorSpy = spyOnLog(slowKernel, 'error');
+
+            const plugin: Plugin = {
+                name: 'hanging-shutdown-plugin',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    // Never settles — the actual shape of a hung teardown.
+                    // Deliberately left pending: resolving it later would let
+                    // the teardown resume after the test had finished.
+                    ctx.hook('kernel:shutdown', () => new Promise<void>(() => {}));
+                },
+            };
+
+            try {
+                await slowKernel.use(plugin);
+                await slowKernel.bootstrap();
+                await slowKernel.shutdown();
+
+                const errors = errorSpy.mock.calls.map((c) => String(c[0]));
+                expect(errors).toContain('Shutdown timed out — forcing exit');
+                expect(exitSpy).toHaveBeenCalledWith(1);
+                expect(slowKernel.getState()).toBe('stopped');
+            } finally {
+                exitSpy.mockRestore();
+                errorSpy.mockRestore();
+            }
+        }, 5000);
     });
 
     describe('Dependency Resolution', () => {

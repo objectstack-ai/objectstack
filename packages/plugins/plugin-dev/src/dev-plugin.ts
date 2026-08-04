@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAllowDevPlugin, resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 
 /**
  * Dev Plugin Options
@@ -445,15 +446,32 @@ export class DevPlugin implements Plugin {
     // name the enterprise plugin keeps registering) and caches the result for
     // the lifetime of the plugin.
     if (enabled('security')) {
-      const multiTenant = resolveMultiOrgEnabled();
+      // [ADR-0105 D1 / #5262] Key off the resolved POSTURE, exactly as
+      // `serve.ts` does — ⛔ never `resolveMultiOrgEnabled()`. That boolean was
+      // DEMOTED to a back-compat input of `resolveTenancyPosture()`, so a dev
+      // stack configured the documented way (`OS_TENANCY_POSTURE=isolated|group`,
+      // legacy boolean unset) read `false` here and never loaded the enterprise
+      // runtime at all — SecurityPlugin then probed an absent `org-scoping`,
+      // stripped the wildcard `tenant_isolation` RLS, and the stack served
+      // traffic in the ADR-0093 D5 degraded state while the `tenancy` service
+      // reported the wall as requested. Both walled postures need this package:
+      // gating on the legacy boolean also let `OS_TENANCY_POSTURE=group` skip it.
+      //
+      // REQUESTED posture is the only coherent judge here — this branch is what
+      // MOUNTS the wall, so asking "is the wall up?" would be circular.
+      const tenancyPosture = resolveTenancyPosture();
+      const multiTenant = postureEnforcesWall(tenancyPosture);
       if (multiTenant) {
         try {
           const organizationsPkg = '@objectstack/organizations';
           const mod: any = await import(/* webpackIgnore: true */ organizationsPkg);
           this.childPlugins.push(new mod.OrganizationsPlugin());
-          ctx.logger.info('  ✔ Organizations plugin enabled (multi-org: organization_id auto-stamp, per-org seed)');
+          ctx.logger.info(`  ✔ Organizations plugin enabled (posture '${tenancyPosture}': organization_id auto-stamp, per-org seed)`);
         } catch {
-          ctx.logger.warn('  ✘ OS_MULTI_ORG_ENABLED=true but @objectstack/organizations (enterprise) not installed — running single-org');
+          // Names the posture that was actually requested, not one knob's
+          // spelling of it: the old text asserted `OS_MULTI_ORG_ENABLED=true`
+          // at an operator who may well have set only `OS_TENANCY_POSTURE`.
+          ctx.logger.warn(`  ✘ tenancy posture '${tenancyPosture}' requested but @objectstack/organizations (enterprise) not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);
         }
       }
       try {

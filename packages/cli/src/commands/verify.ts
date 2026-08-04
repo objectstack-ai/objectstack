@@ -2,7 +2,8 @@
 
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
   bootStack,
   runCrudVerification,
@@ -13,6 +14,37 @@ import {
   type RlsReport,
 } from '@objectstack/verify';
 import { loadConfig } from '../utils/config.js';
+
+/**
+ * Should this `os verify` run boot an org-scoped (multi-tenant) stack?
+ *
+ * Two independent ways to ask for it, ORed: the explicit `--multi-tenant` flag,
+ * or a deployment environment that already asks for an organization wall.
+ *
+ * [ADR-0105 D1 / #5262] The env half reads the resolved POSTURE — ⛔ never
+ * `resolveMultiOrgEnabled()`, which ADR-0105 D1 demoted to a back-compat INPUT
+ * of `resolveTenancyPosture()`. On a deployment configured the documented way
+ * (`OS_TENANCY_POSTURE=isolated|group`, legacy boolean unset) that boolean reads
+ * `false`, so `os verify` booted a single-org stack and SILENTLY skipped every
+ * multi-tenant proof. That is the worst place in the codebase for this defect to
+ * land: the whole purpose of `verify` is to be the thing that notices, and a
+ * verifier that under-verifies reports success it never established. Third
+ * recurrence of the shape (cloud#1020, #5233).
+ *
+ * REQUESTED posture is the right judge here — this resolves a CLI flag before
+ * any kernel exists, and the question is literally "what did the operator ask
+ * this run to prove". `bootStack({ multiTenant: true })` then REQUESTS the
+ * `isolated` posture for the fixture and hard-fails if the enterprise runtime
+ * is missing, so an unenforceable request surfaces as an error rather than as a
+ * quietly single-org pass.
+ *
+ * Extracted and exported so the decision is testable on its own, following
+ * `describeRegisteredDriver` in `serve.ts` — this package's established shape
+ * for a command-level decision worth pinning.
+ */
+export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): boolean {
+  return Boolean(flags['multi-tenant']) || postureEnforcesWall(resolveTenancyPosture());
+}
 
 /**
  * `objectstack verify` — boot the app in-process and exercise it through the
@@ -42,7 +74,7 @@ export default class Verify extends Command {
       default: false,
     }),
     'multi-tenant': Flags.boolean({
-      description: 'Boot org-scoped (register the enterprise @objectstack/organizations plugin) so tenant-isolation RLS policies apply (also honors $OS_MULTI_ORG_ENABLED)',
+      description: 'Boot org-scoped (register the enterprise @objectstack/organizations plugin) so tenant-isolation RLS policies apply (also honors a walled $OS_TENANCY_POSTURE, and the legacy $OS_MULTI_ORG_ENABLED it falls back to)',
       default: false,
     }),
     json: Flags.boolean({ description: 'Emit the structured report as JSON', default: false }),
@@ -53,7 +85,7 @@ export default class Verify extends Command {
 
     const { config, absolutePath } = await loadConfig(flags.app);
 
-    const multiTenant = flags['multi-tenant'] || resolveMultiOrgEnabled();
+    const multiTenant = resolveVerifyMultiTenant(flags);
 
     // Data fidelity runs on its own pristine stack.
     let crud: VerifyReport;

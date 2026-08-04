@@ -37,7 +37,7 @@ A handler on any of the three **boot-path** hooks — `kernel:ready`, `kernel:bo
 
 `kernel:ready` is still the right place for **boot assertions** specifically — the service registry is only finished filling by then, so nothing earlier can judge whether a precondition your plugin *declared* was actually met, and a deployment that cannot honour what it announced must refuse to start rather than serve without the guarantee.
 
-`kernel:shutdown` is the deliberate exception: on `LiteKernel` a failing shutdown handler is logged and the remaining cleanup still runs, because the handlers queued behind it — and the `destroy()` pass after them — are what flush buffers and release resources, so aborting teardown only leaks what they were about to release. `ObjectKernel`'s shutdown path does not yet match that (tracked in [#5274](https://github.com/objectstack-ai/objectstack/issues/5274)); write shutdown handlers that handle their own errors either way.
+`kernel:shutdown` is the deliberate exception, on **both** kernels: a failing shutdown handler is logged (`Hook handler failed: kernel:shutdown`) and the remaining cleanup still runs, because the handlers queued behind it — and the `destroy()` pass after them — are what flush buffers and release resources, so aborting teardown only leaks what they were about to release. On `ObjectKernel` this also means a throwing shutdown handler no longer kills the host process: `shutdown()` still never rejects, the kernel still ends `stopped`, and `process.exit(1)` is reserved for a genuine `shutdownTimeout` overrun — the one case where teardown really is hung ([#5274](https://github.com/objectstack-ai/objectstack/issues/5274)). Write shutdown handlers that handle their own errors either way.
 
 ### Emitting Custom Events
 

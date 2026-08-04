@@ -158,6 +158,25 @@ jobs:
           version: pnpm run version
           commit: 'chore: version packages'
           title: 'chore: version packages'
+          # GitHub Releases are created by the step below instead (#4900). The
+          # action posts each package's raw CHANGELOG section as the Release
+          # body, and @objectstack/spec's section for a single v17 RC is ~343k
+          # characters against the API's 125,000 limit — so the POST 422'd,
+          # INSIDE runPublish and therefore BEFORE `published` was set. npm had
+          # already published; the step went red anyway, `published` stayed
+          # false, and the docker job was skipped. The section only grows, so it
+          # failed identically every release in the window: spec has no Release
+          # for 17.0.0-rc.0/rc.1/rc.2 (all 404), while 16.0.0 and 16.1.0 — 62,886
+          # and 1,523 characters — have theirs, with the ADR-0087 D4
+          # spec-changes.json asset that uploads onto it.
+          #
+          # NOTE this also disables the action's own per-tag `git push` — those
+          # calls live inside the same `if (createGithubReleases)` block in
+          # runPublish. That is a bonus, not a loss: scripts/release-publish.sh
+          # already pushes every tag in ONE atomic `git push origin --tags`
+          # precisely because the action's concurrent per-tag pushes raced
+          # GitHub's ref backend (#2191). The workaround's own cause is now gone.
+          createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -194,6 +213,10 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version=$(node -p "require('./packages/cli/package.json').version")
+          # Emitted unconditionally: the two facts this step can establish —
+          # "npm needed repairing" and "the image is missing" — are independent,
+          # and both consumers need the version regardless of which fired.
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
           # ── npm ─────────────────────────────────────────────────────────────
           if npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
@@ -208,7 +231,12 @@ jobs:
               echo "::error::publish ran but @objectstack/cli@$version is still not on npm"
               exit 1
             fi
-            echo "::warning::Recovered npm packages and git tags. The GitHub Releases and the ADR-0087 D4 spec-changes attachment were NOT created — those only exist on the Changesets action's own publish path. Create them by hand if this release needs them."
+            echo "::warning::Recovered npm packages and git tags. The GitHub Releases and the ADR-0087 D4 spec-changes attachment are created by the steps below, which follow this recovery path too (#4900)."
+            # Distinct from `published` below, which means "the docker job must
+            # build". This one means "a publish happened here", which is what
+            # the Release/D4 steps key off — an npm repair whose image happens to
+            # exist still owes its GitHub Releases.
+            echo "npm-published=true" >> "$GITHUB_OUTPUT"
           fi
 
           # ── runtime image ───────────────────────────────────────────────────
@@ -228,20 +256,56 @@ jobs:
           fi
 
           echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
-          {
-            echo "published=true"
-            echo "version=$version"
-          } >> "$GITHUB_OUTPUT"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Releases (bodies truncated to the API limit)
+        id: github-releases
+        # Replaces the Changesets action's own createGithubReleases (#4900).
+        # Same tag, name, prerelease rule and changelog-entry body — the body
+        # extractor is a direct port of the action's getChangelogEntry, verified
+        # to reproduce the real @objectstack/cli@17.0.0-rc.2 release body exactly
+        # — plus the three properties it lacked: bodies truncated to fit the
+        # 125,000-character limit with a link to the full CHANGELOG entry,
+        # idempotent create-or-update so a re-run over a partially-created set
+        # cannot 422, and per-package isolation so one bad package no longer
+        # abandons the rest of the fixed group (the action ran them under a
+        # single Promise.all).
+        #
+        # `!cancelled()` for the same reason the recovery step above carries it:
+        # a bare `if:` is implicitly wrapped in success(), which would skip this
+        # for exactly the failures it exists to survive.
+        #
+        # Runs on BOTH publish paths. `npm-published` — not `published`, which
+        # means "the docker job must build" — is the recovery path's signal that
+        # packages went out and therefore owe Releases.
+        if: ${{ !cancelled() && (steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.npm-published == 'true') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Authoritative when the action published. Empty on the recovery path,
+          # where RELEASE_VERSION drives the whole publishable workspace instead
+          # (the Changesets `fixed` group bumps every public package in lockstep,
+          # which scripts/check-changeset-fixed.mjs gates).
+          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+          RELEASE_VERSION: ${{ steps.recover-publish.outputs.version }}
+        run: node scripts/release-github-releases.mjs
 
       - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
         # Rebuilds the change manifest with the api-surface diff against the
         # previously PUBLISHED spec (reusing the ADR-0059 §3 gate artifact) and
-        # uploads it to the @objectstack/spec release the changesets action
-        # just created. The npm artifact carries the registry-derived copy.
-        if: steps.changesets.outputs.published == 'true'
+        # uploads it to the @objectstack/spec release the step above created.
+        # The npm artifact carries the registry-derived copy.
+        #
+        # This is the D4 mount point, and it is why #4900 could not be answered
+        # by simply turning createGithubReleases off: `gh release upload` needs a
+        # Release to upload ONTO. Measured while fixing this — spec has no
+        # Release for 17.0.0-rc.0/rc.1/rc.2, so D4 has in fact been unmounted for
+        # the whole v17 RC window; 16.0.0 and 16.1.0 both carry the asset.
+        # Ordering is load-bearing: this step must follow the one above.
+        if: ${{ !cancelled() && (steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.npm-published == 'true') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+          RELEASE_VERSION: ${{ steps.recover-publish.outputs.version }}
         run: bash scripts/release-spec-changes.sh
 
       - name: Extract published @objectstack/cli version
