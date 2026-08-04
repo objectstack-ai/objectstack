@@ -1,0 +1,99 @@
+{
+  "_note": "SHRINK-ONLY RATCHET (#4956). A liveness-ledger entry on a CONTAINER property carries ONE blanket verdict for the whole subtree beneath it. That is a legal granularity — inventing per-key verdicts without evidence would be worse — but it must be DECLARED, because silence is indistinguishable from having looked. `dashboard.widgets` asserted in prose that its widget keys were 'classified in the DashboardWidgetSchema subtree', no such subtree had ever existed, and the gate had no way to disagree — so `widgets[].responsive` rode straight through the #3896 inert-key sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` (#4956; retired four days late in #4876 / PR #4995).",
+  "_containers": "`containers`: the child keys under these coordinates are classified NOWHERE — not in this ledger, not in another file, nowhere. Each row is a recorded, countable gap and a candidate for drilling. The gate prints the total on every run; `check:liveness --undrilled` prints the worklist. A row leaves by being DRILLED (add `children` with a status + evidence per key, the way `view.list` / `view.form` are drilled), never by being deleted for convenience — a row whose container has since been drilled FAILS the gate, so the debt cannot be overstated either. Adding a row is legitimate only when you have no per-key evidence to record, and it is deliberately a visible edit to a file named for the debt, because the alternative it replaced (a reassuring sentence in a `note`) cost nothing to write and could not be checked.",
+  "_deferred": "`deferred`: containers whose subtree IS classified elsewhere — and the reference is RESOLVED, not believed. This is the same claim that caused #4956, which is exactly why it may only be made as DATA: the gate requires the target to exist (a governed type root, or a drilled `type/prop` coordinate) and its classified key set to EQUAL the container's child key set. A dangling target fails; so does a drifted one — equality rather than subset, because a container that grows a key its target never classifies is #4956 reappearing one level down. Without this list the file's own header would have been a false claim: these six cover 248 child keys, nearly half the population.",
+  "_excluded": "ADR-0010 framework overlay fields (`protection`, `_lock*`, `_provenance` — auto-classified live, they never consult the ledger) and container properties with NO ledger row at all (already reported UNCLASSIFIED by the forward pass).",
+  "_issue": "https://github.com/objectstack-ai/objectstack/issues/4956",
+  "deferred": [
+    {
+      "container": "object/fields",
+      "to": "field",
+      "why": "object.fields[] IS FieldSchema — the `field` type is separately governed and classifies all of its keys."
+    },
+    {
+      "container": "object/actions",
+      "to": "action",
+      "why": "object.actions[] IS ActionSchema — the `action` type is separately governed."
+    },
+    {
+      "container": "object/validations",
+      "to": "validation",
+      "why": "object.validations[] IS ValidationRuleSchema — governed via SPEC_ONLY_SCHEMAS since #4509 retired the standalone kind; the rule vocabulary is exactly what `object.validations[]` carries."
+    },
+    {
+      "container": "object/listViews",
+      "to": "view/list",
+      "why": "the same ListView surface `view.list` already drills, embedded on the object."
+    },
+    {
+      "container": "view/listViews",
+      "to": "view/list",
+      "why": "the ViewItem container's list surface — `view.list` is the drilled coordinate for it."
+    },
+    {
+      "container": "view/formViews",
+      "to": "view/form",
+      "why": "the ViewItem container's form surface — `view.form` is the drilled coordinate for it."
+    }
+  ],
+  "containers": [
+    "action/ai",
+    "action/aria",
+    "action/params",
+    "action/resultDialog",
+    "agent/guardrails",
+    "agent/lifecycle",
+    "agent/memory",
+    "agent/model",
+    "agent/planning",
+    "agent/structuredOutput",
+    "app/branding",
+    "dashboard/dateRange",
+    "dashboard/globalFilters",
+    "dashboard/header",
+    "doc/translations",
+    "email_template/fromOverride",
+    "email_template/variables",
+    "field/currencyConfig",
+    "field/dependsOn",
+    "field/lookupColumns",
+    "field/lookupFilters",
+    "field/options",
+    "field/storage",
+    "field/summaryOperations",
+    "flow/edges",
+    "flow/variables",
+    "hook/retryPolicy",
+    "job/retryPolicy",
+    "mapping/fieldMapping",
+    "object/access",
+    "object/activityMilestones",
+    "object/external",
+    "object/fieldGroups",
+    "object/indexes",
+    "object/lifecycle",
+    "object/publicSharing",
+    "object/userActions",
+    "page/aria",
+    "page/interfaceConfig",
+    "page/regions",
+    "page/slots",
+    "page/variables",
+    "permission/adminScope",
+    "query/expand",
+    "query/groupBy",
+    "query/orderBy",
+    "report/blocks",
+    "report/chart",
+    "report/order",
+    "skill/triggerConditions",
+    "translation/apps",
+    "translation/dashboards",
+    "translation/globalActions",
+    "translation/metadataForms",
+    "translation/objects",
+    "translation/pages",
+    "translation/settings",
+    "translation/settingsCommon"
+  ]
+}

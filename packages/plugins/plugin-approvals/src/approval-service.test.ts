@@ -129,6 +129,36 @@ const CTX = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as 
 const SYS = { isSystem: true, positions: [], permissions: [] } as any;
 
 /**
+ * Every session shape that could plausibly be read as "this caller is an admin"
+ * — pinned as NOT exempt by the guards in `lifecycle-hooks.ts` (#4839).
+ *
+ * Two families, and both matter:
+ *
+ *   - the **retired dialect** (`roles: ['admin']`), which is what the deleted
+ *     branches actually tested. It has no producer at all — ObjectQL's
+ *     `buildSession()` never writes `roles` — so a test that only proved this
+ *     shape is refused would pass against a guard that had simply been rewired
+ *     to the live vocabulary instead;
+ *   - the **live ADR-0095 vocabulary** (`permissions` / `positions` / derived
+ *     `posture`), i.e. the exact signals `ApprovalService.isOverrideActor`
+ *     reads. These DO resolve on a real request, which is why they are the
+ *     shapes the pin is really for: the maintainer's ruling is that the record
+ *     lock and the delegation guard have no admin override, not that the
+ *     override moved to a better spelling.
+ */
+const ADMIN_SESSIONS: Array<[string, any]> = [
+  ['the retired `roles: [admin]` dialect', { isSystem: false, roles: ['admin'], userId: 'root' }],
+  ['an ADR-0095 platform admin (admin_full_access)',
+    { isSystem: false, userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] }],
+  ['an ADR-0095 platform admin (platform_admin position)',
+    { isSystem: false, userId: 'root', tenantId: 't1', positions: ['platform_admin'], permissions: [] }],
+  ['an ADR-0095 tenant admin (org_admin position)',
+    { isSystem: false, userId: 'root', tenantId: 't1', positions: ['org_admin'], permissions: [] }],
+  ['an ADR-0095 derived posture (PLATFORM_ADMIN)',
+    { isSystem: false, userId: 'root', tenantId: 't1', positions: [], permissions: [], posture: 'PLATFORM_ADMIN' }],
+];
+
+/**
  * The signed-in caller, when it is someone other than {@link CTX}'s `u1`.
  * An approval action is recorded against the AUTHENTICATED caller (#3800), so a
  * test that acts as `u9` has to present `u9`'s context — naming them in
@@ -1834,14 +1864,24 @@ describe('record-lock hook (node era)', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('allows an admin override', async () => {
+  // ── #4839: there is NO admin exemption on the record lock ─────────
+  //
+  // The hook used to bypass on `session.roles.includes('admin')`. `roles` has no
+  // producer (ObjectQL's `buildSession()` never writes it), so the branch was
+  // dead and the lock has always applied to admins; the maintainer's ruling
+  // deletes it rather than reviving it under the ADR-0095 vocabulary. An admin
+  // releases a locked record through the audited #3424 rescue path
+  // (recall / reject / reassign), never by editing the record under a live
+  // approval. Both shapes below are pinned: the dead dialect must not come back,
+  // and the live privilege vocabulary must not be wired in here instead.
+  it.each(ADMIN_SESSIONS)('does NOT exempt %s from the record lock', async (_label, session) => {
     await expect(
       engine.fire('beforeUpdate', {
         object: 'opportunity',
         input: { id: 'opp1', data: { amount: 200 } },
-        session: { isSystem: false, roles: ['admin'] },
+        session,
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow(/RECORD_LOCKED/);
   });
 
   it('does not lock records without a pending request', async () => {
@@ -2067,10 +2107,15 @@ describe('record-lock hook — predicate (multi) updates (#4778)', () => {
     ).resolves.toBeUndefined();
   });
 
-  it.each(SHAPES)('allows an admin override via %s', async (_label, where) => {
-    await expect(
-      predicateUpdate(where, { amount: 999 }, { session: { isSystem: false, roles: ['admin'] } }),
-    ).resolves.toBeUndefined();
+  // #4839 — the deny half moves with the guard too: no admin shape is exempt on
+  // the predicate path either, so a `multi: true` rewrite cannot become the
+  // admin bypass the by-id path no longer has.
+  it.each(
+    SHAPES.flatMap(([sLabel, where]) =>
+      ADMIN_SESSIONS.map(([aLabel, session]) => [`${aLabel} via ${sLabel}`, where, session] as const),
+    ),
+  )('does NOT exempt %s', async (_label, where, session) => {
+    await expect(predicateUpdate(where, { amount: 999 }, { session })).rejects.toThrow(/RECORD_LOCKED/);
   });
 
   it.each(SHAPES)('allows a status-mirror write via %s', async (_label, where) => {
@@ -2427,9 +2472,10 @@ describe('ApprovalService — out-of-office delegation (#1322)', () => {
 //
 // sys_approval_delegation is apiEnabled CRUD; a member must not be able to
 // forge a delegation for someone else (delegator_id = victim) and reroute the
-// victim's approvals. The guard forces delegator_id == acting user for normal
-// writes; system/admin contexts bypass. Row-ownership on update/delete is the
-// platform's created_by RLS (not exercised here).
+// victim's approvals. The guard forces delegator_id == acting user for EVERY
+// non-system write — since #4839 there is no admin exemption, only the system
+// context bypasses. Row-ownership on update/delete is the platform's created_by
+// RLS (not exercised here).
 describe('sys_approval_delegation write guard (#1322)', () => {
   const DEL = 'sys_approval_delegation';
   let engine: ReturnType<typeof makeFakeEngine>;
@@ -2467,8 +2513,33 @@ describe('sys_approval_delegation write guard (#1322)', () => {
     await expect(fireInsert({ delegator_id: 'victim', delegate_id: 'u1' }, { isSystem: true })).resolves.toBeUndefined();
   });
 
-  it('lets an admin set the delegator to anyone', async () => {
-    await expect(fireInsert({ delegator_id: 'victim', delegate_id: 'u2' }, { isSystem: false, roles: ['admin'], userId: 'admin1' })).resolves.toBeUndefined();
+  // ── #4839: delegation is SELF-MANAGED — no admin exemption ────────
+  //
+  // The guard used to bypass on `roles.includes('admin')` so an admin could
+  // declare a delegation on someone else's behalf. Evidence decided this
+  // (maintainer's ruling, point 2): a delegation is consulted only while a
+  // request is being OPENED (`applyOooDelegation` inside `resolveApproverSpec`),
+  // so it could never have handled the approvals an unavailable approver is
+  // ALREADY holding — and for those the sanctioned, `isOverrideActor`-gated
+  // path exists (`reassign` / `recall` / `decideNode` reject). See
+  // `admin-exemption-retired.test.ts` for that coverage, executed.
+  it.each(ADMIN_SESSIONS)('does NOT let %s forge a delegation for someone else', async (_label, session) => {
+    await expect(
+      fireInsert({ delegator_id: 'victim', delegate_id: 'u2' }, { ...session, userId: 'admin1' }),
+    ).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it.each(ADMIN_SESSIONS)('does NOT let %s relabel an existing delegation on update', async (_label, session) => {
+    await expect(
+      fireUpdate({ id: 'd1', delegator_id: 'victim' }, { ...session, userId: 'admin1' }),
+    ).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it('still lets an admin declare their OWN delegation — the guard is about the delegator, not the caller', async () => {
+    await expect(
+      fireInsert({ delegator_id: 'admin1', delegate_id: 'u2' },
+        { isSystem: false, userId: 'admin1', permissions: ['admin_full_access'], positions: [] }),
+    ).resolves.toBeUndefined();
   });
 
   it('rejects a member relabelling delegator on update', async () => {

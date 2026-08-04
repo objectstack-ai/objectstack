@@ -286,7 +286,7 @@ export async function callData(deps: ActionExecutionDeps,
  * `requiredPermissions` is ungated. Single-sourced so the REST `/actions/...`
  * route and the MCP `run_action` bridge enforce the SAME declaration.
  */
-export function actionPermissionError(deps: ActionExecutionDeps, actionDef: any, ec: any, objectName?: string): string | null {
+export function actionPermissionError(_deps: ActionExecutionDeps, actionDef: any, ec: any, objectName?: string): string | null {
     const required: string[] = Array.isArray(actionDef?.requiredPermissions)
         ? actionDef.requiredPermissions
         : [];
@@ -315,7 +315,7 @@ export function actionPermissionError(deps: ActionExecutionDeps, actionDef: any,
  * data-layer backstop — therefore decides what AI may trigger. Fail-closed by
  * default.
  */
-export function actionAiExposureError(deps: ActionExecutionDeps, actionDef: any, objectName?: string): string | null {
+export function actionAiExposureError(_deps: ActionExecutionDeps, actionDef: any, objectName?: string): string | null {
     if (actionDef?.ai?.exposed === true) return null;
     const on = objectName ? ` on '${objectName}'` : '';
     return (
@@ -331,7 +331,7 @@ export function actionAiExposureError(deps: ActionExecutionDeps, actionDef: any,
  * `flow` needs a `target` and an automation service. UI-only types
  * (`url`, `modal`, `form`) and `api` have no server dispatch here.
  */
-export function isHeadlessInvokableAction(deps: ActionExecutionDeps, action: any, hasAutomation: boolean): boolean {
+export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: any, hasAutomation: boolean): boolean {
     const type: string = action?.type ?? 'script';
     if (type === 'script') return Boolean(action?.target || action?.body);
     if (type === 'flow') return Boolean(action?.target) && hasAutomation;
@@ -359,7 +359,7 @@ const SERVER_DISPATCHED_ACTION_TYPES: ReadonlySet<string> = new Set(['script', '
  * `Action '' on object '*' not found`. Naming the type and the prescription
  * turns that dead end into an actionable 400.
  */
-export function headlessActionTypeError(deps: ActionExecutionDeps, action: any, objectName?: string): string | null {
+export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any, objectName?: string): string | null {
     const type: string = action?.type ?? 'script';
     if (SERVER_DISPATCHED_ACTION_TYPES.has(type)) return null;
     const name: string = action?.name ?? 'unknown';
@@ -424,7 +424,7 @@ export function flowActionUnavailableError(action: any): string {
  * `recordIdParam` that nothing honours is the `declared ≠ enforced` shape in
  * miniature.
  */
-export function seedFlowActionParams(deps: ActionExecutionDeps,
+export function seedFlowActionParams(_deps: ActionExecutionDeps,
     action: any,
     input: {
         objectName: string;
@@ -522,7 +522,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     return result ?? null;
 }
 
-export function actionLooksDestructive(deps: ActionExecutionDeps, action: any): boolean {
+export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any): boolean {
     if (action?.ai?.requiresConfirmation !== undefined) return Boolean(action.ai.requiresConfirmation);
     return Boolean(action?.confirmText || action?.mode === 'delete' || action?.variant === 'danger');
 }
@@ -550,7 +550,7 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
     };
 }
 
-export function jsonTypeOf(deps: ActionExecutionDeps, t: string | undefined): 'string' | 'number' | 'boolean' | 'array' {
+export function jsonTypeOf(_deps: ActionExecutionDeps, t: string | undefined): 'string' | 'number' | 'boolean' | 'array' {
     switch (t) {
         case 'number': case 'currency': case 'percent': case 'rating': case 'slider': case 'autonumber':
             return 'number';
@@ -600,7 +600,7 @@ export function summarizeActionParams(deps: ActionExecutionDeps, action: any, ob
  * parent object schema (holds `.fields`); pass `undefined` for a global
  * action with only inline params.
  */
-export function resolveDeclaredActionParams(deps: ActionExecutionDeps, action: any, obj: any): ResolvedActionParam[] {
+export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: any, obj: any): ResolvedActionParam[] {
     const fields: Record<string, any> = obj?.fields ?? {};
     const out: ResolvedActionParam[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
@@ -673,7 +673,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
  * context-less / self-invoked call so a body can distinguish "no session" the
  * same way hooks do.
  */
-export function buildActionSession(deps: ActionExecutionDeps, ec: any): any | undefined {
+export function buildActionSession(_deps: ActionExecutionDeps, ec: any): any | undefined {
     if (!ec || (ec.userId == null && ec.tenantId == null)) return undefined;
     return {
         ...(ec.userId != null ? { userId: String(ec.userId) } : {}),
@@ -724,7 +724,7 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * facade proxied every call context-less. Returns `undefined` when the engine
  * predates `createContext`, leaving the sandbox's own fallback in charge.
  */
-export function buildActionApi(deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
+export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
     try {
         return ql.createContext(buildActionExecutionContext(ec));
@@ -745,7 +745,7 @@ export function buildActionApi(deps: ActionExecutionDeps, ql: any, ec: any): any
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
  * separates a trusted write from a context-less one.
  */
-export function buildActionEngineFacade(deps: ActionExecutionDeps, ql: any, ec?: any): any {
+export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?: any): any {
     const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
@@ -1007,7 +1007,7 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
  * `executeAction` will find: spec `objectName`, bundle-collector `object`,
  * else the `'global'` wildcard.
  */
-export function standaloneActionObjectName(deps: ActionExecutionDeps, action: any): string {
+export function standaloneActionObjectName(_deps: ActionExecutionDeps, action: any): string {
     if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
     if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
     return GLOBAL_ACTION_OBJECT_KEY;
@@ -1050,7 +1050,7 @@ export function isActionNotRegisteredError(err: any): boolean {
  * failed" (a business outcome, which propagates). Each surface words its own
  * miss: REST 404s naming the routed object, MCP throws naming the action.
  */
-export async function executeRegisteredAction(deps: ActionExecutionDeps,
+export async function executeRegisteredAction(_deps: ActionExecutionDeps,
     ql: any,
     objectName: string,
     candidates: string[],

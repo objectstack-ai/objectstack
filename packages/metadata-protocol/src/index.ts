@@ -13,6 +13,7 @@ export type {
   SysMetadataRepositoryOptions,
   OverlayState,
   ExtendedOperation,
+  DraftDrainFailure,
 } from './sys-metadata-repository.js';
 
 export { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';

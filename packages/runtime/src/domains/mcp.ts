@@ -262,7 +262,7 @@ async function getMcpResourceMetadataUrl(deps: DomainHandlerDeps, context: HttpP
  * shape is unusable. The body is carried separately via `parsedBody`, so a
  * GET/DELETE (no body) and a POST (JSON-RPC) both normalise cleanly.
  */
-function toMcpWebRequest(deps: DomainHandlerDeps, raw: any, parsedBody: any): Request | undefined {
+function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): Request | undefined {
     if (!raw) return undefined;
     // Already a Web Request.
     if (typeof raw.headers?.get === 'function' && typeof raw.url === 'string' && typeof raw.method === 'string') {

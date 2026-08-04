@@ -153,10 +153,6 @@ const DEBT = {
     errors: 2,
     note: 'code-tier 2 (TS2345).',
   },
-  '@objectstack/runtime': {
-    errors: 18,
-    note: 'noise only (TS6133 unused); no code-tier finding in #4311.',
-  },
   '@objectstack/service-analytics': {
     errors: 3,
     note: 'code-tier 2 (TS7053) + 1 noise.',
@@ -214,7 +210,7 @@ const TEST_DEBT = {
     errors: 467,
     note: 'TS2339 x255, TS2345 x188. Larger than driver-sql; src is clean, so the whole pile is test-only and invisible to every gate today.',
   },
-  '@objectstack/runtime': { tests: 66, errors: 220, note: 'TS18048 x81 (possibly-undefined), TS2345 x26, TS6133 x25. Also in DEBT: its src does not check either.' },
+  '@objectstack/runtime': { tests: 66, errors: 220, note: 'TS18048 x81 (possibly-undefined), TS2345 x26, TS6133 x25. Src graduated in #4311 (declares `typecheck`); this is now purely the hidden test layer.' },
   '@objectstack/objectql': { tests: 87, errors: 219, note: 'TS2339 x88, TS2554 x28 (wrong arity), TS7006 x25.' },
   '@objectstack/plugin-auth': { tests: 26, errors: 124, note: 'TS2493 x40 (tuple index out of range), TS18048 x24, TS2740 x18.' },
   '@objectstack/rest': { tests: 35, errors: 105, note: 'TS2835 x43 (NodeNext extensions), TS7006 x42. Also in DEBT.' },
