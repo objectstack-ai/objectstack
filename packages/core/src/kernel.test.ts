@@ -636,6 +636,66 @@ describe('ObjectKernel', () => {
             expect(kernel.getState()).toBe('stopped');
         });
 
+        // #5257 — the ObjectKernel HALVES of the two pins this issue adds.
+        // ObjectKernel already behaved this way (`context.trigger` never
+        // catches); the tests exist so the pair is symmetric with
+        // lite-kernel.test.ts and a regression on EITHER kernel is caught by a
+        // named test rather than inferred from the other one still passing.
+        // That symmetry is the whole point: the bug #5170 and #5257 closed was
+        // one hook name meaning two opposite things depending on the kernel,
+        // and only a matched pair of tests can hold that shut.
+        it('fails the boot when a kernel:bootstrapped handler throws (#5257)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'bootstrapped-thrower-plugin',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    ctx.hook('kernel:bootstrapped', async () => {
+                        throw new Error('node-type audit could not seal the vocabulary');
+                    });
+                    ctx.hook('kernel:bootstrapped', async () => { reached.push('later-bootstrapped'); });
+                    ctx.hook('kernel:listening', async () => { reached.push('kernel:listening'); });
+                },
+            };
+
+            await kernel.use(plugin);
+
+            await expect(kernel.bootstrap()).rejects.toThrow('node-type audit could not seal the vocabulary');
+
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+        });
+
+        // The headline case of #5257, from the kernel that always got it
+        // right: `HonoServerPlugin` awaits `server.listen(port)` inside a
+        // `kernel:listening` handler with no try/catch of its own, so a listen
+        // that rejects must fail the boot rather than resolve into a process
+        // announcing "✅ Bootstrap complete" with nothing listening.
+        it('fails the boot — and never logs "Bootstrap complete" — when a kernel:listening handler throws (#5257)', async () => {
+            const reached: string[] = [];
+            const plugin: Plugin = {
+                name: 'listening-thrower-plugin',
+                version: '1.0.0',
+                init: async (ctx) => {
+                    ctx.hook('kernel:listening', async () => {
+                        throw new Error('listen EACCES: permission denied 0.0.0.0:80');
+                    });
+                    ctx.hook('kernel:listening', async () => { reached.push('later-listening'); });
+                },
+            };
+
+            await kernel.use(plugin);
+            const infoSpy = vi.spyOn((kernel as unknown as { logger: { info: (...a: unknown[]) => void } }).logger, 'info');
+
+            await expect(kernel.bootstrap()).rejects.toThrow('listen EACCES: permission denied 0.0.0.0:80');
+
+            expect(reached).toEqual([]);
+            expect(kernel.getState()).toBe('stopped');
+            const logged = infoSpy.mock.calls.map((c) => String(c[0]));
+            expect(logged.some((m) => m.includes('Bootstrap complete'))).toBe(false);
+            infoSpy.mockRestore();
+        });
+
         it('should trigger shutdown hook', async () => {
             let hookCalled = false;
 
