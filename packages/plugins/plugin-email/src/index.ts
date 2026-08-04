@@ -26,6 +26,15 @@ export type {
   EmailSendQueuePayload,
   DeliverAttemptOptions,
 } from './email-service.js';
+export {
+  SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
+  encodeAttachmentsForRow,
+  decodeAttachmentsFromRow,
+  encodeHeadersForRow,
+  decodeHeadersFromRow,
+  type PersistedEmailAttachment,
+  type EncodedAttachments,
+} from './sys-email-payload.js';
 export { renderTemplate, requireVars, htmlToText } from './template-engine.js';
 export {
   ResendTransport,

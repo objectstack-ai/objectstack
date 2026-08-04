@@ -225,6 +225,43 @@ describe('queue delivery — round trip', () => {
     expect(h.jobs()[0]).toMatchObject({ status: 'completed', attempts: 1 });
   });
 
+  it('carries custom headers and a small attachment all the way to the worker (#5177)', async () => {
+    // The capability #5177 adds, end to end: these messages used to be pushed
+    // back onto inline delivery because a row could not rebuild them, so the
+    // durable path was closed to exactly the mail most worth making durable.
+    const h = await boot({ plugin: { queueDelivery: true } });
+    await h.ready();
+
+    const res = await h.service().send({
+      to: 'a@b.com',
+      subject: '对账单',
+      text: 'hello',
+      headers: { 'X-Campaign': 'spring', 'List-Unsubscribe': '<mailto:u@example.test>' },
+      attachments: [
+        { filename: '对账单.txt', content: '金额:¥1.00' },
+        { filename: 'logo.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]), contentType: 'image/png', cid: 'logo@inline' },
+      ],
+    });
+
+    expect(res.status).toBe('queued');
+    expect(h.transport.send).not.toHaveBeenCalled();
+    expect(h.sysEmail()[0].headers_json).toBeTruthy();
+    expect(h.sysEmail()[0].attachments_json).toBeTruthy();
+
+    await h.adapter.pollOnce();
+
+    expect(h.sysEmail()).toHaveLength(1);
+    expect(h.sysEmail()[0]).toMatchObject({ id: res.id, status: 'sent' });
+    const delivered = vi.mocked(h.transport.send).mock.calls[0][0];
+    expect(delivered.headers).toEqual({ 'X-Campaign': 'spring', 'List-Unsubscribe': '<mailto:u@example.test>' });
+    // Both content forms come back as the arm they were sent as.
+    expect(delivered.attachments[0]).toEqual({ filename: '对账单.txt', content: '金额:¥1.00' });
+    expect(delivered.attachments[1]).toMatchObject({
+      filename: 'logo.png', contentType: 'image/png', cid: 'logo@inline',
+    });
+    expect(Buffer.compare(delivered.attachments[1].content, Buffer.from([0x89, 0x50, 0x4e, 0x47]))).toBe(0);
+  });
+
   it('SMTP 535: the queue retries with backoff, exhausts, and DLQs — one row throughout', async () => {
     // The regression the issue names: the old subscriber called `send()`, so
     // each redelivery INSERTED a new sys_email row. Five attempts, five rows,

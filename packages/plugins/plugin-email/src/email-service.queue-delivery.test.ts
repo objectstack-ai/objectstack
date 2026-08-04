@@ -15,6 +15,7 @@
 //    not.
 
 import { describe, it, expect, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { IQueueService } from '@objectstack/spec/contracts';
 import {
   EmailService,
@@ -22,6 +23,7 @@ import {
   type EmailPersistence,
   type EmailQueueDelivery,
 } from './email-service.js';
+import { SYS_EMAIL_ATTACHMENT_LIMIT_BYTES } from './sys-email-payload.js';
 
 interface Published {
   queue: string;
@@ -201,13 +203,13 @@ describe('EmailService — queue delivery on', () => {
     expect(queue.published).toHaveLength(0);
   });
 
-  it('delivers a message with attachments inline rather than queueing it stripped', async () => {
-    // sys_email has no attachment / header columns, so a row cannot rebuild
-    // them. Queueing such a message would deliver it WITHOUT the attachment —
-    // silent data loss wearing durability's clothes.
-    const transport = { send: vi.fn(async () => ({ messageId: '<with-att@x>' })) };
+  it('queues a message with a SMALL attachment, storing its content on the row (#5177)', async () => {
+    // Was: pushed back to inline delivery, because no column could carry the
+    // attachment and queueing it would have delivered it stripped. Now the
+    // row carries it, so the durable path is available to it too.
+    const transport = { send: vi.fn(async () => ({ messageId: '<never@x>' })) };
     const queue = makeQueue();
-    const { p } = makePersistence();
+    const { p, rows } = makePersistence();
     const logger = makeLogger();
     const svc = new EmailService({
       transport, defaultFrom: 'no@reply.com', persistence: p, logger, queueDelivery: wiring(queue),
@@ -215,28 +217,136 @@ describe('EmailService — queue delivery on', () => {
 
     const res = await svc.send({ ...MSG, attachments: [{ filename: 'a.txt', content: 'hi' }] });
 
-    expect(res.status).toBe('sent');
-    expect(queue.published).toHaveLength(0);
-    expect(transport.send).toHaveBeenCalledWith(expect.objectContaining({
-      attachments: [{ filename: 'a.txt', content: 'hi' }],
-    }));
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('attachments'));
-    // A capability gap, not a failure: nothing is logged at error.
+    expect(res.status).toBe('queued');
+    expect(queue.published).toHaveLength(1);
+    expect(transport.send).not.toHaveBeenCalled();
+    const stored = JSON.parse(String(rows.get(res.id)!.attachments_json));
+    expect(stored).toEqual([{
+      filename: 'a.txt',
+      size: 2,
+      hash: `sha256:${createHash('sha256').update('hi').digest('hex')}`,
+      contentForm: 'string',
+      inline: Buffer.from('hi').toString('base64'),
+    }]);
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it('does the same for custom headers', async () => {
+  it('queues a message with custom headers, storing them on the row (#5177)', async () => {
     const transport = { send: vi.fn(async () => ({ messageId: '<hdr@x>' })) };
     const queue = makeQueue();
-    const { p } = makePersistence();
+    const { p, rows } = makePersistence();
     const svc = new EmailService({
       transport, defaultFrom: 'no@reply.com', persistence: p, queueDelivery: wiring(queue),
     });
 
-    const res = await svc.send({ ...MSG, headers: { 'X-Campaign': 'spring' } });
+    const res = await svc.send({ ...MSG, headers: { 'X-Campaign': 'spring', 'List-Unsubscribe': '<mailto:u@x>' } });
+
+    expect(res.status).toBe('queued');
+    expect(queue.published).toHaveLength(1);
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(JSON.parse(String(rows.get(res.id)!.headers_json)))
+      .toEqual({ 'X-Campaign': 'spring', 'List-Unsubscribe': '<mailto:u@x>' });
+  });
+
+  it('still refuses the queue for attachments OVER the limit, and stores nothing (#5177)', async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<big@x>' })) };
+    const queue = makeQueue();
+    const { p, rows } = makePersistence();
+    const logger = makeLogger();
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence: p, logger, queueDelivery: wiring(queue),
+    });
+    const huge = Buffer.alloc(SYS_EMAIL_ATTACHMENT_LIMIT_BYTES + 1, 0x41);
+
+    const res = await svc.send({ ...MSG, attachments: [{ filename: 'big.bin', content: huge }] });
+
+    // Pre-#5177 behaviour, unchanged: delivered inline and delivered WHOLE.
+    expect(res.status).toBe('sent');
+    expect(queue.published).toHaveLength(0);
+    expect(transport.send).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: [{ filename: 'big.bin', content: huge }],
+    }));
+    // The row must stay bounded: over-limit content never lands in the column.
+    expect(rows.get(res.id)!.attachments_json).toBeUndefined();
+    const info = logger.info.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(info).toMatch(/over the \d+-byte limit/);
+    expect(info).toContain(String(SYS_EMAIL_ATTACHMENT_LIMIT_BYTES + 1));
+    // A capability bound, not a failure: nothing is logged at error.
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('counts the limit across ALL attachments of one message, not per attachment', async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<sum@x>' })) };
+    const queue = makeQueue();
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence: p, queueDelivery: wiring(queue),
+    });
+    const half = Buffer.alloc(SYS_EMAIL_ATTACHMENT_LIMIT_BYTES / 2 + 1, 0x42);
+
+    const res = await svc.send({
+      ...MSG,
+      attachments: [{ filename: 'a.bin', content: half }, { filename: 'b.bin', content: half }],
+    });
+
+    expect(res.status).toBe('sent');          // each fits; together they do not
+    expect(queue.published).toHaveLength(0);
+    expect(rows.get(res.id)!.attachments_json).toBeUndefined();
+  });
+
+  it('keeps a message inline when `content` is outside the string | Buffer contract', async () => {
+    // A Uint8Array/stream is off-contract for EmailAttachment but nodemailer
+    // accepts it, so inline delivery must keep working exactly as before —
+    // what it must NOT do is queue a row that cannot rebuild it.
+    const transport = { send: vi.fn(async () => ({ messageId: '<odd@x>' })) };
+    const queue = makeQueue();
+    const { p, rows } = makePersistence();
+    const logger = makeLogger();
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence: p, logger, queueDelivery: wiring(queue),
+    });
+
+    const res = await svc.send({
+      ...MSG,
+      attachments: [{ filename: 'odd.bin', content: new Uint8Array([1, 2, 3]) as unknown as Buffer }],
+    });
 
     expect(res.status).toBe('sent');
     expect(queue.published).toHaveLength(0);
+    expect(rows.get(res.id)!.attachments_json).toBeUndefined();
+    expect(logger.info.mock.calls.map((c) => String(c[0])).join('\n'))
+      .toMatch(/neither a string nor a Buffer/);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('persists headers and attachments in INLINE mode too, so a stranded row is whole', async () => {
+    // The boot sweep (#5161) re-delivers from the row in inline mode as well.
+    // A row that survived a crash without its parts would be re-sent stripped.
+    const transport = { send: vi.fn(async () => ({ messageId: '<inline@x>' })) };
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: p });
+
+    const res = await svc.send({
+      ...MSG,
+      headers: { 'X-Campaign': 'spring' },
+      attachments: [{ filename: 'a.txt', content: 'hi' }],
+    });
+
+    expect(res.status).toBe('sent');
+    const row = rows.get(res.id)!;
+    expect(JSON.parse(String(row.headers_json))).toEqual({ 'X-Campaign': 'spring' });
+    expect(JSON.parse(String(row.attachments_json))[0]).toMatchObject({ filename: 'a.txt', size: 2 });
+  });
+
+  it('writes neither column for a message that has neither', async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<plain@x>' })) };
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: p });
+
+    const res = await svc.send(MSG);
+
+    expect(Object.keys(rows.get(res.id)!)).not.toContain('headers_json');
+    expect(Object.keys(rows.get(res.id)!)).not.toContain('attachments_json');
   });
 });
 

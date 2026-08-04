@@ -14,6 +14,14 @@ import type {
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
 import { renderTemplate, requireVars, htmlToText } from './template-engine.js';
+import {
+  SYS_EMAIL_ATTACHMENT_LIMIT_BYTES,
+  encodeAttachmentsForRow,
+  encodeHeadersForRow,
+  decodeAttachmentsFromRow,
+  decodeHeadersFromRow,
+  type EncodedAttachments,
+} from './sys-email-payload.js';
 
 /**
  * Queue topic durable email delivery is published to and consumed from
@@ -204,6 +212,16 @@ export function rowToNormalized(row: Record<string, any>): NormalizedEmailMessag
   const bcc = splitAddresses(row.bcc_addresses);
   if (bcc.length > 0) msg.bcc = bcc;
   if (row.reply_to) msg.replyTo = String(row.reply_to);
+  // Headers and attachments (#5177). Both decoders return `undefined` for a
+  // row that simply has no such column — every row written before #5177 — and
+  // THROW for a column that is present but does not describe what it claims
+  // to. Throwing here is the point: the caller (`deliverPersistedRow`) turns
+  // it into a `failed` row carrying the reason, which is strictly better than
+  // handing the transport a message with an attachment quietly missing.
+  const headers = decodeHeadersFromRow(row.headers_json);
+  if (headers) msg.headers = headers;
+  const attachments = decodeAttachmentsFromRow(row.attachments_json);
+  if (attachments) msg.attachments = attachments;
   return msg;
 }
 
@@ -411,10 +429,26 @@ export class EmailService implements IEmailService {
       throw err;
     }
 
+    // Encode the attachments ONCE (#5177). The same verdict answers both
+    // questions that follow — "may this message be queued?" and "what goes in
+    // `attachments_json`?" — so the row can never disagree with the routing
+    // decision (e.g. an over-limit message queued against a column that was
+    // never written).
+    //
+    // Skipped entirely without persistence: there is no row to write the
+    // column to and no queue job that could reference one (queue delivery
+    // reports that as its own degradation, below), so base64-ing a large
+    // attachment for nobody is pure cost on the path that opted out of
+    // persistence.
+    const encodedAttachments: EncodedAttachments = this.options.persistence
+      ? encodeAttachmentsForRow(normalized.attachments)
+      : { kind: 'none' };
+
     // `undefined` ⇒ every statement below is the pre-#5160 inline path.
-    const queue = allowQueue ? this.resolveQueueForSend(input) : undefined;
+    const queue = allowQueue ? this.resolveQueueForSend(encodedAttachments) : undefined;
 
     const id = newId();
+    const headersJson = encodeHeadersForRow(normalized.headers);
     const baseRow: Record<string, any> = {
       id,
       from_address: normalized.from,
@@ -425,6 +459,15 @@ export class EmailService implements IEmailService {
       subject: normalized.subject,
       ...(normalized.text !== undefined ? { body_text: normalized.text } : {}),
       ...(normalized.html !== undefined ? { body_html: normalized.html } : {}),
+      // Written in BOTH delivery modes, not only the queued one. Two reasons:
+      // the row is the audit record of what was actually sent, and the boot
+      // sweep (#5161) re-delivers stranded rows in inline mode too — a row
+      // that survived a crash without its headers/attachments would be
+      // re-sent stripped, which is the exact loss these columns exist to
+      // prevent. Over-limit attachments store NOTHING (see the verdict
+      // above), so the row stays bounded.
+      ...(headersJson !== undefined ? { headers_json: headersJson } : {}),
+      ...(encodedAttachments.kind === 'inline' ? { attachments_json: encodedAttachments.json } : {}),
       ...(input.relatedObject ? { related_object: input.relatedObject } : {}),
       ...(input.relatedId ? { related_id: input.relatedId } : {}),
       ...(input.sentBy ? { sent_by: input.sentBy } : {}),
@@ -473,25 +516,47 @@ export class EmailService implements IEmailService {
    * Resolve the queue to publish THIS message to, or `undefined` to deliver
    * it inline.
    *
-   * Returning `undefined` is never silent when queue delivery was asked for:
-   * the first time it happens the service reports at `error` what is no
-   * longer durable and how to restore it, then stays quiet. Mail keeps
-   * flowing either way — what degrades is persistence of the retry, not
-   * delivery, so a missing queue must not become a missing email.
+   * Returning `undefined` is never silent when queue delivery was asked for,
+   * but the level distinguishes two different things:
+   *
+   *  - the wiring is **broken** (no queue service, no persistence) — the
+   *    durability the operator switched on is not in force while everything
+   *    still looks normal, so that is reported at `error`, once, with the fix;
+   *  - this one message is **outside what a row can carry** (attachments over
+   *    the budget) — nothing regressed, the outcome is exactly the pre-#5160
+   *    inline path, so it is stated at `info`.
+   *
+   * Mail keeps flowing either way — what degrades is persistence of the
+   * retry, not delivery, so a missing queue must not become a missing email.
    */
-  private resolveQueueForSend(input: SendEmailInput): IQueueService | undefined {
+  private resolveQueueForSend(encodedAttachments: EncodedAttachments): IQueueService | undefined {
     const wiring = this.options.queueDelivery;
     if (!wiring) return undefined;
 
-    // `sys_email` carries no attachment or header columns, so a row cannot
-    // reconstruct them (`rowToNormalized`). Queueing such a message would
-    // deliver it stripped — silent data loss dressed as durability. Deliver
-    // it inline, where the in-memory message is still intact. Tracked for a
-    // real fix (attachment storage) rather than papered over.
-    if (input.attachments?.length || (input.headers && Object.keys(input.headers).length > 0)) {
+    // Custom headers are NO LONGER a reason to refuse the queue (#5177):
+    // `headers_json` carries them and `rowToNormalized` rebuilds them.
+    //
+    // Attachments are queueable too, up to the row budget. Past it, the row
+    // deliberately carries nothing, so a queued job could only deliver the
+    // message stripped — silent data loss dressed as durability. Fall back to
+    // inline delivery, where the in-memory message is still whole. This is
+    // not a failure and does not degrade anything that was previously
+    // working: the outcome is exactly today's behaviour, which is why it is
+    // stated at `info` and not `error`.
+    if (encodedAttachments.kind === 'over-limit') {
       this.options.logger?.info(
-        'EmailService: queue delivery skipped for one message — sys_email cannot carry attachments or custom '
-        + 'headers, so the message was delivered inline (in-process retries only) rather than stripped.',
+        `EmailService: queue delivery skipped for one message — its attachments total `
+        + `${encodedAttachments.totalBytes} bytes, over the ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}-byte limit a `
+        + 'sys_email row carries, so the message was delivered inline (in-process retries only) rather than '
+        + 'queued without them. Out-of-row storage for large attachments is objectstack#5172.',
+      );
+      return undefined;
+    }
+    if (encodedAttachments.kind === 'unsupported') {
+      this.options.logger?.info(
+        'EmailService: queue delivery skipped for one message — '
+        + `${encodedAttachments.detail}, so it cannot be reconstructed from a sys_email row. The message was `
+        + 'delivered inline (in-process retries only) rather than queued without the attachment.',
       );
       return undefined;
     }
