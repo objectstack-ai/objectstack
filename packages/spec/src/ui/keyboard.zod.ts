@@ -97,6 +97,13 @@ export const KeyboardNavigationConfigSchema = lazySchema(() => z.object({
   focusManagement: FocusManagementSchema.optional().describe('Focus and tab order management'),
   rovingTabindex: z.boolean().default(false)
     .describe('Enable roving tabindex pattern for composite widgets'),
-}).merge(AriaPropsSchema.partial()).describe('Keyboard navigation and shortcut configuration'));
+}).merge(AriaPropsSchema.partial())
+  // `.strip()` is LOAD-BEARING (#4001 批 16): `AriaPropsSchema` became `strictObject` and
+  // `.merge()` adopts the incoming schema's unknown-key posture, so without this the shape
+  // would silently become `.strict()` — with zod's generic message, not the campaign's — and
+  // would contradict this file's measured `no door` verdict (#4988: nothing parses it, so a
+  // strict shell enforces nothing). Keep it until #4988 says what happens to this file.
+  .strip()
+  .describe('Keyboard navigation and shortcut configuration'));
 
 export type KeyboardNavigationConfig = z.infer<typeof KeyboardNavigationConfigSchema>;

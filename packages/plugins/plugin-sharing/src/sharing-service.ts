@@ -297,9 +297,46 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * [#4647] Does the caller hold **Modify All Data** (`modifyAllRecords`) on
+   * `object`? Probed through the late-bound security service, which answers
+   * from `PermissionEvaluator.superuserBypassSets` — the SAME predicate the
+   * explain engine's `vama_bypass` layer reports. That shared function is the
+   * whole point: before #4647 explain answered "bypass held, ownership and
+   * sharing are skipped" while this side never asked at all, so a Modify All
+   * Data holder was told `allowed: true` by `security/explain` and handed a
+   * 403 by `PATCH /data/…` on the very same record.
+   *
+   * Consulted only AFTER ownership and shares have failed, so the ordinary
+   * write costs no extra resolution.
+   *
+   * **Fails CLOSED** (ADR-0111 D2): no security service (a deployment without
+   * `@objectstack/plugin-security`), a throwing probe, a principal-less or
+   * on-behalf-of context → `false`, i.e. owner-only as before.
+   */
+  private async hasModifyAllBypass(
+    object: string,
+    context: SharingExecutionContext,
+  ): Promise<boolean> {
+    const probe = this.securityService?.();
+    if (!probe || typeof probe.hasWriteBypass !== 'function') return false;
+    try {
+      return (await probe.hasWriteBypass(object, context)) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Return `true` if the caller may UPDATE `(object, recordId)`: ownership
-   * (widened by write DEPTH) OR an explicit write-level share. Always `true`
-   * for system context, public objects, and objects without an owner field.
+   * (widened by write DEPTH), an explicit write-level share, or — [#4647] —
+   * the `modifyAllRecords` super-user bypass. Always `true` for system context,
+   * public objects, and objects without an owner field.
+   *
+   * The bypass branch is what makes "Modify All Data" mean what it says
+   * (an admin edits any record regardless of ownership — #1883's Salesforce
+   * reference frame) on rows the DEPTH fast-path cannot reach: an OWNERLESS
+   * row (`owner_id` NULL, which system-context seeds routinely produce) matches
+   * no owner set at any depth, so ownership alone refused it.
    */
   async canEdit(
     object: string,
@@ -331,19 +368,27 @@ export class SharingService implements ISharingService {
       limit: 1,
       context: SYSTEM_CTX,
     });
-    return Array.isArray(editGrants) && editGrants.length > 0;
+    if (Array.isArray(editGrants) && editGrants.length > 0) return true;
+
+    // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and answered
+    // by the same predicate `security/explain` reports.
+    return this.hasModifyAllBypass(object, context);
   }
 
   /**
    * [ADR-0111 D3] Return `true` if the caller may DELETE `(object, recordId)`.
    *
    * Deliberately NARROWER than {@link canEdit}: ownership (widened by write
-   * DEPTH) or the `modifyAllRecords` super-user bypass — which reaches this
-   * gate as `__writeScope === 'org'`, set by plugin-security's evaluator — and
-   * NOTHING ELSE. An `edit` (or legacy `full`) share opens update but not
-   * delete: sharing widens rows, never verbs. Always `true` for system
-   * context, public objects, and objects without an owner field, matching
-   * {@link canEdit}.
+   * DEPTH) or the `modifyAllRecords` super-user bypass — and NOTHING ELSE. An
+   * `edit` (or legacy `full`) share opens update but not delete: sharing widens
+   * rows, never verbs. Always `true` for system context, public objects, and
+   * objects without an owner field, matching {@link canEdit}.
+   *
+   * [#4647] The bypass is now asked EXPLICITLY (`hasWriteBypass`) instead of
+   * only riding in as `__writeScope === 'org'`. The scope proxy was silently
+   * partial: `matchesOwnerScope` refuses an OWNERLESS row before it ever looks
+   * at the scope, so a Modify All Data holder could not delete a row with a
+   * NULL `owner_id` — while `security/explain` said the bypass applied.
    */
   async canDelete(
     object: string,
@@ -358,9 +403,12 @@ export class SharingService implements ISharingService {
     if (!hasOwnerField(schema)) return true;
     if (!context.userId) return false;
 
-    // Ownership / write DEPTH / Modify All (as `__writeScope === 'org'`) only —
-    // no share branch. This is the whole difference from canEdit.
-    return this.matchesOwnerScope(object, recordId, context);
+    // Ownership / write DEPTH only — no share branch. This is the whole
+    // difference from canEdit.
+    if (await this.matchesOwnerScope(object, recordId, context)) return true;
+
+    // [#4647] Modify All Data — the same explicit bypass canEdit consults.
+    return this.hasModifyAllBypass(object, context);
   }
 
   /**
@@ -400,17 +448,12 @@ export class SharingService implements ISharingService {
       return false;
     }
 
-    const probe = this.securityService?.();
-
     // Modify All Data — the EXPLICIT bypass only (ADR-0111 D1/D2; never the
     // effective write scope, whose unmatched-object case fails open to 'org').
-    try {
-      if (probe && typeof probe.hasWriteBypass === 'function') {
-        if ((await probe.hasWriteBypass(object, context)) === true) return true;
-      }
-    } catch {
-      /* fall through */
-    }
+    // [#4647] Shared with `canEdit`/`canDelete` so the three gates cannot drift.
+    if (await this.hasModifyAllBypass(object, context)) return true;
+
+    const probe = this.securityService?.();
 
     // [ADR-0111 D1 DEPTH] Hierarchy-manager authority: a caller whose effective
     // WRITE scope on this object is a HIERARCHY scope may manage shares on a

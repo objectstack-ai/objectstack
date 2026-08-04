@@ -189,7 +189,7 @@ const result = ETLDestinationSchema.parse(data);
 | **syncMode** | `Enum<'full' \| 'incremental' \| 'cdc'>` | optional | Sync mode |
 | **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron schedule expression |
 | **enabled** | `boolean` | optional | Pipeline enabled status |
-| **retry** | `{ maxAttempts?: integer; backoffMs?: integer }` | optional | Retry configuration |
+| **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Retry configuration |
 | **notifications** | `{ onSuccess?: string[]; onFailure?: string[] }` | optional | Notification settings |
 | **tags** | `string[]` | optional | Pipeline tags |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |

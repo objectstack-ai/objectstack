@@ -21,6 +21,59 @@
  * test dominates is rejected here, so the `has(a) && has(b) && a < b` trap
  * (which reads as a guard and is not one) never reaches a production write.
  * See `validate-null-guards.ts` for the decision procedure and its scope.
+ *
+ * ## Scope — the keys this rule reads, and the ones it deliberately does not
+ *
+ * This rule is registered `input: 'parsed'` (`authoring-rules.ts`), so what it
+ * sees on the compile path is what `ObjectStackSchema` returned. Every key it
+ * reads is one `@objectstack/spec` DECLARES. That is a contract, not a style
+ * preference: the strict sub-schemas reject an undeclared key by NAME, so a
+ * branch keyed on one is inert for every stack an author can ship (#4984,
+ * #5009, #5017).
+ *
+ * | Read                                   | Declared by                       |
+ * |----------------------------------------|-----------------------------------|
+ * | `objects[].validations[]`              | `ObjectSchema`                    |
+ * | `validations[].condition` / `.when` / `.then` / `.otherwise` | the six `*ValidationSchema` variants |
+ * | `objects[].fields[].reference`         | `FieldSchema`                     |
+ * | `objects[].fields[].expression`        | `FieldSchema`                     |
+ * | `actions[].objectName`                 | the action schema                 |
+ * | `sharingRules[].condition` / `.object` | `SharingRuleSchema`               |
+ *
+ * NOT read, and each for a reason that is a schema fact (all verified against
+ * the live `.shape` in `validate-expressions.test.ts`):
+ *
+ * - `objects[].validationRules` — `ObjectSchema` declares `validations` and is
+ *   strict; the alias is refused with "Did you mean `validationRules` →
+ *   `validations`?".
+ * - `validations[].expression` / `.predicate` / `.formula` / `.rule` — the four
+ *   names `validation.zod.ts` lists in `aliases: { … : 'condition' }`, i.e. the
+ *   ones it rejects by name. This one was the worst of the family: the chain
+ *   read them BEFORE `condition`, so for a rule carrying both spellings the
+ *   canonical predicate was short-circuited away and the rejected alias
+ *   validated in its place. Producer and consumer gave two different accounts
+ *   of the same metadata (#5017).
+ * - `sharingRules[].criteria` / `.predicate` — `criteria` is the runtime's own
+ *   spelling of the COMPILED predicate (`criteria_json`), mapped back to the
+ *   authored `condition` in the schema's rejection (#3896); `predicate` is
+ *   refused outright. #4984 removed the same pair from the org-axis rule.
+ * - `objects[].fields[].referenceTo` — `field.zod.ts:331` maps it (with
+ *   `relatedTo` / `target` / `targetObject` / `lookupObject`) to `reference`.
+ * - `actions[].object` — the action schema's own rejection says "Did you mean
+ *   `object` → `objectName`?".
+ * - `objects[].fields[].formula` / `.calculation` / `.compute` — the three names
+ *   `field.zod.ts:333` aliases back to `expression`. The field-formula pass read
+ *   `formula` until #5026, so it had never run against a stack that parses;
+ *   converging it onto `expression` ACTIVATED the check rather than deleting a
+ *   dead branch, which is why it moved on its own PR with a real-metadata sweep
+ *   attached rather than riding along with #5017's five removals.
+ *
+ * Alias tolerance belongs at the schema's refusal, not in a consumer (Prime
+ * Directive #12) — in a consumer it also converts a loud, named rejection into
+ * a silently-inert (or, above, silently-WRONG) gate.
+ *
+ * Every read in this file is now a key the spec declares; the meta-guard in
+ * `validate-expressions.test.ts` pins that with no tracked exceptions left.
  */
 
 import { validateExpression, collectCelRootIdentifiers } from '@objectstack/formula';
@@ -175,7 +228,12 @@ function masterDetailCount(obj: AnyRec): number {
   let n = 0;
   for (const [, def] of fieldEntries(obj)) {
     if (def.type !== 'master_detail') continue;
-    const ref = def.reference ?? def.referenceTo;
+    // `reference` is the ONLY spelling `FieldSchema` declares. `referenceTo`
+    // (with `relatedTo` / `target` / `targetObject` / `lookupObject`) is a
+    // rejected alias — `field.zod.ts:331` maps it to `reference` in the strict
+    // error map, so a field spelling it does not parse (#5017). See the
+    // `## Scope` table on this module for why a consumer must not re-admit it.
+    const ref = def.reference;
     if (typeof ref === 'string' && ref.trim() !== '') n += 1;
   }
   return n;
@@ -202,7 +260,15 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
   const out: Array<{ label: string; raw: unknown }> = [];
   const name = typeof rule.name === 'string' ? rule.name : '?';
   const here = path ? `${path} → '${name}'` : `'${name}'`;
-  const main = rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula;
+  // `condition` is the declared predicate key on every validation-rule variant
+  // that has one (`script`, `cross_field`). `expression` / `predicate` /
+  // `formula` / `rule` are the four names `validation.zod.ts` REJECTS by name
+  // (`aliases: { formula: 'condition', expression: 'condition', predicate:
+  // 'condition', rule: 'condition' }`), so a rule spelling any of them does not
+  // parse. Reading them here put the canonical key in THIRD position — an
+  // author who wrote both `condition` and a rejected alias had their canonical
+  // predicate short-circuited away and the alias validated instead (#5017).
+  const main = rule.condition;
   if (main != null) out.push({ label: `validation rule ${here}`, raw: main });
   if (rule.when != null) out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when });
   for (const branch of ['then', 'otherwise'] as const) {
@@ -413,12 +479,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // ── Object validation-rule + formula predicates ────────────────────
   for (const obj of objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
-    const validations = obj.validations ?? obj.validationRules;
+    // `validations` is the key `ObjectSchema` declares; `validationRules` is a
+    // rejected alias of it (#5017) — see the `## Scope` table above.
+    const validations = obj.validations;
     for (const rule of asArray(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
-      // Common predicate keys across rule shapes. Validation predicates are
-      // `record`-scoped — no field flattening — so bare refs are flagged (#1928).
-      check(where, rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula, objectName, 'record');
+      // The declared predicate key is `condition` (see `rulePredicates`).
+      // Validation predicates are `record`-scoped — no field flattening — so
+      // bare refs are flagged (#1928).
+      check(where, rule.condition, objectName, 'record');
       // `conditional` rules carry a nested `when` predicate (record-scoped).
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
       // #4763 — null-guard gate over every predicate the rule carries, nested
@@ -517,7 +586,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         objectName,
         'fail-open',
       );
-      if (f.formula) {
+      if (f.expression) {
+        // `expression` is the key `FieldSchema` declares for a computed field —
+        // what `Field.formula({ expression: … })` writes. This read was spelled
+        // `formula` until #5026, one of the names `field.zod.ts:333` REJECTS by
+        // aliasing it back to `expression`, so the whole pass had never run
+        // against a stack that parses. Converging it ACTIVATED a check rather
+        // than deleting a dead branch — the real-metadata sweep that had to
+        // accompany that is in #5026's PR body.
+        //
         // formulas are `value` role (any return type), still CEL. They are
         // `record`-scoped — `record.<field>`, never bare — so flag bare refs (#1928).
         //
@@ -532,9 +609,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
         // deciding later is low. Raise it as its own issue rather than widening
         // this call. Ledger: `validate-null-guards.ts`.
-        const res = validateExpression('value', f.formula as string | { dialect?: string; source?: string },
+        const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
-        const fieldWhere = `object '${objectName}' · field '${fname}' formula`;
+        // Names the KEY the author edits, not the field type. Saying "formula"
+        // here is how the wrong spelling propagates: the next author reads the
+        // diagnostic and writes `formula:`, which the schema then rejects.
+        const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
       }
@@ -551,9 +631,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // `disabled` may be a boolean (skip) or a predicate (check).
   const seenActions = new Set<string>();
   const checkAction = (where: string, action: AnyRec, objectName?: string): void => {
+    // `objectName` is the declared key on an action; `object` is the rejected
+    // alias the strict error map maps back to it ("Did you mean `object` →
+    // `objectName`?"), so an action spelling it does not parse (#5017).
     const obj = objectName
-      ?? (typeof action.objectName === 'string' ? action.objectName : undefined)
-      ?? (typeof action.object === 'string' ? action.object : undefined);
+      ?? (typeof action.objectName === 'string' ? action.objectName : undefined);
     const name = typeof action.name === 'string' ? action.name : '?';
     const key = `${obj ?? ''}:${name}`;
     if (seenActions.has(key)) return; // de-dup (actions are merged onto objects AND kept top-level)
@@ -589,10 +671,19 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // ── Sharing-rule predicates (security-critical, record-scoped) ─────
   // A criteria sharing rule's `condition` decides which rows a principal sees.
   // It is evaluated against the record, so a bare ref silently changes access.
-  for (const rule of asArray(stack.sharingRules)) {
-    const ruleObj = typeof rule.object === 'string' ? rule.object : undefined;
-    const where = `sharingRule '${(rule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
-    check(where, rule.condition ?? rule.criteria ?? rule.predicate, ruleObj, 'record');
+  // Named `sharingRule` rather than `rule` so the declared-key guard in the
+  // test can tell this receiver apart from the VALIDATION rule one — the two
+  // are governed by different schemas, and a scan that merged them would let a
+  // key declared by either schema pass on both (#5017).
+  for (const sharingRule of asArray(stack.sharingRules)) {
+    const ruleObj = typeof sharingRule.object === 'string' ? sharingRule.object : undefined;
+    const where = `sharingRule '${(sharingRule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
+    // `condition` is the authored key `SharingRuleSchema` declares. `criteria`
+    // is the RUNTIME spelling of the compiled predicate (`criteria_json`) and
+    // `sharing.zod.ts` maps it back to `condition` in its rejection message;
+    // `predicate` is refused with no rename at all. #4984 removed exactly this
+    // pair one file over; this was the same read left behind (#5017).
+    check(where, sharingRule.condition, ruleObj, 'record');
   }
 
   // ── Hook `condition` predicates (record-scoped gate) ───────────────

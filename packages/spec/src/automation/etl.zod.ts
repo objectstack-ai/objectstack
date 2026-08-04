@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 import { CronExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
+import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -210,41 +212,41 @@ const ETL_PIPELINE_GUIDANCE: Readonly<Record<string, string>> = {
 
 const ETL_RETRY_HISTORY =
   'Until #4001 an undeclared key here was dropped silently and the block fell back to its defaults '
-  + '(3 attempts, 60s) while reporting the authored policy as accepted.';
+  + '(3 attempts, 60s) while reporting the authored policy as accepted. Until #4962 this block was a '
+  + 'SEPARATE retry vocabulary — it spelled the count `maxAttempts`, defaulted it to 3, and declared no '
+  + 'backoff multiplier, ceiling or jitter; it now carries the converged `RetryPolicySchema` contract.';
 
 /**
  * Anchor: `RetryPolicySchema` (`shared/retry-policy.zod.ts`) — the retry policy
  * #4661 converged onto ONE declaration for `job.retryPolicy` and a `try_catch`
- * node's `retry` region. This block is a **third** encoding of the same concept
- * that the convergence did not reach, because it is an anonymous inline object
- * with no exported name and so never appeared in the #4411 / #4535 dual-source
- * scan that drove that work.
+ * node's `retry` region. This block was a **third** encoding of the same
+ * concept that the convergence did not reach, because it is an anonymous
+ * inline object with no exported name and so never appeared in the #4411 /
+ * #4535 dual-source scan that drove that work. (`Flow.errorHandling` was the
+ * fourth — #4964, same construction, same blind spot.)
  *
- * Closing this shape does not fix the divergence — it makes it audible. The
- * five entries below are the whole diff between the two vocabularies, stated
- * where an author hits it. Whether to converge (and which default `maxAttempts`
- * should then take: #4661 argues 0, this block ships 3) is #4962 — a contract
- * decision, deliberately not made inside a strictness batch.
+ * 批 12 could only make the divergence *audible*: it closed the shape and spent
+ * five curated entries stating the diff between the two vocabularies where an
+ * author hits it. #4962 removed the diff instead, so all five entries are gone
+ * — four of them (`retryDelayMs` plus the "documented absence" of
+ * `backoffMultiplier` / `maxRetryDelayMs` / `jitter`) because those keys are
+ * now DECLARED here, and the fifth (`maxRetries` → `maxAttempts`) because it
+ * pointed the wrong way: `maxRetries` is the canonical spelling and
+ * `maxAttempts` is the tombstone.
+ *
+ * What survives is anchored the same way 批 12's entries were — to sibling
+ * contracts that exist in this repo and spell the same knob differently:
+ * `integration/connector.zod.ts`'s `RetryConfig` (`initialDelayMs`,
+ * `maxDelayMs`), and the plain-English count forms. This is deliberately the
+ * SAME table `Flow.errorHandling` carries, because after the convergence the
+ * two surfaces are the same contract and an author should not learn two
+ * different lessons from them.
  */
 const ETL_RETRY_ALIASES: Readonly<Record<string, string>> = {
-  maxRetries: 'maxAttempts',
-};
-
-/** The three keys the converged policy declares and this block deliberately does not. */
-const etlRetryAbsence = (key: string): string =>
-  `\`${key}\` is declared on the converged \`RetryPolicySchema\` (\`shared/retry-policy.zod.ts\`, #4661) but `
-  + `NOT on an ETL pipeline's \`retry\`, which declares only \`maxAttempts\` + \`backoffMs\` — a flat, uncapped, `
-  + `unjittered backoff. This is a documented ABSENCE, not a typo: nothing here would read the key. Converging `
-  + `the two vocabularies is tracked as #4962.`;
-
-const ETL_RETRY_GUIDANCE: Readonly<Record<string, string>> = {
-  retryDelayMs:
-    '`retryDelayMs` was the pre-17 automation-side spelling of the base delay and was removed in '
-    + '@objectstack/spec 17.0.0 (#4661); it is tombstoned on `RetryPolicySchema`. This block already spells it '
-    + '`backoffMs` — rename the key, the value (milliseconds before the first retry) is unchanged.',
-  backoffMultiplier: etlRetryAbsence('backoffMultiplier'),
-  maxRetryDelayMs: etlRetryAbsence('maxRetryDelayMs'),
-  jitter: etlRetryAbsence('jitter'),
+  initialDelayMs: 'backoffMs',
+  maxDelayMs: 'maxRetryDelayMs',
+  retries: 'maxRetries',
+  attempts: 'maxRetries',
 };
 
 const ETL_NOTIFICATIONS_HISTORY =
@@ -485,16 +487,61 @@ export const ETLPipelineSchema = lazySchema(() => strictObject({
   enabled: z.boolean().default(true).describe('Pipeline enabled status'),
 
   /**
-   * Retry configuration for failed runs
+   * Retry configuration for failed runs — the converged `RetryPolicySchema`
+   * contract (#4962), shared with `job.retryPolicy`, a `try_catch` node's
+   * `retry` and `flow.errorHandling`.
+   *
+   * Three things changed when this block stopped being its own vocabulary, and
+   * all three are breaking (17.0.0):
+   *
+   *  1. `maxAttempts` → `maxRetries`. Pure rename, value preserved: both count
+   *     the retries AFTER the initial attempt. (Do NOT carry the off-by-one
+   *     that `integration/connector.zod.ts`'s `RetryConfig.maxAttempts` needs —
+   *     that key INCLUDES the first attempt and is a different number. The
+   *     tombstone below says so, because the same word means two things one
+   *     directory apart.)
+   *  2. The count now defaults to **0**, not 3. A pipeline that declared
+   *     `retry: {}` used to buy three silent re-runs; it now buys none until
+   *     the author states a count. An ETL destination is a foreign system by
+   *     definition, so an implicit retry against a non-idempotent one is a
+   *     duplicate write — a second invoice, a second export, a second webhook.
+   *     That is the failure mode hardest to catch in tests and most expensive
+   *     in production, and an unstated key is exactly where LLM-authored
+   *     metadata hides it.
+   *  3. `backoffMultiplier` / `maxRetryDelayMs` / `jitter` are now declarable.
+   *     They were the documented absence 批 12 spent three guidance entries on:
+   *     a nightly warehouse pipeline retrying every 60s, flat and unjittered,
+   *     is the textbook thundering herd.
+   *
+   * The base delay's default follows the shared contract (1000ms, not this
+   * block's old 60000ms). Nothing deployed moves: `etl.zod.ts` has no parse
+   * site in objectstack / objectui / cloud and an ETL pipeline is not a
+   * `defineStack` collection, so there is no stored pipeline for a default to
+   * change under. State `backoffMs` explicitly if you want the old minute.
    */
   retry: strictObject({
     surface: "this ETL pipeline's retry configuration",
     history: ETL_RETRY_HISTORY,
     aliases: ETL_RETRY_ALIASES,
-    guidance: ETL_RETRY_GUIDANCE,
   }, {
-    maxAttempts: z.number().int().min(0).default(3).describe('Max retry attempts'),
-    backoffMs: z.number().int().min(0).default(60000).describe('Backoff in milliseconds'),
+    ...retryPolicyShape(),
+
+    // ── Tombstone (ADR-0087) ──────────────────────────────────────────
+    // The count's pre-17 ETL spelling. Tombstoned rather than deleted even
+    // though this shape IS strict: an unknown-key rejection would carry the
+    // key, and what an upgrading author needs is the RENAME plus the warning
+    // that the identically-spelled connector key is a different number.
+    maxAttempts: retiredKey(
+      '`maxAttempts` was removed from an ETL pipeline\'s `retry` in @objectstack/spec 17.0.0 '
+      + '(#4962) — the retry policy now has ONE vocabulary across `job.retryPolicy`, a '
+      + '`try_catch` node\'s `retry`, `flow.errorHandling` and this block. Rename the key to '
+      + '`maxRetries`; the NUMBER IS UNCHANGED, because this block\'s `maxAttempts` already '
+      + 'counted the retries after the initial attempt. Do not subtract one — that adjustment '
+      + 'belongs to `integration/connector.zod.ts`\'s `RetryConfig.maxAttempts`, which is a '
+      + 'different key that INCLUDES the first attempt. Note the default also changed: an '
+      + 'omitted count used to mean 3 retries and now means 0, so if you were relying on the '
+      + 'old default, write `maxRetries: 3` explicitly.',
+    ),
   }).optional().describe('Retry configuration'),
 
   /**

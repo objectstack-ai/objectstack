@@ -118,9 +118,16 @@
           "evidence": "packages/services/service-automation/src/engine.ts",
           "note": "LIVE, and now single-sourced (#4247). It was live under TWO defaults — `.default(0)` here, `maxRetries ?? 3` in retryExecution — so the count depended on whether the flow had been through FlowSchema. The engine's fallback is deleted (it destructures the parsed block), and the schema refuses `strategy: 'retry'` with maxRetries < 1, since a zero-attempt retry is `strategy: 'fail'` under another name."
         },
-        "retryDelayMs": {
+        "backoffMs": {
           "status": "live",
-          "evidence": "packages/services/service-automation/src/engine.ts"
+          "verifiedAt": "2026-08-04",
+          "evidence": "packages/services/service-automation/src/engine.ts",
+          "note": "Was `retryDelayMs` until 17.0.0 (#4964). This block was a THIRD encoding of the retry policy #4661 converged, invisible to that pass because it is an anonymous inline block with no exported name — the dual-source instrument judges duplicated export NAMES. It now builds from `retryPolicyShape()`, so the base delay is spelled `backoffMs` here exactly as on `job.retryPolicy` and a `try_catch` node's `retry`; `retryDelayMs` is tombstoned and rewritten by `retry-policy-converged`. `retryExecution` destructures the parsed key."
+        },
+        "retryDelayMs": {
+          "status": "dead",
+          "verifiedAt": "2026-08-04",
+          "note": "RENAMED to `backoffMs` 2026-08-04 (#4964) — the flow-level retry keys converged onto the shared `RetryPolicySchema`, whose tombstone this key now is (it arrives here via `retryPolicyShape()`, so authoring it is a tsc error and a parse error carrying the rename). Rewritten on the load path by the `retry-policy-converged` conversion. The row stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). Note this key was LIVE right up to the rename — `retryExecution` read it — so `dead` here means retired, not never-read."
         },
         "backoffMultiplier": {
           "status": "live",

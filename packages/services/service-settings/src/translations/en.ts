@@ -28,15 +28,18 @@ export const en: TranslationData = {
         smtp: { title: 'SMTP' },
         api_key: { title: 'API key' },
         from_address: { title: 'From address' },
+        delivery: { title: 'Delivery', description: 'How outbound mail is handed to the provider.' },
       },
       keys: {
         provider: {
           label: 'Provider',
+          help: 'Only providers this server can actually deliver through are listed. '
+            + 'SendGrid and Amazon SES are configured as SMTP.',
           options: {
             smtp: 'SMTP',
-            sendgrid: 'SendGrid',
-            ses: 'Amazon SES',
+            resend: 'Resend',
             postmark: 'Postmark',
+            log: 'None (log only — no real delivery)',
           },
         },
         smtp_host: { label: 'Host', help: 'Example: smtp.example.com' },
@@ -47,6 +50,12 @@ export const en: TranslationData = {
         api_key: { label: 'API key' },
         from_email: { label: 'From email', help: 'Example: no-reply@example.com' },
         from_name: { label: 'From name' },
+        queue_delivery: {
+          label: 'Durable queue delivery',
+          help: 'Hand each message to the job queue instead of sending it inline, so a failed delivery is '
+            + 'retried with backoff by a worker and survives a restart. Requires the queue capability with a '
+            + 'durable adapter. "Send test email" always sends inline.',
+        },
       },
       actions: {
         test: { label: 'Send test email' },

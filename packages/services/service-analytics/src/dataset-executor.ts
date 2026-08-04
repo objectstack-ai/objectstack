@@ -474,6 +474,63 @@ function shiftYear(date: string, years: number): string {
   return toISODate(d.getTime());
 }
 
+/**
+ * Resolve which time dimension a `compareTo` shifts (#5011).
+ *
+ * `DatasetCompareTo.dimension` is optional, and this is the rule that makes the
+ * omission deterministic. It is an EXECUTOR resolution rule, not consumer-side
+ * tolerance (PD #12): the choice is made once, here, at the producer of the
+ * comparison — so a dashboard widget, a report, and a raw `queryDataset` caller
+ * that all omit it get the same dimension or the same error, and no renderer is
+ * ever tempted to guess one on their behalf.
+ *
+ * Candidates use the executor's own long-standing criterion, unchanged: a
+ * `timeDimensions` entry that carries a `dateRange`. That is exactly the set
+ * {@link shiftRange} can act on — a time dimension with no window has nothing to
+ * shift — so the resolution can never select a dimension the shift then fails on.
+ *
+ * Ambiguity is loud, never silently first-wins: picking `created_at` when the
+ * author meant `close_date` produces a comparison column that is wrong rather
+ * than missing, which is the failure mode nobody audits. The message names every
+ * candidate so the fix is a copy-paste.
+ */
+function resolveCompareDimension(selection: DatasetSelection): string {
+  const cmp = selection.compareTo!;
+  const shiftable = (selection.timeDimensions ?? []).filter(
+    (t) => (t as { dateRange?: unknown }).dateRange != null,
+  );
+  const names = shiftable.map((t) => t.dimension);
+
+  if (cmp.dimension != null) {
+    if (!names.includes(cmp.dimension)) {
+      throw new Error(
+        `[dataset-executor] compareTo requires a timeDimension "${cmp.dimension}" with a dateRange. `
+        + (names.length > 0
+          ? `This selection dates ${names.map((n) => `"${n}"`).join(', ')} — name one of those, or omit compareTo.dimension to let the executor choose when there is only one.`
+          : 'This selection declares no timeDimension with a dateRange, so there is no window to shift; give the dimension a dateRange (a dashboard date-range filter is the usual source).'),
+      );
+    }
+    return cmp.dimension;
+  }
+
+  if (names.length === 1) return names[0];
+
+  if (names.length === 0) {
+    throw new Error(
+      '[dataset-executor] compareTo needs a dated window to shift, but this selection declares no '
+      + 'timeDimension with a dateRange. Give the time dimension a dateRange (a dashboard date-range '
+      + 'filter is the usual source), or drop compareTo — a period-over-period comparison is only '
+      + 'defined against a bounded window.',
+    );
+  }
+
+  throw new Error(
+    `[dataset-executor] compareTo.dimension is ambiguous: ${names.length} time dimensions carry a `
+    + `dateRange (${names.map((n) => `"${n}"`).join(', ')}). Name the one to shift — `
+    + `compareTo: { kind: '${cmp.kind}', dimension: '${names[0]}' }.`,
+  );
+}
+
 /** Compute the comparison window for a [start,end] range. */
 export function shiftRange(range: [string, string], kind: CompareTo['kind']): [string, string] {
   const [start, end] = range;
@@ -868,18 +925,17 @@ export class DatasetExecutor {
     context?: ExecutionContext,
   ): Promise<Record<string, unknown>[]> {
     const cmp = selection.compareTo!;
-    const td = (selection.timeDimensions ?? []).find((t) => t.dimension === cmp.dimension);
-    if (!td || !td.dateRange) {
-      throw new Error(
-        `[dataset-executor] compareTo requires a timeDimension "${cmp.dimension}" with a dateRange.`,
-      );
-    }
+    // `dimension` is optional since #5011; resolve it (or fail loudly) before
+    // touching a window. Both the "which one?" and the "with a dateRange"
+    // questions are answered in one place — see `resolveCompareDimension`.
+    const dimension = resolveCompareDimension(selection);
+    const td = (selection.timeDimensions ?? []).find((t) => t.dimension === dimension)!;
     const range: [string, string] = Array.isArray(td.dateRange)
       ? [td.dateRange[0], td.dateRange[1] ?? td.dateRange[0]]
-      : [td.dateRange, td.dateRange];
+      : [td.dateRange as string, td.dateRange as string];
     const shifted = shiftRange(range, cmp.kind);
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
-      t.dimension === cmp.dimension ? { ...t, dateRange: shifted } : t,
+      t.dimension === dimension ? { ...t, dateRange: shifted } : t,
     );
     // Run the SAME pass the current period ran, over the shifted window: same
     // measures, same dimensions, same base filter, and — since #4820 — the same

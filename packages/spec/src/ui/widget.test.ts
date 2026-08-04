@@ -1,8 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { FieldWidgetPropsSchema, type FieldWidgetProps } from './widget.zod';
-import { WidgetManifestSchema, type WidgetManifest } from './widget.zod';
+import {
+  WidgetManifestSchema,
+  WidgetLifecycleSchema,
+  WidgetEventSchema,
+  WidgetPropertySchema,
+  WidgetSourceSchema,
+  type WidgetManifest,
+} from './widget.zod';
 import { Field } from '../data/field.zod';
+import { measureDoors } from './door-reachability.testkit';
+import { PageSchema } from './page.zod';
+import { ObjectListViewSchema } from './view.zod';
 
 describe('FieldWidgetPropsSchema', () => {
   describe('Valid Widget Props', () => {
@@ -364,5 +374,82 @@ describe('Widget — retired performance (#3896 close-out)', () => {
     } catch (e) { message = String((e as Error).message); }
     expect(message).toMatch(/virtualScroll/);
     expect(message).toMatch(/#3896/);
+  });
+});
+
+// ============================================================================
+// #4001 批 16 — the `no door` verdict for this WHOLE FILE, pinned.
+//
+// This file was scheduled as `authorable (p)` / 9 sites and resolved NEGATIVE.
+// The pin exists because the verdict regresses in one specific way: a later
+// sweep "finishing the ui/ directory" wraps these nine sites in `strictObject`,
+// spends a breaking change, and gates nothing (#4583). Same verdict is recorded
+// in this file's header comment and in the ui/ row of
+// `docs/audits/2026-07-unknown-key-strictness-ledger.md` — the three-places
+// standard, because a row in a table is not where the next person looks.
+//
+// ADR-0049 enforce-or-remove for these shapes is #5055.
+// ============================================================================
+describe('#4001 批 16 — widget.zod.ts has no authoring door', () => {
+  const SHAPES: Array<[string, unknown]> = [
+    ['WidgetManifestSchema', WidgetManifestSchema],
+    ['WidgetLifecycleSchema', WidgetLifecycleSchema],
+    ['WidgetEventSchema', WidgetEventSchema],
+    ['WidgetPropertySchema', WidgetPropertySchema],
+    ['WidgetSourceSchema', WidgetSourceSchema],
+    ['FieldWidgetPropsSchema', FieldWidgetPropsSchema],
+  ];
+
+  it('is unreachable from all 24 metadata-type roots and defineStack', () => {
+    const { verdict, nodeCount, rootCount } = measureDoors();
+
+    // Controls FIRST, in the same run. An empty result and a broken walker
+    // produce the same output, and only these tell them apart.
+    expect(rootCount, 'roots must include every metadata type plus ObjectStackSchema').toBeGreaterThan(20);
+    expect(nodeCount, 'the graph must actually have been walked').toBeGreaterThan(1000);
+    expect(verdict(PageSchema), 'positive control').toBe('direct');
+    expect(verdict(ObjectListViewSchema), 'positive control').toBe('direct');
+    expect(verdict(z.object({ a: z.string() })), 'negative control').toBe('unreachable');
+
+    for (const [name, schema] of SHAPES) {
+      expect(verdict(schema), `${name} must have no door`).toBe('unreachable');
+    }
+  });
+
+  it('a synthetic carrier flips every one of them — the verdict is the graph, not the walker', () => {
+    // Without this the assertion above is satisfiable by a walker that reaches
+    // nothing at all. 批 15 shipped exactly that shape of vacuous pin once.
+    const carrier = z.object({
+      manifest: WidgetManifestSchema,
+      lifecycle: WidgetLifecycleSchema,
+      event: WidgetEventSchema,
+      property: WidgetPropertySchema,
+      source: WidgetSourceSchema,
+      props: FieldWidgetPropsSchema,
+    });
+    const { verdict } = measureDoors([carrier]);
+    for (const [name, schema] of SHAPES) {
+      expect(verdict(schema), `${name} must become reachable once something carries it`).toBe('direct');
+    }
+  });
+
+  it('#5056 — the OLD any-one-shared-property bridge would have called this file reachable', () => {
+    // The regression pin for the instrument defect this batch found. zod's
+    // `.describe()` returns a clone sharing the original `_zod.def`, so
+    // `WidgetManifestSchema.name` (a described SnakeCaseIdentifierSchema) and
+    // `.label` (a described I18nLabelSchema) are def-identical to the same
+    // leaves on live schemas. Two keys out of twenty is a coincidence, not a
+    // derivation — assert the OVERLAP is low, so a future edit that reinstates
+    // the any-property bridge cannot pass this file off as live surface.
+    const { cloneOverlap } = measureDoors();
+    expect(cloneOverlap(WidgetManifestSchema)).toBeGreaterThan(0);  // it DOES share leaves…
+    expect(cloneOverlap(WidgetManifestSchema)).toBeLessThan(0.2);   // …but nothing structural
+  });
+
+  it('the shapes still accept their own vocabulary — this pins "open", not "broken"', () => {
+    expect(WidgetLifecycleSchema.safeParse({ onMount: 'x', notAHook: 1 }).success).toBe(true);
+    expect(WidgetEventSchema.safeParse({ name: 'e', notAnEventKey: 1 }).success).toBe(true);
+    expect(WidgetPropertySchema.safeParse({ name: 'p', type: 'string', notAPropKey: 1 }).success).toBe(true);
+    expect(WidgetManifestSchema.safeParse({ name: 'w_one', label: 'W', notAManifestKey: 1 }).success).toBe(true);
   });
 });

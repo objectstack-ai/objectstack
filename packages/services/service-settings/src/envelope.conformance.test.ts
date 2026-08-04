@@ -430,6 +430,33 @@ describe('settings envelope (#4224) — SETTINGS_VALIDATION speaks the field-lev
     expect(fields.map((f: any) => f.code).sort()).toEqual(['invalid_format', 'required']);
   });
 
+  it('an out-of-table select reaches the client as a parseable invalid_option (#5131)', async () => {
+    const { http, service } = mount();
+    service.registerManifest({
+      namespace: 'enumerated',
+      label: 'Enumerated',
+      writePermission: 'setup.write',
+      readPermission: 'setup.access',
+      specifiers: [
+        { key: 'provider', type: 'select', label: 'Provider',
+          options: [{ value: 'smtp', label: 'SMTP' }, { value: 'log', label: 'Log' }] },
+      ],
+    } as any);
+    const { status, body } = await drive(http, 'PUT /api/settings/:namespace', {
+      params: { namespace: 'enumerated' },
+      body: { provider: 'sendgrid' },
+    });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('SETTINGS_VALIDATION');
+
+    const [field] = body.error.details.fields;
+    expect(FieldErrorSchema.safeParse(field).success).toBe(true);
+    // The constraint kind is stamped where the check failed, so the route
+    // never has to infer it back out of the prose (ADR-0114).
+    expect(field.code).toBe('invalid_option');
+    expect(field.constraint).toEqual({ allowed: 'smtp, log' });
+  });
+
   it('the pre-#4224 map is gone from both of its old spellings', async () => {
     const http = lockedPattern();
     const { body } = await drive(http, 'PUT /api/settings/:namespace', {

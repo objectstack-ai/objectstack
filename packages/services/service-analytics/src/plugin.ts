@@ -30,7 +30,21 @@ interface DataEngineLike {
      */
     context?: ExecutionContext;
   }): Promise<unknown[]>;
-  execute?(command: unknown, options?: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Raw command pass-through (SQL on driver-sql). The options bag is spelled out
+   * rather than left as `Record<string, unknown>` because **`object` is load-bearing**:
+   * `ObjectQL.execute()` picks its driver in the order
+   * `options.object` → `getDriver(object)`, then `options.datasource`, then the
+   * default driver. A command that reads an object and omits `object` therefore
+   * runs against the DEFAULT datasource — which is how every dataset backed by a
+   * telemetry/audit-routed object read `0` from a populated table (#5033).
+   */
+  execute?(command: unknown, options?: {
+    /** Bound parameters for the command. */
+    args?: unknown[];
+    /** The object this command reads — routes to that object's own datasource. */
+    object?: string;
+  }): Promise<unknown>;
   /** Return the registered object schema (relationship → target + display-label resolution). */
   getObject?(name: string): {
     fields?: Record<string, {
@@ -264,7 +278,7 @@ export class AnalyticsServicePlugin implements Plugin {
       // Always wire the bridge — resolution happens at call time, mirroring
       // the executeAggregate auto-bridge above. This way plugin-init order
       // does not matter as long as `data` exists by the time a query runs.
-      executeRawSql = async (_objectName, sql, params) => {
+      executeRawSql = async (objectName, sql, params) => {
         const engine = tryGetExecutor();
         if (!engine || !engine.execute) {
           throw new Error(
@@ -274,7 +288,16 @@ export class AnalyticsServicePlugin implements Plugin {
         // NativeSQLStrategy emits `$1, $2, …` placeholders. Knex (used by
         // driver-sql) speaks `?` placeholders, so translate.
         const knexSql = sql.replace(/\$(\d+)/g, '?');
-        const result = await engine.execute(knexSql, { args: params });
+        // #5033 — `object` is ObjectQL's FIRST driver-selection key. This bridge
+        // received the object name and dropped it, so every dataset raw-SQL read
+        // fell through to the DEFAULT driver while the object-routed path
+        // (`executeAggregate` → `engine.aggregate(objectName, …)`, right above)
+        // resolved the object's own datasource. The two dataset execution paths
+        // must give ONE answer to "which datasource is this object in": an
+        // object routed elsewhere (ADR-0057 §3.6 telemetry split, an explicit
+        // `object.datasource`, a `datasourceMapping` rule) read `no such table`
+        // on the default DB and degraded to a confident `0` over live rows.
+        const result = await engine.execute(knexSql, { args: params, object: objectName });
         // A driver that cannot run SQL (e.g. the in-memory driver) returns
         // null from execute(). Silently mapping that to [] made EVERY dataset
         // query on such environments report "No rows" while looking healthy
@@ -535,6 +558,12 @@ export class AnalyticsServicePlugin implements Plugin {
           | undefined;
         return f ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
       },
+      // #5033 — the datasource an object is bound to, used ONLY to name the
+      // actual cause when a dataset's SQL references a table that is not on the
+      // datasource the query was routed to. Undefined ⇒ the object rides the
+      // default datasource (or the engine cannot answer), and the diagnostic
+      // says so rather than inventing a name.
+      getObjectDatasource: (objectName: string) => dataEngine()?.getObject?.(objectName)?.datasource,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.

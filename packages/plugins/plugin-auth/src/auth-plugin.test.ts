@@ -1315,6 +1315,15 @@ describe('AuthPlugin', () => {
       // better-auth answers `findSession` from a secondaryStorage snapshot
       // without reading the database, so a cache-backed session store would
       // silently disable them. The cache reaches the COUNTERS only.
+      //
+      // #4785 settled this as a DECISION, not a workaround: the session of
+      // record is always `sys_session`. This assertion is the wiring half of
+      // that decision; `session-of-record.test.ts` is the other half — it
+      // drives the real better-auth pipeline to prove each of the three D4
+      // controls actually ends a live session, and pins the counter-factual
+      // (with a `secondaryStorage` bound, `sys_session` stays EMPTY and the
+      // idle timeout never fires). Read the two together before changing
+      // either: this line alone says what we do, not why it matters.
       const cache = makeCache();
       const { manager } = await bootWith(async () => cache);
       expect((manager as any).config.secondaryStorage).toBeUndefined();

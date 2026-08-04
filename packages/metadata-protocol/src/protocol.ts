@@ -5084,6 +5084,43 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#5088] The same existence gate {@link updateData} runs, for the BY-ID
+     * BULK write faces — `updateManyData` and `batchData`'s `update` branch.
+     *
+     * #4435's "a write that touched zero rows must not report success" landed on
+     * 2 of the 5 write faces in this file: `updateData` (probe) and
+     * `runDeleteManyLoop` (`deleted === false`). The three bulk faces went
+     * straight to `engine.update` / `engine.delete`, so a row naming no record
+     * did not merely misreport — it entered the WRITE PIPELINE. Downstream that
+     * is worse than a wrong status code: with no stored row to overlay, #4770's
+     * record materialisation (stored ⊕ payload) produces a payload-only record,
+     * a hook `condition` reading any untouched field finds it absent, and
+     * #4775's unevaluable-condition abort fires. The row then failed
+     * `INTERNAL_ERROR` with a diagnostic accusing a CORRECT hook of naming an
+     * undeclared field. Three contracts disagreeing because one of them never
+     * ran; the probe is what makes them agree again.
+     *
+     * Deliberately the same `probeRecord` the single-record path uses, for the
+     * reason documented there: it asks EXISTENCE, not visibility, which keeps
+     * this gate out of the RLS model (the by-id write policy stays #1994's
+     * decision, inside `engine.update`) and keeps the `rls-by-id-write` proof
+     * able to go red. And deliberately BEFORE the write, never inferred from a
+     * null readback — `updateData`'s note explains why that inference would
+     * answer 404 to a write that succeeded by moving the row out of the
+     * caller's scope.
+     *
+     * Inside the atomic arm this still reads the batch's own uncommitted state:
+     * `engine.transaction` runs its callback inside the ambient `txStore`
+     * (ADR-0034), and `buildDriverOptions` falls back to that store when the
+     * context carries no explicit `transaction`, so the probe rides the same
+     * connection as the writes it guards.
+     */
+    private async assertRecordExists(object: string, id: string): Promise<void> {
+        const current = await this.probeRecord(object, id);
+        if (!current) throw recordNotFoundError(object, id);
+    }
+
+    /**
      * Optimistic Concurrency Control — the COMPARISON half, over a row the
      * caller has already read. Pure: it issues no query of its own, which is
      * what lets `updateData` run the gate on its existence probe's result
@@ -5545,11 +5582,14 @@ export class ObjectStackProtocolImplementation implements
     /**
      * The per-record loop, shared by both arms of {@link batchData} (ADR-0119
      * D4) so atomic and non-atomic cannot drift apart. `atomic` changes exactly
-     * two things: it aborts on the first failure regardless of
+     * one thing: it aborts on the first failure regardless of
      * `continueOnError` (whose own contract text already scopes it to
-     * `atomic=false`), and it forbids the upsert fallback — inside an aborted
-     * transaction a fallback insert can only fail with a secondary error that
-     * masks the real cause.
+     * `atomic=false`). It used to change a second — forbidding the upsert
+     * fallback insert, whose failure inside an aborted transaction could only
+     * mask the real cause — until #5099 removed that fallback from BOTH arms:
+     * the upsert fork is decided by an existence probe before any write, so a
+     * fallback insert could only bury a real update failure under the
+     * duplicate-key error of inserting a row just proven to exist.
      */
     private async runBatchDataLoop(args: {
         object: string;
@@ -5589,6 +5629,12 @@ export class ObjectStackProtocolImplementation implements
                     }
                     case 'update': {
                         if (!record.id) throw rowRequiredIdError('update');
+                        // [#5088] Same existence gate as `updateMany` and the
+                        // single-record PATCH — a row naming no record must not
+                        // enter the write pipeline, where #4770's stored ⊕
+                        // payload merge has no stored side and #4775 blames the
+                        // hook for the resulting gap.
+                        await this.assertRecordExists(object, record.id);
                         // [#3455] Collect the engine's LEGAL write strips per row.
                         const dropped: DroppedFieldsEvent[] = [];
                         const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
@@ -5597,25 +5643,34 @@ export class ObjectStackProtocolImplementation implements
                         break;
                     }
                     case 'upsert': {
-                        // Try update first, then create if not found
                         if (record.id) {
-                            try {
-                                const existing = await this.engine.findOne(object, { where: { id: record.id }, ...ctxOpt } as any);
-                                if (existing) {
-                                    const dropped: DroppedFieldsEvent[] = [];
-                                    const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
-                                    results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                                } else {
-                                    const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
-                                    results.push({ id: created.id, success: true, data: created, index });
-                                }
-                            } catch (err) {
-                                // ADR-0119 D4 — no blind fallback inside a
-                                // transaction: once the failing statement has
-                                // aborted it, this insert can only fail with a
-                                // secondary error ("current transaction is
-                                // aborted") that buries the real cause.
-                                if (atomic) throw err;
+                            // [#5099] The update-or-insert fork asks EXISTENCE,
+                            // not visibility. `findOne` under the CALLER's
+                            // context is the read RLS/sharing narrows (#3455),
+                            // so an existing row outside the caller's scope
+                            // answered null, took the insert arm, and either
+                            // duplicate-keyed — an authorization/update
+                            // scenario reported as a key collision — or, on a
+                            // store without a unique id constraint, wrote a
+                            // second row. Same probe as the update branch above
+                            // and the single-record path (#4620): it asks the
+                            // database a fact, and whether the caller may WRITE
+                            // the row it proves stays #1994's decision inside
+                            // `engine.update`.
+                            //
+                            // The old fallback (update threw → blind insert)
+                            // is gone with the fork's visibility read: with
+                            // existence decided BEFORE the write, a fallback
+                            // insert could only bury a real update failure
+                            // under the duplicate-key error of inserting a row
+                            // just proven to exist — the same masking ADR-0119
+                            // D4 forbade inside the atomic arm.
+                            const existing = await this.probeRecord(object, record.id);
+                            if (existing) {
+                                const dropped: DroppedFieldsEvent[] = [];
+                                const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                            } else {
                                 const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
                                 results.push({ id: created.id, success: true, data: created, index });
                             }
@@ -5628,7 +5683,18 @@ export class ObjectStackProtocolImplementation implements
                     }
                     case 'delete': {
                         if (!record.id) throw rowRequiredIdError('delete');
-                        await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
+                        // [#5088] `deleteManyData` learned this in #4435; this
+                        // branch — the OTHER by-id bulk delete, ten lines from
+                        // it — kept discarding the driver's return and pushing
+                        // `success: true` unconditionally, so a batch of typo'd
+                        // ids reported every one of them deleted. Same `=== false`
+                        // reading as both fixed faces: the contract's positive
+                        // not-found value (`IDataDriver.delete`), never an
+                        // inference from a falsy return, so a third-party driver
+                        // that answers with the deleted row is not turned into a
+                        // spurious 404.
+                        const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
+                        if (deleted === false) throw recordNotFoundError(object, record.id);
                         results.push({ id: record.id, success: true, index });
                         succeeded++;
                         break;
@@ -5868,6 +5934,14 @@ export class ObjectStackProtocolImplementation implements
                 //  2. `onFieldsDropped` was never wired — the same static `readonly`
                 //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
                 //     surfaces (#3431) happened silently here. Collect per row.
+                //
+                // [#5088] Third gap, the same shape: no existence gate. A row
+                // naming no record went straight into `engine.update`, so the
+                // hook pipeline ran over a payload-only record and the row came
+                // back `INTERNAL_ERROR` from #4775's condition abort — blaming
+                // the hook for a caller's stale id. Probe first, per row, so
+                // this face answers what the single-record PATCH answers.
+                await this.assertRecordExists(object, record.id);
                 const dropped: DroppedFieldsEvent[] = [];
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;

@@ -40,7 +40,8 @@ import { PermissionSetSchema } from './security/permission.zod';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
-import { ApiEndpointSchema } from './api/endpoint.zod';
+import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
+import { validateApiEndpointDeclarations } from './api/endpoint-publish-gate';
 import { retiredKey } from './shared/retired-key';
 
 // AI Protocol
@@ -125,33 +126,35 @@ export const DatasourceMappingRuleSchema = lazySchema(() => z.object({
 export type DatasourceMappingRule = z.infer<typeof DatasourceMappingRuleSchema>;
 
 /**
- * The prescription raised when a stack declares a non-empty `apis:` (#4936).
+ * Raise every `apis:` publish-gate failure as a Zod issue (#5040 E7).
  *
- * This string IS the migration doc for whoever hits it — very often an AI
- * (ADR-0033) — so it states the fact, the fix, and the tracking issue that
- * will make the key writable again. Same posture as a `retiredKey()`
- * tombstone, except the key is NOT retired: the vocabulary stays, only
- * authoring it is refused while no executor exists.
+ * The #4936 blanket refusal that used to live here — a `.max(0)` on `apis`
+ * whose error message told the author to delete their endpoints — is GONE, and
+ * this is what replaced it. Its premise was that nothing executed a declared
+ * endpoint; the #5040 E-series built the executor (mount seam, matcher, policy
+ * keys, execution targets, mapping keys), so the refusal would now be the lie
+ * in the other direction. What survives is the part that was always right:
+ * a declaration this runtime cannot serve is REFUSED, loudly and with a
+ * prescription, never parsed into silence.
  *
- * Deliberately module-local: a rejection that a later release deletes should
- * not first become a public export other packages can start depending on.
+ * It hangs off the whole stack object rather than the `apis` field because two
+ * of the gates are cross-field: the namespace carve-out is derived from
+ * `manifest.namespace` (ADR-0121 D2), and uniqueness is a property of the set.
+ * Placing it on the SCHEMA — not inside `defineStack` — is what keeps it
+ * unavoidable: `defineStack`, `os validate`, the lint scorer, the metadata
+ * plugin's artifact ingestion and `EnvironmentArtifactSchema.metadata` all run
+ * through this one parse, so no publish path can forget to check.
  */
-const APIS_NO_EXECUTOR_GUIDANCE =
-  '`apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime, so a '
-  + 'non-empty array is rejected instead of silently accepted (#4936). Nothing mounts the '
-  + 'declared `path`, no endpoint matcher exists, and therefore NO key on the endpoint takes '
-  + 'effect — `authRequired` included, which would parse green while gating nothing. '
-  + 'Fix: delete the `apis:` entries (an empty array or an absent key is fine). To serve the '
-  + 'route today, mount it in code — a plugin manifest `contributes.routes` entry or an '
-  + '`http.server` route — which is the path the showcase now uses. '
-  + 'The `ApiEndpoint` vocabulary is deliberately KEPT: the executor (mounting + endpoint '
-  + 'matching + per-key wiring for authRequired/cacheTtl/inputMapping/outputMapping/rateLimit) '
-  + 'is tracked by https://github.com/objectstack-ai/objectstack/issues/5040, and this '
-  + 'rejection is replaced by real execution there — so keep your definitions, do not '
-  + 'redesign around the refusal. One thing WILL change when they come back: ADR-0121 D1 '
-  + 'namespaces endpoint paths as `<runtime-prefix>/apps/<namespace>/<subpath>`, so a path '
-  + 'like `/api/v1/my/thing` becomes `/api/v1/apps/<your manifest.namespace>/thing`. Everything '
-  + 'else about the endpoint is unchanged.';
+function applyApiEndpointGates(
+  config: { manifest?: { namespace?: string | undefined } | undefined; apis?: ApiEndpoint[] | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  for (const issue of validateApiEndpointDeclarations(config.apis, {
+    namespace: config.manifest?.namespace,
+  })) {
+    ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  }
+}
 
 /**
  * ObjectStack Ecosystem Definition
@@ -291,27 +294,41 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   sharingRules: z.array(SharingRuleSchema).optional().describe('Record Sharing Rules'),
 
   /**
-   * ObjectAPI: API Layer
+   * ObjectAPI: API Layer — the platform's OUTWARD integration face.
    *
-   * ⚠️ **A non-empty `apis:` is REJECTED in v17** (#4936, maintainer verdict
-   * 2026-08-04). The vocabulary below is deliberately KEPT — endpoint shapes
-   * are an industry-stable form and retiring one only to re-introduce the same
-   * thing later is churn — but this runtime has no executor for it, so
-   * declaring an endpoint is refused rather than parsed into silence.
+   * ⚠️ **Declared endpoints are LIVE from protocol 17** (#5040). Between #4936
+   * and the executor landing, a non-empty `apis:` was refused wholesale because
+   * nothing executed it; that refusal is now narrowed to a per-endpoint gate,
+   * and an endpoint that passes it **serves requests as soon as it is
+   * published**. Read `authRequired: false` on any entry as what it is: an
+   * anonymous, internet-reachable execution entry point (ADR-0121 D6 makes an
+   * armed `rateLimit` its paired obligation).
    *
-   * Why refusing beats accepting: the whole surface was zero-execution end to
-   * end. Nothing mounted the declared `path`, `matchEndpoint` had no
-   * implementation anywhere in the repo, and every key was therefore
-   * declared ≠ enforced — `authRequired: true` included, which is a SECURITY
-   * semantic that parsed green and gated nothing. Accepting that metadata is
-   * the false-compliance failure ADR-0049 exists to stop; refusing it is the
-   * only honest state until {@link https://github.com/objectstack-ai/objectstack/issues/5040 #5040}
-   * lands the executor and turns this rejection back into execution.
+   * Each entry must satisfy every gate below or publish/validate fails naming
+   * that endpoint and that key — the runtime executes exactly the set that
+   * passes, so `declared = enforced` holds in both directions:
+   *
+   *  1. **Namespace** (ADR-0121 D1/D2) — `path` must be
+   *     `/api/v1/apps/<manifest.namespace>/<subpath>`. No built-in domain lives
+   *     under `apps/`, and two packages cannot collide because their namespaces
+   *     differ, so route ownership is structural rather than a maintained list.
+   *  2. **Supported subset** — only `object_operation` (with both
+   *     `objectParams.object` and `.operation`) and `flow` (with a `target`)
+   *     execute in 17.x; `script` and `proxy` are refused pending their own
+   *     rulings, and mapping `transform` is refused because no transformation
+   *     registry exists.
+   *  3. **Policy** — `authRequired: false` requires `rateLimit.enabled: true`;
+   *     an armed budget must be usable; `cacheTtl` must be non-negative and
+   *     GET-only.
+   *  4. **Uniqueness** — one claim per METHOD + path inside a stack.
+   *
+   * Which channel: a caller INSIDE the platform (a session, the UI, AI/MCP, the
+   * SDK) invokes an `action`; a caller OUTSIDE it (a partner system, an
+   * inbound webhook) reaches an `apis:` endpoint (ADR-0121 D3).
    */
   apis: z.array(ApiEndpointSchema)
-    .max(0, { error: () => APIS_NO_EXECUTOR_GUIDANCE })
     .optional()
-    .describe('API Endpoints — vocabulary retained, but a non-empty array is REJECTED until the executor ships (#4936 → #5040)'),
+    .describe('API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121, #5040)'),
   webhooks: z.array(WebhookSchema).optional().describe('Outbound Webhooks'),
 
   /**
@@ -580,7 +597,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * @example "./objectstack-runtime.7a70cd6576d17ff6.mjs"
    */
   runtimeModule: z.string().optional().describe('Path (relative to the artifact JSON) of the compiled runtime ESM bundle. Set by `objectstack build`; do not author by hand.'),
-}));
+}).superRefine(applyApiEndpointGates));
 
 export type ObjectStackDefinition = z.infer<typeof ObjectStackDefinitionSchema>;
 

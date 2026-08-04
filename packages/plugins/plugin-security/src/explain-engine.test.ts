@@ -293,6 +293,68 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
   });
 
+  // ── [#4647] the bypass, at row granularity ──────────────────────────────
+  // The report: `allowed: true` + a `vama_bypass` layer saying "ownership and
+  // sharing checks are skipped", sitting next to `record: { visible: false,
+  // decidedBy: 'sharing' }` — one payload, two opposite answers. Under the
+  // ruling the bypass is real, so the ROW story has to show it (and the write
+  // gate, which now consults the same predicate, agrees).
+  const VIEW_ONLY = PermissionSetSchema.parse({
+    name: 'compliance_auditor',
+    objects: { '*': { allowRead: true, allowEdit: true, viewAllRecords: true } },
+  });
+  const OWNERLESS_ROW = { id: 'r1', organization_id: 'org1', owner_id: null };
+  const ADMIN_CTX = { userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] };
+
+  it('[#4647] Modify All Data admits an OWNERLESS private record — record verdict agrees with the top level', async () => {
+    const d = await explainAccess(
+      recDeps({
+        sets: [ADMIN], layered: { layer0: null, layer1: null },
+        record: OWNERLESS_ROW, shares: [], sharingFilter: { owner_id: 'a1' },
+        canEdit: true, // the fixed gate: ownership fails, the bypass admits
+      }),
+      { object: 'leave_request', operation: 'update', context: ADMIN_CTX, recordId: 'r1' },
+    );
+    expect(d.allowed).toBe(true);
+    expect(d.record).toMatchObject({ visible: true, decidedBy: 'vama_bypass' });
+    const vama = d.layers.find((l) => l.layer === 'vama_bypass')!;
+    expect(vama.verdict).toBe('widens');
+    expect(vama.record!.outcome).toBe('admitted');
+    // The sharing layer credits the bypass rather than claiming a share it never saw.
+    expect(d.layers.find((l) => l.layer === 'sharing')!.record!.detail).toContain('Modify All Data bypass');
+  });
+
+  it('[#4647] View All Data alone does NOT bypass a WRITE — and the layer names the missing bit', async () => {
+    const d = await explainAccess(
+      recDeps({
+        sets: [VIEW_ONLY], layered: { layer0: null, layer1: null },
+        record: OWNERLESS_ROW, shares: [], sharingFilter: { owner_id: 'a1' },
+        canEdit: false, // the gate refuses: no modify bit
+      }),
+      { object: 'leave_request', operation: 'update', context: ADMIN_CTX, recordId: 'r1' },
+    );
+    expect(d.record!.visible).toBe(false);
+    const vama = d.layers.find((l) => l.layer === 'vama_bypass')!;
+    expect(vama.verdict).toBe('not_applicable');
+    expect(vama.detail).toContain('View All Data');
+    expect(vama.detail).toContain('Modify All Data');
+    expect(vama.contributors).toEqual([]);
+  });
+
+  it('[#4647] the same View All Data set DOES bypass a READ of that record', async () => {
+    const d = await explainAccess(
+      recDeps({
+        sets: [VIEW_ONLY], layered: { layer0: null, layer1: null },
+        record: OWNERLESS_ROW, shares: [], sharingFilter: { owner_id: 'a1' },
+      }),
+      { object: 'leave_request', operation: 'read', context: ADMIN_CTX, recordId: 'r1' },
+    );
+    const vama = d.layers.find((l) => l.layer === 'vama_bypass')!;
+    expect(vama.verdict).toBe('widens');
+    expect(vama.contributors.map((c) => c.name)).toEqual(['compliance_auditor']);
+    expect(d.record).toMatchObject({ visible: true, decidedBy: 'vama_bypass' });
+  });
+
   it('degrades gracefully with no record-grained deps — object-level layers plus a best-effort verdict', async () => {
     // Only the base object-level deps: recordId is given but fetchRecord /
     // computeLayeredRlsFilter etc. are absent (e.g. no plugin-sharing).

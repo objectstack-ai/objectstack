@@ -78,7 +78,7 @@
  * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded |
  * | flow / edge `condition`        | sparse  | `record-change-trigger.ts` seeds `{...inputDoc, ...after}`   | excluded |
  * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
- * | `Field.formula`                | n/a     | product judgement, not a wiring gap — see below              | excluded |
+ * | field `expression` (`Field.formula`) | n/a | product judgement, not a wiring gap — see below              | excluded |
  *
  * The three exclusions that are *not* self-evident, spelled out because a
  * surface excluded without a reason is indistinguishable from one nobody
@@ -107,11 +107,16 @@
  *    (The flattened-scope ambiguity is real for a *bare-identifier* checker —
  *    flow inputs shadow record fields, and a node's `outputVariable` can
  *    overwrite either — but that is a different, unbuilt pass.)
- *  - **`Field.formula`.** Excluded by product judgement, not by this criterion:
- *    a formula is `value`-role and natively nullable, and `guard ? value : null`
- *    is the blessed shape (#3306 rewrites it via `dyn(...)`). Making guarded
- *    arithmetic mandatory there would change what authors are *allowed to
- *    write*, which is a decision for the maintainer, not a wiring gap to close.
+ *  - **Field `expression`** (the slot `Field.formula({ expression: … })`
+ *    writes; spelled `formula` here until #5026 renamed the read to the key
+ *    `FieldSchema` actually declares). Excluded by product judgement, not by
+ *    this criterion: a formula is `value`-role and natively nullable, and
+ *    `guard ? value : null` is the blessed shape (#3306 rewrites it via
+ *    `dyn(...)`). Making guarded arithmetic mandatory there would change what
+ *    authors are *allowed to write*, which is a decision for the maintainer,
+ *    not a wiring gap to close. Note this exclusion is about the NULL-GUARD
+ *    verdict only — since #5026 the slot does carry the syntax /
+ *    field-existence / bare-reference verdicts, which it never did before.
  */
 
 import { Environment } from '@marcbachmann/cel-js';

@@ -49,6 +49,15 @@ rules that most often get missed:
 5. **Contract-first.** If the fix tempts you to add a lenient fallback in a
    consumer (`??` alias, tolerant parse), the bug is at the producer or in the
    spec — fix it there, or return `needs_decision`.
+6. **The issue body is a lead, not a spec.** Verify its premise against
+   `origin/main` before implementing: the named file may have moved, the
+   claimed cause may be mis-attributed, the capability may already exist.
+   A report with `premise_still_valid: false`, evidence, and **no PR** is a
+   first-class deliverable (#4832's premise had expired before dispatch;
+   #5047's claimed "enable/disable 重启即失" was disproven with file:line
+   evidence — persistence existed by design — which re-scoped the work to
+   the real empty-env seed bug PR #5117 fixed). Falsifying the issue is a
+   good run; forcing a PR onto a dead premise is the failure mode.
 
 **Resource discipline — parallel agents share ONE container; unbounded
 build/test runs OOM it.** Binding rules:
@@ -72,6 +81,28 @@ build/test runs OOM it.** Binding rules:
    on that PID only (`kill $PID`, liveness via `kill -0 $PID` — a
    `pgrep -f` pattern can match your own watcher and never terminate).
 
+**Toolchain traps — each of these cost at least one agent a false-red lap:**
+
+1. **`--workspace-concurrency=2` goes BEFORE `--filter`**
+   (`pnpm --workspace-concurrency=2 --filter <pkg> test`). Placed after the
+   filter it is forwarded to the underlying script instead of pnpm, and the
+   flag is `--workspace-concurrency`, not `--concurrency` — four agents hit
+   this in one session (#5047's review).
+2. **In a fresh worktree, build your package's dependencies before running
+   its tests**: `pnpm --filter '<pkg>^...' build`. Skipping it produces
+   failures that read exactly like your change broke an import — the §9
+   stale-artefact trap from AGENTS.md, in mirror image.
+3. **pnpm `overrides` live in `pnpm-workspace.yaml` only.** This repo does
+   not read them from `package.json` — an override added there changes
+   nothing while looking committed, and `check:override-consistency` never
+   sees it.
+4. **Never write an OSV override's upper bound as the exclusive fixed
+   version (`<FIXED`).** The pin self-invalidates the day the pinned version
+   itself gets an advisory: `undici@>=7.23.0 <7.28.0` stopped matching
+   exactly when 7.28.0's own advisories landed (#5032, the live specimen of
+   #4961's warning; brace-expansion did the same at 5.0.8). Put the upper
+   bound at the major boundary and move only the replacement target.
+
 Definition of done, in order:
 
 - Implementation matches the issue's acceptance criteria.
@@ -83,6 +114,64 @@ Definition of done, in order:
 - **Draft** PR to `main`, body starting `Fixes #<n>`, explanatory prose in
   Chinese per repo convention.
 - Tear down anything you started (dev servers on random ports).
+
+**Reverse verification — decide the expected direction BEFORE you run it.**
+"Put the deleted limb back / revert the fix and watch the diagnostics" proves
+something only if you predicted which way they should move. Three directions,
+all real:
+
+- **Red (the usual):** the restored dead branch turns your new pin tests red.
+- **More diagnostics, not fewer:** when the removed alias read feeds a
+  **count** rather than a predicate, deleting it can make a downstream gate
+  *gain* a finding — PR #5046: dropping the `referenceTo` alias limb moved a
+  master count from 1 to 0 and a parent-scope gate started reporting. It only
+  happens on stacks the schema already rejects by name, and the PR pinned
+  that honestly instead of leaving it for the next reader to trip over.
+- **Inverted:** when the canonical key sits first in the `??` chain,
+  spec-valid bad stacks were red *before* the change and stay red; what
+  actually changes is that **invalid** spellings stop being judged by the
+  rule (which was over-reaching on the schema's behalf) and fall to the
+  schema's named rejection — before: rule red; after: rule green, schema red
+  (#5009 / PR #5018, where the dispatch template presumed
+  before-green/after-red and the dev reported the inversion instead of
+  forcing the template; #4984 is the family origin — fixtures spelling
+  rejected aliases kept the tests green while the rule was dead).
+
+**Key-vs-value reachability criterion.** Match a fixture guard's assertion to
+what the rule guards. Guarding that a **key** is a real authoring surface →
+assert the schema reports no `unrecognized_keys` on the fixture. Guarding a
+**value** verdict → require full `safeParse` green. Demanding full-parse-green
+on a rule that deliberately also runs pre-parse (to message rejected *values*
+better) deletes legitimate coverage; settling for `unrecognized_keys` where
+the rule judges values lets phantom checks live. PR #5046 wrote this
+distinction down after nearly copying the wrong criterion from #5018 —
+rejected **keys** and rejected **values** are different facts.
+
+**Fixture triage — three dispositions, not one batch re-spell.** When your
+change removes an alias limb, every fixture spelling the alias is re-judged
+individually:
+
+- **Re-spell:** the fixture merely used the alias → canonical spelling
+  (`expression:` → `condition:`).
+- **Add declarations:** re-spelling exposes that the fixture was never
+  spec-valid → add the missing required keys (PR #5046's parity fixture
+  gained `type`/`message`) so it is valid except for the one
+  deliberately-planted defect.
+- **Replace wholesale:** the fixture pinned exactly the limb you deleted —
+  its verdict count goes 1 → 0, and its assertion keeps passing *because
+  nothing is produced*, not because the logic is right. PR #5046's
+  `runtime-gate.test.ts` subtraction case was green for exactly that empty
+  reason; #5096 flagged `validate-rule-compilability.test.ts:295` for the
+  same fate in advance. Replace it with a fixture the surviving rule actually
+  reads.
+
+**Sweep fixtures by the rule's consumption radius, not by the edited
+package.** A narrowed rule is consumed wherever it runs; other packages'
+fixtures feed it too. PR #5046's only rework: the change was in
+`packages/lint`, the broken fixture in `packages/cli`'s command-parity test
+(spelling the rejected `expression:` alias) — a lint-scoped sweep could not
+see it and CI did. Enumerate the rule's callers (cli validate/lint/compile,
+runtime gates, plugin consumers) and grep their fixtures before pushing.
 
 **When to stop instead of code.** If the issue underspecifies a decision that
 shapes the public contract — a spec/Zod schema, API shape, naming, metadata
@@ -117,6 +206,7 @@ Final message — exactly this JSON, no prose around it:
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts)",
   "open_questions": [
@@ -128,10 +218,41 @@ Final message — exactly this JSON, no prose around it:
 
 Use `status: "rework"` for a partial result you know is incomplete (say why in
 `summary`); the PM will review and re-dispatch with feedback.
+`premise_still_valid: false` means your verification disproved the issue's
+stated premise (rule 6): put the evidence in `summary`, leave `pr` null (or
+scope the PR to what survived), and let the PM re-triage — never build on a
+premise you could not confirm.
 
-Practical trap when filing issues/PRs through the GitHub API: the body
-sanitizer strips `<` followed by a letter as an HTML tag **at rest**, which
-destroys TypeScript generics (`Assert<Equal<1, 2>>` is stored as `Assert>`).
+**The report template is a tool, not the truth.** When a field's presumption
+doesn't fit what actually happened — the reverse-verification direction is
+inverted, the premise died, a required artifact is meaningless for this
+change — say so plainly in the report instead of manufacturing evidence that
+fits the form. #5009's review credited exactly this: the dev reported that
+before-green/after-red was impossible for a canonical-first chain and pinned
+the real direction instead. A template-shaped fabrication is worse than a
+blank field, because it reads as verified.
+
+**Byte discipline.** Control characters are written as escape sequences —
+backslash-u forms like `\u0000` / `\u0001` — never as raw bytes, in **any**
+file (source, markdown, fixtures) and in any prompt or tool payload you
+compose: describe the escape, do not paste the byte. Editing tools
+materialize escapes into real control bytes precisely when you are writing
+*about* them — this repo has paid four times: #4763 (raw NUL in a dispatch
+prompt), #4890 (a raw NUL landed in `SKILL.md` **while writing the
+no-raw-NUL rule**, outside every gate's scan surface), and PR #5140's two
+bytes — a NUL plus, 14 bytes away, a `0x01` that `check:nul-bytes` does not
+scan for (#5157). One raw control byte makes grep treat the whole file as
+binary: zero matches, no signal, and the rule you just wrote becomes
+invisible to every agent that greps for it. Run
+`node scripts/check-nul-bytes.mjs` before pushing, and when your change so
+much as *mentions* control characters, self-scan beyond the gate
+(`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f]' <files>`) — the gate's blind
+spots are exactly where these bytes hide.
+
+The GitHub body sanitizer is the same discipline's other half: it strips `<`
+followed by a letter as an HTML tag **at rest**, in issue and PR bodies
+alike, which destroys TypeScript generics (`Assert<Equal<1, 2>>` is stored
+as `Assert>`) and silently truncates any prose containing a bare `<word`.
 Write generics with a space after each `<` — `Assert< Equal< 1, 2 > >` is
-still valid TypeScript — and read the stored body back to verify when a
-snippet is load-bearing.
+still valid TypeScript — avoid `<`+letter in PR/issue prose, and read the
+stored body back to verify whenever a snippet is load-bearing.

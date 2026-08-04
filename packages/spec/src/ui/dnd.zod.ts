@@ -92,7 +92,14 @@ export const DropZoneSchema = lazySchema(() => z.object({
   maxItems: z.number().optional().describe('Maximum items allowed in drop zone'),
   highlightOnDragOver: z.boolean().default(true).describe('Highlight drop zone when dragging over'),
   dropEffect: DropEffectSchema.default('move').describe('Visual effect on drop'),
-}).merge(AriaPropsSchema.partial()).describe('Drop zone configuration'));
+}).merge(AriaPropsSchema.partial())
+  // `.strip()` is LOAD-BEARING (#4001 批 16): `AriaPropsSchema` became `strictObject` and
+  // `.merge()` adopts the incoming schema's unknown-key posture, so without this the shape
+  // would silently become `.strict()` — with zod's generic message, not the campaign's — and
+  // would contradict this file's measured `no door` verdict (#4988: nothing parses it, so a
+  // strict shell enforces nothing). Keep it until #4988 says what happens to this file.
+  .strip()
+  .describe('Drop zone configuration'));
 
 export type DropZone = z.infer<typeof DropZoneSchema>;
 
@@ -107,7 +114,14 @@ export const DragItemSchema = lazySchema(() => z.object({
   constraint: DragConstraintSchema.optional().describe('Drag movement constraints'),
   preview: z.enum(['element', 'custom', 'none']).default('element').describe('Drag preview type'),
   disabled: z.boolean().default(false).describe('Disable dragging'),
-}).merge(AriaPropsSchema.partial()).describe('Draggable item configuration'));
+}).merge(AriaPropsSchema.partial())
+  // `.strip()` is LOAD-BEARING (#4001 批 16): `AriaPropsSchema` became `strictObject` and
+  // `.merge()` adopts the incoming schema's unknown-key posture, so without this the shape
+  // would silently become `.strict()` — with zod's generic message, not the campaign's — and
+  // would contradict this file's measured `no door` verdict (#4988: nothing parses it, so a
+  // strict shell enforces nothing). Keep it until #4988 says what happens to this file.
+  .strip()
+  .describe('Draggable item configuration'));
 
 export type DragItem = z.infer<typeof DragItemSchema>;
 

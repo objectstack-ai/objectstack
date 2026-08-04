@@ -322,7 +322,7 @@ describe('#3863 — a handled failure does not trigger flow-level retry', () => 
             name: 'handled_no_retry',
             label: 'Handled No Retry',
             type: 'autolaunched',
-            errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 1 },
+            errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 1 },
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
                 { id: 'upstream', type: 'script' as any, label: 'Upstream' },

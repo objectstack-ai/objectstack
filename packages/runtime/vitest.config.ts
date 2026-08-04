@@ -36,6 +36,11 @@ export default defineConfig({
       // the #4567 regression (croner rejecting the expression envelope) is
       // reproduced by the actual scheduler rather than by a double.
       '@objectstack/service-job': path.resolve(__dirname, '../services/service-job/src/index.ts'),
+      // Dev-only: app-plugin.disabled-seed.test.ts drives the REAL
+      // `sys_packages` → registry rehydration (#5047), so the empty-env seed
+      // regression is proven against the actual hydration code rather than a
+      // re-implementation of it.
+      '@objectstack/service-package': path.resolve(__dirname, '../services/service-package/src/index.ts'),
     },
   },
   test: {

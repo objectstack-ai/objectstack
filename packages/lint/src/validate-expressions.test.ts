@@ -1,4 +1,10 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
+import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
+import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { SharingRuleSchema } from '@objectstack/spec/security';
+
 import { validateStackExpressions } from './validate-expressions.js';
 
 describe('validateStackExpressions (ADR-0032 build-time)', () => {
@@ -60,7 +66,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
   it('validates object validation-rule predicates too', () => {
     const issues = validateStackExpressions({
       objects: [
-        { name: 'crm_lead', fields: { rating: {} }, validations: [{ name: 'r1', expression: '{record.rating} > 0' }] },
+        { name: 'crm_lead', fields: { rating: {} }, validations: [{ name: 'r1', condition: '{record.rating} > 0' }] },
       ],
     });
     expect(issues).toHaveLength(1);
@@ -176,12 +182,12 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           fields: {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
-            expected_revenue: { type: 'formula', name: 'expected_revenue', formula: 'amount * probability / 100' },
+            expected_revenue: { type: 'formula', name: 'expected_revenue', expression: 'amount * probability / 100' },
           },
         }],
       });
       expect(issues).toHaveLength(1);
-      expect(issues[0].where).toContain("field 'expected_revenue' formula");
+      expect(issues[0].where).toContain("field 'expected_revenue' expression");
       expect(issues[0].message).toMatch(/bare reference `(amount|probability)`/);
     });
 
@@ -190,7 +196,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects: [{
           name: 'crm_lead',
           fields: { lead_score: { type: 'number' } },
-          validations: [{ name: 'lead_score_range', expression: 'lead_score != null && lead_score > 100' }],
+          validations: [{ name: 'lead_score_range', condition: 'lead_score != null && lead_score > 100' }],
         }],
       });
       expect(issues).toHaveLength(1);
@@ -205,9 +211,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           fields: {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
-            expected_revenue: { type: 'formula', name: 'expected_revenue', formula: 'record.amount * record.probability / 100' },
+            expected_revenue: { type: 'formula', name: 'expected_revenue', expression: 'record.amount * record.probability / 100' },
           },
-          validations: [{ name: 'amt', expression: 'record.amount != null && record.amount >= 0' }],
+          validations: [{ name: 'amt', condition: 'record.amount != null && record.amount >= 0' }],
         }],
       });
       expect(issues).toHaveLength(0);
@@ -225,14 +231,14 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             end_date: { type: 'date' },
             days: {
               type: 'formula', name: 'days',
-              formula: 'record.start_date != null && record.end_date != null ? (record.end_date - record.start_date) + 1 : null',
+              expression: 'record.start_date != null && record.end_date != null ? (record.end_date - record.start_date) + 1 : null',
             },
           },
         }],
       });
       expect(issues).toHaveLength(1);
       expect(issues[0].severity).toBe('error');
-      expect(issues[0].where).toContain("field 'days' formula");
+      expect(issues[0].where).toContain("field 'days' expression");
       expect(issues[0].message).toMatch(/date arithmetic/i);
       expect(issues[0].message).toMatch(/daysBetween/);
     });
@@ -246,7 +252,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             end_date: { type: 'date' },
             days: {
               type: 'formula', name: 'days',
-              formula: 'record.start_date != null && record.end_date != null ? daysBetween(record.start_date, record.end_date) + 1 : null',
+              expression: 'record.start_date != null && record.end_date != null ? daysBetween(record.start_date, record.end_date) + 1 : null',
             },
           },
         }],
@@ -302,7 +308,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects: [{
           name: 'crm_lead',
           fields: { lead_score: { type: 'number' } },
-          validations: [{ name: 'r', expression: 'lead_score > 100' }],
+          validations: [{ name: 'r', condition: 'lead_score > 100' }],
         }],
       });
       expect(issues).toHaveLength(1);
@@ -320,13 +326,13 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           name: 'crm_lead',
           fields: {
             company: { type: 'text' },
-            score: { type: 'formula', formula: 'record.company * 2' },
+            score: { type: 'formula', expression: 'record.company * 2' },
           },
         }],
       });
       const w = issues.filter(i => i.severity === 'warning');
       expect(w).toHaveLength(1);
-      expect(w[0].where).toMatch(/formula/);
+      expect(w[0].where).toMatch(/expression/);
       expect(w[0].message).toMatch(/type mismatch/i);
       expect(w[0].message).toMatch(/record\.company/);
     });
@@ -339,7 +345,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
             amount: { type: 'currency' },
             probability: { type: 'percent' },
             close_date: { type: 'date' },
-            expected: { type: 'formula', formula: 'record.amount * record.probability / 100' },
+            expected: { type: 'formula', expression: 'record.amount * record.probability / 100' },
           },
           // The `!= null` guard is load-bearing since #4763: `close_date` is a
           // declared NULLABLE field, and an un-guarded `>=` over it faults at
@@ -347,7 +353,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           // rejects that shape at authoring now. Soundness (this block's
           // subject) and null-guarding are separate verdicts; the predicate has
           // to satisfy both to produce zero issues.
-          validations: [{ name: 'future', expression: 'record.close_date != null && record.close_date >= today()' }],
+          validations: [{ name: 'future', condition: 'record.close_date != null && record.close_date >= today()' }],
         }],
       });
       expect(issues).toHaveLength(0);
@@ -358,7 +364,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects: [{
           name: 'crm_lead',
           fields: { title: { type: 'text' } },
-          validations: [{ name: 'r', expression: 'record.title > 5' }],
+          validations: [{ name: 'r', condition: 'record.title > 5' }],
         }],
       });
       const w = issues.filter(i => i.severity === 'warning');
@@ -1155,18 +1161,729 @@ describe('null-guard gate (#4763)', () => {
       ).toHaveLength(0);
     });
 
-    it('leaves `Field.formula` expressions alone (blessed `guard ? value : null`, #3306)', () => {
+    it('leaves field `expression` alone for the NULL-GUARD verdict (blessed `guard ? value : null`, #3306)', () => {
+      // Load-bearing since #5026: this pass now genuinely RUNS on `expression`
+      // (it read the rejected `formula` spelling before, so the fixture was
+      // silent for the wrong reason). Zero issues here therefore means the
+      // null-guard gate really is excluded from this surface, not that the
+      // surface is unreachable. `budget` / `spent` are both nullable and `-` is
+      // applied to them unguarded — exactly the shape the gate rejects on
+      // `requiredWhen`.
       expect(
         validateStackExpressions({
           objects: [{
             ...project,
             fields: {
               ...project.fields,
-              remaining: { type: 'formula', formula: 'record.budget - record.spent' },
+              remaining: { type: 'formula', expression: 'record.budget - record.spent' },
             },
           }],
         }),
       ).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * ── The structural meta-guard (#4992 pattern, #5009/#5018 shape) — #5017 ─────
+ *
+ * This rule is registered `input: 'parsed'` (`authoring-rules.ts`), so on the
+ * compile path it sees `ObjectStackSchema`'s output. #5017 found five `??`
+ * alias chains here reaching for keys the spec does not declare. Four were the
+ * familiar inert kind. The fifth was not:
+ *
+ *     rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula
+ *
+ * — the canonical `condition` in THIRD position, behind two names
+ * `validation.zod.ts` rejects. See the reverse-verification block below for
+ * the behaviour that cost.
+ *
+ * Two guards pin the property that made all five removable:
+ *
+ * 1. **Declared-key guard** — every key read off a stack, object, field,
+ *    validation rule, sharing rule, action, hook, flow, node or edge must
+ *    appear in that surface's own Zod `.shape`. Scanning the SOURCE rather than
+ *    the behaviour is deliberate: an unreachable branch has no behaviour to
+ *    assert on, which is exactly the problem.
+ *
+ * 2. **Reachability guard** — every changed read must be reached by a fixture
+ *    that passes `ObjectStackSchema.safeParse` outright.
+ *
+ * **Scope, stated rather than implied.** The declared-key guard covers every
+ * receiver in the file except the flow-node CONFIG (`cfg` / `startCfg`), which
+ * is excused for a reason that is itself a schema fact — see
+ * `NOT_A_SINGLE_SHAPE` below. The reachability guard is scoped to the reads
+ * #5017 changed plus the surfaces they sit on; this rule is 660 lines with
+ * `issues.push` sites that carry no rule id or path template (its finding shape
+ * predates `{ rule, path, hint }`), so the #5018-style push-site scan does not
+ * transfer, and a full push-site inventory belongs to #5017's own suggestion 3
+ * — one shared guard across every `input: 'parsed'` rule.
+ */
+const RULE_SOURCE = readFileSync(new URL('./validate-expressions.ts', import.meta.url), 'utf8');
+
+/** The rule's CODE — comments stripped, since the guards scan reads, not prose. */
+const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+function keysReadOff(receiver: string): string[] {
+  const re = new RegExp(`\\b${receiver}\\??\\.([A-Za-z_$][\\w$]*)`, 'g');
+  return [...new Set([...RULE_CODE.matchAll(re)].map((m) => m[1]))].sort();
+}
+
+/**
+ * Declared keys of a schema, unwrapping optional / array / record / lazy /
+ * union layers. A union answers the UNION of its members' keys: a validation
+ * rule is exactly one of six variants, and a key any variant declares is one
+ * some author may legitimately write.
+ *
+ * `lazySchema` proxies a FUNCTION target, so the `typeof` guard admits both —
+ * miss that and every lazily-built schema answers "declares nothing", which
+ * would silently make this guard vacuous.
+ */
+function shapeKeysOf(schema: unknown, depth = 0): string[] {
+  const s = schema as { shape?: Record<string, unknown>; _def?: Record<string, unknown>; unwrap?: () => unknown };
+  if (!s || (typeof s !== 'object' && typeof s !== 'function') || depth > 12) return [];
+  if (s.shape) return Object.keys(s.shape);
+  const d = (s._def ?? {}) as Record<string, unknown>;
+  if (d.type === 'union' && Array.isArray(d.options)) {
+    return [...new Set((d.options as unknown[]).flatMap((o) => shapeKeysOf(o, depth + 1)))];
+  }
+  const getter = d.getter as (() => unknown) | undefined;
+  for (const next of [d.innerType, d.element, d.valueType, getter?.(), d.in, d.out]) {
+    const r = shapeKeysOf(next, depth + 1);
+    if (r.length) return r;
+  }
+  if (typeof s.unwrap === 'function') return shapeKeysOf(s.unwrap(), depth + 1);
+  return [];
+}
+
+const flowShape = () => {
+  const s = ObjectStackSchema.shape.flows as unknown as { _def?: Record<string, unknown> };
+  // flows: optional(array(lazy(object))) — walk to the element's own shape.
+  let cur: unknown = s;
+  for (let i = 0; i < 12; i++) {
+    const c = cur as { shape?: Record<string, unknown>; _def?: Record<string, unknown> };
+    if (c?.shape) return c.shape;
+    const d = (c?._def ?? {}) as Record<string, unknown>;
+    cur = d.innerType ?? d.element ?? (d.getter as (() => unknown) | undefined)?.();
+  }
+  return {} as Record<string, unknown>;
+};
+
+/**
+ * The one receiver this table does not cover, and why it is a schema fact
+ * rather than an exemption of convenience.
+ *
+ * A flow node's `config` has no single `.shape`: it is discriminated on the
+ * node's `type`, and the expression slots inside it are resolved through the
+ * descriptor registry (`resolveFlowNodeExpressions`, #4027) rather than read by
+ * name. The named reads that do remain — `cfg.function` / `cfg.functionName`
+ * and the retired `actionType` / `template` / `recipients` / `variables` /
+ * `script` — are NOT the #5017 defect: `functionName` is a key
+ * `schemaless-node-config.zod.ts` DECLARES and the ADR-0087 D2 conversion
+ * `flow-node-script-config-aliases` (#3796) rewrites at load, and the retired
+ * five are deliberately detected on the pre-parse tier so `os lint` can hand
+ * the author a named replacement instead of a bare "unrecognized key" (#4343).
+ * Reading a key to REJECT it is the opposite of reading a key to honour it.
+ */
+const NOT_A_SINGLE_SHAPE = ['cfg', 'startCfg'];
+
+const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
+  {
+    receiver: 'stack',
+    expected: ['actions', 'flows', 'hooks', 'objects', 'sharingRules'],
+    declaredBy: 'ObjectStackSchema',
+    keys: () => Object.keys(ObjectStackSchema.shape),
+  },
+  {
+    receiver: 'obj',
+    // `validationRules` is absent — one of the five #5017 removed.
+    expected: ['actions', 'fields', 'name', 'validations'],
+    declaredBy: 'ObjectSchema',
+    keys: () => Object.keys(ObjectSchema.shape),
+  },
+  {
+    receiver: 'def',
+    // `referenceTo` is absent — likewise.
+    expected: ['defaultValue', 'options', 'reference', 'required', 'type'],
+    declaredBy: 'FieldSchema',
+    keys: () => Object.keys(FieldSchema.shape),
+  },
+  {
+    receiver: 'rule',
+    // `expression` / `predicate` / `formula` are absent — the chain that put
+    // the canonical `condition` in third place (#5017).
+    expected: ['condition', 'name', 'when'],
+    declaredBy: 'the ObjectSchema.validations[] union',
+    keys: () => shapeKeysOf(ObjectSchema.shape.validations),
+  },
+  {
+    receiver: 'sharingRule',
+    // `criteria` / `predicate` are absent — likewise.
+    expected: ['condition', 'name', 'object'],
+    declaredBy: 'SharingRuleSchema',
+    keys: () => Object.keys(SharingRuleSchema.shape),
+  },
+  {
+    receiver: 'action',
+    // `object` is absent — the action schema's canonical key is `objectName`.
+    expected: ['disabled', 'name', 'objectName', 'visible'],
+    declaredBy: 'ObjectStackSchema.actions[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
+  },
+  {
+    receiver: 'hook',
+    expected: ['condition', 'name', 'object'],
+    declaredBy: 'ObjectStackSchema.hooks[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.hooks),
+  },
+  {
+    receiver: 'flow',
+    expected: ['name', 'nodes'],
+    declaredBy: 'ObjectStackSchema.flows[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.flows),
+  },
+  { receiver: 'node', expected: ['config', 'id', 'type'], declaredBy: 'flows[].nodes[]', keys: () => shapeKeysOf(flowShape().nodes) },
+  { receiver: 'startNode', expected: ['config'], declaredBy: 'flows[].nodes[]', keys: () => shapeKeysOf(flowShape().nodes) },
+  {
+    receiver: 'edge',
+    expected: ['condition', 'id', 'source', 'target'],
+    declaredBy: 'flows[].edges[]',
+    keys: () => shapeKeysOf(flowShape().edges),
+  },
+  {
+    receiver: 'rec',
+    expected: ['dialect', 'source'],
+    declaredBy: 'ExpressionInputSchema',
+    keys: () => shapeKeysOf(ExpressionInputSchema),
+  },
+];
+
+/**
+ * Undeclared reads still tracked rather than fixed. **Empty since #5026** —
+ * every key this rule reads is one `@objectstack/spec` declares.
+ *
+ * The last entry was `f.formula`: `FieldSchema` declares the computed slot as
+ * `expression` and rejects `formula` by name ("Did you mean `formula` →
+ * `expression`?"), so the field-formula pass had never run against a stack that
+ * parses. #5026 converged it onto `expression`, which ACTIVATED the check
+ * rather than deleting a dead branch — hence its own PR, with a sweep of every
+ * real stack in the repo attached (8 field `expression` slots across
+ * `app-showcase` / `app-crm` / `app-todo`; zero new findings).
+ *
+ * This list must shrink, never grow. It is at zero: any entry at all now means
+ * someone treated it as a place to park an exception rather than a debt to pay
+ * down, and the `expected: []` assertions below make that a deliberate act.
+ */
+const TRACKED_UNDECLARED_READS: Array<{ receiver: string; key: string; issue: number }> = [];
+
+describe('validateStackExpressions — reads only keys the spec declares (meta-test, #5017)', () => {
+  it.each(READ_SURFACES)('every key read off `$receiver` is declared by $declaredBy', (surface) => {
+    const read = keysReadOff(surface.receiver);
+    // Exact match, so ADDING a read (or renaming a loop variable, which would
+    // silently disarm the scan) forces a deliberate visit to this table.
+    expect(read).toEqual(surface.expected);
+    const declared = surface.keys();
+    expect(declared.length, `${surface.declaredBy} resolved to no keys — the guard would be vacuous`).toBeGreaterThan(0);
+    expect(read.filter((k) => !declared.includes(k))).toEqual([]);
+  });
+
+  it('the field receiver reads only declared keys — the tracked debt is now empty (#5026)', () => {
+    const read = keysReadOff('f');
+    expect(read).toEqual(['expression', 'name', 'readonlyWhen', 'requiredWhen']);
+    const declared = Object.keys(FieldSchema.shape);
+    const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
+    expect(tracked).toEqual([]);
+    expect(read.filter((k) => !declared.includes(k) && !tracked.includes(k))).toEqual([]);
+    // The canonical key is the declared one, and the spelling this read used to
+    // carry is genuinely absent — so a revert to `f.formula` fails here, loudly,
+    // rather than quietly re-inerting the pass.
+    expect(declared).toContain('expression');
+    expect(declared).not.toContain('formula');
+  });
+
+  it('nothing is tracked as an undeclared read any more — the list shrinks, never grows', () => {
+    expect(TRACKED_UNDECLARED_READS).toEqual([]);
+  });
+
+  it('the computed key lists are spelled from the declaring schema', () => {
+    // `rule[branch]` and `(f as AnyRec)[key]` are COMPUTED reads the scan above
+    // cannot see; the word lists they index with are checked here instead.
+    const branches = /for \(const branch of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
+    expect(branches, 'the nested-rule branch loop moved — update this guard').not.toBeNull();
+    const branchKeys = [...branches![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(branchKeys).toEqual(['then', 'otherwise']);
+    expect(branchKeys.filter((k) => !shapeKeysOf(ObjectSchema.shape.validations).includes(k))).toEqual([]);
+
+    const fieldKeys = /for \(const key of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
+    expect(fieldKeys, 'the field-predicate loop moved — update this guard').not.toBeNull();
+    const slots = [...fieldKeys![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen']);
+    expect(slots.filter((k) => !Object.keys(FieldSchema.shape).includes(k))).toEqual([]);
+  });
+
+  it('covers every receiver in the source that is not explicitly excused', () => {
+    const receivers = [...new Set([...RULE_CODE.matchAll(/\b([a-z][\w$]*)\??\.[A-Za-z_$]/g)].map((m) => m[1]))];
+    const tabled = new Set([...READ_SURFACES.map((s) => s.receiver), ...NOT_A_SINGLE_SHAPE, 'f']);
+    // Locals whose "keys" are JS methods / this file's own plumbing.
+    const PLUMBING = new Set([
+      'issues', 'idx', 'out', 'kept', 'seen', 'seenActions', 'nullable', 'nullableFields', 'nullableIndex',
+      'fieldIndex', 'fieldTypeIndex', 'fields', 'nodes', 'options', 'targets', 'retired', 'ref', 'roots',
+      'res', 'graph', 'found', 'e', 'w', 'p', 'n', 'issue', 'guards', 'config',
+    ]);
+    expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
+  });
+});
+
+/**
+ * ── The alias spellings this rule deliberately does NOT read (#5017) ─────────
+ */
+const MANIFEST = { id: 'expr_probe', name: 'expr_probe', version: '1.0.0', type: 'app' } as const;
+
+/** A fixture is only a fixture if the spec accepts it. */
+function specValid(stack: Record<string, unknown>): Record<string, unknown> {
+  const result = ObjectStackSchema.safeParse({ manifest: MANIFEST, ...stack });
+  if (!result.success) {
+    throw new Error(
+      `fixture is not spec-valid (#5017): ` +
+        result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
+    );
+  }
+  return result.data as unknown as Record<string, unknown>;
+}
+
+/**
+ * The alias spellings, the canonical key each is rejected in favour of, and
+ * what this rule says about a stack that uses one AFTER #5017.
+ *
+ * `lintAfter` is spelled per case rather than assumed uniform, because it is
+ * not uniform, and the difference is the honest part. Six of the seven fall
+ * silent — the read they fed is gone, so the author's only diagnostic comes
+ * from the schema, by name. The seventh (`actions[].object`) keeps a
+ * diagnostic: dropping the alias costs the rule the action's OBJECT, not the
+ * predicate, so the object-INDEPENDENT half of the check (bare-reference scope)
+ * still fires while the field-existence half no longer can.
+ */
+const REJECTED_ALIASES: Array<{ label: string; stack: Record<string, unknown>; refusal: RegExp; lintAfter: RegExp | null }> = [
+  {
+    label: 'objects[].validationRules → validations',
+    stack: {
+      objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'S' } },
+        validationRules: [{ type: 'script', name: 'r', message: 'm', condition: 'lead_score > 100' }] }],
+    },
+    refusal: /Unrecognized key\(s\) on this object: `validationRules`.*Did you mean `validationRules` → `validations`/s,
+    lintAfter: null,
+  },
+  {
+    label: 'validations[].expression → condition',
+    stack: {
+      objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'S' } },
+        validations: [{ type: 'script', name: 'r', message: 'm', expression: 'lead_score > 100' }] }],
+    },
+    refusal: /Did you mean `expression` → `condition`/,
+    lintAfter: null,
+  },
+  {
+    label: 'validations[].predicate → condition',
+    stack: {
+      objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'S' } },
+        validations: [{ type: 'script', name: 'r', message: 'm', predicate: 'lead_score > 100' }] }],
+    },
+    refusal: /Did you mean `predicate` → `condition`/,
+    lintAfter: null,
+  },
+  {
+    label: 'validations[].formula → condition',
+    stack: {
+      objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'S' } },
+        validations: [{ type: 'script', name: 'r', message: 'm', formula: 'lead_score > 100' }] }],
+    },
+    refusal: /Did you mean `formula` → `condition`/,
+    lintAfter: null,
+  },
+  {
+    label: 'sharingRules[].criteria → condition',
+    stack: {
+      sharingRules: [{ name: 'sr', type: 'criteria', object: 'crm_lead', sharedWith: { type: 'team', value: 't' }, criteria: 'lead_score > 1' }],
+    },
+    refusal: /Unrecognized key\(s\) on this sharing rule: `criteria`.*Did you mean `criteria` → `condition`/s,
+    lintAfter: null,
+  },
+  {
+    label: 'fields[].referenceTo → reference',
+    stack: {
+      objects: [{ name: 'child', label: 'C', sharingModel: 'controlled_by_parent',
+        fields: { p: { type: 'master_detail', label: 'P', referenceTo: 'invoice' } } }],
+    },
+    refusal: /Unrecognized key\(s\) on this field: `referenceTo`.*Did you mean `referenceTo` → `reference`/s,
+    lintAfter: null,
+  },
+  {
+    // #5026. The newest member of this table, and the one that reads
+    // differently from the rest: the other spellings were rejected AND unread,
+    // while this one was rejected and READ — the only key the rule honoured.
+    // Converging the read onto `expression` moved it here, where it belongs.
+    label: 'objects[].fields[].formula → expression',
+    stack: {
+      objects: [{ name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+        fields: {
+          amount: { type: 'currency', label: 'Amount' },
+          // A defect the rule WOULD name if it still read this key: bare refs.
+          expected_revenue: { type: 'formula', label: 'Expected', formula: 'amount * 2' },
+        } }],
+    },
+    refusal: /Unrecognized key\(s\) on this field: `formula`.*Did you mean `formula` → `expression`/s,
+    // Silent: the rule reads `expression` now, so an author who spells `formula`
+    // hears it from the schema, by name, once — not twice in two vocabularies.
+    lintAfter: null,
+  },
+  {
+    label: 'actions[].object → objectName',
+    stack: {
+      actions: [{ name: 'mark_done', label: 'Mark', object: 'crm_lead', type: 'script', target: 'fn', visible: 'lead_score > 1' }],
+    },
+    refusal: /Unrecognized key\(s\) on this action: `object`.*Did you mean `object` → `objectName`/s,
+    // Object-INDEPENDENT half survives; the field-existence half cannot.
+    lintAfter: /bare reference `lead_score`/,
+  },
+];
+
+describe('validateStackExpressions — undeclared keys are the schema’s job, not this rule’s (#5017)', () => {
+  it.each(REJECTED_ALIASES)('$label: the schema refuses it BY NAME, so no consumer needs a fallback', ({ stack, refusal }) => {
+    const result = ObjectStackSchema.safeParse({ manifest: MANIFEST, ...stack });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join(' ')).toMatch(refusal);
+  });
+
+  it.each(REJECTED_ALIASES)('$label: the lint defers to the schema', ({ stack, lintAfter }) => {
+    // Reverse verification, canonical-first direction (#5018's lesson): before
+    // #5017 each of these produced a lint diagnostic keyed on the ALIAS, for a
+    // stack `os validate` refuses by name. Alias tolerance belongs at the
+    // producer's refusal, not in a consumer (Prime Directive #12).
+    const issues = validateStackExpressions(stack);
+    if (lintAfter === null) {
+      expect(issues).toEqual([]);
+    } else {
+      expect(issues.map((i) => i.message).join(' ')).toMatch(lintAfter);
+    }
+  });
+});
+
+/**
+ * ── Where removing an alias limb ADDS a diagnostic rather than removing one ──
+ *
+ * #5018's reverse verification ran one way: canonical-first chains over-reached
+ * on illegal spellings, and the fix handed those back to the schema. One of
+ * #5017's chains feeds a COUNT rather than a predicate, so removing the alias
+ * limb moves the count and can make a downstream gate fire that did not before.
+ * Pinned here rather than left to be discovered, and it only ever applies to a
+ * stack `os validate` already refuses by name.
+ */
+describe('validateStackExpressions — the alias limb that fed a count, not a predicate (#5017)', () => {
+  const withRefKey = (key: string) => ({
+    objects: [{
+      name: 'line_item',
+      fields: {
+        invoice_ref: { type: 'master_detail', [key]: 'invoice' },
+        locked: { type: 'text', readonlyWhen: 'parent.posted == true' },
+      },
+    }],
+  });
+
+  it('`reference`: one master ⇒ `parent` binds ⇒ silent, exactly as before', () => {
+    expect(validateStackExpressions(withRefKey('reference'))).toEqual([]);
+  });
+
+  it('`referenceTo`: the master is no longer counted, so the parent-scope gate now fires', () => {
+    // BEFORE #5017 the alias limb counted this field, the object looked like it
+    // had exactly one master, and the gate stayed silent. Now the count is 0
+    // and the author is told `parent` cannot bind. On a stack that PARSES the
+    // two agree — a parsing stack cannot spell `referenceTo` at all (see the
+    // rejected-alias block above) — so the difference exists only on the
+    // pre-parse tier, where the stack is already refused by name for this very
+    // key. An added diagnostic on an invalid stack, not a new verdict on a
+    // valid one: acceptable, and pinned so it stays a decision rather than a
+    // surprise.
+    const issues = validateStackExpressions(withRefKey('referenceTo'));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/declares no `master_detail` relationship/);
+  });
+});
+
+/**
+ * ── Reverse verification for the one chain whose behaviour really changed ────
+ *
+ *     rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula
+ *
+ * The other four chains put the canonical key FIRST, so their alias limbs were
+ * simply unreachable. This one put it THIRD. For a rule carrying both spellings
+ * the alias SHORT-CIRCUITED the canonical key away: the lint validated the
+ * predicate the schema rejects and never looked at the one the author declared.
+ * Producer and consumer gave two different accounts of the same metadata.
+ *
+ * The old chain is reconstructed here rather than described, so the difference
+ * is demonstrated rather than asserted.
+ */
+const OLD_CHAIN = (rule: Record<string, unknown>): unknown =>
+  rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula;
+
+describe('validateStackExpressions — the alias short-circuit that #5017 removed', () => {
+  const ruleWithBoth = {
+    type: 'script', name: 'r', message: 'm',
+    condition: 'record.no_such_field > 0',   // the CANONICAL predicate — and it is broken
+    expression: 'record.lead_score > 0',     // a REJECTED alias — and it is clean
+  };
+  const stackWithBoth = {
+    objects: [{ name: 'crm_lead', fields: { lead_score: { type: 'number' } }, validations: [ruleWithBoth] }],
+  };
+
+  it('the old chain picked the rejected alias over the declared key', () => {
+    expect(OLD_CHAIN(ruleWithBoth)).toBe('record.lead_score > 0');
+    expect(OLD_CHAIN(ruleWithBoth)).not.toBe(ruleWithBoth.condition);
+  });
+
+  it('so the broken CANONICAL predicate went unreported — the rule read the alias instead', () => {
+    // What the rule used to say about this stack: nothing about
+    // `no_such_field`. Its verdict was entirely about the alias's source.
+    const oldVerdict = validateStackExpressions({
+      objects: [{ name: 'crm_lead', fields: { lead_score: { type: 'number' } },
+        validations: [{ ...ruleWithBoth, condition: OLD_CHAIN(ruleWithBoth) }] }],
+    });
+    expect(oldVerdict.map((i) => i.message).join(' ')).not.toMatch(/no_such_field/);
+  });
+
+  it('now it reads the declared key, and the real defect surfaces', () => {
+    const issues = validateStackExpressions(stackWithBoth);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `no_such_field`/);
+  });
+
+  it('and either way the stack does not parse — the alias is refused by name', () => {
+    const result = ObjectStackSchema.safeParse({
+      manifest: MANIFEST,
+      objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private',
+        fields: { lead_score: { type: 'number', label: 'S' } }, validations: [ruleWithBoth] }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join(' ')).toMatch(/Did you mean `expression` → `condition`/);
+  });
+
+  it('on every stack that DOES parse the verdict is unchanged: the alias limbs were dead', () => {
+    // The same defect, spelled the only way the spec accepts.
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [{ name: 'crm_lead', label: 'Lead', sharingModel: 'private',
+          fields: { lead_score: { type: 'number', label: 'S' } },
+          validations: [{ type: 'script', name: 'r', message: 'm', condition: 'record.no_such_field > 0' }] }],
+      }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `no_such_field`/);
+  });
+});
+
+/**
+ * ── Reachability: every changed read fires from a stack that parses ──────────
+ *
+ * Removing a fallback is only safe if the canonical limb is genuinely live.
+ * Each fixture below goes through `specValid` (a real `ObjectStackSchema.parse`)
+ * and must still produce the finding the changed read feeds.
+ */
+describe('validateStackExpressions — every changed read is reachable from a spec-valid stack (meta-test, #5017)', () => {
+  const LEAD = { name: 'crm_lead', label: 'Lead', sharingModel: 'private', fields: { lead_score: { type: 'number', label: 'S' } } };
+
+  it('objects[].validations[].condition — the canonical predicate is read', () => {
+    const issues = validateStackExpressions(
+      specValid({ objects: [{ ...LEAD, validations: [{ type: 'script', name: 'r', message: 'm', condition: 'record.nope > 0' }] }] }),
+    );
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/unknown field `nope`/);
+    expect(issues[0].where).toContain("validation 'r'");
+  });
+
+  it('nested conditional `then` still reaches the null-guard gate through `condition`', () => {
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [{
+          ...LEAD,
+          validations: [{
+            type: 'conditional', name: 'c', message: 'm', when: 'record.lead_score != null',
+            then: { type: 'script', name: 'inner', message: 'm2', condition: 'record.lead_score > 0' },
+          }],
+        }],
+      }),
+    );
+    // `lead_score` is nullable (no `required`, no default) and `>` is applied to
+    // it inside the nested rule — the #4763 verdict, reached via `rule.condition`.
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/compares a value that is null/);
+  });
+
+  it('sharingRules[].condition — the canonical predicate is read', () => {
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [LEAD],
+        sharingRules: [{ name: 'sr', type: 'criteria', object: 'crm_lead', sharedWith: { type: 'team', value: 't' }, condition: 'nope > 0' }],
+      }),
+    );
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/bare reference `nope`/);
+    expect(issues[0].where).toContain("sharingRule 'sr'");
+  });
+
+  it('actions[].objectName — the canonical key still binds the action to its object', () => {
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [LEAD],
+        actions: [{ name: 'mark_done', label: 'Mark', objectName: 'crm_lead', type: 'script', target: 'fn', visible: 'record.nope' }],
+      }),
+    );
+    // The object binding is what makes `nope` reportable as an unknown FIELD
+    // rather than merely unparsed — i.e. `objectName` really was read.
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/unknown field `nope`/);
+  });
+
+  it('fields[].reference — the master-detail count still sees the parent', () => {
+    // Exactly one master ⇒ `parent` binds ⇒ NO finding. That verdict depends on
+    // `masterDetailCount` reading `reference`; if the read were broken the count
+    // would be 0 and this would fire.
+    expect(
+      validateStackExpressions(
+        specValid({
+          objects: [{
+            name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+            fields: {
+              invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
+              locked: { type: 'text', label: 'Locked', readonlyWhen: 'parent.posted == true' },
+            },
+          }],
+        }),
+      ),
+    ).toEqual([]);
+
+    // Two masters ⇒ no single `parent` ⇒ the gate fires. Same read, other side.
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [{
+          name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+          fields: {
+            invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
+            order_ref: { type: 'master_detail', label: 'Order', reference: 'sales_order' },
+            locked: { type: 'text', label: 'Locked', readonlyWhen: 'parent.posted == true' },
+          },
+        }],
+      }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/declares 2 `master_detail` relationships/);
+  });
+
+  it('fields[].expression — the field-formula pass fires from a stack that PARSES (#5026)', () => {
+    // The whole point of #5026. Before it, no spec-valid stack could reach this
+    // branch at all: it was keyed on `formula`, which the schema refuses. This
+    // fixture goes through a real `ObjectStackSchema.parse` and still produces
+    // the finding — the first time that sentence has been true.
+    const issues = validateStackExpressions(
+      specValid({
+        objects: [{
+          name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+          fields: {
+            amount: { type: 'currency', label: 'Amount' },
+            probability: { type: 'percent', label: 'Probability' },
+            expected_revenue: { type: 'formula', label: 'Expected', expression: 'amount * probability / 100' },
+          },
+        }],
+      }),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].where).toBe("object 'crm_opportunity' · field 'expected_revenue' expression");
+    expect(issues[0].message).toMatch(/bare reference `(amount|probability)`/);
+  });
+});
+
+/**
+ * ── Reverse verification for the ACTIVATION itself (#5026) ───────────────────
+ *
+ * #5017's five removals were behaviour-neutral on every parsing stack, so their
+ * reverse verification only had to show the alias limbs were dead. This one is
+ * the opposite shape: converging `f.formula` → `f.expression` turned a branch
+ * that had NEVER run into one that runs on every compile. So the verification
+ * owes four things, not one:
+ *
+ *   1. a broken `expression` on a spec-valid stack is now RED, and named;
+ *   2. a correct one is GREEN (the gate is not simply on);
+ *   3. the `formula:` spelling is handled by the SCHEMA, by name — this rule
+ *      says nothing about it, so the author hears one diagnostic, not two;
+ *   4. mutating the read back to `f.formula` is caught by the declared-key
+ *      meta-guard above — i.e. this cannot silently re-inert.
+ *
+ * Point 4 is asserted against the same source scan the guard uses rather than
+ * described, because "a guard that would have caught it" is exactly the claim
+ * that is worth nothing unless executed.
+ */
+describe('validateStackExpressions — the field-formula check now actually runs (#5026)', () => {
+  const OPP = (expression: string) => ({
+    objects: [{
+      name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+      fields: {
+        amount: { type: 'currency', label: 'Amount' },
+        probability: { type: 'percent', label: 'Probability' },
+        expected_revenue: { type: 'formula', label: 'Expected', expression },
+      },
+    }],
+  });
+
+  it('1 — a broken `expression` is RED on a stack the spec accepts', () => {
+    const issues = validateStackExpressions(specValid(OPP('record.no_such_field * 2')));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].message).toMatch(/unknown field `no_such_field`/);
+    expect(issues[0].where).toContain("field 'expected_revenue' expression");
+  });
+
+  it('1b — and a syntactically broken one is RED too', () => {
+    const issues = validateStackExpressions(specValid(OPP('record.amount *')));
+    expect(issues.length).toBeGreaterThanOrEqual(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].where).toContain("field 'expected_revenue' expression");
+  });
+
+  it('2 — a correct `expression` is GREEN (the gate discriminates, it is not just on)', () => {
+    // The shape every real app in this repo actually ships — verified against
+    // all 8 field `expression` slots in `examples/app-{showcase,crm,todo}` when
+    // the check was activated, all of which stayed green.
+    expect(validateStackExpressions(specValid(OPP('record.amount * record.probability / 100')))).toEqual([]);
+  });
+
+  it('3 — the `formula:` spelling is the SCHEMA’s to refuse; this rule stays silent', () => {
+    const badSpelling = {
+      objects: [{
+        name: 'crm_opportunity', label: 'Opp', sharingModel: 'private',
+        fields: {
+          amount: { type: 'currency', label: 'Amount' },
+          expected_revenue: { type: 'formula', label: 'Expected', formula: 'amount * 2' },
+        },
+      }],
+    };
+    const parsed = ObjectStackSchema.safeParse({ manifest: MANIFEST, ...badSpelling });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.map((i) => i.message).join(' ')).toMatch(/Did you mean `formula` → `expression`/);
+    // And the lint adds nothing of its own — no second vocabulary for one key.
+    expect(validateStackExpressions(badSpelling)).toEqual([]);
+  });
+
+  it('4 — mutating the read back to `f.formula` is caught by the declared-key guard', () => {
+    // The mutation, applied to the real source the guard scans.
+    const mutated = RULE_CODE.replace(/\bf\.expression\b/g, 'f.formula');
+    expect(mutated, 'the read moved — this mutation no longer reproduces #5026').not.toBe(RULE_CODE);
+
+    const readAfterMutation = [
+      ...new Set([...mutated.matchAll(/\bf\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1])),
+    ].sort();
+    const declared = Object.keys(FieldSchema.shape);
+    const undeclared = readAfterMutation.filter(
+      (k) => !declared.includes(k) && !TRACKED_UNDECLARED_READS.some((t) => t.receiver === 'f' && t.key === k),
+    );
+    // The guard's own assertion, run against the mutant: it fails, naming the key.
+    expect(undeclared).toEqual(['formula']);
+    // …and the un-mutated source passes the identical assertion.
+    expect(keysReadOff('f').filter((k) => !declared.includes(k))).toEqual([]);
   });
 });

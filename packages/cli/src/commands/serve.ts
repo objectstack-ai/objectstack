@@ -17,6 +17,13 @@ import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } f
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
+// The mail provider vocabulary, read from the package that materialises the
+// transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
+// has to refuse exactly the configurations `makeTransport` cannot build, and
+// two literal lists for one vocabulary is the drift #5094 was filed for. Values
+// only (no plugin class): `os serve` loads `EmailServicePlugin` itself through
+// the capability loop's dynamic import, host copy first.
+import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
@@ -2269,53 +2276,15 @@ export default class Serve extends Command {
             const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? [];
             arg = { cubes };
           } else if (cap === 'email') {
-            // Compose EmailServicePlugin options from config.email + OS_EMAIL_* env.
-            // Env precedence: env beats config so operators can override per-environment.
-            const cfgEmail = (config as any).email ?? {};
-            const envProvider = process.env.OS_EMAIL_PROVIDER;
-            const provider = (envProvider || cfgEmail.provider || 'log').toLowerCase();
-            const apiKey = process.env.OS_EMAIL_API_KEY || cfgEmail.apiKey;
-            const envFrom = process.env.OS_EMAIL_FROM;
-            // OS_EMAIL_FROM supports either "addr@x" or "Name <addr@x>".
-            let defaultFrom = cfgEmail.defaultFrom;
-            if (envFrom) {
-              const m = envFrom.match(/^\s*(?:"?([^"<]*?)"?\s*<\s*([^>]+)\s*>|(\S+))\s*$/);
-              if (m) {
-                const name = (m[1] ?? '').trim();
-                const address = (m[2] ?? m[3] ?? '').trim();
-                if (address) defaultFrom = name ? { name, address } : { address };
-              }
-            }
-            const retries = process.env.OS_EMAIL_RETRIES
-              ? Number(process.env.OS_EMAIL_RETRIES)
-              : cfgEmail.retries;
-            const defaultTemplateContext = {
-              appName: process.env.OS_APP_NAME || cfgEmail.appName || (config as any).appName || 'ObjectStack',
-              ...(cfgEmail.defaultTemplateContext || {}),
-            };
-            // Provide a sensible fallback `from` so templates can render
-            // even before operators configure SMTP/SaaS. The log transport
-            // simply prints to stdout; the address never leaves the box.
-            if (!defaultFrom) {
-              const slug = String(defaultTemplateContext.appName || 'objectstack')
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/^-+|-+$/g, '') || 'objectstack';
-              defaultFrom = { name: defaultTemplateContext.appName, address: `no-reply@${slug}.local` };
-            }
-            arg = {
-              provider,
-              ...(apiKey ? { apiKey } : {}),
-              defaultFrom,
-              ...(retries != null && !Number.isNaN(retries) ? { retries } : {}),
-              defaultTemplateContext,
-            };
-            if (provider !== 'log' && !apiKey) {
-              console.warn(chalk.yellow(
-                `  ⚠ Capability "email": provider='${provider}' but no apiKey found (set OS_EMAIL_API_KEY or config.email.apiKey). Falling back to LogTransport.`,
-              ));
-              arg.provider = 'log';
-            }
+            // Throws on a mail configuration that cannot deliver (#5087,
+            // #5132) — the catch below turns that into the boot failure /
+            // loud error it should be, never a LogTransport substituted
+            // behind the operator's back.
+            arg = resolveEmailCapabilityArg(
+              (config as any).email ?? {},
+              process.env,
+              (config as any).appName,
+            ).options;
           } else if (cap === 'sms') {
             // Compose SmsServicePlugin options from config.sms + OS_SMS_* env
             // (#2780). Same precedence as email: env beats config. Provider
@@ -2849,6 +2818,144 @@ export interface StorageCapabilityArg {
 export function resolveStorageCapabilityArg(envRoot?: string): StorageCapabilityArg {
   const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
   return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
+}
+
+/**
+ * Constructor options for `EmailServicePlugin`.
+ *
+ * There is no `warning` channel here any more (#5132). It carried exactly one
+ * message — "provider=resend but no apiKey, falling back to LogTransport" —
+ * and that fallback is now a throw, because a mail configuration that cannot
+ * deliver has no "degraded but still fine" reading: it is a server that
+ * accepts every send and delivers nothing.
+ */
+export interface EmailCapabilityArg {
+  options: Record<string, unknown>;
+}
+
+/**
+ * Resolve what `EmailServicePlugin` is constructed with, from `config.email`
+ * plus `OS_EMAIL_*` env (env wins, so an operator can override per environment).
+ *
+ * SMTP (#5087, ADR-0012) is configured through `OS_EMAIL_SMTP_HOST` / `_PORT` /
+ * `_SECURE` / `_USER` / `_PASSWORD` — the `OS_{DOMAIN}_{FEATURE}_{QUALIFIER}`
+ * shape of Prime Directive #9, grouped with the email vars rather than the bare
+ * third-party `SMTP_*` names — layered over `config.email.options`.
+ *
+ * **Every provider that cannot deliver throws** — `smtp` with no host, and
+ * (since #5132) `resend`/`postmark` with no API key, or a provider tag outside
+ * `EMAIL_TRANSPORT_PROVIDERS` altogether. The capability loop turns that into a
+ * loud failure — a hard boot error when the app declared `requires: ['email']`,
+ * otherwise a `console.error` and no email service — which is the point: the
+ * alternative (quietly substituting the LogTransport, as this function's
+ * `resend`/`postmark` arm used to do for a missing API key) hands the operator a
+ * server that accepts every send, records it in `sys_email` as sent, and
+ * delivers nothing — the exact declared-but-not-delivered gap #5087 closed
+ * inside the plugin, left behind one layer up.
+ *
+ * Refusing is only defensible because "this environment does not send mail" has
+ * a way to say itself: `OS_EMAIL_PROVIDER=log` (the default). An operator who
+ * names a delivery provider has declared an intent, and the honest answer to an
+ * intent we cannot honour is a failure, not a substitute transport.
+ *
+ * The provider vocabulary and the "needs an API key" question are both read
+ * from `@objectstack/plugin-email` — the package that has to materialise the
+ * transport — rather than restated here. Two literals describing one vocabulary
+ * is how the settings dropdown and the transports drifted apart (#5094).
+ *
+ * `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) switches
+ * delivery from inline to the durable `sys_job_queue` path (#5160). It reuses
+ * `OS_EMAIL_RETRIES` as its attempt budget rather than adding a second retry
+ * knob — see `EmailServicePlugin.makeQueueDelivery`.
+ */
+export function resolveEmailCapabilityArg(
+  cfgEmail: Record<string, any> = {},
+  env: NodeJS.ProcessEnv = process.env,
+  configAppName?: string,
+): EmailCapabilityArg {
+  const provider = String(env.OS_EMAIL_PROVIDER || cfgEmail.provider || 'log').toLowerCase();
+  const apiKey = env.OS_EMAIL_API_KEY || cfgEmail.apiKey;
+
+  // OS_EMAIL_FROM supports either "addr@x" or "Name <addr@x>".
+  let defaultFrom = cfgEmail.defaultFrom;
+  if (env.OS_EMAIL_FROM) {
+    const m = env.OS_EMAIL_FROM.match(/^\s*(?:"?([^"<]*?)"?\s*<\s*([^>]+)\s*>|(\S+))\s*$/);
+    if (m) {
+      const name = (m[1] ?? '').trim();
+      const address = (m[2] ?? m[3] ?? '').trim();
+      if (address) defaultFrom = name ? { name, address } : { address };
+    }
+  }
+  const retries = env.OS_EMAIL_RETRIES ? Number(env.OS_EMAIL_RETRIES) : cfgEmail.retries;
+  // `OS_EMAIL_QUEUE_ENABLED` — a boolean feature flag, so `_ENABLED` and
+  // default-off (Prime Directive #9; a bare `OS_EMAIL_QUEUE` would read as a
+  // config value, e.g. a queue name). Whether the declaration can be HONOURED
+  // is not knowable here — no kernel exists yet — so the plugin asserts it on
+  // `kernel:ready`, where the service registry has settled, and fails the boot
+  // there if no durable queue showed up.
+  const queueDelivery = env.OS_EMAIL_QUEUE_ENABLED != null
+    ? ['1', 'true', 'yes', 'on'].includes(String(env.OS_EMAIL_QUEUE_ENABLED).trim().toLowerCase())
+    : cfgEmail.queueDelivery;
+  const defaultTemplateContext = {
+    appName: env.OS_APP_NAME || cfgEmail.appName || configAppName || 'ObjectStack',
+    ...(cfgEmail.defaultTemplateContext || {}),
+  };
+  // Provide a sensible fallback `from` so templates can render even before
+  // operators configure SMTP/SaaS. The log transport simply prints to stdout;
+  // the address never leaves the box.
+  if (!defaultFrom) {
+    const slug = String(defaultTemplateContext.appName || 'objectstack')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'objectstack';
+    defaultFrom = { name: defaultTemplateContext.appName, address: `no-reply@${slug}.local` };
+  }
+
+  const smtpEnv: Record<string, unknown> = {};
+  const smtpHost = env.OS_EMAIL_SMTP_HOST?.trim();
+  if (smtpHost) smtpEnv.host = smtpHost;
+  if (env.OS_EMAIL_SMTP_PORT) smtpEnv.port = Number(env.OS_EMAIL_SMTP_PORT);
+  if (env.OS_EMAIL_SMTP_SECURE != null) {
+    const raw = String(env.OS_EMAIL_SMTP_SECURE).trim().toLowerCase();
+    smtpEnv.secure = raw !== 'false' && raw !== '0';
+  }
+  if (env.OS_EMAIL_SMTP_USER) smtpEnv.user = env.OS_EMAIL_SMTP_USER;
+  if (env.OS_EMAIL_SMTP_PASSWORD) smtpEnv.password = env.OS_EMAIL_SMTP_PASSWORD;
+  const providerOptions = { ...(cfgEmail.options ?? {}), ...smtpEnv };
+
+  const options: Record<string, unknown> = {
+    provider,
+    ...(apiKey ? { apiKey } : {}),
+    ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
+    defaultFrom,
+    ...(retries != null && !Number.isNaN(retries) ? { retries } : {}),
+    ...(queueDelivery != null ? { queueDelivery: !!queueDelivery } : {}),
+    defaultTemplateContext,
+  };
+
+  if (!isEmailTransportProvider(provider)) {
+    throw new Error(
+      `provider='${provider}' is not a transport this server can deliver through, so no mail would go out — `
+      + `${unsupportedProviderFix(provider)} `
+      + 'On this boot path the provider is OS_EMAIL_PROVIDER or config.email.provider; set '
+      + 'OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
+    );
+  }
+  if (provider === 'smtp' && !providerOptions.host) {
+    throw new Error(
+      "provider='smtp' selects SMTP delivery but no SMTP host is configured — set OS_EMAIL_SMTP_HOST "
+      + '(plus OS_EMAIL_SMTP_PORT / _SECURE / _USER / _PASSWORD) or config.email.options.host, '
+      + 'or choose another provider.',
+    );
+  }
+  if (emailProviderRequiresApiKey(provider) && !apiKey) {
+    throw new Error(
+      `provider='${provider}' selects ${provider} delivery but no API key is configured, so every send would `
+      + 'be recorded in sys_email as sent and nothing would leave the box — set OS_EMAIL_API_KEY '
+      + '(or config.email.apiKey), or set OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
+    );
+  }
+  return { options };
 }
 
 /**

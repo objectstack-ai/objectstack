@@ -236,6 +236,29 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         // covering only the branches that existed when it was authored is how
         // four sites drifted into three parking spots.
         './security/inbound-rate-limit.ts',
+        // [#5090] The declarative-endpoint step writes a body from the
+        // `setFallbackHandler` seam — a sixth way onto this wire surface, and
+        // the first that answers a request no route matched. Listed the day it
+        // was written, for the same reason the line above was.
+        './api-endpoint-step.ts',
+        // [#5091] The endpoint POLICY keys write the 401 and the 429 that a
+        // declared endpoint answers — a seventh way onto this wire surface.
+        // Both bodies deliberately restate an existing seam's (the platform
+        // anonymous-deny, the server-level limiter's 429), which is exactly the
+        // situation where a hand-rolled copy is tempting; the scan is what makes
+        // "restate" mean "call the same builder".
+        './endpoint-policy.ts',
+        // [#5092] The endpoint executor maps a delegated pipeline's failure onto
+        // this wire surface — a restatement of `errorFromThrown` outside the
+        // dispatcher class, which is exactly the kind of second copy this scan
+        // exists to keep honest. Listed the day it was written.
+        './endpoint-executor.ts',
+        // [#5137] The endpoint MAPPING keys refuse a declaration this runtime
+        // cannot serve (`transform`, an unusable path, colliding targets) with a
+        // body of their own — an eighth way onto this wire surface, and one
+        // whose whole reason for existing is that the alternative was silence.
+        // Listed the day it was written.
+        './api-mapping.ts',
     ];
 
     for (const file of MODULES) {

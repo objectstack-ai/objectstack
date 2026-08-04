@@ -2285,6 +2285,117 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
 };
 
 /**
+ * dashboard.widgets[].compareTo (#5011) — a VOCABULARY convergence, not a
+ * removal: the widget's three declared arms are replaced by the one shape the
+ * analytics executor implements, `{ kind, dimension? }`
+ * (`DatasetSelection.compareTo`).
+ *
+ * Why a conversion rather than a plain tombstone: two of the three arms have an
+ * exact target, so leaving them for the author to retype would be make-work on
+ * a rewrite a machine can prove.
+ *
+ *   'previousPeriod'   → { kind: 'previousPeriod' }   value verbatim, container changed
+ *   'previousYear'     → { kind: 'previousYear' }     value verbatim, container changed
+ *   { offset: '1y' }   → { kind: 'previousYear' }     '1y' IS previousYear, by definition
+ *
+ * `dimension` is deliberately NOT synthesised. The conversion sees a stack, not
+ * a dataset — it cannot know which time dimension carries the window — and it
+ * does not need to: `dimension` is optional precisely so the executor can
+ * resolve it (one dated candidate) or refuse loudly (zero, or several). Writing
+ * a guess here would convert a loud runtime error into a wrong comparison.
+ *
+ * Every OTHER `{ offset }` (`'7d'`, `'1M'`, `'2w'`, …) is left UNTOUCHED, on
+ * purpose. There is no faithful target: `previousPeriod` shifts by the resolved
+ * window's own length, which equals `7d` only when the window happens to be
+ * seven days. Rewriting it would silently change which rows the comparison
+ * column counts — the failure class this issue exists to end. So the source
+ * keeps the key, the strict schema rejects it with `COMPARE_TO_OFFSET_RETIRED`
+ * (which prescribes kind + filter-window), and the residue is declared as the
+ * `dashboard-widget-compareto-offset` semantic migration.
+ *
+ * Measured before writing (#5011's adjudication asked for stored/authored
+ * instances first): repo-wide, four authored instances, all of them the string
+ * form, all in `examples/app-crm`; ZERO `{ offset }` instances in either repo.
+ * Expected — a canonical-path author who tried `{ offset }` got a thrown widget,
+ * so it could never accumulate there.
+ *
+ * `retiredFromLoadPath: true`: the old spellings get NO acceptance window. An
+ * auto-converting loader would let `compareTo: 'previousPeriod'` keep parsing
+ * clean, which is the lenient-consumer shape PD #12 forbids and the exact
+ * dynamic that let the widget and executor vocabularies drift apart unnoticed
+ * for a whole major. Stored `sys_metadata` rows are still covered — every
+ * rehydration seam replays retired entries via `applyConversionsToStoredItem`
+ * (#3903).
+ */
+const dashboardWidgetCompareToConverged: MetadataConversion = {
+  id: 'dashboard-widget-compareto-converged',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dashboard.widgets[].compareTo',
+  summary:
+    "dashboard widget 'compareTo' converged on the executor's { kind, dimension? } contract "
+    + "(#5011 — the bare strings and { offset: '1y' } rewrite mechanically; other { offset } "
+    + 'durations have no faithful target and are reported, not guessed)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const widget = w as Record<string, unknown>;
+        if (!('compareTo' in widget)) return w;
+        const cmp = widget.compareTo;
+        const at = `${path}.widgets[${i}].compareTo`;
+
+        // Arm 1/2 — the bare string form. The value survives verbatim.
+        if (cmp === 'previousPeriod' || cmp === 'previousYear') {
+          emit({ from: `'${cmp}'`, to: `{ kind: '${cmp}' }`, path: at });
+          touched = true;
+          return { ...widget, compareTo: { kind: cmp } };
+        }
+
+        // Arm 3 — `{ offset }`, and only the one duration with an exact target.
+        if (cmp && typeof cmp === 'object' && !Array.isArray(cmp)) {
+          const offset = (cmp as Record<string, unknown>).offset;
+          if (offset === '1y') {
+            emit({ from: "{ offset: '1y' }", to: "{ kind: 'previousYear' }", path: at });
+            touched = true;
+            return { ...widget, compareTo: { kind: 'previousYear' } };
+          }
+        }
+        return w;
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'revenue_review',
+        widgets: [
+          { id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: 'previousPeriod' },
+          { id: 'w2', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: 'previousYear' },
+          { id: 'w3', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { offset: '1y' } },
+        ],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'revenue_review',
+        widgets: [
+          { id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousPeriod' } },
+          { id: 'w2', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousYear' } },
+          { id: 'w3', type: 'kpi', dataset: 'orders', values: ['total'], compareTo: { kind: 'previousYear' } },
+        ],
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
  * agent.knowledge — a grounding claim nothing enforced (the RAG path reads
  * `sourceIds` from the LLM's tool-call arguments, never the agent record).
  * Absorbs the former `agent-knowledge-topics-to-sources` rename (#3855):
@@ -3348,9 +3459,10 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  *     see the `datasource-inert-blocks-removed` note above, which leans on
  *     exactly that distinction), so the platform drops from three spellings to
  *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
- *     deleted — because neither owning shape is `.strict()`: a plain deletion
- *     would have Zod silently swallow the authored number and fall back to the
- *     1000ms default, which is the quiet-failure class ADR-0049 removes.
+ *     deleted — because two of the four owning shapes are not `.strict()`: a
+ *     plain deletion would have Zod silently swallow the authored number and
+ *     fall back to the 1000ms default, which is the quiet-failure class
+ *     ADR-0049 removes.
  *
  *  2. **The defaults were opposite, and no gate can see a default.** Pre-17,
  *     `job.retryPolicy` defaulted `maxRetries: 3` / `backoffMultiplier: 2`
@@ -3368,6 +3480,33 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  * Jobs with no `retryPolicy` block at all are left alone — absence already
  * meant a single attempt on both sides of the change.
  *
+ * ## The two surfaces this entry grew to cover (#4964 / #4962)
+ *
+ * The convergence above was driven by the dual-source instrument, whose
+ * question is "how many declarations share one exported NAME?". Two further
+ * encodings of the identical policy were invisible to it because they are
+ * anonymous inline `z.object`s with no exported name at all — and after a
+ * convergence lands, a surviving dialect reads as reviewed-and-kept rather
+ * than missed:
+ *
+ *  - **`flow.errorHandling`** (#4964) spelled the base delay `retryDelayMs`;
+ *    every other key, bound and default already matched. Step 0 below renames
+ *    it, so the ONE authorable casualty of the whole convergence is still just
+ *    that word — now retired everywhere it was ever legal rather than on two
+ *    surfaces out of four.
+ *  - **`ETLPipeline.retry`** (#4962) spelled the count `maxAttempts` and
+ *    defaulted it to 3. It gets **no step here, deliberately.** An ETL pipeline
+ *    is not a `defineStack` collection and `etl.zod.ts` has no parse site in
+ *    objectstack / objectui / cloud (批 12's measurement), so there is no
+ *    stored or authored document a walker could reach: a branch for it would be
+ *    dead code claiming migration coverage that does not exist, which is the
+ *    ADR-0049 failure this registry is supposed to prevent, not commit. Its
+ *    `maxAttempts` tombstone carries the rename AND the default change, and the
+ *    tombstone reaches the only doors that exist (`tsc` at the authoring site,
+ *    and the parse). That is also why the ETL default flip 3 → 0 needs no
+ *    materialization step while the job one did: nothing is deployed under the
+ *    old reading.
+ *
  * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
  * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
  * conversion layer is the only seam that can declare and retire that spelling.
@@ -3377,13 +3516,34 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
   toMajor: 17,
-  surface: 'flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
+  surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
-    "retry policy unified across job.retryPolicy and try_catch retry: base delay 'retryDelayMs' → 'backoffMs', " +
-    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661)",
+    "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
+    "and the pre-17 job defaults (maxRetries 3, backoffMultiplier 2) written out explicitly now that the merged default is 0 / 1 (#4661, #4964)",
   apply(stack, emit) {
+    // ── 0. flows: errorHandling.retryDelayMs → errorHandling.backoffMs ─
+    //
+    // The FLOW-LEVEL retry policy (#4964). Same rename as the try_catch node
+    // below and for the same reason, reached one level up: `errorHandling`
+    // hangs off the flow document, not off a node, so `mapFlowNodes` walks
+    // straight past it — which is a small echo of why this divergence survived
+    // #4661 at all. `renameKey` leaves an already-canonical `backoffMs` alone
+    // and, when BOTH spellings are present, leaves the alias shadowed rather
+    // than guessing which number the author meant; the strict block then
+    // rejects naming both. (#4923 is queued to revisit that shadowing rule —
+    // this entry deliberately relies on the shared helper's semantics rather
+    // than open-coding its own, so it moves with that ruling.)
+    const withErrorHandling = mapCollection(stack, 'flows', (flow, path) => {
+      const eh = flow.errorHandling;
+      if (!eh || typeof eh !== 'object' || Array.isArray(eh)) return flow;
+      const renamed = renameKey(eh as Record<string, unknown>, 'retryDelayMs', 'backoffMs');
+      if (renamed === null) return flow;
+      emit({ from: 'retryDelayMs', to: 'backoffMs', path: `${path}.errorHandling.backoffMs` });
+      return { ...flow, errorHandling: renamed };
+    });
+
     // ── 1. try_catch nodes: retry.retryDelayMs → retry.backoffMs ──────
-    const withFlows = mapFlowNodes(stack, (node, path) => {
+    const withFlows = mapFlowNodes(withErrorHandling, (node, path) => {
       if (node.type !== 'try_catch') return node;
       const config = node.config;
       if (!config || typeof config !== 'object' || Array.isArray(config)) return node;
@@ -3425,6 +3585,9 @@ const retryPolicyConverged: MetadataConversion = {
     before: {
       flows: [{
         name: 'sync_orders',
+        // Flow-LEVEL policy (#4964) — one level up from the nodes, so the node
+        // walk below never sees it.
+        errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
         nodes: [
           { id: 'n1', type: 'start' },
           {
@@ -3442,6 +3605,11 @@ const retryPolicyConverged: MetadataConversion = {
             config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
           },
         ],
+      }, {
+        // Flow-level block already canonical — left alone, no notice.
+        name: 'roll_up',
+        errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 100 },
+        nodes: [{ id: 'n1', type: 'start' }],
       }],
       jobs: [
         // Omits both defaults — both get written out.
@@ -3455,6 +3623,7 @@ const retryPolicyConverged: MetadataConversion = {
     after: {
       flows: [{
         name: 'sync_orders',
+        errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 2000 },
         nodes: [
           { id: 'n1', type: 'start' },
           {
@@ -3471,6 +3640,10 @@ const retryPolicyConverged: MetadataConversion = {
             config: { try: { nodes: [], edges: [] }, retry: { maxRetries: 2, backoffMs: 250 } },
           },
         ],
+      }, {
+        name: 'roll_up',
+        errorHandling: { strategy: 'retry', maxRetries: 1, backoffMs: 100 },
+        nodes: [{ id: 'n1', type: 'start' }],
       }],
       jobs: [
         { name: 'nightly_sync', schedule: { type: 'cron', expression: '0 0 * * *' }, handler: 'jobs.ts:sync', retryPolicy: { backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 } },
@@ -3478,8 +3651,9 @@ const retryPolicyConverged: MetadataConversion = {
         { name: 'weekly_purge', schedule: { type: 'cron', expression: '0 0 * * 0' }, handler: 'jobs.ts:purge' },
       ],
     },
-    // n2's rename, plus nightly_sync's two materialized defaults.
-    expectedNotices: 3,
+    // sync_orders' flow-level rename, n2's node-level rename, plus
+    // nightly_sync's two materialized defaults.
+    expectedNotices: 4,
   },
 };
 
@@ -3727,6 +3901,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     viewInertKeysRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
+    dashboardWidgetCompareToConverged,
     agentKnowledgeRemoved,
     skillTriggerPhrasesRemoved,
     stackApiRequireAuthRemoved,

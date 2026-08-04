@@ -24,15 +24,17 @@ export const zhCN: TranslationData = {
         smtp: { title: 'SMTP' },
         api_key: { title: 'API 密钥' },
         from_address: { title: '发件地址' },
+        delivery: { title: '投递方式', description: '邮件以何种方式交给服务商。' },
       },
       keys: {
         provider: {
           label: '服务商',
+          help: '此处只列出本服务器真正能投递的服务商。SendGrid 与 Amazon SES 通过 SMTP 配置。',
           options: {
             smtp: 'SMTP',
-            sendgrid: 'SendGrid',
-            ses: 'Amazon SES',
+            resend: 'Resend',
             postmark: 'Postmark',
+            log: '不发送(仅记录日志,不真正投递)',
           },
         },
         smtp_host: { label: '主机', help: '示例:smtp.example.com' },
@@ -43,6 +45,11 @@ export const zhCN: TranslationData = {
         api_key: { label: 'API 密钥' },
         from_email: { label: '发件地址', help: '示例:no-reply@example.com' },
         from_name: { label: '发件人名称' },
+        queue_delivery: {
+          label: '持久化队列投递',
+          help: '把每封邮件交给任务队列而不是内联发送:投递失败由 worker 按退避重试,进程重启也不会丢失。'
+            + '需要挂载具备持久化适配器的队列能力。「发送测试邮件」始终走内联发送。',
+        },
       },
       actions: {
         test: { label: '发送测试邮件' },

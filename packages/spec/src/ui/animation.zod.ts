@@ -121,7 +121,14 @@ export const ComponentAnimationSchema = lazySchema(() => z.object({
   trigger: AnimationTriggerSchema.optional().describe('When to trigger the animation'),
   reducedMotion: z.enum(['respect', 'disable', 'alternative']).default('respect')
     .describe('Accessibility: how to handle prefers-reduced-motion'),
-}).merge(AriaPropsSchema.partial()).describe('Component-level animation configuration'));
+}).merge(AriaPropsSchema.partial())
+  // `.strip()` is LOAD-BEARING (#4001 批 16): `AriaPropsSchema` became `strictObject` and
+  // `.merge()` adopts the incoming schema's unknown-key posture, so without this the shape
+  // would silently become `.strict()` — with zod's generic message, not the campaign's — and
+  // would contradict this file's measured `no door` verdict (#4988: nothing parses it, so a
+  // strict shell enforces nothing). Keep it until #4988 says what happens to this file.
+  .strip()
+  .describe('Component-level animation configuration'));
 
 export type ComponentAnimation = z.infer<typeof ComponentAnimationSchema>;
 

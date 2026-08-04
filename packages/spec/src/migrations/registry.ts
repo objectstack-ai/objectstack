@@ -693,6 +693,30 @@ const step17: MigrationStep = {
     + 'the pre-17 numbers into every existing `job.retryPolicy` that omitted them. Deployed '
     + 'stacks therefore keep their exact behaviour; what changes is only what a NEWLY authored '
     + 'omission means.\n\n'
+    + 'That convergence then had to be finished twice more, and WHY it was incomplete is the '
+    + 'part worth carrying forward (#4964, #4962). It was driven by the dual-source instrument, '
+    + 'which asks "how many declarations publish the same exported NAME?" — so it could not see '
+    + 'the two encodings of the identical policy that have no exported name at all, being '
+    + 'anonymous inline blocks nested in a bigger schema: `flow.errorHandling` and '
+    + '`ETLPipeline.retry`. The instrument was not broken and answered its own question exactly; '
+    + 'that question was simply not "how many shapes does this ONE concept have?", which is what '
+    + 'everybody read off it. The cost of the gap is concrete and falls on the author who did the '
+    + 'right thing: `shared/retry-policy.zod.ts` tombstoned `retryDelayMs` and told them to write '
+    + '`backoffMs`, and `flow.errorHandling` then rejected `backoffMs` and demanded `retryDelayMs` '
+    + '— reading the newer file was punished. Both blocks now build from one shared shape. '
+    + '`flow.errorHandling` costs nothing beyond the same `retryDelayMs` → `backoffMs` rename '
+    + '(every other key, bound and default already matched, which is exactly why it looked '
+    + 'reviewed), and the conversion covers it. `ETLPipeline.retry` costs a rename of the COUNT '
+    + '— `maxAttempts` → `maxRetries`, same number, do NOT subtract one: that adjustment belongs '
+    + "to `integration/connector.zod.ts`'s identically-spelled `RetryConfig.maxAttempts`, which "
+    + 'INCLUDES the first attempt — plus the same default flip (3 → 0) and three keys it never '
+    + 'had (`backoffMultiplier` / `maxRetryDelayMs` / `jitter`, so a nightly warehouse pipeline '
+    + 'can stop retrying flat, uncapped and unjittered every 60s). The ETL half gets a tombstone '
+    + 'and no conversion step, deliberately: an ETL pipeline is not a `defineStack` collection '
+    + 'and `etl.zod.ts` has no parse site in any of the three repos, so there is no stored '
+    + 'document to walk and a step for it would advertise coverage it does not have. Nothing '
+    + 'deployed moves; the migration surface is empty and this is the cheapest this convergence '
+    + 'will ever be.\n\n'
     + 'The same enforce-or-remove pass reaches the event vocabulary: `DataEventType` drops '
     + '`data.field.changed` (#4673). It had no producer anywhere — the engine emits '
     + '`data.record.{created,updated,deleted}` and, since #4639, `data.records.{updated,'
@@ -814,7 +838,43 @@ const step17: MigrationStep = {
     + 'not the shape. `ResponsiveConfig` stays exported and stays live on '
     + '`page.components[].responsive`, which objectui `useResponsiveConfig` genuinely reads, so '
     + 'no import breaks and authors who need breakpoint behaviour today have somewhere real to '
-    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.',
+    + 'put it. Per-widget responsive layout returns if and when a renderer implements it.\n\n'
+    + 'Finally it CONVERGES `dashboard.widgets[].compareTo` (#5011) — the one entry in this step '
+    + 'that is not a removal but a vocabulary merge, and the one whose defect was worst-shaped. '
+    + 'The widget declared three arms with confident TSDoc; the analytics executor implements one '
+    + 'contract, `DatasetSelection.compareTo` = `{ kind, dimension? }`, which has no `offset` in '
+    + 'it. On the ADR-0021 dataset path the two string arms were DROPPED by the renderer (a '
+    + 'comparison silently absent from a widget whose author asked for one) and `{ offset }` was '
+    + 'forwarded into that contract with no dimension, so the executor threw '
+    + '`compareTo requires a timeDimension "undefined"` and errored the whole widget. All three '
+    + 'arms worked on the legacy inline chart path. Same key, two fates — and the failing one was '
+    + 'the path the spec itself calls canonical, which is why this ranks above an ordinary '
+    + 'declared-but-unread key: the documentation was actively teaching a shape that crashes. '
+    + 'The widget now declares the executor\'s own words, so `declared = enforced` holds by '
+    + 'construction with no second vocabulary left to drift. `dimension` is optional and resolved '
+    + 'by the EXECUTOR (one dated time dimension → that one; zero or several → a loud error '
+    + 'naming the candidates), which is a producer-side resolution rule, not the consumer-side '
+    + 'tolerance PD #12 forbids. The bare strings and `{ offset: \'1y\' }` replay mechanically; '
+    + 'every other `{ offset }` duration is a semantic TODO below, because `previousPeriod` '
+    + 'shifts by the resolved window\'s own length and rewriting `7d` into it would change which '
+    + 'rows the comparison counts. The converged slot is also union-free, which is not cosmetic: '
+    + 'zod collapses a failed union into one bare `Invalid input` and #5014 showed that curated '
+    + 'guidance inside a union arm never reaches the author at all.\n\n'
+    + '⚠️ One protocol-17 change turns metadata ON rather than off, and it is the one to read '
+    + 'first: declarative `apis:` endpoints EXECUTE from 17 (#5040). The surface used to be inert '
+    + 'end to end — no route mounted, no matcher, every key including `authRequired` parsed and '
+    + 'enforced nothing — which is why #4936 refused a non-empty `apis:` outright. 17 ships the '
+    + 'executor and narrows that refusal to a per-endpoint publish gate, so an endpoint that '
+    + 'passes the gate is MOUNTED and serves traffic the moment it is published. Any historical '
+    + '`apis:` block therefore changes meaning without changing a byte. Review every entry before '
+    + 'upgrading, and pay particular attention to an explicit `authRequired: false`: the schema '
+    + 'default is `true`, so an omission is safe, and only that explicit `false` opens anonymous '
+    + 'access — which ADR-0121 D6 now pairs with a mandatory armed `rateLimit` '
+    + '(`enabled: true`; the key defaults to `false`, so a budget written without it meters '
+    + 'nothing). Paths also move under the namespace carve-out `/api/v1/apps/<manifest.namespace>/'
+    + '<subpath>` (ADR-0121 D1/D2). The full checklist is the `declarative-apis-endpoints-live` '
+    + 'semantic entry below; it is a security review, not a rename, so nothing about it is '
+    + 'applied for you.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -855,8 +915,33 @@ const step17: MigrationStep = {
     'hook-body-crypto-hash-removed',
     'connector-rate-limit-config-removed',
     'dashboard-widget-responsive-removed',
+    'dashboard-widget-compareto-converged',
   ],
   semantic: [
+    {
+      id: 'dashboard-widget-compareto-offset',
+      surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
+      replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+      reason:
+        'The widget declared three comparison arms; the analytics executor implements one shape, '
+        + '`{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset '
+        + 'path — the spec\'s single author-facing analytics shape — `{ offset }` was forwarded '
+        + 'verbatim into that contract and threw `compareTo requires a timeDimension "undefined"`, '
+        + 'taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). '
+        + "The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every "
+        + 'other duration has NO faithful target: `previousPeriod` shifts by the length of whatever '
+        + "window the widget's filter resolves to, which equals `7d` only when that window happens "
+        + 'to be seven days long. Rewriting mechanically would silently change which rows the '
+        + 'comparison column counts — a wrong number rather than a missing one, which is strictly '
+        + 'worse and exactly the class this convergence exists to end. Re-stating the intended '
+        + 'window is a judgment about the presentation, not a transform.',
+      acceptanceCriteria:
+        'No dashboard widget declares `compareTo.offset`. Each former offset comparison states its '
+        + "window on the widget's `filter` and compares with `compareTo: { kind: 'previousPeriod' }` "
+        + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
+        + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
+        + '`<measure>__compare` column over the window its author intended.',
+    },
     {
       id: 'job-retry-policy-constraints-tightened',
       surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
@@ -875,6 +960,36 @@ const step17: MigrationStep = {
         + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
         + 'retry re-runs the handler with its writes and callouts. No job fails to register '
         + 'with the retry-policy bound prescription.',
+    },
+    {
+      id: 'etl-retry-converged-onto-retry-policy',
+      surface: 'etlPipeline.retry.maxAttempts (and any count above 10)',
+      replacement: 'maxRetries, same number — plus an explicit count if you relied on the old default of 3',
+      reason:
+        'An ETL pipeline\'s `retry` was a THIRD retry vocabulary that #4661\'s convergence never '
+        + 'reached, because that pass was driven by duplicated exported NAMES and this block is an '
+        + 'anonymous inline object (#4962). It now carries the shared `RetryPolicySchema` contract, '
+        + 'which changes three things with no single lossless rewrite between them. The rename '
+        + '`maxAttempts` → `maxRetries` IS lossless and the tombstone performs it — both keys '
+        + 'counted the retries AFTER the initial attempt, so the number does not change, and '
+        + 'subtracting one (correct for `integration/connector.zod.ts`\'s identically-spelled '
+        + '`RetryConfig.maxAttempts`, which includes the first attempt) would silently run one '
+        + 'attempt fewer than asked. What needs a human: the count now DEFAULTS TO 0 instead of 3, '
+        + 'so a pipeline that wrote `retry: {}` or omitted the count bought three silent re-runs '
+        + 'and now buys none. That is deliberate and the business case is the destination — an ETL '
+        + 'destination is a foreign system by definition, and an implicit retry against a '
+        + 'non-idempotent one is a duplicate write (a second invoice, a second export, a second '
+        + 'webhook). Retrying is now something an author states and thereby claims idempotency for. '
+        + 'The shared contract also caps `maxRetries` at 10, which this block never did; clamping '
+        + 'a larger budget would silently halve a number its author chose, so it fails at parse '
+        + 'with the bound named instead.',
+      acceptanceCriteria:
+        'No ETL pipeline declares `retry.maxAttempts`; every one that wants retries declares '
+        + '`maxRetries` >= 1 explicitly (the number carried over unchanged from `maxAttempts`), and '
+        + 'every pipeline that was relying on the old implicit 3 has either written `maxRetries: 3` '
+        + 'or been re-decided against the duplicate-write risk at its destination. No count exceeds '
+        + '10. Pipelines that want the old flat 60s backoff state `backoffMs: 60000` explicitly, '
+        + 'since the shared default is 1000.',
     },
     {
       id: 'flow-retry-max-retries-required',
@@ -1427,6 +1542,55 @@ const step17: MigrationStep = {
         + 'nothing called anything: a caller that believed it was hot-loading a plugin was '
         + 'already only building an object. Boot-time composition through `defineStack` is '
         + 'unchanged.',
+    },
+    {
+      id: 'declarative-apis-endpoints-live',
+      surface: 'stack.apis[] (every declared ApiEndpoint — REVIEW REQUIRED BEFORE UPGRADING)',
+      replacement:
+        'the same declarations, re-read as LIVE HTTP routes: `path` moved under '
+        + '`/api/v1/apps/<manifest.namespace>/<subpath>`, and every entry that declares '
+        + '`authRequired: false` re-confirmed as an intentionally anonymous endpoint carrying '
+        + '`rateLimit: { enabled: true, … }`',
+      reason:
+        'This is the one protocol-17 entry that turns metadata ON rather than off, so read it '
+        + 'as a SECURITY review item and not as a rename. Before 17 the declarative endpoint '
+        + 'surface executed NOTHING: no route was mounted for a declared `path`, no matcher '
+        + 'existed, and every key — `authRequired` included — parsed green and gated nothing '
+        + '(#4936, which refused a non-empty `apis:` outright for exactly that reason). '
+        + 'Protocol 17 ships the executor (#5040) and narrows that refusal to a per-endpoint '
+        + 'publish gate: an endpoint that PASSES the gate is mounted and serves real traffic as '
+        + 'soon as the stack is published. So an `apis:` block written against an older major — '
+        + 'or one restored from a pre-#4936 source, or authored from a doc that predates the '
+        + 'refusal — changes meaning without changing a byte: what used to be inert '
+        + 'documentation becomes an execution entry point into the data and automation '
+        + 'pipelines. Nothing about that transition can be applied mechanically, because the '
+        + 'judgment it needs is "did the author of this endpoint mean for the internet to reach '
+        + 'it?" — and the one key where a wrong answer is unrecoverable is `authRequired`. Its '
+        + 'schema default is `true`, so an omission is SAFE and needs no review; an EXPLICIT '
+        + '`authRequired: false` is the only thing that opens anonymous access, and under '
+        + 'ADR-0121 D6 it now also requires an armed `rateLimit` (`enabled: true` — the key '
+        + 'defaults to `false`, so a budget written without it meters nothing) or the stack '
+        + 'refuses to publish. Grep every `apis:` entry for `authRequired: false` before you '
+        + 'upgrade, delete the ones that were never meant to be public, and arm a budget on the '
+        + 'ones that were. The path move is the mechanical-looking half and is still yours: '
+        + 'ADR-0121 D1/D2 confine a declared path to your own namespace carve-out '
+        + '(`/api/v1/apps/<namespace>/…`), the namespace comes from an explicit '
+        + '`manifest.namespace` with no derivation fallback, and the subpath is the only part '
+        + 'you name — rewriting it for you would silently change a URL third parties call.',
+      acceptanceCriteria:
+        'You have READ every entry of every `apis:` block, not just the ones that fail to '
+        + 'publish. Concretely: (1) each declared `path` is '
+        + '`/api/v1/apps/<your manifest.namespace>/<subpath>` and the stack declares that '
+        + '`manifest.namespace` explicitly; (2) every entry declaring `authRequired: false` is '
+        + 'one you INTEND to be reachable without a session, and each carries '
+        + '`rateLimit: { enabled: true, windowMs, maxRequests }` — entries that were not '
+        + 'intended to be anonymous have the key removed so the safe default (`true`) applies; '
+        + '(3) `objectstack validate` passes, which also proves no endpoint declares a shape '
+        + '17.x cannot execute (`type: script` / `proxy`, mapping `transform`, an '
+        + '`object_operation` missing `objectParams`, `cacheTtl` on a non-GET method, '
+        + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
+        + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
+        + 'a session-only endpoint returns 401 rather than data.',
     },
   ],
 };

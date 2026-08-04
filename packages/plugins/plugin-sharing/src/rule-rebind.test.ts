@@ -23,6 +23,14 @@ import {
 type AnyRecord = Record<string, any>;
 type HookEntry = { event: string; handler: (ctx: any) => any; options: AnyRecord };
 
+/**
+ * Lifecycle hooks `bindRuleHooks` registers per object. Named rather than
+ * inlined because these tests are about REBIND bookkeeping (bound → unbound →
+ * re-bound), not about which events the recompute needs — #4779 changed the
+ * second and must not look like it changed the first.
+ */
+const RULE_HOOKS_PER_OBJECT = 5;
+
 function makeEngine() {
   const hooks: HookEntry[] = [];
   return {
@@ -90,14 +98,19 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     await engine.fire('afterInsert', 'sys_sharing_rule', { result: { id: 'r1' } });
 
     const bound = engine.boundFor(SHARING_RULE_HOOK_PACKAGE);
-    expect(bound.map((h) => h.event).sort()).toEqual(['afterInsert', 'afterUpdate']);
+    // [#4779] Five, not two: predicate writes need a `before` hook to resolve
+    // their row set (the write is what makes those rows unfindable), and
+    // `afterDelete` retires the grants of records that no reconcile can reach.
+    expect(bound.map((h) => h.event).sort()).toEqual(
+      ['afterDelete', 'afterInsert', 'afterUpdate', 'beforeDelete', 'beforeUpdate'],
+    );
     for (const h of bound) expect(h.options.object).toBe('project');
   });
 
   it('tears down hooks when the last rule for an object is deleted', async () => {
     rules = [{ name: 'r1', object_name: 'project', active: true }];
     await engine.fire('afterInsert', 'sys_sharing_rule', {});
-    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(2);
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(RULE_HOOKS_PER_OBJECT);
 
     rules = [];
     await engine.fire('afterDelete', 'sys_sharing_rule', {});
@@ -116,7 +129,7 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
   it('keeps previous bindings and does not throw when listRules fails', async () => {
     rules = [{ name: 'r1', object_name: 'project', active: true }];
     await engine.fire('afterInsert', 'sys_sharing_rule', {});
-    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(2);
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(RULE_HOOKS_PER_OBJECT);
 
     ruleService.listRules = vi.fn(async () => { throw new Error('db gone'); });
     await expect(
@@ -124,7 +137,7 @@ describe('SharingServicePlugin sys_sharing_rule data-change rebind (#2592)', () 
     ).resolves.toBeUndefined(); // the write must not fail
 
     // The failed rebind ran before unbind — previous bindings intact.
-    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(2);
+    expect(engine.boundFor(SHARING_RULE_HOOK_PACKAGE)).toHaveLength(RULE_HOOKS_PER_OBJECT);
   });
 
   it('serializes overlapping rebinds so the newest rule snapshot wins', async () => {

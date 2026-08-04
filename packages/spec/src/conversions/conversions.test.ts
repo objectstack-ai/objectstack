@@ -548,4 +548,100 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices).toHaveLength(0);
     });
   });
+  /**
+   * #5011 — `dashboard.widgets[].compareTo` converged on the executor contract.
+   *
+   * The fixture pair above already proves the three mechanical rewrites. What it
+   * cannot express is the entry's real judgement: the durations it deliberately
+   * does NOT touch, and the fact that it takes no acceptance window. Both are
+   * asserted here, because a conversion that quietly rewrote `{ offset: '7d' }`
+   * into a kind would turn a loud rejection into a wrong comparison — the exact
+   * failure class #5011 exists to end.
+   */
+  describe('dashboard-widget-compareto-converged (#5011)', () => {
+    const dash = (compareTo: unknown) => ({
+      dashboards: [{
+        name: 'revenue_review',
+        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo }],
+      }],
+    });
+    const convert = (compareTo: unknown) =>
+      collectConversionNotices(structuredClone(dash(compareTo)), { includeRetired: true });
+    const widgetOf = (stack: Record<string, unknown>) =>
+      (stack.dashboards as Array<{ widgets: Array<Record<string, unknown>> }>)[0]!.widgets[0]!;
+
+    it('rewrites both bare strings, value verbatim, container changed', () => {
+      for (const kind of ['previousPeriod', 'previousYear'] as const) {
+        const { stack, notices } = convert(kind);
+        expect(widgetOf(stack).compareTo).toEqual({ kind });
+        expect(notices).toHaveLength(1);
+        expect(notices[0]!.from).toBe(`'${kind}'`);
+      }
+    });
+
+    it("rewrites `{ offset: '1y' }` — the one duration with an exact equivalent", () => {
+      const { stack, notices } = convert({ offset: '1y' });
+      expect(widgetOf(stack).compareTo).toEqual({ kind: 'previousYear' });
+      expect(notices).toHaveLength(1);
+    });
+
+    /**
+     * The deliberate non-rewrite, and the assertion this whole describe exists
+     * for. `previousPeriod` shifts by the resolved window's own length, which
+     * equals `7d` only when the window happens to be seven days — so a
+     * mechanical rewrite would silently change which rows the comparison column
+     * counts. Left untouched, the strict schema meets the author with the
+     * prescription instead.
+     */
+    it('leaves every other duration UNTOUCHED and silent, rather than guessing', () => {
+      for (const offset of ['7d', '1M', '2w', '30d', '3y']) {
+        const before = dash({ offset });
+        const { stack, notices } = convert({ offset });
+        expect(stack, `${offset} must not be rewritten`).toEqual(before);
+        expect(notices, `${offset} must emit no notice`).toHaveLength(0);
+      }
+    });
+
+    it('never synthesises a `dimension` — the executor resolves it, the chain cannot', () => {
+      // The conversion sees a stack, not a dataset: it cannot know which time
+      // dimension carries the window. Writing a guess here would convert a loud
+      // runtime error into a wrong comparison.
+      for (const input of ['previousPeriod', 'previousYear', { offset: '1y' }]) {
+        expect(widgetOf(convert(input).stack)).not.toHaveProperty('compareTo.dimension');
+      }
+    });
+
+    it('is retired from the load path — the old spellings get NO acceptance window', () => {
+      // Without `includeRetired` (the normalizeStackInput posture) nothing is
+      // rewritten: the strict schema must be what an AUTHORED legacy spelling
+      // meets, so the prescription is delivered instead of the shape being
+      // silently absorbed (PD #12).
+      for (const input of ['previousPeriod', 'previousYear', { offset: '1y' }]) {
+        const before = dash(input);
+        const { stack, notices } = collectConversionNotices(structuredClone(before));
+        expect(stack).toEqual(before);
+        expect(notices).toHaveLength(0);
+      }
+    });
+
+    it('touches only `compareTo` — a widget without one passes through by reference', () => {
+      const before = {
+        dashboards: [{
+          name: 'other', widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
+        }],
+      };
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('is idempotent by construction — the converged shape is not a match', () => {
+      // No test replays a conversion twice for us (the skill's note), so this
+      // asserts it directly: `{ kind }` is neither a string arm nor an `offset`.
+      const before = dash({ kind: 'previousYear' });
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+  });
 });
