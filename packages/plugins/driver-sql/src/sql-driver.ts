@@ -20,7 +20,8 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { resolveMultiOrgEnabled } from '@objectstack/types';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   applyIndexKeyParts,
@@ -5065,20 +5066,36 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Whether the host kernel runs in multi-tenant mode — read once from
-   * `OS_MULTI_ORG_ENABLED`, matching how
-   * the SchemaRegistry / SecurityPlugin pick the mode. Used to gate the
-   * tenant-audit warning: it's only meaningful where tenant isolation is
-   * actually enforced (org-scoping installed).
+   * Whether this deployment requested an organization wall — the same resolved
+   * POSTURE the SchemaRegistry and SecurityPlugin key off. Gates the
+   * tenant-audit warning, which is only meaningful where tenant isolation is
+   * something the deployment actually asked for.
+   *
+   * [ADR-0105 D1 / #5262] ⛔ Never `resolveMultiOrgEnabled()`. That boolean was
+   * DEMOTED to a back-compat input of `resolveTenancyPosture()` and reads
+   * `false` on a deployment configured the documented way
+   * (`OS_TENANCY_POSTURE=isolated|group`, legacy boolean unset), so the
+   * tenant-audit warning — the one signal that catches a sudo/seed write
+   * landing outside its tenant — was silently off on exactly the walled
+   * deployments it exists for.
+   *
+   * REQUESTED posture, not the `tenancy` service's effective answer, for two
+   * reasons. This class is a driver: it is constructed from connection config
+   * with no kernel or service registry to ask, so the effective posture is not
+   * reachable here at all. And the asymmetry runs the right way for a WARNING —
+   * a spurious line on a degraded stack costs a log entry, while a suppressed
+   * one on a walled stack is the defect being fixed.
+   *
+   * ⚠️ Read LIVE on every call, never memoised. The previous `_multiTenantMode`
+   * field froze a process-level fact into a per-instance verdict on whichever
+   * write happened to land first — the "startup reading recorded as a judgment"
+   * shape AGENTS.md warns about — which made the gate unable to see anything a
+   * later boot phase (or a test) established. It is affordable because
+   * {@link auditMissingTenant} now consults it only AFTER the cheap `tenantId`
+   * early-out, so a normal tenant-scoped write never reaches this at all.
    */
-  private _multiTenantMode?: boolean;
   protected isMultiTenantMode(): boolean {
-    if (this._multiTenantMode === undefined) {
-      // Single source of truth (shared with auth/registry/CLI) — previously
-      // this read `process.env` inline instead of the shared resolver.
-      this._multiTenantMode = resolveMultiOrgEnabled();
-    }
-    return this._multiTenantMode;
+    return postureEnforcesWall(resolveTenancyPosture());
   }
 
   /**
@@ -5173,6 +5190,13 @@ export class SqlDriver implements IDataDriver {
   ): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
     if (options?.bypassTenantAudit === true) return;
+    // A write that DID carry its tenant is the case this audit has nothing to
+    // say about, and it is the overwhelmingly common one — so it exits here,
+    // before the posture read below. Ordering only (both guards are pure
+    // predicates over independent facts); it is what makes `isMultiTenantMode()`
+    // affordable as a live read now that it no longer memoises (#5262).
+    const tenantId = options?.tenantId;
+    if (tenantId !== undefined && tenantId !== null && tenantId !== '') return;
     // Only meaningful in multi-tenant deployments. Single-tenant stacks have no
     // tenant isolation, yet the kernel now ALWAYS provisions an `organization_id`
     // column (its existence is decoupled from the tenant flag). Column presence
@@ -5180,8 +5204,6 @@ export class SqlDriver implements IDataDriver {
     // system/sudo write (e.g. the notification/http delivery dispatchers' claim
     // updates) would spam a meaningless warning on single-tenant boots.
     if (!this.isMultiTenantMode()) return;
-    const tenantId = options?.tenantId;
-    if (tenantId !== undefined && tenantId !== null && tenantId !== '') return;
     const field = this.resolveTenantField(object);
     if (!field) return;
     const key = `${object}:${op}`;
