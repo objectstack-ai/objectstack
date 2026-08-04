@@ -202,10 +202,9 @@ export async function sweepStrandedOutbox(
         logger?.error?.(
           `EmailServicePlugin: outbox sweep could not advance sys_email row '${rowId}' — that message stays `
           + 'at `queued`, undelivered, and nothing will look at it again until the next restart, while the '
-          + 'server keeps reporting healthy. Fix: check the row with '
-          + "`SELECT * FROM sys_email WHERE id = '" + rowId + "'` (a row missing to_addresses/from_address/"
-          + 'subject can never be sent and should be marked failed), then restart to re-sweep. '
-          + `Cause: ${err?.message ?? err}`,
+          + 'server keeps reporting healthy. Fix: the cause below comes from the datasource or the queue, '
+          + 'not from the message itself (a message that cannot be sent is recorded as `failed` on its own '
+          + `row); restore that dependency and restart to re-sweep. Cause: ${err?.message ?? err}`,
         );
       }
     }
