@@ -782,6 +782,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             deferredUpdates.push({
               objectName,
               recordExternalId: this.externalIdKey(record, externalId),
+              externalIdLabel: this.externalIdLabel(externalId),
               field: ref.field,
               targetObject: ref.targetObject,
               targetField: ref.targetField,
@@ -1170,6 +1171,96 @@ export class SeedLoaderService implements ISeedLoaderService {
             this.recordDeferredError(deferred, allResults, allErrors,
               `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${err?.message ?? String(err)}`);
           }
+        } else {
+          // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127).
+          //
+          // Pass 2 did its job — `resolvedValue` is a real internal id — and
+          // then found no internal id to write it ONTO: this load never
+          // registered `deferred.recordExternalId` in `insertedRecords`. Until
+          // now this branch did not exist, so the back-fill simply evaporated:
+          // no write, no `errors`/`allErrors` entry (so `success` stayed true),
+          // no `errored`, no log. The ONLY trace left was the `referencesDeferred`
+          // this record booked in pass 1 and never gave back — a number with
+          // nothing in the result explaining it.
+          //
+          // It is the deeper cousin of the two branches around it: #4729 fixed
+          // "counted but logged at `warn`", #4997 fixed "counted, never logged",
+          // this one was "never counted, never logged". Same objective criterion
+          // as both (does the outcome enter `errors`/`allErrors`?) — so it is
+          // recorded AND logged at `error` per AGENTS.md → "Degradation log
+          // levels" (#4632): the row is in the database, every row counter reads
+          // healthy, and the association it declares is permanently absent.
+          //
+          // `referencesDeferred` deliberately stays booked, exactly as the two
+          // sibling failure branches leave it: the counter means "deferred
+          // references that never landed", and only a SUCCESSFUL back-fill
+          // decrements it. What was missing was never the arithmetic — it was
+          // the error that explains the leftover, which `recordDeferredError`
+          // now supplies (the load reports `success: false`, `errored` counts
+          // the loss, and the dangling count has a matching entry in `errors`).
+          //
+          // The two ways to get here are NOT the same failure, so they do not
+          // get the same line. An EMPTY `recordExternalId` is the pure silent
+          // loss: `externalIdKey` returns `''` when any component of a composite
+          // key is blank, the row itself wrote fine, and nothing anywhere else
+          // reports it — this line is the only one a reader will ever see. A
+          // NON-empty key that is simply absent from the map means the source
+          // row did not land (or its write returned no id); that failure was
+          // already reported at `error` by the pass-1 write site (#4729), so
+          // this line points AT that error instead of restating it — one line,
+          // not a second flood over the same root cause.
+          const missedTarget = this.formatAttempted(deferred.attemptedValue);
+          const where = `${deferred.targetObject}.${deferred.targetField} = '${missedTarget}'`;
+          if (deferred.recordExternalId === '') {
+            this.logger.error(
+              `[SeedLoader] Deferred reference DROPPED — ${deferred.objectName}.${deferred.field} stays NULL ` +
+                `FOREVER on record #${deferred.recordIndex}. Pass 2 RESOLVED the target (${where}) and then had ` +
+                `nowhere to write it: that record's externalId (\`${deferred.externalIdLabel}\`) evaluated to the ` +
+                `EMPTY key, which is what \`externalIdKey\` returns when the key field is absent or blank — or, ` +
+                `for a composite key, when ANY one of its components is — so no internal id was ever registered ` +
+                `for it in this load. The row itself WAS ` +
+                `seeded, so every row counter looks healthy while the relationship is MISSING, and nothing ` +
+                `retries this: pass 2 is the last one. Give every \`${deferred.externalIdLabel}\` component a ` +
+                `non-empty value in the ${deferred.objectName} seed data (or declare an externalId whose parts ` +
+                `are always present) and re-run the seed to complete the link.`,
+              undefined,
+              {
+                object: deferred.objectName,
+                field: deferred.field,
+                target: `${deferred.targetObject}.${deferred.targetField}`,
+                recordIndex: deferred.recordIndex,
+                recordExternalId: deferred.recordExternalId,
+              },
+            );
+            this.recordDeferredError(deferred, allResults, allErrors,
+              `Deferred reference dropped: ${deferred.objectName}.${deferred.field} = '${missedTarget}' → ` +
+                `${deferred.targetObject}.${deferred.targetField} resolved, but ${deferred.objectName} record ` +
+                `#${deferred.recordIndex} has an empty \`${deferred.externalIdLabel}\` externalId, so no internal ` +
+                `id was registered for it and the back-fill could not be written`);
+          } else {
+            this.logger.error(
+              `[SeedLoader] Deferred reference DROPPED — ${deferred.objectName}.${deferred.field} is never written ` +
+                `on record '${deferred.recordExternalId}'. Pass 2 RESOLVED the target (${where}) and then had ` +
+                `nowhere to write it: this load registered no internal id for that ${deferred.objectName} record, ` +
+                `because its pass-1 write FAILED (reported as its own \`error\` above) or returned no id. Nothing ` +
+                `retries this: pass 2 back-fills only rows this load actually seeded, and it is the last pass. ` +
+                `Fix the pass-1 write error reported for ${deferred.objectName} '${deferred.recordExternalId}' ` +
+                `and re-run the seed — the row and this link land together or not at all.`,
+              undefined,
+              {
+                object: deferred.objectName,
+                field: deferred.field,
+                target: `${deferred.targetObject}.${deferred.targetField}`,
+                recordIndex: deferred.recordIndex,
+                recordExternalId: deferred.recordExternalId,
+              },
+            );
+            this.recordDeferredError(deferred, allResults, allErrors,
+              `Deferred reference dropped: ${deferred.objectName}.${deferred.field} = '${missedTarget}' → ` +
+                `${deferred.targetObject}.${deferred.targetField} resolved, but no internal id was registered for ` +
+                `${deferred.objectName} '${deferred.recordExternalId}' in this load (its pass-1 write failed), so ` +
+                `the back-fill could not be written`);
+          }
         }
       } else {
         // Still unresolved after pass 2 — the target never materialized. Name
@@ -1241,9 +1332,12 @@ export class SeedLoaderService implements ISeedLoaderService {
    * Record a pass-2 (deferred) reference failure as a first-class error: it
    * lands in the object's per-result `errors`, bumps its `errored` count (so
    * `summary.totalErrored` is truthful), and joins `allErrors` (so the load
-   * reports `success: false`). Both pass-2 failure modes — target still
-   * missing, or the back-fill write threw — route through here so neither can
-   * leave an incomplete relationship reported as a clean load (framework#2805).
+   * reports `success: false`). ALL THREE pass-2 failure modes route through here
+   * so none can leave an incomplete relationship reported as a clean load
+   * (framework#2805): the target is still missing, the back-fill write threw,
+   * or — the mode that used to fall out of `resolveDeferredUpdates` without
+   * reaching any of this (#5127) — the target resolved but the source record has
+   * no registered internal id to write it onto.
    */
   private recordDeferredError(
     deferred: DeferredUpdate,
@@ -1974,7 +2068,27 @@ interface SummaryRecomputeLike {
 
 interface DeferredUpdate {
   objectName: string;
+  /**
+   * The source record's natural key, as {@link SeedLoaderService.externalIdKey}
+   * computed it in pass 1 — the key pass 2 looks the record's internal id up by.
+   *
+   * May legitimately be `''`: `externalIdKey` returns the empty string when the
+   * key field is absent or blank, and — the case that actually bites — when ANY
+   * ONE component of a composite externalId is. An empty key is
+   * never registered in `insertedRecords`, so a deferred update carrying one can
+   * never find its record in pass 2 — which is precisely the "wrote the row,
+   * dropped the link" case #5127 exists to report. Carried verbatim (not
+   * normalised to `undefined`) so pass 2 can tell that case apart from a real
+   * key whose record simply failed to write.
+   */
   recordExternalId: string;
+  /**
+   * Human-readable name of the source dataset's externalId (`name`, or `a+b` for
+   * a composite) — pass 2 has no other handle on it, and an empty
+   * `recordExternalId` is only actionable if the message can say WHICH key came
+   * out empty (#5127).
+   */
+  externalIdLabel: string;
   field: string;
   targetObject: string;
   targetField: string;
