@@ -39,6 +39,7 @@ import {
   bindEmailTemplateProvenanceStamp,
   unbindEmailTemplateProvenanceStamp,
 } from './email-template-provenance.js';
+import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -170,6 +171,14 @@ export class EmailServicePlugin implements Plugin {
    * `applyMailSettings` already applies to `provider`.
    */
   private queueDeliveryFromSettings?: boolean;
+  /**
+   * Settles when the boot outbox sweep (#5161) has finished — with its counts,
+   * or `undefined` when the sweep itself failed (already reported at `error`).
+   *
+   * Boot does NOT await it, so this is how anything that needs determinism
+   * (tests, an operator script) observes the sweep instead of guessing.
+   */
+  outboxSweepSettled?: Promise<OutboxSweepResult | undefined>;
 
   constructor(options: EmailServicePluginOptions = {}) {
     this.options = options;
@@ -514,12 +523,29 @@ export class EmailServicePlugin implements Plugin {
                     if (target.status !== 'queued' || target.message_id) return;
                     await svc.deliverPersistedRow(target);
                   } catch (err: any) {
-                    ctx.logger.warn(`EmailServicePlugin: outbox drain failed for ${rowId}: ${err?.message ?? err}`);
+                    // `error`, not `warn` (#5161): the insert returned, the row
+                    // is there, everything looks normal — and the mail was NOT
+                    // sent. Nothing else in this process will look at that row
+                    // again, so a line nobody reads is the whole loss.
+                    ctx.logger.error(
+                      `EmailServicePlugin: outbox drain FAILED for sys_email row '${rowId}' — that message was `
+                      + 'NOT sent and the row stays at `queued`; nothing retries it in this process. Fix: it is '
+                      + 'picked up by the boot outbox sweep on the next restart; to have failures retried and '
+                      + 'dead-lettered instead of waiting for one, turn on Settings → Mail → "Durable queue '
+                      + 'delivery" (@objectstack/service-queue over an ObjectQL engine). '
+                      + `Cause: ${err?.message ?? err}`,
+                    );
                   }
                 })();
               }, 0);
             } catch (err: any) {
-              ctx.logger.warn(`EmailServicePlugin: outbox drain hook error: ${err?.message ?? err}`);
+              // Same class one level up: the row was inserted and never even
+              // scheduled for delivery.
+              ctx.logger.error(
+                'EmailServicePlugin: outbox drain hook error — an inserted sys_email row was never scheduled '
+                + 'for delivery and stays at `queued`, undelivered, while the insert reported success. Fix: the '
+                + `boot outbox sweep picks it up on the next restart. Cause: ${err?.message ?? err}`,
+              );
             }
           },
           { packageId: DRAIN_PKG },
@@ -622,6 +648,37 @@ export class EmailServicePlugin implements Plugin {
             + ', or set OS_EMAIL_QUEUE_ENABLED=false / omit `queueDelivery` to declare inline delivery.',
           );
         }
+      }
+
+      // ── STRANDED OUTBOX SWEEP (#5161) ────────────────────────────────
+      // The `queued` rows nobody was consuming: a process that died between
+      // the insert and the delivery left a row named after a queue that had no
+      // reader. Swept HERE — one anchor with the boot gate above, after the
+      // registries are settled and the subscriber is attached, so a re-queued
+      // row has somewhere to land.
+      //
+      // NOT awaited: a backlog of stranded mail must not hold the server off
+      // its port, and in inline mode every row is a transport round trip. And
+      // self-catching rather than trusting the hook: a `kernel:ready` handler
+      // that throws is silently swallowed on LiteKernel (#5170), which for a
+      // durability sweep would mean losing the report of the very failure it
+      // exists to prevent.
+      if (persistence) {
+        const svc = this.service;
+        this.outboxSweepSettled = (async () => {
+          try {
+            return await sweepStrandedOutbox({ engine: engine as any, service: svc, logger: ctx.logger });
+          } catch (err: any) {
+            ctx.logger.error(
+              'EmailServicePlugin: the boot sweep of stranded sys_email rows FAILED to run — messages accepted '
+              + 'before the last restart are still sitting at `queued`, nothing else looks at them, and the '
+              + 'server will keep reporting healthy with that mail undelivered. Fix: make sure sys_email is '
+              + 'readable by the system context (schema sync ran, the datasource is up), then restart to '
+              + `re-sweep. Cause: ${err?.message ?? err}`,
+            );
+            return undefined;
+          }
+        })();
       }
 
       // Seed built-in + user-provided templates (upsert by name+locale).

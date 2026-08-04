@@ -56,6 +56,15 @@ export {
   type BootstrapDeclaredEmailTemplatesResult,
 } from './bootstrap-declared-email-templates.js';
 export {
+  sweepStrandedOutbox,
+  OUTBOX_OBJECT,
+  OUTBOX_SWEEP_MIN_AGE_MS,
+  OUTBOX_SWEEP_LIMIT,
+  type OutboxSweepResult,
+  type OutboxSweepService,
+  type SweepStrandedOutboxOptions,
+} from './outbox-sweep.js';
+export {
   bindEmailTemplateProvenanceStamp,
   unbindEmailTemplateProvenanceStamp,
   EMAIL_TEMPLATE_PROVENANCE_PACKAGE,
