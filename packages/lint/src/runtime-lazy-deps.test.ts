@@ -2,8 +2,8 @@
 //
 // The kernel boot-path contract for `@objectstack/lint/runtime` (#4463).
 //
-// `lazy-deps.test.ts` next door pins that IMPORTING the package loads neither
-// `typescript` (~9 MB) nor `sucrase`. That was enough while the only consumer
+// `lazy-deps.test.ts` next door pins that IMPORTING the package loads none of
+// `typescript` (~9 MB), `sucrase` or `ajv`. That was enough while the only consumer
 // was the CLI, which may load anything. #4463 gave the package a consumer on
 // the kernel boot path — `@objectstack/metadata-protocol`, reached by every
 // runtime metadata write — and that consumer needs the stronger claim:
@@ -30,7 +30,12 @@ import { describe, it, expect } from 'vitest';
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const distDir = join(srcDir, '..', 'dist');
 
-const LAZY_DEPS = ['typescript', 'sucrase'];
+// `ajv` joined the list in #4762: the rule-compilability gate needs a real
+// JSON-Schema compiler to judge a `json_schema` validation rule, and that rule
+// is CLI-only (`surfaceReason: RUNTIME_OBJECT_WRITES_P2`). So the boot path must
+// not pay for it — not at import, and not while gating. Should that rule ever be
+// widened to `runtime-publish`, this assertion is what says so out loud.
+const LAZY_DEPS = ['typescript', 'sucrase', 'ajv'];
 
 const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
   Object.keys(cache ?? {}).some((p) => p.split(/[/\\]/).join('/').includes(`/node_modules/${dep}/`));

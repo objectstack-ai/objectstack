@@ -830,6 +830,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       sucrase:
         specifier: ^3.35.1
         version: 3.35.1

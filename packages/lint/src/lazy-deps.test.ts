@@ -9,7 +9,11 @@
 //     by the L2 body write-set gates (validate-hook-body-writes.ts since
 //     #4271, validate-action-body-writes.ts since #4345);
 //   - `sucrase` (~1.5 MB), loaded by the react syntax gate
-//     (validate-react-pages.ts).
+//     (validate-react-pages.ts);
+//   - `ajv` (~2.4 MB installed), loaded by the #4762 publish gate
+//     (validate-rule-compilability.ts) only when a stack declares a
+//     `json_schema` validation rule — the one rule type whose static artifact
+//     needs a JSON-Schema compiler to judge.
 //
 // "A react page" was the whole story when this file was written; it is not any
 // more, and the cases below say which trigger they are pinning. Keep them
@@ -38,7 +42,7 @@ const distDir = join(srcDir, '..', 'dist');
 
 // Deps that must never load at import time. Extend this list when another
 // heavy, rarely-hit dependency joins the package.
-const LAZY_DEPS = ['typescript', 'sucrase'];
+const LAZY_DEPS = ['typescript', 'sucrase', 'ajv'];
 
 const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
   Object.keys(cache ?? {}).some((p) => p.split(/[/\\]/).join('/').includes(`/node_modules/${dep}/`));
@@ -101,6 +105,18 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       const props = mod.validateReactPageProps(${reactStack('function Page(){ return <ObjectForm mode="edit" />; }')});
       if (!loaded('typescript')) fail('typescript was not loaded by a react-page props validation');
       if (!props.some((f) => f.rule === 'react-prop-missing-required')) fail('props gate produced no finding');
+      // #4762 — the JSON-Schema compiler is the third lazy dep. A stack whose
+      // validation rules are all format rules never pays for it.
+      const ruleStack = (validation) => ({ objects: [{ name: 'a', fields: { payload: {} }, validations: [validation] }] });
+      mod.validateRuleCompilability(ruleStack({ type: 'format', name: 'f', field: 'payload', regex: '([', message: 'm' }));
+      if (loaded('ajv')) fail('the rule-compilability gate must not load ajv to judge a format rule');
+      const schemaFindings = mod.validateRuleCompilability(
+        ruleStack({ type: 'json_schema', name: 'j', field: 'payload', schema: { type: 'not-a-type' }, message: 'm' }),
+      );
+      if (!loaded('ajv')) fail('ajv was not loaded by a json_schema validation-rule check');
+      if (!schemaFindings.some((f) => f.rule === 'validation-rule-json-schema-uncompilable')) {
+        fail('rule-compilability gate produced no finding');
+      }
       console.log('OK');
     };
   `;
@@ -132,8 +148,13 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
 
   it('loads each dep lazily in-process and the gates still work', async () => {
     const req = createRequire(import.meta.url);
-    const { validateReactPages, validateReactPageProps, validateHookBodyWrites, validateActionBodyWrites } =
-      await import('./index.js');
+    const {
+      validateReactPages,
+      validateReactPageProps,
+      validateHookBodyWrites,
+      validateActionBodyWrites,
+      validateRuleCompilability,
+    } = await import('./index.js');
 
     // Stacks without a react-source page never touch either dep.
     expect(validateReactPages({ pages: [{ name: 'p', kind: 'object' }] })).toEqual([]);
@@ -157,9 +178,28 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
         actions: [action({ language: 'js', source: 'ctx.input.amout = 1; return { ok: true };' })],
       }),
     ).toEqual([]);
+    // #4762 — nor does judging a `format` rule's regex: that needs only the
+    // JavaScript engine's own `new RegExp`, so a stack with no `json_schema`
+    // validation rule never loads a JSON-Schema compiler.
+    const ruleStack = (validation: unknown) => ({
+      objects: [{ name: 'a', fields: { payload: {} }, validations: [validation] }],
+    });
+    expect(
+      validateRuleCompilability(
+        ruleStack({ type: 'format', name: 'f', field: 'payload', regex: '([', message: 'm' }),
+      ).map((f) => f.rule),
+    ).toEqual(['validation-rule-regex-uncompilable']);
+
     for (const dep of LAZY_DEPS) {
       expect(depLoaded(req.cache, dep), `${dep} loaded before any react-source or L2-body validation`).toBe(false);
     }
+
+    // The first `json_schema` rule pays for ajv — and the gate still works.
+    const schemaFindings = validateRuleCompilability(
+      ruleStack({ type: 'json_schema', name: 'j', field: 'payload', schema: { type: 'not-a-type' }, message: 'm' }),
+    );
+    expect(depLoaded(req.cache, 'ajv')).toBe(true);
+    expect(schemaFindings.map((f) => f.rule)).toEqual(['validation-rule-json-schema-uncompilable']);
 
     // The first react page with source pays the cost of exactly its own gate's
     // dep — and the gates still work.
