@@ -255,7 +255,13 @@ export function extractFormulaExpressions(code) {
     const take = (initializer, via) => {
       const line = ts.getLineAndCharacterOfPosition(sf, initializer.getStart(sf)).line + lineOffset;
       const source = staticSource(initializer);
-      const key = `${line} ${source ?? 'unknowable'}`;
+      // The separator and the "no static source" sentinel are control chars so
+      // they cannot collide with real expression text. Both MUST stay written as
+      // escape SEQUENCES, never raw bytes: a raw byte is invisible in review, and
+      // one literal NUL makes grep/ripgrep treat the whole file as binary and
+      // return zero matches — the file drops out of code search and out of every
+      // grep-based lint with no error saying so (#4890, pnpm check:nul-bytes).
+      const key = `${line}\u0000${source ?? '\u0001unknowable'}`;
       if (seen.has(key)) return;
       seen.add(key);
       found.push({ line, via, source });
