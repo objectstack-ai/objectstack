@@ -26,8 +26,10 @@ export {
   makeTransport,
   smtpOptionsFromMailSettings,
   EMAIL_TRANSPORT_PROVIDERS,
+  API_KEY_EMAIL_PROVIDERS,
   RETIRED_EMAIL_PROVIDERS,
   isEmailTransportProvider,
+  emailProviderRequiresApiKey,
   retiredProviderGuidance,
   unsupportedProviderFix,
   type ResendTransportOptions,
@@ -35,6 +37,7 @@ export {
   type SmtpTransportOptions,
   type MakeTransportOptions,
   type EmailTransportProvider,
+  type ApiKeyEmailProvider,
 } from './transports/index.js';
 export {
   bootstrapDeclaredEmailTemplates,

@@ -38,6 +38,36 @@ export function isEmailTransportProvider(value: unknown): value is EmailTranspor
 }
 
 /**
+ * Providers whose transport is an HTTPS SaaS API and therefore cannot be built
+ * at all without a key — the single source of truth for "this provider needs
+ * `apiKey`".
+ *
+ * It exists as a value because more than one assembly site has to answer that
+ * question and refuse an incomplete configuration: {@link makeTransport} here,
+ * and `resolveEmailCapabilityArg` in `@objectstack/cli` (#5132), which used to
+ * answer it with its own `provider !== 'log' && provider !== 'smtp'` literal
+ * and silently rewrote the provider to `log` when the key was missing. Two
+ * literals describing one vocabulary is exactly the drift #5094 was filed for,
+ * so the CLI imports this instead of restating it.
+ *
+ * The tie to {@link makeTransport} is a compile error rather than a convention:
+ * its `resend` / `postmark` arms pass their tag to `requireApiKey`, whose
+ * parameter is {@link ApiKeyEmailProvider}, so dropping a tag here stops that
+ * switch from compiling. The other direction — a tag added here whose arm
+ * forgets the check — is pinned by `api-key-providers.contract.test.ts`.
+ */
+export const API_KEY_EMAIL_PROVIDERS = ['resend', 'postmark'] as const satisfies readonly EmailTransportProvider[];
+
+/** A provider that cannot be built without an API key. */
+export type ApiKeyEmailProvider = (typeof API_KEY_EMAIL_PROVIDERS)[number];
+
+/** Does this provider tag need an `apiKey` before a transport can be built? */
+export function emailProviderRequiresApiKey(value: unknown): value is ApiKeyEmailProvider {
+  return typeof value === 'string'
+    && (API_KEY_EMAIL_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
  * Provider tags the settings page used to offer and this package never
  * implemented, mapped to the migration that replaces them (#5094).
  *
@@ -76,6 +106,20 @@ export function unsupportedProviderFix(provider: string): string {
     ?? `pick one of ${EMAIL_TRANSPORT_PROVIDERS.join(' / ')} (Settings → Mail → Provider).`;
 }
 
+/**
+ * The API key for a provider that has no transport without one, or a throw.
+ *
+ * The parameter type is what keeps {@link API_KEY_EMAIL_PROVIDERS} honest: only
+ * a tag listed there can be passed here, so the constant cannot shrink away
+ * from the `switch` arms that rely on it without breaking the build.
+ */
+function requireApiKey(provider: ApiKeyEmailProvider, apiKey: string | undefined): string {
+  if (!apiKey) {
+    throw new Error(`makeTransport: provider='${provider}' requires apiKey (OS_EMAIL_API_KEY)`);
+  }
+  return apiKey;
+}
+
 export interface MakeTransportOptions {
   provider: EmailTransportProvider;
   apiKey?: string;
@@ -110,11 +154,9 @@ export function makeTransport(opts: MakeTransportOptions): IEmailTransport {
     case 'log':
       return new LogTransport(logger);
     case 'resend':
-      if (!apiKey) throw new Error("makeTransport: provider='resend' requires apiKey (OS_EMAIL_API_KEY)");
-      return new ResendTransport({ apiKey, ...(options as any) });
+      return new ResendTransport({ apiKey: requireApiKey(provider, apiKey), ...(options as any) });
     case 'postmark':
-      if (!apiKey) throw new Error("makeTransport: provider='postmark' requires apiKey (OS_EMAIL_API_KEY)");
-      return new PostmarkTransport({ apiKey, ...(options as any) });
+      return new PostmarkTransport({ apiKey: requireApiKey(provider, apiKey), ...(options as any) });
     case 'smtp': {
       const smtp = options as Partial<SmtpTransportOptions>;
       if (!smtp?.host) {

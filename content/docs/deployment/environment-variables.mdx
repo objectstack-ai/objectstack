@@ -124,8 +124,8 @@ Auth settings precedence:
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_EMAIL_PROVIDER` | enum | `log` | Transport. `log` \| `smtp` \| `resend` \| `postmark`. `log` (default) prints to stdout without sending. |
-| `OS_EMAIL_API_KEY` | string | — | API key for `resend` / `postmark`. |
+| `OS_EMAIL_PROVIDER` | enum | `log` | Transport. `log` \| `smtp` \| `resend` \| `postmark`. `log` (default) prints to stdout without sending — it is also how a deployment *declares* that it does not send mail. Any other value is a delivery intent, and a boot that cannot honour it fails loudly instead of substituting the log transport. |
+| `OS_EMAIL_API_KEY` | string | — | API key for `resend` / `postmark`. **Required** when either is selected — a boot without it fails rather than starting with a transport that records every message in `sys_email` as sent and delivers nothing. Set `OS_EMAIL_PROVIDER=log` for environments that should not send mail. |
 | `OS_EMAIL_FROM` | email | — | Default `From:` address. |
 | `OS_EMAIL_RETRIES` | number | `0` | Retry count for transient send failures (`0` = no retry). |
 | `OS_EMAIL_SMTP_HOST` | string | — | SMTP server hostname. **Required** when `OS_EMAIL_PROVIDER=smtp` — a boot without it fails loudly rather than starting with a transport that logs mail instead of sending it. |

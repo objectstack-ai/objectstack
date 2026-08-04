@@ -17,6 +17,13 @@ import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } f
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
+// The mail provider vocabulary, read from the package that materialises the
+// transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
+// has to refuse exactly the configurations `makeTransport` cannot build, and
+// two literal lists for one vocabulary is the drift #5094 was filed for. Values
+// only (no plugin class): `os serve` loads `EmailServicePlugin` itself through
+// the capability loop's dynamic import, host copy first.
+import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
@@ -2269,13 +2276,15 @@ export default class Serve extends Command {
             const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? [];
             arg = { cubes };
           } else if (cap === 'email') {
-            const emailArg = resolveEmailCapabilityArg(
+            // Throws on a mail configuration that cannot deliver (#5087,
+            // #5132) — the catch below turns that into the boot failure /
+            // loud error it should be, never a LogTransport substituted
+            // behind the operator's back.
+            arg = resolveEmailCapabilityArg(
               (config as any).email ?? {},
               process.env,
               (config as any).appName,
-            );
-            arg = emailArg.options;
-            if (emailArg.warning) console.warn(chalk.yellow(`  ⚠ Capability "email": ${emailArg.warning}`));
+            ).options;
           } else if (cap === 'sms') {
             // Compose SmsServicePlugin options from config.sms + OS_SMS_* env
             // (#2780). Same precedence as email: env beats config. Provider
@@ -2812,12 +2821,16 @@ export function resolveStorageCapabilityArg(envRoot?: string): StorageCapability
 }
 
 /**
- * Constructor options for `EmailServicePlugin`, plus an optional warning for
- * the caller to print (degraded, but still bootable, configurations).
+ * Constructor options for `EmailServicePlugin`.
+ *
+ * There is no `warning` channel here any more (#5132). It carried exactly one
+ * message — "provider=resend but no apiKey, falling back to LogTransport" —
+ * and that fallback is now a throw, because a mail configuration that cannot
+ * deliver has no "degraded but still fine" reading: it is a server that
+ * accepts every send and delivers nothing.
  */
 export interface EmailCapabilityArg {
   options: Record<string, unknown>;
-  warning?: string;
 }
 
 /**
@@ -2829,12 +2842,26 @@ export interface EmailCapabilityArg {
  * shape of Prime Directive #9, grouped with the email vars rather than the bare
  * third-party `SMTP_*` names — layered over `config.email.options`.
  *
- * `provider='smtp'` with no host **throws**. The capability loop turns that into
- * a boot failure, which is the point: the alternative (quietly substituting the
- * LogTransport, as this function's `resend`/`postmark` arm still does for a
- * missing API key) hands the operator a server that accepts every send, records
- * it in `sys_email`, and delivers nothing — the exact declared-but-not-delivered
- * gap #5087 closed inside the plugin.
+ * **Every provider that cannot deliver throws** — `smtp` with no host, and
+ * (since #5132) `resend`/`postmark` with no API key, or a provider tag outside
+ * `EMAIL_TRANSPORT_PROVIDERS` altogether. The capability loop turns that into a
+ * loud failure — a hard boot error when the app declared `requires: ['email']`,
+ * otherwise a `console.error` and no email service — which is the point: the
+ * alternative (quietly substituting the LogTransport, as this function's
+ * `resend`/`postmark` arm used to do for a missing API key) hands the operator a
+ * server that accepts every send, records it in `sys_email` as sent, and
+ * delivers nothing — the exact declared-but-not-delivered gap #5087 closed
+ * inside the plugin, left behind one layer up.
+ *
+ * Refusing is only defensible because "this environment does not send mail" has
+ * a way to say itself: `OS_EMAIL_PROVIDER=log` (the default). An operator who
+ * names a delivery provider has declared an intent, and the honest answer to an
+ * intent we cannot honour is a failure, not a substitute transport.
+ *
+ * The provider vocabulary and the "needs an API key" question are both read
+ * from `@objectstack/plugin-email` — the package that has to materialise the
+ * transport — rather than restated here. Two literals describing one vocabulary
+ * is how the settings dropdown and the transports drifted apart (#5094).
  */
 export function resolveEmailCapabilityArg(
   cfgEmail: Record<string, any> = {},
@@ -2891,6 +2918,14 @@ export function resolveEmailCapabilityArg(
     defaultTemplateContext,
   };
 
+  if (!isEmailTransportProvider(provider)) {
+    throw new Error(
+      `provider='${provider}' is not a transport this server can deliver through, so no mail would go out — `
+      + `${unsupportedProviderFix(provider)} `
+      + 'On this boot path the provider is OS_EMAIL_PROVIDER or config.email.provider; set '
+      + 'OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
+    );
+  }
   if (provider === 'smtp' && !providerOptions.host) {
     throw new Error(
       "provider='smtp' selects SMTP delivery but no SMTP host is configured — set OS_EMAIL_SMTP_HOST "
@@ -2898,13 +2933,12 @@ export function resolveEmailCapabilityArg(
       + 'or choose another provider.',
     );
   }
-  if (provider !== 'log' && provider !== 'smtp' && !apiKey) {
-    options.provider = 'log';
-    return {
-      options,
-      warning: `provider='${provider}' but no apiKey found (set OS_EMAIL_API_KEY or config.email.apiKey). `
-        + 'Falling back to LogTransport.',
-    };
+  if (emailProviderRequiresApiKey(provider) && !apiKey) {
+    throw new Error(
+      `provider='${provider}' selects ${provider} delivery but no API key is configured, so every send would `
+      + 'be recorded in sys_email as sent and nothing would leave the box — set OS_EMAIL_API_KEY '
+      + '(or config.email.apiKey), or set OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
+    );
   }
   return { options };
 }
