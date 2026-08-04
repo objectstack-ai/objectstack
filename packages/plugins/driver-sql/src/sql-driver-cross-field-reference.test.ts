@@ -35,7 +35,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 
 /** The shape `mapDataError` / `sendError` read off a thrown driver error. */
 interface WireBearingError extends Error {
@@ -210,8 +210,8 @@ describe('[#5041] SqlDriver refuses `$field` cross-field comparison in the ADR-0
       expect(rows.map((r: any) => r.id)).toEqual(['1']);
     });
 
-    it('an array triple with a scalar still matches', async () => {
-      const rows = await find([['amount', '>', 1]]);
+    it('an authored array triple with a scalar still matches, once lowered (#5158)', async () => {
+      const rows = await find(parseFilterAST([['amount', '>', 1]]));
       expect(rows.map((r: any) => r.id)).toEqual(['1']);
     });
 

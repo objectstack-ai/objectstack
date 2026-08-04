@@ -232,10 +232,40 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         expect(await engine.count('crm_account')).toBe(3);
     });
 
-    it('a non-object where (an expression tree) is the driver\'s to interpret, not refused', async () => {
-        // The guard closes match-everything, not everything it cannot prove.
-        await expect(engine.findOne('crm_account', { where: [['name', '=', 'Two']] } as any))
-            .resolves.not.toThrow();
+    // ── RETIRED PIN (#5158, maintainer ruling C) ────────────────────────
+    //
+    // This slot held: "a non-object where (an expression tree) is the DRIVER'S
+    // TO INTERPRET, not refused". That sentence was the engine's explicit
+    // blessing of a second filter dialect — the one door in the product that
+    // let a `FilterArray` reach a driver unlowered, which is how four drivers
+    // came to carry their own array compilers and how cloud's
+    // `RemoteTransport` ended up refusing what `driver-sql` compiled.
+    //
+    // Ruling C closed that door: `FilterArray` is declared INPUT-ONLY (spec
+    // #5285) and the engine lowers it through `parseFilterAST` like the
+    // protocol face always has. So "the driver's to interpret" is no longer
+    // true of ANY `where` — there is one dialect now, and the guard below
+    // judges the lowered shape. The retirement is the point of the change, not
+    // a casualty of it; the replacements assert what #4419 actually cares
+    // about, which is that findOne never answers with an arbitrary row.
+    //
+    // Lowering itself is pinned in `engine-filter-array-lowering.test.ts`.
+
+    it('an array where is LOWERED before the guard, and still selects the record', async () => {
+        const row = await engine.findOne('crm_account', { where: [['name', '=', 'Two']] } as any);
+        expect(row?.id).toBe(two.id);
+        // The load-bearing half: what the driver saw was a FilterCondition.
+        expect(Array.isArray(lastRead().ast.where)).toBe(false);
+        expect(lastRead().ast.where).toEqual({ name: 'Two' });
+    });
+
+    it('`where: []` no longer walks past the guard as "an expression tree"', async () => {
+        // The retired pin's real cost. `[]` means "no filter" — it always did
+        // — but an unlowered `[]` counted as a predicate here, so findOne
+        // applied `limit: 1` to the WHOLE table and returned its first row:
+        // precisely the #4419 defect, surviving inside #4419's own guard.
+        await expect(engine.findOne('crm_account', { where: [] } as any))
+            .rejects.toThrow(/selects no particular record/);
     });
 
     it('the guard reads the CALLER\'s predicate, before any middleware scoping', async () => {

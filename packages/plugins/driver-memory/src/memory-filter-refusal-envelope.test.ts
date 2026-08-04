@@ -53,7 +53,10 @@ describe('[#4436] InMemoryDriver filter refusals carry INVALID_FILTER and leak n
   const cases: Array<[string, unknown, string]> = [
     ['unsupported operator in a condition array', [['stage', 'sounds_like', 'won']], 'sounds_like'],
     ['bare comparison triple', ['close_date', 'before', '2024-01-01'], 'close_date'],
-    ['filter element of the wrong type', [42], 'number'],
+    // [#5158] The message names the ARRAY, not the offending element's typeof:
+    // the driver no longer walks a filter array, so it has no element to
+    // describe. `42` is the caller's own value, echoed back.
+    ['filter element of the wrong type', [42], '42'],
     ['`between` with a bad operand', [['amount', 'between', 5]], 'between'],
   ];
 
