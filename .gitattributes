@@ -27,11 +27,19 @@
 # dual-source-exports.baseline.json (shrink-only ratchets — recomputing can
 # WIDEN them), variant-docs.json and the migrations/conversions registries
 # (hand-written). Those conflicts are for a human. See NOT_DRIVER_MANAGED.
+#
+# The strictness ledger's COUNTS file joined at #5107 — the ledger's numbers were
+# the repo's hottest conflict surface and merged in the one way that hides: two
+# batches each decrement a header by their own correct delta, the rows merge
+# cleanly because they do not overlap, and the subtotal merges clean and WRONG
+# (seven cases in one day). Note it is the counts file, not the ledger — the
+# ledger's prose is hand-written and must never be resolved by regenerating.
 
-packages/spec/spec-changes.json              merge=os-regen
-packages/spec/authorable-surface.json        merge=os-regen
-packages/spec/json-schema.manifest.json      merge=os-regen
-packages/spec/api-surface.json               merge=os-regen
-packages/spec/api-surface-signatures.json    merge=os-regen
-docs/protocol-upgrade-guide.md               merge=os-regen
-content/docs/references/**                   merge=os-regen
+packages/spec/spec-changes.json                              merge=os-regen
+packages/spec/authorable-surface.json                        merge=os-regen
+packages/spec/json-schema.manifest.json                      merge=os-regen
+packages/spec/api-surface.json                               merge=os-regen
+packages/spec/api-surface-signatures.json                    merge=os-regen
+docs/protocol-upgrade-guide.md                               merge=os-regen
+docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
+content/docs/references/**                                   merge=os-regen
