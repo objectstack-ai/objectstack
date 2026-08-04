@@ -108,6 +108,45 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
  * key(s) and, when one is a recognisable spelling of a declared key, points at
  * the canonical one.
  */
+/**
+ * Guidance for the two per-option keys that ARE declared one layer down, on
+ * `SelectOptionSchema` (`data/field.zod.ts`) — `color` and `visibleWhen`.
+ *
+ * Built per key rather than shared, because `guidance` emits one bullet per
+ * offending key and a shared string prints the same sentence N times (the
+ * 批 10 `join`/`joinGateway` lesson).
+ *
+ * Note what it deliberately does NOT say. The obvious advice — "make the param
+ * field-backed and inherit the field's options" — is FALSE for these two:
+ * objectui's `resolveActionParams` lowers an inherited list through
+ * `normaliseOptions`, which rebuilds every entry as `{ label, value }`. Both
+ * directions drop the key, so the sentence names where the vocabulary is real
+ * without promising a route that does not exist (ledger finding 18: prose in a
+ * rejection is behaviour, and a confidently wrong one is worse than none).
+ */
+const actionParamOptionDeclaredOnFieldOnly = (key: 'color' | 'visibleWhen'): string =>
+  `\`${key}\` is a per-option key of a FIELD's option list (\`SelectOptionSchema\` in `
+  + `\`data/field.zod.ts\`), where the object form and grid do read it. An action param's `
+  + `options are \`{ label, value }\` — and the action metadata door has always stripped `
+  + `anything else before a renderer could see it, so writing \`${key}\` here has never had `
+  + `an effect. Whether this surface should carry the full per-option vocabulary is `
+  + `#5016; do not rely on it today.`;
+
+/**
+ * Guidance for per-option keys that no spec shape declares at all.
+ *
+ * `icon` / `disabled` exist only in objectui's internal `SelectOptionMetadata`
+ * interface, which nothing populates from metadata — so unlike `color` /
+ * `visibleWhen` there is no "one layer down" to point at, and saying there was
+ * would be the false-prescription class this campaign has already shipped four
+ * times (ledger finding 18).
+ */
+const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =>
+  `no option shape in the spec declares \`${key}\` — not this one, and not the field-level `
+  + `\`SelectOptionSchema\`. It exists only inside objectui's own `
+  + `\`SelectOptionMetadata\` type, which no metadata path populates. An action param's `
+  + `options are \`{ label, value }\`; drop the key.`;
+
 const actionParamUnknownKeyError = strictUnknownKeyError({
   surface: 'this action param',
   knownKeys: ACTION_PARAM_KEYS,
@@ -136,8 +175,85 @@ export const ActionParamSchema = lazySchema(() => z.object({
    * renderers check truthiness, so `false === undefined` for UI purposes).
    */
   required: z.boolean().optional().default(false),
-  /** Select/picklist options override. */
-  options: z.array(z.object({ label: I18nLabelSchema, value: z.string() })).optional(),
+  /**
+   * Select/picklist options override.
+   *
+   * #4001 批 14 closed the OPTION ENTRY. `ActionParamSchema` has been strict
+   * since #3405/#3746 — the file's template — but **strictness does not
+   * recurse**, so the entries inside `options` were still zod-default strip:
+   * the param was validated, its option list was not, and the shell reported
+   * success either way.
+   *
+   * **`strictObject`, not `.passthrough()` — measured, not inherited from the
+   * sibling.** `bulk-action.zod.ts`'s option entry went `.passthrough()`
+   * (#4909) and the reasoning there was specific: an authored bulk-action def
+   * is "left as-authored", reaches the grid VERBATIM, and objectui's
+   * `BulkActionParam` declares an explicit `[key: string]: unknown` catch-all,
+   * so `bulkParamToField`'s spread carries extras into a genuinely open widget
+   * vocabulary. Neither half of that holds here, and both were re-measured on
+   * 2026-08-03 rather than assumed:
+   *
+   * 1. **This surface has a parsing door, and the door already strips.** An
+   *    action is a registered metadata type, so an authored param reaches
+   *    objectui through `getMetadataTypeSchema('action')`
+   *    (`MetadataManager.validate` / `GET /api/v1/meta` / the Studio form).
+   *    Parsing a real action whose option carried
+   *    `color` / `icon` / `disabled` / `visibleWhen` returned
+   *    `{"label":"Overload","value":"overload"}` — every extra already gone,
+   *    silently, before any renderer sees it. `.passthrough()` would therefore
+   *    not be preserving a live flow; it would be *opening* one.
+   * 2. **The consumer type here is CLOSED, not a catch-all.** The dialog lowers
+   *    a param through `paramToField` into field metadata, where the option
+   *    vocabulary is objectui's `SelectOptionMetadata` — an enumerable
+   *    interface (`label` / `value` / `color` / `icon` / `disabled` /
+   *    `visibleWhen`), not an index signature. A closed target vocabulary is
+   *    exactly the case where declaring beats tolerating.
+   *
+   * So the answer legitimately differs from the sibling's. What that leaves is
+   * a real, separable question — *should* an action param's option list speak
+   * the full per-option vocabulary that a FIELD's `options`
+   * (`SelectOptionSchema`, `data/field.zod.ts`) already declares and the object
+   * form already honours? That is a capability addition, not a strictness
+   * change, and it is filed as #5016 rather than guessed at here. Until it is decided,
+   * the honest contract is the one this schema has always had — `{ label,
+   * value }` — now said out loud instead of enforced by deletion.
+   *
+   * The aliases are anchored on `SelectOptionSchema`'s own curated table (the
+   * same idea, one layer down) rather than on edit distance, and deliberately
+   * carry across ONLY the entries whose target this shape actually declares —
+   * `never suggest a key the schema cannot accept` (ledger finding 12).
+   */
+  options: z.array(strictObject({
+    surface: 'this action param option',
+    history:
+      'Until #4001 批 14 closed this shape these were dropped silently — the param still '
+      + 'rendered its picker, minus whatever the key was meant to colour, gate or disable.',
+    aliases: {
+      // Carried over from `SelectOptionSchema`'s table — same idea, and these
+      // five point at keys THIS shape declares.
+      text: 'label',
+      name: 'label',
+      title: 'label',
+      key: 'value',
+      id: 'value',
+      // objectql/import-export spell the stored side this way.
+      optionValue: 'value',
+      optionLabel: 'label',
+      displayName: 'label',
+    },
+    guidance: {
+      // The four per-option keys that ARE real one layer down. Each says where
+      // the vocabulary lives and — critically — does NOT promise that a
+      // field-backed param inherits them: `resolveActionParams`'
+      // `normaliseOptions` rebuilds each entry as `{ label, value }`, so that
+      // promise would be false in exactly the way ledger finding 18 warns about.
+      color: actionParamOptionDeclaredOnFieldOnly('color'),
+      visibleWhen: actionParamOptionDeclaredOnFieldOnly('visibleWhen'),
+      icon: actionParamOptionUndeclaredAnywhere('icon'),
+      disabled: actionParamOptionUndeclaredAnywhere('disabled'),
+      default: '`default` on an OPTION is the field-level picklist default (`SelectOptionSchema.default`). A dialog param defaults through `defaultValue` on the PARAM itself, one level up — write `defaultValue: \'<value>\'` there.',
+    },
+  }, { label: I18nLabelSchema, value: z.string() })).optional(),
   /** Placeholder override. */
   placeholder: z.string().optional(),
   /** Help/description override. */

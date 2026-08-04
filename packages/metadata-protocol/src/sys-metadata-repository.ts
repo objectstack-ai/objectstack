@@ -101,6 +101,34 @@ export type OverlayState = 'active' | 'draft';
 export type ExtendedOperation = 'create' | 'update' | 'publish' | 'revert' | 'delete';
 
 /**
+ * #4981 — the machine-readable half of "the publish landed, its cleanup did
+ * not". Set on {@link SysMetadataRepository.promoteDraft}'s result ONLY when
+ * the post-promotion drain failed for a reason that leaves a **stale** draft
+ * row behind; absent means the overlay is in its intended state.
+ *
+ * Absent covers both good outcomes, which is why absence is safe to read as
+ * "clean":
+ *   - the draft row was dropped, or
+ *   - the drain lost a race it is *supposed* to lose (a concurrent publisher
+ *     already drained it, or a newer draft was saved while this publish was in
+ *     flight — see {@link SysMetadataRepository.draftDrainVerdict}).
+ *
+ * Present means: the active row is correct and durable, and a `state='draft'`
+ * row for the same `(org, type, name)` is still in `sys_metadata` holding the
+ * body that was just published. Nothing retries it. Callers that surface
+ * "has unpublished changes" (Studio / Setup) are about to be wrong, and the
+ * next publish of this artifact promotes that same body again.
+ */
+export interface DraftDrainFailure {
+  /** The artifact whose draft row could not be dropped. */
+  ref: MetaRef;
+  /** Checksum of the draft body the drain targeted — the row's `checksum`. */
+  draftHash: string;
+  /** The original failure, unchanged, so callers can classify it themselves. */
+  cause: unknown;
+}
+
+/**
  * Sub-set of the ObjectQL engine shape we depend on. Kept narrow so
  * tests can stub it with a plain mock. Mirrors the real engine's
  * `options.context` pattern so transactions can thread through.
@@ -618,11 +646,23 @@ export class SysMetadataRepository implements MetadataRepository {
    * also surfaces optimistic-lock conflicts when something else has
    * published in between (e.g. another admin reverted to an older
    * version since the draft was authored).
+   *
+   * #4981 — the promotion is a `put` (durable, transactional) followed by a
+   * drain `delete` of the draft row. The drain runs AFTER the put committed,
+   * so its failure is reported, never thrown: see {@link draftDrainVerdict}
+   * for why, and {@link DraftDrainFailure} for the signal it returns.
    */
   async promoteDraft(
     ref: MetaRef,
     opts: { actor: string | null; source?: string; message?: string; intent?: MetadataWriteIntent },
-  ): Promise<{ version: string; seq: number; item: MetadataItem; packageId: string | null }> {
+  ): Promise<{
+    version: string;
+    seq: number;
+    item: MetadataItem;
+    packageId: string | null;
+    /** #4981 — set only when the draft row survived the promotion. */
+    draftDrainFailed?: DraftDrainFailure;
+  }> {
     this.assertOpen();
     // Read the RAW draft row (not just the body) so the promotion can carry
     // the draft's package binding onto the active row. ADR-0048 keys overlay
@@ -660,24 +700,21 @@ export class SysMetadataRepository implements MetadataRepository {
       opType: 'publish',
       packageId: draftPackageId,
     });
-    // Drop the draft row — it has been promoted. Tolerate races where
-    // a second publisher already drained it.
+    // Drop the draft row — it has been promoted.
+    let draftDrainFailed: DraftDrainFailure | undefined;
     try {
-      await this.delete(ref, {
-        parentVersion: draft.hash,
-        actor: opts.actor,
-        source: opts.source ?? 'sys-metadata-repo.publish',
-        intent: opts.intent ?? 'override-artifact',
-        state: 'draft',
-      });
-    } catch {
-      // best-effort: a concurrent publisher may have already drained
-      // the draft; the active row's authoritative content is intact.
+      await this.dropPromotedDraftRow(ref, draft.hash, opts);
+    } catch (error) {
+      draftDrainFailed = this.draftDrainVerdict(error, ref, draft.hash);
     }
     // Surface the promoted draft's package binding so publish-time
     // materializers (ADR-0086 P2 — package-door permission sets) can stamp
     // the data-plane row with the owning `package_id`.
-    return { ...result, packageId: draftPackageId };
+    return {
+      ...result,
+      packageId: draftPackageId,
+      ...(draftDrainFailed ? { draftDrainFailed } : {}),
+    };
   }
 
   /**
@@ -1205,6 +1242,98 @@ export class SysMetadataRepository implements MetadataRepository {
         `\`version\` numbering recovered and metadata writes are being recorded again. Writes ` +
         `rejected during the outage were not applied and must be re-submitted.`,
     );
+  }
+
+  /**
+   * The post-promotion draft drain (#4981) — the `sys_metadata` write whose
+   * failure leaves a promoted draft row behind.
+   *
+   * Extracted as a *named* callee for one reason beyond readability: the write
+   * itself is `this.delete(...)`, and `delete` is far too common a method name
+   * to put in `DURABILITY_CRITICAL_CALLEES`. Naming the seam is what lets
+   * `scripts/check-durability-degradation-log-level.mjs` see it and keep this
+   * catch from ever going quiet again — the same move #5001 made when the
+   * guarded write was hidden inside a closure the AST scan could not enter.
+   */
+  private async dropPromotedDraftRow(
+    ref: MetaRef,
+    draftHash: string,
+    opts: { actor: string | null; source?: string; intent?: MetadataWriteIntent },
+  ): Promise<void> {
+    await this.delete(ref, {
+      parentVersion: draftHash,
+      actor: opts.actor,
+      source: opts.source ?? 'sys-metadata-repo.publish',
+      intent: opts.intent ?? 'override-artifact',
+      state: 'draft',
+    });
+  }
+
+  /**
+   * The verdict for a failed draft drain (#4981) — same shape as the
+   * #4728 / #4825 / #4867 family: **one benign cause may not amnesty every
+   * cause**. Before this, a bare `catch {}` named the concurrent-publisher
+   * race in its comment and swallowed connection drops, timeouts, privilege
+   * errors and driver faults with it.
+   *
+   * **Benign — silent, and only these.** Both arms are a `ConflictError` from
+   * {@link delete}, which does its own row lookup before touching the driver,
+   * so "the row is gone" is not a driver-dependent signal but a ConflictError
+   * carrying `actualHead === null`:
+   *
+   *   - `actualHead === null` — a concurrent publisher already drained the
+   *     draft. Exactly the race the old comment described: no row is left.
+   *   - `actualHead !== draftHash` — a *newer* draft was saved while this
+   *     publish was in flight. The row that survives is not stale, it is
+   *     genuine pending work, and dropping it would have destroyed an admin's
+   *     edit. "Has unpublished changes" is then *correct*, so reporting a
+   *     consequence here would be a false alarm — and AGENTS.md is explicit
+   *     that escalating a non-degradation to `error` is the mirror-image
+   *     failure of hiding one.
+   *
+   * **Everything else — reported at `error`, and never thrown.** The drain
+   * runs after the `put` committed. Throwing would (a) report a durably
+   * successful publish as a failure and (b) invite the caller to retry — and a
+   * retried publish is precisely the harmful path, because it promotes the
+   * stale draft a second time. So the failure is surfaced two ways instead:
+   * loudly in the log, and machine-readably as {@link DraftDrainFailure} on
+   * the result. This is a durability/consistency degradation by the AGENTS.md
+   * test — the system keeps looking healthy while something it claims to have
+   * cleaned up is still there — so it is `error`, not `warn` (#4632).
+   *
+   * Unlike #4867's once-per-outage reporting, this speaks on **every**
+   * occurrence: each one names a different orphaned artifact, and the remedy
+   * is per-row. Deduplicating would hide which drafts are stale, which is the
+   * one fact the reader needs.
+   *
+   * @returns `undefined` for the benign races; a {@link DraftDrainFailure} —
+   *          after reporting it — for every other failure.
+   */
+  private draftDrainVerdict(
+    error: unknown,
+    ref: MetaRef,
+    draftHash: string,
+  ): DraftDrainFailure | undefined {
+    if (error instanceof ConflictError) return undefined;
+
+    const full = this.fullRef(ref);
+    console.error(
+      `[SysMetadataRepository] Published ${full.type}/${full.name} but could NOT drop its ` +
+        `promoted draft row. The publish itself COMMITTED — the active row holds the published ` +
+        `body and the history event was recorded — so this is reported, not thrown, and ` +
+        `promoteDraft() still returns success. Consequence: the \`state='draft'\` row for ` +
+        `${full.type}/${full.name} (org ${full.org}, checksum ${draftHash}) is STILL in ` +
+        `\`sys_metadata\`, and nothing retries or repairs it — Studio/Setup will keep showing ` +
+        `this artifact as having unpublished changes when it has none, and the NEXT publish of ` +
+        `it promotes that same already-published body again (harmless while the active row is ` +
+        `unchanged, but it overwrites the active row if anything has published or reverted it ` +
+        `since). Remedy: fix the datasource/driver error below (connection, timeout, ` +
+        `privileges), then re-publish ${full.type}/${full.name} — the drain runs again and ` +
+        `succeeds — or delete the row directly from \`sys_metadata\` ` +
+        `(type=${full.type}, name=${full.name}, state='draft').`,
+      error,
+    );
+    return { ref: full, draftHash, cause: error };
   }
 
   /** Lightweight UUID-ish id for history rows; sufficient for an audit log. */

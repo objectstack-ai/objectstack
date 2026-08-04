@@ -287,7 +287,53 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   compareTo: z.union([
     z.literal('previousPeriod'),
     z.literal('previousYear'),
-    z.object({
+    // #4001 批 14: the object arm is closed. `DashboardWidgetSchema` has been
+    // strict since the ADR-0021 cutover, but STRICTNESS DOES NOT RECURSE — so
+    // `compareTo: { offset: '7d', granularity: 'month' }` parsed clean on `main`
+    // and came back `{ offset: '7d' }`, the widget rendering a comparison the
+    // author did not describe. A strict container around strip children is the
+    // silhouette of a closed surface, not a closed one.
+    //
+    // ⚠️ KNOWN REACH LIMIT, measured rather than assumed — this closure REJECTS
+    // reliably but its PROSE does not currently reach the author. `compareTo` is
+    // a union, and zod collapses a failed union into one top-level
+    // `invalid_union` issue whose message is the bare `Invalid input`; the arm
+    // errors (including the guidance below) live in `issue.errors`, and
+    // `zodIssuesToFields` in `rest/src/rest-server.ts` maps only top-level
+    // issues, so nothing carries them onto the wire. The rejection is still the
+    // #4001 win — a silent half-discard became a hard failure at `compareTo`.
+    // The transport gap is #5014, and it affects every curated
+    // unknown-key message this campaign has put inside a union arm, not just
+    // this one. `strictness-batch14.test.ts` pins BOTH halves: the bare
+    // top-level text an author sees today, and the guidance waiting in the arm
+    // errors — split deliberately, so a green test cannot stand in for a message
+    // no consumer prints.
+    strictObject({
+      surface: 'this comparison window',
+      history: DASHBOARD_HISTORY,
+      // The neighbouring vocabularies for "shift a time window": the widget's own
+      // string arms (`previousPeriod` / `previousYear`) spelled as an object, and
+      // the date-macro / granularity words used elsewhere on this same widget.
+      aliases: {
+        period: 'offset',
+        duration: 'offset',
+        interval: 'offset',
+        shift: 'offset',
+        delta: 'offset',
+        by: 'offset',
+        amount: 'offset',
+        value: 'offset',
+      },
+      guidance: {
+        // Naming an arm of this very union from inside its object arm.
+        type: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
+        kind: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
+        mode: 'the comparison KIND is the union itself, not a key: write `compareTo: \'previousPeriod\'` or `compareTo: \'previousYear\'` as a bare string. The object arm exists only for an explicit shift — `compareTo: { offset: \'7d\' }`.',
+        // Two real slots one level up, both easy to reach for here.
+        granularity: 'a comparison window carries no granularity — the shift is a whole duration (`7d` / `1M` / `1y`). Date bucketing is declared on the DATASET dimension (`dateGranularity`), which every widget bound to that dataset then shares.',
+        filter: '`filter` is the widget\'s own presentation-scope key, one level up — `compareTo` shifts whatever window that filter already resolves to. Move it out of `compareTo`.',
+      },
+    }, {
       offset: z.string().regex(/^\d+[dwMy]$/, 'Offset must match <N>(d|w|M|y), e.g. "7d", "1M", "1y"'),
     }),
   ]).optional().describe('Period-over-period comparison window'),
@@ -321,7 +367,40 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
    * disabled) even though it rendered correctly. Authors may still pin an
    * explicit grid position; absence means "auto-place".
    */
-  layout: z.object({
+  layout: strictObject({
+    surface: 'this widget layout box',
+    history: DASHBOARD_HISTORY,
+    // React-Grid-Layout's own vocabulary is the competing contract here, and it
+    // is the one an author (or an LLM) will already know: RGL declares
+    // `minW`/`maxW`/`minH`/`maxH`/`static`/`isDraggable`/`isResizable` beside
+    // the same four letters. The renderer reads ONLY `{x, y, w, h}` (and
+    // auto-flows when the box is absent), so the rest are named rather than
+    // suggested — a rename would map a real RGL constraint onto an unrelated
+    // position key.
+    aliases: {
+      col: 'x',
+      column: 'x',
+      left: 'x',
+      row: 'y',
+      top: 'y',
+      width: 'w',
+      cols: 'w',
+      colSpan: 'w',
+      height: 'h',
+      rows: 'h',
+      rowSpan: 'h',
+    },
+    guidance: {
+      minW: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s size CONSTRAINTS (`minW`/`maxW`/`minH`/`maxH`) are not part of the metadata contract — the dashboard grid sizes by `columns` + `gap` on the dashboard and this box on the widget.',
+      maxW: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s size CONSTRAINTS (`minW`/`maxW`/`minH`/`maxH`) are not part of the metadata contract — the dashboard grid sizes by `columns` + `gap` on the dashboard and this box on the widget.',
+      minH: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s size CONSTRAINTS (`minW`/`maxW`/`minH`/`maxH`) are not part of the metadata contract — the dashboard grid sizes by `columns` + `gap` on the dashboard and this box on the widget.',
+      maxH: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s size CONSTRAINTS (`minW`/`maxW`/`minH`/`maxH`) are not part of the metadata contract — the dashboard grid sizes by `columns` + `gap` on the dashboard and this box on the widget.',
+      static: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s interaction flags (`static`/`isDraggable`/`isResizable`) are the DESIGNER\'s runtime state, not authored metadata — omit the box entirely to let the grid auto-flow the widget.',
+      isDraggable: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s interaction flags (`static`/`isDraggable`/`isResizable`) are the DESIGNER\'s runtime state, not authored metadata — omit the box entirely to let the grid auto-flow the widget.',
+      isResizable: 'a widget layout box is exactly `{ x, y, w, h }`. React-Grid-Layout\'s interaction flags (`static`/`isDraggable`/`isResizable`) are the DESIGNER\'s runtime state, not authored metadata — omit the box entirely to let the grid auto-flow the widget.',
+      i: 'React-Grid-Layout keys an item by `i`; this box does not carry an id — the widget\'s own `id` (one level up) is the key. Remove it.',
+    },
+  }, {
     x: z.number(),
     y: z.number(),
     w: z.number(),

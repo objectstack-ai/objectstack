@@ -128,6 +128,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'writeRecord',
         'A seed record was not written — the row is simply absent (or, on the upsert/update path, still holds its pre-seed contents) while the load moves on to the next record (#4729).',
     ],
+    [
+        'dropPromotedDraftRow',
+        "A published draft was never drained — the active row is correct, but the `state='draft'` row is still in `sys_metadata`, so Studio/Setup keeps showing unpublished changes that do not exist and the next publish promotes the same stale body again (#4981).",
+    ],
 ]);
 
 /** Log levels that are ACCEPTABLE inside a durability-guarding catch. */
