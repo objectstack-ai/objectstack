@@ -3564,6 +3564,7 @@
     "AnalyticsQueryInput (type)",
     "AnalyticsResult (interface)",
     "AnalyticsStrategy (interface)",
+    "ApiEndpointMatch (interface)",
     "ApprovalActionAttachment (interface)",
     "ApprovalActionKind (type)",
     "ApprovalActionRow (interface)",

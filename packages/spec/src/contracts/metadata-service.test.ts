@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { IMetadataService, MetadataWatchCallback, MetadataWatchHandle, MetadataTypeInfo } from './metadata-service';
+import type { IMetadataService, MetadataWatchCallback, MetadataWatchHandle, MetadataTypeInfo, ApiEndpointMatch } from './metadata-service';
+import { ApiEndpointSchema, type ApiEndpoint } from '../api/endpoint.zod';
 
 describe('Metadata Service Contract', () => {
   it('should allow a minimal IMetadataService implementation with required methods', () => {
@@ -421,5 +422,129 @@ describe('Metadata Service Contract', () => {
 
     const published = await service.getPublished!('object', 'account');
     expect(published).toEqual({ name: 'account', label: 'Account' });
+  });
+
+  // ==========================================
+  // API Endpoint Resolution (#5040 E1)
+  // ==========================================
+
+  describe('matchEndpoint (optional member)', () => {
+    /** A minimal base implementation with only the REQUIRED members. */
+    const baseService = (): IMetadataService => ({
+      register: async () => {},
+      get: async () => undefined,
+      list: async () => [],
+      unregister: async () => {},
+      exists: async () => false,
+      listNames: async () => [],
+      getObject: async () => undefined,
+      listObjects: async () => [],
+    });
+
+    /** An author-written `api` item that OMITS the `authRequired` default. */
+    const authoredEndpoint = {
+      name: 'showcase_tasks',
+      path: '/api/v1/apps/showcase/tasks',
+      method: 'GET',
+      type: 'object_operation',
+      target: 'showcase_task',
+      objectParams: { object: 'showcase_task', operation: 'find' },
+    };
+
+    it('is optional — an implementation without it still satisfies the contract', () => {
+      const service = baseService();
+
+      // The whole point of the optional-member convention: consumers probe.
+      expect(typeof service.matchEndpoint).toBe('undefined');
+      expect(typeof (service as IMetadataService).matchEndpoint === 'function').toBe(false);
+    });
+
+    it('is probeable with typeof === "function" when provided', () => {
+      const service: IMetadataService = {
+        ...baseService(),
+        matchEndpoint: async () => undefined,
+      };
+
+      expect(typeof service.matchEndpoint).toBe('function');
+    });
+
+    it('resolves method+path to a match, and undefined on a miss', async () => {
+      const parsed = ApiEndpointSchema.parse(authoredEndpoint);
+
+      const service: IMetadataService = {
+        ...baseService(),
+        matchEndpoint: async ({ path, method }) =>
+          method.toUpperCase() === parsed.method && path === parsed.path
+            ? { endpoint: parsed, params: {} }
+            : undefined,
+      };
+
+      const hit = await service.matchEndpoint!({
+        path: '/api/v1/apps/showcase/tasks',
+        method: 'get',
+      });
+      expect(hit).toBeDefined();
+      expect(hit!.endpoint.name).toBe('showcase_tasks');
+
+      const miss = await service.matchEndpoint!({
+        path: '/api/v1/apps/showcase/nope',
+        method: 'GET',
+      });
+      expect(miss).toBeUndefined();
+    });
+
+    it('returns the ApiEndpointSchema.parse-d shape — schema defaults materialized', async () => {
+      // The author never wrote `authRequired`; the contract says a consumer
+      // must never see "absent" for it.
+      expect('authRequired' in authoredEndpoint).toBe(false);
+
+      const service: IMetadataService = {
+        ...baseService(),
+        matchEndpoint: async () => ({
+          endpoint: ApiEndpointSchema.parse(authoredEndpoint),
+          params: {},
+        }),
+      };
+
+      const match = await service.matchEndpoint!({
+        path: '/api/v1/apps/showcase/tasks',
+        method: 'GET',
+      });
+
+      expect(match!.endpoint.authRequired).toBe(true);
+      expect(typeof match!.endpoint.authRequired).toBe('boolean');
+    });
+
+    it('params is always {} in 17.x — the slot is reserved, no template syntax', async () => {
+      const service: IMetadataService = {
+        ...baseService(),
+        matchEndpoint: async () => ({
+          endpoint: ApiEndpointSchema.parse(authoredEndpoint),
+          params: {},
+        }),
+      };
+
+      const match = await service.matchEndpoint!({
+        path: '/api/v1/apps/showcase/tasks',
+        method: 'GET',
+      });
+
+      expect(match!.params).toEqual({});
+    });
+
+    it('ApiEndpointMatch types endpoint as ApiEndpoint and params as Record< string, string >', () => {
+      // Type-level shape assertion: the literal only compiles against the
+      // declared member types.
+      const match: ApiEndpointMatch = {
+        endpoint: ApiEndpointSchema.parse(authoredEndpoint),
+        params: {},
+      };
+
+      const endpoint: ApiEndpoint = match.endpoint;
+      const params: Record<string, string> = match.params;
+
+      expect(endpoint.path).toBe('/api/v1/apps/showcase/tasks');
+      expect(params).toEqual({});
+    });
   });
 });

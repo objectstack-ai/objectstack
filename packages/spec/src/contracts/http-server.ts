@@ -238,4 +238,46 @@ export interface IHttpServer {
      * to expose its internals.
      */
     getRawApp?(): any;
+
+    /**
+     * Install the LAST-RESORT handler: the one invoked for a request that
+     * matched none of the explicitly registered routes.
+     *
+     * ## Contract (#5040 §1-C)
+     *
+     * Two guarantees, and they are the whole reason this seam exists rather
+     * than a wildcard route:
+     *
+     *  1. **It runs only after every explicitly registered route has missed.**
+     *     Not "usually last", not "last if you register it late" — a fallback
+     *     is structurally incapable of shadowing a registered route, so this
+     *     member carries ZERO registration-order dependency. That matters
+     *     because the alternative (mounting `${prefix}/*` wildcards) is
+     *     decided by first-registration-wins across plugin `start()` order,
+     *     the exact ADR-0076 D11 hazard "one route, one owner" exists to
+     *     prevent. Implementations map this onto their framework's own
+     *     not-found hook (Hono's `app.notFound`), never onto a route.
+     *  2. **`req.body` IS readable here.** The handler receives a fully
+     *     populated {@link IHttpRequest}, body included — unlike the
+     *     {@link Middleware} seam installed by {@link use}, whose contract
+     *     explicitly does NOT populate `body` (parsing it there would consume
+     *     the request stream before the route handler that owns it). This is
+     *     the difference that makes `use()` unusable for the dynamic-endpoint
+     *     case and this member necessary: a declared endpoint backed by a flow
+     *     or a `create` operation must read the request body.
+     *
+     * Calling this more than once REPLACES the previous handler — there is one
+     * fallback, not a chain; a host that needs to compose behaviours composes
+     * them inside its own handler. A handler that writes no response leaves the
+     * adapter's standard unmatched-request answer in place (the 404/405
+     * semantics documented on this interface).
+     *
+     * Optional, and feature-detected by consumers with
+     * `typeof server.setFallbackHandler === 'function'` — an adapter that
+     * cannot express a not-found hook simply omits it, and the consumer
+     * degrades to the adapter's own unmatched-request answer.
+     *
+     * @param handler - The handler to invoke for otherwise-unmatched requests
+     */
+    setFallbackHandler?(handler: RouteHandler): void;
 }

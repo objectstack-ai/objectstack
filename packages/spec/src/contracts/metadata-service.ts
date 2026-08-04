@@ -31,6 +31,7 @@
  * │  Validation          │  validate
  * │  Type Registry       │  getRegisteredTypes / getTypeInfo
  * │  Dependencies        │  getDependencies / getDependents
+ * │  Endpoint Resolution │  matchEndpoint
  * └──────────────────────┘
  * ```
  */
@@ -43,6 +44,7 @@ import type { MetadataQuery, MetadataQueryResult, MetadataValidationResult, Meta
 // `@objectstack/spec/kernel`; it had no consumers and was removed in #4411, so
 // this is now the only type by that name.
 import type { MetadataWatchEvent } from '../system/metadata-persistence.zod';
+import type { ApiEndpoint } from '../api/endpoint.zod';
 import type { Action } from '../ui/action.zod';
 import type { MetadataOverlay } from '../kernel/metadata-customization.zod';
 import type { PackagePublishResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataDiffResult } from '../system/metadata-persistence.zod';
@@ -174,6 +176,42 @@ export interface MetadataWriteOptions {
      * optional and absence means "no human actor".
      */
     userId?: string;
+}
+
+/**
+ * The result of {@link IMetadataService.matchEndpoint} — a declared
+ * `api` metadata item that owns the requested `method`+`path`, together with
+ * the path parameters extracted while matching it.
+ *
+ * [#5040 E1] Declared ahead of any implementation (contract-first). The
+ * consumer side is the dispatcher's endpoint step; the producer side is the
+ * `metadata` slot's own endpoint index.
+ */
+export interface ApiEndpointMatch {
+    /**
+     * The matched endpoint as `ApiEndpointSchema.parse` returns it — i.e. with
+     * every schema default MATERIALIZED, not the raw stored JSON. In particular
+     * `authRequired` is a boolean here even when the author omitted it (the
+     * schema defaults it to `true`), so a consumer never has to reason about
+     * "absent" and cannot accidentally read a missing security default as
+     * permissive. Implementations MUST parse before returning, and MUST skip
+     * (loudly) any stored item that fails to parse rather than returning a
+     * half-valid shape.
+     */
+    endpoint: ApiEndpoint;
+
+    /**
+     * Path parameters extracted from the request path.
+     *
+     * **Always `{}` in 17.x.** `ApiEndpointSchema.path` is a frozen vocabulary
+     * (ADR-0121) that defines NO template syntax — neither `:param` nor
+     * `{param}` — and this contract deliberately does not invent one: a syntax
+     * that exists only inside an implementation is a hidden dialect, which is
+     * exactly the failure mode Prime Directive #12 forbids. The member is
+     * declared now so that adding path templates later is an additive change to
+     * the vocabulary rather than a breaking change to this contract.
+     */
+    params: Record<string, string>;
 }
 
 export interface IMetadataService {
@@ -540,6 +578,49 @@ export interface IMetadataService {
      * @returns Array of dependent items
      */
     getDependents?(type: string, name: string): Promise<MetadataDependency[]>;
+
+    // ==========================================
+    // API Endpoint Resolution
+    // ==========================================
+
+    /**
+     * Resolve a request's `method`+`path` to the declared `api` metadata item
+     * that owns it, or `undefined` when nothing declares it.
+     *
+     * This is the lookup the HTTP dispatcher performs between "no built-in
+     * domain claimed this path" and "answer a semantic 404" — the seam that
+     * makes a declared {@link ApiEndpoint} reachable at all.
+     *
+     * ## Contract (#5040 §2)
+     *
+     * - **Scope is the instance.** There is no environment parameter: callers
+     *   already resolve the `metadata` service for the environment they are
+     *   serving, exactly as every other metadata read in this contract does.
+     *   Adding an env parameter here would create a second scoping mechanism.
+     * - **Matching dimensions.** `method` is compared case-insensitively (a
+     *   request's verb normalized to upper case); `path` is compared as a
+     *   WHOLE STRING, exactly, after trimming a trailing slash. 17.x performs
+     *   no percent-decoding, no Unicode normalization and no case folding of
+     *   the path — the raw string is the key. See
+     *   {@link ApiEndpointMatch.params} for why no template syntax exists.
+     * - **The answer is parsed, never raw.** See
+     *   {@link ApiEndpointMatch.endpoint}.
+     * - **Absence is a miss, not an error.** `undefined` means "no declaration
+     *   owns this route"; an implementation that cannot read its store must
+     *   throw rather than report a miss, because a miss becomes a 404 and an
+     *   outage must not masquerade as one (same distinction as
+     *   {@link loadDiagnosed}).
+     *
+     * [#5040 E1] Optional, and probed by consumers with
+     * `typeof svc.matchEndpoint === 'function'` — the same convention as
+     * {@link watch} / {@link subscribe}. An occupant of the `metadata` slot that
+     * carries no endpoint index simply omits it, and the dispatcher falls
+     * through to its existing not-found answer.
+     *
+     * @param query - The request coordinates to resolve (`path`, `method`)
+     * @returns The owning endpoint plus its path params, or `undefined` on a miss
+     */
+    matchEndpoint?(query: { path: string; method: string }): Promise<ApiEndpointMatch | undefined>;
 
     // ==========================================
     // Version History & Rollback
