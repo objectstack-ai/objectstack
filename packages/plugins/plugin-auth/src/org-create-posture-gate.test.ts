@@ -39,6 +39,7 @@
 // precedent: patch the real thing, never stub our own code).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { createTenancyService, type TenancyService, type TenancyPosture } from './tenancy-service';
 
@@ -47,6 +48,11 @@ import { createTenancyService, type TenancyService, type TenancyPosture } from '
  * projects, `update` matches on `id` the way the ObjectQL adapter calls it), so
  * the fake cannot be more forgiving than the real engine about what better-auth
  * asks for while minting `sys_organization` / `sys_member` rows.
+ *
+ * `delete` is pinned to ObjectQL's own dispatch predicate
+ * ({@link assertEngineDeleteDispatch}) rather than a hand-written copy of it,
+ * for the #4550 reason: a fake that accepts a call the real engine refuses is
+ * how #4434 shipped a dead REST route with its suite green.
  */
 const createMemoryEngine = () => {
   const tables = new Map<string, any[]>();
@@ -101,6 +107,7 @@ const createMemoryEngine = () => {
       return { ...row };
     },
     async delete(name: string, q: any = {}) {
+      assertEngineDeleteDispatch(q);
       const table = rows(name);
       const keep = table.filter((r) => !matches(r, q.where));
       tables.set(name, keep);
