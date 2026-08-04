@@ -72,7 +72,7 @@
  * have recovered.
  */
 
-import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
+import { ApiEndpointSchema, normalizeEndpointPath, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
 
@@ -87,13 +87,13 @@ export function normalizeEndpointMethod(method: string): string {
  * Trim exactly one trailing slash, never from a lone `/`.
  *
  * Applied to BOTH the stored declaration and the query, so the two sides can
- * never disagree about which form is canonical.
+ * never disagree about which form is canonical — and re-exported from
+ * `@objectstack/spec/api`, which OWNS the rule (#5040 E7), rather than
+ * re-implemented here. The publish gate that rejects two endpoints claiming the
+ * same METHOD + path must normalize exactly as this matcher does, or a stack
+ * could publish a duplicate the index then silently resolves to one winner.
  */
-export function normalizeEndpointPath(path: string): string {
-  const raw = String(path ?? '');
-  if (raw.length > 1 && raw.endsWith('/')) return raw.slice(0, -1);
-  return raw;
-}
+export { normalizeEndpointPath };
 
 /** The index key for a normalized method+path pair. */
 export function endpointIndexKey(method: string, path: string): string {

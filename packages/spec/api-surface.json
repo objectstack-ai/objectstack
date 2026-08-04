@@ -3124,6 +3124,7 @@
     "envelopeViolations (function)",
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
+    "normalizeEndpointPath (function)",
     "readServiceSelfInfo (function)",
     "standardErrorCodeForHttpStatus (function)"
   ],
