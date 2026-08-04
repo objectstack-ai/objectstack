@@ -1,4 +1,4 @@
-# ADR-0120: Uniqueness scope is an explicit vocabulary — declared-index tenant scoping and NULL-safe tenant uniqueness
+# ADR-0120: Uniqueness scope is an explicit vocabulary — declared-index organization scoping and NULL-safe per-organization uniqueness
 
 **Status**: Proposed (draft 2026-08-04, #4986 / #5030 — awaiting maintainer acceptance)
 **Deciders**: ObjectStack Protocol Architects (maintainer decision requested on #4986)
@@ -11,25 +11,28 @@
 
 ## TL;DR
 
-Uniqueness on this platform has exactly two business meanings — **platform-wide** ("one
-holder of this value across the whole installation") and **per-tenant** ("one holder per
-organization") — but the authoring surface expresses them through *position*: field-level
-`unique: true` means per-tenant, a declared index means platform-wide. An author who does
-not know the convention writes a declared `{ fields: ['name'], unique: true }` on a
-tenant-scoped object, intends per-tenant, silently gets platform-wide, and no gate says a
-word (#4986). One layer down, the per-tenant meaning itself is broken where the tenant
-column is NULL: SQL UNIQUE is NULL-distinct, so on single-tenant stacks — where the
+Uniqueness on this platform materializes in exactly two physical shapes — the verbatim
+column list ("one holder across the whole installation") and the organization composite
+("one holder per organization") — which together carry three business boundaries:
+installation-wide, per-organization, and the posture-dependent customer-company
+(§Posture portability). But the authoring surface expresses the choice through
+*position*: field-level `unique: true` means per-organization, a declared index means
+installation-wide. An author who does not know the convention writes a declared
+`{ fields: ['name'], unique: true }` on an organization-scoped object, intends
+per-organization, silently gets installation-wide, and no gate says a word (#4986). One
+layer down, the per-organization meaning itself is broken where the organization column
+is NULL: SQL UNIQUE is NULL-distinct, so on single-org stacks — where the
 kernel-injected `organization_id` exists and is always NULL — **every field-level
 `unique: true` enforces nothing at all** (#5030, measured).
 
 This ADR replaces position-encoded intent with an **explicit scope vocabulary**, and makes
-the per-tenant meaning **NULL-safe**:
+the per-organization meaning **NULL-safe**:
 
 | # | Decision | One line |
 |---|---|---|
-| D1 | Scope is said, not inferred | `unique: 'global' \| 'tenant'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
+| D1 | Scope is said, not inferred | `unique: 'global' \| 'organization' \| 'company'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
 | D2 | Stored metadata converts losslessly | ADR-0087 D2 entry rewrites declared-index `unique: true → 'global'` — byte-identical physical shape, **zero drift** |
-| D3 | Per-tenant unique survives NULL | tenant key part materializes as `COALESCE(tenantField, '')` (ADR-0048 canonical form) — fixes #5030 for field-level and new `'tenant'` indexes alike |
+| D3 | Per-tenant unique survives NULL | tenant key part materializes as `COALESCE(tenantField, '')` (ADR-0048 canonical form) — fixes #5030 for field-level and new `'organization'` indexes alike |
 | D4 | Tightening migrates through ceremony | `recreate_index` drift + duplicate pre-flight in `os migrate plan`; auto-apply only on a clean probe |
 | D5 | Authoring gates carry the contract | new lint rule for unscoped declared uniques (authoring-time checkable, no tenancy guessing); R10 rewritten in the new vocabulary |
 | D6 | Written surfaces tell one truth | the five #3696 surfaces, the pin tests, and the false single-tenant claim in `UniqueScopeSchema` are updated in the same wave |
@@ -41,11 +44,12 @@ pick a winner — split the vocabulary and make the author state intent.** From
 ADR-0049/0078: a unique constraint that validates clean but enforces nothing is the worst
 of the four outcomes; every scenario below must end in either a real constraint or a loud
 rejection, never a silent no-op. And a third, stated by the maintainer on #4986 and
-binding on every decision here: **app metadata is deployment-mode portable.** The same
-app package must run unmodified in single-organization and multi-organization
-deployments; the author states the *business boundary* of a constraint (per-organization
-vs per-installation) — never the topology, which the author cannot know. See §Mode
-portability below.
+binding on every decision here: **app metadata is posture-portable.** The same app
+package must run unmodified under every tenancy posture — `single | group | isolated`
+(ADR-0105 D1) — and under database-per-customer deployment (an environment-level
+choice invisible to metadata); the author states the *business boundary* of a
+constraint (per-organization / company-wide / installation-wide) — never the posture,
+which the author cannot know. See §Posture portability below.
 
 ## Context
 
@@ -103,11 +107,33 @@ declared, documented, validated clean, unenforced.
 
 ### Why these two issues are one ADR
 
-Any scope vocabulary whose `'tenant'` arm materializes as a NULL-distinct composite
-would ship a per-tenant option that silently enforces nothing on single-tenant stacks —
+Any scope vocabulary whose `'organization'` arm materializes as a NULL-distinct composite
+would ship a per-organization option that silently enforces nothing on single-org stacks —
 the new vocabulary would be *born* violating ADR-0078. Conversely, fixing #5030 without
 the vocabulary leaves the #4986 trap armed. D1/D2 and D3 are therefore one decision
 set: **the vocabulary and its enforcement land together.**
+
+### Terminology: why the authorable words avoid "tenant"
+
+"Tenant" is overloaded on this platform, in ways that collide exactly for the
+portable-app author this ADR serves:
+
+- **Row-level organization scoping** — the `organization_id` column, RLS, shared
+  tables (ADR-0093/0095/0105). Postures: `single | group | isolated` (ADR-0105 D1).
+- **Database-per-customer** — each customer's environment carries its own database.
+  Explicitly an environment/deployment choice with **no object-level config**
+  (`tenancy.strategy` was retired saying exactly this); invisible to metadata.
+
+An authorable `'tenant'` would read differently under each sense. The vocabulary
+therefore uses the product's own nouns: **`'organization'`** (the boundary is the
+organizations feature, whatever the physical topology) and **`'company'`** (the
+customer-company that installed the app — see D1). Rules: the abbreviation `'org'` is
+not accepted (the platform spells it out — `organization_id`); `'tenant'` is not
+accepted as an alias (PD #12 — one contract, no dialects; the schema's rejection
+message for it names `'organization'`). Prose in this ADR says *per-organization* for
+the business boundary; "tenant column" / `tenantField` survive only as the historical
+physical names inside driver internals, which are not authorable surface and are not
+renamed here.
 
 ## Business-requirement matrix
 
@@ -119,19 +145,20 @@ review gap to be raised on the PR.)
 
 | # | Business need (example) | Spelling today | Enforced today | Spelling after | Enforced after |
 |---|---|---|---|---|---|
-| S1 | Per-tenant unique field — contact email unique per org | field `unique: true` | MT rows: yes · **single-tenant / NULL-org rows: void (#5030)** | unchanged (`true` stays valid; `'tenant'` accepted as explicit synonym) | **always** (D3) |
+| S1 | Per-tenant unique field — contact email unique per org | field `unique: true` | MT rows: yes · **single-tenant / NULL-org rows: void (#5030)** | unchanged (`true` stays valid; `'organization'` accepted as explicit synonym) | **always** (D3) |
 | S2 | Platform-wide unique field — `stripe_customer_id`, DNS hostname, device identity | field `unique: 'global'` | yes | unchanged | yes |
-| S3 | Per-tenant **composite** — case `code` unique per `(org, department)` | declared `['organization_id','department','code']` (author must know to add the org column) | non-NULL rows: yes · NULL-org rows: void | declared `{ fields: ['department','code'], unique: 'tenant' }` | **always** (D3); legacy spelling S6 |
+| S3 | Per-tenant **composite** — case `code` unique per `(org, department)` | declared `['organization_id','department','code']` (author must know to add the org column) | non-NULL rows: yes · NULL-org rows: void | declared `{ fields: ['department','code'], unique: 'organization' }` | **always** (D3); legacy spelling S6 |
 | S4 | Platform-wide composite — dedup key `(source, dedup_key)` on `http_delivery` | declared `unique: true` (verbatim) | yes — including NULL-org rows | auto-converted to `'global'` (D2), byte-identical | yes, unchanged |
 | S5 | Engine idempotency keys written by sudo (org NULL) — `sys_job.name`, `sys_notification.dedup_key`, + 7 more (#4986 inventory) | declared `unique: true` | yes — these depend on verbatim single/multi-column shape | `'global'` via D2, **zero drift** | yes, unchanged |
-| S6 | Legacy hand-written tenant composite — `sys_team ['name','organization_id']` | declared `unique: true`, org column listed | non-NULL rows: yes · NULL-org rows (single-tenant stacks): **void** | converts to `'global'` (D2, zero forced drift); advisory lint suggests the `'tenant'` respelling (D5c) | unchanged until the author opts into `'tenant'`; then always (via D4 ceremony) |
-| S7 | Single-tenant deployment, any per-tenant unique | any tenant-scoped spelling | **all void** (#5030 headline) | same spellings | **all real** — NULL bucket constrained (D3) |
+| S6 | Legacy hand-written tenant composite — `sys_team ['name','organization_id']` | declared `unique: true`, org column listed | non-NULL rows: yes · NULL-org rows (single-tenant stacks): **void** | converts to `'global'` (D2, zero forced drift); advisory lint suggests the `'organization'` respelling (D5c) | unchanged until the author opts into `'organization'`; then always (via D4 ceremony) |
+| S7 | Single-org deployment (incl. each db-per-customer database), any per-organization unique | any organization-scoped spelling | **all void** (#5030 headline) | same spellings | **all real** — NULL bucket constrained (D3) |
 | S8 | Mixed population — platform template rows (org NULL) + per-org override rows in one object | field `unique: true` | per-org rows: yes · template rows: unconstrained **among themselves** | unchanged | NULL rows form one platform bucket, unique among themselves (D3) — matches the "NULL = the platform tenant" reading the write path already uses (`GLOBAL_TENANT`) |
-| S9 | Autonumber + uniqueness — per-tenant sequences (`PROD-00001` per org) | declared composite with org column (docs warn against global) | as S3/S6 | `'tenant'` scope pairs with the per-tenant sequence by construction | always; optional follow-up lint: `'global'` unique over an autonumber field is flagged |
-| S10 | Cross-tenant existence-oracle avoidance (#3696 security rationale) | field `true` only | leaks via S3/S6 NULL-void edge? No — leak was global-index rejections; fixed for fields | `'tenant'` extends the no-oracle property to declared composites | a tenant's insert can no longer be rejected by (or reveal) another tenant's values on any `'tenant'` index |
-| S11 | Tenancy-less objects — `tenancy` disabled or `managedBy: 'better-auth'` (no tenant column) | all spellings | single-column / listed columns | unchanged; `'tenant'` degrades to listed columns alone, exactly as field-level `true` already does | unchanged |
-| S12 | Non-unique indexes (`unique: false` / omitted), `partial`, index `type` | verbatim | n/a | untouched — this ADR governs *unique scope* only; `'tenant'` composes with `partial` (both key-part forms already parse, #4884) | n/a |
-| S13 | **Mode-portable app package** — one metadata app, deployed both single-org and multi-org | field `true` (void on single-org, #5030) or hand-written org composite (author must know the convention *and* the topology trap) | multi-org: yes · single-org: **void** | `'tenant'` — states the business boundary, not the topology | **correct in both modes** — per-org under multi-org, deployment-wide under single-org (§Mode portability) |
+| S9 | Autonumber + uniqueness — per-organization sequences (`PROD-00001` per org) | declared composite with org column (docs warn against global) | as S3/S6 | `'organization'` scope pairs with the per-organization sequence by construction | always; optional follow-up lint: `'global'` unique over an autonumber field is flagged |
+| S10 | Cross-tenant existence-oracle avoidance (#3696 security rationale) | field `true` only | leaks via S3/S6 NULL-void edge? No — leak was global-index rejections; fixed for fields | `'organization'` extends the no-oracle property to declared composites | a tenant's insert can no longer be rejected by (or reveal) another tenant's values on any `'organization'` index |
+| S11 | Tenancy-less objects — `tenancy` disabled or `managedBy: 'better-auth'` (no tenant column) | all spellings | single-column / listed columns | unchanged; `'organization'` degrades to listed columns alone, exactly as field-level `true` already does | unchanged |
+| S12 | Non-unique indexes (`unique: false` / omitted), `partial`, index `type` | verbatim | n/a | untouched — this ADR governs *unique scope* only; `'organization'` composes with `partial` (both key-part forms already parse, #4884) | n/a |
+| S13 | **Posture-portable app package** — one metadata app, deployed under `single`, `group`, and `isolated` postures (and db-per-customer environments) | field `true` (void on single-org, #5030) or hand-written org composite (author must know the convention *and* the posture trap) | varies by posture; `single`: **void** | `'organization'` for per-org rules — states the business boundary, not the posture | **correct under every posture** — per-org under `group`/`isolated`, deployment-wide under `single` (§Posture portability) |
+| S14 | **Company-wide rule in a portable app** — material code / chart of accounts unique across the whole customer company (集团) | inexpressible portably: `'global'`-style verbatim is right under `group` but crosses customers under `isolated`; org composite is right under `isolated` but per-subsidiary under `group` | whichever the author guessed — wrong under the other posture | `'company'` — posture-resolved at registration (D1) | group: group-wide · isolated: per-customer-org · single: deployment-wide — **no posture guess** |
 
 Two properties of this table are the ADR's acceptance criteria:
 
@@ -141,67 +168,98 @@ Two properties of this table are the ADR's acceptance criteria:
    author edits metadata (S6 opt-in) — the conversion is semantic bookkeeping, not a
    migration.
 
-## Mode portability: one app package, both deployment modes
+## Posture portability: one app package, every tenancy posture
 
 The constraint that shapes the vocabulary (maintainer requirement, #4986): a metadata
-app is authored **once** and must run unmodified under both deployment modes. The
-author can decide the *business rule* — "is this value one-per-organization, or
-one-per-installation?" — because that question has a mode-independent answer. The
-author cannot decide, and must never be asked to encode, the *topology* the app will
-be deployed into. The vocabulary satisfies this because both words name the business
-boundary, and D3 is what makes the single-org degradation real rather than nominal
-(#5030 is precisely the vocabulary-shaped hole where it used to be a lie):
+app is authored **once** and must run unmodified under every tenancy posture —
+`single | group | isolated` (ADR-0105 D1) — and under database-per-customer
+deployment, which is an environment-level choice invisible to metadata (inside each
+such database the app simply runs whichever posture that environment configures). The
+author can decide the *business rule* — which boundary a value is unique within —
+because that question has a posture-independent phrasing. The author cannot decide,
+and must never be asked to encode, the posture the app will be deployed into.
 
-| Declaration | Multi-org deployment | Single-org deployment |
-|:---|:---|:---|
-| `'tenant'` | unique within each organization (the isolation boundary) | the deployment **is** one organization data space (the D3 bucket) → deployment-wide unique — exactly what the same business rule means there |
-| `'global'` | unique across the whole installation, all organizations | deployment-wide unique — physically coincides with `'tenant'`, semantically distinct (see transitions below) |
+Three business boundaries cover the inventory, and only two of them are
+posture-invariant *physically* — which is exactly why the third must exist as a word
+rather than as author guesswork:
 
-**Mode transitions are part of the contract.** The physical coincidence of the two
-scopes under single-org is temporary state, not equivalence — the day the deployment
-changes mode, the declarations diverge, and the fact that the author *stated* the
-scope is what makes the transition mechanical:
+| Declaration | `single` | `group` (集团 — one corporate family, many orgs, one DB) | `isolated` (租户隔离 — orgs are separate customers) |
+|:---|:---|:---|:---|
+| `'organization'` | one D3 bucket → deployment-wide | unique within each subsidiary/plant org | unique within each customer org |
+| `'company'` — the customer-company that installed the app | = installation → verbatim columns | = the group → verbatim columns (group-wide) | = the organization → D3 org-composite |
+| `'global'` — the whole installation, unconditionally | = installation | = the group (same as `'company'` here) | **crosses customers** — correct only for infra/dedup keys and genuinely platform-wide reservations (hostnames, external ids); an app business rule almost never means this |
 
-- **Single-org → multi-org** (a customer enables organizations): every `'tenant'`
-  constraint *relaxes* from deployment-wide to per-org — a pure loosening; existing
-  rows keep their bucket, new organizations open their own scopes, no violation is
-  possible, **zero migration**. `'global'` constraints do not move. Had the intent
-  been positional (bare `true`), this transition would have no right answer.
-- **Multi-org → single-org** (consolidation): `'tenant'` constraints *tighten* —
-  previously-separate org scopes merge, duplicates across former orgs are possible,
-  and the change goes through the D4 ceremony (drift op + duplicate pre-flight,
-  operator resolves collisions before the constraint lands). Never silent.
+The rows to read twice:
 
-Corollary for acceptance: the conformance suite must boot the **same fixture app** in
-both modes and assert each S-row's enforcement in each (see Acceptance tests) — mode
-portability is tested, not assumed.
+- **"Unique across the whole company" is posture-VARIANT**: under `group` it means
+  the installation; under `isolated` it means one organization. Neither
+  `'organization'` nor `'global'` expresses it portably — an ISV app declaring a
+  group-wide material code with `'global'` would, deployed under `isolated`, leak a
+  uniqueness wall across unrelated customers (and become a cross-customer existence
+  oracle, S10). `'company'` names the boundary; the driver resolves the shape at
+  registration, where the posture is known — the same resolution point D1 already
+  uses for the organization column.
+- **`'global'` is physically posture-invariant but not *safety*-invariant**: under
+  `isolated`, a `'global'` unique on an app business object is almost always a
+  mis-scoped `'company'`. `os doctor` / `os migrate plan` surface it as an advisory
+  under that posture (never a boot warning — #4884 discipline).
+
+**Posture transitions are part of the contract.** Deployments move along the ADR-0105
+spectrum (a `single` customer enables `group`; acquisitions merge `isolated`
+customers into a `group`; a BU subtree is promoted to an organization, ADR-0105 D13).
+The stated scope is what makes each move mechanical:
+
+- **`single` → `group`**: `'organization'` constraints relax from one bucket to
+  per-org as rows acquire org ids — same index shape, **zero migration**;
+  `'company'`/`'global'` do not move.
+- **`single`/`group` → `isolated`**, or the reverse (acquisition/consolidation):
+  `'company'` re-resolves between verbatim and org-composite — a D4 `recreate_index`
+  ceremony with the duplicate pre-flight. The tightening direction (e.g. two acquired
+  companies holding the same material code, merging into one group) is precisely what
+  the probe reports for operator resolution before the constraint lands. Never
+  silent, never auto-applied over duplicates.
+
+Corollary for acceptance: the conformance suite boots the **same fixture app** under
+all three postures and asserts each S-row's enforcement in each, plus the transition
+stories above (see Acceptance tests) — posture portability is tested, not assumed.
 
 ## Decisions
 
 ### D1 — Scope is an explicit vocabulary on both spellings
 
-`UniqueScopeSchema` becomes `boolean | 'global' | 'tenant'`, shared by field-level
-`unique` and `IndexSchema.unique`:
+`UniqueScopeSchema` becomes `boolean | 'global' | 'organization' | 'company'`, shared
+by field-level `unique` and `IndexSchema.unique`:
 
 - **Field-level**: `true` keeps meaning tenant-scoped (unchanged since #3696 — it is
   documented, unambiguous, and ubiquitous; churning every schema for symmetry would be
-  cost without safety). `'tenant'` is accepted as its explicit synonym; `'global'`
+  cost without safety). `'organization'` is accepted as its explicit synonym; `'global'`
   unchanged.
 - **Declared index**: `'global'` = today's verbatim semantics — materialized over
-  exactly the listed columns. `'tenant'` = the driver prepends the tenant key part
+  exactly the listed columns. `'organization'` = the driver prepends the tenant key part
   (D3 form) to the listed columns at registration, where tenancy is known — same shape
-  family as field-level composites. On an object with no tenant column, `'tenant'`
+  family as field-level composites. On an object with no tenant column, `'organization'`
   degrades to the listed columns alone, mirroring field-level behavior (S11).
-  Both words are **deployment-mode-invariant** (§Mode portability): they name the
-  business boundary relative to the organization, never the topology — the same
-  declaration is correct under single-org and multi-org deployment, which is what
-  lets one app package serve both.
+- **`'company'` — the posture-resolved boundary** (§Posture portability): "unique
+  within the customer-company that installed the app". Resolved at registration,
+  where the posture is known: under `single` and `group` it materializes as the
+  verbatim/single-column shape (`'global'`-form — the installation *is* the company);
+  under `isolated` it materializes as the organization composite (D3 form — the
+  organization *is* the company). It owns no third physical shape; it is a
+  posture-resolved selection between the two existing ones, and a posture change
+  re-resolves it through the D4 ceremony. This is the word that keeps ISV apps
+  portable across `group` and `isolated` deployments (S14) — without it, "company-wide
+  unique" is expressible only by guessing the posture.
+
+  All three words name business boundaries, never postures — the same declaration is
+  correct under every deployment shape, which is what lets one app package serve all
+  of them.
+
   **Bare `true` on a declared index is retired**: deprecation warning in 17.x (D5a),
-  rejected at protocol 18 with a prescriptive error naming both replacements. It is the
+  rejected at protocol 18 with a prescriptive error naming the replacements. It is the
   one spelling whose meaning was positional, and it is the trap #4986 documents; an
   explicit statement is cheap for the author and eliminates the class.
 
-Why not silently flip bare `true` to mean `'tenant'` after conversion: external
+Why not silently flip bare `true` to mean `'organization'` after conversion: external
 examples, old snippets, and AI training corpora still carry bare `true` with
 platform-wide intent; re-meaning it would spring the #4986 trap in mirror image, with
 the failure mode inverted and still silent. Rejection is loud, prescriptive, and
@@ -222,8 +280,8 @@ Field-level `unique: true` is **not** converted — it is not deprecated (D1).
 
 ### D3 — Tenant key part materializes NULL-safe: `COALESCE(tenantField, '')`
 
-All tenant-scoped unique materializations — field-level `true`/`'tenant'` and declared
-`'tenant'` — use `COALESCE(organization_id, '')` as the tenant key part instead of the
+All tenant-scoped unique materializations — field-level `true`/`'organization'` and declared
+`'organization'` — use `COALESCE(organization_id, '')` as the tenant key part instead of the
 raw column. NULL-tenant rows collapse into one platform bucket, unique among themselves
 (S7, S8); non-NULL rows are untouched. Empty string cannot collide with a real tenant
 id (tenant ids are non-empty by contract).
@@ -273,21 +331,23 @@ planner asserts that invariant.
 
 a. **New rule `unique/unscoped-declared-index`** (lint + `os validate` publish gate):
    a declared index with bare `unique: true`. 17.x: warning with the prescriptive fix
-   ("state `'global'` (platform-wide, today's behavior) or `'tenant'` (per-tenant)").
-   Protocol 18: error. Needs no tenancy knowledge — it fires on the spelling, which is
-   what makes it the first gate in this saga that can actually run at authoring time.
+   ("state `'global'` (installation-wide, today's behavior), `'organization'` (one per
+   organization), or `'company'` (one per customer company, posture-resolved)").
+   Protocol 18: error. Needs no tenancy or posture knowledge — it fires on the
+   spelling, which is what makes it the first gate in this saga that can actually run
+   at authoring time.
 b. **R10 `unique/double-declaration` rewritten** in the vocabulary: field
-   `true`/`'tenant'` vs declared `'global'` on the same single column = contradiction
+   `true`/`'organization'` vs declared `'global'` on the same single column = contradiction
    (global wins physically, tenant intent dead); field `'global'` vs declared
-   `'global'` = redundancy; field `true` vs declared `'tenant'` on the same single
+   `'global'` = redundancy; field `true` vs declared `'organization'` on the same single
    column = redundancy (same index either way). Message and fix text updated; the
-   "spell it out as `['organization_id', X]`" advice is replaced by the `'tenant'`
+   "spell it out as `['organization_id', X]`" advice is replaced by the `'organization'`
    spelling.
 c. **Advisory nudge (S6)**: a declared unique whose column list *contains* the tenant
-   column reads as a hand-written tenant composite; suggest the `'tenant'` respelling
+   column reads as a hand-written tenant composite; suggest the `'organization'` respelling
    (which is also what closes its NULL hole). Advisory only — the legacy spelling
    stays valid and unmigrated forever if untouched (zero forced drift).
-d. **Registration-time diagnostic**: `'tenant'` on an object with no tenant column
+d. **Registration-time diagnostic**: `'organization'` on an object with no tenant column
    logs the degrade (S11) once, at registration — informational, matching field-level
    behavior, not a boot warning storm (#4884 discipline).
 
@@ -302,12 +362,12 @@ split this ADR exists to close (PD #10):
 2. `UniqueScopeSchema` doc block — the false "degenerates to the single-column one"
    claim replaced with the D3 truth.
 3. `content/docs/data-modeling/indexing.mdx` §*Two ways to say "unique"* — table gains
-   the `'tenant'` row and loses the trap; the `os:check` block updated.
+   the `'organization'` row and loses the trap; the `os:check` block updated.
 4. Generated references (`content/docs/references/data/object.mdx`) — regen via
    `gen:schema && gen:docs` (never hand-edited).
 5. `syncDeclaredIndexes` doc block — "VERBATIM" statement scoped to `'global'`.
 6. `sql-driver-unique-tenancy.test.ts` — contract header gains the scope table;
-   *"exactly as authored"* is retained **for `'global'`**; new pins for `'tenant'`
+   *"exactly as authored"* is retained **for `'global'`**; new pins for `'organization'`
    (two tenants may hold the same value; NULL bucket may not), for S7 (single-tenant
    enforcement — the #5030 probe graduates into this suite), and for D2 (nine-key
    inventory unchanged). The *"`'global'` is a synonym of `true`"* pin retires at 18
@@ -318,7 +378,7 @@ split this ADR exists to close (PD #10):
 
 ### D7 — Staging across 17.x → protocol 18
 
-- **17.x (additive, non-breaking)**: `'tenant'` accepted on both spellings; D3
+- **17.x (additive, non-breaking)**: `'organization'` accepted on both spellings; D3
   materialization + D4 drift/probe; D5 warnings; D6 truth sweep. Bare `true` on
   declared indexes still accepted (warned).
 - **Protocol 18**: D2 conversion active; bare `true` on declared indexes rejected at
@@ -351,9 +411,15 @@ existence-oracle property (#3696) extends to declared composites (S10).
   becoming visible, and it needs an operator, not an auto-migration.
 - Two lint rules and the conversion entry to maintain until 18 retires the transitional
   states.
-- `'tenant'` on declared indexes makes the driver's normalize path tenancy-aware for
+- `'organization'` on declared indexes makes the driver's normalize path tenancy-aware for
   declared indexes for the first time; the drift reader's COALESCE handling (#4884)
   must be exercised for tenant key parts too (new tests in D6.6).
+- `'company'` introduces the platform's first posture-resolved physical shape: the
+  registration path must read the tenancy posture, and a posture change acquires
+  schema consequences (D4 ops) it never had before. The alternative — authors
+  guessing the posture — is the trap S14 documents; the coupling is real, and is why
+  the resolution lives at the one point (registration) that already knows the
+  posture.
 - Protocol 18 is the earliest point at which bare `true` can be rejected; until then
   the trap is warned, not closed. Accepting a full major of warning-only is the price
   of not breaking third-party authors mid-major (ADR-0059/0087 discipline).
@@ -376,11 +442,11 @@ orthogonal (S12).
    #4884 false-alarm class. Diagnosis needs the vocabulary; once the vocabulary
    exists, refusing bare `true` is strictly stronger than warning about it. Subsumed
    into D5.
-3. **Re-meaning bare `true` to `'tenant'` after conversion**: silent intent flip for
+3. **Re-meaning bare `true` to `'organization'` after conversion**: silent intent flip for
    every out-of-repo author; rejected in D1.
 4. **#5030 alternatives A/B/C**: rejected in D3 with reasons inline.
 5. **A separate `scope` key instead of widening `unique`**: two keys that are only
-   meaningful together (`unique: true, scope: 'tenant'`) reintroduce a positional trap
+   meaningful together (`unique: true, scope: 'organization'`) reintroduce a positional trap
    (what does `scope` alone mean?) and double the surface the conversion must carry.
    One key, one statement.
 
@@ -389,10 +455,13 @@ orthogonal (S12).
 - Matrix invariant 1: for every S-row, either an enforcing index exists (integration
   test inserts the violating pair and expects rejection) or the spelling is rejected at
   validate — no silent third state.
-- Mode portability (S13): one fixture app booted under single-org **and** multi-org
-  configuration; every unique declaration's enforcement asserted in both modes, plus
-  the single-org → multi-org transition (loosening, zero migration ops emitted) and
-  the reverse (tightening surfaces as D4 ops, never auto-applied over duplicates).
+- Posture portability (S13/S14): one fixture app booted under all three postures
+  (`single | group | isolated`); every unique declaration's enforcement asserted in
+  each, including `'company'` resolving to the verbatim shape under `single`/`group`
+  and to the org composite under `isolated`. Transition coverage: `single → group`
+  emits zero migration ops; posture moves that re-resolve `'company'`
+  (`group ↔ isolated`, `single → isolated`) surface as D4 ops, and the tightening
+  direction is never auto-applied over seeded cross-org duplicates.
 - Matrix invariant 2: expected-index output for the S4/S5/S6 corpus is byte-identical
   before/after D2 on an untouched database (drift plan is empty).
 - The #5030 probe, as a permanent regression test, on both single-tenant and
@@ -411,10 +480,18 @@ orthogonal (S12).
    already round-trips through the drift reader; `'__global__'` is more self-describing
    in `\d`-style index listings. Draft picks `''`; cheap to flip before acceptance.
 2. **Field-level bare `true`**: this draft keeps it valid indefinitely (unambiguous,
-   ubiquitous). Should it eventually require the explicit `'tenant'` as well, for one
+   ubiquitous). Should it eventually require the explicit `'organization'` as well, for one
    uniform rule? Draft says no — deprecation should buy safety, and there is no trap
    on that spelling.
 3. **D3 timing**: land the COALESCE materialization in 17.x (this draft — it is a fix
    to declared-but-unenforced behavior, not a contract change) or hold it for 18 with
    the rest? Landing in 17.x means single-tenant stacks get real constraints a major
    earlier; holding means one migration wave instead of two.
+4. **The `'company'` token name**: `'company'` (this draft) vs `'group'` (matches the
+   ADR-0105 posture noun, but misleads under `isolated`, where no group exists and the
+   boundary is one organization) vs `'customer'`. The draft prefers `'company'`
+   because it names the boundary from the app's point of view — the customer-company
+   that installed it — which is the reading that stays true under every posture.
+5. **Where the `isolated`-posture advisory for `'global'` business uniques lives**:
+   `os doctor` + `os migrate plan` (this draft) — lint cannot see posture, and boot
+   warnings are banned by the #4884 discipline. Confirm, or name another surface.
