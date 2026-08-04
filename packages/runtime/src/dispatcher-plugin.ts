@@ -3,12 +3,13 @@
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
-import type { IAuthService } from '@objectstack/spec/contracts';
+import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth';
 import { HttpDispatcher, HttpDispatcherResult } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
+import { appEndpointMountPrefix, runAppEndpointStep } from './api-endpoint-step.js';
 import {
     buildSecurityHeaders,
     createInboundRateLimitMiddleware,
@@ -1239,6 +1240,88 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             }
 
             ctx.logger.info('Dispatcher bridge routes registered', { prefix, enableProjectScoping, projectResolution });
+
+            // ── Declarative endpoint mount seam (#5040 E3) ───────────────
+            // The ONE path by which a metadata-declared `apis:` endpoint can
+            // ever reach a handler. It is installed as the server's LAST-RESORT
+            // handler, not as a `${prefix}/apps/*` wildcard route, and the
+            // difference is structural rather than stylistic: a wildcard route
+            // competes with every route registered after it and Hono resolves
+            // that by first-registration-wins across plugin `start()` order —
+            // the exact ADR-0076 D11 hazard. A fallback runs only once every
+            // explicitly registered route has missed, so it CANNOT shadow one,
+            // whatever order the plugins started in.
+            //
+            // Feature-detected: the member is optional on `IHttpServer`, and an
+            // adapter that cannot express a not-found hook simply omits it (see
+            // the contract in `@objectstack/spec/contracts`). Installed on the
+            // RAW server rather than the observability Proxy above, which wraps
+            // route registration only.
+            //
+            // A miss writes NOTHING. That is load-bearing: the transport's
+            // existing unmatched answer (404, or 405 + `Allow` for a method
+            // mismatch) then stands unchanged, so this seam costs today's
+            // callers nothing. Folding those bare 404s into the dispatcher's
+            // semantic `ROUTE_NOT_FOUND` envelope is a separate decision and
+            // deliberately NOT taken here (#5090).
+            if (typeof rawServer.setFallbackHandler === 'function') {
+                rawServer.setFallbackHandler(async (req: any, res: any) => {
+                    try {
+                        const answer = await runAppEndpointStep({
+                            method: req.method,
+                            path: req.path,
+                            prefix,
+                            // Resolved PER REQUEST and never cached: during
+                            // `start()` the `metadata` slot may still be filling,
+                            // and recording "absent" as a verdict that outlives
+                            // the moment is the #4771 defect class. A read-only
+                            // probe per request is the sanctioned shape.
+                            //
+                            // It resolves this kernel's metadata service. A
+                            // multi-tenant host serves each request from a
+                            // per-environment kernel, and reaching THAT one means
+                            // running the resolver + kernel swap `dispatch()`
+                            // performs — which the executor needs anyway for its
+                            // `executionContext`, and which therefore lands with
+                            // it (#5040 E5). Nothing here reads data through the
+                            // service: the step only probes and reports 501, so
+                            // there is no wrong-environment answer to give.
+                            metadataService: safeGetService<IMetadataService>(ctx, 'metadata'),
+                        });
+                        // `undefined` = not an app-endpoint path, no matcher, or
+                        // no declaration owns it. Writing nothing is how this
+                        // handler says "not mine" (contract on setFallbackHandler).
+                        if (!answer) return;
+                        res.status(answer.status);
+                        if (securityHeaders) {
+                            for (const [k, v] of Object.entries(securityHeaders)) res.header(k, v);
+                        }
+                        res.json(answer.body);
+                    } catch (err: any) {
+                        // `matchEndpoint` throws when it cannot read its store —
+                        // its contract says so explicitly, so that an outage
+                        // cannot masquerade as a 404. Answer 5xx like any other
+                        // dispatcher exit rather than degrading to not-found.
+                        errorResponse(err, res);
+                    }
+                });
+                ctx.logger.info('Declarative endpoint dispatch step armed', {
+                    mount: appEndpointMountPrefix(prefix),
+                    // Said plainly so this line is never read as "endpoints work
+                    // now": the seam is mounted, execution is not built yet.
+                    executes: false,
+                });
+            } else {
+                // `debug`, not `warn`: no stack can declare an endpoint yet (a
+                // non-empty `apis:` is rejected at publish until #5040 E7), so
+                // nothing is missing from any deployment today. When that flip
+                // lands, THIS is where absence must become loud — an adapter
+                // without the seam can never serve a declared endpoint.
+                ctx.logger.debug(
+                    '[dispatcher] http.server exposes no `setFallbackHandler`; declarative endpoints '
+                    + 'would be unreachable on this transport.',
+                );
+            }
 
             // Resolve the authenticated user from a request's headers by
             // delegating to the AuthService's `getSession` API (better-auth

@@ -21,10 +21,12 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "nodemailer": "^9.0.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/nodemailer": "^8.0.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

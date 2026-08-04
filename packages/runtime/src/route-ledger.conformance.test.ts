@@ -22,7 +22,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
-import { ROUTE_LEDGER, LEGACY_CHAIN_PREFIXES } from './route-ledger.js';
+import { ROUTE_LEDGER, LEGACY_CHAIN_PREFIXES, NON_DISPATCH_MOUNT_PREFIXES } from './route-ledger.js';
 
 /** Minimal kernel — enough for the constructor to register builtin domains. */
 function fakeKernel(): any {
@@ -51,17 +51,49 @@ describe('route ledger ↔ dispatcher domain registry', () => {
     ).toEqual([]);
   });
 
-  it('every ledger domain is a live registry prefix or a pinned legacy branch', () => {
+  it('every ledger domain is a live registry prefix, a pinned legacy branch, or a pinned non-dispatch mount', () => {
     const live = registryPrefixes();
     const legacy = new Set<string>(LEGACY_CHAIN_PREFIXES);
+    // [#5090] The third source: prefixes `dispatcher-plugin` serves without
+    // going through `dispatch()` (today: the declarative-endpoint fallback
+    // seam). Neither the registry nor the if-chain can enumerate them, and
+    // pinning them in the list whose name says "legacy if-chain" would have
+    // made that list lie — the ledger's job is the opposite.
+    const nonDispatch = new Set<string>(NON_DISPATCH_MOUNT_PREFIXES);
     const stale = [...new Set(ROUTE_LEDGER.map((e) => e.domain))].filter(
-      (d) => !live.has(d) && !legacy.has(d),
+      (d) => !live.has(d) && !legacy.has(d) && !nonDispatch.has(d),
     );
     expect(
       stale,
       `Route-ledger domains that no longer exist on the dispatcher: ${stale.join(', ')}. ` +
         'Remove or reclassify them so the ledger stays truthful.',
     ).toEqual([]);
+  });
+});
+
+describe('non-dispatch mounts (#5090)', () => {
+  it('every pinned non-dispatch mount has a ledger row', () => {
+    const ledgerDomains = new Set(ROUTE_LEDGER.map((e) => e.domain));
+    const missing = NON_DISPATCH_MOUNT_PREFIXES.filter((p) => !ledgerDomains.has(p));
+    expect(
+      missing,
+      `Non-dispatch mounts with no route-ledger entry: ${missing.join(', ')}.`,
+    ).toEqual([]);
+  });
+
+  it('the `/apps` carve-out is owned by nothing else (ADR-0121 D1)', () => {
+    // D1 rests on a factual claim about THIS repo — that `apps` is not a
+    // built-in prefix — and reserves it for app-declared endpoints on that
+    // basis. A future built-in domain mounted at `/apps` would silently shadow
+    // every declared endpoint, so the claim is pinned rather than trusted: the
+    // ADR's own conflict analysis ("端点撞内建域:不可能") is only true while
+    // this passes.
+    const live = registryPrefixes();
+    const legacy = new Set<string>(LEGACY_CHAIN_PREFIXES);
+    for (const prefix of NON_DISPATCH_MOUNT_PREFIXES) {
+      expect(live.has(prefix), `${prefix} is now a dispatcher domain prefix — ADR-0121 D1 needs revisiting`).toBe(false);
+      expect(legacy.has(prefix), `${prefix} is now a legacy-chain prefix — ADR-0121 D1 needs revisiting`).toBe(false);
+    }
   });
 });
 

@@ -236,6 +236,11 @@ describe('#3842 — no dispatcher module may reintroduce the drift', () => {
         // covering only the branches that existed when it was authored is how
         // four sites drifted into three parking spots.
         './security/inbound-rate-limit.ts',
+        // [#5090] The declarative-endpoint step writes a body from the
+        // `setFallbackHandler` seam — a sixth way onto this wire surface, and
+        // the first that answers a request no route matched. Listed the day it
+        // was written, for the same reason the line above was.
+        './api-endpoint-step.ts',
     ];
 
     for (const file of MODULES) {

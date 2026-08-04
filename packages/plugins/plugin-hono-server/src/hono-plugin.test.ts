@@ -35,6 +35,12 @@ vi.mock('./adapter', async (importOriginal) => ({
             // end of init(). Real behaviour is covered against the REAL adapter
             // in `middleware-seam.test.ts`; here it only has to exist.
             installMiddlewareSeam: vi.fn(),
+            // [#5090] Same deal for the unmatched-request seam: `start()` mounts
+            // it through the adapter now (one owner for `app.notFound`, which is
+            // last-call-wins). The real 404/405/fallback composition is covered
+            // against the REAL adapter in `notfound-405.test.ts` and
+            // `fallback-seam.test.ts`; here it only has to exist.
+            installNotFoundSeam: vi.fn(),
             getRawApp: vi.fn().mockReturnValue({
                 get: vi.fn(),
                 use: vi.fn(),

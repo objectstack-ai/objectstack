@@ -193,6 +193,16 @@ export class AppPlugin implements Plugin {
         // up with (the core in-memory fallback included); idempotent across
         // multiple wirers via the ownership marker in core.
         wireAuthoredTranslationSync(ctx as any);
+        // Seed persisted package disable-state — also BEFORE the empty-env
+        // return (#5047). An empty env is EXACTLY the hydration-only scenario:
+        // the artifact ships no app payload, so every package in that
+        // environment arrives later from `sys_packages` (PackageServicePlugin's
+        // Phase 2 rehydrate) or from an HTTP install. Seeding after the return
+        // meant the registry's initial-disabled set stayed empty on those
+        // envs, and a package an operator had disabled came back ENABLED on
+        // every restart. The seed must land before ANY registration path runs,
+        // which is Phase 1, unconditionally.
+        this.seedPersistedDisabledPackages(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping init', {
                 pluginName: this.name,
@@ -223,11 +233,27 @@ export class AppPlugin implements Plugin {
             ? { ...this.bundle.manifest, ...this.bundle }
             : this.bundle;
 
-        // Seed persisted package disable-state into the registry BEFORE the
-        // manifest is decomposed, so disabled packages are installed disabled
-        // and stay hidden after restart. Honors every later registration path
-        // (boot artifact, marketplace rehydrate, import) via the registry's
-        // initial-disabled set. Best-effort — never block boot on this.
+        ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
+    }
+
+    /**
+     * Seed persisted package disable-state into the registry's initial-disabled
+     * set, so every later registration path — boot artifact decomposition,
+     * marketplace / `sys_packages` rehydrate, local import — installs those
+     * packages DISABLED and they stay hidden after a restart.
+     *
+     * Runs in init (Phase 1) and BEFORE the empty-env return (#5047), for the
+     * same reason the runners above do: the seed only works if it is in place
+     * before the FIRST `installPackage` call, and on an empty env every
+     * package arrives from Phase 2 hydration rather than from this bundle.
+     * On a non-empty env it still lands before the manifest is decomposed,
+     * because that decomposition happens at the `manifest.register()` call at
+     * the end of init.
+     *
+     * Best-effort — never block boot on this. Degrades silently on kernels
+     * with no engine (metadata-only one-shot commands, mock-engine tests).
+     */
+    private seedPersistedDisabledPackages(ctx: PluginContext): void {
         try {
             const ql = ctx.getService<{ registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } }>('objectql');
             const setter = ql?.registry?.setInitialDisabledPackageIds;
@@ -246,8 +272,6 @@ export class AppPlugin implements Plugin {
                 error: (err as Error)?.message ?? String(err),
             });
         }
-
-        ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
     }
 
     /**
