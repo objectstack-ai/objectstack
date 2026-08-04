@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectSchema } from '@objectstack/spec/data';
-import { SharingRuleSchema, type SharingRuleInput } from '@objectstack/spec/security';
+import { ShareRecipientType, SharingRuleSchema, type SharingRuleInput } from '@objectstack/spec/security';
 
 import {
   validateOrgAxisRedLines,
@@ -284,8 +284,21 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
   });
 });
 
+/**
+ * ── Rule ②'s recipient word list ────────────────────────────────────────────
+ *
+ * The two BU-tree recipients ② intercepts, and the three it deliberately lets
+ * past. Split out here because the drift guard below asserts the two halves
+ * partition `ShareRecipientType` exactly — the check whose absence is #4991.
+ */
+const BU_TREE_RECIPIENTS = ['business_unit', 'unit_and_subordinates'] as const;
+const FLAT_RECIPIENTS = ['user', 'team', 'position'] as const;
+
 describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal', () => {
-  const platformGlobalStack = (tenancy: unknown) => ({
+  const platformGlobalStack = (
+    tenancy: unknown,
+    recipientType: string = 'business_unit',
+  ) => ({
     objects: [
       objectFixture(
         tenancy === undefined
@@ -298,21 +311,82 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
         name: 'catalog_to_plant',
         type: 'criteria',
         object: 'material_catalog',
-        sharedWith: { type: 'business_unit', value: 'bu_plant_a' },
+        sharedWith: { type: recipientType, value: 'bu_plant_a' },
         condition: 'true',
-      }),
+      } as unknown as SharingRuleInput),
     ],
   });
 
-  it('flags a business-unit grant on a `tenancy.enabled: false` object', () => {
-    const findings = validateOrgAxisRedLines(platformGlobalStack({ enabled: false }));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({
-      severity: 'error',
-      rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
-      path: 'sharingRules[0].sharedWith',
-    });
-    expect(findings[0].message).toMatch(/spans EVERY organization/);
+  /**
+   * The word list ② enforces must PARTITION the authoring enum: every member of
+   * `ShareRecipientType` is either intercepted as a BU-tree recipient or named
+   * in the allowed half with a reason in the rule's own comment. No third
+   * bucket, no silent remainder.
+   *
+   * This is the guard #4991 is the absence of. ② shipped naming a single
+   * recipient, `business_unit`, while ADR-0105 D6 ②'s own sentence names
+   * `unit_and_subordinates` — the strictly WIDER grant (a BU plus every
+   * descendant unit) sailed past the gate that stopped the narrower one. A
+   * sixth enum member added tomorrow fails HERE, at the vocabulary, instead of
+   * quietly inheriting whichever bucket nobody chose for it.
+   */
+  it('partitions `ShareRecipientType` — no recipient is unaccounted for (#4991)', () => {
+    const declared = [...ShareRecipientType.options].sort();
+    const accounted = [...BU_TREE_RECIPIENTS, ...FLAT_RECIPIENTS].sort();
+    expect(accounted).toEqual(declared);
+  });
+
+  it.each(BU_TREE_RECIPIENTS)(
+    'flags a `%s` grant on a `tenancy.enabled: false` object',
+    (recipientType) => {
+      const findings = validateOrgAxisRedLines(platformGlobalStack({ enabled: false }, recipientType));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        severity: 'error',
+        rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
+        path: 'sharingRules[0].sharedWith',
+      });
+      expect(findings[0].message).toMatch(/spans EVERY organization/);
+      // The diagnostic names the recipient actually written, not a generic
+      // "business-unit rule" the author then has to go match up themselves.
+      expect(findings[0].message).toContain(`\`${recipientType}\``);
+    },
+  );
+
+  it('spells out that `unit_and_subordinates` reaches the whole subtree', () => {
+    // The two recipients share a defect but not a blast radius: this one is the
+    // BU plus every descendant unit (ADR-0057 D5), so the message says so.
+    const [finding] = validateOrgAxisRedLines(
+      platformGlobalStack({ enabled: false }, 'unit_and_subordinates'),
+    );
+    expect(finding.message).toMatch(/AND every descendant unit/);
+    const [narrow] = validateOrgAxisRedLines(platformGlobalStack({ enabled: false }, 'business_unit'));
+    expect(narrow.message).not.toMatch(/descendant/);
+  });
+
+  it('flags `unit_and_subordinates` under the `systemFields.tenant: false` spelling too', () => {
+    expect(
+      rules({
+        objects: [objectFixture({ name: 'material_catalog', systemFields: { tenant: false } })],
+        sharingRules: [
+          sharingRule({
+            name: 'r',
+            type: 'criteria',
+            object: 'material_catalog',
+            sharedWith: { type: 'unit_and_subordinates', value: 'bu_field_ops' },
+            condition: 'true',
+          }),
+        ],
+      }),
+    ).toEqual([ORG_AXIS_CROSS_ORG_BU_GRANT]);
+  });
+
+  it('allows `unit_and_subordinates` on an ORG-SCOPED object (the showcase shape)', () => {
+    // `share_new_inquiries_with_field_ops` → `showcase_inquiry` in
+    // examples/app-showcase: a real, correct subtree grant. The widened word
+    // list must not turn the sanctioned intra-org case red.
+    expect(rules(platformGlobalStack({ enabled: true }, 'unit_and_subordinates'))).toEqual([]);
+    expect(rules(platformGlobalStack(undefined, 'unit_and_subordinates'))).toEqual([]);
   });
 
   it('flags the `systemFields.tenant: false` spelling of the same opt-out', () => {
@@ -337,22 +411,30 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
     expect(rules(platformGlobalStack(undefined))).toEqual([]);
   });
 
-  it('allows a non-BU audience on a platform-global object', () => {
-    expect(
-      rules({
-        objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
-        sharingRules: [
-          sharingRule({
-            name: 'r',
-            type: 'criteria',
-            object: 'material_catalog',
-            sharedWith: { type: 'position', value: 'buyer' },
-            condition: 'true',
-          }),
-        ],
-      }),
-    ).toEqual([]);
-  });
+  it.each(FLAT_RECIPIENTS)(
+    'allows the flat `%s` audience on a platform-global object (the sanctioned path)',
+    (recipientType) => {
+      // These three expand with no business-unit tree involved — `user` not at
+      // all, `team` via `TeamGraphService`, `position` flat over holders
+      // (ADR-0090 D3). Sharing a platform-global catalog to them is what
+      // `tenancy.enabled: false` is FOR; ② forbids resolving a BU subtree with
+      // no organization to resolve it within, not sharing a global object.
+      expect(
+        rules({
+          objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
+          sharingRules: [
+            sharingRule({
+              name: 'r',
+              type: 'criteria',
+              object: 'material_catalog',
+              sharedWith: { type: recipientType, value: 'buyer' },
+              condition: 'true',
+            } as unknown as SharingRuleInput),
+          ],
+        }),
+      ).toEqual([]);
+    },
+  );
 });
 
 describe('validateOrgAxisRedLines — input tolerance', () => {

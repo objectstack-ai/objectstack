@@ -213,6 +213,13 @@ export class SeedLoaderService implements ISeedLoaderService {
       allResults.push(result);
 
       if (config.haltOnError && result.errored > 0) {
+        // Deliberately `warn`, and audited as such in #4729: this line reports
+        // a CONTROL-FLOW decision, not a loss. Every error it halts on was
+        // already reported at `error` by the site that counted it, and the
+        // datasets skipped after it were never written — the load reports
+        // `success: false` and says which object stopped it. Escalating a
+        // second line about the same failures is the over-application AGENTS.md
+        // warns about (it trains readers to skim `error`).
         this.logger.warn('[SeedLoader] Halting on first error', { object: dataset.object });
         break;
       }
@@ -480,7 +487,15 @@ export class SeedLoaderService implements ISeedLoaderService {
           const error = this.buildWriteError(objectName, record, externalId, recordIndex, res.error);
           errors.push(error);
           allErrors.push(error);
-          this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex });
+          // `error`, not `warn` (#4729 / #4632): this row is counted in
+          // `allErrors` — the load already reports `success: false` — and the
+          // consequence is that the record did NOT land. Count and log level
+          // must agree; the message names the row and the cause.
+          this.logger.error(
+            `[SeedLoader] ${error.message}`,
+            res.error instanceof Error ? res.error : undefined,
+            { recordIndex },
+          );
         }
       }
     };
@@ -542,7 +557,9 @@ export class SeedLoaderService implements ISeedLoaderService {
         };
         errors.push(error);
         allErrors.push(error);
-        this.logger.warn(`[SeedLoader] ${error.message}`);
+        // `error`, not `warn` (#4729 / #4632): counted in `allErrors` and the
+        // record is dropped — nothing of it is persisted.
+        this.logger.error(`[SeedLoader] ${error.message}`, undefined, { recordIndex: i });
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
@@ -609,6 +626,27 @@ export class SeedLoaderService implements ISeedLoaderService {
           return error;
         };
 
+        /**
+         * Report a reference the loader had to DROP — the row still lands, so
+         * this is the one failure mode in the file whose row counters stay
+         * clean (`errored` never moves; only `referencesDropped` does,
+         * framework#3932). That is exactly the shape AGENTS.md → "Degradation
+         * log levels" reserves `error` for: the record looks seeded while an
+         * association it declared is not there. `warn` here was the same
+         * count/level contradiction #4729 fixed in pass 2, so the line states
+         * the CONSEQUENCE (row written without the association) and the FIX on
+         * top of the authored error's own advice.
+         */
+        const reportDroppedReference = (error: ReferenceResolutionError): void => {
+          this.logger.error(
+            `[SeedLoader] ${error.message} The value was DROPPED, so ${objectName} record #${i} was written WITHOUT ` +
+              `its \`${ref.field}\` association: the row counters stay clean (only referencesDropped moves), and the ` +
+              `link is simply absent. Fix the seed value and re-run the seed to restore it.`,
+            undefined,
+            { recordIndex: i },
+          );
+        };
+
         // LOUD FAILURE: an ARRAY of natural keys is only writable by a field
         // that stores an array — `Field.lookup(..., { multiple: true })` (or a
         // multi `user` field). On a single-value field it can never resolve, so
@@ -621,7 +659,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               `or pass one natural key.`,
             fieldValue,
           );
-          this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+          reportDroppedReference(error);
           // Drop the unwritable value so it never reaches the driver. Removing
           // the key (not writing null) matters on the upsert UPDATE path — see
           // the deferred-reference note below. The row itself still gets
@@ -661,7 +699,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 `${ref.targetObject}.${ref.targetField} natural-key string but got an object.${outcome.hint}`,
               item,
             );
-            this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+            reportDroppedReference(error);
             invalidItem = true;
             break;
           }
@@ -722,6 +760,12 @@ export class SeedLoaderService implements ISeedLoaderService {
             // (LOUD: counted + reported). Writing it anyway would either
             // carry the raw natural-key string into the FK column or, on
             // update, corrupt the existing row.
+            //
+            // "LOUD" here means counted + in `result.errors` ONLY — this path
+            // logs nothing at all, so a load that drops N records looks
+            // identical to a clean one in the console. Filed as #4997 rather
+            // than fixed under #4729, whose audit criterion was the file's
+            // `logger.warn` calls.
             pushError(
               `Cannot resolve reference: ${objectName}.${ref.field} = '${String(unresolvedItem)}' → ` +
                 `${ref.targetObject}.${ref.targetField} not found`,
@@ -779,7 +823,14 @@ export class SeedLoaderService implements ISeedLoaderService {
             const error = this.buildWriteError(objectName, record, externalId, i, err);
             errors.push(error);
             allErrors.push(error);
-            this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+            // `error`, not `warn` (#4729 / #4632): counted in `allErrors`, and
+            // the record did not land. `writeRecord` is in the durability
+            // gate's vocabulary, so this catch cannot regress to `warn`.
+            this.logger.error(
+              `[SeedLoader] ${error.message}`,
+              err instanceof Error ? err : undefined,
+              { recordIndex: i },
+            );
           }
         } else {
           const decision = this.decideWriteAction(record, mode, externalId, existingRecords);
@@ -809,7 +860,15 @@ export class SeedLoaderService implements ISeedLoaderService {
               const error = this.buildWriteError(objectName, record, externalId, i, err);
               errors.push(error);
               allErrors.push(error);
-              this.logger.warn(`[SeedLoader] ${error.message}`, { recordIndex: i });
+              // `error`, not `warn` (#4729 / #4632): counted in `allErrors`,
+              // and the row's declared values did not land — an upsert that
+              // fails here leaves the PREVIOUS row contents in place, which
+              // looks like a seeded record and is not one.
+              this.logger.error(
+                `[SeedLoader] ${error.message}`,
+                err instanceof Error ? err : undefined,
+                { recordIndex: i },
+              );
             }
           } else {
             // Insert: buffer for the batched flush rather than writing now.
@@ -1015,16 +1074,7 @@ export class SeedLoaderService implements ISeedLoaderService {
 
         if (recordId) {
           try {
-            // Use SEED_OPTIONS like every other seed write: this pass is still
-            // seeding, so it must carry `skipTriggers` too. Inlining a bare
-            // `{ isSystem: true }` here re-fired record-change automation on
-            // freshly seeded rows — `isSystem` does NOT suppress trigger
-            // dispatch, only `skipTriggers` does — which is exactly the
-            // self-trigger vector SEED_OPTIONS exists to prevent (#3760).
-            await withTransientRetry(() => this.engine.update(deferred.objectName, {
-              id: recordId,
-              [deferred.field]: resolvedValue,
-            }, SeedLoaderService.SEED_OPTIONS as any));
+            await this.writeDeferredReference(deferred, recordId, resolvedValue);
 
             // Update result stats
             const resultEntry = allResults.find(r => r.object === deferred.objectName);
@@ -1033,18 +1083,34 @@ export class SeedLoaderService implements ISeedLoaderService {
               resultEntry.referencesDeferred--;
             }
           } catch (err: any) {
-            // LOUD FAILURE (framework#2805): the target resolved but the
-            // back-fill WRITE failed (a transient error that outlasted the
-            // retry budget, a validation veto, …). The reference stays NULL —
-            // the very corruption pass 2 exists to prevent — so this must be a
-            // reported, counted error, never a silent warning. Swallowing it
-            // returned `success: true` / `totalErrored: 0` over a load that
-            // left a circular relationship half-written.
-            this.logger.warn('[SeedLoader] Failed to write deferred reference', {
-              object: deferred.objectName,
-              field: deferred.field,
-              error: err?.message,
-            });
+            // LOUD FAILURE (framework#2805; rule: #4632, accident: #4420): the
+            // target resolved but the back-fill WRITE failed (a transient error
+            // that outlasted the retry budget, a validation veto, …). The
+            // reference stays NULL — the very corruption pass 2 exists to
+            // prevent — so this must be a reported, counted `error`, never a
+            // warning. It is counted below (`recordDeferredError` → `allErrors`
+            // → `success: false`), and until #4729 the LOG line contradicted
+            // that count by sitting at `warn`: the one trace a seed leaves in
+            // the console was the level nobody reads (#4420). Count and level
+            // now agree, and the line owes the two things AGENTS.md
+            // ("Degradation log levels") requires of an `error`: the
+            // CONSEQUENCE and the FIX.
+            this.logger.error(
+              `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} stays NULL ` +
+                `on record '${deferred.recordExternalId}'. The row itself was seeded, so every row counter looks healthy ` +
+                `while the circular relationship is HALF-WRITTEN: nothing links it to ${deferred.targetObject}.` +
+                `${deferred.targetField} = '${this.formatAttempted(deferred.attemptedValue)}'. Nothing retries this — ` +
+                `fix the write error below (a transient failure that outlasted the retry budget, or a validation rule ` +
+                `vetoing the update) and re-run the seed to complete the link. ` +
+                `Cause: ${err?.message ?? String(err)}`,
+              err instanceof Error ? err : undefined,
+              {
+                object: deferred.objectName,
+                field: deferred.field,
+                target: `${deferred.targetObject}.${deferred.targetField}`,
+                recordIndex: deferred.recordIndex,
+              },
+            );
             this.recordDeferredError(deferred, allResults, allErrors,
               `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${err?.message ?? String(err)}`);
           }
@@ -1057,6 +1123,37 @@ export class SeedLoaderService implements ISeedLoaderService {
           `Deferred reference unresolved after pass 2: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField} not found`);
       }
     }
+  }
+
+  /**
+   * Write ONE pass-2 back-fill — the update that turns a deferred reference
+   * from NULL into the resolved id.
+   *
+   * Uses SEED_OPTIONS like every other seed write: this pass is still seeding,
+   * so it must carry `skipTriggers` too. Inlining a bare `{ isSystem: true }`
+   * here re-fired record-change automation on freshly seeded rows — `isSystem`
+   * does NOT suppress trigger dispatch, only `skipTriggers` does — which is
+   * exactly the self-trigger vector SEED_OPTIONS exists to prevent (#3760).
+   *
+   * Extracted (rather than inlined at the call site) so the durability gate can
+   * SEE this seam: `scripts/check-durability-degradation-log-level.mjs` matches
+   * a guarded `try` by the callee name it finds in the block, and it
+   * deliberately does not descend into nested function bodies — the engine
+   * write here lives inside the `withTransientRetry` closure, where no AST scan
+   * of the try block can reach it. `writeDeferredReference` is listed in that
+   * script's `DURABILITY_CRITICAL_CALLEES`, so a future edit that quietly drops
+   * the caller's `logger.error` back to `warn` fails CI instead of shipping
+   * (#4729; the rule is #4632, the accident it comes from is #4420).
+   */
+  private async writeDeferredReference(
+    deferred: DeferredUpdate,
+    recordId: string,
+    resolvedValue: unknown,
+  ): Promise<void> {
+    await withTransientRetry(() => this.engine.update(deferred.objectName, {
+      id: recordId,
+      [deferred.field]: resolvedValue,
+    }, SeedLoaderService.SEED_OPTIONS as any));
   }
 
   /**
@@ -1129,6 +1226,15 @@ export class SeedLoaderService implements ISeedLoaderService {
    * and return the written value rather than re-writing (which would
    * duplicate). Matched by `code` so we needn't import objectql (which depends
    * on this package — importing back would cycle). Any other error propagates.
+   *
+   * Left at `warn` by #4729 deliberately, and the reasoning is filed rather
+   * than settled here: this is the one degradation in the file that is NOT
+   * counted as an error (the load still reports `success: true`), so it falls
+   * outside that issue's "count and level must agree" criterion — but a stale
+   * roll-up column IS persisted data disagreeing with the rows it summarizes,
+   * which is arguably the #4632 class. Whether it should become `error`,
+   * counted, or stay as-is is #4998 (needs a maintainer's call, since it
+   * changes what a SUCCESSFUL seed prints).
    */
   private async writeRecoveringSummary<T>(fn: () => Promise<T>): Promise<T> {
     try {

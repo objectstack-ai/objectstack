@@ -2,7 +2,13 @@
 
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { compileCelToFilter, isPushdownableCel } from '@objectstack/formula';
+// [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
+// used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
+// — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
+// SAME question at authoring time and may never import a runtime. This file is
+// now a consumer of that one definition, exactly as the lint gate is; there is
+// no second copy for the `=` / `IN` bridge to drift against.
+import { compileCelToFilter, isSupportedRlsExpression, sqlPredicateToCel } from '@objectstack/formula';
 
 /**
  * RLS User Context
@@ -58,50 +64,6 @@ interface RLSUserContext {
 export const RLS_DENY_FILTER: Record<string, unknown> = Object.freeze({
   id: '__rls_deny__:00000000-0000-0000-0000-000000000000',
 });
-
-/**
- * Recognize whether an RLS `using` / `check` expression matches one of the SHAPES
- * the compiler can compile (equality against a `current_user.*` var, equality
- * against a string literal, set-membership against a `current_user.*` array, or
- * the `1 = 1` allow-all). This is SHAPE-only — it does not check whether the
- * referenced context variable is populated at runtime.
- *
- * ADR-0056 D4: exposed so an authoring-time gate (`objectstack compile`) can REJECT
- * a predicate the runtime would silently drop — the class of bug where
- * `owner == current_user.name` (`==`, unsupported) compiled to nothing and left an
- * object unprotected. A `false` here means "this predicate will never enforce".
- */
-export function isSupportedRlsExpression(expression: string): boolean {
-  if (!expression || !expression.trim()) return false;
-  // ADR-0058 D1: a single canonical shape gate. We bridge the legacy SQL-ish
-  // subset (`=`, `IN`) to canonical CEL, then ask the ONE pushdown compiler
-  // whether the shape lowers to a FilterCondition at all. This is broader than
-  // the historical 4 forms — comparisons (`amount > 100`) and `==` now ENFORCE
-  // (the compiler lowers them), so the gate correctly reports them supported.
-  // It is SHAPE-only: whether a referenced `current_user.*` variable is exposed
-  // at runtime is a separate availability concern (an unexposed var fails closed
-  // at resolution — see compileExpression).
-  return isPushdownableCel(sqlPredicateToCel(expression)).ok;
-}
-
-/**
- * @deprecated Transitional bridge (ADR-0058 D1). Canonical RLS predicates are
- * CEL; this exists ONLY so stored/legacy SQL-ish `using`/`check` keeps compiling
- * until it is migrated. Bridge the legacy SQL subset to canonical CEL so it flows
- * through the ONE compiler: `=` → `==`, `IN` → `in`. Quoted string literals are
- * left untouched. It is IDEMPOTENT on CEL input (a `==`/`in` predicate is
- * unchanged), so authored-CEL seeds pass through as no-ops (no deprecation warn). Only this historically-supported subset is bridged — compound
- * predicates should be authored in canonical CEL (`&&` / `||`); anything outside
- * the subset (subqueries, SQL `AND`/`OR`, `LIKE`) stays unparseable and so fails
- * closed, exactly as before.
- */
-export function sqlPredicateToCel(expression: string): string {
-  return expression.replace(/'[^']*'|\bIN\b|(?<![<>=!])=(?!=)/gi, (m) => {
-    if (m[0] === "'") return m; // quoted literal — never rewrite its contents
-    if (m === '=') return '==';
-    return 'in'; // IN / in / In → CEL membership operator
-  });
-}
 
 /**
  * Does this filter consist solely of an empty membership (`{ field: { $in: [] } }`)?

@@ -2,12 +2,53 @@
 
 import { z } from 'zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { lazySchema } from '../shared/lazy-schema';
+
+// ---------------------------------------------------------------------------
+// NOT CLOSED AGAINST UNKNOWN KEYS -- AND THAT IS THE MEASURED VERDICT
+// (#4001 batch 13 / 批 13, ADR-0078). Read this before "finishing" the file.
+//
+// The strictness ledger scheduled this file's 4 object sites as `authorable
+// (p)` -- provisional. #4001's own rule is verify-before-tightening, and here
+// the verification came back NEGATIVE: no metadata document is ever parsed
+// against these shapes, because nothing in the protocol carries them.
+//
+// Three independent measurements, 2026-08-03:
+//
+//   1. STATIC -- nothing under `packages/spec/src` imports this module except
+//      the `ui/index.ts` barrel. No schema anywhere declares a `component.animation / app.motion`
+//      slot, so there is no key an author can write to reach these shapes.
+//   2. GRAPH -- a BFS over this build's in-memory Zod graph from all 24
+//      metadata-type roots (`listMetadataTypeSchemaTypes`) plus
+//      `ObjectStackSchema` (`defineStack`) -- the closure `build-schemas.ts`
+//      uses for the #4650 deletion check -- reaches none of them. Its three
+//      positive controls resolve `root-graph` in the same run: `PageSchema`,
+//      `WebhookSchema` (batch 11's `defineStack({ webhooks })` door) and
+//      `StateMachineSchema` (batch 10's `agent.lifecycle` door). So
+//      "unreachable" is a fact about the graph, not a broken instrument.
+//   3. CALL SITES -- no `.parse()` / `.safeParse()` on any schema here exists
+//      in `objectstack`, `objectui` or the example apps, outside this file's
+//      own unit test. objectui re-exports the inferred TYPES only and says so
+//      (`@object-ui/types`, the #2561 note: the validators are deliberately
+//      NOT re-exported).
+//
+// `.strict()` would therefore gate nothing -- strictness is a property of a
+// PARSE, and there is no parse. Adding it would spend a v17 breaking change to
+// make this file LOOK finished, and leave behind the artefact the ledger
+// itself warns about: "a *precisely validated* dead slot is the more
+// convincing lie" (#4583). The real question is ADR-0049 enforce-or-remove --
+// retire this vocabulary or give it a carrier -- filed as #4988, with the same
+// verdict recorded in this file's ledger row.
+//
+// DO NOT convert these sites to `strictObject` before #4988 is decided: a
+// strict shape reads as load-bearing and makes the retirement harder, which is
+// the opposite of what the measurement asks for.
+// ---------------------------------------------------------------------------
 
 /**
  * Transition Preset Schema
  * Common animation transition presets.
  */
-import { lazySchema } from '../shared/lazy-schema';
 export const TransitionPresetSchema = lazySchema(() => z.enum([
   'fade',
   'slide_up',

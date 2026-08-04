@@ -20,23 +20,27 @@ One question decides the class: **who writes this schema's input?**
 | **authorable** | A human or AI author, into `*.object.ts` / `defineStack` config / Studio / MCP | `.strict()` + fixable error (the ratchet target) |
 | **wire** | Another machine: server responses, connector payloads, runtime envelopes, persisted runtime state | stay tolerant (`.strip` / `.passthrough`); strictness here turns an upstream *addition* into our parse crash |
 | **open** | Deliberately schemaless user data (record bodies, per-node-type `config`, React props) | stay open; a *sibling* contract validates it (e.g. a node executor's `configSchema`, #4027/#4040) |
-| **no door** | **Nobody — because nothing parses it.** No carrier key on any metadata type, unreachable from the metadata-type roots, no `.parse()` outside the schema's own test | **do not tighten.** `.strict()` is a property of a PARSE; closing a shape nothing parses spends a breaking change to leave *"a precisely-validated dead slot — the more convincing lie"* (#4583). The verdict it needs is ADR-0049 enforce-or-remove (#4988, #5015) |
+| **no door** | **Nobody — nothing parses it.** The shape is exported and typed, but no schema declares a carrier key for it, so it is unreachable from every metadata-type root and from `defineStack`, and nothing calls `.parse()` on it outside its own test. Added at 批 13, when the first run of files resolved its `(p)` this way | **out of this ratchet's scope.** `.strict()` is a property of a PARSE; with no parse it enforces nothing and only makes a dead slot look load-bearing — *"a precisely-validated dead slot is the more convincing lie"* (#4583). The live question is ADR-0049 enforce-or-remove — retire the vocabulary or give it a carrier — so a row here points at an issue, never at a batch (#4988, #5015) |
 
-The fourth class was added by 批 13 (#5003) and 批 14, and it is the one the
-question above cannot reach by reading: *"who writes this schema's input?"* has no
-cell for **"nobody, because there is no door"**, and a file's surface gives no hint
-which it is. It has to be MEASURED — carrier key, graph reachability, call sites —
-and the measurement needs a positive control in the same run, or an
-`UNREACHABLE` verdict is indistinguishable from a broken walker. 批 14's run: 6860
-nodes from the 24 roots + `defineStack`, four controls (`Page` / `Action` /
+A fourth answer to "who writes this input" is **nobody**, and it is only
+reachable by measurement rather than by reading the file: `no door` was added at
+批 13 after a BFS from every authoring root (with positive controls) came back
+empty on five `ui/` files at once. Reading a schema's exports and JSDoc cannot
+distinguish it from `authorable` — which is exactly why the `(p)` exists.
+
+The measurement needs a positive control **in the same run**, or an `UNREACHABLE`
+verdict is indistinguishable from a broken walker. 批 14's run: 6860 nodes from
+the 24 metadata-type roots + `defineStack`, four controls (`Page` / `Action` /
 `DashboardWidget` / `Webhook`) all `root-graph`, and injecting a synthetic carrier
-flipped both no-door shapes to `root-graph`.
+flipped both of its no-door shapes to `root-graph`.
 
-Note the class is per SCHEMA like the others, and 批 14 found the first file that
-**splits across it**: `ui/sharing.zod.ts` holds one live door (`SharingConfig`,
-carried by `FormViewSchema.sharing` and read by `rest-server.ts`) and one shape
-nothing in the repo so much as names (`EmbedConfig`). A file-level verdict would
-have been wrong in one direction or the other, whichever way it fell.
+批 14 then found the thing 批 13's five whole-file verdicts could not show: the
+class is per SCHEMA like every other, and a file can **split across it**.
+`ui/sharing.zod.ts` holds one live door (`SharingConfig` — carried by
+`FormViewSchema.sharing`, and `rest-server.ts` mounts the anonymous form routes on
+`sharing.allowAnonymous` + `sharing.publicLink`) beside one shape nothing in the
+repo so much as names (`EmbedConfig`). A file-level verdict would have been wrong
+in one direction or the other, whichever way it fell.
 
 Mixed files carry both — classify per schema, not per file. A **response-side
 extension of an authoring schema** (e.g. `EffectiveObjectPermissionSchema`)
@@ -512,11 +516,11 @@ not verdicts).
 | `dashboard.zod.ts` | 11 | authorable | **strict as of #4001 批 14 — 0 strip sites remain.** `DashboardWidgetSchema` has been strict since the ADR-0021 cutover; 批 14 closed the two NESTED holes inside it (`compareTo`'s object arm, `layout`), the same strict-shell-over-strip-children silhouette 批 13 found on `page.components[]`. `DashboardWidgetOptionsSchema` stays `passthrough` **deliberately** (renderer escape hatch) and the `responsive` tombstone (#4876) is untouched. ⚠️ `compareTo` is a UNION, so its curated prescription is produced but not delivered — `zodIssuesToFields` maps only top-level issues and a failed union collapses to a bare `Invalid input` (#5014). The REJECTION is unaffected |
 | `widget.zod.ts` | 9 | authorable (p) | |
 | `page.zod.ts` | 7 | authorable | partially strict (ADR-0089) |
-| `chart.zod.ts` / `i18n.zod.ts` / `responsive.zod.ts` | 7+6+4 | authorable (p) | i18n label shapes are wide-open records by design — verify. **`chart` 6 → 7 at the re-measurement** — again no schema changed: `ChartAggregateSchema` is written `z\n  .object({`, and the old counter's `z\.object\(` could not match across the line break |
+| `chart.zod.ts` / `i18n.zod.ts` | 7+6 | authorable (p) | i18n label shapes are wide-open records by design — verify. **`chart` 6 → 7 at the re-measurement** — again no schema changed: `ChartAggregateSchema` is written `z\n  .object({`, and the old counter's `z\.object\(` could not match across the line break |
+| `responsive.zod.ts` | 4 | authorable | **strict as of #4001 批 13** — all four sites (`ResponsiveConfig`, `ResponsiveStyles`, and the two per-breakpoint maps). This is the one file of batch 13's six whose `(p)` resolved POSITIVE, and it resolved on the graph rather than on the file's face: `page.components[].responsive` / `.responsiveStyles` put both shapes inside the `page` metadata-type root (`dashboard.widgets[].responsive` was the second carrier until #4876 retired it, same day). What the closure bought is the batch's whole argument in one parse — **`PageComponentSchema` has been `.strict()` since ADR-0089 D3a and that never reached these blocks**, so `{ type:'element:text', responsiveStyles: { lg: {…} }, responsive: { colums: {…}, hideOn: [] } }` parsed CLEAN and returned `responsiveStyles: {}, responsive: {}` — every styling and layout instruction the author wrote, gone, reported valid. A strict shell over strip-mode children is a closed surface's silhouette, not a closed surface. The curation is the file's real hazard rather than typos: it carries TWO breakpoint vocabularies sixteen lines apart on the same component (`responsiveStyles`' `large`/`medium`/`small`/`xsmall`, ADR-0065, against `responsive`'s Tailwind `xs`…`2xl`), so the aliases run BOTH ways between them and are anchored to the named sibling, not to edit distance — batch 12's method, and the only thing that can answer `lg` → `large`. Two entries had to be measured rather than reasoned: `{ columns: { large: 4, lg: 3 } }` used to keep HALF the map (the node laid out, at the wrong width, on breakpoints the author never named — worse than a total loss, which is at least visible); and `hideOn` → `hiddenOn` needed a hand-written alias because the distance fallback provably cannot reach it — it lowercases the input but not the candidates, so a capital in a declared key costs an extra edit against a budget of 2, and the all-lowercase `hiddenon` resolves while the correctly-cased `hideOn` does not. That asymmetry is general to camelCase keys, i.e. to most of the spec, and is filed as **#4990**. `StyleMapSchema` stays deliberately OPEN (its key space is every CSS property; objectui's `declarations()` emits whatever it is handed) — recorded in the schema JSDoc, in a test pin, and in this row |
 | `dataset.zod.ts` | 4 | authorable | **strict as of #4001 批 14 — 0 strip sites remain.** `DatasetSchema` was strict from the ADR-0021 cutover while the two shapes carrying the actual semantic contract — `DatasetDimension`, `DatasetMeasure` (+ `.derived`) — were not. Curated against the sibling this module's own header names, `data/analytics.zod.ts`'s Cube layer: a Cube metric's `type` IS its aggregation, so `{ name: 'revenue', type: 'sum', field: 'amount' }` parsed clean and computed a `count`; `sql` gets guidance rather than an alias, because aiming `SUM(amount)` at `field` is finding 7's trap |
-| `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` | 4+4+4+7 | authorable (p) | interaction configs — #5003 (批 13, in flight) reclassifies these as `no door`; that row is its edit, not 批 14's |
+| `animation.zod.ts` / `dnd.zod.ts` / `keyboard.zod.ts` / `touch.zod.ts` / `offline.zod.ts` | 4+4+4+7+3 | ~~authorable (p)~~ **no door** | **no authoring door (measured, #4001 批 13)** — the `(p)` resolved NEGATIVE and the row is kept only so the arithmetic stays complete. Three independent measurements on 2026-08-03: (1) nothing under `packages/spec/src` imports these modules except the `ui/index.ts` barrel, so no schema anywhere declares a carrier key for them; (2) a BFS over the in-memory Zod graph from all 24 metadata-type roots plus `defineStack`'s `ObjectStackSchema` — the closure `build-schemas.ts` uses for the #4650 deletion check — reaches none of the 22 sites, while its three positive controls (`PageSchema`, batch 11's `WebhookSchema`, batch 10's `StateMachineSchema`) all resolve `root-graph` in the same run; (3) no `.parse()` / `.safeParse()` on any of them exists in `objectstack`, `objectui` or the example apps outside their own unit tests — objectui re-exports the inferred TYPES only and says so (#2561). `.strict()` is a property of a PARSE and there is no parse, so closing them would enforce nothing and would spend a v17 breaking change to leave *"a precisely validated dead slot — the more convincing lie"* (the #4583 row below). The live question is ADR-0049 enforce-or-remove, filed as **#4988**; each file's header comment and its test file carry the same verdict (the batch 12 three-places standard). **Do not reschedule these as strictness work** — that is what the `(p)` was for, and it has been answered |
 | `report.zod.ts` | 3 | authorable | **strict as of #4001 批 14 — 0 strip sites remain.** `ReportSchema` was already strict; `ReportSortSchema` and `JoinedReportBlockSchema` were not. The order key is the THIRD spelling of "sort" an author meets (`SortNodeSchema`'s `{field, order}`, the widget's flat `sortBy`/`sortOrder`, this `{by, direction}`), and the mappings run in opposite directions, so none is inferrable. ⚠️ `ReportSchema`'s OWN alias table carries a live false prescription (`filter` → `filters`, a key it also rejects; the real key is `runtimeFilter`) — out of 批 14's scope, filed as #5013 and pinned as a known defect in `strictness-batch14.test.ts` so the list cannot outlive it |
-| `offline.zod.ts` | 3 | authorable (p) | #5003 (批 13, in flight) reclassifies this as `no door`; that row is its edit, not 批 14's |
 | `notification.zod.ts` | 1 | authorable (p) | **#4610 dropped two sites** — the `./ui` `Notification` (toast/banner instance) and `NotificationConfig` (toaster global config) shapes were removed: zero importers in all three repos, and both shadowed live names owned elsewhere (`./api` owns the inbox row). What remains is `NotificationActionSchema` — and 批 14 measured it as **`no door`**, the fourth class: no carrier key (the barrel is its only importer), unreachable in a 6860-node BFS from the 24 metadata-type roots + `defineStack` (four positive controls passed in the same run; an injected carrier flipped it), and zero `.parse()` outside its own test. objectui consumes its `.shape.variant` as a VOCABULARY, never parsing an authored payload — which is exactly why closing it would buy nothing. Not tightened; ADR-0049 verdict filed as #5015 |
 | `sharing.zod.ts` | 2 | **split** | The first row in this ledger to carry two verdicts, and the reason the classification question is per SCHEMA rather than per file. `SharingConfigSchema` is a **live door** — `FormViewSchema.sharing` carries it, `rest-server.ts` mounts the anonymous form routes on `sharing.allowAnonymous` + `sharing.publicLink`, and both example apps author it — **strict as of #4001 批 14**. `EmbedConfigSchema` is **`no door`**: nothing in the repo so much as names the symbol, BFS-unreachable, zero parse. Not tightened; ADR-0049 verdict filed as #5015 |
 
@@ -683,7 +687,7 @@ it the same way: the decision is also written beside the schema and pinned in a
 test (`flow.test.ts`, `etl.test.ts`), because a row in a table is not where the
 next person to open that file will look.
 
-#### `ui/` — 114 strip of 198
+#### `ui/` — 110 strip of 198
 
 | File | Strip | Sites | Class | Batch |
 |---|---|---|---|---|
@@ -692,39 +696,88 @@ next person to open that file will look.
 | `theme.zod.ts` | 14 | 14 | authorable (p) | Authored themes; `Typography` / `Animation` sub-blocks dominate |
 | `widget.zod.ts` | 9 | 9 | authorable (p) | Widget manifest + lifecycle/event/property/source |
 | `chart.zod.ts` | 7 | 7 | authorable (p) | Axis / series / annotation / interaction / config / groupBy / aggregate |
-| `touch.zod.ts` | 7 | 7 | authorable (p) | Gesture configs |
+| `touch.zod.ts` | 7 | 7 | **no door** | ⛔ **not strictness work** — measured unreachable from every authoring root (#4001 批 13); ADR-0049 triage is #4988. See the triage row above |
 | `i18n.zod.ts` | 6 | 6 | authorable (p) | ⚠️ the triage row warns label shapes are wide-open records **by design** — verify before closing |
-| `animation.zod.ts` | 4 | 4 | authorable (p) | |
-| `dnd.zod.ts` | 4 | 4 | authorable (p) | |
-| `keyboard.zod.ts` | 4 | 4 | authorable (p) | |
-| `responsive.zod.ts` | 4 | 4 | authorable (p) | |
-| `offline.zod.ts` | 3 | 3 | authorable (p) | |
+| `animation.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
+| `dnd.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
+| `keyboard.zod.ts` | 4 | 4 | **no door** | ⛔ same as `touch` — #4988 |
+| `offline.zod.ts` | 3 | 3 | **no door** | ⛔ same as `touch` — #4988 |
 | `sharing.zod.ts` | 1 | 2 | **no door** | 批 14: `SharingConfig` was a live door and is **closed**; the 1 left is `EmbedConfigSchema`, which no module in the repo even names (BFS-unreachable, zero parse). **This row shrinks without disappearing** — the first `no door` floor, the same read the `Class` column already has to carry for `flow`'s and `etl`'s wire floors. ADR-0049 verdict: #5015 |
 | `app.zod.ts` | 1 | 18 | verify | `BaseNavItemSchema` — the base the strict discriminated-union members extend. Closing a base that is `.extend()`ed is the #4001 trap that bit `view` (finding 16); confirm the members' strictness is not already covering it before touching |
 | `notification.zod.ts` | 1 | 1 | **no door** | 批 14: `NotificationActionSchema` reclassified, not tightened — no carrier key, BFS-unreachable, zero parse; objectui reads its `.shape` as a vocabulary. ADR-0049 verdict: #5015 |
 
-**Authorable strip in `ui/`: 112 of 114.** Recomputed FROM THE SURVIVING ROWS
-above (29+20+14+9+7+7+6+4+4+4+4+3+1+1+1 = 114), never by decrementing the previous
-header — see the `automation/` note on why a clean merge here is evidence of
-nothing. Of those 114, `app.zod.ts`'s single site is held pending the finding-16
-`.extend()` check rather than counted as ready, and **2 are the fourth class**:
-`sharing.zod.ts`'s `EmbedConfig` and `notification.zod.ts`'s `NotificationAction`,
-both measured by 批 14 as having no authoring door at all (#5015).
+`responsive.zod.ts` left this table at **批 13** (#4001) on reverse-pin evidence
+— it reached 0 strip, the gate went red on the row still being there, and the row
+was deleted. `action.zod.ts`, `report.zod.ts`, `dataset.zod.ts` and
+`dashboard.zod.ts` left it the same way at **批 14**. Header and subtotal are
+**recomputed from the surviving rows** (29 + 20 + 14 + 9 + 7 + 7 + 6 + 4 + 4 + 4 +
+3 + 1 + 1 + 1 = 110), not decremented by any batch's own count. That is not
+pedantry: it happened four times in one day in `automation/` — each branch's
+arithmetic was right against itself, git merged the rows cleanly because they do
+not overlap, and the subtotal line, which conflicts with nothing, merged clean and
+wrong on both sides. `check:strictness-ledger`'s header arithmetic is what settles
+it.
 
-批 14 took the ratchet from 123 to 114 by closing **9 sites across four files**
-(`action` 1, `report` 2, `dataset` 3, `dashboard` 2 — all four rows deleted by the
-reverse pin) and reclassifying **2**. Worth recording what it did NOT find: the
-#4852 remeasure's site counts held exactly (1+1+2+2+3+2 = 11, confirmed against
-the gate's own AST counter), unlike 批 13, where the counts held but five of six
-files' `authorable(p)` dissolved under measurement. Both outcomes are the
-verification step working; neither is its expected answer.
+**批 13 and 批 14 are the fifth and sixth instances, and the first where the two
+wrong numbers were both *this* line.** 批 13 computed 119 against a tree where
+`action`/`report`/`dataset`/`dashboard` still had rows; 批 14 computed 114 against
+one where `responsive` still did. Both were correct against their own branch and
+both are wrong against the merge, which is **110** — a number neither side ever
+wrote down. Git reported one conflicted region here and would have reported none
+at all had the two batches touched different paragraphs. Every row from both sides
+was kept and the arithmetic redone from them; nothing was resolved in favour of a
+side.
 
-`sharing.zod.ts` is the shape this table had not seen before: **one file, two
-verdicts.** Its row shrinks 2 → 1 rather than disappearing, because the surviving
-site is deliberately-not-tightened rather than unfinished — the same read the
-`Class` column already has to carry for `flow`'s and `etl`'s wire floors in
-`automation/`, now needed for a `no door` floor too. The reverse pin still cannot
-tell the three apart; only this column can.
+**Authorable strip in `ui/`: 88 of 110** (was 123 of 123 when the ruling was
+written). Of the 110, `app.zod.ts`'s single site is held pending the finding-16
+`.extend()` check rather than counted as ready, and **22 are the fourth class** —
+`touch` (7), `animation` (4), `dnd` (4), `keyboard` (4) and `offline` (3) from
+批 13, plus `sharing.zod.ts`'s `EmbedConfig` and `notification.zod.ts`'s
+`NotificationAction` from 批 14. For all of those the live question is ADR-0049
+enforce-or-remove (#4988, #5015), not this ratchet.
+
+## What the two `ui/` batches measured, and why the answers differ
+
+批 13's subtotal moved by 26 while only 4 sites were CLOSED, and the 22-site gap
+was its actual finding: five files' `(p)` resolved NEGATIVE — no metadata document
+is ever parsed against them, so there is no author for strictness to protect.
+批 14's moved by 13 while 9 were closed, and its 2-site gap is the same class
+found twice more.
+
+That is worth reading as a method note, because 批 13 was the first time the `(p)`
+came back negative on a whole run of files rather than on one. The three
+`automation/` waves each resolved their `(p)` by *finding* a door the ledger's
+prose had missed — 批 10's `agent.lifecycle`, 批 11's boot-time
+`bootstrapDeclaredWebhooks`. That created a quiet expectation that verification
+means finding the door. Run with positive controls in the same execution, the same
+procedure found no door at all, five times. The correct output of a verification
+step is whatever it measures, including *"this was never ratchet work"*. A batch
+that had skipped the check would have shipped 22 strict schemas, a breaking
+changeset, and ~58 curated alias entries no parse would ever consult.
+
+批 14 is the counterweight that keeps that from hardening into a new expectation:
+of ITS eleven sites, **nine had real, live doors**, and four of those were the
+exact nested-hole shape 批 13 found on `page.components[]` — a container closed
+years ago (`ActionParamSchema` since #3746, `DashboardWidgetSchema` since the
+ADR-0021 cutover, `ReportSchema`, `DatasetSchema`) with strip-mode children,
+because **strictness does not recurse**. An action param option carrying
+`color` / `visibleWhen` / `icon` / `disabled` parsed clean through
+`getMetadataTypeSchema('action')` and came back `{ label, value }`. So the two
+batches together say the useful thing neither says alone: the `(p)` is a genuine
+question, and both answers are common.
+
+批 14 also produced the shape this table had not seen — **one file, two verdicts.**
+`ui/sharing.zod.ts`'s row shrinks 2 → 1 rather than disappearing, because the
+surviving site is deliberately-not-tightened rather than unfinished. The `Class`
+column now has to separate THREE kinds of floor: `flow`/`etl`'s wire floors in
+`automation/`, and now a `no door` floor. The reverse pin cannot tell any of them
+from unfinished work; only this column can.
+
+One more thing 批 14 did NOT find, recorded because the campaign's own history
+makes it worth stating: the #4852 remeasure's site counts held **exactly**
+(1+1+2+2+3+2 = 11, re-confirmed against the gate's own AST counter before any
+edit). 批 13 proved `authorable(p)` can dissolve under measurement; the COUNTS,
+since they were rebuilt on the AST at finding 19, have not.
 
 The one `open` site this directory carried is **gone, and not by being closed**:
 `bulk-action.zod.ts`'s `BulkActionParamSchema.options` was the row that read
