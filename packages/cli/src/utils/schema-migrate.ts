@@ -15,6 +15,7 @@
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
 import { isInPlaceSchemaWork } from '@objectstack/driver-sql';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
 
 export type { PendingSchemaWork };
@@ -51,7 +52,7 @@ export interface SchemaStack {
    * this project's `objectstack.config.ts`. Read by the ADR-0120 D5e
    * unique-scope advisory; best-effort (`[]` when no ObjectQL service composed).
    */
-  allObjects: () => any[];
+  allObjects: () => unknown[];
   /**
    * Perform the deferred sync — call only once the operator has confirmed the
    * plan. Returns the work it actually ran (`[]` when nothing was deferred).
@@ -223,9 +224,14 @@ export async function bootSchemaStack(
      * marketplace packages is a strict subset. Best-effort — a stack with no
      * ObjectQL service reports none, and the advisory then simply says nothing.
      */
-    allObjects: (): any[] => {
+    allObjects: (): unknown[] => {
       try {
-        const ql: any = (kernel as any).getService?.('objectql');
+        // The `objectql` slot's contract is `IObjectQLEngine` (#4251) — read it
+        // through that rather than erasing the lookup to `any`, so a rename of
+        // `registry` / `getAllObjects` breaks this at compile time instead of
+        // silently reporting zero objects and turning the D5e advisory mute.
+        const getService = (kernel as { getService?: (name: string) => unknown })?.getService;
+        const ql = getService?.call(kernel, 'objectql') as IObjectQLEngine | undefined;
         return ql?.registry?.getAllObjects?.() ?? [];
       } catch {
         return [];
