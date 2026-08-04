@@ -56,6 +56,33 @@ const MODIFY_ALL_WRITE_KEYS = new Set<keyof ObjectPermission>([
 export type CrudBucket = 'read' | 'create' | 'update' | 'delete';
 
 /**
+ * [#4647] Which super-user ("View/Modify All Data") bit answers a bypass
+ * question:
+ *
+ *  - `view`   → the READ bypass: `viewAllRecords` OR `modifyAllRecords`
+ *               (Modify All Data implies View All Data).
+ *  - `modify` → the WRITE bypass: `modifyAllRecords` ONLY. "View All Data" is
+ *               a read power and must never widen a write — the whole point of
+ *               shipping the two bits separately.
+ */
+export type SuperuserBypassBit = 'view' | 'modify';
+
+/**
+ * [#4647] The bypass bit that governs an ObjectQL operation, DERIVED from
+ * {@link crudBucketForOperation} so a future operation added to the CRUD map is
+ * classified automatically instead of being silently treated as a read.
+ *
+ * `export` is the one op with no CRUD bit of its own; it is a bulk READ
+ * (`export ⊆ list`, #3544), so it asks for the view bit. Everything the CRUD
+ * map does not classify as a read asks for the stronger `modify` bit — the
+ * fail-closed direction for an unknown operation.
+ */
+export function superuserBypassBitForOperation(operation: string): SuperuserBypassBit {
+  if (operation === 'export') return 'view';
+  return crudBucketForOperation(operation) === 'read' ? 'view' : 'modify';
+}
+
+/**
  * [ADR-0066 ⑤] Map a raw ObjectQL operation to the CRUD class a per-operation
  * `requiredPermissions` map is keyed on, DERIVED from `OPERATION_TO_PERMISSION`
  * so it stays in lockstep with the CRUD permission bits (and any future
@@ -243,6 +270,48 @@ export class PermissionEvaluator {
   }
 
   /**
+   * [ADR-0066 D2 / ① — #4647] **THE** "View/Modify All Data bypass held?"
+   * predicate. Returns the NAMES of the resolved sets that carry the requested
+   * bit for `objectName` (empty array = not held), honouring the private
+   * posture (see {@link resolveObjectPermission}).
+   *
+   * This is deliberately the ONE function every consumer folds through, because
+   * the bypass used to be decided in two places that disagreed (#4647): the
+   * explain engine's `vama_bypass` layer answered "bypass held — ownership and
+   * sharing are skipped" from its own inline read of `objects[name] ?? ['*']`,
+   * while the write path never consulted the bypass at all — so a Modify All
+   * Data holder was told `allowed: true` by `security/explain` and handed a 403
+   * by `PATCH /data/…` for the same (principal, record, operation) triple.
+   * Both sides now resolve the bypass HERE:
+   *
+   *   - explain → `explain-engine.ts` §8 `vama_bypass`
+   *   - writes  → {@link hasSuperuserWriteBypass} → `ISecurityService.hasWriteBypass`
+   *               → plugin-sharing `SharingService.canEdit` / `canDelete`
+   *               (and through `canEdit`, the `sys_attachment` parent gate)
+   *
+   * Returning the set names rather than a boolean is what keeps the two halves
+   * honest: the layer's `contributors` attribution and the enforcement decision
+   * are the same list, so a report that names a granting set cannot coexist
+   * with a gate that found none.
+   */
+  superuserBypassSets(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    opts: { isPrivate?: boolean; bit: SuperuserBypassBit },
+  ): string[] {
+    const out: string[] = [];
+    for (const ps of permissionSets) {
+      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
+      if (!op) continue;
+      const held = opts.bit === 'modify'
+        ? Boolean(op.modifyAllRecords)
+        : Boolean(op.viewAllRecords || op.modifyAllRecords);
+      if (held) out.push(String((ps as { name?: unknown }).name ?? '?'));
+    }
+    return out;
+  }
+
+  /**
    * [ADR-0066 D2 / ①] Does any resolved set grant the super-user READ bypass
    * (`viewAllRecords`/`modifyAllRecords`, the "View All Data" power) for the
    * object? Honours the private posture (see {@link resolveObjectPermission}).
@@ -254,24 +323,22 @@ export class PermissionEvaluator {
     permissionSets: PermissionSet[],
     opts: { isPrivate?: boolean } = {},
   ): boolean {
-    for (const ps of permissionSets) {
-      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-      if (op && (op.viewAllRecords || op.modifyAllRecords)) return true;
-    }
-    return false;
+    return this.superuserBypassSets(objectName, permissionSets, { ...opts, bit: 'view' }).length > 0;
   }
 
-  /** [ADR-0066 D2 / ①] Super-user WRITE bypass (`modifyAllRecords`) for the object. */
+  /**
+   * [ADR-0066 D2 / ①] Super-user WRITE bypass (`modifyAllRecords`) for the
+   * object — "Modify All Data": an admin may edit any record regardless of
+   * ownership (#1883's Salesforce reference frame, re-affirmed for the write
+   * path in #4647). Same predicate the explain engine reports, so the two can
+   * never answer differently.
+   */
   hasSuperuserWriteBypass(
     objectName: string,
     permissionSets: PermissionSet[],
     opts: { isPrivate?: boolean } = {},
   ): boolean {
-    for (const ps of permissionSets) {
-      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-      if (op && op.modifyAllRecords) return true;
-    }
-    return false;
+    return this.superuserBypassSets(objectName, permissionSets, { ...opts, bit: 'modify' }).length > 0;
   }
 
   /**

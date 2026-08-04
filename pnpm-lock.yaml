@@ -1581,6 +1581,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../plugin-sharing
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
