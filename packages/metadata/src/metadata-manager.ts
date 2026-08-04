@@ -184,10 +184,13 @@ export class MetadataManager implements IMetadataService {
   // acquire a fresh knex connection while the transaction is still holding
   // SQLite's single connection — knex waits the full `acquireConnectionTimeout`
   // (60s) before returning []. The cache absorbs the repeated lookups so the
-  // loader is only hit once per TTL window — for SEQUENTIAL callers. Nothing is
-  // written until a read completes, so calls issued concurrently with the first
-  // one all miss and each walk every loader (#5253); read that sentence as a
-  // statement about repeated lookups, not a concurrency guarantee.
+  // loader is only hit once per TTL window — for CONCURRENT callers as well as
+  // sequential ones, since #5253. The cache on its own could only ever deliver
+  // the sequential half of that promise: nothing is written until a read
+  // completes, so everything issued before the first read returned used to miss
+  // and walk every loader — N callers, N × 60s on the very stall described
+  // above. The concurrent half is delivered by `inflightListReads` below, which
+  // is why the two fields are one policy and are documented together.
   //
   // [#5184] That hazard is NOT historical — it was re-verified on the current
   // driver stack before this policy was chosen. `DatabaseLoader._find()` still
@@ -237,6 +240,57 @@ export class MetadataManager implements IMetadataService {
    * 15× shorter than the healthy TTL.
    */
   private static readonly DEGRADED_LIST_CACHE_TTL_MS = 2_000;
+
+  /**
+   * [#5253] The `list()` read currently in flight for a metadata type — the
+   * concurrent half of the `listCache` policy above.
+   *
+   * `listCache` memoizes an answer only once a read has *finished*, so it can
+   * absorb the caller that arrives second in time but never the caller that
+   * arrives second in flight. Everything issued while the first read is still
+   * walking the loaders used to miss and start its own identical walk; on the
+   * knex/SQLite path the field comment above is built for, that is 60s burned
+   * per concurrent caller instead of once for all of them. A type is read once
+   * at a time: whoever finds a read already running joins it.
+   *
+   * **Sharers share the outcome. This is a contract, not an accident.** Every
+   * caller joining an in-flight read receives that read's exact result — the
+   * same array instance, and, when a loader was unreadable, the same
+   * known-partial set that gets memoized `degraded: true` on the short TTL.
+   * There is no per-caller retry: `list()` is the best-effort listing seam and
+   * does not throw (see {@link reportLoaderReadFailure}; the strict
+   * counterparts are `listForIndex()` and {@link loadDiagnosed}), so a lost
+   * loader is not an error to fail over from — it is the answer. Re-running the
+   * read privately for a joiner would walk the same loaders in the same window
+   * against the same outage, which is precisely what this map exists to
+   * prevent. Should the seam ever acquire a rejecting path, that rejection is
+   * shared by the same mechanism and for the same reason.
+   *
+   * **The registration is also the permission to cache.** An entry here says
+   * "this read still describes the current state". {@link invalidateListCache}
+   * retracts it, which is what makes a write landing mid-read safe in both
+   * directions:
+   *   • the retracted read does NOT write its result into `listCache` when it
+   *     settles, so an answer assembled before the write cannot outlive the
+   *     write it predates (the invalidation wins — it is the later, better
+   *     informed fact);
+   *   • a `list()` issued after the invalidation starts a FRESH read instead of
+   *     joining one that predates the write.
+   * That second point is the #5219 / #5229 ordering bar restated for
+   * concurrency: a consumer woken by a metadata change must not observe the
+   * event and pre-event state together, and handing a woken watcher an
+   * in-flight read that began before the event would be exactly that.
+   * Callers *already waiting* on the retracted read still receive its (now
+   * possibly stale) result — they asked before the write, and restarting the
+   * read under them would turn a write burst into an unbounded retry loop on
+   * the one path the cache exists to keep off the loaders.
+   *
+   * Self-cleaning: the entry is dropped when the read settles, by that read
+   * only, so a fresh read that already replaced it keeps its slot. Nothing
+   * accumulates — a wave of callers arriving after settle finds the cache the
+   * settle just wrote, and once that lapses it starts one new read.
+   */
+  private readonly inflightListReads = new Map<string, Promise<unknown[]>>();
 
   // [#5108] Loader names whose read failure has already been reported at
   // `error` by `list()`. AGENTS.md → "Degradation log levels": say it once, at
@@ -605,7 +659,17 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
-   * List all metadata items of a given type
+   * List all metadata items of a given type.
+   *
+   * Best-effort by contract: a loader that cannot be read is reported once and
+   * skipped ({@link reportLoaderReadFailure}), so this resolves with what the
+   * reachable loaders hold rather than throwing.
+   *
+   * [#5253] Reads of one type are single-flight — concurrent callers join the
+   * read already running instead of each walking every loader. What they are
+   * promised, and what happens when a write lands mid-read, is the contract on
+   * `inflightListReads`; what is memoized afterwards is the contract on
+   * `listCache`.
    */
   async list(type: string): Promise<unknown[]> {
     // Short-TTL cache: see the field comment on `listCache` for what is
@@ -616,6 +680,54 @@ export class MetadataManager implements IMetadataService {
       return cached.items;
     }
 
+    // [#5253] Cold cache, but not necessarily a cold read: join the walk
+    // already in progress for this type rather than starting an identical one.
+    const joined = this.inflightListReads.get(type);
+    if (joined) {
+      return joined;
+    }
+
+    // Registering the read is what permits it to memoize its own result —
+    // `invalidateListCache()` retracts the registration, and both the cache
+    // write and the cleanup below act only while the slot is still ours.
+    const shared: Promise<unknown[]> = this.readListUncached(type).then(({ items, degraded }) => {
+      // [#5184] The degraded verdict of a SHARED read is the degraded verdict
+      // of the read: sharing must not become a back door that lands a
+      // known-partial answer on the 30s healthy TTL. Every sharer received
+      // this same set, and it is memoized as what it is.
+      // [#5253] Skipped when an invalidation crossed this read, so a write
+      // that landed mid-read is never re-buried under the pre-write answer.
+      if (this.inflightListReads.get(type) === shared) {
+        this.cacheListResult(type, items, degraded);
+      }
+      return items;
+    });
+    this.inflightListReads.set(type, shared);
+
+    try {
+      return await shared;
+    } finally {
+      // Retract only our OWN registration: an invalidation may have already
+      // dropped it and a fresh read may own the slot now — deleting that one
+      // would let a third read start against the same window.
+      if (this.inflightListReads.get(type) === shared) {
+        this.inflightListReads.delete(type);
+      }
+    }
+  }
+
+  /**
+   * Assemble the `list()` answer for `type` from the in-memory registry plus
+   * every loader, reporting (but not rethrowing) loaders that could not be
+   * read.
+   *
+   * The body {@link list} used to inline, extracted so the caching and
+   * single-flight bookkeeping around it has one thing to run at most once per
+   * type (#5253). Deliberately does NOT touch `listCache` itself: whether this
+   * result may be memoized depends on what happened to the read's registration
+   * while it ran, which only `list()` can see.
+   */
+  private async readListUncached(type: string): Promise<{ items: unknown[]; degraded: boolean }> {
     const items = new Map<string, unknown>();
 
     // From in-memory registry
@@ -647,9 +759,7 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    const result = Array.from(items.values());
-    this.cacheListResult(type, result, degraded);
-    return result;
+    return { items: Array.from(items.values()), degraded };
   }
 
   /**
@@ -743,9 +853,20 @@ export class MetadataManager implements IMetadataService {
     return Date.now() - cached.ts < ttl ? cached : undefined;
   }
 
-  /** Internal helper: drop the cached `list()` result for a type. */
+  /**
+   * Internal helper: drop every memoized or in-progress `list()` answer for a
+   * type, so the next read observes the write that called this.
+   *
+   * [#5253] Retracting the in-flight read (not just the finished entry) is the
+   * whole mid-read story, and it is pinned by test: the read keeps running for
+   * the callers already waiting on it, but it loses the right to memoize its
+   * pre-write answer, and a caller arriving after this point gets a fresh read
+   * instead of joining a pre-write one. The reasoning — including why waiting
+   * callers are NOT restarted — is on the `inflightListReads` field.
+   */
   private invalidateListCache(type: string): void {
     this.listCache.delete(type);
+    this.inflightListReads.delete(type);
     // [#5089] The endpoint index is a cache of the same stored set, so it goes
     // stale under exactly the same conditions. Hooking here (rather than only
     // on the watcher) is what covers the `{ notify: false }` writes — artifact
