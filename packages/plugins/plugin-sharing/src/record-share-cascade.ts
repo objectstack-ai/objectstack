@@ -68,6 +68,17 @@
  * The `kernel:bootstrapped` sweep (unscoped) is the durable backstop for both:
  * a hook that failed, a process that died mid-cascade, and every orphan that
  * predates this code converge on the next boot.
+ *
+ * ## Referential cascades are covered
+ *
+ * `ObjectQLEngine.cascadeDeleteRelations` removes a `deleteBehavior: 'cascade'`
+ * child by recursing through the PUBLIC `delete()` ("so the child's own
+ * cascade, hooks and events fire"), not by calling the driver directly — so a
+ * detail record swept away with its master reaches this hook like any other
+ * delete. That is why `controlled_by_parent` counts as sharing-capable in
+ * {@link objectCanCarryRecordShares} despite refusing manual grants: rows can
+ * exist there (the rule evaluator grants under system context), and this is
+ * the path that reclaims them.
  */
 
 import {
