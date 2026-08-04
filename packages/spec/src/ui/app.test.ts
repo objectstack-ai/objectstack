@@ -1463,6 +1463,25 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(msg).toMatch(/visible.*removed.*17\.0\.0/s);
       expect(msg).toMatch(/fails open|EVERYONE/s);
       expect(msg).toMatch(/navigation ITEM's `visible`/s);
+      // #4722 also moved where a SERVER-enforced gate may live, and this
+      // prescription's closing enumeration had not followed. It used to name
+      // the top-level tree as the only item-level destination, which sends an
+      // author already standing inside an area off to restructure their
+      // navigation for a gate they can now write in place. Pin the corrected
+      // enumeration rather than merely the absence of the old one.
+      expect(msg).toMatch(/either navigation tree/s);
+      expect(msg).toMatch(/areas\[\]\.navigation/s);
+      expect(msg).toMatch(/#4722/s);
+      // …and do NOT let that drag `visible`'s own verdict along: #4722 changed
+      // nothing about CEL, which is still evaluated in the browser at every
+      // level. That asymmetry is the entire reason this prescription can send a
+      // must-never-ship gate to `requiredPermissions` rather than to an item's
+      // `visible` — the destination it would otherwise be natural to reach for,
+      // since the author arrived here holding a CEL expression.
+      expect(msg).toMatch(/evaluated in the browser/s);
+      expect(msg).toMatch(/navigation ITEM's `visible` takes the same CEL expression/s);
+      // Negative pin on the enumeration this replaced.
+      expect(msg).not.toMatch(/on items of the app's top-level/s);
     });
 
     it('routes the retired gating aliases to the same prescriptions', () => {

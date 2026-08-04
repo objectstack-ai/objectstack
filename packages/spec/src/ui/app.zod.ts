@@ -686,9 +686,12 @@ const AREA_VISIBLE_RETIRED =
   + 'gate that fails open, which is worse than no gate at all. Delete the key and gate the '
   + 'items INSIDE the area — a navigation ITEM\'s `visible` takes the same CEL expression and '
   + 'IS evaluated per item by the shell. For a gate the SERVER enforces, use '
-  + '`requiredPermissions`: on the app itself, or on items of the app\'s top-level '
-  + '`navigation` tree. Run `os migrate meta --from 16` to rewrite existing sources '
-  + 'automatically.';
+  + '`requiredPermissions` instead: on the app itself, or on the ITEMS of either navigation '
+  + 'tree — the app\'s top-level `navigation` AND every `areas[].navigation`, both stripped '
+  + 'server-side since #4722. The distinction survives at every level: `visible` is CEL '
+  + 'evaluated in the browser, so it hides an entry that has already been sent, while '
+  + '`requiredPermissions` stops that entry from being served at all. Run '
+  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
   '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — '
