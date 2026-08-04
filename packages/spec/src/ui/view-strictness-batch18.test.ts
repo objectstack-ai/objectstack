@@ -5,11 +5,17 @@
  *
  * The long tail of this file: the top level, the form/page shapes and the ~28
  * config blocks under them were closed in earlier waves, leaving 20 object
- * sites that still dropped unknown keys silently. 16 are closed here. The other
- * FOUR stay open, each for a measured reason, and those reasons are pinned in
- * this file too — a deliberately-open shape that is only explained in prose is
- * indistinguishable from one nobody has got to yet, which is how the next sweep
- * "finishes the job" and breaks something.
+ * sites that still dropped unknown keys silently. 16 were closed in the batch
+ * itself; `UserFiltersSchema` followed at **#5073**, once the maintainer
+ * adjudicated the protocol question that blocked it (promote `allowAddTab`,
+ * then close). The other THREE stay open, each for a measured reason, and those
+ * reasons are pinned in this file too — a deliberately-open shape that is only
+ * explained in prose is indistinguishable from one nobody has got to yet, which
+ * is how the next sweep "finishes the job" and breaks something.
+ *
+ * ⚠️ A fourth shape, `ViewFilterRuleSchema`, is open on separate evidence and
+ * pinned in its OWN file (`view-filter-rule-wire-id.test.ts`, #5114). It is not
+ * this batch's to reason about; do not fold the two sets together.
  *
  * This file is the third of the three places each verdict is recorded (the
  * others: the JSDoc on the shape itself, and the `ui/` row in
@@ -28,8 +34,8 @@
  *      redundant. Where the bare edit-distance suggester already answers
  *      correctly, no alias was added — and where it would answer WRONGLY, the
  *      alias overrules it and this file says so.
- *   4. The FOUR shapes left open, with the evidence that they are wire/base
- *      rather than unfinished.
+ *   4. The shapes left open, with the evidence that they are wire/base rather
+ *      than unfinished.
  *   5. The real union ERROR BEHAVIOUR (#5014) — pinned honestly, including the
  *      part that does not reach the author today.
  */
@@ -222,6 +228,84 @@ describe('#4001 批 18 — the rejection carries a usable prescription', () => {
     expect(reject(ListViewSchema, { ...LIST_BASE, emptyState: { action: {} } })).toContain('addRecord');
   });
 
+  describe('UserFiltersSchema — closed at #5073, after `allowAddTab` was promoted', () => {
+    // 批 18 left this shape open because closing it would have 422'd
+    // `allowAddTab`: objectui's renderer reads the key
+    // (`plugin-list/src/UserFilters.tsx:182` / `:742`), and `saveMetaItem`
+    // persists the ORIGINAL body rather than `parsed.data`, so the stripped key
+    // still reached the renderer and the capability WORKED. The maintainer
+    // adjudicated promote-then-close (2026-08-04), which is what these pin.
+
+    it('`allowAddTab` is DECLARED, so the promoted capability survives the close', () => {
+      // The whole reason the close was blocked. If this ever goes red, the
+      // close has silently re-become the capability removal #5073 refused.
+      const parsed = accept(UserFiltersSchema, { element: 'tabs', allowAddTab: true }) as Record<string, unknown>;
+      expect(parsed.allowAddTab).toBe(true);
+      expect(reject(ListViewSchema, { ...LIST_BASE, userFilters: { element: 'tabs', allowAddTab: 'yes' } }))
+        .toContain('allowAddTab');
+    });
+
+    it('rides in through `ListView.userFilters` — the carrier, not just the shape standalone', () => {
+      const parsed = accept(ListViewSchema, { ...LIST_BASE, userFilters: { element: 'tabs', allowAddTab: true } }) as {
+        userFilters?: Record<string, unknown>;
+      };
+      expect(parsed.userFilters?.allowAddTab).toBe(true);
+    });
+
+    it('an unknown key is now REJECTED where it lives, not dropped', () => {
+      expect(reject(UserFiltersSchema, { element: 'dropdown', notAUserFilterKey: 1 })).toContain('notAUserFilterKey');
+      expect(reject(ListViewSchema, { ...LIST_BASE, userFilters: { element: 'dropdown', notAUserFilterKey: 1 } }))
+        .toContain('notAUserFilterKey');
+    });
+
+    it('the 批 6e strip-reliance flipped from "drops" to "rejects" — the wanted flip', () => {
+      // `ObjectUserFiltersSchema` is `.omit()`ed off this base and `.omit()`
+      // inherits posture, which is exactly what 批 6e asked about. Before the
+      // close these three keys were silently dropped while the CLI lint
+      // (`validate-list-view-mode.ts`) warned about them — two doors
+      // disagreeing. They now agree.
+      for (const pageOnly of [
+        { tabs: [{ name: 'mine', label: 'Mine', filter: [] }] },
+        { showAllRecords: true },
+        { allowAddTab: true },
+      ]) {
+        expect(reject(ObjectUserFiltersSchema, { element: 'dropdown', ...pageOnly }))
+          .toContain(Object.keys(pageOnly)[0]);
+      }
+    });
+
+    it('…and each rejection carries the `listViews` prescription, not a bare refusal', () => {
+      // The keys are page-only, so there IS a right answer on an object view;
+      // a bare "unrecognized key" would leave the author to guess it.
+      expect(reject(ObjectUserFiltersSchema, { element: 'dropdown', tabs: [] })).toContain('listViews');
+      expect(reject(ObjectUserFiltersSchema, { element: 'dropdown', showAllRecords: true })).toContain('listViews');
+      expect(reject(ObjectUserFiltersSchema, { element: 'dropdown', allowAddTab: true })).toContain('ViewTabBar');
+    });
+
+    it('…and does NOT suggest an omitted key back — the finding-7 hazard the close created', () => {
+      // `.omit()` keeps the BASE's error map, whose `knownKeys` were read from
+      // the base shape — which still lists `tabs`. Measured before the fix:
+      // `tab` was answered with "Did you mean `tab` → `tabs`?", steering the
+      // author at the one key this surface refuses. The map is rebuilt over the
+      // omitted shape so the suggestion pool cannot contain them.
+      const msg = reject(ObjectUserFiltersSchema, { element: 'dropdown', tab: 1 });
+      expect(msg).toContain('`tab`');
+      expect(msg).not.toContain('→ `tabs`');
+      expect(reject(ObjectUserFiltersSchema, { element: 'dropdown', showAllRecord: 1 }))
+        .not.toContain('→ `showAllRecords`');
+    });
+
+    it('the object variant still DERIVES its shape from the base (#2231), not a transcription', () => {
+      // The reason it is `.omit()` + spread rather than a hand-listed shape: a
+      // key added to the base must appear here, or the two drift into the fork
+      // derive-by-reference exists to prevent.
+      const baseKeys = Object.keys((UserFiltersSchema as unknown as { shape: Record<string, unknown> }).shape);
+      const objectKeys = Object.keys((ObjectUserFiltersSchema as unknown as { shape: Record<string, unknown> }).shape);
+      expect(baseKeys).toEqual(['element', 'fields', 'tabs', 'showAllRecords', 'allowAddTab']);
+      expect(objectKeys).toEqual(['element', 'fields']);
+    });
+  });
+
   it('`continue` / `next-record` explain they take no options instead of suggesting a key', () => {
     const msg = reject(FormViewSchema, { ...FORM_BASE, submitBehavior: { kind: 'continue', title: 'Thanks' } });
     expect(msg).toContain('thank-you');
@@ -263,33 +347,9 @@ describe('#4001 批 18 — union error behaviour (#5014), pinned as it really is
 });
 
 // ===========================================================================
-// 5. The four shapes left OPEN — with the evidence, so nobody "finishes" them
+// 5. The shapes left OPEN — with the evidence, so nobody "finishes" them
 // ===========================================================================
 describe('#4001 批 18 — deliberately still open (do not close without re-measuring)', () => {
-  it('UserFiltersSchema stays open: closing it would 422 `allowAddTab`, a LIVE capability', () => {
-    // objectui reads `config.allowAddTab` and renders an add-tab control from
-    // it (`plugin-list/src/UserFilters.tsx:182` / `:742`); the spec never
-    // declared the key. Because `saveMetaItem` validates but persists the
-    // ORIGINAL body, the key survives the strip and the feature WORKS today —
-    // so closing here removes a capability rather than making a silent failure
-    // loud. Blocked on the promote-or-reject decision for `allowAddTab`.
-    expect(UserFiltersSchema.safeParse({ element: 'dropdown', allowAddTab: true }).success).toBe(true);
-  });
-
-  it('…and the 批 6e question IS answered: the strip-reliance is real and named', () => {
-    // `ObjectUserFiltersSchema` is `UserFiltersSchema.omit({ tabs,
-    // showAllRecords })` and `.omit()` inherits the base's posture, so closing
-    // the base flips this from "drops" to "rejects". That flip is wanted (the
-    // CLI lint already reports it) — it is gated only on `allowAddTab`.
-    const parsed = accept(ObjectUserFiltersSchema, {
-      element: 'dropdown',
-      tabs: [{ name: 'mine', label: 'Mine', filter: [] }],
-      showAllRecords: true,
-    }) as Record<string, unknown>;
-    expect(parsed).not.toHaveProperty('tabs');
-    expect(parsed).not.toHaveProperty('showAllRecords');
-  });
-
   it('ViewItemSchema stays open: it is the member Studio round-trips `isPinned` through', () => {
     // objectui's pin control PUTs `{ ...storedItem, isPinned }`
     // (`ObjectView.tsx:882` → `data-objectstack/src/index.ts:2801`). A stored
