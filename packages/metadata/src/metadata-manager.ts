@@ -1701,8 +1701,13 @@ export class MetadataManager implements IMetadataService {
                 }
                 results.push(item);
             }
+            this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
-           this.logger.warn(`Loader ${loader.contract.name} failed to loadMany ${type}`, { error: e });
+            // [#5108] Same seam, same verdict as `list()` — see
+            // {@link reportLoaderReadFailure}. Two adjacent plural reads
+            // reporting one storage outage at two different levels is how the
+            // wrong one gets copied.
+            this.reportLoaderReadFailure(loader.contract.name, type, e);
         }
     }
     return results;

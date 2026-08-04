@@ -1008,6 +1008,34 @@ describe('DatabaseLoader read failures are outages, not misses (#5108)', () => {
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
 
+    it('the sibling plural read, loadMany(), reports at the same level', async () => {
+      const manager = managerOverBrokenDb();
+
+      await expect(manager.loadMany('permission')).resolves.toEqual([]);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('un-says it when the loader becomes readable again', async () => {
+      const driver = createMockDriver();
+      let broken = true;
+      const realFind = driver.find as unknown as (t: string, q: unknown) => Promise<Record<string, unknown>[]>;
+      driver.find = vi.fn().mockImplementation((table: string, query: unknown) => {
+        if (broken) return Promise.reject(connectionReset());
+        return realFind(table, query);
+      });
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerLoader(new DatabaseLoader({ driver, cache: { enabled: false } }));
+
+      await manager.loadMany('permission');
+      expect(logger.error).toHaveBeenCalledTimes(1);
+
+      broken = false;
+      await manager.loadMany('permission');
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.info.mock.calls.map(c => c[0]).join()).toMatch(/readable again/i);
+    });
+
     it('loadDiagnosed reports `degraded` — ADR-0110 D3 now holds for the DB loader', async () => {
       const manager = managerOverBrokenDb();
 

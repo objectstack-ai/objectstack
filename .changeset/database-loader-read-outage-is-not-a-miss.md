@@ -25,7 +25,9 @@ fix(metadata): `DatabaseLoader` 的读故障不再被吞成「什么都没声明
 - `MetadataManager.list()` 的降级分支会真的进,并且**升级到 `error`**
   (AGENTS.md「Degradation log levels」:系统看着正常、它声称掌握的清单其实是残缺的),
   日志写明后果与修法,每次故障只说一次、恢复时再说一次;`list()` 仍然尽力返回可读
-  loader 的内容 —— 这个 best-effort 姿态是刻意保留的;
+  loader 的内容 —— 这个 best-effort 姿态是刻意保留的。兄弟方法
+  `MetadataManager.loadMany()` 的同一条缝走同一个判决,不让同一次故障在同一个文件里
+  报出两个级别;
 - `MetadataManager.loadDiagnosed()`(ADR-0110 D3)对 `DatabaseLoader` 终于能报出
   `degraded` / `errors`,而不是把 outage 报成 miss;
 - `listForIndex()` / `matchEndpoint`(#5089)契约要求「读不到存储必须抛出,不得伪装成
