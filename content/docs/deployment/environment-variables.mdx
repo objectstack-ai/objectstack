@@ -124,16 +124,29 @@ Auth settings precedence:
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_EMAIL_PROVIDER` | enum | `log` | Transport. `log` \| `resend` \| `postmark`. `log` (default) prints to stdout without sending. Real SMTP delivery requires the separate `@objectstack/plugin-mail-smtp` package. |
+| `OS_EMAIL_PROVIDER` | enum | `log` | Transport. `log` \| `smtp` \| `resend` \| `postmark`. `log` (default) prints to stdout without sending. |
 | `OS_EMAIL_API_KEY` | string | — | API key for `resend` / `postmark`. |
 | `OS_EMAIL_FROM` | email | — | Default `From:` address. |
 | `OS_EMAIL_RETRIES` | number | `0` | Retry count for transient send failures (`0` = no retry). |
+| `OS_EMAIL_SMTP_HOST` | string | — | SMTP server hostname. **Required** when `OS_EMAIL_PROVIDER=smtp` — a boot without it fails loudly rather than starting with a transport that logs mail instead of sending it. |
+| `OS_EMAIL_SMTP_PORT` | number | `587` | SMTP port. `465` selects implicit TLS (SMTPS). |
+| `OS_EMAIL_SMTP_SECURE` | boolean | `true` | Require TLS. On port `465` that means implicit TLS; on any other port a **required** STARTTLS upgrade (a server that will not upgrade fails the send instead of leaking credentials in the clear). `false` connects in the clear and upgrades only when STARTTLS is offered. |
+| `OS_EMAIL_SMTP_USER` | string | — | SMTP AUTH username. Omit for servers that accept unauthenticated relay. |
+| `OS_EMAIL_SMTP_PASSWORD` | string | — | SMTP AUTH password. |
 
-> No SMTP transport ships in the open-core runtime — `OS_EMAIL_PROVIDER`
-> only materialises `log`, `resend`, or `postmark`. Real SMTP delivery
-> requires the separate `@objectstack/plugin-mail-smtp` package, which reads
-> its own SMTP settings (configured in **Settings → Mail** or via the
-> plugin's constructor options).
+> SMTP delivery ships in `@objectstack/plugin-email` (ADR-0012) and is
+> implemented with `nodemailer`, imported lazily so deployments that never
+> select SMTP — and non-Node runtimes — never load `node:net` / `node:tls`.
+> Any provider that speaks SMTP works through it: a corporate mail server,
+> Aliyun DirectMail, Tencent SES, QQ / 163 enterprise mailboxes.
+>
+> These variables configure the transport at **boot**. The same connection
+> can be configured at runtime in **Settings → Mail** (namespace `mail`,
+> keys `smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+> `smtp_password`), which hot-swaps the live transport without a restart and
+> whose **Send test email** button performs a real delivery. Settings-page
+> values are overridden by the namespace's own `OS_MAIL_*` env door
+> (e.g. `OS_MAIL_SMTP_HOST`), which locks the field in the UI.
 
 ---
 

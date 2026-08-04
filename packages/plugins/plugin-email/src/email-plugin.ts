@@ -9,7 +9,12 @@ import type {
 } from '@objectstack/spec/contracts';
 import { SysEmail, SysEmailTemplate } from '@objectstack/platform-objects/audit';
 import { EmailService, LogTransport, type EmailPersistence, type TemplateLoader, type EmailTemplateRow } from './email-service.js';
-import { makeTransport } from './transports/index.js';
+import {
+  makeTransport,
+  SmtpTransport,
+  smtpOptionsFromMailSettings,
+  type EmailTransportProvider,
+} from './transports/index.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 import type { EmailTemplateDefinition as EmailTemplate } from '@objectstack/spec/system';
 import {
@@ -35,11 +40,17 @@ export interface EmailServicePluginOptions {
    * `LogTransport` (no real send).
    */
   transport?: IEmailTransport;
-  /** Provider tag — `'log' | 'resend' | 'postmark'`. Default `'log'`. */
-  provider?: 'log' | 'resend' | 'postmark';
+  /** Provider tag — `'log' | 'resend' | 'postmark' | 'smtp'`. Default `'log'`. */
+  provider?: EmailTransportProvider;
   /** API key for resend/postmark. */
   apiKey?: string;
-  /** Provider-specific extra options (e.g. Postmark messageStream). */
+  /**
+   * Provider-specific extra options — Postmark `messageStream`, or the
+   * SMTP connection for `provider: 'smtp'` (`host` / `port` / `secure` /
+   * `user` / `password`, see `SmtpTransportOptions`). A `smtp` provider
+   * with no `host` THROWS at init: a boot that cannot deliver must fail
+   * loudly rather than degrade to a LogTransport that reports success.
+   */
   providerOptions?: Record<string, unknown>;
   /** Default `From` address applied when `input.from` is omitted. */
   defaultFrom?: EmailAddress;
@@ -83,21 +94,35 @@ export class EmailServicePlugin implements Plugin {
   private boundEngine?: IDataEngine;
   /** Live `email_template` metadata subscription — detached in dispose(). */
   private unsubscribeTemplates?: () => void;
+  /** SMTP transport currently in use, if any — closed in dispose(). */
+  private liveSmtp?: SmtpTransport;
 
   constructor(options: EmailServicePluginOptions = {}) {
     this.options = options;
   }
 
+  /**
+   * Materialise the constructor-configured transport.
+   *
+   * Deliberately propagates `makeTransport`'s throw (missing SMTP host,
+   * missing API key): on the construction path — `os serve`, an explicit
+   * `new EmailServicePlugin({ provider: 'smtp' })` — a provider that cannot
+   * be built must fail the boot. Falling back to a LogTransport here would
+   * hand the operator a server that reports every send as successful and
+   * delivers nothing (#5087).
+   */
   private resolveTransport(ctx: PluginContext): IEmailTransport {
     if (this.options.transport) return this.options.transport;
     const provider = this.options.provider ?? 'log';
     if (provider === 'log') return new LogTransport(ctx.logger);
-    return makeTransport({
+    const transport = makeTransport({
       provider,
       apiKey: this.options.apiKey,
       options: this.options.providerOptions,
       logger: ctx.logger,
     });
+    if (transport instanceof SmtpTransport) this.liveSmtp = transport;
+    return transport;
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -156,10 +181,12 @@ export class EmailServicePlugin implements Plugin {
             try {
               const payload = await settings.getNamespace('mail');
               const values: Record<string, unknown> = {};
+              const sources: Record<string, string> = {};
               for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
                 values[k] = v?.value;
+                if (v?.source) sources[k] = String(v.source);
               }
-              this.applyMailSettings(values, ctx);
+              this.applyMailSettings(values, sources, ctx);
             } catch (err: any) {
               ctx.logger.warn('EmailServicePlugin: failed to apply mail settings: ' + (err?.message ?? err));
             }
@@ -173,13 +200,15 @@ export class EmailServicePlugin implements Plugin {
             ctx.logger.info('EmailServicePlugin: bound to settings:changed for namespace=mail');
           }
 
-          // Register the `mail/test` action handler so saving + sending
-          // a test email actually exercises the live transport.
+          // Register the `mail/test` action handler so pressing "Send test
+          // email" actually delivers one. This OVERRIDES the built-in
+          // fallback in service-settings, which can only validate the form
+          // (and says so) — the same pattern `storage/test` uses.
           //
           // The handler accepts both the persisted snapshot (`values`)
           // and the (possibly unsaved) form state posted as
           // `payload.values`, with overrides winning. When the merged
-          // provider/api_key differ from what the live `svc` is bound
+          // provider/credentials differ from what the live `svc` is bound
           // to, a one-shot temporary `EmailService` is built so the
           // operator can validate edits before hitting "Save".
           if (typeof settings.registerAction === 'function') {
@@ -196,12 +225,43 @@ export class EmailServicePlugin implements Plugin {
 
               // Build a temporary service from the merged values when
               // the form differs from the live svc — covers the
-              // "edited but not saved" path.
+              // "edited but not saved" path. For `smtp` this ALWAYS
+              // happens: the button must exercise the host/port/TLS/
+              // credentials on screen, and a real connection is the only
+              // thing that can report an authentication failure honestly
+              // (#5087 — this action used to report success for SMTP
+              // while the live transport was still the LogTransport).
               let target: EmailService = svc;
               let tempDescription = '';
+              /** One-shot SMTP transport built for this test — closed below. */
+              let tempSmtp: SmtpTransport | undefined;
               const provider = String(merged.provider ?? 'smtp');
               const apiKey = typeof merged.api_key === 'string' ? merged.api_key : undefined;
-              if (provider !== 'smtp' && provider !== 'log') {
+              if (provider === 'smtp') {
+                const smtp = smtpOptionsFromMailSettings(merged);
+                if (!smtp.host) {
+                  return { ok: false, severity: 'error', message: 'SMTP host is required — nothing was sent.' };
+                }
+                try {
+                  tempSmtp = new SmtpTransport({ ...smtp, logger: ctx.logger });
+                  target = new EmailService({
+                    transport: tempSmtp,
+                    defaultFrom: merged.from_email
+                      ? {
+                          address: String(merged.from_email),
+                          name: merged.from_name ? String(merged.from_name) : undefined,
+                        }
+                      : undefined,
+                    // Same sys_email audit trail as any other delivery —
+                    // a test send is a send.
+                    ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
+                    logger: ctx.logger,
+                  });
+                  tempDescription = ` via smtp (${smtp.host}:${smtp.port ?? 587})`;
+                } catch (err: any) {
+                  return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
+                }
+              } else if (provider !== 'log') {
                 if (!apiKey) {
                   return { ok: false, severity: 'error', message: `${provider}: api_key is required.` };
                 }
@@ -219,6 +279,7 @@ export class EmailServicePlugin implements Plugin {
                           name: merged.from_name ? String(merged.from_name) : undefined,
                         }
                       : undefined,
+                    ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
                     logger: ctx.logger,
                   });
                   tempDescription = ` via ${provider}`;
@@ -238,7 +299,24 @@ export class EmailServicePlugin implements Plugin {
                   text: 'This is a test email from the ObjectStack settings page.',
                 });
                 if (result.status === 'failed') {
-                  return { ok: false, severity: 'error', message: result.error ?? 'Send failed.' };
+                  // Carry the transport's own words (SMTP reply codes,
+                  // provider error bodies) — the operator needs to read
+                  // "535 authentication failed", not "Send failed".
+                  return {
+                    ok: false,
+                    severity: 'error',
+                    message: `Test send failed${tempDescription}: ${result.error ?? 'unknown transport error'}`,
+                  };
+                }
+                // A LogTransport "send" is not a delivery. Say so instead of
+                // reporting the success it never had (#5087).
+                if (target === svc && svc.options.transport instanceof LogTransport) {
+                  return {
+                    ok: false,
+                    severity: 'warning',
+                    message: 'No delivery transport is active — the message was only logged and recorded in sys_email. '
+                      + 'Configure an SMTP host (or an API provider) and save before testing.',
+                  };
                 }
                 return {
                   ok: true,
@@ -247,6 +325,10 @@ export class EmailServicePlugin implements Plugin {
                 };
               } catch (err: any) {
                 return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+              } finally {
+                // The test transport is this call's own — release it rather
+                // than leaving a connection behind on every button press.
+                await tempSmtp?.close();
               }
             });
           }
@@ -463,6 +545,10 @@ export class EmailServicePlugin implements Plugin {
   async dispose(): Promise<void> {
     try { this.unsubscribeTemplates?.(); } catch { /* best effort */ }
     this.unsubscribeTemplates = undefined;
+    if (this.liveSmtp) {
+      try { await this.liveSmtp.close(); } catch { /* best effort */ }
+      this.liveSmtp = undefined;
+    }
     if (this.boundEngine) {
       try { unbindEmailTemplateProvenanceStamp(this.boundEngine as any); } catch { /* best effort */ }
       this.boundEngine = undefined;
@@ -474,18 +560,40 @@ export class EmailServicePlugin implements Plugin {
    * and `defaultFrom`, then hot-swap them on the running EmailService.
    *
    * Behaviour:
-   *  - `provider = 'log' | 'smtp'` keeps the LogTransport (real SMTP
-   *    delivery requires `@objectstack/plugin-mail-smtp`, which is not
-   *    a dependency of this package). The from-address is still applied.
+   *  - `provider = 'smtp'` builds a real {@link SmtpTransport} from
+   *    `smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+   *    `smtp_password` and swaps it in (ADR-0012 — SMTP ships in core).
+   *  - `provider = 'log'` keeps the LogTransport. The from-address is
+   *    still applied.
    *  - `provider = 'resend' | 'postmark'` rebuilds the transport using
-   *    `api_key` from settings. If `api_key` is missing the swap is
-   *    skipped and a warning is logged — the previous transport stays.
+   *    `api_key` from settings.
+   *
+   * **This path never throws.** A settings save must not be able to kill a
+   * running server, so a transport that cannot be built leaves the previous
+   * one in place — but it says so at `error` level, naming the consequence
+   * (mail is NOT being delivered) and the fix, and `mail/test` surfaces the
+   * same failure to whoever pressed the button. What it must never do is
+   * keep a LogTransport and report success: that silent gap IS #5087.
+   * (The constructor / CLI path is the opposite — it throws, so a boot that
+   * cannot deliver fails loudly instead of starting half-configured.)
+   *
+   * `sources` carries each key's provenance from the resolver so the
+   * unconfigured out-of-the-box state (`provider` still at its manifest
+   * default of `smtp`, no host anywhere) is reported as the information it
+   * is, while an OPERATOR-selected SMTP with no host is an error. Escalating
+   * both would print an error on every fresh dev boot and train everyone to
+   * skim errors — the failure mode AGENTS.md's degradation-log-level section
+   * warns about.
    *
    * Env-locked fields (handled in SettingsService.get) still resolve
    * before this method ever sees them, so an env override transparently
    * wins.
    */
-  private applyMailSettings(values: Record<string, unknown>, ctx: PluginContext): void {
+  private applyMailSettings(
+    values: Record<string, unknown>,
+    sources: Record<string, string>,
+    ctx: PluginContext,
+  ): void {
     if (!this.service) return;
 
     const fromEmail = typeof values.from_email === 'string' ? values.from_email : undefined;
@@ -493,21 +601,59 @@ export class EmailServicePlugin implements Plugin {
     if (fromEmail) this.service.setDefaultFrom({ address: fromEmail, name: fromName });
 
     const provider = String(values.provider ?? 'smtp');
-    if (provider === 'smtp' || provider === 'log') {
-      // No SMTP transport ships in core; settings-only edits become
-      // a no-op for transport but still apply `defaultFrom`. Users
-      // wanting real SMTP install `@objectstack/plugin-mail-smtp`
-      // and configure it via constructor opts.
+
+    if (provider === 'smtp') {
+      const smtp = smtpOptionsFromMailSettings(values);
+      if (!smtp.host) {
+        // The settings page carries no host — but the boot may already have
+        // built one from OS_EMAIL_SMTP_* / providerOptions, in which case
+        // SMTP mail IS being delivered and there is nothing to report.
+        if (this.service.options.transport instanceof SmtpTransport) {
+          ctx.logger.info(
+            'EmailServicePlugin: mail settings carry no SMTP host — keeping the SMTP transport configured '
+            + 'at boot (OS_EMAIL_SMTP_HOST / providerOptions).',
+          );
+          return;
+        }
+        const selected = (sources.provider ?? 'default') !== 'default';
+        const line = "EmailServicePlugin: provider='smtp' but no SMTP host is configured — the previous "
+          + 'transport is kept and NO mail is delivered over SMTP. Fix: set Settings → Mail → Host '
+          + '(or OS_MAIL_SMTP_HOST), or select another provider.';
+        if (selected) ctx.logger.error(line);
+        else ctx.logger.info(`${line} (Mail has never been configured — this is the out-of-the-box state.)`);
+        return;
+      }
+      try {
+        const transport = new SmtpTransport({ ...smtp, logger: ctx.logger });
+        this.service.setTransport(transport);
+        this.liveSmtp = transport;
+        ctx.logger.info(
+          `EmailServicePlugin: SMTP transport built from settings (host=${smtp.host}:${smtp.port ?? 587}, `
+          + `tls=${smtp.secure !== false}, auth=${smtp.user ? 'yes' : 'no'}).`,
+        );
+      } catch (err: any) {
+        ctx.logger.error(
+          "EmailServicePlugin: provider='smtp' selected but the SMTP transport could NOT be built — the "
+          + 'previous transport is kept and NO mail is delivered over SMTP. Fix the SMTP settings and save '
+          + 'again. Cause: ' + (err?.message ?? err),
+        );
+      }
+      return;
+    }
+
+    if (provider === 'log') {
       ctx.logger.info(
-        `EmailServicePlugin: mail settings applied (provider=${provider}, from=${fromEmail ?? '∅'}); transport unchanged.`,
+        `EmailServicePlugin: mail settings applied (provider=log, from=${fromEmail ?? '∅'}); `
+        + 'transport unchanged — messages are logged and recorded in sys_email, never delivered.',
       );
       return;
     }
 
     const apiKey = typeof values.api_key === 'string' ? values.api_key : undefined;
     if (!apiKey) {
-      ctx.logger.warn(
-        `EmailServicePlugin: provider='${provider}' selected but api_key is empty — transport NOT rebuilt.`,
+      ctx.logger.error(
+        `EmailServicePlugin: provider='${provider}' selected but api_key is empty — the previous transport `
+        + 'is kept and NO mail is delivered through it. Fix: set Settings → Mail → API key.',
       );
       return;
     }
@@ -519,9 +665,13 @@ export class EmailServicePlugin implements Plugin {
         logger: ctx.logger,
       });
       this.service.setTransport(transport);
+      this.liveSmtp = undefined;
       ctx.logger.info(`EmailServicePlugin: transport rebuilt from settings (provider=${provider}).`);
     } catch (err: any) {
-      ctx.logger.warn('EmailServicePlugin: failed to rebuild transport: ' + (err?.message ?? err));
+      ctx.logger.error(
+        `EmailServicePlugin: provider='${provider}' selected but the transport could NOT be built — the `
+        + 'previous transport is kept and NO mail is delivered through it. Cause: ' + (err?.message ?? err),
+      );
     }
   }
 
