@@ -902,6 +902,122 @@ describe('json_schema enforcement', () => {
   });
 });
 
+// ── #5029 — the `format` keyword inside a `json_schema` rule ─────────────
+//
+// In ajv 8 `format` is NOT built in; it ships in `ajv-formats`. Without the
+// plugin, and under the runtime's `strict: false`, an unknown format is not an
+// error — ajv logs one line at COMPILE time and drops the keyword. So a rule
+// declaring `format: 'email'` compiled fine, ran on every write, enforced
+// `type`/`required`, and enforced NOTHING for `format`, for every record.
+//
+// That is the #4649 / #4762 family one level in, and nastier than either
+// because the failure is PARTIAL: the rule visibly rejects bad `type` payloads
+// in dev, so it reads as working while the `format` half never fires. These
+// cases are the pin that it fires now.
+describe('json_schema — `format` is actually enforced (#5029)', () => {
+  const withSchema = (schema: Record<string, unknown>) => ({
+    validations: [
+      { type: 'json_schema' as const, name: 'cfg', message: 'Config does not match schema.', field: 'config', schema },
+    ],
+  });
+
+  const EMAIL = withSchema({
+    type: 'object',
+    properties: { email: { type: 'string', format: 'email' } },
+    required: ['email'],
+  });
+
+  it('rejects a value that violates `format: email`', () => {
+    // The issue's exact repro. Before the plugin was registered this write
+    // sailed through — `type: 'string'` and `required` both held.
+    expect(() => evaluateValidationRules(EMAIL, { config: { email: 'not-an-email' } }, 'insert')).toThrow(
+      ValidationError,
+    );
+  });
+
+  it('accepts a valid address, and still speaks the json_schema violation code', () => {
+    expect(() => evaluateValidationRules(EMAIL, { config: { email: 'ops@objectstack.ai' } }, 'insert')).not.toThrow();
+    try {
+      evaluateValidationRules(EMAIL, { config: { email: 'not-an-email' } }, 'insert');
+      throw new Error('expected throw');
+    } catch (e) {
+      // A format failure is a schema violation like any other — it must not
+      // invent a new error code or a new field.
+      expect((e as ValidationError).fields[0].code).toBe('json_schema_violation');
+      expect((e as ValidationError).fields[0].field).toBe('config');
+    }
+  });
+
+  it('enforces the other formats authors actually reach for — uuid, date-time, uri', () => {
+    // The DEFAULT (full) `ajv-formats` set, deliberately: `fast` mode trades
+    // correctness for speed on exactly these, and a format that "mostly"
+    // matches is the same declared ≠ enforced defect with a smaller hole.
+    const rich = withSchema({
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        at: { type: 'string', format: 'date-time' },
+        site: { type: 'string', format: 'uri' },
+      },
+    });
+    const ok = {
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      at: '2026-08-04T10:00:00Z',
+      site: 'https://objectstack.ai/docs',
+    };
+    expect(() => evaluateValidationRules(rich, { config: ok }, 'insert')).not.toThrow();
+    for (const bad of [{ id: 'nope' }, { at: 'yesterday' }, { site: 'not a uri' }]) {
+      expect(() => evaluateValidationRules(rich, { config: { ...ok, ...bad } }, 'insert'), JSON.stringify(bad)).toThrow(
+        ValidationError,
+      );
+    }
+  });
+
+  it('enforces a format nested behind $ref, and inside an array item', () => {
+    // The keyword is registered on the shared instance, so it reaches every
+    // sub-schema — not merely a top-level property. Worth pinning: a plugin
+    // registered per-compile-call would pass the flat case and fail this one.
+    const nested = withSchema({
+      $defs: { contact: { type: 'object', properties: { email: { type: 'string', format: 'email' } }, required: ['email'] } },
+      type: 'object',
+      properties: { contacts: { type: 'array', items: { $ref: '#/$defs/contact' } } },
+    });
+    expect(() =>
+      evaluateValidationRules(nested, { config: { contacts: [{ email: 'a@b.com' }] } }, 'insert'),
+    ).not.toThrow();
+    expect(() =>
+      evaluateValidationRules(nested, { config: { contacts: [{ email: 'a@b.com' }, { email: 'nope' }] } }, 'insert'),
+    ).toThrow(ValidationError);
+  });
+
+  it('enforces `format` through a JSON STRING value too', () => {
+    // `checkJsonSchema` parses a string field before validating, so the string
+    // path must not be a way round the new enforcement.
+    expect(() => evaluateValidationRules(EMAIL, { config: '{"email":"a@b.com"}' }, 'insert')).not.toThrow();
+    expect(() => evaluateValidationRules(EMAIL, { config: '{"email":"nope"}' }, 'insert')).toThrow(ValidationError);
+  });
+
+  it('DOCUMENTS the residual gap: a misspelled format name is still ignored', () => {
+    // Not the behaviour we want; it is the behaviour we have, and #5029
+    // deliberately did not change it. `strict: false` is what lets an
+    // author-written schema carry vendor keywords (the reason it is set), and
+    // the same setting downgrades an unrecognised format to a logged line. So
+    // `format: 'emial'` compiles and enforces nothing — filed separately as an
+    // authoring-time question. Pinned here so the gap is a RECORD, not a
+    // surprise, and so flipping it is a deliberate act that turns this red.
+    const typo = withSchema({ type: 'object', properties: { email: { type: 'string', format: 'emial' } } });
+    expect(() => evaluateValidationRules(typo, { config: { email: 'not-an-email' } }, 'insert')).not.toThrow();
+    // …while the neighbouring keywords in the very same schema still bite, which
+    // is exactly what made the pre-#5029 defect read as "working".
+    const mixed = withSchema({
+      type: 'object',
+      properties: { email: { type: 'string', format: 'emial' } },
+      required: ['email'],
+    });
+    expect(() => evaluateValidationRules(mixed, { config: {} }, 'insert')).toThrow(ValidationError);
+  });
+});
+
 describe('conditional enforcement', () => {
   const schema = {
     validations: [

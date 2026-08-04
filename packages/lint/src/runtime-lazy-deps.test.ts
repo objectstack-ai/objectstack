@@ -35,7 +35,11 @@ const distDir = join(srcDir, '..', 'dist');
 // is CLI-only (`surfaceReason: RUNTIME_OBJECT_WRITES_P2`). So the boot path must
 // not pay for it — not at import, and not while gating. Should that rule ever be
 // widened to `runtime-publish`, this assertion is what says so out loud.
-const LAZY_DEPS = ['typescript', 'sucrase', 'ajv'];
+// `ajv-formats` joined in #5029 for the same gate and the same trigger: the gate
+// compiles in the runtime's ajv ENVIRONMENT, and that environment now registers
+// the formats plugin. It carries ajv in with it, so listing it here is not
+// belt-and-braces — it is the second door onto the same load.
+const LAZY_DEPS = ['typescript', 'sucrase', 'ajv', 'ajv-formats'];
 
 const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
   Object.keys(cache ?? {}).some((p) => p.split(/[/\\]/).join('/').includes(`/node_modules/${dep}/`));

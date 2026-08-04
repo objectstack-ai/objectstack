@@ -13,7 +13,12 @@
 //   - `ajv` (~2.4 MB installed), loaded by the #4762 publish gate
 //     (validate-rule-compilability.ts) only when a stack declares a
 //     `json_schema` validation rule — the one rule type whose static artifact
-//     needs a JSON-Schema compiler to judge.
+//     needs a JSON-Schema compiler to judge;
+//   - `ajv-formats`, loaded by the same gate for the same trigger (#5029). Small
+//     on its own, but it `require`s `ajv/dist/compile/codegen`, so an eager
+//     import of it would drag ajv onto the boot path through the back door —
+//     i.e. it must be listed here even though its own weight would not justify
+//     it.
 //
 // "A react page" was the whole story when this file was written; it is not any
 // more, and the cases below say which trigger they are pinning. Keep them
@@ -42,7 +47,7 @@ const distDir = join(srcDir, '..', 'dist');
 
 // Deps that must never load at import time. Extend this list when another
 // heavy, rarely-hit dependency joins the package.
-const LAZY_DEPS = ['typescript', 'sucrase', 'ajv'];
+const LAZY_DEPS = ['typescript', 'sucrase', 'ajv', 'ajv-formats'];
 
 const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
   Object.keys(cache ?? {}).some((p) => p.split(/[/\\]/).join('/').includes(`/node_modules/${dep}/`));
@@ -105,15 +110,18 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       const props = mod.validateReactPageProps(${reactStack('function Page(){ return <ObjectForm mode="edit" />; }')});
       if (!loaded('typescript')) fail('typescript was not loaded by a react-page props validation');
       if (!props.some((f) => f.rule === 'react-prop-missing-required')) fail('props gate produced no finding');
-      // #4762 — the JSON-Schema compiler is the third lazy dep. A stack whose
-      // validation rules are all format rules never pays for it.
+      // #4762 — the JSON-Schema compiler is the third lazy dep, and #5029 added
+      // its formats plugin as the fourth. A stack whose validation rules are all
+      // format rules never pays for either.
       const ruleStack = (validation) => ({ objects: [{ name: 'a', fields: { payload: {} }, validations: [validation] }] });
       mod.validateRuleCompilability(ruleStack({ type: 'format', name: 'f', field: 'payload', regex: '([', message: 'm' }));
       if (loaded('ajv')) fail('the rule-compilability gate must not load ajv to judge a format rule');
+      if (loaded('ajv-formats')) fail('the rule-compilability gate must not load ajv-formats to judge a format rule');
       const schemaFindings = mod.validateRuleCompilability(
         ruleStack({ type: 'json_schema', name: 'j', field: 'payload', schema: { type: 'not-a-type' }, message: 'm' }),
       );
       if (!loaded('ajv')) fail('ajv was not loaded by a json_schema validation-rule check');
+      if (!loaded('ajv-formats')) fail('ajv-formats was not loaded by a json_schema validation-rule check (#5029 parity)');
       if (!schemaFindings.some((f) => f.rule === 'validation-rule-json-schema-uncompilable')) {
         fail('rule-compilability gate produced no finding');
       }
@@ -194,11 +202,14 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       expect(depLoaded(req.cache, dep), `${dep} loaded before any react-source or L2-body validation`).toBe(false);
     }
 
-    // The first `json_schema` rule pays for ajv — and the gate still works.
+    // The first `json_schema` rule pays for ajv AND its formats plugin (#5029 —
+    // the gate compiles in the runtime's environment, which now registers
+    // formats) — and the gate still works.
     const schemaFindings = validateRuleCompilability(
       ruleStack({ type: 'json_schema', name: 'j', field: 'payload', schema: { type: 'not-a-type' }, message: 'm' }),
     );
     expect(depLoaded(req.cache, 'ajv')).toBe(true);
+    expect(depLoaded(req.cache, 'ajv-formats')).toBe(true);
     expect(schemaFindings.map((f) => f.rule)).toEqual(['validation-rule-json-schema-uncompilable']);
 
     // The first react page with source pays the cost of exactly its own gate's

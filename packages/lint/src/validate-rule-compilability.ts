@@ -44,14 +44,28 @@
  *  - the regex is compiled with `new RegExp(source)`, the exact call
  *    `checkFormat` makes (no flags, same as the runtime);
  *  - the schema is compiled with ajv, constructed with the SAME options the
- *    runtime's shared instance uses — `{ allErrors: true, strict: false }`.
+ *    runtime's shared instance uses — `{ allErrors: true, strict: false }` —
+ *    and carrying the SAME plugins, which since #5029 means `ajv-formats`.
  *    `strict: false` is load-bearing in both directions: it is what lets an
  *    author-written schema carry vendor keywords, so a gate running `strict:
- *    true` would reject schemas the runtime compiles happily.
+ *    true` would reject schemas the runtime compiles happily. `ajv-formats` is
+ *    load-bearing in one direction and it is the dangerous one: the plugin also
+ *    registers `formatMinimum` / `formatMaximum`, so a gate WITHOUT it treats
+ *    those as unknown keywords (`strict: false` ⇒ ignored) and publishes a
+ *    schema the runtime then refuses to compile — a rule that passes review and
+ *    enforces nothing, which is the exact failure this file was written for.
  *
- * Those options are pinned against `rule-validator.ts`'s own source by
- * `validate-rule-compilability.test.ts`, so the day the runtime changes them
- * this gate is told rather than left quietly disagreeing.
+ * Those options *and* that plugin registration are pinned against
+ * `rule-validator.ts`'s own source by `validate-rule-compilability.test.ts`, so
+ * the day the runtime changes either one this gate is told rather than left
+ * quietly disagreeing.
+ *
+ * What this gate deliberately does NOT judge is a MISSPELLED format name.
+ * `format: 'emial'` compiles in both environments — under `strict: false` ajv
+ * logs one line and drops the keyword — so refusing it here would be the gate
+ * inventing a verdict the runtime does not share, the mirror image of the
+ * `strict: true` mistake above. #5029 pins that behaviour rather than changing
+ * it; closing it is an authoring-time decision of its own.
  *
  * ### One ajv instance per schema, on purpose
  *
@@ -115,7 +129,9 @@ import { createRequire } from 'node:module';
 // metadata write), while this gate needs a JSON-Schema compiler only when a
 // stack actually declares a `json_schema` validation rule. Same lazy-load
 // contract as `typescript`/`sucrase`, and guarded the same way by
-// `lazy-deps.test.ts`.
+// `lazy-deps.test.ts`. `ajv-formats` (#5029) is under the same contract and for
+// a sharper reason: it `require`s `ajv/dist/compile/codegen`, so importing it
+// eagerly would drag ajv onto the boot path through the back door.
 import type { Options as AjvOptions } from 'ajv';
 
 export type RuleCompilabilitySeverity = 'error';
@@ -167,8 +183,11 @@ function asArray(v: unknown): AnyRec[] {
  */
 type AjvLike = { compile: (schema: unknown) => unknown };
 type AjvCtor = new (options?: AjvOptions) => AjvLike;
+/** `ajv-formats`' plugin entry — mutates the instance it is handed (#5029). */
+type AddFormats = (ajv: AjvLike) => unknown;
 
 let cachedAjv: AjvCtor | null = null;
+let cachedAddFormats: AddFormats | null = null;
 
 /**
  * Load ajv on first use. `node:module` is a Node builtin untouched by
@@ -201,6 +220,53 @@ function loadAjv(): AjvCtor {
   const ctor = (isRec(mod) && 'default' in mod ? (mod as AnyRec).default : mod) as AjvCtor;
   cachedAjv = ctor;
   return ctor;
+}
+
+/**
+ * Load `ajv-formats` on first use — same deferral, same reason, as {@link loadAjv}
+ * (#5029). Kept as its own loader rather than folded into that one so the
+ * failure message names the package the deployment actually pruned.
+ */
+function loadAddFormats(): AddFormats {
+  if (cachedAddFormats) return cachedAddFormats;
+  const anchor =
+    typeof import.meta !== 'undefined' && import.meta.url
+      ? import.meta.url
+      : typeof __filename !== 'undefined'
+        ? __filename
+        : process.cwd() + '/';
+  let mod: unknown;
+  try {
+    mod = createRequire(anchor)('ajv-formats');
+  } catch (err) {
+    throw new Error(
+      `@objectstack/lint: checking a \`json_schema\` validation rule requires the "ajv-formats" package, which ` +
+        `could not be loaded (${err instanceof Error ? err.message : String(err)}). It is a declared dependency ` +
+        `of @objectstack/lint — if this deployment prunes packages, keep "ajv-formats" in the image; it is only ` +
+        `loaded when a stack declares a \`json_schema\` validation rule. The runtime registers it too, and this ` +
+        `gate must compile in the SAME environment or it starts disagreeing with the write path.`,
+    );
+  }
+  const plugin = (isRec(mod) && 'default' in mod ? (mod as AnyRec).default : mod) as AddFormats;
+  cachedAddFormats = plugin;
+  return plugin;
+}
+
+/**
+ * A fresh ajv in the runtime's EXACT environment: the runtime's options, plus
+ * the `ajv-formats` plugin the runtime registers (#5029).
+ *
+ * Registering formats is not cosmetic parity. `ajv-formats` also installs the
+ * `formatMinimum` / `formatMaximum` keywords, which are *unknown keywords*
+ * without it — and `strict: false` ignores an unknown keyword while a
+ * registered one is metaschema-checked. So a schema the runtime would refuse to
+ * compile is one this gate would otherwise wave through, which is precisely the
+ * disagreement this whole file exists to prevent.
+ */
+function createRuntimeAjv(): AjvLike {
+  const instance = new (loadAjv())(RUNTIME_AJV_OPTIONS);
+  loadAddFormats()(instance);
+  return instance;
 }
 
 /** The message a thrown compile error contributes, verbatim. */
@@ -298,7 +364,7 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
         if (rule.type === 'json_schema' && isRec(rule.schema)) {
           try {
             // A fresh instance per schema — see "One ajv instance per schema".
-            new (loadAjv())(RUNTIME_AJV_OPTIONS).compile(rule.schema);
+            createRuntimeAjv().compile(rule.schema);
           } catch (err) {
             findings.push({
               severity: 'error',
@@ -308,7 +374,7 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
               message:
                 `\`json_schema\` validation ${label} on object '${objectName}' declares a \`schema\` ajv cannot ` +
                 `compile: ${errorText(err)}. The write path compiles it with the same ajv ` +
-                `(\`new Ajv({ allErrors: true, strict: false })\`) and SKIPS the rule when that throws ` +
+                `(\`new Ajv({ allErrors: true, strict: false })\` + \`ajv-formats\`) and SKIPS the rule when that throws ` +
                 `(rule-validator.ts \`checkJsonSchema\`), so the rule is declared and enforces nothing on any ` +
                 `record.`,
               hint:
