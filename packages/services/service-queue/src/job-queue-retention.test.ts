@@ -26,6 +26,7 @@
 // the engine.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { DbQueueAdapter, completedRetentionWindowMs } from './db-queue-adapter.js';
 import { lifecycleDurationMs } from './common.js';
@@ -94,17 +95,20 @@ function makeFakeEngine() {
       return r;
     },
     async delete(table: string, opts: any) {
+      // [#4550] Opened with ObjectQL.delete's OWN dispatch predicate rather
+      // than a hand-mirrored `if`: a double looser than the engine it stands
+      // in for is how #4434 shipped a dead REST route with its suite green,
+      // and the case a mirror always drops is the one that only LOOKS like an
+      // id (`where: { id: { $in: [...] } }` without `multi`).
+      const dispatch = assertEngineDeleteDispatch(opts);
       const t = tables.get(table) ?? [];
-      if (opts?.multi) {
-        const where = opts.where ?? {};
-        const keep = t.filter((r) => !matches(r, where));
+      if (dispatch.kind === 'multi') {
+        const keep = t.filter((r) => !matches(r, opts?.where ?? {}));
         tables.set(table, keep);
         return t.length - keep.length; // drivers report a deleted count
       }
-      const id = opts?.where?.id;
-      if (id == null) throw new Error('Delete requires an ID or options.multi=true');
-      tables.set(table, t.filter((r) => r.id !== id));
-      return { id };
+      tables.set(table, t.filter((r) => r.id !== dispatch.id));
+      return { id: dispatch.id };
     },
   };
 }
