@@ -101,13 +101,18 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
     it('$not (CEL `!expr` scope filter) → negated sub-condition, not a bogus "$not" column', async () => {
       // `!(assignee == 'alice')` → { $not: { assignee: { $eq: 'alice' } } }.
-      // SQL `NOT (assignee = 'alice')` excludes alice AND is null-safe only for
-      // the rows it can evaluate — rows 2/4 have null assignee so `NOT (null = 'alice')`
-      // is UNKNOWN and they are excluded, leaving carol.
+      //
+      // [#5146] This case used to expect ['3'] alone: `NOT (assignee = 'alice')`
+      // is UNKNOWN for the null-assignee rows 2/4, so SQL dropped them while
+      // `driver-memory` and `formula` returned them — one permission rule, two
+      // visible sets. `$not` is now compiled over a TOTAL predicate
+      // (`NOT (assignee IS NOT NULL AND assignee = 'alice')`), so "has no
+      // assignee" counts as "is not alice", as it always did on the other two
+      // backends. The unassigned rows are the behaviour change.
       const rows = await driver.find('tasks', {
         where: { $not: { assignee: { $eq: 'alice' } } },
       } as any);
-      expect(ids(rows)).toEqual(['3']);
+      expect(ids(rows)).toEqual(['2', '3', '4']);
     });
 
     it('unknown $-operator throws instead of a silent equality compare', async () => {
