@@ -894,7 +894,25 @@ const step17: MigrationStep = {
     + '<subpath>` (ADR-0121 D1/D2). The full checklist is the `declarative-apis-endpoints-live` '
     + 'semantic entry below; it is a security review, not a rename, so nothing about it is '
     + 'applied for you.\n\n'
-    + 'Last in the enforce-or-remove line, it retires two `./ui` vocabulary shapes that never '
+    + 'Finally, the theme token scales retire (#5021, ADR-0049): `typography.fontSize`, '
+    + '`typography.fontWeight`, `typography.lineHeight`, `typography.letterSpacing`, '
+    + '`typography.fontFamily.heading`, `typography.fontFamily.mono`, `animation` and `zIndex`. '
+    + 'These are the reverse of the usual inert key and the distinction is the point: the theme '
+    + 'engine DID emit them — `--font-size-*`, `--font-weight-*`, `--line-height-*`, '
+    + '`--letter-spacing-*`, `--duration-*`, `--timing-*`, `--z-*`, `--font-heading`, '
+    + '`--font-mono` all reached the document exactly as authored — and no first-party component '
+    + 'or stylesheet has ever read one, so a declared type scale was real CSS that styled '
+    + 'nothing. That is why the earlier theme sweep (#3494) left them standing: its criterion was '
+    + '"never emitted", and these are emitted. `colors`, `borderRadius`, `shadows` and '
+    + '`typography.fontFamily.base` have live consumers and are untouched. The prescription is '
+    + '`customVars`, which emits `--<key>: <value>` verbatim — so a tenant stylesheet that really '
+    + 'was reading `--z-modal` reproduces it byte for byte and loses no capability. The '
+    + 'conversion DELETES the keys and emits a notice per key rather than auto-populating '
+    + '`customVars`: a rewrite would hand back two dozen variables that still nothing reads, '
+    + 'turning a dead semantic slot into a dead literal one. Deciding which of them you actually '
+    + 'consume is yours to make; the notice names each one. Retired from the load path with the '
+    + 'other keys that misdescribed themselves.\n\n'
+    + 'It closes the enforce-or-remove line with two `./ui` vocabulary shapes that never '
     + 'had a key to be written into (#5015): `NotificationActionSchema` / `NotificationAction` '
     + 'and `EmbedConfigSchema` / `EmbedConfig`. This is the class BELOW a declared-but-unread '
     + 'key — there was no key at all. No schema anywhere declared a carrier, a BFS from all 24 '
@@ -956,6 +974,7 @@ const step17: MigrationStep = {
     'dashboard-widget-responsive-removed',
     'dashboard-widget-action-aria-removed',
     'dashboard-widget-compareto-converged',
+    'theme-inert-token-scales-removed',
   ],
   semantic: [
     {

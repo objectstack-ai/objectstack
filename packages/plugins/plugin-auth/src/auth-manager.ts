@@ -18,7 +18,7 @@ import {
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
-import { postureEnforcesWall } from '@objectstack/spec/security';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
@@ -1899,13 +1899,19 @@ export class AuthManager {
           // organization there would mint a boundary nothing keeps (ADR-0049 at
           // the deployment layer).
           //
-          // [#5233] The judge is the REQUESTED tenancy posture
-          // (`multiOrgPostureRequested()`), never the `OS_MULTI_ORG_ENABLED`
-          // boolean ADR-0105 D1 demoted — that one reads `false` on a
-          // deployment configured with only the authoritative
+          // [#5233] The judge is the tenancy POSTURE, never the
+          // `OS_MULTI_ORG_ENABLED` boolean ADR-0105 D1 demoted — that one reads
+          // `false` on a deployment configured with only the authoritative
           // `OS_TENANCY_POSTURE=isolated`, so the whole organization wall
           // mounted and every org-less user's guided "create your workspace"
           // path still 403'd. Same defect shape as cloud#1020.
+          //
+          // [#5261] And the judge is the EFFECTIVE posture
+          // (`multiOrgPostureEffective()` — the `tenancy` service's answer),
+          // not the requested one, so this gate and `/auth/config`'s
+          // `features.multiOrgEnabled` are literally the same derivation. On the
+          // ADR-0093 D5 degraded shape they used to disagree: the console hid
+          // the button while the route minted organizations no engine walls.
           beforeCreateOrganization: async ({ organization }: any = {}) => {
             // [ADR-0120 D3] `'__global__'` is the platform's name for the
             // NULL-organization bucket: the autonumber sequence table keys
@@ -1922,7 +1928,7 @@ export class AuthManager {
                   '(ADR-0120 D3) and cannot be used as an organization id or slug.',
               });
             }
-            if (!this.multiOrgPostureRequested()) {
+            if (!this.multiOrgPostureEffective()) {
               const { APIError } = await import('better-auth/api');
               throw new APIError('FORBIDDEN', {
                 message:
@@ -3195,8 +3201,16 @@ export class AuthManager {
   }
 
   /**
-   * [ADR-0105 D1 / #5233] Does this deployment ASK for a multi-organization
-   * posture? The `beforeCreateOrganization` gate's judge.
+   * The tenancy posture ACTUALLY IN FORCE on this deployment — the one fact
+   * both `organization/create`'s gate and `/auth/config`'s
+   * `features.multiOrgEnabled` are derived from, so the two can never disagree.
+   *
+   * The `tenancy` service is authoritative because it is the only thing that
+   * knows whether a requested wall is actually STANDING: it probes the
+   * enterprise `org-scoping` runtime and resolves an unenforceable request down
+   * to `single` + `degraded` (ADR-0093 D5 / ADR-0105 D1). Only a lean embedding
+   * that never registered the service falls back to `resolveTenancyPosture()`,
+   * the operator's REQUEST read from env.
    *
    * ⛔ Never `resolveMultiOrgEnabled()`. ADR-0105 D1 DEMOTED that boolean to a
    * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
@@ -3207,19 +3221,43 @@ export class AuthManager {
    * every org-less user's guided "create your workspace" path dead-ended while
    * `/auth/config` advertised the capability as present.
    *
-   * REQUESTED, not effective — the same fact `serve.ts`'s ADR-0093 D5 boot
-   * guard keys on (`resolveTenancyPosture() !== 'single'`), and the same fact
-   * the old boolean expressed, so this corrects the KNOB and nothing else.
-   * Whether a requested wall is actually ENFORCED is the `tenancy` service's
-   * separate answer (`degraded`), which `/auth/config` reports and this gate
-   * deliberately does not consult; #5261 carries that question.
+   * [#5261] EFFECTIVE, not requested — this is a deliberate, BREAKING capability
+   * contraction over what #5233 shipped. The gate used to judge
+   * `postureEnforcesWall(resolveTenancyPosture())`, the operator's request, which
+   * came apart from `/auth/config` on exactly one deployment shape: ADR-0093 D5
+   * degradation (a wall was asked for, the enterprise `@objectstack/organizations`
+   * runtime is absent, so nothing isolates anything). There the console hid the
+   * "Create organization" action while the API happily minted organizations whose
+   * boundary NO engine enforces — a declared-but-unenforced security property,
+   * ADR-0049's canonical failure, at the deployment layer. Reading the effective
+   * posture retires that shape: a deployment without an organization wall cannot
+   * mint an organization, whether it never asked for a wall or asked and did not
+   * get one.
    *
-   * Read live on every call — never cached. The posture is process-level
-   * config, and freezing it at plugin-build time would make the gate unable to
-   * see anything a later boot phase (or a test) established.
+   * Consequence, accepted knowingly: a deployment running WITHOUT the enterprise
+   * runtime can no longer create organizations at all, no matter which env knobs
+   * it sets. `serve.ts` already refuses to boot that shape unless the operator
+   * passes `OS_ALLOW_DEGRADED_TENANCY=1`; from here on, the org-create route is
+   * refused there too rather than half-working.
+   *
+   * Read live on every call — never cached. The posture is process-level config
+   * and the service's own probe is lazy, so freezing either at plugin-build time
+   * would make the gate unable to see a provider that registers later in the
+   * same boot (the recorded-verdict defect AGENTS.md's startup-registry rule
+   * names).
    */
-  private multiOrgPostureRequested(): boolean {
-    return postureEnforcesWall(resolveTenancyPosture());
+  private multiOrgPostureEffective(): boolean {
+    return postureEnforcesWall(this.effectiveTenancyPosture());
+  }
+
+  /**
+   * The effective posture itself. Single derivation, two readers — the gate
+   * above and `getPublicConfig()`'s `features.multiOrgEnabled` /
+   * `features.tenancyPosture` — because #5233 was only hard to see thanks to
+   * those two sites answering from different facts.
+   */
+  private effectiveTenancyPosture(): TenancyPosture {
+    return this.config.getTenancy?.()?.posture ?? resolveTenancyPosture();
   }
 
   getPublicConfig() {
@@ -3295,8 +3333,13 @@ export class AuthManager {
     // contract that broke the org-create gate, one site over. It reads the
     // posture now, so an unwired-tenancy embedding advertises the capability
     // its gate actually allows.
+    //
+    // [#5261] `effectiveTenancyPosture()` is now literally the SAME call the
+    // `organization/create` gate makes, so this flag cannot advertise a
+    // capability the route refuses (or hide one it allows) on any deployment
+    // shape — including ADR-0093 D5 degradation, where the two used to split.
     const tenancy = this.config.getTenancy?.();
-    const tenancyPosture = tenancy?.posture ?? resolveTenancyPosture();
+    const tenancyPosture = this.effectiveTenancyPosture();
     const multiOrgEnabled = postureEnforcesWall(tenancyPosture);
     const degradedTenancy = tenancy?.degraded ?? false;
 
