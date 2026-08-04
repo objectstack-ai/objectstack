@@ -51,8 +51,8 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
  * the shared dispatcher then executes at runtime.
  *
  * Derived rather than restated: a type added to `ActionType` is dispatchable
- * from a widget the moment the runner implements it, with no second list to
- * remember.
+ * from a header action the moment the runner implements it, with no second list
+ * to remember.
  */
 export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
