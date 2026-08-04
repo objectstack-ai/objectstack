@@ -175,10 +175,12 @@ describe('formatZodError', () => {
 // string `"Invalid input"`; every branch's real rejection sits one level down
 // in `issue.errors[]`. Structural consumers (the REST error body,
 // `ZodError.message`) carry that payload through — a flatten-to-one-line
-// consumer does not, and `formatZodError` is exactly such a consumer, on the
-// CLI path (`os validate` / `os compile`). Until #4971 the curated prose the
+// consumer does not, and `formatZodError` is exactly such a consumer: it is
+// documented for CLI output and is what `defineStack` throws through, so every
+// author loading a stack config reads it. Until #4971 the curated prose the
 // #4001 campaign wrote for every strict shape behind a union was cut off
-// before it reached the author.
+// before it reached them. (`os validate` / `os build` print through the CLI's
+// OWN `formatZodErrors`, which still flattens the same way — #5341.)
 //
 // The whole risk of fixing it is the opposite failure: N branches × the same
 // mistake = the same key reported N times, which is why `view.zod.ts`'s
