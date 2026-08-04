@@ -63,8 +63,13 @@ export type HttpRequest = z.infer<typeof HttpRequestSchema>;
  * 
  * Used by:
  * - api/router.zod.ts (RouterConfigSchema)
- * - system/http-server.zod.ts (HttpServerConfigSchema)
- * 
+ *
+ * (`system/http-server.zod.ts` embedded this as `HttpServerConfig.cors` until
+ * #4938 retired that shape. CORS is owned by the transport adapter and
+ * configured by OS_CORS_ORIGIN / OS_CORS_CREDENTIALS / OS_CORS_MAX_AGE; this
+ * schema is the registered first candidate for a future `server.cors` key,
+ * which arrives WITH its executor or not at all.)
+ *
  * @example
  * {
  *   "enabled": true,
@@ -115,8 +120,13 @@ export type CorsConfig = z.infer<typeof CorsConfigSchema>;
  * 
  * Used by:
  * - api/endpoint.zod.ts (ApiEndpointSchema)
- * - system/http-server.zod.ts (HttpServerConfigSchema)
- * 
+ * - system/stack-server.zod.ts (ServerRateLimitConfigSchema — this shape reused
+ *   verbatim and closed against unknown keys; the LIVE inbound token bucket)
+ *
+ * (`system/http-server.zod.ts` embedded this as `HttpServerConfig.security
+ * .rateLimit` until #4938 retired that shape; the budget itself was not lost —
+ * #5006 activated it on the narrow `server:` block.)
+ *
  * @example
  * {
  *   "enabled": true,
@@ -152,9 +162,12 @@ export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
  * Configuration for serving static files
  * 
  * Used by:
- * - api/router.zod.ts (RouterConfigSchema)
- * - system/http-server.zod.ts (HttpServerConfigSchema)
- * 
+ * - api/router.zod.ts (RouterConfigSchema — `staticMounts`)
+ *
+ * (`system/http-server.zod.ts` embedded this as `HttpServerConfig.static` until
+ * #4938 retired that shape. Static mounts are configured on the transport
+ * plugin's `staticMounts`.)
+ *
  * @example
  * {
  *   "path": "/static",

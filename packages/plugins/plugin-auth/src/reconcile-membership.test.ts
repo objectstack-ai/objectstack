@@ -1,8 +1,22 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { reconcileMembership, backfillMemberships } from './reconcile-membership.js';
+import {
+  reconcileMembership,
+  backfillMemberships,
+  MEMBERSHIP_POLICIES,
+  type MembershipPolicy,
+} from './reconcile-membership.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+
+/**
+ * Off-vocabulary policy values, as a JS caller or a host stack could pass them
+ * past the `MembershipPolicy` type. `reconcileMembership` and
+ * `backfillMemberships` are public exports of `@objectstack/plugin-auth`, so
+ * the cast is the test reproducing a real call, not defeating the type system
+ * for convenience.
+ */
+const asPolicy = (value: unknown) => value as MembershipPolicy;
 
 /**
  * In-memory engine over sys_member (+ optional sys_user) with the find/insert
@@ -157,6 +171,206 @@ describe('backfillMemberships', () => {
     expect(res.scanned).toBe(2);
     expect(res.bound).toBe(1); // u2 still bound
     expect(res.skipped).toBe(1);
+  });
+});
+
+/**
+ * [#5205] The two entry points read the SAME policy field and used to judge it
+ * with opposite predicates: `reconcileMembership` tested `=== 'invite-only'`
+ * (so anything else, including a typo, fell through to the `auto` branch and
+ * bound — fail-open), `backfillMemberships` tested `!== 'auto'` (refused —
+ * fail-safe). The dangerous half was the sign-up path: a caller who believed
+ * they had turned auto-binding off got it anyway, silently.
+ *
+ * These pin the fixed contract: one input, one direction (nothing bound), and
+ * a verdict that says *why* — `'invalid-policy'`, not a `policy-skip` /
+ * `'policy'` that would send a reader to inspect a setting that is fine.
+ */
+describe('reconcileMembership / backfillMemberships — off-vocabulary policy (#5205)', () => {
+  const INVALID: Array<[label: string, value: unknown]> = [
+    ['camelCase typo', 'inviteOnly'],
+    ['snake_case typo', 'invite_only'],
+    ['wrong case', 'Auto'],
+    ['empty string', ''],
+    ['undefined', undefined],
+    ['null', null],
+    ['boolean', false],
+    ['object', { policy: 'invite-only' }],
+  ];
+
+  describe.each(INVALID)('policy = %s', (_label, value) => {
+    it('reconcileMembership refuses — invalid-policy, nothing bound', async () => {
+      const engine = makeEngine();
+      const resolveTargetOrg = vi.fn(async () => 'org_default');
+      const res = await reconcileMembership(engine, 'user-1', {
+        policy: asPolicy(value),
+        resolveTargetOrg,
+      });
+      expect(res.outcome).toBe('invalid-policy');
+      // The whole bug: this used to be `bound`.
+      expect(engine.insert).not.toHaveBeenCalled();
+      expect(engine._members).toHaveLength(0);
+      // Refused at the entry — no org was even resolved.
+      expect(resolveTargetOrg).not.toHaveBeenCalled();
+    });
+
+    it('backfillMemberships refuses — invalid-policy, nothing bound', async () => {
+      const engine = makeEngine({ users: [{ id: 'u1' }, { id: 'u2' }] });
+      const resolveTargetOrg = vi.fn(async () => 'org_default');
+      const res = await backfillMemberships(engine, {
+        policy: asPolicy(value),
+        resolveTargetOrg,
+      });
+      expect(res.reason).toBe('invalid-policy');
+      expect(res.bound).toBe(0);
+      expect(engine.insert).not.toHaveBeenCalled();
+      expect(resolveTargetOrg).not.toHaveBeenCalled();
+    });
+
+    it('both paths agree: same input, same direction, neither binds', async () => {
+      const signupEngine = makeEngine();
+      const backfillEngine = makeEngine({ users: [{ id: 'u1' }] });
+      const deps = { policy: asPolicy(value), resolveTargetOrg: async () => 'org_default' };
+
+      const signup = await reconcileMembership(signupEngine, 'user-1', deps);
+      const backfill = await backfillMemberships(backfillEngine, deps);
+
+      expect(signupEngine._members).toHaveLength(0);
+      expect(backfillEngine._members).toHaveLength(0);
+      // …and both name the same cause, so a reader of either one lands on the
+      // caller's policy value rather than on the deployment's setting.
+      expect(signup.outcome).toBe('invalid-policy');
+      expect(backfill.reason).toBe('invalid-policy');
+      expect(signup.outcome).not.toBe('policy-skip');
+      expect(backfill.reason).not.toBe('policy');
+    });
+  });
+
+  it('names the offending value so it is not swallowed — logged and returned', async () => {
+    const error = vi.fn();
+    const res = await reconcileMembership(makeEngine(), 'user-1', {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+      logger: { error },
+    });
+    // Returned, so the diagnosis survives a caller that passed no logger.
+    expect(res.error).toContain(`'inviteOnly'`);
+    expect(res.error).toContain('invite-only'); // the expected vocabulary
+    expect(error).toHaveBeenCalledTimes(1);
+    const [msg, meta] = error.mock.calls[0];
+    expect(msg).toContain(`'inviteOnly'`);
+    expect(meta).toMatchObject({ userId: 'user-1', expected: MEMBERSHIP_POLICIES });
+  });
+
+  it('logs at error, not warn — nothing else looks broken afterwards', async () => {
+    const error = vi.fn();
+    const warn = vi.fn();
+    await backfillMemberships(makeEngine({ users: [{ id: 'u1' }] }), {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+      logger: { error, warn },
+    });
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('still reaches a logger that only has warn', async () => {
+    const warn = vi.fn();
+    await reconcileMembership(makeEngine(), 'user-1', {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+      logger: { warn },
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain(`'inviteOnly'`);
+  });
+
+  it('refuses without a logger at all (the refusal is not a logging side effect)', async () => {
+    const engine = makeEngine();
+    const res = await reconcileMembership(engine, 'user-1', {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+    });
+    expect(res.outcome).toBe('invalid-policy');
+    expect(engine.insert).not.toHaveBeenCalled();
+  });
+
+  it('does not echo a non-string value into the log — typeof only', async () => {
+    const error = vi.fn();
+    const res = await reconcileMembership(makeEngine(), 'user-1', {
+      // A caller that passed the whole config object by mistake; it may carry
+      // fields that have no business in a log line.
+      policy: asPolicy({ membershipPolicy: 'invite-only', adminEmail: 'ops@example.com' }),
+      resolveTargetOrg: async () => 'org_default',
+      logger: { error },
+    });
+    expect(res.outcome).toBe('invalid-policy');
+    expect(res.error).toContain('[object]');
+    expect(error.mock.calls[0][0]).not.toContain('ops@example.com');
+    expect(JSON.stringify(error.mock.calls[0][1])).not.toContain('ops@example.com');
+  });
+
+  it('bounds a long string value', async () => {
+    const error = vi.fn();
+    const res = await reconcileMembership(makeEngine(), 'user-1', {
+      policy: asPolicy('x'.repeat(500)),
+      resolveTargetOrg: async () => 'org_default',
+      logger: { error },
+    });
+    expect(res.error).toContain('(truncated)');
+    expect(res.error!.length).toBeLessThan(200);
+  });
+
+  it('preconditions still win — a missing engine reports skipped, not invalid-policy', async () => {
+    const res = await reconcileMembership(undefined, 'user-1', {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+    });
+    expect(res.outcome).toBe('skipped');
+    const bf = await backfillMemberships(undefined, {
+      policy: asPolicy('inviteOnly'),
+      resolveTargetOrg: async () => 'org_default',
+    });
+    expect(bf.reason).toBe('engine-unavailable');
+  });
+});
+
+/**
+ * [#5205] The guard must not move the ground under the two values that ARE
+ * policies. Asserted as a table over the declared vocabulary, so the behaviour
+ * of every legal value is stated here rather than inferred from a green suite.
+ */
+describe('legal policies are unaffected by the invalid-policy guard (#5205)', () => {
+  const EXPECTED: Record<MembershipPolicy, { signup: string; backfillReason?: string; binds: boolean }> = {
+    auto: { signup: 'bound', backfillReason: undefined, binds: true },
+    'invite-only': { signup: 'policy-skip', backfillReason: 'policy', binds: false },
+  };
+
+  it('covers the whole declared vocabulary', () => {
+    expect(Object.keys(EXPECTED).sort()).toEqual([...MEMBERSHIP_POLICIES].sort());
+  });
+
+  it.each([...MEMBERSHIP_POLICIES])('reconcileMembership(%s) is unchanged', async (policy) => {
+    const engine = makeEngine();
+    const res = await reconcileMembership(engine, 'user-1', {
+      policy,
+      resolveTargetOrg: async () => 'org_default',
+    });
+    expect(res.outcome).toBe(EXPECTED[policy].signup);
+    expect(res.error).toBeUndefined();
+    expect(engine._members).toHaveLength(EXPECTED[policy].binds ? 1 : 0);
+  });
+
+  it.each([...MEMBERSHIP_POLICIES])('backfillMemberships(%s) is unchanged', async (policy) => {
+    const engine = makeEngine({ users: [{ id: 'u1' }] });
+    const res = await backfillMemberships(engine, {
+      policy,
+      resolveTargetOrg: async () => 'org_default',
+    });
+    expect(res.reason).toBe(EXPECTED[policy].backfillReason);
+    expect(res.error).toBeUndefined();
+    expect(res.bound).toBe(EXPECTED[policy].binds ? 1 : 0);
+    expect(engine._members).toHaveLength(EXPECTED[policy].binds ? 1 : 0);
   });
 });
 

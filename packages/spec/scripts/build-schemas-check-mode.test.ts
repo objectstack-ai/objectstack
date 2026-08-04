@@ -40,6 +40,12 @@
 // version of the file a PR cannot rewrite. Fabricating the ref (rather than
 // injecting a base through some test-only env var) keeps that discipline: the
 // gate runs exactly the git resolution CI runs.
+//
+// It also carries the in-tree anchor `authorable-surface.base.json` (#5235),
+// seeded authentic: its `baseRev` is a sandbox commit reachable from
+// `origin/main` and its keys ARE that commit's baseline. Deleting the ref is
+// then a faithful model of a build environment with no route to GitHub — the
+// last describe block below drives exactly that.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -74,8 +80,13 @@ let sandbox: string;
 let script: string;
 let manifestPath: string;
 let surfacePath: string;
+let surfaceBasePath: string;
 let pristine: string;
 let pristineSurface: string;
+/** The generator's own description line for the in-tree anchor, so fixtures
+ *  written here are byte-canonical exactly the way `gen:schema` writes it —
+ *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
+let surfaceBaseDescription: string;
 
 /** Run git in the sandbox repo; throws on failure so a broken fixture is loud. */
 function git(...args: string[]): string {
@@ -90,9 +101,33 @@ function git(...args: string[]): string {
   return (r.stdout ?? '').trim();
 }
 
+/**
+ * Write the in-tree anchor (#5235) in the generator's exact canonical form:
+ * `{ description, baseRev, keys }`, two-space indent, trailing newline. Anything
+ * else is a hand-edit as far as the gate is concerned, which is the point of the
+ * file — so fixtures must go through here rather than patching bytes.
+ */
+function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]): string {
+  const keys = mutate((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+  const text = JSON.stringify({ description: surfaceBaseDescription, baseRev, keys }, null, 2) + '\n';
+  fs.writeFileSync(surfaceBasePath, text);
+  return text;
+}
+
+const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
+
 beforeAll(() => {
   pristine = fs.readFileSync(REAL_MANIFEST, 'utf8');
   pristineSurface = fs.readFileSync(path.join(PKG, 'authorable-surface.json'), 'utf8');
+  const realBase = path.join(PKG, 'authorable-surface.base.json');
+  if (!fs.existsSync(realBase)) {
+    throw new Error(
+      `packages/spec/authorable-surface.base.json is missing — it is a committed artifact (#5235). ` +
+        `Run \`pnpm --filter @objectstack/spec gen:schema\` in a checkout that can reach origin/main.`,
+    );
+  }
+  surfaceBaseDescription = (JSON.parse(fs.readFileSync(realBase, 'utf8')) as { description: string })
+    .description;
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-check-'));
   fs.cpSync(path.join(PKG, 'scripts'), path.join(sandbox, 'scripts'), { recursive: true });
   for (const entry of ['src', 'node_modules', 'package.json']) {
@@ -107,12 +142,19 @@ beforeAll(() => {
   script = path.join(sandbox, 'scripts', 'build-schemas.ts');
   manifestPath = path.join(sandbox, 'json-schema.manifest.json');
   surfacePath = path.join(sandbox, 'authorable-surface.json');
+  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
   // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
   // committed baseline. Only the baseline is tracked — src/node_modules stay
   // symlinked, untracked reads the same as any dirty worktree.
   git('init', '-q', '-b', 'main', '.');
   git('add', 'authorable-surface.json');
   git('commit', '-q', '-m', 'baseline: committed authorable-surface.json');
+  // The in-tree anchor (#5235), authentic by construction: it mirrors the
+  // baseline at the commit just made, which stays reachable from origin/main for
+  // every fixture below (this repo's history is linear).
+  seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
+  git('add', 'authorable-surface.base.json');
+  git('commit', '-q', '-m', 'baseline anchor: committed authorable-surface.base.json');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
 });
 
@@ -486,19 +528,29 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
   );
 
   it(
-    'fails LOUDLY when origin/main cannot be resolved — a deletion check that silently skips is the bypass again',
+    'fails LOUDLY when NO anchor of either kind is available — a deletion check that silently skips is the bypass again',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      seedBase((s) => s);
+      // Until #5235 an unresolvable origin/main was fatal on its own. It no
+      // longer is (the in-tree anchor takes over — see the #5235 block below),
+      // but the property this test was written for is untouched and pinned here:
+      // with NOTHING left to anchor on, the build fails rather than skipping.
+      const head = seedBase((s) => s);
       seedSurface((s) => s);
+      const anchor = readSurfaceBase();
       git('update-ref', '-d', 'refs/remotes/origin/main');
+      fs.rmSync(surfaceBasePath);
       try {
         const { status, output } = run(['--check']);
         expect(status).toBe(1);
-        expect(output).toContain('Cannot resolve origin/main');
+        expect(output).toContain('No baseline to anchor');
         expect(output).toContain('#4650');
+        // Both remedies are named — neither is an env var.
+        expect(output).toContain('authorable-surface.base.json');
+        expect(output).toContain('git fetch origin main');
       } finally {
-        git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+        fs.writeFileSync(surfaceBasePath, anchor);
+        git('update-ref', 'refs/remotes/origin/main', head);
       }
     },
   );
@@ -521,6 +573,233 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).not.toContain('deleted without proof');
       expect(output).not.toContain('carry their own proof');
       expect(status).toBe(0);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5235 — the same gate, in a build that cannot reach GitHub.
+//
+// The #4650 anchor is `authorable-surface.json` at the merge base with
+// origin/main, resolved out of git. Consumers that build a SHA-pinned framework
+// tree inside an environment with no route to GitHub — cloud's buildx image
+// stages, air-gapped builds, forks, historical-tag reproductions — cannot
+// resolve it, and the gate failed the whole build there. Deleting
+// `refs/remotes/origin/main` in the sandbox models exactly that (the sandbox has
+// no `origin` remote either, so the self-heal fetch cannot rescue it).
+//
+// The fix is an in-tree anchor, and these tests pin the three properties that
+// make it a fix rather than a bypass:
+//
+//   * offline, the gate RUNS against the committed anchor and still fails on an
+//     unproven deletion (it is not "skip when git is unavailable");
+//   * offline, nothing may WRITE the anchor — an offline build that could
+//     advance it to its own state would be laundering the baseline;
+//   * where origin/main IS reachable, the anchor is verified against it, so a
+//     commit cannot edit the anchor to hide a deletion.
+describe('build-schemas.ts — an in-tree anchor carries the deletion gate offline (#5235)', () => {
+  /** Recorded in the anchor, emitted by no build: the offline gate's input. */
+  const ONLY_AT_BASE = 'data/Object:zzOnlyInTreeAnchor5235';
+  /** A real, reachable, live key — shedding it from the anchor is the attack. */
+  const SHED_FROM_ANCHOR = 'data/Object:label';
+
+  let head: string;
+
+  beforeEach(() => {
+    // A clean, current tree: manifest and worktree baseline canonical, and
+    // origin/main holding that same baseline.
+    seedManifest((s) => s);
+    head = seedBase((s) => s);
+    seedSurface((s) => s);
+    seedSurfaceBase(head, (k) => k);
+  });
+
+  afterEach(() => {
+    git('update-ref', 'refs/remotes/origin/main', head);
+  });
+
+  /** Run with no resolvable origin/main — the consumer/offline build shape. */
+  function offline<T>(fn: () => T): T {
+    git('update-ref', '-d', 'refs/remotes/origin/main');
+    try {
+      return fn();
+    } finally {
+      git('update-ref', 'refs/remotes/origin/main', head);
+    }
+  }
+
+  it(
+    'builds instead of failing when origin/main is unreachable, anchoring on the committed baseline',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { status, output } = offline(() => run(['--check']));
+
+      expect(status).toBe(0);
+      // The #5235 fatal is gone…
+      expect(output).not.toContain('Cannot resolve origin/main');
+      expect(output).not.toContain('No baseline to anchor');
+      // …and the run says which anchor it used, naming the commit it mirrors.
+      expect(output).toContain('origin/main is not resolvable in this build environment');
+      expect(output).toContain('authorable-surface.base.json');
+      expect(output).toContain(head.slice(0, 12));
+    },
+  );
+
+  it(
+    'still fails offline on a deletion the anchor records and this build cannot account for',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Set-wise identical to the real attack: a line present at the base and
+      // absent from the build's emitted surface. Check (a) reads the WORKTREE
+      // baseline, which stays canonical, so only the anchored check (c) can see
+      // this — which is the whole point of anchoring offline at all.
+      seedSurfaceBase(head, (k) => [...k, ONLY_AT_BASE].sort());
+
+      const { status, output } = offline(() => run(['--check']));
+
+      expect(status).toBe(1);
+      expect(output).toContain('deleted without proof (#4650)');
+      expect(output).toContain(ONLY_AT_BASE);
+      expect(output).toMatch(/LIVE \(never tombstoned\)/);
+    },
+  );
+
+  it(
+    'never advances the anchor from an offline build — not on success, not on failure',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // A LAGGING anchor: one key short of the current surface. A writer fed by
+      // this build (rather than by a git-resolved baseline) would "helpfully"
+      // top it up, and the next offline build would then be checking the tree
+      // against itself. Write mode must leave it byte-identical.
+      const lagging = seedSurfaceBase(head, (k) => k.filter((x) => x !== SHED_FROM_ANCHOR));
+
+      const clean = offline(() => run([]));
+      expect(clean.status).toBe(0);
+      expect(readSurfaceBase()).toBe(lagging);
+
+      // Same on the failing path: the anchor recording a key this build cannot
+      // account for must not be rewritten into agreement with it.
+      const planted = seedSurfaceBase(head, (k) => [...k, ONLY_AT_BASE].sort());
+      const red = offline(() => run([]));
+      expect(red.status).toBe(1);
+      expect(red.output).toContain('deleted without proof (#4650)');
+      expect(readSurfaceBase()).toBe(planted);
+    },
+  );
+
+  it(
+    'catches the anchor being edited to hide a deletion, wherever origin/main IS reachable',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      expect(
+        (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+        `${SHED_FROM_ANCHOR} is no longer in the baseline — pick another live key`,
+      ).toContain(SHED_FROM_ANCHOR);
+      // The bypass this file exists to prevent, moved one file over: drop the
+      // line from the anchor so an offline build would never miss it.
+      seedSurfaceBase(head, (k) => k.filter((x) => x !== SHED_FROM_ANCHOR));
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('is not the baseline it claims to be');
+      expect(output).toContain(SHED_FROM_ANCHOR);
+      expect(output).toContain('gen:schema');
+    },
+  );
+
+  it(
+    'refuses an anchor pinned to a commit off origin/main — a rev the commit under test controls',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The other half of the same forgery: keep the keys honest, but point
+      // baseRev at a LOCAL commit. Its baseline would match, so only the
+      // ancestry test can tell it apart from an upstream one.
+      git('commit', '-q', '--allow-empty', '-m', 'a commit this branch controls');
+      const local = git('rev-parse', 'HEAD');
+      expect(local).not.toBe(head);
+      seedSurfaceBase(local, (k) => k);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('NOT an ancestor of');
+      expect(output).toContain(local.slice(0, 12));
+    },
+  );
+
+  it(
+    'does not mistake a shallow checkout for a forged baseRev — CI is shallow, and ancestry there is unwalkable',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The shape that broke this change's own first CI run. CI checks out
+      // depth 1, the anchor's commit is fetched as its own shallow root, and
+      // `merge-base --is-ancestor` then answers "not an ancestor" about a commit
+      // that plainly is one. Trusting that answer fails every build.
+      //
+      // `$GIT_DIR/shallow` is what makes a repository shallow, so writing the
+      // current tip into it truncates history exactly the way `--depth=1` does —
+      // no clone, and `git show BASEREV:file` still works, which is what keeps
+      // the KEYS half of the verification alive here.
+      const older = head;
+      const tip = seedBase((s) => s);
+      seedSurface((s) => s);
+      seedSurfaceBase(older, (k) => k);
+      fs.writeFileSync(path.join(sandbox, '.git', 'shallow'), `${tip}\n`);
+      try {
+        expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+        const { status, output } = run(['--check']);
+
+        expect(output).toContain('shallow checkout');
+        expect(output).not.toContain('NOT an ancestor of');
+        expect(status).toBe(0);
+      } finally {
+        fs.rmSync(path.join(sandbox, '.git', 'shallow'), { force: true });
+      }
+    },
+  );
+
+  it(
+    'still compares the anchor keys in a shallow checkout — the half that survives truncation',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const older = head;
+      const tip = seedBase((s) => s);
+      seedSurface((s) => s);
+      seedSurfaceBase(older, (k) => k.filter((x) => x !== SHED_FROM_ANCHOR));
+      fs.writeFileSync(path.join(sandbox, '.git', 'shallow'), `${tip}\n`);
+      try {
+        const { status, output } = run(['--check']);
+
+        expect(status).toBe(1);
+        expect(output).toContain('is not the baseline it claims to be');
+        expect(output).toContain(SHED_FROM_ANCHOR);
+      } finally {
+        fs.rmSync(path.join(sandbox, '.git', 'shallow'), { force: true });
+      }
+    },
+  );
+
+  it(
+    'is a committed artifact: --check reports it missing without writing it, gen:schema creates it from the git baseline',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      fs.rmSync(surfaceBasePath);
+
+      const check = run(['--check']);
+      expect(check.status).toBe(1);
+      expect(check.output).toContain('authorable-surface.base.json is missing');
+      // A check reports; it does not repair (#4711).
+      expect(fs.existsSync(surfaceBasePath)).toBe(false);
+
+      const write = run([]);
+      expect(write.status).toBe(0);
+      expect(write.output).toContain('authorable-surface.base.json created at');
+      const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
+      // Written from the git-resolved baseline — the merge base, not this tree.
+      expect(doc.baseRev).toBe(head);
+      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
     },
   );
 });

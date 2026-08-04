@@ -364,12 +364,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    *
    * DELIBERATELY NARROW (#4910): it carries only keys an executor consumes —
    * today `security.rateLimit` (the inbound token bucket that answers 429) and
-   * `trustProxy` (how that limiter identifies a caller). It is NOT the nine-key
-   * `HttpServerConfigSchema`: seven of those keys have no reader and no
-   * authoring surface, and mounting them here would make dead keys writable
-   * (their enforce-or-remove fate is #4938). Port/host stay a deployment
-   * concern owned by `objectstack serve -p`; see the schema file for the
-   * precedence rule and the rest of the rationale.
+   * `trustProxy` (how that limiter identifies a caller). It is NOT the former
+   * nine-key `HttpServerConfigSchema`: seven of those keys had no reader and no
+   * authoring surface, and mounting them here would have made dead keys
+   * writable — so they were retired with their container instead (#4938,
+   * ADR-0049). Port/host stay a deployment concern owned by
+   * `objectstack serve -p`; see the schema file for the precedence rule, the
+   * per-key prescriptions and the rest of the rationale.
    */
   server: StackServerConfigSchema.optional()
     .describe('Server-level runtime config consumed by objectstack serve/dev (inbound rate limit, proxy trust)'),
