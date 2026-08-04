@@ -222,7 +222,14 @@ export function bindRecordShareCascade(
       // Queued, because the walk's cost is unrelated to this write's and a hook
       // must not hold the caller. Under-cleaning for a moment is the safe
       // direction; over-deleting a manual share would be unrecoverable.
-      logger?.warn?.(
+      // `info`, not `warn`: unlike the rule path's unbounded branch — which
+      // revokes grants that records still deserve and warns because recipients
+      // visibly lose access until the re-grant lands — nothing here is taken
+      // from a surviving record. The sweep only removes rows whose record is
+      // gone, so a deferred reclaim has no user-visible consequence to warn
+      // about, and a `warn` on every bulk delete would just erode the level.
+      // The sweep speaks up (at `warn`) if it actually revokes anything.
+      logger?.info?.(
         '[sharing] a bulk delete touched more rows than could be enumerated — the shares of the ' +
           'deleted records are being reclaimed by a background orphan sweep instead ' +
           '(a restart re-runs the same sweep)',
