@@ -217,3 +217,199 @@ describe('compileDataset — multi-hop joins (ADR-0071)', () => {
     expect(cube.joins?.['account__owner']?.name).toBe('owner');
   });
 });
+
+
+/**
+ * #5115 — a dataset whose JOIN crosses datasources is metadata that can never
+ * execute: the whole dataset is lowered into ONE statement on the base object's
+ * datasource (raw SQL routes by object since #5033), so the joined table is
+ * simply not there. #5033 made that failure loud at QUERY time, in front of
+ * whoever opened the dashboard; this suite pins the same verdict at COMPILE
+ * time, while the author (often an AI author) is still holding the metadata.
+ *
+ * The gate is deliberately narrow, and these cases pin the boundary as much as
+ * the rejection: it fires only on a conflict the METADATA PROVES — two explicit,
+ * different `object.datasource` bindings — because `'default'` is the schema's
+ * default value rather than a routing decision (mapping rules / the ADR-0057
+ * lifecycle split / a package's `defaultDatasource` all route objects that
+ * never say a word about `datasource`). Everything it cannot prove stays
+ * compilable and is caught by #5033's query-time defence.
+ */
+describe('compileDataset — cross-datasource join gate (#5115)', () => {
+  /** opportunity → crm_account → core_user (all to-one). */
+  const chainResolver = (obj: string, rel: string) => {
+    const graph: Record<string, Record<string, { object: string; table: string }>> = {
+      opportunity: { account: { object: 'crm_account', table: 'crm_account' } },
+      crm_account: { owner: { object: 'core_user', table: 'core_user' } },
+    };
+    return graph[obj]?.[rel];
+  };
+
+  const datasetWith = (include: string[], dimensions: Record<string, string>[]) =>
+    DatasetSchema.parse({
+      name: 'revenue_by_region',
+      label: 'Revenue by region',
+      object: 'opportunity',
+      include,
+      dimensions: dimensions.map((d) => ({ ...d, type: 'string' })),
+      measures: [{ name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' }],
+    });
+
+  const crossDs = datasetWith(['account'], [{ name: 'region', field: 'account.region' }]);
+
+  /** Compile `crossDs` with a datasource map; returns the thrown error, if any. */
+  const compileWith = (
+    datasources: Record<string, string | undefined>,
+    isExternalObject?: (o: string) => boolean,
+  ): Error | undefined => {
+    try {
+      compileDataset(crossDs, chainResolver, {
+        getObjectDatasource: (o) => datasources[o],
+        ...(isExternalObject ? { isExternalObject } : {}),
+      });
+      return undefined;
+    } catch (e) {
+      return e as Error;
+    }
+  };
+
+  it('rejects two explicitly-bound objects on different datasources, naming BOTH sides and the fix', () => {
+    const err = compileWith({ opportunity: 'billing_db', crm_account: 'crm_db' });
+
+    expect(err).toBeDefined();
+    const msg = String(err?.message);
+    // Both objects …
+    expect(msg).toContain('base object "opportunity"');
+    expect(msg).toContain('joined object "crm_account"');
+    // … both datasources …
+    expect(msg).toContain('datasource "billing_db"');
+    expect(msg).toContain('datasource "crm_db"');
+    // … the offending include path …
+    expect(msg).toContain('"account"');
+    // … the rule, and a remedy the author can act on — same wording family as
+    // the #5033 query-time diagnostic, so the two never read as two bugs.
+    expect(msg).toMatch(/JOIN cannot cross datasources/);
+    expect(msg).toMatch(/binding both objects to the same datasource/);
+    expect(msg).toMatch(/dropping "account" from the dataset's `include`/);
+  });
+
+  it('compiles normally when both sides declare the SAME datasource', () => {
+    expect(compileWith({ opportunity: 'crm_db', crm_account: 'crm_db' })).toBeUndefined();
+    // …and the join is still emitted, unchanged.
+    const { cube } = compileDataset(crossDs, chainResolver, { getObjectDatasource: () => 'crm_db' });
+    expect(cube.joins?.account?.name).toBe('crm_account');
+  });
+
+  it('compares datasource ids case-insensitively (casing is not two databases)', () => {
+    expect(compileWith({ opportunity: 'CRM_DB', crm_account: 'crm_db' })).toBeUndefined();
+  });
+
+  // ── "cannot answer, do not block" — the tiering, pinned case by case ───────
+
+  it('a host with NO datasource probe compiles exactly as before', () => {
+    // The headline tiering case: an embedding with no data engine passes no
+    // options at all, and every dataset it registers must still compile.
+    expect(() => compileDataset(crossDs, chainResolver)).not.toThrow();
+    expect(() => compileDataset(crossDs, chainResolver, {})).not.toThrow();
+    const { cube } = compileDataset(crossDs, chainResolver, {});
+    expect(cube.joins?.account?.name).toBe('crm_account');
+  });
+
+  it('does not block when the probe cannot place the JOIN TARGET', () => {
+    expect(compileWith({ opportunity: 'billing_db', crm_account: undefined })).toBeUndefined();
+  });
+
+  it('does not block when the probe cannot place the BASE object', () => {
+    // "Cannot answer for the base" must not reject every join — the base is the
+    // side every comparison is made against.
+    expect(compileWith({ opportunity: undefined, crm_account: 'crm_db' })).toBeUndefined();
+  });
+
+  it('treats the DEFAULT binding as unanswered on either side', () => {
+    // `datasource: 'default'` is the schema's default VALUE, not a routing
+    // decision: `ObjectQL.getDriver` only short-circuits on a name OTHER than
+    // 'default', then falls through to datasourceMapping rules, the ADR-0057
+    // lifecycle split and the package's defaultDatasource. An object that says
+    // 'default' may well be routed elsewhere — and may land on exactly the
+    // datasource the other side declares, which is why rejecting here would
+    // blank a working dashboard.
+    expect(compileWith({ opportunity: 'default', crm_account: 'crm_db' })).toBeUndefined();
+    expect(compileWith({ opportunity: 'billing_db', crm_account: 'default' })).toBeUndefined();
+    expect(compileWith({ opportunity: 'default', crm_account: 'DEFAULT' })).toBeUndefined();
+  });
+
+  it('exempts a FEDERATED join target (ADR-0062 D6 — served by the FK-expand path)', () => {
+    // NativeSQLStrategy already declines a cube whose base or joined object is
+    // external, so such a query runs on the ObjectQL FK-expand path (two reads
+    // joined in memory), which crosses datasources by construction. Rejecting
+    // it here would break a path that works today.
+    expect(
+      compileWith({ opportunity: 'billing_db', crm_account: 'sf_prod' }, (o) => o === 'crm_account'),
+    ).toBeUndefined();
+  });
+
+  it('exempts a FEDERATED base object', () => {
+    expect(
+      compileWith({ opportunity: 'sf_prod', crm_account: 'crm_db' }, (o) => o === 'opportunity'),
+    ).toBeUndefined();
+  });
+
+  // ── which hop gets named ──────────────────────────────────────────────────
+
+  it('names the ONE offending hop when a multi-hop path crosses on its second hop', () => {
+    const twoHop = datasetWith(
+      ['account', 'account.owner'],
+      [{ name: 'owner_region', field: 'account.owner.region' }],
+    );
+    const datasources: Record<string, string> = {
+      opportunity: 'billing_db',
+      crm_account: 'billing_db', // first hop stays home …
+      core_user: 'identity_db', // … the second one leaves
+    };
+    let thrown: Error | undefined;
+    try {
+      compileDataset(twoHop, chainResolver, { getObjectDatasource: (o) => datasources[o] });
+    } catch (e) {
+      thrown = e as Error;
+    }
+    const msg = String(thrown?.message);
+    expect(msg).toContain('joined object "core_user"');
+    expect(msg).toContain('datasource "identity_db"');
+    expect(msg).toContain('path "account.owner"');
+    // The innocent intermediate hop is not blamed.
+    expect(msg).not.toContain('joined object "crm_account"');
+  });
+
+  it('rejects only the crossing target when several joins are declared', () => {
+    const multi = DatasetSchema.parse({
+      name: 'multi',
+      label: 'Multi',
+      object: 'opportunity',
+      include: ['owner', 'account'],
+      dimensions: [
+        { name: 'owner_name', field: 'owner.name', type: 'string' },
+        { name: 'region', field: 'account.region', type: 'string' },
+      ],
+      measures: [{ name: 'cnt', label: 'Count', aggregate: 'count' }],
+    });
+    const flatResolver = (obj: string, rel: string) => {
+      if (obj !== 'opportunity') return undefined;
+      if (rel === 'owner') return { object: 'core_user', table: 'core_user' };
+      if (rel === 'account') return { object: 'crm_account', table: 'crm_account' };
+      return undefined;
+    };
+    const datasources: Record<string, string> = {
+      opportunity: 'billing_db',
+      core_user: 'billing_db', // same datasource — fine
+      crm_account: 'crm_db', // the offender
+    };
+    let thrown: Error | undefined;
+    try {
+      compileDataset(multi, flatResolver, { getObjectDatasource: (o) => datasources[o] });
+    } catch (e) {
+      thrown = e as Error;
+    }
+    expect(String(thrown?.message)).toContain('joined object "crm_account"');
+    expect(String(thrown?.message)).not.toContain('core_user');
+  });
+});

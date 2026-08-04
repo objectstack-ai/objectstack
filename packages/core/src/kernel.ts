@@ -425,11 +425,22 @@ export class ObjectKernel {
         this.state = 'stopping';
         this.logger.info('Graceful shutdown started');
 
+        // The ONE rejection that means "teardown hung". Created here so the
+        // catch below can discriminate by IDENTITY (#5274): only this
+        // `setTimeout` can produce this exact object, so no message match, no
+        // `instanceof`, and nothing a plugin throws can ever impersonate it —
+        // not even a handler throwing `new Error('Shutdown timeout exceeded')`.
+        // That discrimination is the whole point: the catch used to be reached
+        // by BOTH the timer and any exception escaping `performShutdown()`, and
+        // it treated them identically — `process.exit(1)` under a log line
+        // reading "Shutdown timed out" when nothing had timed out.
+        const shutdownTimeoutError = new Error('Shutdown timeout exceeded');
+
         try {
             const shutdownPromise = this.performShutdown();
             const timeoutPromise = new Promise<void>((_, reject) => {
                 const t = setTimeout(() => {
-                    reject(new Error('Shutdown timeout exceeded'));
+                    reject(shutdownTimeoutError);
                 }, this.config.shutdownTimeout);
                 // Don't let this timer keep the event loop alive
                 if (t.unref) t.unref();
@@ -440,11 +451,32 @@ export class ObjectKernel {
             this.state = 'stopped';
             this.logger.info('✅ Graceful shutdown complete');
         } catch (error) {
-            this.logger.error('Shutdown timed out — forcing exit', error as Error);
             this.state = 'stopped';
-            // Flush logger then hard-exit; the process would otherwise hang
-            await this.logger.destroy();
-            process.exit(1);
+
+            if (error === shutdownTimeoutError) {
+                // GENUINE timeout: `performShutdown()` is still running and has
+                // stopped making progress, so the process would otherwise hang
+                // holding whatever it failed to release. Hard-exit stays — it
+                // is the only branch it was ever right for.
+                this.logger.error('Shutdown timed out — forcing exit', error as Error);
+                // Flush logger then hard-exit; the process would otherwise hang
+                await this.logger.destroy();
+                process.exit(1);
+            } else {
+                // NOT a timeout. `performShutdown()` isolates every teardown
+                // step it owns (hook dispatch, each destroy(), each shutdown
+                // handler), so reaching here means something outside those
+                // loops failed — the teardown is over either way, and there is
+                // nothing hung to escape from. Killing the host process here
+                // would take away the embedding host's (cloud auth-proxy, CLI,
+                // a test runner) chance to do its own cleanup, over a fault
+                // that did not require it. Log and return down the normal
+                // path; `shutdown()` still never rejects.
+                this.logger.error(
+                    'Shutdown finished with an unexpected teardown error — the kernel is stopped and the process is NOT being exited; some cleanup may not have run',
+                    error as Error,
+                );
+            }
         } finally {
             await this.logger.destroy();
         }
@@ -673,9 +705,55 @@ export class ObjectKernel {
         this.startedPlugins.clear();
     }
 
+    /**
+     * Dispatch `kernel:shutdown`, ISOLATING failures: a handler that throws is
+     * logged and the remaining handlers still run (#5274).
+     *
+     * This is a per-hook judgement, deliberately NOT the bare awaited loop
+     * `context.trigger` runs for every other hook — the boot-path hooks
+     * (`kernel:ready`, `kernel:bootstrapped`, `kernel:listening`) keep
+     * propagating, because everything dispatched before "✅ Bootstrap complete"
+     * is a precondition of that claim and swallowing a throw there only hides
+     * the failure behind a process reporting success (#5170, #5257).
+     *
+     * On the teardown path there is no "refuse to proceed" left to buy. What is
+     * queued behind a failing shutdown handler is the rest of the cleanup —
+     * every other subscriber, then each plugin's `destroy()` in reverse order —
+     * which is what flushes buffers, closes connections and releases locks. So
+     * one bad handler must not amplify into leaked resources and unflushed
+     * writes. Same reasoning, same wording, same `Hook handler failed:
+     * kernel:shutdown` log line as `LiteKernel`'s dispatch site, which reaches
+     * the shared isolating dispatcher `ObjectKernelBase.triggerHook` (#5257).
+     *
+     * `ObjectKernel` cannot call that dispatcher: it does not extend
+     * `ObjectKernelBase` (only `LiteKernel` does) and owns its own `hooks` map,
+     * so the semantics are mirrored here rather than shared. One hook name
+     * meaning two opposite things across the two kernels is exactly the bug
+     * #5170/#5257 closed, so the pin for this one lives on both sides too.
+     */
+    private async triggerShutdownHookIsolating(): Promise<void> {
+        const handlers = this.hooks.get('kernel:shutdown') || [];
+        this.logger.debug('Triggering hook: kernel:shutdown', {
+            hook: 'kernel:shutdown',
+            handlerCount: handlers.length,
+        });
+
+        for (const handler of handlers) {
+            try {
+                await handler();
+            } catch (error) {
+                this.logger.error('Hook handler failed: kernel:shutdown', error as Error);
+                // Continue with other handlers even if one fails
+            }
+        }
+    }
+
     private async performShutdown(): Promise<void> {
-        // Trigger shutdown hook
-        await this.context.trigger('kernel:shutdown');
+        // Trigger shutdown hook — ISOLATING dispatch, see the method's own
+        // rationale. The two loops below already isolate per plugin and per
+        // handler; before #5274 this line was the one teardown step that did
+        // not, so a single throwing subscriber skipped BOTH of them.
+        await this.triggerShutdownHookIsolating();
 
         // Destroy plugins in reverse order
         const orderedPlugins = Array.from(this.plugins.values()).reverse();
