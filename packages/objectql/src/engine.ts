@@ -5532,7 +5532,88 @@ export class ObjectQL implements IObjectQLEngine {
           transaction: opCtx.context?.transaction,
           ql: this
       };
+
+      // [#5272] The pre-image of the row this delete is about to remove.
+      //
+      // `HookContext.previous` is documented — in the spec, since it was
+      // written — as "the state of the record BEFORE the operation (for
+      // update/delete)", and `update()` has bound it all along. `delete()`
+      // never did: `previous` was `undefined` in `beforeDelete` AND in
+      // `afterDelete`, so a legal, contract-shaped delete-side transition
+      // condition (`previous.status == "done"`) was unevaluable — and since
+      // #4775 unevaluable REJECTS the operation. Worse, it was reported
+      // through the generic branch, which reads as "you misspelled a key"
+      // when the key was fine and the engine simply never bound it (#5037's
+      // shape, one path over).
+      //
+      // #5038 made the asymmetry visible from the other side: a predicate
+      // bulk delete already binds each doomed row's own pre-image on its
+      // per-row `afterDelete`, so the SINGLE-record path was strictly worse
+      // than the bulk one — the exact inversion #4800/#4862 ruled against.
+      //
+      // Demand-driven, like `update()`'s `priorRecord`: read only when
+      // something on this object actually consumes it —
+      //   * a delete-side hook, EITHER phase (its `condition` may read
+      //     `previous`; its handler — plugin-audit, the record-change
+      //     trigger — reads `ctx.previous` directly);
+      //   * a roll-up summary aggregating this object, which needs the
+      //     doomed row's FK value to find the parent to recompute.
+      // Those two used to be separate reads at separate times (the summary
+      // one fetched only after `beforeDelete` had run); they are ONE read
+      // now — and a RAW driver read, which is exactly what `update()`
+      // already hands `recomputeSummaries` as its `previous` argument, so
+      // the two write paths now agree on what a pre-image is.
+      //
+      // `needsPriorRecord(schema)` is deliberately NOT part of this gate
+      // even though `update()`'s twin carries it: object validation rules
+      // are evaluated on insert/update only — `delete()` evaluates none —
+      // so including it would buy a read with no reader.
+      //
+      // Read BEFORE `beforeDelete` fires. A delete's `before` phase is the
+      // one that has nothing else to look at (its `input` carries an id and
+      // no data), and the pre-image has to be taken before the row is gone
+      // either way, so a single read serves both phases.
+      const deleteSchema = this._registry.getObject(object);
+      const wantsPreImage =
+        this.hasHooksFor('beforeDelete', object) ||
+        this.hasHooksFor('afterDelete', object) ||
+        this.getSummaryDescriptors(object).length > 0;
+      // `buildDriverOptions` is what carries the open transaction and the
+      // tenant scope onto a raw driver read. Skipping it here would read
+      // outside this write's transaction and across the tenant boundary —
+      // `update()`'s prior read passes the same bag for the same reason.
+      const readPreImage = async (targetId: unknown): Promise<Record<string, unknown> | null> => {
+        const preAst: QueryAST = { object, where: { id: targetId }, limit: 1 };
+        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+        return (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null;
+      };
+      const bindPreImage = (row: Record<string, unknown> | null): void => {
+        // Never fabricate: a row that is not there leaves `previous` UNBOUND
+        // rather than `{}`/`null`, so a condition reading it faults loudly
+        // instead of answering for a record nobody read (#4649/#4775).
+        hookContext.previous = row ? (coerceBooleanFields(deleteSchema as any, row as any) as any) : undefined;
+      };
+      let priorRecord: Record<string, unknown> | null = null;
+      if (id && wantsPreImage) {
+        priorRecord = await readPreImage(id);
+        bindPreImage(priorRecord);
+      }
+
       await this.triggerHooks('beforeDelete', hookContext);
+
+      // A `beforeDelete` hook may repoint the target id, or clear it (which
+      // #4550's re-asked dispatch verdict below already accounts for). The
+      // pre-image bound above describes the OLD id, so it must not ride into
+      // `afterDelete` — or into the summary recompute — as though it
+      // described the new target. A cleared id falls through to the predicate
+      // branch, whose batch-scoped dispatch must carry no single row's
+      // pre-image at all (`hook-wrappers` diagnoses that dispatch by the
+      // absence of both).
+      if (wantsPreImage && hookContext.input.id !== id) {
+        priorRecord = hookContext.input.id ? await readPreImage(hookContext.input.id) : null;
+        bindPreImage(priorRecord);
+      }
+
       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
 
       try {
@@ -5545,15 +5626,6 @@ export class ObjectQL implements IObjectQLEngine {
           // `record-after-delete` flow must see each deleted row rather than
           // one context that names none of them.
           let bulkPerRowRows: Record<string, unknown>[] | null = null;
-          // Capture the row's FK values BEFORE deletion so roll-up summaries can
-          // recompute the (now-orphaned) parent. Only when a summary aggregates
-          // this object — avoids an extra read on every delete.
-          let summaryPrev: any = null;
-          if (hookContext.input.id && this.getSummaryDescriptors(object).length > 0) {
-            try {
-              summaryPrev = await this.findOne(object, { where: { id: hookContext.input.id }, context: opCtx.context } as any);
-            } catch { /* best-effort */ }
-          }
           if (hookContext.input.id) {
               // Honor referential delete behavior (cascade/set_null/restrict)
               // for relations pointing at this record before removing it.
@@ -5607,9 +5679,13 @@ export class ObjectQL implements IObjectQLEngine {
             await this.triggerHooks('afterDelete', hookContext);
           }
 
-          // Roll-up: recompute the parent summary now that the child is gone.
-          const summaryFailures = summaryPrev
-            ? await this.recomputeSummaries(object, null, summaryPrev, opCtx.context)
+          // Roll-up: recompute the parent summary now that the child is gone,
+          // from the row's FK values captured BEFORE deletion. [#5272] That
+          // capture is now the same single pre-image read `previous` rides on
+          // (it used to be its own later `findOne`), which is also what
+          // `update()` passes here.
+          const summaryFailures = priorRecord
+            ? await this.recomputeSummaries(object, null, priorRecord, opCtx.context)
             : [];
 
           // Same split as update(): per-record `data.record.deleted` (#4626),
