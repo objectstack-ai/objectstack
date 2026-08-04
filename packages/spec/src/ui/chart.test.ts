@@ -2,9 +2,121 @@ import { describe, it, expect } from 'vitest';
 import {
   ChartTypeSchema,
   ChartConfigSchema,
+  ChartAxisSchema,
+  ChartSeriesSchema,
+  ChartAnnotationSchema,
+  ChartInteractionSchema,
+  ChartAggregateSchema,
+  ChartGroupBySchema,
   type ChartType,
   type ChartConfig,
 } from './chart.zod';
+import { ReportChartSchema } from './report.zod';
+import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../kernel/metadata-type-schemas';
+import { ObjectStackSchema } from '../stack.zod';
+
+/**
+ * Reachability of a schema from every metadata-type root plus `defineStack`'s
+ * `ObjectStackSchema`, by BFS over this build's in-memory Zod graph.
+ *
+ * Mirrors `computeSurfaceReachability` in `scripts/build-schemas.ts` (the
+ * #4650 closure). `derived-clone` counts as reachable: `.extend()` / `.strip()`
+ * produce a clone that shares no identity with the original but DOES share its
+ * per-property schema instances, which is exactly how `ChartConfigSchema` is
+ * reached through `ReportChartSchema`.
+ *
+ * ⚠️ Identity-keyed, so it must see the REAL schema instances. `lazySchema`
+ * returns a Proxy unless `OS_EAGER_SCHEMAS=1`, and comparing a Proxy against
+ * the instance stored in the graph reports every root as unreachable — which
+ * is precisely how the first run of this measurement produced three failing
+ * positive controls. Hence the resolve step.
+ */
+function reachableFromMetadataRoots(): (schema: unknown) => boolean {
+  // Identity is the schema's `_zod.def` OBJECT, never the schema binding.
+  // `lazySchema` hands out a Proxy unless `OS_EAGER_SCHEMAS=1`, and the graph
+  // holds the real instances — so comparing bindings reports every root as
+  // unreachable. That is not hypothetical: it is what the first run of this
+  // assertion did, and the positive controls above are the only reason it was
+  // caught instead of shipping as a green that proved nothing. `def` survives
+  // the Proxy (the `_zod` facade delegates to the real internals), so it is
+  // the one stable key for both identities.
+  const defOf = (s: unknown): unknown => (s as { _zod?: { def?: unknown } })?._zod?.def;
+
+  const childrenOf = (node: unknown): unknown[] => {
+    const out: unknown[] = [];
+    const seen = new Set<unknown>();
+    const walk = (v: unknown): void => {
+      // `typeof v !== 'object'` alone is WRONG here and silently halves the
+      // graph: `lazySchema`'s Proxy target is `function lazyZod() {}`, so every
+      // lazy schema is `typeof 'function'`. Skipping those made the BFS stop at
+      // the first lazy node and report the whole chart family unreachable —
+      // caught only because the positive controls above went red.
+      // (`build-schemas.ts`'s equivalent walk never hit this: it runs under
+      // `OS_EAGER_SCHEMAS=1`, where there are no proxies at all.)
+      if (v === null || (typeof v !== 'object' && typeof v !== 'function') || seen.has(v)) return;
+      seen.add(v);
+      if (defOf(v)) { out.push(v); return; }
+      if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+      if (v instanceof Map) { for (const x of v.values()) walk(x); return; }
+      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
+    };
+    walk(defOf(node));
+    return out;
+  };
+  const shapeOf = (node: unknown): Record<string, unknown> | null => {
+    const def = defOf(node) as { type?: string; shape?: Record<string, unknown> } | undefined;
+    return def?.type === 'object' && def.shape ? def.shape : null;
+  };
+
+  const roots: unknown[] = [];
+  for (const type of listMetadataTypeSchemaTypes()) {
+    const s = getMetadataTypeSchema(type);
+    if (s) roots.push(s);
+  }
+  roots.push(ObjectStackSchema);
+
+  const visitedDefs = new Set<unknown>();
+  const visitedNodes: unknown[] = [];
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const node = queue.pop();
+    const def = defOf(node);
+    if (!def || visitedDefs.has(def)) continue;
+    visitedDefs.add(def);
+    visitedNodes.push(node);
+    for (const child of childrenOf(node)) queue.push(child);
+  }
+
+  // (propName → prop def) pairs of every visited object node — the bridge that
+  // recognises a derived clone (`.extend()` / `.strip()` share no identity with
+  // the original but DO share its per-property schema instances, which is how
+  // `ChartConfigSchema` is reached through `ReportChartSchema`).
+  const bridged = new Map<unknown, Set<string>>();
+  for (const node of visitedNodes) {
+    const shape = shapeOf(node);
+    if (!shape) continue;
+    for (const [name, prop] of Object.entries(shape)) {
+      const d = defOf(prop);
+      if (!d) continue;
+      let names = bridged.get(d);
+      if (!names) { names = new Set<string>(); bridged.set(d, names); }
+      names.add(name);
+    }
+  }
+
+  return (schema: unknown): boolean => {
+    const def = defOf(schema);
+    if (!def) return false;
+    if (visitedDefs.has(def)) return true;
+    const shape = shapeOf(schema);
+    if (!shape) return false;
+    for (const [name, prop] of Object.entries(shape)) {
+      const d = defOf(prop);
+      if (d && bridged.get(d)?.has(name)) return true;
+    }
+    return false;
+  };
+}
 
 describe('ChartTypeSchema', () => {
   it('should accept all comparison chart types', () => {
@@ -251,5 +363,181 @@ describe('Chart ARIA Integration', () => {
       title: 'Revenue by Region',
       aria: { ariaLabel: 'Pie chart showing revenue by region', role: 'img' },
     })).not.toThrow();
+  });
+});
+
+// ============================================================================
+// #4001 批 15 — the SPLIT verdict, pinned.
+//
+// Five sites are closed and two are deliberately open, on a door measurement.
+// Both halves are pinned here, because both can regress and they regress in
+// OPPOSITE directions: the closed half by someone reopening it, the open half
+// by a later sweep "finishing the file" with a `strictObject` that gates
+// nothing (#4583). The same verdict is recorded in `chart.zod.ts`'s header and
+// in the ui/ row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+// ============================================================================
+describe('#4001 批 15 — the five closed chart sites', () => {
+  const reject = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string => {
+    const r = schema.safeParse(value);
+    expect(r.success, 'expected this to be REJECTED').toBe(false);
+    return JSON.stringify(r.error?.issues ?? []);
+  };
+
+  it('the controls parse — these tests fail closed, not by rejecting everything', () => {
+    expect(ChartConfigSchema.safeParse({ type: 'bar' }).success).toBe(true);
+    expect(ChartAxisSchema.safeParse({ field: 'status' }).success).toBe(true);
+    expect(ChartSeriesSchema.safeParse({ name: 'total' }).success).toBe(true);
+    expect(ChartAnnotationSchema.safeParse({ value: 10 }).success).toBe(true);
+    expect(ChartInteractionSchema.safeParse({}).success).toBe(true);
+  });
+
+  it.each([
+    ['ChartConfigSchema', () => ChartConfigSchema, { type: 'bar', notAChartKey: 1 }],
+    ['ChartAxisSchema', () => ChartAxisSchema, { field: 'f', notAnAxisKey: 1 }],
+    ['ChartSeriesSchema', () => ChartSeriesSchema, { name: 'n', notASeriesKey: 1 }],
+    ['ChartAnnotationSchema', () => ChartAnnotationSchema, { value: 1, notAnAnnotationKey: 1 }],
+    ['ChartInteractionSchema', () => ChartInteractionSchema, { notAnInteractionKey: 1 }],
+  ])('%s rejects an undeclared key', (_name, get, value) => {
+    expect(reject(get() as never, value)).toContain(Object.keys(value).slice(-1)[0]);
+  });
+
+  // ---- the door: a strict schema nobody parses gates nothing -----------
+  it('the door is the dashboard metadata root, not just the exported schema', () => {
+    const dash = getMetadataTypeSchema('dashboard');
+    expect(dash, 'dashboard must resolve a schema — this is the parse door').toBeTruthy();
+    const widget = (chartConfig: Record<string, unknown>) => ({
+      name: 'dash_one', label: 'D',
+      widgets: [{ id: 'w1', type: 'bar', title: 'W', dataset: 'ds', dimensions: ['a'], values: ['b'], chartConfig }],
+    });
+    expect(dash!.safeParse(widget({ type: 'bar' })).success, 'control').toBe(true);
+    const r = dash!.safeParse(widget({ type: 'bar', chartType: 'bar' }));
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain('widgets');
+  });
+
+  it('strictness RIDES `.extend()` onto ReportChartSchema — the webhook/view trap, here on purpose', () => {
+    // `.extend()` inherits `.strict()` AND the error map. `ReportChartSchema`
+    // narrows xAxis/yAxis to dataset names and adds no key of its own, so the
+    // inherited key set is exactly right — but that has to be asserted, not
+    // assumed, because the same mechanic is what made finding 16 a finding.
+    expect(ReportChartSchema.safeParse({ type: 'bar', xAxis: 'dim', yAxis: 'measure' }).success, 'control').toBe(true);
+    const msg = reject(ReportChartSchema as never, { type: 'bar', xAxis: 'd', yAxis: 'm', chartType: 'bar' });
+    expect(msg).toContain('chartType');
+    expect(msg, 'the base error map rides too, so the report surface gets the rename').toContain('`chartType` → `type`');
+  });
+
+  // ---- curation, each entry measured against a named sibling ----------
+  it('crosses the axis/series vocabulary in BOTH directions', () => {
+    // Same file, sixty lines apart: the axis binds `field`/`title`, the series
+    // binds `name`/`label`. Neither is a typo for the other.
+    expect(reject(ChartAxisSchema as never, { field: 'f', name: 'status' })).toContain('`name` → `field`');
+    expect(reject(ChartSeriesSchema as never, { name: 'n', field: 'total' })).toContain('`field` → `name`');
+    expect(reject(ChartAxisSchema as never, { field: 'f', label: 'x' })).toContain('`label` → `title`');
+    expect(reject(ChartSeriesSchema as never, { name: 'n', title: 'x' })).toContain('`title` → `label`');
+  });
+
+  it('renames Recharts prop names onto the spec keys — the renderer an author debugs against', () => {
+    expect(reject(ChartAxisSchema as never, { field: 'f', dataKey: 'x' })).toContain('`dataKey` → `field`');
+    expect(reject(ChartSeriesSchema as never, { name: 'n', stackId: 'g' })).toContain('`stackId` → `stack`');
+    expect(reject(ChartSeriesSchema as never, { name: 'n', strokeDasharray: '4 4' })).toContain('`strokeDasharray` → `dashArray`');
+  });
+
+  it('renames a region\'s range vocabulary onto value/endValue', () => {
+    // Getting `endValue` wrong collapses the region to a line at `value`.
+    const msg = reject(ChartAnnotationSchema as never, { value: 1, from: 1, to: 2 });
+    expect(msg).toContain('`from` → `value`');
+    expect(msg).toContain('`to` → `endValue`');
+  });
+
+  it('carries the #3752 tombstones, one distinct sentence each (批 10)', () => {
+    const zoom = reject(ChartInteractionSchema as never, { zoom: true });
+    expect(zoom).toContain('#3752');
+    expect(zoom).toContain('brush: true');
+    const click = reject(ChartInteractionSchema as never, { clickAction: 'x' });
+    expect(click).toContain('#3752');
+    expect(click).toContain('onSegmentClick');
+    // Two keys at once ⇒ two DISTINCT bullets, not one string printed twice.
+    const both = reject(ChartInteractionSchema as never, { zoom: true, clickAction: 'x' });
+    expect(both.split('• ').length - 1).toBe(2);
+  });
+
+  it('never prescribes `drillDown` — it is not a key this protocol declares', () => {
+    // The #3752 migration prose said "Migration: `drillDown`" until 批 15.
+    // There is no `drillDown` anywhere in the spec; it is an untyped
+    // `(schema as any).drillDown` read inside objectui's ObjectChart. Promoting
+    // that sentence into a rejection message would have handed an author the
+    // platform's authority for a key the same gate then rejects — the ledger's
+    // finding 7, a third time. Filed separately, corrected here.
+    const msg = reject(ChartInteractionSchema as never, { clickAction: 'x' });
+    expect(msg).not.toContain('drillDown');
+    expect(msg, 'it must name something that exists instead').toContain('drilldown');
+  });
+
+  it('points wrong-layer keys at the layer that owns them, naming a real key', () => {
+    const width = reject(ChartConfigSchema as never, { type: 'bar', width: 400 });
+    expect(width).toContain('layout.w');
+    const stacked = reject(ChartConfigSchema as never, { type: 'bar', stacked: true });
+    expect(stacked).toContain('series[].stack');
+    const dataset = reject(ChartConfigSchema as never, { type: 'bar', dataset: 'ds' });
+    expect(dataset).toContain('ADR-0021');
+  });
+
+  it('every alias target it suggests is a key the schema accepts', () => {
+    // The `triggerPhrases` lesson (`shared/strict-object.ts`): never point an
+    // author at a key that rejects them a second time.
+    const shapeOf = (s: unknown) => Object.keys((s as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape);
+    expect(shapeOf(ChartConfigSchema)).toEqual(expect.arrayContaining(['type', 'colors', 'showLegend', 'showDataLabels', 'annotations', 'interaction', 'subtitle', 'aria', 'height', 'xAxis', 'yAxis']));
+    expect(shapeOf(ChartAxisSchema)).toEqual(expect.arrayContaining(['field', 'title', 'showGridLines', 'stepSize', 'logarithmic', 'min', 'max', 'format', 'position']));
+    expect(shapeOf(ChartSeriesSchema)).toEqual(expect.arrayContaining(['name', 'label', 'type', 'stack', 'yAxis', 'variant', 'dashArray', 'opacity', 'color']));
+    expect(shapeOf(ChartAnnotationSchema)).toEqual(expect.arrayContaining(['value', 'endValue', 'label', 'style', 'color', 'axis', 'type']));
+    expect(shapeOf(ChartInteractionSchema)).toEqual(expect.arrayContaining(['tooltips', 'brush']));
+  });
+});
+
+describe('#4001 批 15 — the two chart sites deliberately LEFT OPEN (measured, not skipped)', () => {
+  // `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm have a LIVE
+  // carrier — the react tier's `<ObjectChart aggregate={…}>` prop, which
+  // objectui's ObjectChart reads to run the query — but no PARSE: they are
+  // unreachable from all 24 metadata-type roots and from `ObjectStackSchema`,
+  // and the react-page publish lint re-derives their rules by hand instead of
+  // parsing them. `.strict()` is a property of a parse, so closing them would
+  // gate nothing while making the real gap harder to see.
+  it('ChartAggregateSchema still STRIPS an undeclared key — deliberate', () => {
+    const parsed = ChartAggregateSchema.parse({ function: 'count', groupBy: 'status', groupby: 'status' }) as Record<string, unknown>;
+    expect(parsed.groupby, 'if this is no longer stripped, re-read the header in chart.zod.ts').toBeUndefined();
+    expect(parsed.groupBy).toBe('status');
+  });
+
+  it('ChartGroupBySchema\'s object arm still STRIPS an undeclared key — deliberate', () => {
+    const parsed = ChartGroupBySchema.parse({ field: 'created_at', dateGranularty: 'month' }) as Record<string, unknown>;
+    expect(parsed.dateGranularty).toBeUndefined();
+    expect(parsed.field).toBe('created_at');
+  });
+
+  it('neither is REACHABLE from the metadata-type roots — the measurement, re-run every CI', () => {
+    // The standing half of the door measurement, so the verdict cannot go
+    // stale in silence: the day someone gives `aggregate` a metadata carrier
+    // key this goes red and points them back at the header comment.
+    //
+    // It is a real BFS over this build's in-memory Zod graph from every
+    // metadata-type root plus `defineStack`'s `ObjectStackSchema` — the same
+    // closure `build-schemas.ts` uses for the #4650 deletion check — NOT a
+    // string search over a serialized schema, which cannot see a shape at all
+    // and would pass no matter what (the vacuous-green this campaign keeps
+    // paying for). The positive controls below are what prove that.
+    const reachable = reachableFromMetadataRoots();
+
+    // Positive controls, in the SAME run: the five closed sites of this file
+    // resolve. An instrument that says "unreachable" to everything is broken,
+    // not informative.
+    expect(reachable(ChartConfigSchema), 'positive control').toBe(true);
+    expect(reachable(ChartAxisSchema), 'positive control').toBe(true);
+    expect(reachable(ChartSeriesSchema), 'positive control').toBe(true);
+    expect(reachable(ChartAnnotationSchema), 'positive control').toBe(true);
+    expect(reachable(ChartInteractionSchema), 'positive control').toBe(true);
+
+    // The measurement itself.
+    expect(reachable(ChartAggregateSchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe(false);
+    expect(reachable(ChartGroupBySchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe(false);
   });
 });
