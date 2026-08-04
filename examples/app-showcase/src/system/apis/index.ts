@@ -3,82 +3,98 @@
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
 /**
- * Declarative API endpoints (`apis:`) — SUSPENDED in v17 (#4936).
+ * Declarative API endpoints (`apis:`) — RESTORED and LIVE in v17 (#5040 E8).
  *
- * ## Why this file is empty
+ * ## What these are
  *
- * The showcase used to declare the two endpoints preserved below, and the
- * metadata side worked perfectly: `defineStack({ apis })` loaded them, and
- * `GET /api/v1/meta/api` returned both with every key intact. The EXECUTION
- * side was zero-hit. On a real boot (showcase, 47 plugins) the declared paths
- * answered a bare `404 {"error":"Not found"}` — not even the dispatcher's
- * semantic 404, because no route was ever mounted for them and the request
- * died at Hono's `notFound`. Behind that, the dispatcher's `handleApiEndpoint`
- * branch called a `matchEndpoint` method that no implementation in the repo
- * ever provided, so it could not have executed anything even if reached.
+ * The metadata-authored counterpart of the code-mounted endpoint in
+ * `src/system/server/recalc-endpoint.ts`. The runtime matches a declared
+ * `path` + `method` against the stored `api` items and executes the target
+ * with NO handler code: `object_operation` delegates to the same `callData`
+ * the built-in `/data` route uses, `flow` to the same automation pipeline
+ * `POST /automation/<name>/trigger` uses. A declared endpoint is a stable URL
+ * plus a policy layer over an existing pipeline — never a second execution
+ * dialect (#5040 §4).
  *
- * Every key was therefore declared ≠ enforced — `authRequired: true` included,
- * which parsed green while gating nothing at all. Per the maintainer verdict
- * (2026-08-04, #4936) a non-empty `apis:` is now REJECTED at publish/validate
- * with a prescription, so these definitions are commented out rather than
- * shipped: an example must never demo a capability the runtime does not
- * deliver (Prime Directive #10).
+ * ## Why they were commented out, and what changed
  *
- * ## What replaces it today
+ * #4936 measured this surface on a real boot and found it zero-execution end
+ * to end: no route was mounted for a declared `path`, the request died at
+ * Hono's `notFound`, and the dispatcher branch behind it called a
+ * `matchEndpoint` no implementation in the repo ever provided. Every key was
+ * declared ≠ enforced — `authRequired: true` included, a security semantic
+ * that parsed green and gated nothing — so a non-empty `apis:` was refused
+ * outright and these two definitions were preserved here, commented.
  *
- * A code-mounted endpoint — see `src/system/server/recalc-endpoint.ts`. That
- * is the honest path until the executor lands.
+ * #5040's E-series built the executor (mount seam, matcher, policy keys,
+ * target delegation, mapping keys, OpenAPI enrichment) and E7 narrowed the
+ * blanket refusal to per-endpoint publish gates. So the premise of the comment
+ * is gone, and these come back **unchanged in intent** — same names, same
+ * targets, same `authRequired`, same `cacheTtl` — with the ONE edit ADR-0121
+ * D1 requires: the paths move under this app's namespace carve-out.
  *
- * ## Restoring these
+ * ## The namespace carve-out (ADR-0121 D1/D2)
  *
- * The `ApiEndpoint` vocabulary is deliberately KEPT: the verdict rejected
- * retiring it, because endpoint shapes are an industry-stable form that would
- * only be re-introduced identically later. When the executor ships (#5040 —
- * mounting + endpoint matching + per-key wiring), the rejection is replaced by
- * real execution and these two come back. They are kept verbatim for that.
+ * A declared path must be `<runtime prefix>/apps/<manifest.namespace>/<subpath>`
+ * — here `/api/v1/apps/showcase/…`, from the explicit `manifest.namespace:
+ * 'showcase'` in `objectstack.config.ts`. That segment is what makes route
+ * ownership structural rather than a list somebody maintains: no built-in
+ * domain lives under `apps/`, and two packages can never collide because their
+ * namespaces differ. Only the subpath is ours to name; publish rejects
+ * anything outside the carve-out, and a stack that declares `apis:` without an
+ * explicit `manifest.namespace` is rejected too (there is deliberately no
+ * derivation from `manifest.id` — an outward URL contract must not move
+ * because a package id was rewritten).
  *
- * ⚠️ ONE edit is required when restoring them, and it is not cosmetic:
- * ADR-0121 D1 (accepted 2026-08-04, after these were commented out) namespaces
- * endpoint paths as `<runtime-prefix>/apps/<namespace>/<subpath>`, so that an
- * app can only claim its own namespace and can never collide with a built-in
- * domain or another installed package. The `path` values below predate that
- * rule and would be rejected under it. Per that ADR they return as
- * `/api/v1/apps/showcase/tasks` and `/api/v1/apps/showcase/inquiries/purge`
- * (its §D1 names them explicitly, restored by #5040 E8).
+ * ## `authRequired` is deliberate here, not incidental
+ *
+ * Both endpoints are session-gated. `authRequired` DEFAULTS to `true`, so the
+ * explicit `true` below is documentation rather than protection — but it is
+ * the key whose historical value matters most: an explicit `false` is the only
+ * thing that opens an anonymous execution entry point, and ADR-0121 D6 then
+ * requires it to carry an ARMED `rateLimit` (`enabled: true`; the key defaults
+ * to `false`, so a budget written without it meters nothing). Neither of these
+ * endpoints was ever anonymous, and restoring them did not make one anonymous:
+ * an example must not demo an anonymous surface it never had.
+ *
+ * Proven end to end, on a real boot, by
+ * `packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`.
  */
 
-// /** Read-only data projection: GET a filtered task list through a stable URL. */
-// export const TaskFeedEndpoint: ApiEndpoint = {
-//   name: 'showcase_task_feed',
-//   path: '/api/v1/showcase/tasks',
-//   method: 'GET',
-//   summary: 'Task feed',
-//   description: 'Returns tasks via a declarative object_operation endpoint — no handler code.',
-//   type: 'object_operation',
-//   target: 'showcase_task',
-//   objectParams: {
-//     object: 'showcase_task',
-//     operation: 'find',
-//   },
-//   authRequired: true,
-//   cacheTtl: 30,
-// };
-//
-// /** Flow-typed endpoint: POST triggers the janitor flow (get+delete demo). */
-// export const InquiryPurgeEndpoint: ApiEndpoint = {
-//   name: 'showcase_inquiry_purge_api',
-//   path: '/api/v1/showcase/inquiries/purge',
-//   method: 'POST',
-//   summary: 'Purge closed inquiries',
-//   description: 'Invokes the showcase_inquiry_purge flow (get_record + delete_record janitor) over HTTP.',
-//   type: 'flow',
-//   target: 'showcase_inquiry_purge',
-//   authRequired: true,
-// };
+/** Read-only data projection: GET a filtered task list through a stable URL. */
+export const TaskFeedEndpoint: ApiEndpoint = {
+  name: 'showcase_task_feed',
+  // ADR-0121 D1: was `/api/v1/showcase/tasks` before #4936; the namespace
+  // segment is the only change this restoration makes to the declaration.
+  path: '/api/v1/apps/showcase/tasks',
+  method: 'GET',
+  summary: 'Task feed',
+  description: 'Returns tasks via a declarative object_operation endpoint — no handler code.',
+  type: 'object_operation',
+  target: 'showcase_task',
+  objectParams: {
+    object: 'showcase_task',
+    operation: 'find',
+  },
+  authRequired: true,
+  // Seconds. Emitted as `Cache-Control: public, max-age=30` on a SUCCESSFUL
+  // answer only — never on a 401/429/5xx, because telling a client to reuse a
+  // failure for half a minute is worse than saying nothing. GET-only by rule:
+  // publish rejects `cacheTtl` on any other method rather than parsing it and
+  // ignoring it.
+  cacheTtl: 30,
+};
 
-/**
- * Empty on purpose (#4936). An empty array and an absent key are both still
- * accepted — only a NON-EMPTY `apis:` is rejected — so the stack keeps
- * exercising the accepted shape rather than dropping the wiring entirely.
- */
-export const allApis: ApiEndpoint[] = [];
+/** Flow-typed endpoint: POST triggers the janitor flow (get+delete demo). */
+export const InquiryPurgeEndpoint: ApiEndpoint = {
+  name: 'showcase_inquiry_purge_api',
+  path: '/api/v1/apps/showcase/inquiries/purge',
+  method: 'POST',
+  summary: 'Purge closed inquiries',
+  description: 'Invokes the showcase_inquiry_purge flow (get_record + delete_record janitor) over HTTP.',
+  type: 'flow',
+  target: 'showcase_inquiry_purge',
+  authRequired: true,
+};
+
+export const allApis: ApiEndpoint[] = [TaskFeedEndpoint, InquiryPurgeEndpoint];
