@@ -755,6 +755,175 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
   return 'clause';
 }
 
+// ── [#5146] NULL-safe `$not` ─────────────────────────────────────────────────
+
+/**
+ * [#5146] What a single field constraint needs so its compiled SQL is TOTAL —
+ * TRUE or FALSE for every row, never UNKNOWN.
+ *
+ * - `'none'`         — the predicate is already total (`IS NULL` / `IS NOT NULL`).
+ * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
+ * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
+ */
+type NullGuard = 'none' | 'requireValue' | 'allowNull';
+
+/**
+ * [#5146] Does a NULL column satisfy this one operator, under the semantics the
+ * JS backends (`driver-memory` `match`, `formula` `matchesFilterCondition`)
+ * give it?
+ *
+ * They evaluate a missing/null field in ordinary two-valued JS: `undefined !==
+ * 'won'` is simply `true`. This table is that answer, per operator — measured
+ * against both, not assumed. The default is the large positive-comparison
+ * family (`$gt`/`$in`/`$contains`/…), every member of which answers `false` for
+ * a value that is not there.
+ */
+function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
+  switch (op) {
+    // `$eq: null` IS the null predicate; any other comparand is a value test.
+    case '$eq': return value === null;
+    case '$ne': return value !== null;
+    // The emitter reads `$null`/`$exists` by identity against `false`, so the
+    // guard must read them the same way or the two can disagree.
+    case '$null': return value !== false;
+    case '$exists': return value === false;
+    // Negative-polarity set/substring tests: "not among" / "does not contain"
+    // hold vacuously for a value that is absent.
+    case '$nin': return true;
+    // `$notContains` is the one operator where the two JS backends disagree on a
+    // null-valued field (`driver-memory` answers false because `typeof null !==
+    // 'string'`; `formula` answers true). `formula` is followed here because it
+    // is what this driver already answers for the shape today, so the ruling on
+    // that disagreement stays where it belongs — the issue that records it —
+    // instead of being made silently by this rewrite.
+    case '$notContains': return true;
+    default: return false;
+  }
+}
+
+/** [#5146] Is this operator's compiled SQL already total for a NULL column? */
+function operatorIsNullTotal(op: string, value: unknown): boolean {
+  switch (op) {
+    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
+    case '$null':
+    case '$exists':
+      return true;
+    // A null comparand makes these null PREDICATES too (see the `$eq`/`$ne`
+    // arms of the emitter below), not comparisons.
+    case '$eq':
+    case '$ne':
+      return value === null;
+    default:
+      return false;
+  }
+}
+
+/**
+ * [#5146] The guard one field constraint needs. A constraint is the AND of its
+ * operators, so it is total when every operator is, and a NULL column satisfies
+ * it only when it satisfies all of them.
+ */
+function nullGuardForFieldSpec(spec: unknown): NullGuard {
+  // `{ field: null }` compiles to `IS NULL` — already total.
+  if (spec === null) return 'none';
+  // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
+  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
+  const entries = Object.entries(spec as Record<string, unknown>);
+  // `{ field: {} }` compiles to no SQL at all. Guarding it would turn a shape
+  // that emits nothing into a live `IS NULL` predicate — i.e. would RULE on
+  // #5240 from here. Left exactly as it compiles today.
+  if (entries.length === 0) return 'none';
+  let total = true;
+  let nullSatisfies = true;
+  for (const [op, value] of entries) {
+    if (!operatorIsNullTotal(op, value)) total = false;
+    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
+  }
+  if (total) return 'none';
+  return nullSatisfies ? 'allowNull' : 'requireValue';
+}
+
+/**
+ * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
+ * predicate, which is what makes `NOT (…)` mean the same thing here as it does
+ * in `driver-memory` / `formula`.
+ *
+ * # The defect
+ *
+ * SQL is three-valued: `NULL = 'won'` is UNKNOWN, `NOT UNKNOWN` is still
+ * UNKNOWN, and a `WHERE` keeps only TRUE — so `{ $not: { stage: 'won' } }`
+ * dropped every row whose `stage` is NULL. The JS backends evaluate the same
+ * filter in two-valued logic (`undefined !== 'won'` → the row matches), so ONE
+ * declared operator gave two different answers depending on which driver ran
+ * it. On a CEL `!expr` read scope lowered by `cel-to-filter.ts` that is not a
+ * count that differs — it is the SAME permission rule admitting a different
+ * set of rows per backend. Ruled NULL-safe in #5146: "the column has no value"
+ * counts as NOT satisfying the negated condition, matching the 2:1 majority.
+ *
+ * # Why the guard is pushed to the LEAF, not hung off the `NOT`
+ *
+ * The issue states the fix as `NOT (…) OR col IS NULL`, and for the flat shape
+ * that motivates it the two are identical — `NOT (a IS NOT NULL AND a = 'won')`
+ * is `NOT (a = 'won') OR a IS NULL`. They stop being identical as soon as the
+ * operand nests: hoisting the guard to the top of a `$not` whose operand is a
+ * `$or` re-admits rows the JS backends exclude (a NULL `a` would satisfy the
+ * whole negation even when the `$or`'s OTHER branch is satisfied). Totalising
+ * each leaf makes the rewrite compositional instead — De Morgan is sound over
+ * two-valued leaves, so `$and`, `$or` and a nested `$not` all stay correct
+ * without special cases.
+ *
+ * # Why polarity is per operator
+ *
+ * A blanket "OR col IS NULL" would also WIDEN the negative-polarity operators:
+ * `{ $not: { a: { $ne: 5 } } }` means "a is 5", and both JS backends exclude a
+ * NULL row from it (`null !== 5` holds, so the operand matches, so the negation
+ * does not). Adding an unconditional null escape there would hand back exactly
+ * the rows the filter excludes — the silent widening class this driver keeps
+ * paying for (#2704, #5134). So each leaf is guarded in the direction its own
+ * operator answers, per {@link nullValueSatisfiesOperator}.
+ *
+ * The rewrite only ever runs INSIDE a `$not`; a plain comparison's SQL is
+ * untouched, so `{ a: 1 }` still compiles to `a = 1` and nothing outside a
+ * negation changes shape or loses an index.
+ *
+ * A nested `$not` is deliberately left alone: its own branch totalises its
+ * operand, and `NOT <total>` is itself total, so recursing into it here would
+ * only stack a redundant guard on the same column.
+ */
+function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const guarded: unknown[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
+      out[key] = value.map((element) => nullSafeNegationOperand(element as Record<string, unknown>));
+      continue;
+    }
+    if (key.startsWith('$')) {
+      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
+      // whatever this driver does with them today — the rewrite rules on NULL,
+      // not on the operator vocabulary.
+      out[key] = value;
+      continue;
+    }
+    const guard = nullGuardForFieldSpec(value);
+    if (guard === 'none') {
+      out[key] = value;
+    } else if (guard === 'requireValue') {
+      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
+      guarded.push({ [key]: { $null: false } }, { [key]: value });
+    } else {
+      // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the
+      // AND the node's keys form.
+      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
+    }
+  }
+  if (guarded.length > 0) {
+    const existing = Array.isArray(out.$and) ? out.$and : [];
+    out.$and = [...existing, ...guarded];
+  }
+  return out;
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 export interface IntrospectedColumn {
@@ -6089,6 +6258,14 @@ export class SqlDriver implements IDataDriver {
    * `'false'` members of a `$or` are dropped as their identities, and a node
    * that reduces to `'false'` never reaches the loop at all. So Knex is never
    * again in a position to silently discard a group.
+   *
+   * # NULL-safe negation (#5146)
+   *
+   * `$not` negates a predicate that {@link nullSafeNegationOperand} has first
+   * made TOTAL, because SQL's `NOT UNKNOWN` is UNKNOWN and a `WHERE` drops it —
+   * which used to hide every row whose compared column was NULL, while
+   * `driver-memory` and `formula` returned those same rows. Only the `$not`
+   * path is rewritten; an ordinary comparison compiles exactly as before.
    */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
@@ -6162,9 +6339,17 @@ export class SqlDriver implements IDataDriver {
         // group is FALSE and never reaches here (the node reduced to FALSE), and
         // a non-node operand was refused by the reduction, so `value` is a node.
         if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        // #5146 — negate a TOTAL predicate, so a row whose column is NULL gets
+        // the same answer here as it does in driver-memory / formula instead of
+        // vanishing into SQL's UNKNOWN. See {@link nullSafeNegationOperand} for
+        // why the guard sits on each leaf rather than beside the `NOT`, and why
+        // its direction is per operator. The reduction above ran on the ORIGINAL
+        // operand; the rewrite preserves every verdict (each guarded conjunct
+        // still carries a field key, so a `'clause'` stays a `'clause'`).
+        const negated = nullSafeNegationOperand(value as Record<string, unknown>);
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
-          this.applyFilterCondition(qb, value, 'and', table);
+          this.applyFilterCondition(qb, negated, 'and', table);
         });
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const localField = this.mapSortField(key);
