@@ -1882,6 +1882,9 @@ importers:
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../services/service-messaging
+      '@objectstack/service-package':
+        specifier: workspace:*
+        version: link:../services/service-package
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
