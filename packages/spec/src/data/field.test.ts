@@ -360,7 +360,7 @@ describe('FieldSchema', () => {
         name: 'full_name',
         label: 'Full Name',
         type: 'formula',
-        expression: 'first_name + " " + last_name',
+        expression: 'record.first_name + " " + record.last_name',
       };
 
       expect(() => FieldSchema.parse(formulaField)).not.toThrow();

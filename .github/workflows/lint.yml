@@ -588,6 +588,30 @@ jobs:
       - name: Check skills TypeScript examples compile
         run: pnpm --filter @objectstack/spec run check:skill-examples
 
+      # The SEMANTIC half of the same surface (#5116). The gate above proves a
+      # formula example COMPILES; it cannot prove the CEL is right, because
+      # `expression` is typed `string` — `'quantity * price'` type-checks exactly
+      # as well as `'record.quantity * record.price'`, and only the second one
+      # works. A bare reference does not throw at runtime either: it resolves to
+      # nothing and the expression silently evaluates to null. That is how two doc
+      # examples stayed wrong until #5026's activation sweep found them — one of
+      # them in content/blog/, which check:skill-examples does not scan at all.
+      #
+      # The verdict is `validateExpression` imported from @objectstack/formula —
+      # the same call `os build` / `os validate` makes — never a lookalike, so the
+      # docs are gated by the rule rather than by a dialect of it. Hence its home
+      # in packages/lint (which owns that verdict) and its place in this
+      # post-build job: it reads the built formula package like its neighbours.
+      #
+      # Deliberately narrow: a site is opted in only by parsed structure that can
+      # mean nothing else (`Field.*({ expression })`, or `type: 'formula'` beside
+      # `expression`), because the corpus spells three unrelated contracts with
+      # the one key `expression:` — a cron string, and a flow-scoped predicate
+      # where a bare reference is CORRECT, are the other two. Self-test first,
+      # both directions.
+      - name: Check docs formula examples are valid CEL
+        run: pnpm --filter @objectstack/lint run check:doc-formula-expressions
+
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing
       # regenerated them either, so they rotted three ways at once (#3670):
