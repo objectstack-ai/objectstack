@@ -8,14 +8,23 @@
  * sites that still dropped unknown keys silently. 16 were closed in the batch
  * itself; `UserFiltersSchema` followed at **#5073**, once the maintainer
  * adjudicated the protocol question that blocked it (promote `allowAddTab`,
- * then close). The other THREE stay open, each for a measured reason, and those
- * reasons are pinned in this file too — a deliberately-open shape that is only
- * explained in prose is indistinguishable from one nobody has got to yet, which
- * is how the next sweep "finishes the job" and breaks something.
+ * then close). Of the three the batch left open, TWO closed at **#5074** —
+ * `ViewItemSchema` and `ListView.sort` — once the authoring/wire split the
+ * batch filed rather than guessed was adjudicated and built. Their cases below
+ * are marked `[RESOLVED at #5074]` and now assert the split (authoring rejects,
+ * wire accepts) instead of the openness; they were kept rather than deleted
+ * because the trace each recorded is still the evidence the wire side rests on.
  *
- * ⚠️ A fourth shape, `ViewFilterRuleSchema`, is open on separate evidence and
- * pinned in its OWN file (`view-filter-rule-wire-id.test.ts`, #5114). It is not
- * this batch's to reason about; do not fold the two sets together.
+ * ONE stays open — `FormFieldBaseSchema`, a module-private base whose sole
+ * consumer already `.strict()`s it — and its reason is pinned here too: a
+ * deliberately-open shape that is only explained in prose is indistinguishable
+ * from one nobody has got to yet, which is how the next sweep "finishes the
+ * job" and breaks something.
+ *
+ * ⚠️ A fourth shape, `ViewFilterRuleSchema`, was open on separate evidence and
+ * is pinned in its OWN file (`view-filter-rule-wire-id.test.ts`, #5114). It
+ * closed at #5074 too, by the same mechanism. It was never this batch's to
+ * reason about; do not fold the two sets together.
  *
  * This file is the third of the three places each verdict is recorded (the
  * others: the JSDoc on the shape itself, and the `ui/` row in
@@ -349,21 +358,29 @@ describe('#4001 批 18 — union error behaviour (#5014), pinned as it really is
 // ===========================================================================
 // 5. The shapes left OPEN — with the evidence, so nobody "finishes" them
 // ===========================================================================
-describe('#4001 批 18 — deliberately still open (do not close without re-measuring)', () => {
-  it('ViewItemSchema stays open: it is the member Studio round-trips `isPinned` through', () => {
-    // objectui's pin control PUTs `{ ...storedItem, isPinned }`
-    // (`ObjectView.tsx:882` → `data-objectstack/src/index.ts:2801`). A stored
+describe('#4001 批 18 — the shapes left open, and what became of them', () => {
+  it('[RESOLVED at #5074] ViewItemSchema SPLIT — the authoring gate closed, the wire member kept the round-trip', () => {
+    // 批 18 left this open and filed the design question as #5074; the
+    // maintainer ruled "split" and it has landed, so this case is replaced
+    // rather than deleted — the trace it recorded is still the reason the wire
+    // side exists. objectui's pin control PUTs `{ ...storedItem, isPinned }`
+    // (`ObjectView.tsx:882` → `data-objectstack/src/index.ts:2801`); a stored
     // ViewItem record carries `viewKind` AND `config`, so the merged body lands
-    // on THIS member — the flattened members are excluded by their
-    // `config: z.undefined()` guard. Closed, pinning a saved view would 422.
+    // on member 1 (the flattened members are excluded by their
+    // `config: z.undefined()` guard).
+    //
+    // Both halves are asserted here because either alone is satisfiable by the
+    // wrong outcome: authoring-only would pass if the wire member had been
+    // closed too (a 422 on pinning), wire-only would pass if nothing had closed.
     const record = {
       name: 'crm_lead.pipeline',
       object: 'crm_lead',
       viewKind: 'list' as const,
       config: { type: 'grid', columns: ['name'] },
     };
-    expect(ViewItemSchema.safeParse({ ...record, isPinned: true, sortOrder: 3 }).success).toBe(true);
+    expect(ViewItemSchema.safeParse({ ...record, isPinned: true, sortOrder: 3 }).success).toBe(false);
     expect(ViewMetadataSchema.safeParse({ ...record, isPinned: true, sortOrder: 3 }).success).toBe(true);
+    // The full split is pinned in `view-authoring-wire-split.test.ts`.
   });
 
   it('…and the aux keys really do land on member 1, not on a flattened member', () => {
@@ -381,29 +398,39 @@ describe('#4001 批 18 — deliberately still open (do not close without re-meas
     ).toBe(false);
   });
 
-  it('ListViewSchema.sort stays open: the console stamps a UI row `id` into it', () => {
-    // Batch 18 CLOSED this (with `direction → order`, the #4721 alias for the
-    // identical tuple) and the full suite caught it: `view-metadata-schema.test.ts`
-    // pins `sort: [{ id, field, order }]` as the exact body a console column-sort
-    // PUT persists, and objectui stamps that `id` per row
-    // (`components/src/custom/sort-builder.tsx:68`, `:94` — `crypto.randomUUID()`).
-    // `id` was deliberately NOT declared to silence the rejection: it is a React
-    // list key, and declaring it would put a UI artifact on the authorable
-    // surface and teach an AI author to emit one.
-    expect(ListViewSchema.safeParse({ ...LIST_BASE, sort: [{ id: 'uuid', field: 'name', order: 'asc' }] }).success).toBe(true);
+  it('[RESOLVED at #5074] ListViewSchema.sort CLOSED — the console `id` is stripped on the wire instead', () => {
+    // 批 18 closed this (with `direction → order`, the #4721 alias for the
+    // identical tuple), hit a live 422 and reverted (#5070). The revert was
+    // provisional pending #5074, so the case is replaced with what actually
+    // holds now — the two doors, separately:
+    //
+    //   authoring — `id` is rejected by name. It was never declared: it is a
+    //   React list key (`components/src/custom/sort-builder.tsx:68`/`:94`,
+    //   `crypto.randomUUID()`), and declaring it would put a UI artifact on the
+    //   authorable surface and teach an AI author to emit one.
+    //
+    //   wire — the same body still parses, because the write door removes the
+    //   decoration BEFORE validating (`stripViewConsoleDecorations`).
+    const sorted = { id: 'uuid', field: 'name', order: 'asc' };
+    expect(ListViewSchema.safeParse({ ...LIST_BASE, sort: [sorted] }).success).toBe(false);
+    expect(
+      ViewMetadataSchema.safeParse({
+        type: 'grid', columns: ['name'], name: 'o.default', viewKind: 'list', object: 'o', sort: [sorted],
+      }).success,
+    ).toBe(true);
   });
 
-  it('…and the mechanism that made it a regression: `.strip()` does NOT recurse', () => {
-    // This is the load-bearing fact for every nested block in this file, and it
-    // is the opposite of what the union's comment implies. `ViewMetadataSchema`
-    // rescues Studio's round-trip keys by making its flattened members
-    // `.strip()` — but that re-opens the TOP level only. A nested block closed
-    // inside `ListViewSchema` is still reached through that member, so a
-    // console-stamped key inside it becomes a 422 no matter what the member does.
+  it('…and the mechanism, which is why a posture flip could NOT have fixed it: `.strip()` does not recurse', () => {
+    // The load-bearing fact for every nested block in this file. A member's
+    // `.strip()` re-opens the TOP level only, so a nested block closed inside
+    // `ListViewSchema` is still reached at full strictness through that member.
+    // #5074's answer is not a deeper strip — it is removing the named
+    // decoration ahead of the parse. These two assertions are the CONTROLS for
+    // that claim and must hold whichever way the decorated blocks are written.
     const overlay = { type: 'grid', columns: ['name'], name: 'o.default', viewKind: 'list', object: 'o' };
     // top level: an unknown aux key rides along, because the member strips.
     expect(ViewMetadataSchema.safeParse({ ...overlay, someStudioAuxKey: 1 }).success).toBe(true);
-    // nested: a CLOSED sub-block still rejects through that same member.
+    // nested: a CLOSED sub-block that is NOT a declared decoration still rejects.
     expect(ViewMetadataSchema.safeParse({ ...overlay, emptyState: { title: 'x', notAnEmptyStateKey: 1 } }).success).toBe(false);
   });
 
