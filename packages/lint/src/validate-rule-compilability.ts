@@ -181,6 +181,17 @@ function errorText(err: unknown): string {
 }
 
 /**
+ * Depth cap on `conditional` nesting. Parsed metadata is a tree, so this is not
+ * a cycle guard — it is the same cheap promise `flow-walk.ts`'s
+ * `MAX_REGION_DEPTH` makes: a hand-authored (PRE-parse) stack cannot make a lint
+ * hang. `os lint` never parses, so it hands this walker whatever object the
+ * author's module actually built, and `const r = {…}; r.then = r` is a two-line
+ * accident. Well past anything reviewable — three levels of nested conditional
+ * validation is already unreadable.
+ */
+export const MAX_RULE_NESTING_DEPTH = 16;
+
+/**
  * Every rule reachable from one authored `validations[]` entry: the rule itself
  * plus, for a `conditional`, its `then` / `otherwise` branches — which
  * `evaluateRule` dispatches to exactly like a top-level rule, and which
@@ -193,6 +204,7 @@ function flattenRules(
   rule: AnyRec,
   labelTrail: string,
   pathTrail: string,
+  depth = 0,
 ): Array<{ rule: AnyRec; label: string; path: string }> {
   const name = typeof rule.name === 'string' && rule.name ? rule.name : '?';
   // The two trails are deliberately different: the LABEL reads as prose for a
@@ -201,9 +213,10 @@ function flattenRules(
   const label = labelTrail ? `${labelTrail} → '${name}'` : `'${name}'`;
   const path = pathTrail ? `${pathTrail}.${name}` : name;
   const out = [{ rule, label, path }];
+  if (depth >= MAX_RULE_NESTING_DEPTH) return out;
   for (const branch of ['then', 'otherwise'] as const) {
     const nested = rule[branch];
-    if (isRec(nested)) out.push(...flattenRules(nested, label, `${path}.${branch}`));
+    if (isRec(nested)) out.push(...flattenRules(nested, label, `${path}.${branch}`, depth + 1));
   }
   return out;
 }

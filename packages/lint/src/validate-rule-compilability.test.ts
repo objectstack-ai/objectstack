@@ -22,6 +22,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   validateRuleCompilability,
+  MAX_RULE_NESTING_DEPTH,
   RUNTIME_AJV_OPTIONS,
   VALIDATION_RULE_REGEX_UNCOMPILABLE,
   VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
@@ -296,6 +297,33 @@ describe('validateRuleCompilability — walks what authors actually write', () =
         ],
       }),
     ).toEqual([VALIDATION_RULE_REGEX_UNCOMPILABLE]);
+  });
+
+  it('terminates on a self-referential `conditional` — `os lint` never parses', () => {
+    // The pre-parse stack is whatever the author's own module built, so a
+    // self-referential rule is a two-line accident rather than a hypothetical.
+    // Same promise `flow-walk.ts`'s MAX_REGION_DEPTH makes: no lint may hang.
+    const cyclic: Record<string, unknown> = {
+      type: 'conditional',
+      name: 'loop',
+      when: 'true',
+      message: 'm',
+    };
+    cyclic.then = cyclic;
+
+    const findings = validateRuleCompilability(objectWith(cyclic));
+    expect(findings).toEqual([]);
+
+    // Non-vacuity: the walk really does descend, and really does stop. A broken
+    // regex parked at the bottom of a legal nest is still reported…
+    const nest = (depth: number): Record<string, unknown> =>
+      depth === 0
+        ? { type: 'format', name: `leaf`, field: 'tax_id', regex: '([', message: 'm' }
+        : { type: 'conditional', name: `c${depth}`, when: 'true', message: 'm', then: nest(depth - 1) };
+
+    expect(ids(objectWith(nest(MAX_RULE_NESTING_DEPTH)))).toEqual([VALIDATION_RULE_REGEX_UNCOMPILABLE]);
+    // …and one level past the cap is where the walker stops looking.
+    expect(ids(objectWith(nest(MAX_RULE_NESTING_DEPTH + 1)))).toEqual([]);
   });
 
   it('never throws on a stack that is missing, malformed or empty', () => {
