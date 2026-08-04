@@ -752,6 +752,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   ): void {
     if (!node) return;
 
+    // The boolean constant FALSE (#5322), handed to the engine as `{$or: []}`
+    // — the canonical spec spelling of "match nothing", which every driver
+    // reduces to zero rows (#5134 / #5239). Returning without a conjunct would
+    // read the constant as "no constraint" and run the aggregate over every
+    // row — the exact inverse.
+    if (node.kind === 'false') {
+      conjuncts.push({ $or: [] });
+      return;
+    }
+
     if (node.kind === 'leaf') {
       const fieldName = this.resolveFieldName(cube, node.member, 'any');
       const extra = this.mergeFilterOperand(filter, fieldName, this.convertFilter(node.operator, node.values));
@@ -774,6 +784,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     cube: Cube,
   ): Record<string, unknown> | null {
     if (!node) return null;
+
+    // FALSE as a standalone `FilterCondition`: `{$or: []}` — see
+    // `applyFilterNode` for why the constant must not degrade to `null`.
+    if (node.kind === 'false') return { $or: [] };
 
     if (node.kind === 'not') {
       const inner = this.filterNodeToCondition(node.child, cube);
@@ -809,6 +823,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     params: unknown[],
   ): string | null {
     if (!node) return null;
+
+    // FALSE (#5322): echoed exactly as the raw-SQL path compiles it, so the
+    // display SQL reproduces the zero-row execution instead of omitting the
+    // constraint it ran with.
+    if (node.kind === 'false') return '1 = 0';
 
     if (node.kind === 'leaf') {
       return this.buildFilterClauseSql(

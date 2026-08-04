@@ -106,7 +106,12 @@ describe('compileScopedFilterToSql — filter logic conformance', () => {
       const { sql, params } = compileScopedFilterToSql(c.filter, ALIAS);
       // The compiler returns a boolean expression, exactly as the analytics
       // query builder splices it — including the unparenthesized top level.
-      const stmt = db.prepare(`SELECT "id" FROM "t" AS "${ALIAS}" WHERE ${sql} ORDER BY "id"`);
+      // `''` is the compiler's TRUE (#5322: `{$and: []}` and an absorbed `$or`
+      // compile to it), the shape for which `applyReadScope` adds no `WHERE`
+      // at all — so it executes here as the unconstrained query it stands for.
+      const stmt = db.prepare(
+        `SELECT "id" FROM "t" AS "${ALIAS}" WHERE ${sql.length > 0 ? sql : '1 = 1'} ORDER BY "id"`,
+      );
       stmt.bind(params as any[]);
       const got: string[] = [];
       while (stmt.step()) got.push(String(stmt.get()[0]));

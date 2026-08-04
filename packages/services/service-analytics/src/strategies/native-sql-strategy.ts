@@ -585,6 +585,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   ): string | null {
     if (!node) return null;
 
+    // The boolean constant FALSE (#5322): the same zero-row spelling
+    // `read-scope-sql.ts` and `driver-sql` use for it. Returning `null` here
+    // would drop the constraint and run the query over EVERY row — the exact
+    // inverse of what `{$or: []}` means.
+    if (node.kind === 'false') return '1 = 0';
+
     if (node.kind === 'leaf') {
       const colExpr = this.resolveFieldSql(cube, node.member, parentTable, joins);
       // Resolve the (object, column) this member binds against so the value

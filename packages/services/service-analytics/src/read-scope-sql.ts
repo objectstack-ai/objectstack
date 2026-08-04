@@ -43,6 +43,20 @@ import type { FilterCondition } from '@objectstack/spec/data';
  * survives, and FALSE has a spelling ({@link FALSE_CLAUSE}) instead of being
  * representable only as silence.
  *
+ * ## Empty combinators are boolean identities (#5322)
+ *
+ * `{$and: []}` is TRUE (every row), `{$or: []}` is FALSE (zero rows), and
+ * `{$not: {}}` is `NOT TRUE` — FALSE. This compiler used to refuse the empty
+ * arrays fail-closed while the five `FILTER_LOGIC_CASES` backends reduced
+ * them; the 2026-08-04 #5322 ruling aligned this file and the analytics
+ * `filter-normalizer` with the reduction (see the note at the `length === 0`
+ * branch in {@link compileNode} for why). Reduction happens structurally over
+ * the whole tree, and it composes with the #5146 NULL-safe `$not` rewrite as
+ * "reduce first": {@link nullSafeNegationOperand} maps combinator arrays
+ * element-wise (an empty array stays empty, a `{}` leaf has no field to
+ * guard), so the identity a constant reduces to is untouched by the rewrite
+ * and the rewrite only ever guards leaves that survive it.
+ *
  * ## `$not` is NULL-safe (#5146)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
@@ -109,8 +123,23 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
   const clauses: string[] = [];
   for (const [key, value] of Object.entries(node)) {
     if (key === '$and' || key === '$or') {
-      if (!Array.isArray(value) || value.length === 0) {
-        throw new Error(`[read-scope-sql] "${key}" requires a non-empty array (fail-closed).`);
+      if (!Array.isArray(value)) {
+        throw new Error(`[read-scope-sql] "${key}" requires an array (fail-closed).`);
+      }
+      if (value.length === 0) {
+        // Boolean identity (#5322 ruling, 2026-08-04): the empty `$and` is the
+        // AND identity — TRUE, no constraint — and the empty `$or` is the OR
+        // identity — FALSE, zero rows. Until that ruling this compiler REFUSED
+        // both ("requires a non-empty array (fail-closed)"), while the five
+        // FILTER_LOGIC_CASES backends reduced them; #5322 took the reduction:
+        // it is the only reading that lets a nested tree be evaluated at all
+        // (a rejection cannot answer what `$and: []` means as the third branch
+        // of a `$or`), and `{$or: []}` = zero rows is itself fail-closed for an
+        // RLS scope — a disjunct list that loops to zero items hides every row
+        // instead of exposing the table (#5134). Authoring-time loud rejection
+        // of the literal spelling is tracked separately (#5330).
+        if (key === '$or') clauses.push(FALSE_CLAUSE);
+        continue;
       }
       const compiled = (value as unknown[]).map((child) => compileSub(child, qAlias));
       // A `''` branch is the constant TRUE. It ABSORBS a disjunction — one TRUE

@@ -117,7 +117,26 @@ export type NormalizedFilterNode =
   | { kind: 'leaf'; member: string; operator: string; values: string[] }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
-  | { kind: 'not'; child: NormalizedFilterNode };
+  | { kind: 'not'; child: NormalizedFilterNode }
+  /**
+   * The boolean constant FALSE — zero rows. TRUE already has a spelling
+   * (`null`, "no constraint"), and #5322 gave the empty combinators their
+   * boolean-identity readings, so FALSE needs one too: `{$or: []}` and
+   * `{$not: {}}` MEAN "match nothing", and a tree that cannot say so can only
+   * mis-say it as `null` — which the strategies compile as "match everything",
+   * the exact inverse (the read-scope compiler paid for that seam in #5297).
+   * {@link buildNode} reduces constants structurally, so `'false'` only ever
+   * survives at the ROOT of a normalized tree — but every consumer handles it
+   * wherever it appears, because "impossible" is not a contract.
+   */
+  | { kind: 'false' };
+
+/** The FALSE constant. One shared instance so reductions are cheap to emit. */
+const FALSE_NODE: NormalizedFilterNode = { kind: 'false' };
+
+function isFalseNode(n: NormalizedFilterNode): boolean {
+  return n.kind === 'false';
+}
 
 /** `null` means "no constraint" — an empty object contributes no predicate. */
 function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
@@ -230,14 +249,39 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
 }
 
 /**
- * Compile a `FilterCondition` object into a node. `null` = no constraint.
+ * Compile a `FilterCondition` object into a node. `null` = no constraint
+ * (TRUE); `{kind: 'false'}` = zero rows.
  *
  * Every entry of one object ANDs with its siblings, at every depth — the rule
  * `filter-logic-conformance.ts` exists to hold each backend to (#3774). The
  * combinator handling deliberately mirrors `read-scope-sql.ts`'s
- * `compileNode`, including its fail-closed empty-array rejection, so the two
- * SQL-producing paths in this package cannot drift apart about what a filter
- * MEANS.
+ * `compileNode`, so the two SQL-producing paths in this package cannot drift
+ * apart about what a filter MEANS.
+ *
+ * ## Empty combinators are boolean identities (#5322)
+ *
+ * `{$and: []}` is TRUE, `{$or: []}` is FALSE, a `{}` branch is a TRUE
+ * disjunct that ABSORBS its `$or`, and `{$not: {}}` is `NOT TRUE` — FALSE.
+ * The whole tree reduces structurally, so a constant never survives below the
+ * root. Until the 2026-08-04 #5322 ruling this function REFUSED the empty
+ * arrays instead — its error message argued, verbatim, that "An empty
+ * combinator has no defensible reading — dropping it widens the query, and
+ * treating it as 'match nothing' silently empties a chart" — while the five
+ * `FILTER_LOGIC_CASES` backends already reduced them. The ruling took the
+ * reduction: it is the only reading that can evaluate a nested tree at all
+ * (a rejection cannot answer what `$and: []` means as the third branch of a
+ * `$or` without first reducing, which concedes the point), and `{$or: []}` =
+ * zero rows is fail-closed where it matters most — a scope's disjunct list
+ * that loops to zero items hides every row instead of widening (#5134).
+ * Loud AUTHORING-time rejection of the literal spellings is #5330's scope.
+ *
+ * What did NOT loosen: a non-array `$and`/`$or`, a non-object branch, and a
+ * non-object `$not` operand all still throw. The reduction makes "no
+ * constraint" a meaningful verdict, so the old habit of silently DROPPING a
+ * malformed branch is no longer merely lossy — a junk disjunct mapped to TRUE
+ * would absorb its `$or` and widen the query. Malformed shapes must stay
+ * loud, exactly as `read-scope-sql.ts` and `driver-mongodb` (#5239) treat
+ * them.
  */
 function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   const children: NormalizedFilterNode[] = [];
@@ -246,27 +290,67 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
     if (raw === undefined) continue;
 
     if (key === '$and' || key === '$or') {
-      if (!Array.isArray(raw) || raw.length === 0) {
+      if (!Array.isArray(raw)) {
         throw new Error(
-          `[analytics] "${key}" requires a non-empty array. An empty combinator has no ` +
-          `defensible reading — dropping it widens the query, and treating it as "match ` +
-          `nothing" silently empties a chart.`,
+          `[analytics] "${key}" requires an array of filter objects. ` +
+          `Dropping it would silently widen the query to rows the filter excludes.`,
         );
       }
-      const branches = raw
-        .map((sub) => (sub && typeof sub === 'object' ? buildNode(sub as Record<string, unknown>) : null))
-        .filter((n): n is NormalizedFilterNode => n !== null);
-      if (branches.length === 0) continue;
-      // `$and` folds into this object's own AND; `$or` becomes a node, since
-      // OR is exactly the structure a flat list could not carry.
-      if (key === '$and') children.push(...branches);
-      else children.push(branches.length === 1 ? branches[0] : { kind: 'or', children: branches });
+      const branches = raw.map((sub) => {
+        if (!sub || typeof sub !== 'object' || Array.isArray(sub)) {
+          throw new Error(
+            `[analytics] every "${key}" branch must be a filter object, got ${JSON.stringify(sub)}. ` +
+            `Dropping it would silently rewrite the combinator the author wrote.`,
+          );
+        }
+        return buildNode(sub as Record<string, unknown>);
+      });
+
+      if (key === '$and') {
+        // TRUE conjuncts drop out (the AND identity) — which also makes the
+        // literal `$and: []` TRUE. One FALSE conjunct makes the whole entry
+        // FALSE.
+        if (branches.some((n) => n !== null && isFalseNode(n))) {
+          children.push(FALSE_NODE);
+          continue;
+        }
+        children.push(...branches.filter((n): n is NormalizedFilterNode => n !== null));
+        continue;
+      }
+
+      // `$or`: one TRUE disjunct ABSORBS the whole disjunction — collapsing to
+      // the surviving branches instead is the narrowing `read-scope-sql` paid
+      // for in #5297. FALSE disjuncts drop out (the OR identity), and a `$or`
+      // with nothing left — the literal `$or: []` included — is FALSE.
+      if (branches.some((n) => n === null)) continue;
+      const kept = branches.filter((n): n is NormalizedFilterNode => n !== null && !isFalseNode(n));
+      if (kept.length === 0) {
+        children.push(FALSE_NODE);
+        continue;
+      }
+      children.push(kept.length === 1 ? kept[0] : { kind: 'or', children: kept });
       continue;
     }
 
     if (key === '$not') {
-      const inner = raw && typeof raw === 'object' ? buildNode(raw as Record<string, unknown>) : null;
-      if (inner) children.push({ kind: 'not', child: inner });
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error(
+          `[analytics] "$not" requires a filter object operand, got ${JSON.stringify(raw)}. ` +
+          `Dropping it would silently widen the query to rows the filter excludes.`,
+        );
+      }
+      // Negate the REDUCED operand: `{$not: {}}` and `{$not: {$and: []}}` are
+      // `NOT TRUE` — zero rows — and `{$not: {$or: []}}` is `NOT FALSE` — no
+      // constraint. Before #5322 a TRUE operand made the `$not` vanish, which
+      // read a "show nothing" filter as "show everything" (#5297's seam).
+      const inner = buildNode(raw as Record<string, unknown>);
+      if (inner === null) {
+        children.push(FALSE_NODE);
+      } else if (isFalseNode(inner)) {
+        // NOT FALSE ≡ TRUE — contributes nothing.
+      } else {
+        children.push({ kind: 'not', child: inner });
+      }
       continue;
     }
 
@@ -280,6 +364,10 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
     children.push(...fieldLeaves(key, raw));
   }
 
+  // A FALSE entry FALSifies the node — entries AND together. Checked after the
+  // loop, not short-circuited inside it, so a malformed later entry still
+  // throws instead of being masked by an earlier constant.
+  if (children.some(isFalseNode)) return FALSE_NODE;
   return andOf(children);
 }
 
@@ -308,6 +396,7 @@ export function collectFilterLeaves(
   node: NormalizedFilterNode | null,
 ): NormalizedAnalyticsFilter[] {
   if (!node) return [];
+  if (node.kind === 'false') return []; // the constant touches no member
   if (node.kind === 'leaf') return [{ member: node.member, operator: node.operator, values: node.values }];
   if (node.kind === 'not') return collectFilterLeaves(node.child);
   return node.children.flatMap(collectFilterLeaves);

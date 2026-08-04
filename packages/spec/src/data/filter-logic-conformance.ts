@@ -180,6 +180,32 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     note: 'The control: the shape that was always correct must stay correct.',
   },
 
+  // ── Boolean identities of the empty combinators (#5322 ruling) ────────────
+  {
+    name: 'empty $and is TRUE — the AND identity',
+    filter: { $and: [] },
+    expected: ['1', '2', '3', '4'],
+    note: '#5322: a conjunction of zero conditions constrains nothing.',
+  },
+  {
+    name: 'empty $or is FALSE — the OR identity',
+    filter: { $or: [] },
+    expected: [],
+    note: '#5322/#5134: a disjunction of zero conditions matches nothing. Fail-closed for an RLS scope — a disjunct list that loops to zero items hides every row instead of exposing the table.',
+  },
+  {
+    name: 'a {} branch is a TRUE disjunct and absorbs its $or',
+    filter: { $or: [{ a: 'x' }, {}] },
+    expected: ['1', '2', '3', '4'],
+    note: '#5322: collapsing to the surviving branches instead compiles `a = x` — a silently NARROWED scope (#5297).',
+  },
+  {
+    name: '$not of {} is FALSE — NOT TRUE',
+    filter: { $not: {} },
+    expected: [],
+    note: '#5322: emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass (#5297).',
+  },
+
   // ── Shapes read scopes are actually written in ────────────────────────────
   {
     name: 'read scope: own AND active, OR another owner\'s row',

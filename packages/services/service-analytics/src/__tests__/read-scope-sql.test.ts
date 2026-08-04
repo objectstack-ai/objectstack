@@ -82,8 +82,21 @@ describe('compileScopedFilterToSql', () => {
     expect(() => compileScopedFilterToSql({ account: { region: 'NA' } }, 't')).toThrowError(/nested\/relation value/);
   });
 
-  it('THROWS on an empty $and (degenerate, fail-closed)', () => {
-    expect(() => compileScopedFilterToSql({ $and: [] }, 't')).toThrowError(/non-empty array/);
+  it('empty combinators reduce to their boolean identities (#5322)', () => {
+    // FLIPPED pin. Until the 2026-08-04 #5322 ruling this asserted
+    // `toThrowError(/non-empty array/)`: the compiler refused empty
+    // combinators fail-closed while the five FILTER_LOGIC_CASES backends
+    // reduced them to identities. The ruling took the reduction, so `''`
+    // (TRUE) and `1 = 0` (FALSE) are now the pinned answers — matching
+    // `driver-sql` / `driver-memory` / `formula` / `driver-sqlite-wasm` /
+    // `driver-mongodb` row for row.
+    expect(compileScopedFilterToSql({ $and: [] }, 't')).toEqual({ sql: '', params: [] });
+    expect(compileScopedFilterToSql({ $or: [] }, 't')).toEqual({ sql: '1 = 0', params: [] });
+  });
+
+  it('still THROWS on a non-array $and/$or (fail-closed — #5322 loosened only the EMPTY array)', () => {
+    expect(() => compileScopedFilterToSql({ $and: 'x' } as never, 't')).toThrowError(/requires an array/);
+    expect(() => compileScopedFilterToSql({ $or: { a: 1 } } as never, 't')).toThrowError(/requires an array/);
   });
 
   it('THROWS on a non-object read scope', () => {

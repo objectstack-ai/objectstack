@@ -24,7 +24,9 @@
  * what makes it a bypass rather than a wrong string, which is why the assertion
  * below goes through `NativeSQLStrategy.generateSql` and not only through
  * `compileScopedFilterToSql`. `$and: []` / `$or: []` in the same loop were
- * fail-closed all along; `$not` was the one uncovered square.
+ * fail-closed when this file was written; #5322 has since ruled them boolean
+ * identities (TRUE / FALSE), and the fail-closed pin at the bottom of this
+ * file flipped with that ruling.
  *
  * **`$not` was not NULL-safe.** SQL is three-valued and a `WHERE` keeps only
  * TRUE, so `NOT (stage = 'won')` dropped every row whose `stage` is NULL, while
@@ -373,17 +375,31 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
   });
 
   describe('the fail-closed guarantees survive the rewrite', () => {
-    it('an empty `$and` / `$or` still THROWS, inside a `$not` as well as outside', () => {
-      expect(() => compileScopedFilterToSql({ $and: [] } as FilterCondition, ALIAS))
-        .toThrowError(/non-empty array/);
-      expect(() => compileScopedFilterToSql({ $or: [] } as FilterCondition, ALIAS))
-        .toThrowError(/non-empty array/);
-      // The empty-combinator square is its own ruling (#5322) — the rewrite must
-      // not quietly turn either of them into a boolean identity on the way past.
-      expect(() => compileScopedFilterToSql({ $not: { $or: [] } } as FilterCondition, ALIAS))
-        .toThrowError(/non-empty array/);
-      expect(() => compileScopedFilterToSql({ $not: { $and: [] } } as FilterCondition, ALIAS))
-        .toThrowError(/non-empty array/);
+    it('an empty `$and` / `$or` reduces to its boolean identity, inside a `$not` as well as outside (#5322)', () => {
+      // FLIPPED pin. This block used to assert `toThrowError(/non-empty
+      // array/)` four times: when it was written, the empty-combinator square
+      // was still an open ruling (#5322) and the rewrite was required not to
+      // change the answer on the way past. The 2026-08-04 ruling took the
+      // boolean identities, so the pinned answers flipped with it — and the
+      // second half of the old requirement still holds in its new form: the
+      // `$not` negates the REDUCED operand.
+      expect(ids({ $and: [] })).toEqual(ALL); //  TRUE — the AND identity
+      expect(ids({ $or: [] })).toEqual([]); //    FALSE — the OR identity
+      expect(compileScopedFilterToSql({ $or: [] } as FilterCondition, ALIAS))
+        .toEqual({ sql: '1 = 0', params: [] });
+      expect(ids({ $not: { $or: [] } })).toEqual(ALL); // NOT FALSE ≡ TRUE
+      expect(ids({ $not: { $and: [] } })).toEqual([]); // NOT TRUE ≡ FALSE
+    });
+
+    it('reduction composes with the NULL-safe rewrite: identities first, surviving leaves stay guarded (#5322)', () => {
+      // The FALSE disjunct drops out (the OR identity), leaving
+      // `{$not: {$or: [{stage: 'won'}]}}` — whose leaf the #5146 rewrite still
+      // totalises, so the NULL-stage rows 3 and 4 are returned exactly as the
+      // plain `{$not: {stage: 'won'}}` pin above returns them.
+      expect(ids({ $not: { $or: [{ stage: 'won' }, { $or: [] }] } })).toEqual(['2', '3', '4']);
+      // The TRUE disjunct ABSORBS the `$or`, so the whole `$not` is NOT TRUE —
+      // zero rows — and no leaf survives for the rewrite to guard.
+      expect(ids({ $not: { $or: [{ stage: 'won' }, { $and: [] }] } })).toEqual([]);
     });
 
     it('an unknown operator inside a `$not` still THROWS rather than being guarded', () => {
