@@ -47,6 +47,15 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 //    `react-blocks.ts` uses `Object.keys(ComponentPropsMap)` for type names only —
 //    its `REACT_BLOCKS[].schema` entries all point at view/chart schemas.
 //
+// The #5056 bridge defect does NOT touch this result. That defect makes the
+// derived-clone bridge report dead shapes as REACHABLE (shared `.describe()`
+// clones under common leaves like `SnakeCaseIdentifier` / `I18nLabel`), so its
+// error direction is the opposite of this verdict -- it could only have hidden a
+// no-gate finding, never manufactured one. And nothing here rests on that bridge
+// anyway: all six positive controls resolve `root-graph` (their own instances are
+// in the closure), and all 52 targets miss BOTH `root-graph` and `derived-clone`.
+// The two non-BFS measurements below stand on their own regardless.
+//
 // Empirically, through the live door (`definePage()` IS `PageSchema.parse()`): on
 // the example corpus an undeclared key written inside `components[].properties`
 // parses clean and is RETAINED on 10/10 pages, while the same key one level out
