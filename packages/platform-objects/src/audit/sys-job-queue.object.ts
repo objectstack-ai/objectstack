@@ -22,6 +22,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Writers: `DbQueueAdapter` (publish/lease/complete/fail).
  * Readers: Studio DLQ view, ops dashboards, the adapter's worker loop.
  *
+ * Retention: `completed` rows are swept by the platform LifecycleService —
+ * see the `lifecycle` block below (#5179).
+ *
  * @namespace sys
  */
 export const SysJobQueue = ObjectSchema.create({
@@ -31,6 +34,56 @@ export const SysJobQueue = ObjectSchema.create({
   icon: 'inbox',
   isSystem: true,
   managedBy: 'engine-owned',
+
+  /**
+   * [ADR-0057 §3.1/§3.3, #5179] The queue table only ever GREW: the adapter
+   * marks a delivered message `completed` and nothing ever touched the row
+   * again (`purge()` had zero production callers, `purgeFailed()` is a manual
+   * dead-letter API). Since #5160 that is one permanent row per email.
+   *
+   * Bounded declaratively rather than by a sweeper inside `DbQueueAdapter`:
+   * ADR-0057 §3.3 puts ONE reaper in the platform (`LifecycleService`), not N
+   * per-plugin ones — the same call the sibling `sys_job_run` already makes.
+   * That the writer is the adapter itself (never user data) is what makes an
+   * unattended delete safe here; the declaration is where an operator can see
+   * the window, and `lifecycle` settings can override it per environment
+   * without a code change.
+   *
+   * `onlyWhen: { status: 'completed' }` is the whole safety story:
+   *   - `pending` / `running` are LIVE work — reaping them would drop
+   *     undelivered messages;
+   *   - `dlq` / `failed` are the dead-letter surface and exist precisely to
+   *     wait for a human (`listFailed` / `replay` / `purgeFailed`), so they
+   *     are never swept automatically, at any age.
+   * This is also why the policy is `retention` (age by `created_at` + row
+   * filter) and not `ttl` on `completed_at`: TTL has no row filter, and `dlq`
+   * rows stamp `completed_at` too — a TTL would eat the dead-letter queue.
+   *
+   * Window = 7d, and it MUST stay ≥ the adapter's idempotency window
+   * (`DbQueueAdapterOptions.idempotencyWindowMs`, default 24h): publish
+   * dedups against terminal rows by comparing `created_at` to that window
+   * (`db-queue-adapter.ts`), and the Reaper cuts off on the very same
+   * `created_at` axis — so a retention ≥ the dedup window means a row the
+   * dedup check still needs can never have been reaped, with no clock skew
+   * between the two rules. 7d gives a week of delivery history for debugging
+   * and 7× headroom over the default dedup window. `DbQueueAdapter` reads
+   * this declaration and refuses to start when the two are configured the
+   * wrong way round, so the invariant cannot drift apart silently.
+   *
+   * `class: 'transient'` ("workflow / ephemeral state" — ADR-0057 §3.1), not
+   * `telemetry`: this is live work state, not a log, and per §3.6 a
+   * `telemetry`/`event`/`audit` class RELOCATES the table to the dedicated
+   * `telemetry` datasource wherever one is registered. Moving a live queue's
+   * store is a migration, not a cleanup — `transient` deliberately stays on
+   * the primary.
+   */
+  lifecycle: {
+    class: 'transient',
+    retention: {
+      maxAge: '7d',
+      onlyWhen: { status: 'completed' },
+    },
+  },
   description: 'Durable job/message queue including dead letters',
   displayNameField: 'queue',
   nameField: 'queue', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
