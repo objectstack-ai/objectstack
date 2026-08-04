@@ -10,7 +10,6 @@
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
-import { canonicalAstOperator } from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
@@ -469,6 +468,38 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#5158] A `FilterArray` reached the driver unlowered.
+ *
+ * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
+ * — and `FilterArray` is INPUT-ONLY authoring sugar the spec declares separately
+ * (`spec/data/filter.zod.ts`, #5285). Both doors into the runtime lower it
+ * through `parseFilterAST` before any driver is reached: the protocol face
+ * (`metadata-protocol`, since #4121) and the engine (`ObjectQL`, ruling C).
+ *
+ * Until ruling C this driver carried a SECOND filter compiler for the array
+ * spelling — one that also accepted an INFIX join form (`[condA, 'or', condB]`)
+ * no schema ever declared and `parseFilterAST` cannot express. Two compilers
+ * for one query is the ADR-0053 D-A1 divergence, and it had already produced a
+ * live product fork: cloud's `RemoteTransport.buildWhereSQL` refuses the exact
+ * input this method used to compile (cloud#1075), with zero tests on either
+ * side of the split. Deleting the dialect converges them.
+ *
+ * The message names the lowering, not the SQL builder, because the fix is
+ * always at the caller: lower the value (or go through the engine, which does).
+ */
+function filterArrayReachedDriverError(filters: unknown[]): Error {
+  return unsupportedFilterError(
+    `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
+    `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
+    `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
+    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+    `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
+    `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
+    `all: write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -516,10 +547,13 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
 }
 
 /**
- * [#5041] Operators whose comparand is a single bound VALUE, in both spellings
- * this driver accepts — the Filter Protocol `$`-form read by
- * {@link SqlDriver.applyFilterCondition} and the canonicalised infix form read
- * by {@link SqlDriver.applyAstComparison}.
+ * [#5041] Operators whose comparand is a single bound VALUE, in the Filter
+ * Protocol `$`-form read by {@link SqlDriver.applyFilterCondition} — the one
+ * spelling this driver still compiles. It also listed the canonicalised infix
+ * form, read by an `applyAstComparison` emitter deleted with the array dialect
+ * in #5158; the infix spellings stay in the set because
+ * {@link assertCompilableComparand} is called with an already-canonicalised
+ * operator on the reduction path.
  *
  * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
  * ABSENT: an array is their legitimate comparand, and they compile through
@@ -5995,9 +6029,30 @@ export class SqlDriver implements IDataDriver {
 
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
+
+    // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
+    // declares `QueryASTSchema.where: FilterConditionSchema` — but this method
+    // used to carry a SECOND compiler for the array spelling, including an
+    // INFIX dialect (`[condA, 'or', condB]`) that no schema ever declared and
+    // that `parseFilterAST` cannot express. `FilterArray` is now declared as
+    // INPUT-ONLY authoring sugar (`spec/data/filter.zod.ts`, #5285) and BOTH
+    // doors into the runtime lower it before a driver is reached: the protocol
+    // face (`metadata-protocol`) and the engine (`ObjectQL.find`/`findOne`/
+    // `count`/`aggregate`/`update`/`delete`). So an array here is a bug in the
+    // caller, not a dialect to compile — and refusing it is what converges this
+    // driver with cloud's `RemoteTransport.buildWhereSQL`, which has refused
+    // the same input since cloud#1075. That fork had zero tests on either side.
+    if (Array.isArray(filters)) {
+      // `[]` keeps its meaning — "no filter", not a failed filter. Unchanged
+      // from every previous version of this method, and the same reading
+      // `parseFilterAST([])` gives it.
+      if (filters.length === 0) return;
+      throw filterArrayReachedDriverError(filters);
+    }
+
     const table = this.coercionKey(builder);
 
-    if (!Array.isArray(filters) && typeof filters === 'object') {
+    if (typeof filters === 'object') {
       const hasMongoOperators = Object.keys(filters).some(
         (k) =>
           k.startsWith('$') ||
@@ -6032,83 +6087,12 @@ export class SqlDriver implements IDataDriver {
       return;
     }
 
-    if (!Array.isArray(filters) || filters.length === 0) return;
-
-    let nextJoin: 'and' | 'or' = 'and';
-
-    for (const item of filters) {
-      if (typeof item === 'string') {
-        const lower = item.toLowerCase();
-        if (lower === 'or') { nextJoin = 'or'; continue; }
-        if (lower === 'and') { nextJoin = 'and'; continue; }
-        // Anything else is not a join keyword, and the only way a bare string
-        // reaches here is a comparison triple that `isFilterAST()` refused —
-        // its operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()`
-        // never converted it and the raw array arrived as `where`. Skipping it
-        // (the old behaviour) emitted NO predicate at all: the caller asked to
-        // filter and silently got every row. Fail loudly instead. #3948.
-        throw unsupportedFilterError(
-          `Unrecognized filter operator "${item}" in a comparison triple. ` +
-            `A filter array is either a logical node (["and"|"or", …]) or nested ` +
-            `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
-            `reaches the driver when its operator is outside @objectstack/spec ` +
-            `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
-            `Filter was: ${JSON.stringify(filters)}`,
-        );
-      }
-
-      if (Array.isArray(item)) {
-        const [fieldRaw, op, value] = item;
-        const isCriterion = typeof fieldRaw === 'string' && typeof op === 'string';
-
-        if (isCriterion) {
-          const localField = this.mapSortField(fieldRaw);
-          const field = this.remoteColumn(table, fieldRaw, localField);
-          const opLower = String(op).toLowerCase();
-          const columnExpr = this.filterColumnExpr(table, localField, field);
-          // Calendar-day upper bounds (#3777) — same translation the
-          // Mongo-operator path applies, for the array (`[field, op, value]`)
-          // spelling of the identical comparison.
-          const dayRange = opLower === 'between'
-            ? this.calendarDayBetweenRewrite(table, localField, value) : null;
-          if (dayRange) {
-            (builder as any)[nextJoin === 'or' ? 'orWhere' : 'where']((qb: any) => {
-              if (columnExpr) {
-                this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
-                this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
-              } else {
-                qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
-              }
-            });
-          } else {
-            const rewrite = this.calendarDayUpperBoundRewrite(table, localField, opLower, value);
-            const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, value);
-            this.applyAstComparison(
-              builder, nextJoin, field, rewrite?.op ?? op, value, coerced,
-              columnExpr,
-            );
-          }
-        } else {
-          const method = nextJoin === 'or' ? 'orWhere' : 'where';
-          (builder as any)[method]((qb: any) => {
-            this.applyFilters(qb, item);
-          });
-        }
-
-        nextJoin = 'and';
-        continue;
-      }
-
-      // Neither a join keyword nor a condition. Previously fell out of both
-      // branches and was dropped, so a malformed element silently narrowed
-      // nothing. Same reasoning as above: an unapplied filter must not look
-      // like a satisfied one. #3948.
-      throw unsupportedFilterError(
-        `Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
-          `expected a logical keyword ("and"/"or") or a condition array. ` +
-          `Filter was: ${JSON.stringify(filters)}`,
-      );
-    }
+    // A truthy non-object, non-array `where` (`'active'`, `42`) emits no
+    // predicate. Pre-existing behaviour on a shape only a cast can produce —
+    // the protocol face rejects it (`unusableFilterError`) and `FilterCondition`
+    // does not describe it. Untouched here on purpose: #5158 is about the ARRAY
+    // dialect, and widening the refusal is a separate change with its own
+    // blast radius.
   }
 
   /**
@@ -6145,139 +6129,6 @@ export class SqlDriver implements IDataDriver {
     const keyword = negate ? 'NOT LIKE' : 'LIKE';
     const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
     builder[rawMethod](`?? ${keyword} ? ESCAPE ?`, [field, pattern, '\\']);
-  }
-
-  /**
-   * Apply one comparison node from the array-format (`[field, op, value]`)
-   * `where` to the Knex builder, honouring the operator whitelist from
-   * `@objectstack/spec` (`VALID_AST_OPERATORS`) plus the alias spellings the
-   * ObjectUI client emits (`isnull` / `isnotnull` / `is_empty`, …).
-   *
-   * Why this is NOT a thin `builder.where(field, op, value)` passthrough
-   * (issue #2704): an unrecognised operator used to be forwarded to Knex
-   * verbatim. Knex then either rejected it with a 400 (`is_empty` →
-   * "operator not permitted", blanking the whole grid) or — when the comparand
-   * was `null` — silently compiled a clause that matched EVERY row
-   * (`isnull` / `is`). On a permission- or assignment-scoped list view that
-   * silent full-table scan is a data leak, strictly worse than an error. So
-   * null predicates compile to a real `IS NULL` / `IS NOT NULL` (unified with
-   * the `{field, equals, null}` path), and any operator off the whitelist
-   * throws instead of ever reaching Knex.
-   *
-   * `columnExpr` (from {@link filterColumnExpr}) is the storage-normalised form
-   * of `field` — non-null only for a SQLite `Field.datetime`, where comparing the
-   * raw column would compare against whichever of the two stored forms the writer
-   * happened to produce (#3912). It is optional so the protected signature stays
-   * source-compatible for subclasses; omitting it just keeps the raw column.
-   */
-  protected applyAstComparison(
-    builder: any,
-    join: 'and' | 'or',
-    field: string,
-    op: string,
-    rawValue: unknown,
-    coerced: unknown,
-    columnExpr?: { sql: string; bindings: any[] } | null,
-  ): void {
-    const where = join === 'or' ? 'orWhere' : 'where';
-    const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
-    const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
-    // Fold every accepted spelling of one comparison onto a single infix form so
-    // the switch below has one case per comparison rather than one per spelling.
-    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
-    // `after` for the same thing; growing a private alias list here is how this
-    // driver and driver-memory drifted apart. #3948.
-    const opLower = canonicalAstOperator(String(op));
-
-    // #5041 — the array (`[field, op, value]`) spelling reaches Knex through a
-    // different emitter than the Filter Protocol one, and measured identically:
-    // `[['amount', 'gt', { $field: 'budget' }]]` also threw a bare TypeError.
-    // One filter condition gets one answer however it was spelled, so the same
-    // gate runs here, on the RAW value (pre-coercion).
-    assertCompilableComparand(field, opLower, rawValue);
-
-    // Value comparisons on a mixed-storage column read it through the CASE; every
-    // other operator (null predicates, the LIKE family, a malformed `between`)
-    // declines and falls through to the ordinary handling below.
-    if (columnExpr && this.applyNormalizedComparison(builder, join, columnExpr, opLower, coerced)) return;
-
-    switch (opLower) {
-      // Equality — 2-arg form so Knex renders `IS NULL` for a null comparand,
-      // keeping the `{field, equals, null}` path working.
-      case '=':
-      case '==':
-        builder[where](field, coerced);
-        return;
-      case '!=':
-      case '<>':
-        // `<> NULL` matches nothing; a null comparand means "has any value".
-        if (coerced == null) builder[whereNotNull](field);
-        else builder[where](field, '<>', coerced);
-        return;
-      case '>':
-      case '>=':
-      case '<':
-      case '<=':
-      case 'like':
-      case 'ilike':
-        builder[where](field, opLower, coerced);
-        return;
-      case 'in':
-        builder[join === 'or' ? 'orWhereIn' : 'whereIn'](field, coerced as any[]);
-        return;
-      case 'nin':
-      case 'not_in':
-      case 'notin':
-        builder[join === 'or' ? 'orWhereNotIn' : 'whereNotIn'](field, coerced as any[]);
-        return;
-      case 'between': {
-        const arr = Array.isArray(coerced) ? coerced : [];
-        if (arr.length !== 2) {
-          throw unsupportedFilterError(`Operator "between" on field "${field}" requires a [min, max] value array.`);
-        }
-        builder[join === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
-        return;
-      }
-      case 'contains':
-        this.applyLike(builder, where, field, rawValue, 'contains');
-        return;
-      case 'notcontains':
-      case 'not_contains':
-        this.applyLike(builder, where, field, rawValue, 'contains', true);
-        return;
-      case 'startswith':
-      case 'starts_with':
-        this.applyLike(builder, where, field, rawValue, 'starts');
-        return;
-      case 'endswith':
-      case 'ends_with':
-        this.applyLike(builder, where, field, rawValue, 'ends');
-        return;
-      // Null / empty predicates — value-independent, unified with `equals`+null.
-      case 'is_null':
-      case 'isnull':
-      case 'is_empty':
-      case 'isempty':
-      case 'empty':
-        builder[whereNull](field);
-        return;
-      case 'is_not_null':
-      case 'isnotnull':
-      case 'is_not_empty':
-      case 'isnotempty':
-      case 'not_empty':
-      case 'notempty':
-      case 'is_set':
-      case 'set':
-        builder[whereNotNull](field);
-        return;
-      default:
-        throw unsupportedFilterError(
-          `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
-            `=, !=, <, <=, >, >=, in, nin, between, contains, not_contains, starts_with, ends_with, ` +
-            `is_null, is_not_null (see @objectstack/spec VALID_AST_OPERATORS).`,
-        );
-    }
   }
 
   /**

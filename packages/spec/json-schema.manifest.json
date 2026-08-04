@@ -1626,6 +1626,7 @@
     "ui/ViewFilterRule",
     "ui/ViewItem",
     "ui/ViewItemName",
+    "ui/ViewItemWire",
     "ui/ViewKind",
     "ui/ViewScope",
     "ui/ViewSharing",

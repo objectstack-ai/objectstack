@@ -32,6 +32,34 @@ export function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#5158] A `FilterArray` reached the driver unlowered.
+ *
+ * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
+ * — and `FilterArray` is INPUT-ONLY authoring sugar the spec declares separately
+ * (`spec/data/filter.zod.ts`, #5285). Both doors into the runtime lower it
+ * through `parseFilterAST` before any driver is reached: the protocol face
+ * (`metadata-protocol`) and the engine (`ObjectQL`, maintainer ruling C).
+ *
+ * The twin of `driver-sql`'s `filterArrayReachedDriverError`, and deliberately
+ * word-for-word: #3948 made the two backends AGREE that an uncompilable filter
+ * is a loud refusal rather than a silent match-everything, and the four drivers
+ * each carrying their own array compiler is how they drifted apart in the first
+ * place. cloud's `RemoteTransport.buildWhereSQL` already refuses this input
+ * (cloud#1075); deleting the dialect here converges the product on one answer.
+ */
+export function filterArrayReachedDriverError(filters: unknown[]): Error {
+  return unsupportedFilterError(
+    `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
+      `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
+      `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
+      `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+      `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
+      `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
+      `all: write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
  * [#5240] Is this field spec `{}` — a field constrained by ZERO operators?
  *
  * A plain object with no own enumerable keys, and nothing else: a `Date`, a

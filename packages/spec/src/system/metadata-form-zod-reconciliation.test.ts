@@ -125,8 +125,18 @@ function unwrap(schema: unknown, depth = 0): any {
       return unwrap(d.valueType, depth + 1);
     case 'lazy':
       return unwrap(d.getter(), depth + 1);
-    case 'pipe':
-      return unwrap(d.in, depth + 1);
+    case 'pipe': {
+      // #4488's finding, applied here at #5074: `a.transform(fn)` authors
+      // against the IN side, while `z.preprocess(fn, schema)` puts the TRANSFORM
+      // on IN and the authorable schema on OUT. Taking `def.in` unconditionally
+      // made this gate report `view` as "not key-bearing" — i.e. stop
+      // reconciling it — the moment `ViewMetadataSchema` gained its
+      // console-decoration preprocess. Same shape as the `translation` outage
+      // #4488 fixed in `check-liveness.mts`.
+      const inner = unwrap(d.in, depth + 1);
+      const innerType = (inner?.def ?? inner?._def)?.type;
+      return innerType === 'transform' ? unwrap(d.out, depth + 1) : inner;
+    }
     default:
       return s;
   }

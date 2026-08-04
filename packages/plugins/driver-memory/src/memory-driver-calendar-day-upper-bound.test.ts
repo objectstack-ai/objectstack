@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import type { Cube } from '@objectstack/spec/data';
@@ -87,14 +88,19 @@ describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => 
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_old']);
   });
 
-  it('applies to the array (`[field, op, value]`) where spelling too', async () => {
+  it('applies to the authored array spelling, lowered the declared way (#5158)', async () => {
+    // The array form is input-only sugar lowered at the engine/protocol doors;
+    // the driver no longer compiles it. Same authored filter, same rows. The
+    // INFIX join has no lowering — the declared spelling is the prefix group.
     const lte = await driver.find('task', {
-      where: [['created_at', '>=', '2026-04-29'], 'and', ['created_at', '<=', '2026-07-28']],
+      where: parseFilterAST(
+        ['and', ['created_at', '>=', '2026-04-29'], ['created_at', '<=', '2026-07-28']],
+      ) as any,
     } as any);
     expect(ids(lte)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
 
     const between = await driver.find('task', {
-      where: [['created_at', 'between', ['2026-04-29', '2026-07-28']]],
+      where: parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]]) as any,
     } as any);
     expect(ids(between)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });

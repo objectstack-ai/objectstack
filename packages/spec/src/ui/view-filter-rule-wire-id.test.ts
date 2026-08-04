@@ -1,8 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #5114 — `ViewFilterRuleSchema` stays OPEN: the console stamps a UI row `id`
- * into every filter rule it writes.
+ * #5114 → **#5074**: the console stamps a UI row `id` into every filter rule it
+ * writes, and the two doors now answer that differently — the AUTHORING shape
+ * rejects it by name, the WIRE door removes it before validating.
+ *
+ * ⚠️ #5114 was an explicitly PROVISIONAL hotfix: it reopened
+ * `ViewFilterRuleSchema` to stop a live 422, and said so, "pending #5074's
+ * authoring/wire split applied to this block". That split has landed, so this
+ * file no longer pins an open shape — it pins the split, per door. The
+ * direction of the change is worth stating because it is the INVERTED one:
+ * §2's first two cases were GREEN before #5074 and are RED after (that is the
+ * close), while §2's third case — the body the console actually PUTs — is green
+ * on both sides and must stay that way. A file that only asserted "console body
+ * parses" would have passed unchanged through a change that quietly declared
+ * `id` as authorable, which is the outcome 批 18 Q1 rejected on record.
  *
  * This is the third of the three places the verdict is recorded (the others:
  * the JSDoc on the shape itself, and the `ui/` row in
@@ -28,14 +40,15 @@
  * `view-strictness-batch18.test.ts`; this file pins the consequence for the
  * filter surface, which is the one live path it broke.
  *
- * WHY `id` IS NOT DECLARED. It is a React list key, not protocol. Declaring it
- * would put a UI artifact on the authorable surface and tell an AI author to
- * generate a UUID for a filter rule — the "declared = encouraged" failure this
- * campaign exists to remove. A schema-shaped `??` fallback is still a `??`
- * fallback. So the shape stays open rather than half-closed against the
- * platform's own writes, and the real close is #5074's authoring/wire split
- * applied to this block: an authoring variant that rejects `id` and a wire
- * variant that tolerates it, with the re-opening able to REACH a nested block.
+ * WHY `id` IS STILL NOT DECLARED. It is a React list key, not protocol.
+ * Declaring it would put a UI artifact on the authorable surface and tell an AI
+ * author to generate a UUID for a filter rule — the "declared = encouraged"
+ * failure this campaign exists to remove. A schema-shaped `??` fallback is still
+ * a `??` fallback. #5074 therefore closed the shape WITHOUT declaring the key:
+ * the write door strips the declared decoration vocabulary
+ * (`stripViewConsoleDecorations`, the mirror of `stripReadDecorations`) ahead of
+ * the union, which is the only route that is recursive-effective — a `.strip()`
+ * on the wire member can never reach a nested block.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -91,20 +104,28 @@ describe('#5114 — the door this shape is reached through', () => {
 // ===========================================================================
 // 2. The regression itself — all three paths the console body travels
 // ===========================================================================
-describe('#5114 — a console-written filter row parses on every path', () => {
-  it('1/3 `ViewFilterRuleSchema` accepts the row directly', () => {
-    expect(ViewFilterRuleSchema.safeParse(CONSOLE_FILTER_ROW).success).toBe(true);
+describe('#5114 — a console-written filter row, judged per door (#5074)', () => {
+  it('1/3 `ViewFilterRuleSchema` — the AUTHORING shape — now REJECTS the row, by name', () => {
+    // Inverted vs #5114: this was green while the hotfix stood. The rejection
+    // has to carry its reason, or an author fixes it by inventing a key.
+    const r = ViewFilterRuleSchema.safeParse(CONSOLE_FILTER_ROW);
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues ?? [])).toContain('console row key');
   });
 
-  it('2/3 `ListViewSchema.filter` accepts an array of them', () => {
+  it('2/3 `ListViewSchema.filter` — reached through its carrier — rejects it too', () => {
+    // Probed at its own path: strictness does not recurse in either direction,
+    // so the carrier has to be measured, not inferred from case 1.
     expect(
       ListViewSchema.safeParse({ columns: ['name'], filter: [CONSOLE_FILTER_ROW] }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('3/3 `ViewMetadataSchema` accepts the flattened overlay the console PUTs', () => {
-    // The path that actually 422'd the user. It reaches this block through the
-    // flattened member, whose `.strip()` re-opens the top level ONLY.
+  it('3/3 `ViewMetadataSchema` — the WIRE door — still accepts the body the console PUTs', () => {
+    // The path that actually 422'd the user, and the case that must NOT move.
+    // It is green before and after #5074: before because the block was open,
+    // after because the decoration is stripped ahead of the union. If this ever
+    // goes red the close has re-become the #5114 outage.
     expect(ViewMetadataSchema.safeParse(CONSOLE_PUT_BODY).success).toBe(true);
   });
 
@@ -125,22 +146,32 @@ describe('#5114 — a console-written filter row parses on every path', () => {
 // ===========================================================================
 // 3. Open is not undefended — what reopening did NOT give away
 // ===========================================================================
-describe('#5114 — reopening dropped the unknown-key gate, and nothing else', () => {
-  it('`id` is DROPPED from the parsed result, not declared onto the surface', () => {
-    // The distinction the fix turns on. Declaring `id` would make it authorable
-    // (and teach an AI author to emit a UUID); stripping leaves the authorable
-    // surface exactly three keys. `saveMetaItem` stores the ORIGINAL body, so
-    // the console's `id` still round-trips to the renderer either way.
-    const parsed = ViewFilterRuleSchema.parse(CONSOLE_FILTER_ROW) as Record<string, unknown>;
-    expect(Object.keys(parsed).sort()).toEqual(['field', 'operator', 'value']);
-    expect('id' in parsed).toBe(false);
+describe('#5114 — the close gave away no validation, and declared no UI key', () => {
+  it('`id` is DROPPED on the wire path, not declared onto the surface', () => {
+    // The distinction the whole fix turns on, re-measured at the door that now
+    // owns the tolerance. Declaring `id` would make it authorable (and teach an
+    // AI author to emit a UUID); stripping leaves the authorable surface exactly
+    // three keys. `saveMetaItem` stores the ORIGINAL body, so the console's `id`
+    // still round-trips to the renderer either way.
+    const parsed = ViewMetadataSchema.parse(CONSOLE_PUT_BODY) as { filter?: Array<Record<string, unknown>> };
+    const row = parsed.filter?.[0] ?? {};
+    expect(Object.keys(row).sort()).toEqual(['field', 'operator', 'value']);
+    expect('id' in row).toBe(false);
+    // …and the authoring shape never grew the key.
+    expect(
+      Object.keys((ViewFilterRuleSchema as unknown as { shape: Record<string, unknown> }).shape).sort(),
+    ).toEqual(['field', 'operator', 'value']);
   });
 
-  it('the operator vocabulary still bites — an invented operator is still rejected', () => {
-    // Reopening is about UNKNOWN KEYS. Every declared key keeps its own
-    // validation, so this is not a shape that accepts anything now.
+  it('the operator vocabulary still bites ON THE WIRE — an invented operator is still rejected', () => {
+    // The tolerance is about UNKNOWN KEYS only. Every declared key keeps its own
+    // validation, so the wire door is not a shape that accepts anything now.
+    // Probed through the WIRE door, because that is the one that got looser.
     expect(
-      ViewFilterRuleSchema.safeParse({ ...CONSOLE_FILTER_ROW, operator: 'sorta_equals' }).success,
+      ViewMetadataSchema.safeParse({
+        ...CONSOLE_PUT_BODY,
+        filter: [{ ...CONSOLE_FILTER_ROW, operator: 'sorta_equals' }],
+      }).success,
     ).toBe(false);
   });
 
@@ -163,8 +194,11 @@ describe('#5114 — reopening dropped the unknown-key gate, and nothing else', (
 describe('#5114 — why the flattened member could not rescue this block', () => {
   // Both assertions here run on the FILTER-FREE overlay on purpose: they are
   // controls for the member's own posture, so they must hold whichever way
-  // `ViewFilterRuleSchema` is written. Re-close the fix and case 3/3 above goes
-  // red while these two stay green — that gap IS the finding.
+  // `ViewFilterRuleSchema` is written — and they did, across the #5114 reopen
+  // AND the #5074 re-close, which is what makes them controls rather than
+  // assertions about the fix. Remove the decoration strip from the wire door
+  // and case 3/3 above goes red while these two stay green: that gap is still
+  // the finding, now pointing at the mechanism instead of the posture.
   it('the flattened member re-opens the TOP level: an unknown aux key rides along', () => {
     expect(
       ViewMetadataSchema.safeParse({ ...OVERLAY_BASE, someStudioAuxKey: 1 }).success,

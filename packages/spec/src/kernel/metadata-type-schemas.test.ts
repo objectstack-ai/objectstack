@@ -227,18 +227,32 @@ describe('registered metadata types', () => {
  * ## `view` is the end state, not the last item of debt
  *
  * 24 of 25 are closed and the 25th will not be, for a reason worth stating so
- * nobody "finishes the job" by force. The registered `view` schema is a UNION of
- * three runtime shapes, and the third — the flattened overlay — is deliberately
- * `.strip()`: it carries Studio's auxiliary round-trip keys (`isPinned`,
- * `sortOrder`, …) that `saveMetaItem` persists verbatim, so closing it would 422
- * a shape the platform itself writes. A union is only as closed as its most open
+ * nobody "finishes the job" by force. The registered `view` schema is a UNION
+ * over the runtime shapes a `view` body really takes, and THREE of its four
+ * members are deliberately `.strip()`:
+ *
+ *   • member 1, `ViewItemWireSchema` — the wire variant of `ViewItemSchema`;
+ *   • members 3 and 4, the flattened personalization overlays.
+ *
+ * All three carry Studio's auxiliary round-trip keys (`isPinned`, `sortOrder`,
+ * …) that `saveMetaItem` persists verbatim, so closing any of them would 422 a
+ * shape the platform itself writes. A union is only as closed as its most open
  * member, so `view` reads `strip` and always will.
  *
+ * ⚠️ [#5074] This paragraph used to name the flattened overlay as "the one
+ * deliberately open member" and say nothing about member 1 — which was ALSO
+ * open, and open by accident rather than by decision. That gap was #5074's
+ * finding: member 1 was the shape `updateView` PUTs a pin through, so it had a
+ * wire contract nobody had written down. It now has a name, a declared home for
+ * the aux keys, and a strict authoring twin (`ViewItemSchema`). Do not shorten
+ * this back to "the overlay".
+ *
  * What DID close is everything an author writes: `ViewSchema` (the container),
- * `ListViewSchema`, `FormViewSchema`, and the ~28 config shapes under them. The
- * open member is a wire shape wearing the same type name — which is exactly the
- * distinction the ledger's classification rule exists to draw, arriving here as
- * the campaign's final answer rather than as an exception to it.
+ * `ViewItemSchema`, `ListViewSchema`, `FormViewSchema`, and the ~28 config
+ * shapes under them. The open members are wire shapes, now wearing their own
+ * names — which is exactly the distinction the ledger's classification rule
+ * exists to draw, arriving here as the campaign's final answer rather than as an
+ * exception to it.
  */
 const STILL_STRIP = new Set<string>(['view']);
 

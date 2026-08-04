@@ -21,17 +21,17 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 474 |
-| Still-open (strip) sites | 219 |
+| Object sites in them | 476 |
+| Still-open (strip) sites | 217 |
 | Files carrying at least one | 34 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 15 |
+| authorable — the ruling's forced scope | 11 |
 | unresolved — needs a per-schema verdict | 33 |
-| wire / open — out of forced scope | 104 |
+| wire / open — out of forced scope | 106 |
 | no door — no carrier, ADR-0049 territory | 36 |
 | no gate — carrier live, no parse | 31 |
 
@@ -43,12 +43,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 190 | 112 | 5 | 0 | 73 |
+| `ui/` | 192 | 116 | 5 | 0 | 71 |
 | `data/` | 162 | 54 | 1 | 0 | 107 |
 | `automation/` | 75 | 49 | 0 | 0 | 26 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **474** | **249** | **6** | **0** | **219** |
+| **total** | **476** | **253** | **6** | **0** | **217** |
 
 ## File-level triage — site counts
 
@@ -78,9 +78,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `sharing.zod.ts` | 1 |
 | `theme.zod.ts` | 6 |
 | `touch.zod.ts` | 7 |
-| `view.zod.ts` | 51 |
+| `view.zod.ts` | 53 |
 | `widget.zod.ts` | 9 |
-| **total** | **190** |
+| **total** | **192** |
 
 ### `data/` — sites
 
@@ -160,7 +160,7 @@ over it is here.
 
 ### `ui/` — open
 
-**73 strip of 190**, in 11 file(s).
+**71 strip of 192**, in 11 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -173,15 +173,15 @@ over it is here.
 | `keyboard.zod.ts` | 4 | 4 |
 | `offline.zod.ts` | 3 | 3 |
 | `touch.zod.ts` | 7 | 7 |
-| `view.zod.ts` | 5 | 51 |
+| `view.zod.ts` | 3 | 53 |
 | `widget.zod.ts` | 9 | 9 |
-| **total** | **73** | **190** |
+| **total** | **71** | **192** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 6 |
+| authorable — the ruling's forced scope | 2 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 0 |
+| wire / open — out of forced scope | 2 |
 | no door — no carrier, ADR-0049 territory | 36 |
 | no gate — carrier live, no parse | 31 |
 

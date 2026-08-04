@@ -13,11 +13,19 @@
  * - Special: `{ field: { $null, $exists } }`
  * - Logical: `{ $and, $or, $not }`
  * - Range: `{ field: { $between: [min, max] } }`
- * - Legacy array-style: `[field, op, value]`
+ *
+ * NOT supported, deliberately: the legacy ARRAY spelling (`[field, op, value]`,
+ * `[[…], 'or', […]]`). `where` is a `FilterCondition` object by declaration, and
+ * `FilterArray` is INPUT-ONLY authoring sugar lowered through `parseFilterAST`
+ * at the engine and protocol doors before any driver is reached (#5158, ruling
+ * C). A second compiler for it here is the divergence ADR-0053 D-A1 forbids —
+ * it is refused loudly instead, matching driver-sql, driver-memory and cloud's
+ * `RemoteTransport.buildWhereSQL`.
  */
 
 import type { Filter } from 'mongodb';
 import { nextUtcCalendarDay } from '@objectstack/core';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -25,12 +33,34 @@ import {
 } from './mongodb-temporal.js';
 
 /**
+ * [#5158] A `FilterArray` reached the driver unlowered — the twin of
+ * `driver-sql`'s and `driver-memory`'s `filterArrayReachedDriverError`, word
+ * for word so the three backends answer one condition with one wording, in the
+ * ADR-0112 envelope (`400 INVALID_FILTER`) every sibling filter refusal speaks.
+ */
+function filterArrayReachedDriverError(filters: unknown[]): Error {
+  const err = new Error(
+    `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
+    `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
+    `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
+    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+    `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
+    `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
+    `all: write the prefix form ["or", condA, condB].`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
+
+/**
  * Translate an ObjectStack `where` clause into a MongoDB filter document.
  *
  * The `where` clause can be:
  * 1. A FilterCondition object (MongoDB-style with `$` operators)
- * 2. A legacy array-style filter `[[field, op, value], 'or', [field, op, value]]`
- * 3. A plain key-value object for implicit equality
+ * 2. A plain key-value object for implicit equality
+ *
+ * An ARRAY is refused (#5158) — see the module header.
  *
  * `temporalKind` resolves the declared temporal type of a field so comparands
  * land in the column's storage form (#4047) — a `Field.datetime` comparand
@@ -44,9 +74,10 @@ export function translateFilter(
 ): Filter<any> {
   if (!where) return {};
 
-  // Legacy array-style filters
   if (Array.isArray(where)) {
-    return translateArrayFilter(where, temporalKind);
+    // `[]` still means "no filter" — unchanged.
+    if (where.length === 0) return {};
+    throw filterArrayReachedDriverError(where);
   }
 
   if (typeof where !== 'object') return {};
@@ -225,155 +256,6 @@ function translateFieldOperators(
   }
 
   return result;
-}
-
-/**
- * Translate legacy array-style filters into a MongoDB filter.
- *
- * Array format: `[[field, op, value], 'or', [field, op, value], ...]`
- * Nested arrays are treated as grouped conditions.
- */
-function translateArrayFilter(
-  filters: unknown[],
-  temporalKind?: TemporalFieldKindResolver,
-): Filter<any> {
-  if (filters.length === 0) return {};
-
-  // Check if this is a single comparison tuple: [field, op, value]
-  if (
-    filters.length === 3 &&
-    typeof filters[0] === 'string' &&
-    typeof filters[1] === 'string' &&
-    !Array.isArray(filters[0]) &&
-    (typeof filters[2] !== 'object' || filters[2] === null || Array.isArray(filters[2]))
-  ) {
-    // Only treat as tuple if filters[1] looks like an operator (not another field name
-    // that could be part of a nested array filter)
-    const possibleOp = filters[1] as string;
-    const isOperator = ['=', '!=', '<>', '>', '>=', '<', '<=', 'in', 'nin', 'eq', 'ne',
-      'gt', 'gte', 'lt', 'lte', 'contains', 'like'].includes(possibleOp) || possibleOp.startsWith('$');
-    if (isOperator) {
-      return translateComparison(filters[0], possibleOp, filters[2], temporalKind);
-    }
-  }
-
-  // Parse mixed array of conditions and logical connectors
-  const groups: { logic: 'and' | 'or'; filter: Filter<any> }[] = [];
-  let nextLogic: 'and' | 'or' = 'and';
-
-  for (const item of filters) {
-    if (typeof item === 'string') {
-      const lower = item.toLowerCase();
-      if (lower === 'or') nextLogic = 'or';
-      else if (lower === 'and') nextLogic = 'and';
-      continue;
-    }
-
-    if (Array.isArray(item)) {
-      // Could be a comparison tuple or a nested group
-      const isTuple =
-        item.length === 3 &&
-        typeof item[0] === 'string' &&
-        typeof item[1] === 'string' &&
-        !Array.isArray(item[2]);
-
-      const translated = isTuple
-        ? translateComparison(item[0], item[1], item[2], temporalKind)
-        : translateArrayFilter(item, temporalKind);
-
-      groups.push({ logic: nextLogic, filter: translated });
-      nextLogic = 'and';
-    }
-  }
-
-  if (groups.length === 0) return {};
-  if (groups.length === 1) return groups[0].filter;
-
-  // Check if all are AND
-  const hasOr = groups.some((g) => g.logic === 'or');
-  if (!hasOr) {
-    return { $and: groups.map((g) => g.filter) };
-  }
-
-  // Build $or groups: consecutive AND conditions are grouped together
-  const orGroups: Filter<any>[][] = [[]];
-  for (const g of groups) {
-    if (g.logic === 'or') {
-      orGroups.push([g.filter]);
-    } else {
-      orGroups[orGroups.length - 1].push(g.filter);
-    }
-  }
-
-  const orClauses = orGroups.map((group) => {
-    if (group.length === 1) return group[0];
-    return { $and: group };
-  });
-
-  if (orClauses.length === 1) return orClauses[0];
-  return { $or: orClauses };
-}
-
-/**
- * Translate a single comparison `[field, operator, value]` tuple.
- */
-function translateComparison(
-  field: string,
-  op: string,
-  value: unknown,
-  temporalKind?: TemporalFieldKindResolver,
-): Filter<any> {
-  const mappedField = mapFieldName(field);
-  // Resolve against the MAPPED name: `createdAt` is an alias of the declared
-  // `created_at`, and the field kinds are indexed under declared names.
-  const store = (v: unknown) => coerceTemporalValue(v, temporalKind?.(mappedField));
-
-  switch (op) {
-    case '=':
-    case 'eq':
-      return { [mappedField]: store(value) };
-    case '!=':
-    case '<>':
-    case 'ne':
-      return { [mappedField]: { $ne: store(value) } };
-    case '>':
-    case 'gt':
-      return { [mappedField]: { $gt: store(value) } };
-    case '>=':
-    case 'gte':
-      return { [mappedField]: { $gte: store(value) } };
-    case '<':
-    case 'lt':
-      return { [mappedField]: { $lt: store(value) } };
-    case '<=':
-    case 'lte': {
-      // Bare-day upper bound → half-open, `$lte`'s whole-day rule (#4042).
-      // Calendar first, storage form second — see translateFieldOperators.
-      const nextDay = nextUtcCalendarDay(value);
-      return {
-        [mappedField]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) },
-      };
-    }
-    case 'in':
-      return { [mappedField]: { $in: store(value) as unknown[] } };
-    case 'nin':
-      return { [mappedField]: { $nin: store(value) as unknown[] } };
-    case 'contains':
-    case 'like':
-      return { [mappedField]: { $regex: escapeRegex(String(value)), $options: 'i' } };
-    default:
-      // Pass through for any standard MongoDB operator
-      return { [mappedField]: { [`$${op}`]: value } };
-  }
-}
-
-/**
- * Map common ObjectStack field name aliases.
- */
-function mapFieldName(field: string): string {
-  if (field === 'createdAt') return 'created_at';
-  if (field === 'updatedAt') return 'updated_at';
-  return field;
 }
 
 /**

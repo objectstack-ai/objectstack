@@ -232,10 +232,19 @@ describe('posture reading, with a red control for each', () => {
     // is planned against — is untouched by this fix.
     //
     // The number itself tracks real batches: 6 when #5072 was written, 5 since
-    // #5073 closed `UserFiltersSchema`. It is the file's live strip count, not a
-    // #5072 invariant — what #5072 pins is that ITS OWN change moved no strip
-    // site, and that still reads correctly against whatever the current count is.
-    expect(countStripSites(at('ui/view.zod.ts'))).toBe(5);
+    // #5073 closed `UserFiltersSchema`, 3 since #5074. It is the file's live
+    // strip count, not a #5072 invariant — what #5072 pins is that ITS OWN
+    // change moved no strip site, and that still reads correctly against
+    // whatever the current count is.
+    //
+    // 5 → 3 at #5074, and the arithmetic is worth spelling out because it is
+    // not "two more closed": FOUR closed (both `ViewItemSchema` arms, the
+    // `ListView.sort` entry, `ViewFilterRuleSchema`) and TWO were ADDED — the
+    // two arms of `ViewItemWireSchema`, which are strip BY DESIGN and are the
+    // declared home the wire contract moved into. A strip site that exists on
+    // purpose still counts here; this map measures posture, not intent, which
+    // is exactly why the ledger row carries the intent in prose.
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(3);
   });
 
   it('lets a chained posture override the idiom in either direction (#5072)', () => {

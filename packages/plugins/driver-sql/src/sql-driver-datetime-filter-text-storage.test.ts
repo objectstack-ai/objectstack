@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
@@ -155,9 +156,14 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
     expect(present.map((r: any) => r.id)).toEqual(['l1', 'l2', 'l3']);
   });
 
-  it('matches the AST array filter form', async () => {
+  it('matches the authored array form, lowered the declared way (#5158)', async () => {
+    // The driver no longer compiles the array spelling — it is input-only
+    // sugar lowered at the engine/protocol doors. Same authored filter, same
+    // row, via the one route that exists.
     const rows = await driver.find('lead', {
-      where: [['created_date', '>=', '2026-01-01'], ['created_date', '<', '2026-05-01']],
+      where: parseFilterAST(
+        [['created_date', '>=', '2026-01-01'], ['created_date', '<', '2026-05-01']],
+      ) as any,
     } as any);
     expect(rows.map((r: any) => r.id)).toEqual(['l2']);
   });

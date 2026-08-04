@@ -18,6 +18,9 @@ import {
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
+// [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
+// runs, so `FilterArray` has exactly one lowering in the product.
+import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -364,6 +367,102 @@ function foldEngineOptionAliases<T extends object | undefined>(
     );
   });
   return folded as T;
+}
+
+/**
+ * **Door 2** — lower an arriving {@link FilterArray} on `where` to the
+ * `FilterCondition` the AST actually declares (#5158, maintainer ruling C).
+ *
+ * `FilterArray` — `['stage', '=', 'won']`, `['and', […], […]]`, `[[…], […]]` —
+ * is authoring sugar, and since #5285 the spec says so in as many words: it is
+ * declared INPUT-ONLY (`data/filter.zod.ts`), and `QuerySchema.where` is a
+ * `FilterCondition` that deliberately excludes it. There were two doors into
+ * the runtime and only one of them read the contract that way:
+ *
+ * - **Door 1**, the protocol/HTTP face (`metadata-protocol` `protocol.ts`),
+ *   has always run `isFilterAST` → `parseFilterAST` and answered `400
+ *   INVALID_FILTER` for an array it could not lower. Nothing array-shaped
+ *   survives it.
+ * - **Door 2**, a direct in-process engine call, passed the array through
+ *   verbatim, and four drivers grew a second filter compiler to meet it —
+ *   an INFIX dialect (`[condA, 'or', condB]`) that the spec never declared,
+ *   that `parseFilterAST` cannot even express, and that cloud's
+ *   `RemoteTransport.buildWhereSQL` refuses outright. Same query, two
+ *   answers, decided by whether the caller went over the wire.
+ *
+ * This is that second door, closed: every entry point lowers through the SAME
+ * `parseFilterAST` sink Door 1 uses, so a driver sees exactly one filter
+ * dialect regardless of how the query arrived. The authoring ergonomics are
+ * untouched — `FilterBuilder` tuples, React block `filters` props and the five
+ * showcase call sites all still work, because lowering is what those shapes
+ * were always for.
+ *
+ * Three arrivals, three answers, matching Door 1 exactly:
+ *
+ * 1. `[]` — "no filter". The key is DELETED rather than lowered, which is the
+ *    same reading every layer already gives it (`parseFilterAST([])` is
+ *    `undefined`; `SqlDriver.applyFilters` returns early). Note this is now
+ *    visible to `findOne`'s #4419 guard, which is the point: `findOne({where:
+ *    []})` used to slip past the guard as "an expression tree the driver will
+ *    interpret" and come back with an ARBITRARY row.
+ * 2. A well-formed AST — lowered. `isFilterAST` gates first so the operator
+ *    vocabulary is checked before `parseFilterAST`'s lenient `$${op}` fallback
+ *    can turn a misspelling into a `$sounds_like` condition nothing executes.
+ * 3. Anything else array-shaped — REFUSED, loudly, at the call site. Today
+ *    those reach a driver and are refused there (#3948) with driver-internal
+ *    wording, or — for the infix dialect — silently compiled by a second
+ *    implementation. Failing here names the caller's own value.
+ *
+ * Returns the SAME reference when `where` is not an array (the overwhelmingly
+ * common path allocates nothing), otherwise a shallow copy: the bag belongs to
+ * the caller and may be reused (view metadata, flow node config).
+ */
+function lowerWhereFilterArray<T extends object | undefined>(
+  object: string,
+  operation: string,
+  bag: T,
+): T {
+  if (!bag) return bag;
+  const where = (bag as Record<string, unknown>).where;
+  if (!Array.isArray(where)) return bag;
+
+  const lowered: Record<string, unknown> = { ...bag };
+
+  // (1) `[]` is "no filter", not a failed filter.
+  if (where.length === 0) {
+    delete lowered.where;
+    return lowered as T;
+  }
+
+  // (3) Not a shape `parseFilterAST` can express.
+  if (!isFilterAST(where)) {
+    throw new Error(
+      `${operation}('${object}') received a 'where' array that is not a filter: ` +
+      `${JSON.stringify(where)}. A filter array is a comparison [field, operator, value], ` +
+      `a logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY ` +
+      `sugar (spec 'FilterArray'), lowered to a FilterCondition here before any driver sees ` +
+      `it (#5158). This value cannot be lowered, and an unapplied filter would have returned ` +
+      `the UNFILTERED result set. Recognised operators: ` +
+      `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
+      `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
+    );
+  }
+
+  // (2) The declared path.
+  const condition = parseFilterAST(where);
+  if (condition === undefined) {
+    // Unreachable by construction — `isFilterAST` accepted the shape, so
+    // `parseFilterAST` has a lowering for it. Loud rather than silent because
+    // the failure mode of the two spec functions disagreeing is a dropped
+    // predicate, i.e. every row (#3948).
+    throw new Error(
+      `${operation}('${object}'): filter array ${JSON.stringify(where)} passed isFilterAST() ` +
+      `but parseFilterAST() lowered it to nothing. Refusing rather than running the query ` +
+      `unfiltered (#5158).`,
+    );
+  }
+  lowered.where = condition;
+  return lowered as T;
 }
 
 interface FormulaPlanEntry { name: string; expression: Expression; }
@@ -4427,10 +4526,19 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * "Selects nothing" is read the same way #3896 read an empty sharing
    * criteria: absent, `null`, or `{}` — the three shapes that mean "match every
-   * row". A `where` that is not a plain object (an expression tree) is the
-   * driver's to interpret, and counts as a predicate; this guard closes the one
-   * case that is unambiguously match-everything, not everything it cannot
-   * prove.
+   * row". This guard closes the one case that is unambiguously
+   * match-everything, not everything it cannot prove.
+   *
+   * [#5158] This comment used to add: "a `where` that is not a plain object (an
+   * expression tree) is the DRIVER'S to interpret, and counts as a predicate."
+   * That sentence was the engine's blessing of a second filter dialect, and it
+   * cost exactly what a blessing costs — `findOne({ where: [] })` counted as a
+   * predicate, walked past this guard, and returned an ARBITRARY row: the #4419
+   * defect surviving inside #4419's own guard. `FilterArray` is now lowered by
+   * {@link lowerWhereFilterArray} at every entry point, so by the time this
+   * runs `where` is a `FilterCondition` or nothing. The `Array.isArray` arm
+   * below is kept as defence in depth for a subclass or a future caller that
+   * reaches this method without lowering — it is no longer a contract.
    *
    * `orderBy` is the other way to be specific, and a legitimate one — "the
    * newest", "the highest priority". It is honored on this path by every
@@ -4465,6 +4573,7 @@ export class ObjectQL implements IObjectQLEngine {
     // (#4371, three shipped instances in #4370).
     query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
+    query = lowerWhereFilterArray(object, 'find', query);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     // `object` LAST: the resolved name must win. Spread-first used to let a
@@ -4609,6 +4718,7 @@ export class ObjectQL implements IObjectQLEngine {
     // matters here too: findOne({ sort }) means "first row of THIS order".
     query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
+    query = lowerWhereFilterArray(objectName, 'findOne', query);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
@@ -4984,6 +5094,10 @@ export class ObjectQL implements IObjectQLEngine {
      // predicate at all and a `multi: true` update rewrote EVERY row.
      options = foldEngineOptionAliases(object, 'update', options, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'update', options, ENGINE_UPDATE_OPTION_KEYS);
+     // [#5158] Lower before the by-id extraction below reads `where.id`: on an
+     // array that read is `undefined` whatever the caller wrote, so an
+     // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
+     options = lowerWhereFilterArray(object, 'update', options);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -5483,6 +5597,9 @@ export class ObjectQL implements IObjectQLEngine {
     // predicate on its AST and emptied the table.
     options = foldEngineOptionAliases(object, 'delete', options, ENGINE_WHERE_SLOTS);
     rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
+    // [#5158] Same ordering reason as update(): the dispatch decision below
+    // reads `where.id`, which an unlowered array never carries.
+    options = lowerWhereFilterArray(object, 'delete', options);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -5725,6 +5842,7 @@ export class ObjectQL implements IObjectQLEngine {
      // `query.where` only, so an unfolded `{ filter }` counted the whole table.
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
+     query = lowerWhereFilterArray(object, 'count', query);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -5806,6 +5924,7 @@ export class ObjectQL implements IObjectQLEngine {
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
+      query = lowerWhereFilterArray(object, 'aggregate', query);
       this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
