@@ -35,8 +35,16 @@ import type { ApiEndpoint } from '@objectstack/spec/api';
  * retiring it, because endpoint shapes are an industry-stable form that would
  * only be re-introduced identically later. When the executor ships (#5040 —
  * mounting + endpoint matching + per-key wiring), the rejection is replaced by
- * real execution and the two definitions below can be uncommented as-is. They
- * are kept verbatim for exactly that reason.
+ * real execution and these two come back. They are kept verbatim for that.
+ *
+ * ⚠️ ONE edit is required when restoring them, and it is not cosmetic:
+ * ADR-0121 D1 (accepted 2026-08-04, after these were commented out) namespaces
+ * endpoint paths as `<runtime-prefix>/apps/<namespace>/<subpath>`, so that an
+ * app can only claim its own namespace and can never collide with a built-in
+ * domain or another installed package. The `path` values below predate that
+ * rule and would be rejected under it. Per that ADR they return as
+ * `/api/v1/apps/showcase/tasks` and `/api/v1/apps/showcase/inquiries/purge`
+ * (its §D1 names them explicitly, restored by #5040 E8).
  */
 
 // /** Read-only data projection: GET a filtered task list through a stable URL. */

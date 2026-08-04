@@ -147,7 +147,11 @@ const APIS_NO_EXECUTOR_GUIDANCE =
   + 'The `ApiEndpoint` vocabulary is deliberately KEPT: the executor (mounting + endpoint '
   + 'matching + per-key wiring for authRequired/cacheTtl/inputMapping/outputMapping/rateLimit) '
   + 'is tracked by https://github.com/objectstack-ai/objectstack/issues/5040, and this '
-  + 'rejection is replaced by real execution there — your endpoint definitions stay valid.';
+  + 'rejection is replaced by real execution there — so keep your definitions, do not '
+  + 'redesign around the refusal. One thing WILL change when they come back: ADR-0121 D1 '
+  + 'namespaces endpoint paths as `<runtime-prefix>/apps/<namespace>/<subpath>`, so a path '
+  + 'like `/api/v1/my/thing` becomes `/api/v1/apps/<your manifest.namespace>/thing`. Everything '
+  + 'else about the endpoint is unchanged.';
 
 /**
  * ObjectStack Ecosystem Definition
