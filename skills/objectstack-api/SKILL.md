@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: api
   tags: rest, graphql, endpoint, auth, realtime, server
 ---
@@ -139,10 +139,120 @@ export const closeCase: RestApiEndpoint = RestApiEndpointSchema.parse({
 
 There is no `name`, `request`, `response`, or `auth` field on this schema —
 request/response schemas are referenced **by name** (`requestSchema` /
-`responseSchema`), and auth is the flat `public` + `permissions` pair. The
-alternative declarative surface is `ApiEndpointSchema` (`endpoint.zod.ts`):
-`type: 'flow' | 'script' | 'object_operation' | 'proxy'` plus a `target`
-(Flow ID, script name, or proxy URL) and `authRequired: boolean`.
+`responseSchema`), and auth is the flat `public` + `permissions` pair.
+
+The alternative — and usually the better one — is the **declarative** surface
+`ApiEndpointSchema`, which needs no handler code at all. See the next section.
+
+---
+
+## Declarative Endpoints (`apis:`) — no handler code
+
+`defineStack({ apis })` declares an HTTP endpoint as **metadata**. Declared
+endpoints are **live from protocol 17** (#5040): the runtime matches
+`METHOD` + `path`, runs the endpoint's policy keys, and delegates to the *same*
+pipelines the built-in routes use — `object_operation` to the data pipeline
+behind `/api/v1/data/{object}`, `flow` to the automation pipeline behind
+`POST /api/v1/automation/{name}/trigger`. An endpoint is a stable URL plus a
+policy layer over an existing pipeline, never a second execution dialect.
+
+### Choosing between `apis:` and `contributes.routes`
+
+| Use | When |
+|:---|:---|
+| **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
+| **`contributes.routes`** (plugin manifest) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. This registers a prefix for a plugin-provided service. |
+
+If the logic is "a bit of computation, then a record write", express it as a
+**flow** and point a `type: 'flow'` endpoint at it — that keeps the URL
+declarative and the logic in the automation surface that already runs it.
+
+<!-- os:check -->
+```typescript
+import type { ApiEndpointInput } from '@objectstack/spec/api';
+
+// The stack declares `manifest: { namespace: 'acme', … }` — required, see below.
+export const leadFeed: ApiEndpointInput = {
+  name: 'acme_lead_feed',
+  path: '/api/v1/apps/acme/leads',      // /api/v1/apps/<namespace>/<subpath>
+  method: 'GET',
+  summary: 'Lead feed',
+  type: 'object_operation',
+  target: 'acme_lead',
+  objectParams: { object: 'acme_lead', operation: 'find' },
+  // `authRequired` omitted → defaults to `true`. Omission is SAFE.
+  cacheTtl: 30,                          // seconds; GET-only; success answers only
+};
+```
+
+### The path carve-out (ADR-0121 D1/D2)
+
+A declared path must be `/api/v1/apps/<manifest.namespace>/<subpath>`. Only the
+subpath is yours to name. `manifest.namespace` must be declared **explicitly** —
+there is deliberately no derivation from `manifest.id`, because an outward URL
+contract must not move because a package id was rewritten. This is what makes
+route ownership structural: no built-in domain lives under `apps/`, and two
+packages cannot collide because their namespaces differ.
+
+Note the ordinary naming rules above still apply *inside* the subpath, but the
+prefix is not yours to choose — a path outside the carve-out is rejected at
+publish, and would match nothing at runtime even if it were not.
+
+### Five publish gates, each with a prescription
+
+A declaration this runtime cannot serve is **rejected at publish**, one gate at a
+time, each naming the endpoint, the key and the fix. Run the gate yourself:
+
+```bash
+objectstack validate    # or: os build — same gates
+```
+
+Do not memorise the gate texts; **read the rejection**, it carries the fix.
+What the five gates cover: **namespace** (the carve-out above),
+**supported target** (`script` / `proxy` do not execute in 17.x; an
+`object_operation` needs both `objectParams.object` and `.operation`; a `flow`
+needs a `target`), **mapping** (below), **policy** (below), and **uniqueness**
+(one `METHOD` + path claim per stack).
+
+### `authRequired` and the D6 pairing
+
+`authRequired` defaults to `true`, so **omitting it is safe**. An explicit
+`false` is the only thing that opens an anonymous, unauthenticated execution
+entry point — and ADR-0121 **D6** pairs it with an *armed* budget:
+
+```typescript
+authRequired: false,
+rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 },
+```
+
+The gate's predicate is `rateLimit.enabled === true`, **not** the key's presence:
+`RateLimitConfigSchema.enabled` itself defaults to `false`, so writing only
+`windowMs` / `maxRequests` declares a budget that meters nothing. Endpoint
+budgets are metered independently of the server-level `server.security.rateLimit`.
+
+### Mapping keys: projection only
+
+`inputMapping` / `outputMapping` **move and rename fields by dot path, and
+nothing more**. `inputMapping` maps the REQUEST BODY, applied after the policy
+chain and before delegation (so a mapping can never buy a caller past
+`authRequired` or the rate limiter); `outputMapping` is applied to a **successful**
+response body only. Three consequences worth knowing before you author one:
+
+- `transform` is rejected — there is no transformation-function registry.
+  Compute the value where it is produced (a flow, or a formula field).
+- `inputMapping` is rejected on a `find` / `get` / `delete` `object_operation`,
+  which never reads a request body.
+- Two entries cannot write the same target path, nor one inside the other
+  (`x` and `x.y`).
+
+### Upgrading a pre-17 stack
+
+An `apis:` block written against an older major **changes meaning without
+changing a byte** — inert documentation becomes an execution entry point. Work
+through the `declarative-apis-endpoints-live` entry of the protocol upgrade
+guide before upgrading; it is a security review, not a rename. Its two
+load-bearing steps: move every `path` into the carve-out, and grep every entry
+for `authRequired: false`.
 
 ---
 
@@ -154,6 +264,7 @@ alternative declarative surface is `ApiEndpointSchema` (`endpoint.zod.ts`):
 | `/api/v1/data/{object}/:id` | Auto-generated record | `/api/v1/data/accounts/abc123` |
 | `/api/v1/{object}/:id/{action}` | Custom action on record | `/api/v1/cases/:id/close` |
 | `/api/v1/{domain}/{action}` | Domain-level action | `/api/v1/ai/chat` |
+| `/api/v1/apps/{namespace}/{subpath}` | Declarative `apis:` endpoint — the carve-out, not a free choice | `/api/v1/apps/acme/leads` |
 
 **Rules:**
 
@@ -319,8 +430,10 @@ fields on the endpoint itself:
 ```
 
 Declarative `ApiEndpointSchema` endpoints (and the dispatcher) instead use
-`authRequired: boolean` (default `true`). Rate-limit policies themselves are
-shaped by `RateLimitConfigSchema`:
+`authRequired: boolean` (default `true`) — and setting it to `false` obliges you
+to arm a `rateLimit` (ADR-0121 D6 — see **Declarative Endpoints → `authRequired`
+and the D6 pairing** above). Rate-limit policies themselves are shaped by
+`RateLimitConfigSchema`:
 
 <!-- os:check -->
 ```typescript

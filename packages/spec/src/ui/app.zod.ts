@@ -1172,12 +1172,21 @@ export const AppSchema = lazySchema(() => z.object({
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
-    'never read). Delete the key. Note the stack-level `defineStack({ apis })` this ' +
-    'prescription used to redirect to is ALSO not executable in v17 (#4936): the ' +
-    'vocabulary is kept but a non-empty array is rejected there too, until the endpoint ' +
-    'executor ships (tracked by ' +
-    'https://github.com/objectstack-ai/objectstack/issues/5040). Serve the route in code ' +
-    'meanwhile — a plugin manifest `contributes.routes` entry or an `http.server` route.',
+    'never read). Delete the key and declare the endpoint one level up, on the STACK: ' +
+    '`defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between ' +
+    '#4936 and the executor landing it was refused wholesale — nothing mounted a declared ' +
+    'path, so every key including `authRequired` parsed and gated nothing — and that ' +
+    'blanket refusal is now narrowed to five per-endpoint publish gates (namespace, ' +
+    'supported target, mapping, policy, uniqueness): an endpoint that passes them is ' +
+    'mounted and serves traffic as soon as the stack is published. Two things to get ' +
+    'right when you move it: the path must sit inside your own carve-out, ' +
+    '`/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` ' +
+    '(ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the ' +
+    'only thing that opens anonymous access, and ADR-0121 D6 then requires an armed ' +
+    '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
+    '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
+    'security review, not a rename. A route that genuinely needs handler CODE still ' +
+    'belongs in a plugin manifest `contributes.routes` entry.',
   ),
 
   /**
