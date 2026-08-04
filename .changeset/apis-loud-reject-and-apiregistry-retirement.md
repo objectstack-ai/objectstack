@@ -2,9 +2,8 @@
 "@objectstack/spec": major
 "@objectstack/core": major
 "@objectstack/plugin-hono-server": major
-"@objectstack/runtime": minor
+"@objectstack/runtime": major
 "@objectstack/metadata-protocol": patch
-"@objectstack/client": patch
 ---
 
 feat(spec,core,runtime)!: declarative `apis:` refuses loudly instead of parsing into silence; the `ApiRegistry` family retires (#4936, #4939)
@@ -88,10 +87,13 @@ independent ratchets and is not part of the retired surface.
 
 ## Also in this change
 
-- `handleApiEndpoint` and its private `callData` delegate are deleted from
-  `http-dispatcher.ts`, and `/__api-endpoint` leaves `LEGACY_CHAIN_PREFIXES` and the route
-  ledger. Absence is now loud (ADR-0076): the surface is refused at authoring rather than
-  404ing at runtime with dead code behind it.
+- **BREAKING (`@objectstack/runtime`):** `HttpDispatcher.handleApiEndpoint()` is deleted,
+  along with its now-orphaned private `callData` delegate, and `/__api-endpoint` leaves
+  `LEGACY_CHAIN_PREFIXES` and the route ledger. The method was public, so this is an API
+  removal — but it returned `{ handled: false }` for every call it ever received, so no
+  caller can observe a behaviour change beyond the missing symbol. Delete the call.
+  Absence is now loud (ADR-0076): the surface is refused at authoring rather than 404ing
+  at runtime with dead code behind it.
 - `examples/app-showcase` no longer declares endpoints, and its coverage manifest no
   longer claims the capability is `demonstrated` — that entry read "executed by the runtime
   dispatcher (handleApiEndpoint)", which was exactly the advertise-what-you-don't-deliver
