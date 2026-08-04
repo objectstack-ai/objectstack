@@ -346,9 +346,20 @@ The transport is handed to the manager by `MetadataClusterBridgePlugin`
 `kernel:ready`. `Runtime` registers that bridge automatically alongside the
 cluster service.
 
-Peers suppress their own messages by `originNode` and replay the watch
-event locally — there is currently **no** `version` / `name` / `tenantId` /
-`operation` field and **no** version comparison.
+On receipt a peer suppresses its own messages by `originNode`, then — **first,
+synchronously** — invalidates its local caches for that type: it drops the
+`registry` entry named by the nested watch event and the `list(type)` cache
+(`invalidateForForeignWrite`). Only then does it replay the watch event into
+its local watch hub, deferred by one tick so a slow consumer callback cannot
+back-pressure the pubsub dispatch loop. That order is what lets a woken
+consumer answer by re-reading through `list()` and see the write rather than
+the pre-write set (#5109). The registry entry is **deleted, never pre-filled**
+from the payload — the peer re-reads the shared store, which is the source of
+truth.
+
+At the payload's top level there is still **no** `version` / `name` /
+`tenantId` / `operation` field and **no** version comparison; the item's name
+is carried only inside the replayed `event`.
 
 **Target spec (planned).** The richer, version-stamped payload below is
 defined as `MetadataChangedEventPayloadSchema` in `kernel/cluster.zod.ts`
