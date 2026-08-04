@@ -142,7 +142,6 @@ describe('#4001 批 18 — closed sites reject unknown keys where they live', ()
   });
 
   it.each([
-    ['sort', { sort: [{ field: 'name', order: 'asc', notASortKey: 1 }] }],
     ['conditionalFormatting', { conditionalFormatting: [{ condition: 'true', style: {}, notAFormatKey: 1 }] }],
     ['emptyState', { emptyState: { title: 'None', notAnEmptyStateKey: 1 } }],
   ])('ListViewSchema.%s rejects an undeclared key', (_block, patch) => {
@@ -181,15 +180,6 @@ describe('#4001 批 18 — closed sites reject unknown keys where they live', ()
 // 3. Curation — the entries that make a rejection fixable
 // ===========================================================================
 describe('#4001 批 18 — the rejection carries a usable prescription', () => {
-  it('`direction` → `order` on a sort entry — the #4721 sibling contract, second declaration', () => {
-    // `SortNodeSchema` (data/query.zod.ts) closed with this exact alias after
-    // #4721 measured `{ field, direction: 'desc' }` parsing to
-    // `{ field, order: 'asc' }` — a silently REVERSED sort reported as valid.
-    // The view surface declares the same two-key tuple and must not re-learn it.
-    expect(reject(ListViewSchema, { ...LIST_BASE, sort: [{ field: 'name', direction: 'desc' }] }))
-      .toContain('`direction` → `order`');
-  });
-
   it('`object` → `childObject` on a subform — the word every neighbouring block uses', () => {
     expect(reject(FormViewSchema, { ...FORM_BASE, subforms: [{ childObject: 'x', object: 'crm_line' }] }))
       .toContain('`object` → `childObject`');
@@ -329,6 +319,32 @@ describe('#4001 批 18 — deliberately still open (do not close without re-meas
       ViewMetadataSchema.safeParse(withConfig).success,
       'a broken record must NOT be rescued by a lenient flattened member',
     ).toBe(false);
+  });
+
+  it('ListViewSchema.sort stays open: the console stamps a UI row `id` into it', () => {
+    // Batch 18 CLOSED this (with `direction → order`, the #4721 alias for the
+    // identical tuple) and the full suite caught it: `view-metadata-schema.test.ts`
+    // pins `sort: [{ id, field, order }]` as the exact body a console column-sort
+    // PUT persists, and objectui stamps that `id` per row
+    // (`components/src/custom/sort-builder.tsx:68`, `:94` — `crypto.randomUUID()`).
+    // `id` was deliberately NOT declared to silence the rejection: it is a React
+    // list key, and declaring it would put a UI artifact on the authorable
+    // surface and teach an AI author to emit one.
+    expect(ListViewSchema.safeParse({ ...LIST_BASE, sort: [{ id: 'uuid', field: 'name', order: 'asc' }] }).success).toBe(true);
+  });
+
+  it('…and the mechanism that made it a regression: `.strip()` does NOT recurse', () => {
+    // This is the load-bearing fact for every nested block in this file, and it
+    // is the opposite of what the union's comment implies. `ViewMetadataSchema`
+    // rescues Studio's round-trip keys by making its flattened members
+    // `.strip()` — but that re-opens the TOP level only. A nested block closed
+    // inside `ListViewSchema` is still reached through that member, so a
+    // console-stamped key inside it becomes a 422 no matter what the member does.
+    const overlay = { type: 'grid', columns: ['name'], name: 'o.default', viewKind: 'list', object: 'o' };
+    // top level: an unknown aux key rides along, because the member strips.
+    expect(ViewMetadataSchema.safeParse({ ...overlay, someStudioAuxKey: 1 }).success).toBe(true);
+    // nested: a CLOSED sub-block still rejects through that same member.
+    expect(ViewMetadataSchema.safeParse({ ...overlay, emptyState: { title: 'x', notAnEmptyStateKey: 1 } }).success).toBe(false);
   });
 
   it('FormFieldBaseSchema stays a bare z.object: its ONE consumer already `.strict()`s it', () => {

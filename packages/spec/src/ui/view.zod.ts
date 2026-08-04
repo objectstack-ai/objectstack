@@ -922,19 +922,38 @@ export const ListViewSchema = lazySchema(() => strictObject({
    * renderer in objectui#2601 — kept covered by a live fixture). Removal will
    * go through its own deprecation cycle; do not drop it here.
    */
+  /**
+   * ⚠️ [#4001 批 18] Deliberately still STRIP — reverted after the closed
+   * version broke a live console path, which is the finding rather than a
+   * setback.
+   *
+   * This batch closed it (with `direction → order`, the #4721 alias for the
+   * identical tuple — `{ field, direction: 'desc' }` parsed to
+   * `{ field, order: 'asc' }`, a silently REVERSED sort). The full suite then
+   * failed one case: `view-metadata-schema.test.ts` pins
+   * `sort: [{ id, field, order }]` as *"the exact shape normalizeViewMetadata
+   * persists on a console column-sort PUT"*, and `id` is a UI row identity
+   * objectui stamps per row (`components/src/custom/sort-builder.tsx:68`,
+   * `:94` — `crypto.randomUUID()`), persisted verbatim because `saveMetaItem`
+   * stores the original body.
+   *
+   * The mechanism is worth stating, because it governs every nested block in
+   * this file and is NOT what the union's comment implies: `ViewMetadataSchema`
+   * rescues Studio's round-trip keys with `.strip()` on its flattened members —
+   * but **`.strip()` does not recurse** any more than `.strict()` does. It
+   * re-opens the TOP level only, so a nested block closed here is still reached
+   * through that member and a console-stamped key inside it becomes a 422.
+   *
+   * `id` was NOT declared to make the rejection go away. It is a React list key,
+   * not protocol: declaring it would put a UI artifact on the authorable surface
+   * and tell an AI author to generate one. The real end state is the same
+   * authoring/wire split filed as #5074, applied one level down — until then
+   * this shape stays open rather than half-closed against the platform's own
+   * writes.
+   */
   sort: z.union([
     z.string(), //Legacy "field desc"
-    z.array(strictObject({
-      surface: 'this list view sort entry',
-      history: VIEW_HISTORY,
-      // Same two-key tuple as `SortNodeSchema` (`data/query.zod.ts`), which
-      // #4721 closed with this exact alias after measuring that
-      // `{ field, direction: 'desc' }` parsed to `{ field, order: 'asc' }` —
-      // a silently REVERSED sort reported as valid. This is the second
-      // declaration of that tuple, so it carries the same prescription rather
-      // than leaving the view surface to re-learn it.
-      aliases: { direction: 'order', dir: 'order', sortOrder: 'order', by: 'field', fieldName: 'field' },
-    }, {
+    z.array(z.object({
       field: z.string(),
       order: z.enum(['asc', 'desc'])
     }))
