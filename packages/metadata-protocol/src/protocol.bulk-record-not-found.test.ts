@@ -421,6 +421,52 @@ describe('[#5088] batchData delete — the driver`s return decides, as in delete
     });
 });
 
+describe('[#5100] an id-less row is a CALLER error on both by-id update faces', () => {
+    it('updateMany: VALIDATION_FAILED/400 before any engine read or write', async () => {
+        const t = makeStoreEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const res: any = await p.updateManyData({
+            object: 'showcase_task',
+            records: [{ data: { progress: 1 } }],
+            options: { continueOnError: true },
+        } as any);
+
+        expect(res.succeeded).toBe(0);
+        expect(res.failed).toBe(1);
+        expect(res.results[0].errors?.[0]?.code).toBe('VALIDATION_FAILED');
+        expect(res.results[0].errors?.[0]?.httpStatus).toBe(400);
+        expect(res.results[0].errors?.[0]?.message).toBe('Record id is required for update');
+        // A missing id is a request-shape error, not a data-state one — and it
+        // must fail BEFORE any engine round-trip: unguarded, the row reached
+        // the #5088 probe as `{ id: undefined }`, whose reading is up to the
+        // driver's undefined-where-key handling, and came back as a 404 with
+        // `undefined` interpolated into the message.
+        expect(res.results[0].errors?.[0]?.message).not.toContain('not found');
+        expect(t.findOne).not.toHaveBeenCalled();
+        expect(t.update).not.toHaveBeenCalled();
+    });
+
+    it('the two by-id update faces give ONE classification for the same malformed row (#4620)', async () => {
+        const t = makeStoreEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const many: any = await p.updateManyData({
+            object: 'showcase_task',
+            records: [{ data: { progress: 1 } }],
+        } as any);
+        const batch: any = await p.batchData({
+            object: 'showcase_task',
+            request: { operation: 'update', records: [{ data: { progress: 1 } }] },
+        } as any);
+
+        expect(many.results[0].errors[0].code).toBe(batch.results[0].errors[0].code);
+        expect(many.results[0].errors[0].message).toBe(batch.results[0].errors[0].message);
+        expect(many.results[0].errors[0].httpStatus).toBe(batch.results[0].errors[0].httpStatus);
+        expect(batch.results[0].errors[0].code).toBe('VALIDATION_FAILED');
+    });
+});
+
 describe('[#5088] the three by-id write faces answer the SAME thing', () => {
     it('single-record PATCH, updateMany and batchData produce one message for one missing id', async () => {
         const t = makeStoreEngine();

@@ -353,6 +353,165 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
   });
 });
 
+describe('audit writers — chunked upload sessions are excluded (#5202, ADR-0057 D5)', () => {
+  // The upload-session table as `StorageMetadataStore` writes it, plus
+  // `sys_file` (its sibling, deliberately NOT exempted) and a business object.
+  // Same wildcard hooks a business object goes through — `SKIP_OBJECTS` is the
+  // only thing between an upload and the ledger.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_upload_session: ['id', 'file_id', 'status', 'uploaded_chunks', 'uploaded_size', 'parts', 'started_at', 'expires_at', 'updated_at'],
+    sys_file: ['id', 'name', 'size', 'status'],
+    crm_lead: ['id', 'name'],
+  };
+
+  /**
+   * Every write `StorageMetadataStore` performs for ONE chunked upload of
+   * `chunks` parts, in order: `createSession()` insert, one `updateSession()`
+   * per chunk, the terminal `updateSession()`, and the row's removal.
+   *
+   * `updateSession()` writes the MERGED FULL record, so `parts` — the JSON blob
+   * that grows by one entry per chunk — is in every single diff. The fixture
+   * grows it for real rather than sending a placeholder, because the size of
+   * those `old_value`/`new_value` payloads is half of what #5202 is about.
+   */
+  function uploadLifecycle(
+    chunks: number,
+    terminal: { status: string; via: 'afterUpdate' | 'afterDelete' },
+  ): Array<[string, Record<string, any>]> {
+    const partsAfter = (n: number) =>
+      JSON.stringify(Array.from({ length: n }, (_, i) => ({ part: i + 1, etag: `etag-${i + 1}` })));
+    const snapshot = (n: number, status: string) => ({
+      id: 'ups-1',
+      file_id: 'file-1',
+      status,
+      uploaded_chunks: n,
+      uploaded_size: n * 5_242_880,
+      parts: partsAfter(n),
+      updated_at: `2026-08-04T00:00:${String(n).padStart(2, '0')}.000Z`,
+    });
+
+    const writes: Array<[string, Record<string, any>]> = [
+      // createSession() — engine.insert with the full seeded record.
+      ['afterInsert', { input: { id: 'ups-1' }, result: snapshot(0, 'in_progress') }],
+    ];
+    // updateSession() — ONE per chunk, each carrying the whole grown record.
+    for (let n = 1; n <= chunks; n += 1) {
+      writes.push([
+        'afterUpdate',
+        {
+          input: snapshot(n, 'in_progress'),
+          __previous: snapshot(n - 1, 'in_progress'),
+          result: snapshot(n, 'in_progress'),
+        },
+      ]);
+    }
+    // complete() / abort() — a final updateSession() flipping status…
+    writes.push([
+      'afterUpdate',
+      {
+        input: { id: 'ups-1', status: terminal.status },
+        __previous: snapshot(chunks, 'in_progress'),
+        result: snapshot(chunks, terminal.status),
+      },
+    ]);
+    // …then deleteSession(), or the ADR-0057 TTL/retention reaper.
+    if (terminal.via === 'afterDelete') {
+      writes.push([
+        'afterDelete',
+        { input: { id: 'ups-1' }, __previous: snapshot(chunks, terminal.status), result: { id: 'ups-1' } },
+      ]);
+    }
+    return writes;
+  }
+
+  it('writes NO audit/activity row for a completed 8-chunk upload (create → 8 × update → complete → delete)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    const writes = uploadLifecycle(8, { status: 'completed', via: 'afterDelete' });
+    // Sanity-check the fixture itself: 1 insert + 8 chunk updates + 1 terminal
+    // update + 1 delete. Without the exemption that is 2 × 11 = 22 ledger rows
+    // for one file — the 2 × (1 + N) amplifier #5202 names.
+    expect(writes).toHaveLength(11);
+
+    for (const [event, ctx] of writes) {
+      await fire(event, { object: 'sys_upload_session', session: { isSystem: true }, ...ctx });
+    }
+
+    // Not "fewer rows" — zero.
+    expect(created).toEqual([]);
+  });
+
+  it('writes NO audit/activity row when the session is aborted and reaped instead', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // Abandoned mid-upload: the terminal write is the TTL reaper's DELETE of a
+    // row 1d past `expires_at`, not a user action.
+    for (const [event, ctx] of uploadLifecycle(3, { status: 'expired', via: 'afterDelete' })) {
+      await fire(event, { object: 'sys_upload_session', session: { isSystem: true }, ...ctx });
+    }
+    expect(created).toEqual([]);
+  });
+
+  it('does not re-read the growing session row before every chunk update', async () => {
+    const { engine, fire } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    const reads: string[] = [];
+    const ql = {
+      async findOne(object: string) {
+        reads.push(object);
+        return { id: 'ups-1' };
+      },
+    };
+
+    // `captureBefore` would otherwise snapshot the row — `parts` blob and all —
+    // once per chunk, on top of the write the store is already doing.
+    for (let n = 1; n <= 4; n += 1) {
+      await fire('beforeUpdate', { object: 'sys_upload_session', input: { id: 'ups-1', uploaded_chunks: n }, ql });
+    }
+    await fire('beforeDelete', { object: 'sys_upload_session', input: { id: 'ups-1' }, ql });
+    expect(reads).toEqual([]);
+
+    // Control — the assertion above can fail: a business object on the same
+    // harness DOES get snapshotted.
+    await fire('beforeUpdate', { object: 'crm_lead', input: { id: 'lead-1', name: 'Acme' }, ql });
+    expect(reads).toEqual(['crm_lead']);
+  });
+
+  it('still audits sys_file — mostly permanent business truth, deliberately NOT exempted', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    // `sys_file` also declares `lifecycle.class: 'transient'`, but only to reap
+    // tombstones and unfinished uploads; the rows themselves are business truth
+    // with compliance value. #5202 exempts the SESSION, never the FILE — if a
+    // later "finish the sweep" change adds `sys_file` to `SKIP_OBJECTS`, this
+    // is the test that says no.
+    await fire('afterInsert', {
+      object: 'sys_file',
+      input: { id: 'file-1' },
+      result: { id: 'file-1', name: 'contract.pdf', size: 41_943_040, status: 'ready' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+
+  it('still audits ordinary business writes (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+});
+
 describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', () => {
   // crm_opportunity with a tracked select field (Stage) carrying option labels.
   const SCHEMA = {

@@ -5935,6 +5935,17 @@ export class ObjectStackProtocolImplementation implements
                 //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
                 //     surfaces (#3431) happened silently here. Collect per row.
                 //
+                // [#5100] Same guard as `runBatchDataLoop`'s update branch
+                // (#4793), same classification: an id-less row is a CALLER
+                // error — VALIDATION_FAILED/400 — not a data-state one. The
+                // REST entrance already rejects it (`UpdateManyRecordSchema`
+                // requires `id`, #3939), but that invariant lives two packages
+                // away; unguarded, an in-process caller's malformed row
+                // reached the probe and the write as `{ id: undefined }`,
+                // whose reading is up to each driver's undefined-where-key
+                // handling — at best a 404 with `undefined` interpolated into
+                // the message, at worst a where-clause with no id at all.
+                if (!record.id) throw rowRequiredIdError('update');
                 // [#5088] Third gap, the same shape: no existence gate. A row
                 // naming no record went straight into `engine.update`, so the
                 // hook pipeline ran over a payload-only record and the row came
@@ -5945,7 +5956,7 @@ export class ObjectStackProtocolImplementation implements
                 const dropped: DroppedFieldsEvent[] = [];
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
-                const updated = await this.engine.update(object, record.data, opts);
+                const updated = await this.engine.update(object, record.data || {}, opts);
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
             } catch (err: any) {

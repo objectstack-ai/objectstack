@@ -39,6 +39,17 @@ export const REGEN_ARTIFACTS = Object.freeze([
     readsDist: true,
   },
   { path: 'content/docs/references/**', gen: 'gen:docs', check: 'check:docs' },
+  // #5107. Unlike its neighbours this one is derived from the AST *plus* a
+  // hand-written column (the ledger's `Class` verdicts feed the per-class
+  // subtotals), which is exactly why it belongs here rather than in the ledger:
+  // the arithmetic composes on a merge, the judgement does not, so they had to
+  // stop living in one file. The ledger itself stays hand-written and is NOT
+  // driver-managed — regenerating prose would delete somebody's evidence.
+  {
+    path: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+    gen: 'gen:strictness-ledger',
+    check: 'check:strictness-ledger',
+  },
 ]);
 
 /**
@@ -79,7 +90,12 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   },
   {
     path: 'docs/audits/**',
-    why: 'hand-written audit ledgers. `check:strictness-ledger` audits one against the code; there is no generator.',
+    why:
+      'hand-written audit ledgers — Class verdicts, evidence, findings logs. The ONE exception is '
+      + 'the strictness ledger\'s `.counts.md`, declared above: #5107 split the ledger\'s numbers out '
+      + 'precisely so the prose could keep text-merging (it always merged cleanly) while the numbers '
+      + 'stopped (they merged clean and WRONG). Regenerating a ledger would discard evidence, which is '
+      + 'the opposite trade — so this exclusion covers the prose and must stay.',
   },
 ]);
 

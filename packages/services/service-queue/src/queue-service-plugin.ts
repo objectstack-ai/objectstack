@@ -5,7 +5,7 @@ import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { MemoryQueueAdapter } from './memory-queue-adapter.js';
 import type { MemoryQueueAdapterOptions } from './memory-queue-adapter.js';
 import { DbQueueAdapter } from './db-queue-adapter.js';
-import type { DbQueueAdapterOptions } from './db-queue-adapter.js';
+import type { DbQueueAdapterOptions, LifecycleFloorRegistrar } from './db-queue-adapter.js';
 
 /**
  * Configuration options for the QueueServicePlugin.
@@ -107,6 +107,17 @@ export class QueueServicePlugin implements Plugin {
         options: this.options.db,
       });
 
+      // [#5195] Tell the LifecycleService how short sys_job_queue's retention
+      // may get. The adapter's constructor already refuses an idempotency
+      // window longer than the DECLARED retention (#5179), but ADR-0057 P4
+      // overrides live in the `lifecycle` settings namespace, which the
+      // constructor never sees — an operator setting `maxAge: '1h'` would reap
+      // the rows publish dedups against and duplicate deliveries would resume
+      // silently. The floor carries the window this adapter was actually
+      // constructed with, so a non-default `db.idempotencyWindowMs` is covered
+      // too.
+      this.registerRetentionFloor(ctx, this.dbAdapter);
+
       try {
         (ctx as any).replaceService?.('queue', this.dbAdapter);
         this.dbAdapter.start();
@@ -115,6 +126,44 @@ export class QueueServicePlugin implements Plugin {
         ctx.logger.warn('QueueServicePlugin: replaceService failed; staying on MemoryQueueAdapter', err as any);
       }
     });
+  }
+
+  /**
+   * [#5195] Register the adapter's retention floor with the platform
+   * LifecycleService. Best-effort: a kernel without a lifecycle service has no
+   * sweeper either, so there is no override for anything to bypass.
+   *
+   * The lookup is typed to {@link LifecycleFloorRegistrar} — the slot's
+   * contract as this package consumes it — rather than erased to `any`
+   * (#4127/#4251). The `typeof … === 'function'` probe stays because the method
+   * is genuinely optional (a lifecycle service predating floors), but it is now
+   * a check the compiler can see rather than one `any` was hiding.
+   */
+  private registerRetentionFloor(ctx: PluginContext, adapter: DbQueueAdapter): void {
+    let lifecycle: LifecycleFloorRegistrar | undefined;
+    try {
+      lifecycle = ctx.getService<LifecycleFloorRegistrar>('lifecycle');
+    } catch {
+      lifecycle = undefined;
+    }
+    if (!lifecycle || typeof lifecycle.registerRetentionFloor !== 'function') return;
+    try {
+      lifecycle.registerRetentionFloor(SysJobQueue.name, adapter.retentionFloor());
+      ctx.logger.info(
+        `QueueServicePlugin: registered a ${adapter.idempotencyWindowMs}ms retention floor on ${SysJobQueue.name} `
+        + 'with the lifecycle service (settings overrides below it are rejected)',
+      );
+    } catch (err) {
+      // A floor the service refused is a wiring bug in THIS plugin, not a
+      // degraded deployment — but it must not stop the queue from coming up.
+      ctx.logger.error(
+        'QueueServicePlugin: the lifecycle service rejected the sys_job_queue retention floor. A `lifecycle` '
+        + 'settings override may now shorten sys_job_queue.retention below the idempotency window, in which case '
+        + 'publish would silently re-accept duplicates (#5195). Fix the floor registration, or keep '
+        + 'lifecycle.retention_overrides.sys_job_queue unset.',
+        err as any,
+      );
+    }
   }
 
   async destroy(): Promise<void> {

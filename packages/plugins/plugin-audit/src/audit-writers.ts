@@ -125,6 +125,19 @@ const SKIP_OBJECTS = new Set<string>([
   'sys_notification_receipt',
   'sys_inbox_message',           // per-user fan-out of every notification
   'sys_http_delivery',           // webhook/outbound transport log
+  // [#5202, ADR-0057 D5 — the same gap as #5193, one table over] Also
+  // `lifecycle.class: 'transient'`, and its own object comment settles what the
+  // rows are worth: "an upload session is ephemeral state, **never business
+  // truth**" (ADR-0057 / #2970 item 4). `StorageMetadataStore` is its only
+  // writer — `createSession()` inserts, `updateSession()` runs ONCE PER CHUNK,
+  // and `deleteSession()` (plus the TTL/retention reaper) removes the row — so
+  // an N-chunk upload cost 2 × (1 + N) `sys_audit_log` + `sys_activity` rows,
+  // each with its own `beforeUpdate` snapshot read. Worse per row than the
+  // count suggests: `updateSession()` writes the MERGED FULL record, so every
+  // chunk's diff drags along the `parts` JSON blob that grows with each part.
+  // Deliberately NOT `sys_file`: those rows are mostly permanent business truth
+  // and keep their compliance value, so they stay audited (see #5202).
+  'sys_upload_session',          // chunked-upload progress (1 write per chunk)
   'ai_traces',                   // LLM trace telemetry
 ]);
 

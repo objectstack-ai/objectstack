@@ -91,6 +91,9 @@ export interface LifecycleObjectLike {
 export interface LifecycleLoggerLike {
   info(msg: string, meta?: unknown): void;
   warn(msg: string, meta?: unknown): void;
+  /** Optional so a test double stays a two-method object; a real kernel logger
+   * always has it. Absent ⇒ {@link LifecycleService} falls back to `warn`. */
+  error?(msg: string, meta?: unknown): void;
   debug?(msg: string, meta?: unknown): void;
 }
 
@@ -168,6 +171,67 @@ const DEFAULT_GOVERNANCE: GovernanceSnapshot = {
 /** Cap on tenants scanned for per-tenant overrides each sweep. */
 const TENANT_SCAN_LIMIT = 200;
 
+/**
+ * [#5195] A **retention floor**: the shortest window a consumer's own contract
+ * can survive on an object it does not own.
+ *
+ * ADR-0057 P4 lets an operator override any object's window through the
+ * `lifecycle` settings namespace, and until #5195 the only validation on that
+ * override was "does it parse". That is a side door around exactly the kind of
+ * invariant #5179 had just made construction-time: `DbQueueAdapter` dedups
+ * `sys_job_queue` publishes by comparing `created_at` against its idempotency
+ * window and checks — at construction — that the window is ≤ the **declared**
+ * retention. A settings override the constructor cannot see (`maxAge: '1h'`)
+ * reaps the very rows the dedup check reads, and duplicate deliveries resume
+ * with nothing in any log.
+ *
+ * The floor is registered at **runtime** (`registerRetentionFloor`), the same
+ * shape as {@link LifecycleReapGuard} and for the same reason (ADR-0057 §3.3
+ * amendment): the number is not a property of the declaration at all. The
+ * queue's floor IS `DbQueueAdapterOptions.idempotencyWindowMs` — a per-kernel
+ * construction option — so a static key on the object's `lifecycle` block could
+ * only ever be a second, drifting copy of it. Declaration says how long rows
+ * are kept; a floor says how short a *consumer* can survive them being kept.
+ */
+export interface LifecycleRetentionFloor {
+  /** Which window is floored: `retention` (`maxAge`, incl. the rotation
+   * fallback) or `ttl` (`expireAfter`). */
+  policy: 'retention' | 'ttl';
+  /** Shortest window, in ms, that keeps the registrar's contract true. */
+  minWindowMs: number;
+  /** Who depends on it — named in the rejection so an operator knows who to
+   * talk to (e.g. `'com.objectstack.service.queue'`). */
+  declaredBy: string;
+  /** What breaks below the floor, in operator terms. Required: an error line
+   * without a consequence is an error line nobody can act on. */
+  consequence: string;
+  /** The config change that makes the override legal. Also required. */
+  remedy: string;
+}
+
+/**
+ * [#5195] A window that would have been enforced below a registered floor.
+ * Always reported per sweep (machine-readable), and logged at `error` once per
+ * distinct violation — the failure it prevents is silent duplicate work, which
+ * is a durability-class degradation, not a functional one.
+ */
+export interface LifecycleFloorViolation {
+  object: string;
+  policy: 'retention' | 'ttl';
+  /** `'global'`, or `tenant:<id>` for a tenant-scoped override. */
+  scope: string;
+  /** The offending settings literal — absent when the **declaration itself**
+   * is what sits below the floor (there is no override to blame). */
+  override?: string;
+  /** The offending window in ms. */
+  offendingMs: number;
+  /** The floor that rejected it, and who registered it. */
+  floorMs: number;
+  declaredBy: string;
+  /** The window actually enforced this sweep after the violation was handled. */
+  appliedMs: number;
+}
+
 export interface LifecycleSweepEntry {
   object: string;
   class: string;
@@ -193,6 +257,13 @@ export interface LifecycleSweepReport {
   reclaimed: string[];
   /** Governance alerts raised this sweep (quota breaches, growth spikes). */
   alerts: LifecycleGovernanceAlert[];
+  /**
+   * [#5195] Windows rejected this sweep for sitting below a registered
+   * {@link LifecycleRetentionFloor}. Empty on every healthy sweep; non-empty
+   * means an override (or a declaration) is being overruled, and the entry
+   * says by whom.
+   */
+  floorViolations: LifecycleFloorViolation[];
   /**
    * [#4551] Read-only referential-integrity finding for this sweep, when the
    * engine offers the audit. Absent on an engine that does not (older engine,
@@ -262,6 +333,15 @@ export class LifecycleService {
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
   /** Per-object reap guards ({@link LifecycleReapGuard}). */
   private readonly reapGuards = new Map<string, LifecycleReapGuard>();
+  /**
+   * [#5195] Registered retention floors, keyed `object::policy::declaredBy` so
+   * a re-registration replaces rather than accumulates, while two independent
+   * consumers of one object both keep their say (the strictest wins).
+   */
+  private readonly retentionFloors = new Map<string, LifecycleRetentionFloor & { object: string }>();
+  /** Violations already logged, so a standing misconfiguration says it once
+   * (AGENTS.md degradation rule) while a CHANGED one speaks up again. */
+  private readonly reportedFloorViolations = new Set<string>();
   /**
    * [#4747] The "the engine is going away" bit, handed to the work in flight.
    *
@@ -342,6 +422,62 @@ export class LifecycleService {
   }
 
   /**
+   * [#5195] Register a {@link LifecycleRetentionFloor} for one object.
+   *
+   * From then on a settings override (global **or** tenant-scoped) that would
+   * shorten that object's window below the floor is REJECTED — the declared
+   * window stands — and the rejection is reported at `error` naming the
+   * registrar, the consequence and the fix.
+   *
+   * Rejected rather than clamped to the floor, deliberately. Clamping would
+   * enforce a third number that appears in neither the object's declaration nor
+   * the operator's settings, so nobody reading either surface could predict when
+   * rows actually disappear — and it would move whenever an unrelated package
+   * changed its floor. Rejection has exactly one fallback, the declaration,
+   * which is already the contract everywhere else in this file (an unparseable
+   * override resolves the same way: "never fail open into no bound at all").
+   * The operator's intent is not silently half-honoured; it is refused, loudly,
+   * with the two settings that would make it legal.
+   *
+   * Registering a floor is a wiring act, so a malformed one throws here rather
+   * than degrading into an unactionable log line at 3am.
+   */
+  registerRetentionFloor(object: string, floor: LifecycleRetentionFloor): void {
+    if (!object) throw new Error('[lifecycle] registerRetentionFloor requires an object name');
+    if (floor?.policy !== 'retention' && floor?.policy !== 'ttl') {
+      throw new Error(
+        `[lifecycle] retention floor for ${object} must declare policy 'retention' or 'ttl' (got ${JSON.stringify(floor?.policy)})`,
+      );
+    }
+    if (!Number.isFinite(floor.minWindowMs) || floor.minWindowMs <= 0) {
+      throw new Error(
+        `[lifecycle] retention floor for ${object} needs a positive finite minWindowMs (got ${String(floor.minWindowMs)})`,
+      );
+    }
+    if (!floor.declaredBy || !floor.consequence || !floor.remedy) {
+      throw new Error(
+        `[lifecycle] retention floor for ${object} must name declaredBy, consequence and remedy — `
+        + 'the rejection it produces is read by an operator who knows none of the three.',
+      );
+    }
+    this.retentionFloors.set(`${object}::${floor.policy}::${floor.declaredBy}`, { ...floor, object });
+  }
+
+  /** The strictest floor registered for (object, policy) — every registrar's
+   * floor has to hold, so the largest one governs. */
+  private floorFor(
+    object: string,
+    policy: 'retention' | 'ttl',
+  ): (LifecycleRetentionFloor & { object: string }) | undefined {
+    let strictest: (LifecycleRetentionFloor & { object: string }) | undefined;
+    for (const floor of this.retentionFloors.values()) {
+      if (floor.object !== object || floor.policy !== policy) continue;
+      if (!strictest || floor.minWindowMs > strictest.minWindowMs) strictest = floor;
+    }
+    return strictest;
+  }
+
+  /**
    * Apply every declared lifecycle policy once. Safe to call directly (the
    * dogfood growth gate and `db:clean`-style tooling do); re-entrant calls
    * while a sweep is running resolve to an empty report.
@@ -354,6 +490,7 @@ export class LifecycleService {
       errors: [],
       reclaimed: [],
       alerts: [],
+      floorViolations: [],
     };
     if (this.sweeping || !this.enabled) return report;
     // [#4747] Torn down ⇒ there is no engine to sweep through, whatever the
@@ -437,7 +574,10 @@ export class LifecycleService {
         this.opts.logger.info(
           `[lifecycle] sweep: ${report.swept.length} policy(ies) applied, ~${total} rows reaped, ` +
             `${report.reclaimed.length} datasource(s) reclaimed, ${report.errors.length} error(s), ` +
-            `${report.alerts.length} alert(s)`,
+            `${report.alerts.length} alert(s)` +
+            (report.floorViolations.length > 0
+              ? `, ${report.floorViolations.length} window(s) overruled by a registered retention floor`
+              : ''),
         );
       }
       return report;
@@ -617,7 +757,14 @@ export class LifecycleService {
     const ov = this.governance.overrides[object] ?? {};
 
     if (lc.ttl) {
-      const windowMs = this.effectiveWindowMs(ov.expireAfter, parseLifecycleDuration(lc.ttl.expireAfter), object);
+      const windowMs = this.effectiveWindowMs(
+        ov.expireAfter,
+        parseLifecycleDuration(lc.ttl.expireAfter),
+        object,
+        'ttl',
+        'global',
+        report,
+      );
       outcomes.push(await this.reap(engine, object, lc, 'ttl', lc.ttl.field, windowMs, report));
     }
 
@@ -649,7 +796,14 @@ export class LifecycleService {
       // granularity, an explicit retention.maxAge trims to the day inside the
       // live shards — and immediately bounds a legacy table the Rotator just
       // adopted whole into its first shard.
-      const windowMs = this.effectiveWindowMs(ov.maxAge, parseLifecycleDuration(lc.retention.maxAge), object);
+      const windowMs = this.effectiveWindowMs(
+        ov.maxAge,
+        parseLifecycleDuration(lc.retention.maxAge),
+        object,
+        'retention',
+        'global',
+        report,
+      );
       outcomes.push(
         await this.reap(engine, object, lc, 'retention', 'created_at', windowMs, report, lc.retention.onlyWhen),
       );
@@ -657,24 +811,126 @@ export class LifecycleService {
       // Rotation declared but the driver can't shard physically: the shard
       // window IS the bound — enforce the same window with an age-based reap
       // so the declaration is never inert.
-      const windowMs = this.effectiveWindowMs(ov.maxAge, lc.storage.shards * SHARD_UNIT_MS[lc.storage.unit], object);
+      const windowMs = this.effectiveWindowMs(
+        ov.maxAge,
+        lc.storage.shards * SHARD_UNIT_MS[lc.storage.unit],
+        object,
+        'retention',
+        'global',
+        report,
+      );
       outcomes.push(await this.reap(engine, object, lc, 'rotation-fallback', 'created_at', windowMs, report));
     }
 
     return outcomes;
   }
 
-  /** A governance override window beats the declared one — unless it fails to
+  /**
+   * A governance override window beats the declared one — unless it fails to
    * parse, in which case the declared window stands (never fail open into
-   * "no bound at all"). */
-  private effectiveWindowMs(override: string | undefined, declaredMs: number, object: string): number {
-    if (!override) return declaredMs;
+   * "no bound at all") — or [#5195] unless it sits below a registered
+   * {@link LifecycleRetentionFloor}, in which case it is rejected the same way
+   * and for the same reason: an override that breaks a consumer's contract is
+   * not a shorter policy, it is an invalid one.
+   *
+   * `fallbackMs` is what an invalid override falls back to: the declared window
+   * at global scope, and the already-resolved global window for a tenant-scoped
+   * override (which has itself passed this check).
+   */
+  private effectiveWindowMs(
+    override: string | undefined,
+    fallbackMs: number,
+    object: string,
+    policy: 'retention' | 'ttl',
+    scope: string,
+    report: LifecycleSweepReport,
+  ): number {
+    const floor = this.floorFor(object, policy);
+
+    if (!override) {
+      // No override: the DECLARATION is what runs. A declaration below the
+      // floor is a different defect (the object and its consumer disagree at
+      // authoring time, which is where #5179's constructor guard catches the
+      // queue case) — reported here too, because a floor registered against an
+      // object nobody re-checked would otherwise be silently unmet. The sweep
+      // still runs it: refusing to reap would trade a broken consumer contract
+      // for an unbounded table, which is the defect #5179 just closed.
+      if (floor && fallbackMs < floor.minWindowMs) {
+        this.reportFloorViolation(report, {
+          object,
+          policy,
+          scope,
+          offendingMs: fallbackMs,
+          floorMs: floor.minWindowMs,
+          declaredBy: floor.declaredBy,
+          appliedMs: fallbackMs,
+        }, floor, 'declared');
+      }
+      return fallbackMs;
+    }
+
+    let overrideMs: number;
     try {
-      return parseLifecycleDuration(override);
+      overrideMs = parseLifecycleDuration(override);
     } catch {
       this.opts.logger.warn(`[lifecycle] invalid override window '${override}' for ${object}; keeping the declared window`);
-      return declaredMs;
+      return fallbackMs;
     }
+
+    if (floor && overrideMs < floor.minWindowMs) {
+      this.reportFloorViolation(report, {
+        object,
+        policy,
+        scope,
+        override,
+        offendingMs: overrideMs,
+        floorMs: floor.minWindowMs,
+        declaredBy: floor.declaredBy,
+        appliedMs: fallbackMs,
+      }, floor, 'override');
+      return fallbackMs;
+    }
+
+    return overrideMs;
+  }
+
+  /**
+   * Record a floor violation on the sweep report (always) and log it at
+   * `error` (once per distinct violation).
+   *
+   * `error`, not `warn`, by the AGENTS.md test: after this degradation the
+   * system looks entirely normal — the sweep reports success, the table shrinks
+   * on schedule — while the contract that override silently broke shows up
+   * later as duplicate work nobody can trace back to a settings edit. The line
+   * owes a consequence and a fix, and both come from the registrar rather than
+   * from guesswork here.
+   */
+  private reportFloorViolation(
+    report: LifecycleSweepReport,
+    violation: LifecycleFloorViolation,
+    floor: LifecycleRetentionFloor,
+    kind: 'override' | 'declared',
+  ): void {
+    report.floorViolations.push(violation);
+    const dedupKey = `${violation.object}|${violation.policy}|${violation.scope}|${kind}|${violation.offendingMs}|${violation.floorMs}`;
+    if (this.reportedFloorViolations.has(dedupKey)) return;
+    this.reportedFloorViolations.add(dedupKey);
+
+    const where = violation.scope === 'global' ? 'global scope' : violation.scope;
+    const head =
+      kind === 'override'
+        ? `[lifecycle] REJECTED the ${violation.policy} override '${violation.override}' (${violation.offendingMs}ms) on `
+          + `${violation.object} at ${where}: it is below the ${violation.floorMs}ms floor registered by `
+          + `'${floor.declaredBy}'. Enforcing the declared ${violation.appliedMs}ms window instead.`
+        : `[lifecycle] ${violation.object}'s declared ${violation.policy} window (${violation.offendingMs}ms) is below `
+          + `the ${violation.floorMs}ms floor registered by '${floor.declaredBy}'; it is still being enforced as declared.`;
+    this.logError(`${head} Consequence: ${floor.consequence} Fix: ${floor.remedy}`);
+  }
+
+  /** `error` where the logger has one; a duck-typed test double may not. */
+  private logError(msg: string): void {
+    if (typeof this.opts.logger.error === 'function') this.opts.logger.error(msg);
+    else this.opts.logger.warn(msg);
   }
 
   /**
@@ -785,7 +1041,16 @@ export class LifecycleService {
       // Tenant-level windows (P4): each overriding tenant gets its own
       // cutoff on its own rows…
       for (const t of tenantWindows) {
-        const tMs = this.effectiveWindowMs(t[overrideKey], windowMs, `${object} (tenant ${t.tenantId})`);
+        // [#5195] Tenant-scoped overrides go through the same floor: a
+        // per-tenant `maxAge: '1h'` is the identical side door, one scope down.
+        const tMs = this.effectiveWindowMs(
+          t[overrideKey],
+          windowMs,
+          object,
+          policy === 'ttl' ? 'ttl' : 'retention',
+          `tenant:${t.tenantId}`,
+          report,
+        );
         const tCutoff = new Date(this.now() - tMs).toISOString();
         accumulate(await reapWhere({ [field]: { $lt: tCutoff }, organization_id: t.tenantId, ...scope }));
       }

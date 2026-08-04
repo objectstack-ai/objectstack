@@ -17,6 +17,7 @@ import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { DbQueueAdapter } from '@objectstack/service-queue';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, EMAIL_SEND_QUEUE } from './email-service.js';
+import { encodeAttachmentsForRow, encodeHeadersForRow } from './sys-email-payload.js';
 
 // ── harness ────────────────────────────────────────────────────────────────
 
@@ -172,8 +173,32 @@ async function boot(opts: BootOpts = {}) {
     created_at: createdAt,
   });
 
+  /**
+   * The same crash, for a message that carried custom headers and a small
+   * attachment (#5177) — the columns are written exactly as `send()` writes
+   * them, via the same encoders.
+   */
+  const strandWithParts = (id: string, createdAt: string) => {
+    const encoded = encodeAttachmentsForRow([
+      { filename: '对账单.txt', content: '金额:¥1.00', cid: 'stmt@inline' },
+    ]);
+    if (encoded.kind !== 'inline') throw new Error(`fixture is not storable: ${encoded.kind}`);
+    engine.seed('sys_email', {
+      id,
+      from_address: 'no-reply@example.test',
+      to_addresses: 'user@example.test',
+      subject: `Stranded ${id}`,
+      body_text: 'hello',
+      headers_json: encodeHeadersForRow({ 'X-Campaign': 'spring' }),
+      attachments_json: encoded.json,
+      status: 'queued',
+      attempt_count: 0,
+      created_at: createdAt,
+    });
+  };
+
   return {
-    plugin, ctx, engine, adapter, clock, transport, strand,
+    plugin, ctx, engine, adapter, clock, transport, strand, strandWithParts,
     service: () => services.email as EmailService,
     sysEmail: () => engine.rows('sys_email'),
     jobs: () => engine.rows('sys_job_queue'),
@@ -221,6 +246,22 @@ describe('boot sweep — inline delivery', () => {
     expect(errorLines(h.ctx).join('\n')).toMatch(/never reached a recipient/);
   });
 
+  it('re-delivers a stranded row WITH its headers and attachment, inline too (#5177)', async () => {
+    // Inline mode reaches the transport straight from the sweep, so this is
+    // the shortest path from a persisted row to the wire — and the one that
+    // proves the columns, not the queue, are what carries the parts.
+    const h = await boot();
+    h.strandWithParts('row-rich-inline', ago(min(30)));
+
+    const swept = await h.ready();
+
+    expect(swept).toMatchObject({ scanned: 1, sent: 1 });
+    expect(vi.mocked(h.transport.send).mock.calls[0][0]).toMatchObject({
+      headers: { 'X-Campaign': 'spring' },
+      attachments: [{ filename: '对账单.txt', content: '金额:¥1.00', cid: 'stmt@inline' }],
+    });
+  });
+
   it('does not touch a row that was inserted seconds ago', async () => {
     // Another instance is delivering it right now; a boot must not race it.
     const h = await boot();
@@ -257,6 +298,24 @@ describe('boot sweep — durable queue delivery', () => {
     expect(h.sysEmail()).toHaveLength(1);              // still ONE row
     expect(h.sysEmail()[0]).toMatchObject({ id: 'row-crashed', status: 'sent', attempt_count: 1 });
     expect(h.jobs()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it('re-delivers a stranded row WITH its headers and attachment (#5177)', async () => {
+    // A crash must not silently downgrade the message. Before #5177 the row
+    // had nowhere to keep either part, so a swept row was necessarily sent
+    // stripped — the loss looked exactly like a successful delivery.
+    const h = await boot({ queue: true, plugin: { queueDelivery: true } });
+    h.strandWithParts('row-rich', ago(min(30)));
+
+    await h.ready();
+    await h.adapter.pollOnce();
+
+    expect(h.sysEmail()[0]).toMatchObject({ id: 'row-rich', status: 'sent' });
+    expect(h.transport.send).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(h.transport.send).mock.calls[0][0]).toMatchObject({
+      headers: { 'X-Campaign': 'spring' },
+      attachments: [{ filename: '对账单.txt', content: '金额:¥1.00', cid: 'stmt@inline' }],
+    });
   });
 
   it('collapses onto an existing pending job instead of racing a second worker', async () => {

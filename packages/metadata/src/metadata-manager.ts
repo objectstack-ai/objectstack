@@ -185,9 +185,12 @@ export class MetadataManager implements IMetadataService {
   // become cluster-wide:
   //   • Local notifyWatchers() publishes on `metadata.changed` so peers
   //     can invalidate their caches.
-  //   • Subscribed remote events are replayed into the local watch hub
-  //     so existing consumers (ObjectQLPlugin, Studio HMR, …) see
-  //     uniform behavior regardless of which node initiated the change.
+  //   • A subscribed remote event first invalidates THIS node's caches
+  //     (registry entry + listCache, via `invalidateForForeignWrite` —
+  //     #5109) and is then replayed into the local watch hub, so existing
+  //     consumers (ObjectQLPlugin, Studio HMR, …) see uniform behavior
+  //     regardless of which node initiated the change — including when
+  //     they answer the event by re-reading through `list()`.
   // `originNode` on the payload prevents loopback; `partitionKey` keeps
   // per-object ordering on partitioned drivers.
   private clusterPubSub?: IPubSub;
@@ -207,9 +210,9 @@ export class MetadataManager implements IMetadataService {
   // ── #5089 (#5040 E2): declared-endpoint index ────────────────────────
   // Backs `matchEndpoint`. Lazily built from `api` items on the first call
   // and invalidated by every path that can change them — see
-  // `invalidateListCache` (local writes, repo events, HMR/artifact ingest,
-  // which registers with `notify:false`) and the `subscribe('api', …)`
-  // registration below (cluster peer replay, which reaches watchers only).
+  // `invalidateListCache` (local writes, repo events, HMR/artifact ingest
+  // which registers with `notify:false`, and — since #5109 — cluster peer
+  // replay) and the `subscribe('api', …)` registration below.
   private static readonly ENDPOINT_METADATA_TYPE = 'api';
   private readonly endpointMatcher: EndpointMatcher;
 
@@ -218,17 +221,18 @@ export class MetadataManager implements IMetadataService {
     this.logger = createLogger({ level: 'info', format: 'pretty' });
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
-    // covering disjoint event sets — both are needed, neither is redundant:
-    //   1. `invalidateListCache('api')` — every LOCAL mutation of the stored
-    //      set, including the `{ notify: false }` writes the artifact ingest
-    //      and the HMR reload use, which by construction never reach a
-    //      watcher. It is the same invariant the list cache carries: if the
-    //      cached list of a type is stale, so is the index built from it.
-    //   2. `subscribe('api', …)` — a CLUSTER peer's write, which
-    //      `attachClusterPubSub` replays through `notifyWatchersLocal` only
-    //      and therefore does not pass through (1). (That the peer replay
-    //      leaves the manager's OWN caches stale is #5109; the index does not
-    //      inherit the bug because it listens on the watcher too.)
+    // covering overlapping but non-identical event sets — both are kept:
+    //   1. `invalidateListCache('api')` — every mutation of the stored set
+    //      this manager learns about, including the `{ notify: false }`
+    //      writes the artifact ingest and the HMR reload use, which by
+    //      construction never reach a watcher. It is the same invariant the
+    //      list cache carries: if the cached list of a type is stale, so is
+    //      the index built from it. Since #5109 a CLUSTER peer's write also
+    //      passes through here, via `invalidateForForeignWrite`.
+    //   2. `subscribe('api', …)` — the watcher seam, which additionally
+    //      covers events raised by subclasses / test doubles that call
+    //      `notifyWatchers` without a cache mutation of their own.
+    //      Double invalidation is idempotent, so the overlap is free.
     this.endpointMatcher = new EndpointMatcher({
       listApiItems: () => this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE),
       logger: this.logger,
@@ -2027,22 +2031,57 @@ export class MetadataManager implements IMetadataService {
     }
   }
 
+  /**
+   * Drop every local cache of `type` (and of `name` within it) that a change
+   * we did not perform ourselves has just invalidated, so the next read falls
+   * through to the source of truth.
+   *
+   * The two callers are the manager's two *foreign-write* seams — the
+   * repository watch loop ({@link applyRepoEvent}) and the cluster peer replay
+   * in {@link attachClusterPubSub}. Both learn about a write that landed
+   * somewhere else (the repo head; another node's `sys_metadata`) and hold
+   * caches that the write silently aged out. Local writes do not come through
+   * here: `register()` / `unregister()` / `registerInMemory()` update the
+   * registry to the value they just wrote and call `invalidateListCache()`
+   * themselves.
+   *
+   * **Delete, do not pre-fill.** Even when the event carries a body we drop the
+   * registry entry rather than writing the body into it: the body reaching us
+   * is a snapshot of *someone else's* write, already possibly superseded, and
+   * pre-filling would race with the true head and require us to re-canonicalise
+   * a definition we did not load. Lazy invalidation is the safer default —
+   * `get()` then falls through to the loaders / repository, which is where the
+   * truth is. (This paragraph is the rationale `applyRepoEvent` carried since
+   * ADR-0008 PR-6; #5109 extended the same choice to the cluster path.)
+   *
+   * `name` is optional because `MetadataWatchEvent.name` is: a nameless event
+   * cannot address a registry entry, so it invalidates the list cache only.
+   * Dropping the whole type store instead would evict `registerInMemory()`
+   * artefacts (code-owned datasources, ADR-0015 Addendum) that no loader can
+   * restore — an unrecoverable loss in exchange for a guess.
+   */
+  private invalidateForForeignWrite(type: string, name?: string): void {
+    if (name) {
+      const typeStore = this.registry.get(type);
+      if (typeStore) {
+        typeStore.delete(name);
+        if (typeStore.size === 0) this.registry.delete(type);
+      }
+    }
+    this.invalidateListCache(type);
+  }
+
   /** Translate a repo event to the legacy MetadataWatchEvent + invalidate caches. */
   private applyRepoEvent(evt: MetadataEvent): void {
     const ref: MetaRef = evt.ref;
     const type = ref.type;
     const name = ref.name;
 
-    // Invalidate in-memory registry so manager.get() falls through to
-    // loaders / repository on next read. We do NOT pre-fill the registry
-    // here — that would race with the repo head and require us to
-    // re-canonicalise. Lazy invalidation is the safer default.
-    const typeStore = this.registry.get(type);
-    if (typeStore) {
-      typeStore.delete(name);
-      if (typeStore.size === 0) this.registry.delete(type);
-    }
-    this.listCache.delete(type);
+    // Invalidate before announcing, so a watcher that re-reads on the event
+    // observes the write rather than the pre-write cache. See
+    // {@link invalidateForForeignWrite} for why the registry entry is deleted
+    // rather than pre-filled.
+    this.invalidateForForeignWrite(type, name);
 
     const legacyType: 'added' | 'changed' | 'deleted' =
       evt.op === 'create' ? 'added'
@@ -2137,6 +2176,40 @@ export class MetadataManager implements IMetadataService {
         // Loopback guard — never replay events we just emitted.
         if (p?.originNode && p.originNode === this.clusterNodeId) return;
         if (!p?.type || !p.event) return;
+
+        // [#5109] Invalidate FIRST, and SYNCHRONOUSLY on receipt — this is
+        // what the channel is for ("consumed by peers to invalidate their
+        // local caches", see ClusterMetadataChangedPayload). Until this
+        // landed, a peer's write only woke this node's watchers: the registry
+        // entry and the `listCache` were left untouched, so every `list(type)`
+        // kept serving the pre-write set for up to LIST_CACHE_TTL_MS (30s) —
+        // and a watcher that re-read via `list()` in response to the wake-up
+        // got the stale set back, an invalidation notice carrying invalidated
+        // data.
+        //
+        // Two deliberate choices, both pinned by tests in
+        // `metadata-manager-cluster.test.ts`:
+        //
+        //   • BEFORE the notify, matching every other write path in this file
+        //     (`register` / `unregister` / `applyRepoEvent` all invalidate,
+        //     then announce): a watcher must never be able to observe the
+        //     event and the pre-event cache at the same time.
+        //   • OUTSIDE the `setImmediate`, unlike the notify. The deferral
+        //     exists so a slow *watcher callback* — arbitrary consumer code —
+        //     cannot back-pressure the pubsub dispatch loop. Invalidation is
+        //     two `Map.delete`s and runs no consumer code, so it has nothing
+        //     to defer for, while deferring it would leave a window between
+        //     receipt and the next tick in which reads still answer stale.
+        //     Any `await` in a request handler is enough to lose that race.
+        try {
+          this.invalidateForForeignWrite(p.type, p.event.name);
+        } catch (err) {
+          this.logger.error('Cluster remote invalidation failed', undefined, {
+            type: p.type,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
         // Defer to setImmediate so a slow local handler can't back-pressure
         // the pubsub dispatch loop on memory drivers.
         setImmediate(() => {

@@ -90,8 +90,14 @@ Two consequences worth knowing:
   setting would start accepting duplicates the moment the row was swept. The
   `db` adapter throws at construction instead of degrading quietly.
 - **The window is overridable per environment** through the `lifecycle`
-  settings namespace (`maxAge` per object), like every other ADR-0057 policy.
-  Keep it ≥ your idempotency window.
+  settings namespace (`maxAge` per object), like every other ADR-0057 policy —
+  but **not below the idempotency window**. On startup this plugin registers a
+  *retention floor* with the `LifecycleService` carrying the window the adapter
+  was actually constructed with; a global or tenant-scoped override under it is
+  **rejected** at sweep time (the declared window keeps running) and logged at
+  `error` naming the consequence and the two settings that would make it legal.
+  So the ordering is enforced from both sides: the constructor rejects a
+  too-long `idempotencyWindowMs`, the floor rejects a too-short `maxAge`.
 
 ## Service API
 
