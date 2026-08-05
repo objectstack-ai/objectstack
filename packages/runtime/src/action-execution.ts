@@ -19,6 +19,7 @@ import { validateActionParams, type ResolvedActionParam } from '@objectstack/spe
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
+import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -872,17 +873,23 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     if (record && (record as any).id == null && recordId) (record as any).id = recordId;
 
-    const user = ec?.userId
-        ? {
-            id: ec.userId,
-            name: ec.userName ?? ec.userDisplayName ?? ec.userId,
-            // `organizationId` is the blessed name for the caller's active
-            // org (matches columns + `current_user.organizationId`); the
-            // action body executes TRUSTED (RLS-bypassing), so a body that
-            // wants to scope by org must read it here (#3280).
-            ...(ec.tenantId != null ? { organizationId: String(ec.tenantId) } : {}),
-          }
-        : { id: 'system', name: 'system' };
+    // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
+    // the same one the REST `/actions` route and the AI routes use. What stood
+    // here was `name: ec.userName ?? ec.userDisplayName ?? ec.userId` — a `??`
+    // chain over two fields `ExecutionContextSchema` never declared and nothing
+    // in the repo ever assigned, so its only reachable arm was the id (#4984's
+    // dead-limb family). The name now comes from `sys_user.name`, resolved once
+    // per request. `organizationId` is the blessed name for the caller's active
+    // org (matches columns + `current_user.organizationId`); the action body
+    // executes TRUSTED (RLS-bypassing), so a body that wants to scope by org
+    // must read it here (#3280).
+    const user = actorUserFromExecutionContext(
+        ec,
+        await resolveActorDisplayName(
+            async () => driver ?? await deps.getObjectQL(requestContext, envId),
+            ec,
+        ),
+    );
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
