@@ -1432,19 +1432,40 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     executes: true,
                 });
             } else {
-                // Still `debug`, and that is now UNDER-STATED — tracked by
-                // #5400, deliberately not changed here (#5399 is comment-only).
-                // The reason this was debug has expired: it read "no stack can
-                // declare an endpoint yet", which stopped being true at the
-                // #5040 E7 publish flip. Declarations exist now, so on an
-                // adapter without this seam they are silently unservable and
-                // the operator's only signal is a line that the default `info`
-                // level does not even print. This is the "absence must be loud"
-                // case (AGENTS.md, Route & surface ownership §3); #5400 raises
-                // it to `warn` carrying the consequence and the remedy.
-                ctx.logger.debug(
-                    '[dispatcher] http.server exposes no `setFallbackHandler`; declarative endpoints '
-                    + 'would be unreachable on this transport.',
+                // ── Absence must be loud (AGENTS.md, Route & surface ownership
+                // §3) ────────────────────────────────────────────────────────
+                // `warn` since #5400. This was `debug`, on a reason that has
+                // since expired: it read "no stack can declare an endpoint yet",
+                // true only while a non-empty `apis:` was rejected WHOLESALE at
+                // publish. The #5040 E7 flip ended that — declarations publish
+                // now and stacks ship them — so on an adapter without this seam
+                // they are legitimately, permanently unservable. At `debug` that
+                // was not a signal at all: the default `level: 'info'` does not
+                // print it (`isEnabled`, `packages/core/src/logger.ts`), leaving
+                // a bare 404 as the only evidence — precisely the "leave a bare
+                // 404 to be diagnosed" outcome the rule names.
+                //
+                // `warn`, NOT `error`, deliberately. AGENTS.md's "Degradation log
+                // levels" question — does the system look normal from outside
+                // while something it claims is PERSISTED did not land? — answers
+                // no: nothing here claims durability. This is a functional
+                // degradation (a capability is not mounted, and the next caller
+                // of it finds out), the same shape as the reference text
+                // "scheduled flows will not run until a job service is
+                // registered". `dispatcher-plugin.fallback-absence-warn.test.ts`
+                // welds the level so a quiet slide back to `debug` fails.
+                //
+                // The line owes both halves the rule demands, and carries them
+                // in the first (and only) thing it prints:
+                //   consequence — every metadata-declared `apis:` endpoint is
+                //     unreachable on this transport, answering a bare 404;
+                //   remedy — compose an adapter that implements the seam.
+                ctx.logger.warn(
+                    '[dispatcher] http.server exposes no `setFallbackHandler`: every metadata-declared '
+                    + '`apis:` endpoint is UNREACHABLE on this transport and will answer a bare 404. '
+                    + 'Fix: compose an HTTP adapter that implements `setFallbackHandler` '
+                    + '(e.g. `@objectstack/plugin-hono-server`).',
+                    { mount: appEndpointMountPrefix(prefix), declarativeEndpoints: 'unreachable' },
                 );
             }
 
