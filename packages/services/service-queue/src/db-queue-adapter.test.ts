@@ -1,6 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  ENGINE_DELETE_DISPATCH_CASES,
+  ENGINE_DELETE_REJECT_MESSAGE,
+  assertEngineDeleteDispatch,
+} from '@objectstack/objectql';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
 /**
@@ -54,15 +59,26 @@ function makeFakeEngine() {
       return r;
     },
     async delete(table: string, opts: any) {
-      // Real-engine contract: the target id lives at `where.id` — there is no
-      // top-level `id` option. The mock used to accept `opts.id`, a signature
-      // the real engine rejects, which is exactly how the adapter's broken
-      // `{ id }` bags stayed green (#4371 option-2 survey).
-      const id = opts?.where?.id;
-      if (id == null) throw new Error('Delete requires an ID or options.multi=true');
+      // [#4550/#5198] Opened with ObjectQL.delete's OWN dispatch predicate.
+      // What stood here was a hand-mirrored `if (opts?.where?.id == null)` —
+      // written for #4371 to stop the mock accepting the top-level `{ id }`
+      // bags the real engine rejects, and correct about that. But a mirror is a
+      // second copy of the contract, and it was looser than the producer in
+      // both directions: `where: { id: { $in: [...] } }` only LOOKS like an id
+      // (a multi-row predicate the engine refuses without `multi`) and the
+      // mirror waved it through, while `{ multi: true }` with no `where` is a
+      // shape the engine ACCEPTS and the mirror threw on. A double that imports
+      // the decision cannot drift from it; the same predicate already opens the
+      // sibling `job-queue-retention.test.ts` fake in this package.
+      const dispatch = assertEngineDeleteDispatch(opts);
       const t = tables.get(table) ?? [];
-      tables.set(table, t.filter((r) => r.id !== id));
-      return { id };
+      if (dispatch.kind === 'multi') {
+        const keep = t.filter((r) => !matches(r, opts?.where ?? {}));
+        tables.set(table, keep);
+        return t.length - keep.length; // drivers report a deleted count
+      }
+      tables.set(table, t.filter((r) => r.id !== dispatch.id));
+      return { id: dispatch.id };
     },
   };
 }
@@ -230,5 +246,75 @@ describe('DbQueueAdapter', () => {
     expect(await adapter.getQueueSize('mix')).toBe(3);
     await adapter.pollOnce();
     expect(await adapter.getQueueSize('mix')).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The double itself, measured against the producer (#4550 / #5198)
+// ---------------------------------------------------------------------------
+//
+// Every assertion above is only worth what this fake's fidelity is worth: a
+// double that accepts a call the real engine refuses turns a green suite into
+// no suite at all, on exactly the path the double was introduced for (#4434).
+// So the fake is driven against ObjectQL.delete's OWN published case-set here,
+// rather than trusted because its `delete` now names the right function.
+//
+// This is what the deleted `scripts/engine-double-contract.baseline.json` DEBT
+// entry bought, and why the entry could go: the gate proves the predicate is
+// CALLED, and these two tests prove the call is answered — the by-id and multi
+// branches route by verdict, and every shape the engine rejects the fake
+// rejects, with the producer's own message.
+
+describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
+  it.each(ENGINE_DELETE_DISPATCH_CASES.map((c) => [c.what, c] as const))(
+    'agrees with the engine on %s',
+    async (_what, c) => {
+      const engine = makeFakeEngine();
+      engine.tables.set('sys_job_queue', [{ id: 'rec_1', rule_id: 'r1' }]);
+      const call = engine.delete('sys_job_queue', c.options as any);
+      if (c.expect === 'reject') {
+        // Not merely "throws": the same message a real server answers with, so
+        // the fake's rejection surface cannot drift from the producer's.
+        await expect(call).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+        // …and a refused call must not have deleted anything on its way out.
+        expect(engine.tables.get('sys_job_queue')).toHaveLength(1);
+        return;
+      }
+      await expect(call).resolves.toBeDefined();
+    },
+  );
+
+  it('routes by the verdict, not by guessing at `where`', async () => {
+    const engine = makeFakeEngine();
+    const rows = () => engine.tables.get('sys_job_queue') ?? [];
+
+    // by-id: the scalar id is the ONLY row removed, siblings survive.
+    engine.tables.set('sys_job_queue', [{ id: 'a' }, { id: 'b' }]);
+    expect(await engine.delete('sys_job_queue', { where: { id: 'a' } })).toEqual({ id: 'a' });
+    expect(rows().map((r: any) => r.id)).toEqual(['b']);
+
+    // multi: the predicate matches many, and the fake reports the count a
+    // driver's `deleteMany` reports.
+    engine.tables.set('sys_job_queue', [
+      { id: 'a', status: 'completed' },
+      { id: 'b', status: 'completed' },
+      { id: 'c', status: 'pending' },
+    ]);
+    expect(
+      await engine.delete('sys_job_queue', { where: { status: 'completed' }, multi: true }),
+    ).toBe(2);
+    expect(rows().map((r: any) => r.id)).toEqual(['c']);
+
+    // `where: { id: { $in: […] } }` only LOOKS like an id: it is a multi-row
+    // predicate, so without `multi` the engine rejects it — the exact case a
+    // hand-mirrored `if (opts?.where?.id == null)` waves through, and the reason
+    // the mirror had to go rather than be corrected in place. (This fake's
+    // `matches` is equality-only by design — no fixture here sends an operator
+    // predicate — so what is pinned is the dispatch verdict, not `$in` matching.)
+    engine.tables.set('sys_job_queue', [{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+    await expect(
+      engine.delete('sys_job_queue', { where: { id: { $in: ['a', 'b'] } } }),
+    ).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+    expect(rows()).toHaveLength(3);
   });
 });

@@ -242,13 +242,6 @@
       "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
     },
     {
-      "file": "packages/services/service-queue/src/db-queue-adapter.test.ts",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove — but @objectstack/service-queue does not depend on @objectstack/objectql, so replacing the copy with the producer's predicate needs a devDependency change.",
-      "closes": "add @objectstack/objectql to devDependencies, then replace the mirrored `if` with assertEngineDeleteDispatch(options)"
-    },
-    {
       "file": "packages/spec/src/contracts/data-engine.test.ts",
       "unguarded": 1,
       "kind": "EXEMPT",
