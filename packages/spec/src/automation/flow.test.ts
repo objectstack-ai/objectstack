@@ -11,6 +11,16 @@ import {
   type FlowNode,
   type FlowEdge,
 } from './flow.zod';
+// #4924 — the per-node-type config contracts the executors parse at run time.
+// `FlowNodeSchema.config` is deliberately open (`z.record(z.unknown())`, ADR-0018:
+// `node.type` is a plugin namespace and a plugin executor brings its own
+// `configSchema`), so `FlowSchema.parse` green says NOTHING about whether a
+// builtin's config could run. These are the contracts that do.
+import {
+  GetRecordConfigSchema,
+  UpdateRecordConfigSchema,
+  DeleteRecordConfigSchema,
+} from './builtin-node-config.zod';
 
 describe('FlowNodeAction', () => {
   it('should accept all node action types', () => {
@@ -337,9 +347,17 @@ describe('FlowSchema', () => {
             id: 'get_opportunity',
             type: 'get_record',
             label: 'Get Opportunity',
+            // #4924 — was `{ object, recordId }`, and GetRecordConfigSchema declares
+            // NEITHER: `object` is the retired spelling the ADR-0087 D2 conversion
+            // `flow-node-crud-object-alias` rewrites at load, and `recordId` is not a
+            // key any CRUD executor has ever read. CRUD nodes address rows through
+            // `filter` only, so the id goes in as a filter VALUE. `outputVariable` is
+            // what actually binds the row to a variable — without it the downstream
+            // `opportunity.*` predicate below referenced nothing.
             config: {
-              object: 'opportunity',
-              recordId: '{opportunityId}',
+              objectName: 'opportunity',
+              filter: { id: '{opportunityId}' },
+              outputVariable: 'opportunity',
             },
             position: { x: 100, y: 150 },
           },
@@ -347,17 +365,25 @@ describe('FlowSchema', () => {
             id: 'check_amount',
             type: 'decision',
             label: 'Amount > $100K?',
-            config: {
-              condition: '{opportunity.amount} > 100000',
-            },
+            // #4924 — the `config.condition` that used to live here was inert:
+            // the key is the trigger gate on a `start` node and is read on no other
+            // node type, which is what `lint-flow-patterns`' `flow-inert-node-condition`
+            // advisory reports (#4414). A `decision` branches on its OUT-EDGES
+            // (`condition` per branch + `isDefault: true` on the fallback) or on
+            // `config.conditions[]` — one mechanism, never both. The out-edges below
+            // already carried the predicate, so the third copy is simply gone.
             position: { x: 100, y: 250 },
           },
           {
             id: 'auto_approve',
             type: 'update_record',
             label: 'Auto Approve',
+            // #4924 — `recordId` again (unread; see `get_opportunity`). `objectName`
+            // is execute-time REQUIRED — without it the executor refuses the node
+            // outright — so this fixture could not have run as written either.
             config: {
-              recordId: '{opportunityId}',
+              objectName: 'opportunity',
+              filter: { id: '{opportunityId}' },
               fields: {
                 status: 'approved',
                 approved_by: 'system',
@@ -390,17 +416,25 @@ describe('FlowSchema', () => {
           { id: 'e1', source: 'start', target: 'get_opportunity' },
           { id: 'e2', source: 'get_opportunity', target: 'check_amount' },
           {
+            // #4924 — the fallback branch. `isDefault: true` is traversed only when
+            // no sibling condition matched; carrying a `condition` as well is
+            // self-contradictory (BPMN forbids a conditional default flow) and the
+            // flow linter gates it as `flow-default-edge-with-condition` (#4414).
             id: 'e3',
             source: 'check_amount',
             target: 'auto_approve',
-            condition: '{opportunity.amount} <= 100000',
+            isDefault: true,
             label: 'No',
           },
           {
+            // #4924 — the one guarded branch, in the dialect the slot declares:
+            // edge conditions are BARE CEL (ADR-0032). `{…}` template braces parse as
+            // a CEL map literal, so `registerFlow`'s expression pass rejects them
+            // outright — the #1491 trap this fixture used to teach.
             id: 'e4',
             source: 'check_amount',
             target: 'send_approval_request',
-            condition: '{opportunity.amount} > 100000',
+            condition: 'opportunity.amount > 100000',
             label: 'Yes',
           },
           { id: 'e5', source: 'auto_approve', target: 'end' },
@@ -410,6 +444,24 @@ describe('FlowSchema', () => {
       };
 
       expect(() => FlowSchema.parse(approvalFlow)).not.toThrow();
+
+      // #4924 — and that green tells us nothing about the node configs, which is
+      // exactly how this fixture taught three shapes that cannot run. Check each
+      // corrected node against the contract its executor parses.
+      const configOf = (id: string) => approvalFlow.nodes.find(n => n.id === id)?.config;
+      expect(GetRecordConfigSchema.safeParse(configOf('get_opportunity')).success).toBe(true);
+      expect(UpdateRecordConfigSchema.safeParse(configOf('auto_approve')).success).toBe(true);
+
+      // The decision declares no config at all: its branching lives on the
+      // out-edges — exactly one guarded branch and exactly one `isDefault`
+      // fallback, and the fallback carries no condition (#4414).
+      expect(configOf('check_amount')).toBeUndefined();
+      const branches = approvalFlow.edges.filter(e => e.source === 'check_amount');
+      expect(branches.filter(e => e.condition && e.isDefault !== true)).toHaveLength(1);
+      expect(branches.filter(e => e.isDefault === true && !e.condition)).toHaveLength(1);
+      // Bare CEL, not `{…}` template braces — the #1491 trap (ADR-0032).
+      const guarded = branches.find(e => e.condition);
+      expect(String(guarded?.condition)).not.toContain('{');
     });
 
     it('should accept screen flow for user input', () => {
@@ -488,8 +540,16 @@ describe('FlowSchema', () => {
             id: 'delete_record',
             type: 'delete_record',
             label: 'Delete Record',
+            // #4924 — this was the worst of the three shapes: `recordId` was the
+            // node's ONLY key, no executor reads it, and a `delete_record` whose
+            // single "constraint" is unread is a match-everything delete (#3810)
+            // wearing a key that reads like a constraint. The executor locates rows
+            // through `filter` and refuses the node without `objectName`.
+            // The per-item token is the loop's `iteratorVariable` (default `item`),
+            // NOT `{<node id>.item}` — node outputs are never bound under a node id.
             config: {
-              recordId: '{loop_records.item.id}',
+              objectName: 'log_entry',
+              filter: { id: '{item.id}' },
             },
           },
           { id: 'end', type: 'end', label: 'End' },
@@ -505,6 +565,13 @@ describe('FlowSchema', () => {
       };
 
       expect(() => FlowSchema.parse(scheduledFlow)).not.toThrow();
+
+      // #4924 — the delete node addresses rows the only way the executor does.
+      // (The `get_old_records` / `loop_records` pair upstream still carries
+      // shapes of its own — a string `filter`, the `object` alias and a
+      // `{<node id>.…}` output reference — tracked separately, see the PR.)
+      const deleteConfig = scheduledFlow.nodes.find(n => n.id === 'delete_record')?.config;
+      expect(DeleteRecordConfigSchema.safeParse(deleteConfig).success).toBe(true);
     });
 
     it('should accept API flow with webhook', () => {
