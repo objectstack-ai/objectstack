@@ -87,7 +87,7 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
@@ -1835,6 +1835,16 @@ export class ObjectQL implements IObjectQLEngine {
    * a `required` record number is never rejected for "missing" — the runtime
    * owns the value, not the client.
    *
+   * That ownership is now ENFORCED rather than merely asserted (#5503): the
+   * insert path strips a caller-supplied value before this runs, so the "respect
+   * explicit value" skip below is reached only by writers the strip exempts —
+   * `isSystem` (seed replay, migration) and an opt-in historical import
+   * (`preserveAudit`), plus values a `beforeInsert` hook computed server-side.
+   * For every other caller the slot arrives empty and the sequence issues the
+   * number. Do NOT "fix" a forged value here by overwriting it: the strip must
+   * stay upstream of this method, because a driver with
+   * `supports.autonumber === true` returns above without ever entering the loop.
+   *
    * In the fallback path the next value is `max(existing) + 1`, seeded once per
    * `object.field.<scope>` from the store then incremented in memory (monotonic
    * within the process, resilient to deletions). The shared `autonumberFormat`
@@ -1857,7 +1867,10 @@ export class ObjectQL implements IObjectQLEngine {
     for (const [name, def] of Object.entries(fields)) {
       if ((def as any)?.type !== 'autonumber') continue;
       const current = record[name];
-      if (current != null && current !== '') continue; // respect explicit value
+      // Respect an explicit value — reachable only for an EXEMPT writer now
+      // (isSystem / preserveAudit / a hook stamp): #5503's strip removed every
+      // other caller's value before this method was called.
+      if (current != null && current !== '') continue;
       // Honor either the spec-canonical `autonumberFormat` or the shorthand
       // `format` (both appear in metadata; the driver reads both too) — #1603.
       const fmt = (def as any).autonumberFormat ?? (def as any).format;
@@ -4821,12 +4834,14 @@ export class ObjectQL implements IObjectQLEngine {
    * validation passes, so a doomed attempt no longer consumes a sequence value
    * (no number-range gaps from a rejected batch).
    */
-  // [#3407] `WriteObservabilityOptions.onFieldsDropped` is accepted for
-  // signature symmetry with `update()` but never fires here: INSERT is
-  // deliberately exempt from the readonly/readonlyWhen strips (a create may
-  // legitimately seed read-only columns), and the FLS write gate throws
-  // instead of stripping. If insert ever gains a silent strip, wire the
-  // listener at that strip site — do not let it go silent.
+  // [#3407] `WriteObservabilityOptions.onFieldsDropped` fires here for exactly
+  // ONE strip: the runtime-owned (`autonumber`) strip added by #5503, wired at
+  // its strip site below per the standing note this comment used to carry.
+  // INSERT remains deliberately exempt from the AUTHOR-declared
+  // readonly/readonlyWhen strips (a create may legitimately seed read-only
+  // columns; the #3043 ingress strip covers external callers instead), and the
+  // FLS write gate throws rather than stripping. Any FURTHER silent strip added
+  // here must wire the listener at its own site too — do not let it go silent.
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
@@ -4937,6 +4952,56 @@ export class ObjectQL implements IObjectQLEngine {
           (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
             (row) => (row ?? {}) as Record<string, unknown>,
           );
+        // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
+        // persistent sequence) issues the value, so a non-system caller does not
+        // get to supply or rewrite it. Until now nothing enforced that — a POST
+        // carrying an explicit record number was stored verbatim, bypassing the
+        // sequence, and the SQL driver's `supports.autonumber` path adopted it
+        // too (it only fills a slot left empty). Stripping HERE, in the engine
+        // and before `applyAutonumbers`, is what makes the fix driver-agnostic:
+        // every driver — native-sequence or not — is handed a row with no
+        // caller-supplied record number, so no driver had to change.
+        //
+        // Runs BEFORE validation on purpose: a value the caller was never
+        // allowed to send must not be judged by the object's rules either (a
+        // `format` rule on the field would otherwise 400 on a payload we are
+        // about to discard). Symmetric with the UPDATE strip, which likewise
+        // runs before `evaluateValidationRules`. Exemptions are the update
+        // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
+        // pass, and `preserveAudit` (#3493) lets a historical import reinstate
+        // legacy record numbers.
+        const autonumberDropped: string[] = [];
+        if (!opCtx.context?.isSystem) {
+          const preserveAudit = opCtx.context?.preserveAudit === true;
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            const supplied = new Set(Object.keys(suppliedPerRow[i] ?? {}));
+            const stripped = stripRuntimeOwnedFields(
+              schemaForValidation as any, rows[i], supplied, this.logger, { preserveAudit },
+            ) as Record<string, unknown>;
+            if (stripped === rows[i]) continue;
+            for (const k of Object.keys(rows[i])) {
+              if (!(k in stripped) && !autonumberDropped.includes(k)) autonumberDropped.push(k);
+            }
+            rows[i] = stripped;
+            rowHookContexts[i].input.data = stripped;
+          }
+        }
+        // [#3407] The insert path's `onFieldsDropped` used to be accepted for
+        // signature symmetry and never fire, with a standing note: "if insert
+        // ever gains a silent strip, wire the listener at that strip site — do
+        // not let it go silent." This is that strip site. Reported under the
+        // existing `readonly` reason — from the caller's side an implicitly
+        // read-only field is dropped for exactly the reason a declared one is,
+        // and inventing a parallel reason code would fork the vocabulary
+        // (`packages/spec`) for a distinction no consumer acts on.
+        if (autonumberDropped.length > 0 && typeof options?.onFieldsDropped === 'function') {
+          try {
+            options.onFieldsDropped({ object, fields: autonumberDropped, reason: 'readonly' });
+          } catch (err) {
+            this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+          }
+        }
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
@@ -5076,8 +5141,14 @@ export class ObjectQL implements IObjectQLEngine {
    * A summary-recompute failure after retries still throws
    * {@link SummaryRecomputeError} (framework#3147) with `written` set to the
    * outcome array — the records ARE written.
+   *
+   * `onFieldsDropped` (#3407) is forwarded to `insert`, so the runtime-owned
+   * strip (#5503) reports here too. The event carries no row index — it is the
+   * UNION over the batch — but the strip only ever removes keys the row itself
+   * supplied, so a caller holding the input rows can attribute each name back to
+   * the rows that carried it (`insertManyData` does exactly that).
    */
-  async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions): Promise<InsertManyRowOutcome[]> {
+  async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<InsertManyRowOutcome[]> {
     if (!Array.isArray(rows)) throw new Error('insertMany expects an array of rows');
     return this.insert(object, rows, { ...(options ?? {}), __partialRowErrors: true } as any);
   }

@@ -28,6 +28,13 @@ describe('validateRecord — required + autonumber exemption', () => {
   });
 
   it('accepts an explicitly-provided autonumber value', () => {
+    // NOT a licence for clients to supply record numbers — since #5503 the
+    // engine strips a non-system caller's value BEFORE this validator runs, so
+    // the only writes that still arrive here carrying one are the exempt ones
+    // (`isSystem` seed replay / migration, a `preserveAudit` historical import,
+    // or a hook-computed stamp). This pins that those are not then rejected by
+    // the validator instead. The write-path ownership itself is pinned in
+    // `engine-autonumber-runtime-owned.test.ts`.
     expect(() =>
       validateRecord(schema, { title: 'Hello', record_no: 'REC-0042' }, 'insert'),
     ).not.toThrow();

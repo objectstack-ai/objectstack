@@ -551,13 +551,53 @@ export function stripReadonlyWhenFieldsMulti(
 }
 
 /**
- * Strip CALLER-SUPPLIED writes to statically `readonly: true` fields from an
- * UPDATE payload (#2948). Unlike `readonlyWhen` (conditional, handled above), a
+ * Field types whose VALUE the runtime owns end to end, whether or not the
+ * author ever wrote `readonly: true` on them (#5503).
+ *
+ * Exactly one member today: `autonumber`. The engine has always documented the
+ * ownership (`applyAutonumbers`: "the runtime owns the value, not the client")
+ * and both record validators act on it — a `required` autonumber is exempt from
+ * the missing-value check on insert AND update precisely because the client is
+ * not supposed to supply it. What was missing was the other half: nothing on
+ * the write path stopped a client from supplying it anyway, so a plain REST
+ * caller could POST a record number of their choosing (bypassing the sequence)
+ * and PATCH an existing one (forging a business identifier). Declaring the
+ * ownership here makes it enforced rather than merely asserted — the same
+ * `declared ≠ enforced` correction as #4447 (`created_at`), one type over.
+ *
+ * Deliberately NOT `formula` / `summary`: those are computed on read from a
+ * plan, never stored from the write payload, so there is no caller value to
+ * strip. Keep this set to types whose value is (a) persisted and (b) issued by
+ * the runtime.
+ */
+const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set(['autonumber']);
+
+/**
+ * Whether the runtime owns this field's value outright — i.e. the field is
+ * IMPLICITLY read-only on the write path even with no `readonly: true` flag.
+ * See {@link RUNTIME_OWNED_FIELD_TYPES}. #5503.
+ */
+export function isRuntimeOwnedField(def: { type?: string } | undefined | null): boolean {
+  return def?.type != null && RUNTIME_OWNED_FIELD_TYPES.has(String(def.type));
+}
+
+/**
+ * Strip CALLER-SUPPLIED writes to read-only fields from an UPDATE payload
+ * (#2948). Unlike `readonlyWhen` (conditional, handled above), a
  * static `readonly` field was never enforced on the server write path: the
  * record validator only SKIPS it from validation, so a user-context update
  * could overwrite audit stamps, provenance, or any other read-only column. We
  * STRIP the change (symmetric with `readonlyWhen`) rather than reject it, for
  * compatibility.
+ *
+ * "Read-only" here has TWO sources, at equal rank (#5503):
+ *  - the AUTHOR-declared `readonly: true` flag; and
+ *  - an IMPLICITLY read-only, RUNTIME-OWNED field type
+ *    ({@link isRuntimeOwnedField}) — today exactly `autonumber`, whose value the
+ *    engine or the driver's persistent sequence issues. Before #5503 only the
+ *    first source was read here, so a plain PATCH could rewrite any record
+ *    number: the same defect as #4447 (`created_at` forgeable by a normal
+ *    PATCH), except the field carried no flag for this loop to notice.
  *
  * Two guards keep every legitimate write intact:
  *  - `suppliedKeys` — only keys the CALLER sent are candidates. Server stamps
@@ -573,7 +613,9 @@ export function stripReadonlyWhenFieldsMulti(
  * `options.preserveAudit` (#3493) relaxes the strip for an opt-in "historical"
  * import that reinstates the original timeline: a caller-supplied read-only
  * field is KEPT when {@link isPreservableUnderAudit} allows it — the
- * audit/timestamp family or any author-declared business `readonly` field.
+ * audit/timestamp family or any author-declared business field (including a
+ * runtime-owned `autonumber`, so a migration may reinstate the legacy record
+ * numbers it is carrying over — #5503).
  * Platform-managed `system` columns outside that family (`organization_id` /
  * tenancy, generated columns) stay stripped, so the relaxation reinstates facts
  * without becoming a tenancy-forging backdoor. It is a WHITELIST, deliberately
@@ -615,15 +657,97 @@ export function stripReadonlyFields(
   const preserveAudit = options?.preserveAudit === true;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
-    if (!def?.readonly) continue;
+    // [#5503] `readonly: true` is the AUTHOR-declared lock; a runtime-owned
+    // type (`autonumber`) is the IMPLICIT one. Both mean the same thing to a
+    // caller: you do not get to write this column.
+    const runtimeOwned = isRuntimeOwnedField(def);
+    if (!def?.readonly && !runtimeOwned) continue;
     if (!(name in (result as Record<string, unknown>))) continue;
     if (!suppliedKeys.has(name)) continue; // server-stamped, not caller-supplied — keep
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];
-    logger?.warn?.(readonlyStripWarning(name, objectSchema?.name));
+    logger?.warn?.(
+      def?.readonly
+        ? readonlyStripWarning(name, objectSchema?.name)
+        : runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name),
+    );
   }
   return result;
+}
+
+/**
+ * Strip CALLER-SUPPLIED writes to RUNTIME-OWNED fields ({@link
+ * isRuntimeOwnedField}) only — the INSERT-side counterpart of
+ * {@link stripReadonlyFields} (#5503).
+ *
+ * Why a separate, narrower function rather than reusing the one above: INSERT is
+ * deliberately exempt from the author-declared static-`readonly` strip inside
+ * the engine (#3413). A create may legitimately seed read-only columns, and the
+ * trusted internal writers (identity provisioning, the metadata repository, the
+ * event-log cursor) call `engine.insert` DIRECTLY — which is why that strip
+ * lives at the DataProtocol ingress instead (`stripReadonlyForInsert`, #3043).
+ * Runtime-owned fields carry none of that ambiguity: nobody may seed a record
+ * number on create, because the engine (or the driver's persistent sequence)
+ * issues it. So this one CAN live in the engine, and living there is the point —
+ * it runs before the payload is dispatched, which covers the SQL driver's
+ * `supports.autonumber` path without the driver participating at all.
+ *
+ * Same two guards as the update strip: only keys the CALLER supplied are
+ * candidates (a `beforeInsert` hook that computes the value survives), and the
+ * `preserveAudit` whitelist is honoured so a historical import may reinstate the
+ * legacy record numbers it is migrating. `isSystem` writes never reach here —
+ * the caller gates on that, exactly as it does for the update strip.
+ */
+export function stripRuntimeOwnedFields(
+  objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  suppliedKeys: ReadonlySet<string>,
+  logger?: EvaluateRulesOptions['logger'],
+  options?: { preserveAudit?: boolean },
+): Record<string, unknown> | undefined | null {
+  const fields = objectSchema?.fields;
+  if (!fields || !data) return data;
+  const preserveAudit = options?.preserveAudit === true;
+  let result = data;
+  for (const [name, def] of Object.entries(fields)) {
+    if (!isRuntimeOwnedField(def)) continue;
+    if (!(name in (result as Record<string, unknown>))) continue;
+    if (!suppliedKeys.has(name)) continue; // hook/middleware stamp — keep
+    if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
+    if (result === data) result = { ...data };
+    delete (result as Record<string, unknown>)[name];
+    logger?.warn?.(runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name));
+  }
+  return result;
+}
+
+/**
+ * The message the runtime-owned strip logs per dropped field (#5503). Exported
+ * so the pin test asserts the CONTRACT of this text rather than its wording.
+ *
+ * Deliberately distinct from {@link readonlyStripWarning}: the author never
+ * wrote `readonly: true` on an `autonumber` field, so "this field is read-only"
+ * alone reads as a bug report against their own metadata. The message has to
+ * name WHY the value is refused (the runtime issues it) and WHICH legitimate
+ * writer paths still may set it. Same `warn` level, for the same reason spelled
+ * out on {@link readonlyStripWarning}: this seam cannot tell a hostile forged
+ * body from a trusted server-side writer that simply forgot to declare itself.
+ */
+export function runtimeOwnedStripWarning(field: string, type: string, object?: string): string {
+  const on = object ? ` on '${object}'` : '';
+  return (
+    `Field '${field}'${on} is a runtime-owned '${type}' field: the caller-supplied value was ` +
+    `DROPPED and the write is being COMMITTED WITHOUT IT — the runtime issues this value from its ` +
+    `sequence, so the call returns success while the column holds the generated number, not the one ` +
+    `sent (#5503). Server-side code that legitimately sets it (seed replay, a migration) must ` +
+    `declare itself trusted by passing { context: { isSystem: true } }; a data import reinstating ` +
+    `legacy record numbers uses the historical-import context ({ context: { preserveAudit: true } }, ` +
+    `#3493). A beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are not ` +
+    `caller-supplied. To detect drops programmatically instead of reading this log, pass ` +
+    `options.onFieldsDropped (#3407). Forged record numbers from untrusted client input are ` +
+    `expected here and need no action.`
+  );
 }
 
 /**

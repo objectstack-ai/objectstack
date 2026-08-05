@@ -5836,9 +5836,12 @@ export class ObjectStackProtocolImplementation implements
         );
         // [#3455] Surface the #3043 ingress strip, symmetric with single-write
         // createData. Diff each supplied row against its stripped form, then
-        // AGGREGATE — the `{ records, count }` response has no per-row slot, and
-        // the insert-time strip is static-`readonly` only (schema-uniform), so a
-        // union view is faithful rather than lossy.
+        // AGGREGATE — the `{ records, count }` response has no per-row slot, so
+        // a union is the only representable view here. (It used to be lossless
+        // as well, the ingress strip being static-`readonly` and therefore
+        // schema-uniform; the engine strip #5503 adds is per-row, so the union
+        // now genuinely aggregates. `insertManyData`, which HAS a per-row slot,
+        // keeps row precision for both sources.)
         const dropped: DroppedFieldsEvent[] = [];
         if (Array.isArray(request.records)) {
             for (let i = 0; i < request.records.length; i++) {
@@ -5846,12 +5849,15 @@ export class ObjectStackProtocolImplementation implements
                 if (ev) dropped.push(ev);
             }
         }
+        // [#5503] The engine gained an INSERT-side strip of its own (runtime-owned
+        // `autonumber` values a non-system caller supplied). Forward the listener
+        // here as `createData` already does, so a bulk create / import learns
+        // which record numbers were refused instead of only the server log seeing
+        // it. Merging AFTER the write is what lets both sources land in one list.
+        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
+        if (request.context !== undefined) opts.context = request.context;
+        const records = await this.engine.insert(request.object, rows, opts);
         const merged = mergeDroppedFieldEvents(dropped);
-        const records = await this.engine.insert(
-            request.object,
-            rows,
-            request.context !== undefined ? { context: request.context } as any : undefined,
-        );
         return {
             object: request.object,
             records,
@@ -5890,16 +5896,33 @@ export class ObjectStackProtocolImplementation implements
         const perRowDropped: Array<DroppedFieldsEvent | null> = Array.isArray(request.records)
             ? request.records.map((rec, i) => diffDroppedFields(request.object, rec, rowsArr[i], 'readonly'))
             : [];
+        // [#5503] The ENGINE now strips too (runtime-owned `autonumber` values a
+        // non-system caller supplied), and its `onFieldsDropped` event is the
+        // UNION over the batch — the listener signature carries no row index. Row
+        // precision is recoverable without one: the engine strip only removes
+        // keys the ROW ITSELF supplied, so a dropped name belongs to exactly the
+        // rows whose supplied payload carried it. Without this the import
+        // surface (which prefers this partial-success path over createManyData)
+        // would drop record numbers with nothing but a server log to show for it.
+        const engineDropped = new Set<string>();
+        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { for (const f of e.fields) engineDropped.add(f); } };
+        if (request.context !== undefined) opts.context = request.context;
         const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
             this.engine,
             request.object,
             rows,
-            request.context !== undefined ? { context: request.context } as any : undefined,
+            opts,
         );
         if (Array.isArray(outcomes)) {
             for (let i = 0; i < outcomes.length; i++) {
-                const ev = perRowDropped[i];
-                if (ev && outcomes[i]) outcomes[i].droppedFields = [ev];
+                if (!outcomes[i]) continue;
+                const supplied = (request.records?.[i] ?? {}) as Record<string, unknown>;
+                const mine = [...engineDropped].filter((f) => f in supplied);
+                const events: DroppedFieldsEvent[] = [];
+                if (perRowDropped[i]) events.push(perRowDropped[i]!);
+                if (mine.length > 0) events.push({ object: request.object, fields: mine, reason: 'readonly' });
+                const merged = mergeDroppedFieldEvents(events);
+                if (merged.length > 0) outcomes[i].droppedFields = merged;
             }
         }
         return { object: request.object, outcomes };

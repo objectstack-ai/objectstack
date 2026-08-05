@@ -10,6 +10,9 @@ import {
   hasReadonlyWhenInPayload,
   hasParentScopedReadonlyWhenInPayload,
   stripReadonlyFields,
+  stripRuntimeOwnedFields,
+  isRuntimeOwnedField,
+  runtimeOwnedStripWarning,
 } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
 
@@ -378,6 +381,109 @@ describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
       organization_id: 'o1',
     }, supplied);
     expect(out).toEqual({ title: 'x' });
+  });
+});
+
+// #5503 — `autonumber` is IMPLICITLY read-only: the runtime issues the value,
+// so a caller may neither seed it on create nor rewrite it on update. The field
+// carries no `readonly: true` flag (and the spec builder does not inject one),
+// which is exactly why the #2948 loop used to walk straight past it.
+const numberedFields = {
+  name: 'an_account',
+  fields: {
+    title: { type: 'text' },
+    // the forgeable business identifier
+    account_number: { type: 'autonumber', autonumberFormat: 'ACC-{0000}' },
+    // a formula field: computed on READ from a plan, never persisted from the
+    // write payload — deliberately NOT runtime-owned for strip purposes.
+    total: { type: 'formula' },
+    // an author-declared readonly field, to prove both sources coexist
+    closed_at: { type: 'datetime', readonly: true },
+  },
+};
+
+describe('isRuntimeOwnedField (#5503)', () => {
+  it('is true for autonumber and false for every other type in the fixture', () => {
+    expect(isRuntimeOwnedField({ type: 'autonumber' })).toBe(true);
+    expect(isRuntimeOwnedField({ type: 'text' })).toBe(false);
+    expect(isRuntimeOwnedField({ type: 'formula' })).toBe(false);
+    expect(isRuntimeOwnedField({ type: 'summary' })).toBe(false);
+    expect(isRuntimeOwnedField(undefined)).toBe(false);
+  });
+});
+
+describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () => {
+  it('drops a caller-supplied record number even with no `readonly: true` flag', () => {
+    const supplied = new Set(['title', 'account_number']);
+    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'ACC-888888' }, supplied);
+    expect(out).toEqual({ title: 'x' });
+  });
+
+  it('KEEPS a hook-stamped record number the caller did not supply', () => {
+    const supplied = new Set(['title']);
+    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'HOOK-1' }, supplied);
+    expect(out).toEqual({ title: 'x', account_number: 'HOOK-1' });
+  });
+
+  it('KEEPS it under preserveAudit — a migration reinstates legacy record numbers', () => {
+    const supplied = new Set(['account_number']);
+    const out = stripReadonlyFields(
+      numberedFields, { account_number: 'LEGACY-7' }, supplied, undefined, { preserveAudit: true },
+    );
+    expect(out).toEqual({ account_number: 'LEGACY-7' });
+  });
+
+  it('logs the runtime-owned message, not the author-declared readonly one', () => {
+    const warns: string[] = [];
+    stripReadonlyFields(
+      numberedFields,
+      { account_number: 'ACC-888888', closed_at: '2021-01-01T00:00:00Z' },
+      new Set(['account_number', 'closed_at']),
+      { warn: (m: string) => warns.push(m) } as any,
+    );
+    expect(warns).toHaveLength(2);
+    expect(warns.some((m) => m === runtimeOwnedStripWarning('account_number', 'autonumber', 'an_account'))).toBe(true);
+    // The message must say WHY (runtime-issued) and name BOTH exempt writer
+    // paths — an author who never wrote `readonly: true` gets no help from a
+    // bare "this field is read-only".
+    const rt = warns.find((m) => m.includes('runtime-owned'))!;
+    expect(rt).toContain('isSystem');
+    expect(rt).toContain('preserveAudit');
+    expect(rt).toContain('COMMITTED WITHOUT IT');
+  });
+});
+
+describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
+  it('drops a caller-supplied record number', () => {
+    const out = stripRuntimeOwnedFields(
+      numberedFields, { title: 'x', account_number: 'ACC-777777' }, new Set(['title', 'account_number']),
+    );
+    expect(out).toEqual({ title: 'x' });
+  });
+
+  it('leaves AUTHOR-declared readonly fields alone — insert keeps its #3413 exemption', () => {
+    // The engine is deliberately NOT the place the static-`readonly` insert
+    // strip lives (that is the #3043 protocol ingress); this narrower helper
+    // must not quietly take over that job and start stripping columns the
+    // trusted internal writers legitimately seed on create.
+    const out = stripRuntimeOwnedFields(
+      numberedFields,
+      { title: 'x', closed_at: '2021-01-01T00:00:00Z' },
+      new Set(['title', 'closed_at']),
+    );
+    expect(out).toEqual({ title: 'x', closed_at: '2021-01-01T00:00:00Z' });
+  });
+
+  it('KEEPS a hook-stamped value and returns the SAME object when nothing is stripped', () => {
+    const d = { title: 'x', account_number: 'HOOK-1' };
+    expect(stripRuntimeOwnedFields(numberedFields, d, new Set(['title']))).toBe(d);
+  });
+
+  it('KEEPS it under preserveAudit', () => {
+    const out = stripRuntimeOwnedFields(
+      numberedFields, { account_number: 'LEGACY-7' }, new Set(['account_number']), undefined, { preserveAudit: true },
+    );
+    expect(out).toEqual({ account_number: 'LEGACY-7' });
   });
 });
 
