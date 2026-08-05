@@ -17,7 +17,8 @@
  * never saw, so a real semantic change lands silently inside a mechanical diff.
  * What is worth automating is the *diagnosis* — which artifacts are stale, and
  * the exact command for each. `--fix` then regenerates **only** the ones this run
- * proved stale, and says so.
+ * proved stale, and says so — minus the `ratchet` entries, whose gate has already
+ * answered a question `--fix` would otherwise have to guess (see GATED below).
  *
  * Usage:
  *   pnpm --filter @objectstack/spec check:generated          # report every stale artifact
@@ -41,8 +42,18 @@ const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
  * The gates that verify a checked-in artifact against its source, with the
  * generator that rewrites each. Order is the cheapest-first order a human would
  * want the answers in, not CI's.
+ *
+ * `ratchet` marks the entries whose artifact is a DIRECTIONAL debt ledger rather
+ * than a descriptive snapshot of the source. For those, "stale" is ambiguous —
+ * see the `--fix` loop, which refuses to guess.
  */
-const GATED: ReadonlyArray<{ check: string; gen: string; artifact: string; readsDist?: true }> = [
+const GATED: ReadonlyArray<{
+  check: string;
+  gen: string;
+  artifact: string;
+  readsDist?: true;
+  ratchet?: true;
+}> = [
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
   { check: 'check:upgrade-guide', gen: 'gen:upgrade-guide', artifact: 'docs/protocol-upgrade-guide.md' },
   { check: 'check:skill-docs', gen: 'gen:skill-docs', artifact: 'skill docs (from SKILL.md frontmatter)' },
@@ -68,6 +79,31 @@ const GATED: ReadonlyArray<{ check: string; gen: string; artifact: string; reads
     check: 'check:strictness-ledger',
     gen: 'gen:strictness-ledger',
     artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
+  },
+  // GATED by the definition above — it compares a checked-in artifact
+  // (test-typecheck-debt.json) against what `tsc -p tsconfig.test.json` measures
+  // right now, and `gen:test-typecheck-debt` is that artifact's writer. It is NOT
+  // a source audit: there is a real file to regenerate, so NO_GENERATOR would be
+  // a false classification, and UNGATED_GENERATORS ("nothing verifies this
+  // output") would be false in the other direction.
+  //
+  // What it is, that nothing above it is, is a DIRECTIONAL ratchet — hence
+  // `ratchet`. The other artifacts here are pure functions of the source, so
+  // regenerating is always the right answer. This one records DEBT, and its four
+  // verdicts split two ways: "the debt shrank" and "the file graduated" are
+  // re-record, while "the debt grew" and "an unledgered file has errors" are fix
+  // the code (#5286). `--fix` regenerates without reading which one it got, so
+  // for this entry it refuses instead — the merge that brought three new spec
+  // test files into this very branch is the live shape of the risk: had any of
+  // them carried errors, a reflexive `--fix` would have ledgered them silently.
+  //
+  // Cost: this is the only gate here that runs a full tsc program (~30s over
+  // src/**/*.test.ts), so it goes last in the cheapest-first order above.
+  {
+    check: 'check:test-typecheck',
+    gen: 'gen:test-typecheck-debt',
+    artifact: 'test-typecheck-debt.json',
+    ratchet: true,
   },
 ];
 
@@ -237,18 +273,54 @@ if (!stale.length) {
 }
 
 console.log(`\n✗ ${stale.length} of ${GATED.length} artifact(s) stale:\n`);
-for (const s of stale) console.log(`  ${s.artifact}\n    pnpm --filter @objectstack/spec ${s.gen}`);
+for (const s of stale) {
+  console.log(`  ${s.artifact}\n    pnpm --filter @objectstack/spec ${s.gen}` +
+    (s.ratchet ? `   ← only if ${s.check} asked you to RE-RECORD; --fix will not run this one` : ''));
+}
+
+const autoFixable = stale.filter((s) => !s.ratchet);
 
 if (!fix) {
   console.log(`\nRegenerate exactly these:\n  ` +
-    stale.map((s) => `pnpm --filter @objectstack/spec ${s.gen}`).join(' && ') +
-    `\n\nOr re-run with --fix to do it now (only the ${stale.length} proved stale — never the whole set).`);
+    stale.map((s) => `pnpm --filter @objectstack/spec ${s.gen}`).join(' && '));
+  console.log(
+    autoFixable.length
+      ? `\nOr re-run with --fix to do it now (only the ${autoFixable.length} proved stale — never the whole set` +
+          (autoFixable.length < stale.length
+            ? `, and never the ${stale.length - autoFixable.length} ratchet(s) above: read their verdict first).`
+            : `).`)
+      : `\n--fix will not do this for you: every stale artifact above is a directional ratchet, ` +
+          `and its gate already said which direction it moved.`,
+  );
   process.exit(1);
 }
 
-console.log(`\n--fix: regenerating the ${stale.length} stale artifact(s). Review the diff before committing.\n`);
+console.log(
+  `\n--fix: regenerating ${autoFixable.length} of the ${stale.length} stale artifact(s)` +
+    (autoFixable.length < stale.length ? ` — the rest are ratchets, refused below` : '') +
+    `. Review the diff before committing.\n`,
+);
 let failed = 0;
 for (const s of stale) {
+  // A ratchet's gate has already answered the question --fix would have to guess:
+  // it names, per file, whether the debt grew (fix the code) or shrank (re-record
+  // the number). Regenerating on the first reading launders new debt in as a
+  // mechanical diff — the same "admit it via the fix command" hazard that keeps
+  // dual-source-exports.baseline.json out of GATED entirely (#4446). That ledger
+  // can stay hand-edited because it holds a handful of rows; this one holds 79
+  // files, so it ships a generator and puts the refusal here instead.
+  if (s.ratchet) {
+    failed++;
+    console.log(`  ✗ ${s.gen} — REFUSED`);
+    console.error(
+      `      ${s.artifact} is a directional debt ledger, not a snapshot of the source.\n`
+        + `      "the debt shrank — re-record it" and "the debt grew — fix the new errors" both\n`
+        + `      reach --fix as one stale artifact, and only ${s.check} knows which it was.\n`
+        + `      Read its per-file verdict; if re-recording is what it asked for, run:\n`
+        + `      pnpm --filter @objectstack/spec ${s.gen}`,
+    );
+    continue;
+  }
   // The `readsDist` warning above is advice a reader can ignore; here it must
   // become a refusal. `gen:api-surface` on a stale dist does not fail — it
   // writes a plausible surface with every export added since the last build

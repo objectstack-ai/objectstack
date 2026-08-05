@@ -84,6 +84,15 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'a maintainer decision (#4446).',
   },
   {
+    path: 'packages/spec/test-typecheck-debt.json',
+    why:
+      'a SHRINK-ONLY ratchet, same trade as docs-import-surface.baseline.json above (#5286). '
+      + '`gen:test-typecheck-debt` writes it, and on a merge it is exactly the file two branches '
+      + 'both re-record — but recomputing it mid-merge would record whatever the half-merged tree '
+      + 'happens to compile to, and any file that GAINED errors would enter the ledger as merge '
+      + 'noise instead of as red. check:generated refuses to auto-regenerate it for the same reason.',
+  },
+  {
     path: 'packages/spec/variant-docs.json',
     why: 'hand-maintained map of the schema variants; `check:variant-docs` audits it against the code, no generator.',
   },
