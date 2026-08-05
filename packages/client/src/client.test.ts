@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectStackClient, QueryBuilder, FilterBuilder, createQuery, createFilter } from './index';
+// `QueryBuilder` / `FilterBuilder` are named only by the `describe` blocks below;
+// the suites build them through `createQuery` / `createFilter`, so importing the
+// classes themselves left two unused bindings (TS6133) the moment this file
+// entered a tsc program (#5449).
+import { ObjectStackClient, createQuery, createFilter } from './index';
 
 /** Helper: create a client with mocked fetch that returns the given response body */
 function createMockClient(body: any, status = 200) {
@@ -103,7 +107,11 @@ describe('ObjectStackClient', () => {
 
         const result = await client.meta.getItem('object', 'customer');
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/meta/object/customer', expect.any(Object));
-        expect(result.name).toBe('customer');
+        // `meta.getItem` has no declared return type (unlike the `getItems`
+        // beside it — #5545), so its unwrapped payload is `unknown`. Asserted
+        // structurally rather than cast: same assertion strength, without
+        // pretending this surface is typed (#5449).
+        expect(result).toMatchObject({ name: 'customer' });
     });
 
     it('meta.getView speaks the path-param dialect both surfaces accept (#3611)', async () => {
@@ -1280,7 +1288,12 @@ describe('ScopedProjectClient', () => {
 
     it('throws when environmentId is missing', () => {
         const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
-        // @ts-expect-error — empty string rejected at runtime
+        // No `@ts-expect-error` here, and that is the finding of #5449 rather than
+        // an omission. `project(environmentId: string)` accepts `''` — it is a
+        // perfectly good `string` — so the directive that sat on this line
+        // suppressed nothing and reported TS2578 ("unused") the first time a tsc
+        // program read the file. Its own comment said what the test actually
+        // proves: the empty id is rejected at RUNTIME, by the guard below.
         expect(() => client.project('')).toThrow(/environmentId is required/);
     });
 

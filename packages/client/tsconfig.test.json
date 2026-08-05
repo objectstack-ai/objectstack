@@ -1,0 +1,62 @@
+// The TEST-layer type-check program (#5449, the mechanism #5286/PR #5478 set
+// for `packages/spec`). `tsconfig.json` above stays as it is: it is the BUILD
+// config, and its `**/*.test.ts` exclusion has a reason — ci.yml gates that no
+// test file reaches the published artifact. This sibling puts the excluded
+// layer back in front of tsc, and `package.json`'s `typecheck` script NAMES it
+// (`-p tsconfig.test.json`), because a config no script invokes is exactly the
+// phantom this whole change is about.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY. The tests are written and executed as ESM by
+//     vitest (esbuild/vite), while `client` has no `"type": "module"`, so the
+//     build config's NodeNext compiles them as CJS and reports errors about the
+//     CHECK rather than the code (TS2835 extensionless relative imports, TS1470
+//     `import.meta`, TS2550 lib). Matching vitest is fidelity.
+//   - `rootDir` widens to the workspace root. It steers emit layout only, and
+//     this program emits nothing; inherited as `./src` it reported TS6059 for
+//     the four route-ledger modules `client-url-conformance.test.ts` and the
+//     three `*-route-ledger-coverage.test.ts` files deep-import from sibling
+//     packages (`../../runtime/src/route-ledger`, …). Those five TS6059 are the
+//     bulk of this package's stale TEST_DEBT entry — a measurement of the
+//     misconfigured check, not of the tests.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns` and the rest are inherited from the root config.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// `include` deliberately stops at `src`, matching the build config's root, and
+// none of the files it leaves out carries a `@ts-expect-error`, so no pin is
+// hiding there. `tests/integration/` — the suite `vitest.integration.config.ts`
+// runs against a live server — is in no tsconfig at all: a second,
+// differently-shaped hole (1 file / 3 errors, one of them a real API drift, the
+// suite reading a `client.discovery` property `ObjectStackClient` does not
+// have) that wants its own change rather than a rider on this one. Filed as
+// #5544.
+//
+// The per-file ledger beside this config (`test-typecheck-debt.json`) is small
+// on purpose. Under the repaired config the whole test layer came to 13 errors;
+// eight were the tests' own and are fixed in this same change (two unused
+// imports, an unused parameter, two possibly-undefined reads, an `unknown`
+// payload asserted structurally, a `reference_to` key the field schema never
+// had, and the phantom pin itself). Re-spelling that key uncovered one more of
+// the remaining kind, and all six that stay are ONE producer-side defect
+// wearing three files' clothes: objectql's `registerObject` takes the schema's
+// OUTPUT type (`z.infer`) where it should take the INPUT one, so a perfectly
+// good authored literal reads as missing nine defaulted keys (#5543). Holding
+// them EXACT and shrink-only means fixing #5543 turns the ledger red until the
+// entries are deleted, instead of letting it rot. Every file NOT listed there —
+// `client.test.ts`, the pin file, first among them — must have no errors at
+// all.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

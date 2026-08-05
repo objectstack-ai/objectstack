@@ -94,7 +94,10 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
             label: 'Task',
             fields: {
                 title: { type: 'text', label: 'Title' },
-                project: { type: 'lookup', reference_to: 'project', label: 'Project' },
+                // `reference`, not `reference_to`: the latter is no key the field
+                // schema knows, so this lookup declared no target at all until a
+                // tsc program finally read the file (TS2561, #5449).
+                project: { type: 'lookup', reference: 'project', label: 'Project' },
             },
         });
         // Objects registered AFTER bootstrap miss the boot-time schema sync, so

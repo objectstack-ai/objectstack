@@ -46,11 +46,15 @@ never its own *strictness*: `strict` and friends are inherited, untouched.
 "tsc is the best sweeper" channel the spec-property-retirement playbook leans on: the
 directive is meant to go red the day a removed key comes back. Outside a program it
 evaluates never, and *deleting the directive leaves every gate just as green* — which is
-how spec's 17 retirement pins across 5 files were found (#5286). Before writing one,
-check the file is compiled. `packages/spec` additionally holds its test-layer residue in
-a per-file, exactly-measured, shrink-only ledger (`packages/spec/test-typecheck-debt.json`,
-`pnpm --filter @objectstack/spec gen:test-typecheck-debt`): a file not listed there may
-have no type errors at all.
+how spec's 17 retirement pins across 5 files were found (#5286), and the repo-wide sweep
+that followed found the eighteenth in `packages/client` (#5449). Before writing one,
+check the file is compiled. A package whose test layer still carries residue holds it in
+a per-file, exactly-measured, shrink-only ledger next to its `tsconfig.test.json`
+(`<package>/test-typecheck-debt.json`, regenerated with
+`pnpm --filter <package> gen:test-typecheck-debt`): a file not listed there may have no
+type errors at all. The gate behind both is one shared script,
+`scripts/check-test-typecheck.mts --package <dir>` — onboard a package by wiring its
+`typecheck` script to it, never by copying it.
 
 One trap worth knowing before you read any of these counts: under `moduleResolution:
 NodeNext` a relative import missing its `.js` extension does not resolve, every symbol it

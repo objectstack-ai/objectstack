@@ -16,7 +16,9 @@
     "build": "tsup --config ../../tsup.config.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "typecheck": "tsc --noEmit"
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/client --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/client --project tsconfig.test.json",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
@@ -29,6 +31,7 @@
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/runtime": "workspace:*",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
