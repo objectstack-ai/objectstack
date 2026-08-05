@@ -176,6 +176,12 @@ import { zodIssuesToFields } from '@objectstack/rest';
 // `too_small` becomes `min_length` / `min_value` / `min_items` depending on what
 // was too small, and a MISSING property becomes `required` instead of the
 // `invalid_type` Zod reports for it.
+//
+// One entry per issue is the common case, NOT a guarantee: Zod folds a failed
+// `z.union` into a single issue whose message is the bare "Invalid input", so a
+// union failure produces that entry PLUS the entries of the branch that explains
+// it, addressed with the union's own path (#5014). Read `fields.length` as the
+// number of field errors, never as the number of Zod issues.
 function createValidationError(zodError: z.ZodError, input?: unknown): AppError {
   const fields = zodIssuesToFields(zodError.issues, input);
 
