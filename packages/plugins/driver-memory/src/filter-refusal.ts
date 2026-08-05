@@ -352,8 +352,12 @@ export function assertFilterConditionShape(node: unknown, path: string): void {
  */
 function assertFieldConstraintShape(field: string, spec: unknown, path: string): void {
   if (!isFilterNode(spec)) return;
+  // [#5240] The zero-operator constraint keeps its own predicate rather than an
+  // inlined `keys.length === 0`, so the reasoning for what does and does not
+  // count as one (a `Date` enumerates to nothing but is a comparand) stays
+  // attached to the check that applies it.
+  if (isEmptyFieldConstraint(spec)) throw emptyFieldConstraintError(field, path);
   const keys = Object.keys(spec);
-  if (keys.length === 0) throw emptyFieldConstraintError(field, path);
   if (!keys.some((key) => key.startsWith('$'))) return;
   for (const op of keys) {
     if (!SUPPORTED_FIELD_OPERATORS.has(op)) throw unknownFieldOperatorError(op, field, path);
