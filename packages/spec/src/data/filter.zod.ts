@@ -279,23 +279,32 @@ export type FilterCondition = {
  * `$nin` from being widened — `{ $not: { stage: { $ne: 'won' } } }` still means
  * "the column IS that value".
  *
- * Conformance status, honestly: `driver-sql` (PR #5296), `driver-sqlite-wasm`,
- * `driver-memory`, `formula` and `driver-mongodb` answer this way today.
- * `read-scope-sql` and the analytics `filter-normalizer`, both in
- * `packages/services/service-analytics`, still emit a bare `NOT (…)` and are
- * tracked by #5297 — declaring the rule here is what makes that gap a tracked
- * bug instead of an invisible one, per Prime Directive #10.
+ * Conformance status, re-measured at the 2026-08-05 sync of this PR (main @
+ * `cdfbee2f0`): EVERY surface answers this way today. `driver-sql` (PR #5296),
+ * `driver-sqlite-wasm`, `driver-memory`, `formula` and `driver-mongodb`
+ * already did; `read-scope-sql` was aligned by #5326 (closing #5297) and the
+ * analytics `filter-normalizer` by #5335 (closing #5325). The gap an earlier
+ * revision of this paragraph tracked is closed — declaring the rule here is
+ * what turned it into a tracked bug instead of an invisible one, per Prime
+ * Directive #10, and this sentence is kept as the record that the tracking
+ * worked.
  *
  * ## Deliberately NOT declared here
  *
  * The boolean identities of the EMPTY combinators (`{ $and: [] }` = TRUE,
- * `{ $or: [] }` = FALSE, `{ $not: {} }` = FALSE) are implemented by the four
- * drivers but are NOT yet stated as contract, because two backends answer them
- * by refusing the filter instead — see the note in
- * `filter-logic-conformance.ts`. Likewise `{ field: {} }` (a field constrained
- * by zero operators), which #5240 ruled must be REJECTED but which no backend
- * gates yet. Declaring either before it is enforced everywhere would be exactly
- * the `declared ≠ enforced` shape this file exists to prevent.
+ * `{ $or: [] }` = FALSE, `{ $not: {} }` = FALSE) are RULED — #5322
+ * (maintainer, 2026-08-04) took the identity over the analytics compilers'
+ * fail-closed throw — but not yet stated here as contract: on main today
+ * `read-scope-sql` and `filter-normalizer` still refuse an empty `$and`/`$or`,
+ * and the ruling's implementation PR #5365 (aligns both compilers, enrolls the
+ * four cases in `FILTER_LOGIC_CASES`) is sequenced to land after this one. The
+ * declaration flips to stated contract with that PR, not here — declaring it
+ * first would out-run enforcement. Likewise `{ field: {} }` (a field
+ * constrained by zero operators): #5240 ruled it REJECTED and #5327 gated
+ * driver-sql / driver-sqlite-wasm / driver-memory / formula; `driver-mongodb`
+ * still answers it (tracked by #5376), and the schema-side narrowing stays
+ * with the spec lane. Declaring either before it is enforced everywhere would
+ * be exactly the `declared ≠ enforced` shape this file exists to prevent.
  */
 export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> = z.lazy(() =>
   z.record(z.string(), z.unknown()).and(
