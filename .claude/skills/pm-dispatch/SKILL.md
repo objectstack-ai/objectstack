@@ -1150,9 +1150,12 @@ against the report's own claims:
   过程必须写在 PR 正文里,且新判据要附在 main 语料上的实测信噪比(误报为零
   的证据),否则按 REWORK 要证据。
 - **Tests/docs-only PR 走 `skip-changeset` 标签,不走空 changeset**(空
-  changeset 滞留发布,#4898)。标签由 PM 在验收时打。⛔ 打完标签后 Check
-  Changeset 的 **rerun 无效** —— rerun 重放的是旧事件载荷,看不见新标签;
-  需要一个**新的 labeled 事件**(摘掉再打回)才翻绿(#5497/#5502 实测)。
+  changeset 滞留发布,#4898)。标签由 PM 在验收时打。历史坑(#5497/#5502
+  实测):该闸曾从**事件载荷**读标签,rerun 重放旧载荷看不见新标签,得靠
+  「摘掉再打回」制造新 labeled 事件 —— **#5625(#5580)已根治**,闸门改为
+  实时读 PR 标签,rerun 即翻绿。留此一条是因为它是一类通病的标本:**任何
+  从事件载荷而非现状读判据的闸,rerun 都复现旧世界** —— 撞上同形状的红,
+  先查该闸读的是载荷还是现状,再决定是补事件还是改闸。
   边界:改动若含读者可见的生成产物(如参考文档),dev 选 changeset 而非
   标签是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别来回改。
 - **`+0/-0` in a PR diff is not proof of an empty file.** git renders a file
