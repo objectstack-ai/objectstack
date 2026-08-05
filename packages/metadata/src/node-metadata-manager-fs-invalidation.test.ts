@@ -232,13 +232,18 @@ describe('#5218 — an FS change invalidates the local listCache', () => {
         // An unparseable file is a real change to the stored set — `loadMany`
         // skips it, so the cached list is stale either way and must go.
         //
-        // Note the handler does NOT take its `catch` here: `load()` delegates
-        // to `loadDiagnosed`, which absorbs a loader throw into
-        // `{ data: null, degraded: true }` and returns `null` rather than
-        // rethrowing. So the early-return guards nothing in this case and the
-        // event is announced with `data: null`. That announcement is its own
-        // (pre-existing, out-of-scope) problem — filed separately; this test
-        // pins only that the invalidation happens.
+        // This case was written expecting the handler's `catch` to fire and
+        // return early; it does not, and finding out why is what became #5228.
+        // `load()` delegates to `loadDiagnosed`, which absorbs a loader throw
+        // into `{ data: null, degraded: true }` rather than rethrowing, so the
+        // `catch` was unreachable and the event went out claiming the view was
+        // empty. #5228 fixed the announcement (degraded now reads through
+        // `loadDiagnosed` and announces nothing — see
+        // `node-metadata-manager-degraded-file-event.test.ts`) and moved the
+        // invalidation ABOVE the read so this contract survived it. What this
+        // case pins is unchanged and deliberately narrow: whatever the read
+        // says, the caches go. It is green on both sides of #5228, which is
+        // exactly why that change needed pins of its own.
         await writeMetadataFile('view', 'v_a', view('v_a'));
         const mgr = makeManager();
         await mgr.list('view');
