@@ -49,6 +49,7 @@
  */
 
 import * as actionExec from '../action-execution.js';
+import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailureDetails } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -272,21 +273,22 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // roles (ADR-0090 `positions`, formerly `roles`) so a handler can branch
     // on identity and enforce ownership. Falls back to a `system` principal
     // only for a genuinely anonymous / self-invoked call (#2701).
+    //
+    // [#5372] The SHAPE is built by the one shared producer
+    // (`security/actor-user.ts`) that the MCP `run_action` and AI-route paths
+    // also use — three hand-rolled literals had drifted into three different
+    // user shapes. `name` in particular was hardcoded to `ec.userId` here: a
+    // declared key delivering a plausible WRONG value, which no consumer-side
+    // fallback can detect. It now carries `sys_user.name`, resolved once per
+    // request (falling back to the id, quietly, when there is none).
+    // `organizationId` remains the blessed developer-facing name for the
+    // caller's active org (matches columns + `current_user.organizationId`);
+    // the deprecated `tenantId` alias (#3280) was removed in v11 (#3290).
     const ec: any = _context?.executionContext;
-    const userFromAuth = ec?.userId
-        ? {
-            id: ec.userId,
-            name: ec.userId,
-            email: ec.email,
-            roles: Array.isArray(ec.positions) ? ec.positions : [],
-            positions: Array.isArray(ec.positions) ? ec.positions : [],
-            permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
-            // `organizationId` is the blessed developer-facing name for the
-            // caller's active org (matches columns + `current_user.organizationId`).
-            // The deprecated `tenantId` alias (#3280) was removed in v11 (#3290).
-            organizationId: ec.tenantId,
-          }
-        : { id: 'system', name: 'system', roles: [], positions: [], permissions: [] };
+    const userFromAuth = actorUserFromExecutionContext(
+        ec,
+        await resolveActorDisplayName(() => ql, ec),
+    );
 
     const actionContext: any = {
         record,
