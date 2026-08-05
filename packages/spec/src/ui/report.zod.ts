@@ -249,7 +249,29 @@ export const ReportSchema = lazySchema(() => strictObject({
   surface: 'this report',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { dataSet: 'dataset', source: 'dataset', fields: 'values', columns: 'values', chart: 'chartConfig', filter: 'filters' },
+  // Kept deliberately parallel to `JoinedReportBlockSchema` above: a block is a
+  // sub-report, so an author who learns one vocabulary must not be corrected
+  // differently on the other. The scope-filter entries are that table's,
+  // verbatim.
+  //
+  // #5013 — `filter` used to point at `filters`, a key `ReportSchema` does not
+  // declare either, so taking the advice earned a SECOND rejection and that one
+  // carried no suggestion at all. Three entries are gone with it: `columns` and
+  // `chart` are both declared here (the matrix across-axis and the embedded
+  // chart), so an alias filed under them could never run — an alias is consulted
+  // only from the `unrecognized_keys` path — and `chartConfig` was not a key
+  // either. `alias-integrity.test.ts` now proves both halves for every table in
+  // the package.
+  aliases: {
+    dataSet: 'dataset', source: 'dataset',
+    fields: 'values',
+    // Scope filter. `runtimeFilter` is camelCase, so the edit-distance fallback
+    // under-reaches every one of these (#4990) — same as on a block.
+    filter: 'runtimeFilter',
+    filters: 'runtimeFilter',
+    where: 'runtimeFilter',
+    criteria: 'runtimeFilter',
+  },
   guidance: {
     // #5022 — the reverse half of a two-way disambiguation. The forward half
     // lives on `ChartDrillDownSchema` in `ui/chart.zod.ts`, which tells an

@@ -23,6 +23,7 @@ describe('reference-integrity suite — membership', () => {
       'validateNavAccess',
       'validateNavTargetRefs',
       'validateTranslationReferences',
+      'validateTranslatableSections',
       'validateFlowTemplatePaths',
       'validateAiSurfaceAffinity',
       'validateAiToolReferences',
@@ -93,6 +94,15 @@ describe('reference-integrity suite — every member actually runs', () => {
           data: { provider: 'object', object: 'crm_lead' },
           // validateActionNameRefs: no such action.
           bulkActions: ['mass_update'],
+        },
+        // validateTranslatableSections (#5417): a form section authored with a
+        // `label` and no `name`. `_sections` is keyed by name, so this heading
+        // has no key any bundle can carry — and crm_lead IS translated below,
+        // which is what opens the rule's opt-in gate.
+        form: {
+          type: 'simple',
+          data: { provider: 'object', object: 'crm_lead' },
+          sections: [{ label: 'Qualification', columns: 2, fields: ['name'] }],
         },
       },
     ],
@@ -228,6 +238,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('translation-target-unknown');
+    expect(rules).toContain('translation-section-name-missing');
     expect(rules).toContain('flow-template-unknown-field');
     expect(rules).toContain('ai-skill-surface-mismatch');
     expect(rules).toContain('ai-skill-tool-unresolved');

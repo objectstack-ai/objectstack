@@ -35,7 +35,7 @@ async function promptPassword(promptText: string): Promise<string> {
 
     const handler = (char: string) => {
       switch (char) {
-        case '': // Ctrl+C
+        case '\u0003': // Ctrl+C
           cleanup();
           process.kill(process.pid, 'SIGINT');
           break;
@@ -44,7 +44,7 @@ async function promptPassword(promptText: string): Promise<string> {
           cleanup();
           resolve(chars.join(''));
           break;
-        case '': // Backspace
+        case '\u007f': // Backspace
           if (chars.length > 0) {
             chars.pop();
             process.stdout.clearLine(0);

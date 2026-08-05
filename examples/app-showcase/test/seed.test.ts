@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import stack from '../objectstack.config.js';
 import { ShowcaseSeedData } from '../src/data/seed/index.js';
 import * as viewBarrel from '../src/ui/views/index.js';
@@ -121,6 +122,54 @@ describe('showcase stack', () => {
       expect(label).not.toMatch(/^[\x20-\x7e]+$/);
     }
   });
+
+  /**
+   * #5443 — the comment at the top of `ui/views/contact.view.ts` promises that
+   * the hand-written `form` "mirrors what the platform auto-derives", i.e. that
+   * you may OMIT it and get the same grouped form. That promise is only true if
+   * the object DECLARES the four groups: `deriveFieldGroupLayout` (ADR-0085 §5,
+   * the one derivation every renderer and the i18n walker consume) buckets a
+   * field only when its `group` matches a declared `fieldGroups[].key`, and
+   * otherwise drops it into the trailing untitled bucket — which is exactly
+   * what nine `showcase_contact` fields did while the comment claimed
+   * otherwise (`os lint`: 9 × `field-group-undeclared`).
+   *
+   * So this pins the promise itself, not the declaration: the derived sections
+   * must equal the authored `form.sections` in ORDER and MEMBERSHIP. Deleting
+   * `fieldGroups` makes `deriveFieldGroupLayout` return `null` (no declared
+   * groups → grouping does not apply), and the assertion goes red on the first
+   * line rather than passing vacuously on an empty comparison.
+   *
+   * Read on the composed stack for the same reason the section-key test above
+   * is: what renderers and gates see is `stack.objects`, not the imported
+   * module. The trailing ungrouped bucket the SERVED object grows (the
+   * platform injects `owner_id`, which is neither hidden nor an audit column)
+   * is deliberately out of frame here — it is a registration-time addition, and
+   * the view comment states it in prose.
+   */
+  it('derives the contact form sections from `fieldGroups` exactly as the view authors them', () => {
+    const object = (stack.objects ?? []).find(
+      (o: { name: string }) => o.name === 'showcase_contact',
+    );
+    const derived = deriveFieldGroupLayout(object);
+    expect(derived, 'showcase_contact must declare fieldGroups (#5443)').not.toBeNull();
+    expect(derived!.map((s) => s.key)).toEqual(['contact', 'work', 'status', 'notes']);
+
+    const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact');
+    const form = (contact as { form?: unknown } | undefined)?.form;
+    const authored = (form as { sections?: unknown } | undefined)?.sections;
+    const authoredPairs = (Array.isArray(authored) ? authored : []).map((s) => {
+      const section = s as { name?: unknown; label?: unknown; fields?: unknown };
+      return {
+        key: section.name,
+        label: section.label,
+        fields: Array.isArray(section.fields) ? section.fields : [],
+      };
+    });
+    expect(derived!.map((s) => ({ key: s.key, label: s.label, fields: s.fields }))).toEqual(
+      authoredPairs,
+    );
+  }, 60_000);
 
   it('registers UI, automation, security, and AI metadata', () => {
     expect((stack.views ?? []).length).toBeGreaterThan(0);

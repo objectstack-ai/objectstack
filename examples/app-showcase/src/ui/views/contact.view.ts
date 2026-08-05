@@ -13,11 +13,27 @@ const data = { provider: 'object' as const, object: 'showcase_contact' };
  * Two projections of ONE flat, grouped field set (see objects/contact.object.ts):
  *
  *   • `form` (default edit/detail) — the FULL record, grouped into sections by
- *     each field's `group`. This mirrors what the platform auto-derives from
- *     `field.group`; it is written out explicitly here only so the example is
- *     legible. In the target model you can OMIT it and get an equivalent
- *     grouped form for free. Sections list fields as bare strings → every
- *     field inherits its type / validation / FLS / default from the object.
+ *     each field's `group`. This mirrors what the platform auto-derives, and
+ *     it is written out explicitly here only so the example is legible: OMIT
+ *     it and `deriveFieldGroupLayout` (ADR-0085 §5) produces these same four
+ *     sections, in this order, with these members. Sections list fields as
+ *     bare strings → every field inherits its type / validation / FLS /
+ *     default from the object.
+ *
+ *     The derivation's authority is the object's `fieldGroups` DECLARATION,
+ *     not `field.group` on its own: a field whose `group` names no declared
+ *     key falls into the trailing ungrouped bucket exactly as if it carried no
+ *     `group` at all (`os lint` reports it as `field-group-undeclared`). That
+ *     is why `objects/contact.object.ts` declares all four keys — without them
+ *     this comment would be promising a grouping the platform never derives
+ *     (#5443).
+ *
+ *     Two honest differences from the hand-written version below, both of them
+ *     the reason the explicit `form` is still worth authoring here: the
+ *     derived layout appends the platform-injected `owner_id` in a trailing
+ *     untitled section (audit/system columns are excluded, ownership is not),
+ *     and per-section presentation like `columns: 2` is a form-view knob the
+ *     group declaration does not carry.
  *
  *   • `formViews.create` (the escape hatch) — a SPARSE override for the create
  *     experience: just the core fields, one ungrouped section. Note what is

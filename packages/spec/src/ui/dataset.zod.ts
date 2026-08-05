@@ -249,7 +249,13 @@ export const DatasetSchema = lazySchema(() => strictObject({
   surface: 'this dataset',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { source: 'object', objectName: 'object', measures: 'metrics', dimension: 'dimensions', filter: 'filters' },
+  // #5013 — `measures` and `filter` are both DECLARED here (the aggregatable
+  // values and the intrinsic scope filter), so neither entry could ever run: an
+  // alias is consulted only from the `unrecognized_keys` path, and a declared
+  // key is recognised. Their targets (`metrics`, `filters`) were not keys of
+  // this schema either, so had they been reachable they would have prescribed a
+  // second rejection.
+  aliases: { source: 'object', objectName: 'object', dimension: 'dimensions' },
 }, {
   /** Identity. */
   name: SnakeCaseIdentifierSchema.describe('Dataset unique name'),

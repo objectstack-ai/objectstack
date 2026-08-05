@@ -99,13 +99,55 @@ jobs:
           # never go red. #3373 merged a real spec/api-surface fix with no
           # changeset while this step happily reported "Found 104 changeset(s)".
           # Diffing against BASE_SHA ignores that residue and sees only what the
-          # PR itself introduced. An empty-frontmatter changeset still counts —
-          # it is the sanctioned "this PR releases nothing" declaration, on par
-          # with the skip-changeset label.
+          # PR itself introduced.
+          #
+          # An empty-frontmatter changeset still COUNTS here, and that is
+          # deliberate and unchanged — it remains a legal "this PR releases
+          # nothing" declaration. What #5292 corrected is the PRESCRIPTION, not
+          # the count: this comment used to call it "on par with the
+          # skip-changeset label", and the failure message below used to offer
+          # the two as equals. They are not equal downstream. The label is a
+          # gate-level exemption that produces no input for changesets/action;
+          # an empty changeset is a real input to it. See the message for the
+          # consequence.
           ADDED=$(git diff --name-only --diff-filter=A "$BASE_SHA" HEAD -- '.changeset/*.md' \
                   | grep -v '/README\.md$' | wc -l | tr -d '[:space:]')
           if [ "$ADDED" -eq 0 ]; then
-            echo "::error::This PR adds no changeset. Run 'pnpm changeset' (an empty changeset is fine for changes that release nothing), or apply the 'skip-changeset' label if it does not need one."
+            # The full comparison goes to the job log — that is what an author
+            # reading `gh run view --log-failed`, or expanding this step in the
+            # UI, actually sees. The ::error:: annotation after it is the
+            # one-line version for the Checks tab. Both lead with the label.
+            # Terminator sits at this block's base indentation on purpose: YAML
+            # strips that much from every line, so `MSG` lands in column 0 of
+            # the generated script. Do not re-indent it.
+            cat <<'MSG'
+          This PR adds no changeset. There are three ways forward, and they are NOT
+          equivalent. Pick by what the PR actually releases:
+
+            1. It releases something
+               -> run 'pnpm changeset' and name the packages it releases.
+
+            2. It releases nothing (.github/, .claude/, docs/, content/, examples/,
+               tests-only, and the like)
+               -> apply the 'skip-changeset' label.   <<< PREFERRED
+               The label is a gate-level exemption. It produces NO input for
+               changesets/action, so it cannot affect a release.
+
+            3. An empty-frontmatter changeset also satisfies this gate and stays
+               legal -- but it is a LAST RESORT, not the quick way past a red check.
+               Unlike the label it is a REAL INPUT to changesets/action: when every
+               pending changeset is empty, the action takes its
+               "hasChangesets && !hasNonEmptyChangesets" branch, prints
+               "All changesets are empty; not creating PR", and returns in 0 seconds
+               -- no version PR, no publish, and the Release run still goes GREEN.
+               That is #4898, which silently stalled 17.0.0-rc.2. It also buys you
+               nothing the label does not: an empty changeset names no package, so
+               its body reaches no CHANGELOG.
+
+          If you are unsure, take route 2. A wrong 'skip-changeset' label is caught by
+          review; a wrong empty changeset is caught by nobody.
+          MSG
+            echo "::error::This PR adds no changeset. If it releases nothing, apply the 'skip-changeset' label (preferred); otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset also passes this gate, but it is NOT equivalent to the label -- it is a real input to changesets/action, and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
             exit 1
           fi
           echo "This PR adds $ADDED changeset(s)."

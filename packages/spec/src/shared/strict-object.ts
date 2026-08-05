@@ -88,7 +88,7 @@ import { strictUnknownKeyError } from './suggestions.zod';
  * structural check gets that for free, and keeps working if the tombstone
  * helper is ever reshaped.
  */
-function acceptsNothing(schema: unknown, depth = 0): boolean {
+export function acceptsNothing(schema: unknown, depth = 0): boolean {
   if (depth > 6) return false;
   const def = (schema as { _zod?: { def?: { type?: string; innerType?: unknown } } })._zod?.def;
   if (!def?.type) return false;
@@ -149,6 +149,48 @@ export interface StrictObjectOptions {
 }
 
 /**
+ * One built authoring shape, paired with the options it was declared with, so
+ * the table can be judged against the schema it makes claims about (#5013).
+ */
+export interface StrictObjectDeclaration {
+  /** The authoring metadata the shape was declared with. */
+  readonly options: StrictObjectOptions;
+  /**
+   * The shape the options make claims about — the very object the error map
+   * reads `knownKeys` from, so the audit judges exactly what the suggester
+   * judges rather than a second view of it.
+   */
+  readonly shape: z.ZodRawShape;
+}
+
+const DECLARATIONS: StrictObjectDeclaration[] = [];
+
+/**
+ * Every authoring shape {@link strictObject} has built **so far in this
+ * process** — the audit handle behind `alias-integrity.test.ts` (#5013).
+ *
+ * An `aliases` / `guidance` table is a **claim about the schema**, in two
+ * halves: that the key it is filed under is one the shape *rejects* (an alias
+ * runs only from the `unrecognized_keys` path, so a declared key can never
+ * reach it), and that the key it prescribes is one the shape *accepts*. Nothing
+ * checked either half until #5013, and both were false on `main` —
+ * `ReportSchema` answered `filter` with *"Did you mean `filter` → `filters`?"*
+ * and then rejected `filters` too, with no suggestion the second time.
+ *
+ * Recorded at construction rather than read back off the built schema, because
+ * a marker on the instance does not survive the clone `.superRefine()` /
+ * `.extend()` make — which silently un-audited most of the interesting schemas,
+ * `ReportSchema` and `DatasetSchema` among them, when this was first written
+ * that way. "So far in this process" is why the audit walks the schema graph to
+ * force every `lazySchema` before reading this, and cross-checks the result
+ * against an AST scan of the call sites: a table nothing constructs is a table
+ * nothing judges, and that must fail loudly rather than pass quietly.
+ */
+export function strictObjectDeclarations(): readonly StrictObjectDeclaration[] {
+  return DECLARATIONS;
+}
+
+/**
  * A `.strict()` object whose unknown-key error names the surface, echoes the
  * offending key, and suggests the closest declared key — with the candidate
  * list read from `shape` rather than transcribed alongside it.
@@ -201,6 +243,8 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
       guidance,
     }))(issue);
   };
+
+  DECLARATIONS.push({ options, shape });
 
   return z.object(shape, { error }).strict();
 }

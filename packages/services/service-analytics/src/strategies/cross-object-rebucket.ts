@@ -118,7 +118,7 @@ export function rebucketCrossObject(
       resolved[cd.outputName] = cd.fkToAttr.has(fk) ? cd.fkToAttr.get(fk) : RESTRICTED_BUCKET;
     }
 
-    // Bucket key = base dims (unchanged) + resolved attributes. `` is a
+    // Bucket key = base dims (unchanged) + resolved attributes. `\u0001` is a
     // separator no group value contains, matching the engine's own convention.
     const keyParts: string[] = [];
     // JSON-encoded, so the empty bucket (`null` on both aggregation paths since
@@ -128,7 +128,7 @@ export function rebucketCrossObject(
     // bucket keeps the row's own value verbatim below.
     for (const f of baseDimFields) keyParts.push(`${f}=${JSON.stringify(row[f] ?? null)}`);
     for (const cd of crossDims) keyParts.push(`${cd.outputName}=${String(resolved[cd.outputName])}`);
-    const key = keyParts.join('');
+    const key = keyParts.join('\u0001');
 
     let bucket = buckets.get(key);
     if (!bucket) {
