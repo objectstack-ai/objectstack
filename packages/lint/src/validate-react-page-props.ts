@@ -333,9 +333,10 @@ function checkObjectChart(
   // and the strictness ledger's `chart.zod.ts` row already names it as the
   // weakness: a gate that re-derives the rules cannot inherit the schema's
   // unknown-key handling, so `groupby` sails through it. Parsing inherits all
-  // of it for free — the surface name, the near-key guidance, the
-  // `target: 'navigate'` prescription — which is why #5022 declared the shape
-  // as Zod rather than as another list here.
+  // of it for free — the surface name, the near-key guidance, the `target`
+  // union — which is why #5022 declared the shape as Zod rather than as
+  // another list here. #5435 is the dividend: widening `target` to admit
+  // `'navigate'` moved this gate with it, with nothing to edit in this file.
   checkChartDrillDown(values.get('drillDown'), push);
 
   // Inline `data` wins over the aggregate query: the columns then come from

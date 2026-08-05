@@ -392,9 +392,16 @@ export const ChartInteractionSchema = lazySchema(() => strictObject(
  * ## Keys that belong to other widgets, not to a chart
  *
  * objectui's renderer carries a wider drill config shared by its table / pivot /
- * metric widgets (`mode`, `report`, and a `target: 'navigate'` arm). A chart
- * reads none of them, so they are not declared here — see the `guidance`
- * entries, which name each one and where it does apply.
+ * metric widgets (`mode`, `report`). A chart reads neither, so they are not
+ * declared here — see the `guidance` entries, which name each one and where it
+ * does apply.
+ *
+ * `target: 'navigate'` used to be on that list and no longer is: #5022 excluded
+ * it on a MEASUREMENT (ObjectChart's hand-rolled drawer only branched on
+ * `'dialog'`, so `'navigate'` fell through to the Sheet), and objectui#3382
+ * implemented the arm, which retired the measurement. #5435 widened the union
+ * to match what the renderer now delivers. The ordering matters and is not
+ * reversible: the protocol declares an arm only once a renderer honours it.
  */
 export const ChartDrillDownSchema = lazySchema(() => strictObject(
   {
@@ -462,19 +469,29 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
      * side sheet; `'dialog'` is a centered modal, for when the chart is already
      * inside a drawer and a second sheet would stack badly.
      *
-     * There is no `'navigate'` arm here even though objectui's shared renderer
-     * type has one: `<ObjectChart>` does not implement it and silently renders
-     * the drawer instead (objectui#3354). Escalating to the object's full list
-     * page is available anyway, and needs no config — the drill drawer shows an
-     * "Open in list" action whenever the host app provides drill navigation.
+     * `'navigate'` skips the in-place view entirely and sends the user to the
+     * object's full list page, carrying the same filter the drawer would have
+     * used (the widget filter ∧ the clicked segment's context). Reach for it
+     * when the drilled list is a destination rather than a peek.
+     *
+     * ## What `'navigate'` requires, and what happens without it
+     *
+     * It is the one arm with a HOST PRECONDITION: the app must provide drill
+     * navigation — in objectui that is `DrillNavigationContext.openRecordList`.
+     * When the host does not provide it there is nowhere to navigate to, and
+     * the renderer falls back to `'drawer'`. That fallback is DOCUMENTED
+     * behaviour, not a failure: the click still opens the records, just in
+     * place. Semantics match `DrillDownDrawer.navigateOnly`, which is how the
+     * table / pivot / metric widgets on objectui's shared `DrillDownConfig`
+     * have always honoured this arm.
+     *
+     * Note the escape hatch is independent of this key: the drill drawer shows
+     * an "Open in list" action whenever the host wires drill navigation, so a
+     * `'drawer'` chart can still reach the list page on demand. `'navigate'`
+     * is for making that jump the DEFAULT click behaviour.
      */
-    target: z.enum(['drawer', 'dialog'], {
-      error: (issue) =>
-        issue.code === 'invalid_value' && issue.input === 'navigate'
-          ? "`drillDown.target: 'navigate'` is not supported by a chart. objectui's shared drill type offers it for the table/pivot/metric widgets, but `<ObjectChart>` does not implement that arm — it renders the drawer regardless (objectui#3354), so declaring it here would promise a jump that never happens. Use 'drawer' (the default) or 'dialog'; the drawer already offers an \"Open in list\" action when the host app wires drill navigation."
-          : undefined,
-    }).optional()
-      .describe("Where the drilled list opens: 'drawer' (default, side sheet) or 'dialog' (centered modal)"),
+    target: z.enum(['drawer', 'dialog', 'navigate']).optional()
+      .describe("Where the drilled list opens: 'drawer' (default, side sheet), 'dialog' (centered modal), or 'navigate' (skip the in-place view and open the object's full list page; needs host drill navigation, else falls back to 'drawer')"),
 
     /**
      * Whitelist of field names shown as columns in the drilled list, in order.
