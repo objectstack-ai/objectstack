@@ -11,6 +11,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
@@ -662,12 +663,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       contains: 'LIKE', notContains: 'NOT LIKE',
       startsWith: 'LIKE', endsWith: 'LIKE',
     };
-    /** The LIKE pattern each string operator wraps its comparand in. */
-    const likePattern: Record<string, (v: string) => string> = {
-      contains: (v) => `%${v}%`,
-      notContains: (v) => `%${v}%`,
-      startsWith: (v) => `${v}%`,
-      endsWith: (v) => `%${v}`,
+    /**
+     * Where each string operator puts the wildcard. [#5567] The pattern itself is
+     * built by the shared `likePattern`, which ESCAPES the comparand — `_` and
+     * `%` are LIKE wildcards, so the old inline table quietly turned an author's
+     * literal into a pattern (`$contains: '_admin'` also matched `xyadmin`).
+     * `objectql-strategy.ts`'s `LIKE_SQL_OPS` carries the same table for the
+     * `/analytics/sql` echo of this statement; they move together.
+     */
+    const likeShape: Record<string, LikeShape> = {
+      contains: 'contains', notContains: 'contains',
+      startsWith: 'starts', endsWith: 'ends',
     };
 
     // Null predicates and the LIKE family read the column as stored — the former
@@ -690,10 +696,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     // The LIKE family reads the column as stored — a substring/prefix/suffix
     // match is on the raw text — so it keeps the un-normalised reference.
-    const pattern = likePattern[operator];
-    if (pattern) {
-      params.push(pattern(values[0]));
-      return `${rawCol} ${sqlOp} $${params.length}`;
+    const shape = likeShape[operator];
+    if (shape) {
+      // [#5567] Escaped pattern AND an explicit `ESCAPE`, bound together: the
+      // escaping alone would search for a literal backslash on SQLite (no
+      // default escape character there), the clause alone would change nothing.
+      params.push(likePattern(shape, values[0]));
+      const patternRef = `$${params.length}`;
+      params.push(LIKE_ESCAPE_CHAR);
+      return `${rawCol} ${sqlOp} ${patternRef} ESCAPE $${params.length}`;
     }
 
     // A bare-day `lte` bound means "through that whole day" (#3777): compile
