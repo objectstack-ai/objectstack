@@ -123,6 +123,7 @@ import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
+import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -923,6 +924,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateRuleCompilability(stack),
+  },
+  // #5178 — the residual half of #5029, which registering `ajv-formats` does
+  // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is
+  // logged once and DROPPED, so the rule compiles, ships, runs on every write
+  // and enforces nothing for the keyword its author wrote — and the record is
+  // accepted, which is the silent direction. Deliberately its own entry rather
+  // than a third finding inside the rule above: that one's whole contract is
+  // compiling in the runtime's exact environment, and a typo'd format compiles
+  // there. This judges the format NAME against the registered set (enumerated
+  // from the same ajv instance, never a hardcoded list) and compiles nothing,
+  // so the #4762/#5029 compile parity is untouched — a judgement beside the
+  // compile, not a divergent compile. Gating for the `lint-flow-patterns.ts`
+  // bar: no reading of the metadata behaves as written.
+  {
+    name: 'validateRuleSchemaFormats',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-rule-schema-formats.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    run: (stack) => validateRuleSchemaFormats(stack),
   },
 ];
 

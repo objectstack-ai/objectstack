@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-nul-bytes -- rejects raw C0 control bytes in every tracked TEXT file.
+// check-nul-bytes -- rejects raw ASCII control bytes in every tracked TEXT file.
 //
-// Scanned set (#5157): 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f -- the whole C0 control
-// range except the three bytes that ARE ordinary text structure: tab (0x09),
-// LF (0x0a), CR (0x0d). Equivalently `[\x00-\x08\x0b\x0c\x0e-\x1f]`, the exact
-// pattern #4890's own manual sweep used before this gate narrowed to NUL.
+// Scanned set (#5157, #5460): 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f and 0x7f -- every
+// ASCII control character except the three bytes that ARE ordinary text
+// structure: tab (0x09), LF (0x0a), CR (0x0d). Equivalently
+// `[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`.
+//
+// #5157 drew that set as "C0 minus tab/LF/CR", matching the pattern #4890's own
+// manual sweep used before this gate narrowed to NUL. #5460 added DEL (0x7f),
+// which is a control character but NOT a C0 one -- it sits alone at the end of
+// the ASCII table, outside any contiguous range, which is precisely how a
+// range-shaped set missed it. See "Why DEL is in the set too" below.
 //
 //   node scripts/check-nul-bytes.mjs
 //   node scripts/check-nul-bytes.mjs --self-test   # verify the checker itself
@@ -73,6 +79,38 @@
 // escape sequence is byte-identical at runtime and is the only spelling that a
 // reviewer, a grep and a diff can all see.
 //
+// ## Why DEL (0x7f) is in the set too (#5460)
+//
+// #5157 drew its set as "the C0 controls", and DEL is not one: C0 is 0x00-0x1f,
+// and 0x7f sits alone at the far end of the ASCII table. Nothing about that
+// numbering is a reason to treat it differently -- it is an artifact of where
+// ASCII put the byte, and a set expressed as a contiguous range simply could not
+// reach it.
+//
+// The proof that the gap was arbitrary rather than considered is where the two
+// remaining specimens were found. #5157 escaped a raw 0x03 in the CLI's password
+// prompt; NINE LINES further down the SAME switch, in both login.ts and
+// register.ts, sat a raw 0x7f as the Backspace key literal, untouched:
+//
+//     case '<0x03>': // Ctrl+C      <- escaped by #5157; reads as a key
+//     ...
+//     case '<0x7f>': // Backspace   <- shows as: case '':
+//
+// One case in a switch reads as a key, the next reads as an empty-string case,
+// and the only thing separating them is which side of 0x1f the byte landed on.
+//
+// Each of the three harms above lands on DEL unchanged: it renders as nothing
+// (the `case '':` above), neither spelling can be searched for, and -- the
+// decisive one -- the accident source does not pick byte values. Both specimens
+// came from the same tool behaviour as #4763 / #4890 / PR #5140. So did the
+// FIRST draft of #5460's own issue body, which materialised two real 0x03 bytes
+// while describing this very defect; that is the third and fourth recorded
+// instance of the source, and it is why the set is drawn by accident source
+// rather than by byte semantics.
+//
+// The wider vocabulary agrees: C's `iscntrl` and the Unicode regex class
+// \p{Cc} both count 0x7f as a control character. "C0" was the narrower reading.
+//
 // ## Scope: the carrier, not the use (#4890)
 //
 // This guard used to scan JS/TS extensions only, on the theory that a raw NUL
@@ -121,8 +159,11 @@
 //     dropped into the middle of it -- strip only NUL and that decodes as
 //     invalid UTF-8, the file is skipped as binary, and the 0x01 is its own
 //     alibi, one byte value over from the circularity this guard was built to
-//     break. Widening cannot go wrong in the other direction either: every
-//     scanned byte is <= 0x1f, while valid UTF-8 multi-byte sequences are built
+//     break. #5460 extended the same stripping to DEL, and it is load-bearing
+//     there for exactly the same reason: `E4 B8 7F AD` is 中 with a stray 0x7f
+//     dropped into it, and a C0-only strip reads that file as binary and hides
+//     the 0x7f. Widening cannot go wrong in the other direction either: every
+//     scanned byte is <= 0x7f, while valid UTF-8 multi-byte sequences are built
 //     exclusively from bytes >= 0x80, so removing them can never break an
 //     otherwise-valid sequence.
 //   - The decode reads the ENTIRE file, not a leading window. git's 8000-byte
@@ -132,9 +173,12 @@
 // A new text file with an extension nobody has seen before therefore gets
 // scanned by default -- it decodes as UTF-8, so it is text. Only real binary
 // assets (the repo's 4 PNGs and 1 ICO today) fail rule 3 and drop out. Measured
-// over all 5448 tracked paths when #5157 landed: the widened stripping moves
-// exactly zero files between text and binary, so it buys the anti-circularity
-// property above at no cost in false positives.
+// over all 5448 tracked paths when #5157 landed, and again over all 5456 when
+// #5460 added DEL: the widened stripping moves exactly zero files between text
+// and binary, so it buys the anti-circularity property above at no cost in
+// false positives. The 4 PNGs and the ICO carry raw 0x7f bytes in quantity
+// (1317 in one of them) and stay binary regardless -- they fail rule 3 on their
+// whole-file decode, not on any single byte.
 //
 // There is intentionally NO per-file exemption hatch. No tracked file in this
 // repo carries a legitimate raw control byte; if one ever genuinely needs to,
@@ -146,16 +190,27 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /**
- * The scanned set as a 256-entry lookup: every C0 control except tab, LF and CR.
- * A table rather than a regex, because the scan is one pass over BYTES and must
- * never have to decode the file first -- a file this gate is interested in is
- * precisely one that may not decode cleanly.
+ * The scanned set as a 256-entry lookup: every ASCII control character except
+ * tab, LF and CR. A table rather than a regex, because the scan is one pass over
+ * BYTES and must never have to decode the file first -- a file this gate is
+ * interested in is precisely one that may not decode cleanly.
  */
 const IS_SCANNED = new Uint8Array(256);
 for (let b = 0x00; b <= 0x1f; b++) IS_SCANNED[b] = 1;
 IS_SCANNED[0x09] = 0; // tab -- ordinary text structure
 IS_SCANNED[0x0a] = 0; // LF
 IS_SCANNED[0x0d] = 0; // CR
+// DEL (#5460). Not a C0 control -- it sits alone at the end of the ASCII table,
+// which is exactly why the C0-shaped range above missed it, and why two raw
+// specimens sat nine lines from a 0x03 this gate had just made #5157 escape.
+// It is in the set because the set is drawn by the ACCIDENT SOURCE, and an
+// editing tool materialising an escape into its byte does not pick byte values.
+// Every consequence the C0 argument rests on holds for it verbatim: it renders
+// as nothing, neither spelling can be searched for, and it can split a
+// multi-byte sequence and become its own alibi. The usual definitions of
+// "control character" agree -- C's `iscntrl` and the regex class \p{Cc} both
+// include it.
+IS_SCANNED[0x7f] = 1;
 
 /**
  * The escape an author should have written for a byte, as TEXT.
@@ -314,12 +369,12 @@ function main() {
   const { offenders } = result;
 
   if (offenders.length === 0) {
-    console.log(`check-nul-bytes: OK (${summarise(result)}; no raw C0 control bytes).`);
+    console.log(`check-nul-bytes: OK (${summarise(result)}; no raw ASCII control bytes).`);
     process.exit(0);
   }
 
   const plural = offenders.length === 1 ? 'file contains' : 'files contain';
-  console.error(`check-nul-bytes: ${offenders.length} ${plural} a raw C0 control byte\n`);
+  console.error(`check-nul-bytes: ${offenders.length} ${plural} a raw ASCII control byte\n`);
   for (const o of offenders) {
     const times = o.count === 1 ? '1 occurrence' : `${o.count} occurrences`;
     const which = o.bytes.map(hex).join(', ');
@@ -333,7 +388,7 @@ function main() {
   console.error(`
 The resulting string is byte-identical at runtime, so behaviour does not change.
 
-Why every C0 control byte and not only NUL (#5157):
+Why every ASCII control byte and not only NUL (#5157, #5460):
 
   • A raw NUL makes grep/ripgrep treat the entire file as binary and silently
     return ZERO matches, so the file drops out of code search and out of every
@@ -347,8 +402,10 @@ Why every C0 control byte and not only NUL (#5157):
     escape text (the file holds a byte) and not the byte (nobody can type it).
   • Every occurrence in this repo came from an editing tool materialising an
     escape into the real byte while someone was writing ABOUT the byte (#4763,
-    #4890, PR #5140). That slip does not pick byte values, so neither does this
-    gate.
+    #4890, PR #5140, and #5460's own issue body). That slip does not pick byte
+    values, so neither does this gate -- which is why DEL (0x7f) is scanned too
+    even though it is not a C0 control (#5460): it is the byte the C0-shaped
+    range could not reach, and it was sitting nine lines from one that was.
 
 That harm is not any one language's, so this guard covers every tracked TEXT
 file -- markdown and agent instructions under .claude/ included (#4890), not
@@ -386,6 +443,7 @@ function selfTest() {
   const NUL = byte(0x00);
   const SOH = byte(0x01); // the PR #5140 specimen
   const ETX = byte(0x03); // Ctrl+C, as a CLI key literal
+  const DEL = byte(0x7f); // Backspace, as a CLI key literal -- the #5460 specimen
   const dir = mkdtempSync(join(tmpdir(), 'check-nul-bytes-selftest-'));
   const write = (rel, contents) => {
     const full = join(dir, rel);
@@ -436,6 +494,25 @@ function selfTest() {
       'docs/split-sequence.md',
       Buffer.concat([Buffer.from('head '), byte(0xe4), byte(0xb8), SOH, byte(0xad), Buffer.from(' tail\n')]),
     );
+    // #5460 specimen: a raw DEL as a Backspace key literal, the shape login.ts
+    // and register.ts both carried nine lines below the 0x03 #5157 escaped.
+    // Deliberately holds NO C0 byte at all, so the "green before / red after"
+    // proof below is about DEL and not about some other byte riding along.
+    write('packages/cli/src/prompt.ts', Buffer.concat([Buffer.from("      case '"), DEL, Buffer.from("': // Backspace\n")]));
+    // #5460, the anti-circularity case for DEL, mirroring the 0x01 one above:
+    // E4 B8 AD is 中; with a 0x7f in the middle, stripping only the C0 set
+    // leaves invalid UTF-8, the file reads as "binary", and the DEL becomes its
+    // own alibi. Stripping DEL as well is what keeps it visible.
+    write(
+      'docs/split-sequence-del.md',
+      Buffer.concat([Buffer.from('head '), byte(0xe4), byte(0xb8), DEL, byte(0xad), Buffer.from(' tail\n')]),
+    );
+    // The cure, as a fixture: the same key literal written as the escape TEXT
+    // stays green. This is the state the two CLI files are left in by #5460, and
+    // it is what makes the gate's prescription testable rather than merely
+    // stated -- a red fixture with no green counterpart proves only that
+    // something is rejected, never that the fix is accepted.
+    write('packages/cli/src/prompt-fixed.ts', "      case '\\u007f': // Backspace\n");
     // An extension nobody has seen before must still be scanned -- that is the
     // property an allow-list cannot have.
     write('config/weird.frobnicate', Buffer.concat([Buffer.from('key='), NUL, Buffer.from('\n')]));
@@ -447,12 +524,11 @@ function selfTest() {
     write('src/clean.ts', "export const sep = '\\u0000';\n");
     write('.github/workflows/ci.yml', 'name: ci\non: [push]\n');
     // The three exempt controls are ordinary text structure and must stay green,
-    // CRLF endings included. DEL (0x7f) rides along: it is not a C0 control, so
-    // it is deliberately outside this gate's set and must not be flagged either.
-    write(
-      'src/whitespace.ts',
-      Buffer.concat([Buffer.from('const a\t= 1;\r\nconst b = 2;\r\n'), byte(0x7f), Buffer.from('\n')]),
-    );
+    // CRLF endings included. DEL used to ride along on this fixture, asserted as
+    // deliberately OUTSIDE the set; #5460 moved it into the set, so it moved out
+    // of this fixture and into `packages/cli/src/prompt.ts` above, where it is
+    // now asserted red. Tab / CR / LF are the whole exemption list.
+    write('src/whitespace.ts', 'const a\t= 1;\r\nconst b = 2;\r\n');
     // Real binary assets: a PNG header and an ICO header, both carrying NULs and
     // other control bytes -- they must stay binary under the WIDENED stripping.
     write(
@@ -509,6 +585,49 @@ function selfTest() {
     assert(!nulOnlyProbeDecodes, '#5157: NUL-only stripping would misread the split-sequence file as binary');
     assert(classify(splitSeq) === 'text', '#5157: widened stripping keeps the split-sequence file scannable');
 
+    // ── #5460: DEL added to the set, proved in both directions ──────────────
+    //
+    // Forward -- a raw DEL is flagged, and reported as 0x7f so the prescription
+    // can name the right escape.
+    assert(flagged.has('packages/cli/src/prompt.ts'), '#5460: a raw 0x7f Backspace literal must be flagged');
+    assert(
+      flagged.get('packages/cli/src/prompt.ts')?.bytes.join() === String(0x7f),
+      `#5460: the offending byte is reported as 0x7f, got ${flagged.get('packages/cli/src/prompt.ts')?.bytes}`,
+    );
+    assert(escapeFor(0x7f) === '\\u007f', 'the prescribed escape for DEL is \\u007f');
+    assert(hex(0x7f) === '0x7f', 'DEL is reported as 0x7f');
+    assert(flagged.has('docs/split-sequence-del.md'), '#5460: a 0x7f inside a multi-byte sequence must be flagged');
+    //
+    // Reverse -- and note WHICH way it runs. #5157's own reverse proof compared
+    // against the NUL-only gate; the predecessor here is the C0-only gate, so
+    // the question is whether these fixtures were green under THAT. They were,
+    // and not by accident of construction: neither contains a single C0 byte, so
+    // a C0-shaped scan had nothing to find in either.
+    const c0OnlyGateWouldFlag = (rel) => {
+      const buf = readFileSync(join(dir, rel));
+      return buf.some((b) => b <= 0x1f && b !== 0x09 && b !== 0x0a && b !== 0x0d);
+    };
+    for (const rel of ['packages/cli/src/prompt.ts', 'docs/split-sequence-del.md']) {
+      assert(!c0OnlyGateWouldFlag(rel), `#5460 reverse: ${rel} carries no C0 byte, so the C0-only gate passed it`);
+    }
+    // ...and the DEL anti-circularity fixture would not even have been SCANNED
+    // before: strip the C0 set only, and `head E4 B8 7F AD tail` fails to decode,
+    // so the file skips as binary and the 0x7f is its own alibi.
+    const splitDel = readFileSync(join(dir, 'docs/split-sequence-del.md'));
+    let c0OnlyProbeDecodes = true;
+    try {
+      new TextDecoder('utf8', { fatal: true }).decode(splitDel.filter((b) => b > 0x1f || b === 0x09 || b === 0x0a || b === 0x0d));
+    } catch {
+      c0OnlyProbeDecodes = false;
+    }
+    assert(!c0OnlyProbeDecodes, '#5460: C0-only stripping would misread the DEL split-sequence file as binary');
+    assert(classify(splitDel) === 'text', '#5460: widened stripping keeps the DEL split-sequence file scannable');
+    //
+    // The cure is green. Escaping is what the gate tells authors to do, so the
+    // escaped spelling must actually pass -- otherwise the prescription is
+    // untested and an author who follows it lands in the same red.
+    assert(!flagged.has('packages/cli/src/prompt-fixed.ts'), '#5460: the \\u007f escape spelling stays green');
+
     // Which byte it was is reported, so the prescription can name the escape.
     assert(
       flagged.get('packages/x/src/key.ts')?.bytes.join() === '1',
@@ -531,12 +650,17 @@ function selfTest() {
       ['docs/clean.md', 'docs/long.md', 'src/clean.ts', '.github/workflows/ci.yml'].every((f) => !flagged.has(f)),
       'clean text of every shape stays green',
     );
-    assert(!flagged.has('src/whitespace.ts'), 'tab / CR / LF / DEL are outside the scanned set and stay green');
+    // #5460 inverted this one on purpose. It used to read "tab / CR / LF / DEL
+    // are outside the scanned set and stay green" -- DEL was pinned OUT
+    // deliberately, to record that the C0 boundary was chosen rather than
+    // overlooked. The choice was re-made in #5460 and went the other way, so the
+    // assertion states the new boundary and the DEL half is asserted red above.
+    assert(!flagged.has('src/whitespace.ts'), 'tab / CR / LF are outside the scanned set and stay green');
     assert(
       !skipped.binary.includes('docs/long.md'),
       'a long multi-byte UTF-8 file must not be misread as binary (leading-window truncation)',
     );
-    assert(scanned >= 11, `every text fixture is actually scanned, got ${scanned}`);
+    assert(scanned >= 14, `every text fixture is actually scanned, got ${scanned}`);
 
     // The location report points at the byte, not at byte 0.
     const skill = flagged.get('.claude/skills/demo/SKILL.md');
@@ -549,9 +673,18 @@ function selfTest() {
     // classify() is the criterion; state it directly too.
     assert(classify(Buffer.concat([Buffer.from('plain text'), NUL])) === 'text', 'a NUL alone never makes a file binary');
     assert(classify(Buffer.concat([Buffer.from('plain text'), SOH])) === 'text', 'a 0x01 alone never makes a file binary');
+    assert(classify(Buffer.concat([Buffer.from('plain text'), DEL])) === 'text', 'a 0x7f alone never makes a file binary');
     assert(classify(Buffer.from([0xc0, 0x80, 0x41, 0xf8])) === 'binary', 'invalid UTF-8 is binary');
     assert(classify(Buffer.from('')) === 'text', 'an empty file is text');
     assert(findControlBytes(Buffer.from('a\tb\r\nc\n')).length === 0, 'tab / CR / LF are not control-byte hits');
+    assert(findControlBytes(Buffer.concat([Buffer.from('a'), DEL])).join() === '1', 'DEL is a control-byte hit (#5460)');
+    // The set is exactly ASCII's controls minus the three text-structure ones --
+    // stated as a whole so a future edit to the table has to face the boundary
+    // rather than nudge it. 0x20 (space) and 0x7e (~) bracket the printable run.
+    const scannedSet = [...Array(256).keys()].filter((b) => IS_SCANNED[b] === 1);
+    const expectedSet = [...Array(0x20).keys()].filter((b) => b !== 0x09 && b !== 0x0a && b !== 0x0d).concat(0x7f);
+    assert(scannedSet.join() === expectedSet.join(), `the scanned set is C0-minus-tab/LF/CR plus DEL, got ${scannedSet.length} bytes`);
+    assert(IS_SCANNED[0x20] === 0 && IS_SCANNED[0x7e] === 0, 'printable ASCII is never scanned');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

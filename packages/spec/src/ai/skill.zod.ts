@@ -67,8 +67,27 @@ export const SkillSchema = lazySchema(() => strictObject({
   surface: 'this skill',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { prompt: 'instructions', content: 'instructions', body: 'instructions', trigger: 'triggers', tool: 'tools' },
+  aliases: { prompt: 'instructions', content: 'instructions', body: 'instructions', tool: 'tools' },
   guidance: {
+    // #5013 — `trigger` used to be an ALIAS pointing at `triggers`, a key this
+    // schema has never declared: the author was told to write it, wrote it, and
+    // was rejected a second time with no suggestion left to give.
+    //
+    // It is not repointed at `triggerConditions`, because a rename is the wrong
+    // instrument here. The prescription the `triggerPhrases` tombstone below
+    // carries is a SPLIT — routing intent goes to `triggerConditions`, natural
+    // language to `description` / `instructions` — so an author who wrote
+    // `trigger: 'create a case'` and took a rename would land a phrase in an
+    // array-of-conditions slot and be rejected on the value instead of the key.
+    // That is ledger finding 7 exactly: this campaign's own fix signposting the
+    // way back into the failure mode it exists to kill.
+    trigger:
+      '`trigger` is not a skill key, and skills have never been activated by a phrase. '
+      + 'Activation is `triggerConditions` (an AND of context field/operator/value) intersected '
+      + "with the agent's `skills[]` allowlist, plus explicit /skill-name pinning. If you meant a "
+      + 'programmatic condition, write `triggerConditions: [{ field: …, operator: …, value: … }]`; '
+      + 'if you meant natural-language intent for the LLM to route on, that belongs in '
+      + '`description` / `instructions`, which are the strings actually put in front of the model.',
     permissions:
       '`permissions` is not a skill key — skill invocation was never permission-gated, '
       + 'so this was stripped in silence and the author believed they had a gate. Gate at '
