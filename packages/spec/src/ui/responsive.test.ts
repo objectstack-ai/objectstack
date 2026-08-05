@@ -190,14 +190,22 @@ describe('unknown keys are rejected, not stripped (#4001 batch 13)', () => {
 
     it('reaches `hiddenOn` from both wrong spellings', () => {
       // `hidden` is objectui's RESOLVED spelling (`useResponsiveConfig` returns
-      // `{ hidden, columns, order, breakpoint }`). `hideOn` is the same word,
-      // and the distance fallback measurably cannot reach it — it lowercases
-      // the input but not the candidates, so the capital in `hiddenOn` costs an
-      // extra edit against a budget of 2 (filed as #4990).
+      // `{ hidden, columns, order, breakpoint }`) — a different WORD, which no
+      // edit distance can reach, so it keeps its entry in the alias table.
       expect(unknownKeyIssue(ResponsiveConfigSchema, { hidden: true })!.message)
         .toContain('`hidden` → `hiddenOn`');
+      // `hideOn` is the SAME word and had an alias entry of its own until #4990,
+      // because the fallback charged the author for `hiddenOn`'s capital O:
+      // `hideOn` scored 3 against a budget of 2 and returned nothing, while the
+      // all-lowercase `hiddenon` scored 1 and resolved. #4990 folds case on both
+      // sides, so the alias was retired and this now rides the fallback alone.
+      // These two assertions ARE batch 13's measurement, kept executable — the
+      // first fails if the general fix regresses, the second is the comparison
+      // that made the old behaviour indefensible.
       expect(unknownKeyIssue(ResponsiveConfigSchema, { hideOn: ['xs'] })!.message)
         .toContain('`hideOn` → `hiddenOn`');
+      expect(unknownKeyIssue(ResponsiveConfigSchema, { hiddenon: ['xs'] })!.message)
+        .toContain('`hiddenon` → `hiddenOn`');
     });
   });
 

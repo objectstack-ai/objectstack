@@ -53,7 +53,26 @@ export function levenshteinDistance(a: string, b: string): number {
 }
 
 /**
+ * Fold away the differences an author is *never* signalling with: letter case
+ * and the dash/space spellings of an underscore separator.
+ *
+ * Applied to BOTH sides of the comparison in {@link findClosestMatches}. Folding
+ * only the input was a real defect (#4990): candidates are camelCase across most
+ * of the spec (AGENTS.md Prime Directive #3, "TS config keys → camelCase"), so
+ * every capital in a declared key charged the author one extra substitution
+ * against a budget that is only `max(2, len/3)`. The observable symptom was
+ * inverted quality — `hiddenon` (all-lowercase, plain wrong) resolved to
+ * `hiddenOn` at distance 1, while `hideOn` (correctly cased, one real typo)
+ * scored 3 against a budget of 2 and got no suggestion at all.
+ */
+const foldForScoring = (value: string): string => value.toLowerCase().replace(/[-\s]/g, '_');
+
+/**
  * Find the closest matches from a list of candidates.
+ *
+ * Scoring is case- and separator-insensitive on both sides; the returned
+ * strings are the candidates' ORIGINAL spelling, because that spelling is what
+ * the author has to type back.
  *
  * @param input - The user-provided (possibly invalid) value
  * @param candidates - Array of valid values to compare against
@@ -67,15 +86,28 @@ export function findClosestMatches(
   maxDistance = 3,
   maxResults = 3,
 ): string[] {
-  const normalized = input.toLowerCase().replace(/[-\s]/g, '_');
+  const normalized = foldForScoring(input);
 
   const scored = candidates
     .map((candidate) => ({
       value: candidate,
-      distance: levenshteinDistance(normalized, candidate),
+      distance: levenshteinDistance(normalized, foldForScoring(candidate)),
+      // Tie-break only. Folding is right for RANKING (case is not what the
+      // author meant to signal), but when two declared keys are equidistant
+      // under the fold the author's own capitalisation is the last piece of
+      // evidence left about which one they were reaching for — `yxAis` ties
+      // `yAxis` and `xAxis` at 2 folded, and the capital A picks the intended
+      // one. Kept strictly secondary so it can never resurrect the #4990 bug
+      // of case outranking a real edit.
+      cased: levenshteinDistance(input, candidate),
     }))
-    .filter((s) => s.distance <= maxDistance && s.distance > 0)
-    .sort((a, b) => a.distance - b.distance);
+    // Drop only the candidate the author ALREADY typed verbatim — suggesting a
+    // string back to the author who wrote it is noise. A folded distance of 0
+    // on a differently-spelled candidate (`hiddenon` vs `hiddenOn`) is not that
+    // case: it is the strongest suggestion available, and pre-#4990 the
+    // `distance > 0` test threw it away together with the true self-match.
+    .filter((s) => s.distance <= maxDistance && s.value !== input)
+    .sort((a, b) => a.distance - b.distance || a.cased - b.cased);
 
   return scored.slice(0, maxResults).map((s) => s.value);
 }

@@ -114,7 +114,7 @@ async function isTranslatableMetaType(type: string): Promise<boolean> {
  * string, received undefined), so passing it through marked a missing input as a
  * type error.
  */
-function zodIssueToFieldCode(issue: any, input?: unknown, inputProvided = false): FieldErrorCode {
+function zodIssueToFieldCode(issue: any, path: unknown, input?: unknown, inputProvided = false): FieldErrorCode {
     const origin = issue?.origin;
     switch (issue?.code) {
         case 'too_small':
@@ -138,8 +138,13 @@ function zodIssueToFieldCode(issue: any, input?: unknown, inputProvided = false)
             // keep `invalid_type`: reading "received undefined" out of the message
             // would make the wire contract depend on Zod's phrasing, which is the
             // leak this mapping exists to stop.
+            //
+            // `path` is passed in rather than read off the issue because a union
+            // BRANCH issue carries a path relative to the union (#5014): walking
+            // the relative one would read the wrong slot of the input — usually
+            // `undefined` — and report every branch mismatch as `required`.
             if (!inputProvided) return 'invalid_type';
-            return valueAtPath(input, issue?.path) === undefined ? 'required' : 'invalid_type';
+            return valueAtPath(input, path) === undefined ? 'required' : 'invalid_type';
         }
         case 'invalid_value':
             // A closed set (`z.enum`, `z.literal`) the value is not a member of.
@@ -171,6 +176,163 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
+ * How many levels of nested `invalid_union` are expanded below a top-level
+ * issue, and how many equally-informative branches are emitted at one level.
+ *
+ * Both bounds — and the whole selection policy below — are the ones
+ * `formatZodError` landed for the CLI/spec side of this defect (#4971,
+ * `spec/src/shared/error-map.zod.ts`). They are duplicated rather than imported
+ * because spec exports only the STRING renderer (`formatZodIssue`), and the wire
+ * needs structured `{field, code, message}` entries; the *verdict* must match all
+ * the same, or one mistake gets two different prescriptions depending on whether
+ * the author published from the terminal or POSTed to the API (#5014).
+ */
+const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/** A Zod issue path, normalised to the array Zod always produces. */
+function issuePathOf(issue: any): Array<string | number> {
+    return Array.isArray(issue?.path) ? issue.path : [];
+}
+
+/**
+ * True when a branch only complains that the value is the wrong *kind* at the
+ * branch root — `expected string, received object` for the string member of
+ * `z.union([z.string(), SomeObject])`.
+ *
+ * Such a branch carries no prescription: the author never intended it, and
+ * emitting it is the "N branches, N times the noise" failure. An empty branch
+ * (zod's "matched multiple" variant carries `errors: []`) counts as
+ * uninformative too — `every` on an empty list is `true`.
+ */
+function isKindMismatchOnly(issues: readonly any[]): boolean {
+    return issues.every(
+        (issue) =>
+            issuePathOf(issue).length === 0
+            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
+    );
+}
+
+/** True when a branch carries the #4001 campaign's unknown-key prescription. */
+function carriesUnknownKey(issues: readonly any[]): boolean {
+    return issues.some((issue) => issue?.code === 'unrecognized_keys');
+}
+
+/**
+ * Pick the branch(es) of a failed union whose issues actually explain the
+ * failure. Ranking, in order (identical to `selectUnionBranches` in
+ * `spec/src/shared/error-map.zod.ts`):
+ *
+ * 1. **Kind-mismatch-only branches are dropped entirely.** If *every* branch is
+ *    one — a plain `z.union([z.string(), z.number()])` handed an object —
+ *    nothing is selected and the union reports exactly what it always has.
+ * 2. **Fewest issues wins.** The branch the author was closest to hitting
+ *    complains least, so "fewest" is what keeps ONE unknown key from arriving as
+ *    N `fields[]` entries, one per branch.
+ * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
+ *    where the curated prose lives.
+ * 4. Declaration order breaks what remains, so the wire is deterministic.
+ *
+ * Branches that tie at the top are all emitted (capped): when two shapes explain
+ * the failure equally well, privileging the first by accident of declaration
+ * order would be a lie about which shape was expected.
+ */
+function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (readonly any[])[] {
+    const informative = branches
+        .map((issues, index) => ({ issues, index }))
+        .filter((branch) => !isKindMismatchOnly(branch.issues));
+    if (informative.length === 0) return [];
+
+    const rank = (branch: { issues: readonly any[] }): [number, number] => [
+        branch.issues.length,
+        carriesUnknownKey(branch.issues) ? 0 : 1,
+    ];
+
+    const sorted = [...informative].sort((a, b) => {
+        const [aCount, aKeys] = rank(a);
+        const [bCount, bKeys] = rank(b);
+        return aCount - bCount || aKeys - bKeys || a.index - b.index;
+    });
+
+    const [bestCount, bestKeys] = rank(sorted[0]!);
+    return sorted
+        .filter((branch) => {
+            const [count, keys] = rank(branch);
+            return count === bestCount && keys === bestKeys;
+        })
+        .slice(0, UNION_BRANCH_EMIT_LIMIT)
+        .map((branch) => branch.issues);
+}
+
+/**
+ * One issue → its `fields[]` entries, appended to `out`.
+ *
+ * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
+ * bare `"Invalid input"`, mapped to `invalid_shape`) FOLLOWED by the entries of
+ * the branches that explain it, with `field` resolved against the union's own
+ * path — branch paths are relative to it.
+ *
+ * The union's entry is kept rather than replaced: it is the only entry naming
+ * the slot the client sent, existing clients already read it, and when every
+ * branch is uninformative it is still the whole answer. So the expansion is
+ * strictly ADDITIVE — no entry that shipped before this changed is gone or
+ * renumbered, only newly accompanied (ADR-0114: same `{field, code, message}`
+ * shape as {@link mapDataError}, which has never bounded the array's length).
+ *
+ * `seen` de-duplicates entries *within one top-level issue*: two branches that
+ * reject the same key with the same words say it once. Union entries themselves
+ * are exempt, since two same-path `"Invalid input"` entries can head genuinely
+ * different sub-trees.
+ *
+ * Deliberate divergence from the spec-side renderer: where it prints a trailing
+ * "… and N more branches rejected this value", this emits nothing. That line is
+ * a rendering affordance; a `fields[]` entry must name a real field and carry a
+ * catalog code, and the omission note has neither.
+ */
+function collectIssueFields(
+    issue: any,
+    parentPath: Array<string | number>,
+    depth: number,
+    seen: Set<string>,
+    input: unknown,
+    inputProvided: boolean,
+    out: Array<{ field: string; code: FieldErrorCode; message: string }>,
+): void {
+    const ownPathIsArray = Array.isArray(issue?.path);
+    const path = ownPathIsArray ? [...parentPath, ...issue.path] : parentPath;
+    const field = ownPathIsArray
+        ? path.join('.')
+        : [...parentPath, String(issue?.path ?? '')].join('.');
+
+    const branches: readonly (readonly any[])[] = issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
+        ? issue.errors.filter((branch: unknown): branch is any[] => Array.isArray(branch))
+        : [];
+    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+
+    const entry = {
+        field,
+        // A non-array path keeps the pre-#5014 reading (`valueAtPath` bails and
+        // the mapper stays conservative) instead of being coerced into one.
+        code: zodIssueToFieldCode(issue, ownPathIsArray ? path : issue?.path, input, inputProvided),
+        message: String(issue?.message ?? 'Invalid value'),
+    };
+
+    if (!expandable) {
+        const key = JSON.stringify([entry.field, entry.code, entry.message]);
+        if (seen.has(key)) return;
+        seen.add(key);
+    }
+    out.push(entry);
+    if (!expandable) return;
+
+    for (const branch of selectUnionBranches(branches)) {
+        for (const nested of branch) {
+            collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+        }
+    }
+}
+
+/**
  * Zod issues → the data surface's `fields[]` validation envelope
  * (`{ field, code, message }`, docs/api/wire-format §7).
  *
@@ -180,6 +342,13 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
  * wire. Since ADR-0114 that sameness covers the `code` VALUE too, not just the
  * shape: see {@link zodIssueToFieldCode}.
+ *
+ * A rejection behind a `z.union` is expanded (#5014): zod folds every branch of
+ * a failed union into ONE top-level issue whose message is the literal
+ * `"Invalid input"`, so mapping only top-level issues put `{field: 'query.search',
+ * code: 'invalid_shape', message: 'Invalid input'}` on the wire while the branch
+ * that says WHICH key is wrong — required-property and unknown-key prescriptions
+ * alike — was produced and dropped. See {@link collectIssueFields}.
  */
 export function zodIssuesToFields(
     issues: unknown,
@@ -187,11 +356,13 @@ export function zodIssuesToFields(
 ): Array<{ field: string; code: FieldErrorCode; message: string }> {
     if (!Array.isArray(issues)) return [];
     const inputProvided = input.length > 0;
-    return issues.map((i: any) => ({
-        field: Array.isArray(i?.path) ? i.path.join('.') : String(i?.path ?? ''),
-        code: zodIssueToFieldCode(i, input[0], inputProvided),
-        message: String(i?.message ?? 'Invalid value'),
-    }));
+    const out: Array<{ field: string; code: FieldErrorCode; message: string }> = [];
+    for (const issue of issues) {
+        // A fresh `seen` per top-level issue: de-duplication is about one
+        // union's branches agreeing, never about two independent issues.
+        collectIssueFields(issue, [], 0, new Set<string>(), input[0], inputProvided, out);
+    }
+    return out;
 }
 
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {

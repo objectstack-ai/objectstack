@@ -15,6 +15,7 @@
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
 import { isInPlaceSchemaWork } from '@objectstack/driver-sql';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
 
 export type { PendingSchemaWork };
@@ -45,6 +46,13 @@ export interface SchemaStack {
    * (#3917). Always `[]` unless the stack was booted with `deferSchemaDdl`.
    */
   pendingSchemaWork: PendingSchemaWork[];
+  /**
+   * Every object the booted stack knows about — the set the plan is computed
+   * against, including objects that arrived from installed packages rather than
+   * this project's `objectstack.config.ts`. Read by the ADR-0120 D5e
+   * unique-scope advisory; best-effort (`[]` when no ObjectQL service composed).
+   */
+  allObjects: () => unknown[];
   /**
    * Perform the deferred sync — call only once the operator has confirmed the
    * plan. Returns the work it actually ran (`[]` when nothing was deferred).
@@ -206,6 +214,29 @@ export async function bootSchemaStack(
     managedTableCount,
     kernel,
     pendingSchemaWork,
+    /**
+     * Every object this booted stack knows about — the same set the plan is
+     * computed against.
+     *
+     * Exposed for the ADR-0120 D5e advisory in `os migrate plan`: the advisory
+     * must describe the objects the migration is actually planning for, not a
+     * re-read of `objectstack.config.ts`, which on a runtime serving installed
+     * marketplace packages is a strict subset. Best-effort — a stack with no
+     * ObjectQL service reports none, and the advisory then simply says nothing.
+     */
+    allObjects: (): unknown[] => {
+      try {
+        // The `objectql` slot's contract is `IObjectQLEngine` (#4251) — read it
+        // through that rather than erasing the lookup to `any`, so a rename of
+        // `registry` / `getAllObjects` breaks this at compile time instead of
+        // silently reporting zero objects and turning the D5e advisory mute.
+        const getService = (kernel as { getService?: (name: string) => unknown })?.getService;
+        const ql = getService?.call(kernel, 'objectql') as IObjectQLEngine | undefined;
+        return ql?.registry?.getAllObjects?.() ?? [];
+      } catch {
+        return [];
+      }
+    },
     flushSchemaDdl: async () => (defer && driver?.flushDeferredSchemaDdl
       ? await driver.flushDeferredSchemaDdl()
       : []),

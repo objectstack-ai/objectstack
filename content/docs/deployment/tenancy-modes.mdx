@@ -1,51 +1,145 @@
 ---
-title: Tenancy Modes & Membership
-description: Single-org vs multi-org tenancy, the membership policy for new users, and the degraded-tenancy boot guard (ADR-0093).
+title: Tenancy Postures & Membership
+description: The three tenancy postures (single / group / isolated), how OS_TENANCY_POSTURE resolves, the membership policy for new users, and the degraded-tenancy boot guard.
 ---
 
-# Tenancy Modes & Membership
+# Tenancy Postures & Membership
 
-An ObjectStack deployment runs in one of two tenancy modes. The mode governs
-whether organization boundaries isolate data, how new users are placed into an
-organization, and which organization-management UI is available.
+An ObjectStack deployment runs in one of **three tenancy postures**. The posture
+is the single fact that decides what the authorization kernel's Layer 0
+organization wall enforces, how new users are placed into an organization, and
+which organization-management UI is available.
 
-This page describes the runtime contract introduced by
-[ADR-0093](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0093-tenancy-mode-and-membership-lifecycle.md).
+The three-posture spectrum is
+[ADR-0105 D1](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0105-group-tenancy-posture-and-first-class-org-scope.md);
+it generalizes the two-valued *tenancy mode* of
+[ADR-0093](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0093-tenancy-mode-and-membership-lifecycle.md),
+whose `tenancy` service, membership lifecycle and degraded-tenancy boot guard all
+still apply — widened to the three postures.
+
+<Callout type="info" title="Renamed, not re-configured">
+The posture formerly called `multi` is now `isolated`, and the authoritative knob
+is `OS_TENANCY_POSTURE`, not `OS_MULTI_ORG_ENABLED`. Existing deployments keep
+their behaviour with no config change: the legacy boolean is still honoured as a
+fallback **input** to posture resolution. See
+[How the posture resolves](#how-the-posture-resolves).
+</Callout>
 
 ---
 
-## The two modes
+## The three postures
 
-| | **Single-org** (default) | **Multi-org** |
+| | `single` (default) | `group` | `isolated` |
+|---|---|---|---|
+| Layer 0 organization wall | none — the layer is inert | `organization_id IN accessible_org_ids` (union / MOAC) | `organization_id = <active organization>` |
+| Read reach | the whole dataset, subject to RBAC | every organization the caller currently holds a membership in | the active organization only |
+| Shape | one logical tenant; sub-units modelled as business units in one tree | organizations are membership / invitation boundaries over one shared dataset | legal-entity / sovereignty isolation — the hard wall |
+| `organization_id` filled in on write | no | yes | yes |
+| Enterprise `@objectstack/organizations` | not needed | **required** | **required** |
+| Default organization | one bootstrapped "Default Organization" | owned by the enterprise runtime | owned by the enterprise runtime |
+| Org-management UI (create / switch org) | hidden | shown | shown |
+
+Only the wall's **predicate** differs between `group` and `isolated`. Everything
+about how it composes is identical: Layer 0 is AND-composed ahead of, and
+independently of, business RLS, and no permissive business policy, sharing rule
+or `viewAllRecords` / `modifyAllRecords` superuser bit can widen it (ADR-0095
+W1/W2, ADR-0105 D2/D4). A walled posture with no resolvable scope — no active
+organization under `isolated`, an empty membership set under `group` — fails
+closed to zero rows rather than falling through.
+
+`single` is not "multi-org with the walls left standing": Layer 0 contributes no
+filter at all, and the platform's own tenant-scoped RLS policies are stripped.
+Policies **you** authored that mention `current_user.organization_id` are
+retained and fail closed (ADR-0105 D3) — only the platform's own wildcard tenant
+policies are dropped.
+
+### Open code, entitled activation
+
+Both walled postures require the enterprise `@objectstack/organizations` runtime
+to **activate**. The wall's implementation is open — the Layer 0 compiler,
+`accessible_org_ids` resolution, and the write-side validation that rejects a
+forged `organization_id` all ship in open packages — but *enabling* a
+multi-organization posture is a commercial capability (ADR-0105 D12). Filling in
+an **absent** `organization_id` on write is the enterprise runtime's job;
+**validating** a supplied one is a security property and stays open.
+
+The installed runtime may narrow this further: the `org-scoping` service can
+declare `supportedPostures`, and the open core fails closed on any walled
+posture it does not list. A runtime that declares nothing entitles both.
+
+---
+
+## How the posture resolves
+
+`OS_TENANCY_POSTURE` is the authoritative knob; `OS_MULTI_ORG_ENABLED` is a
+back-compat input consulted only when the posture is unset.
+
+| `OS_TENANCY_POSTURE` | `OS_MULTI_ORG_ENABLED` | Requested posture |
 |---|---|---|
-| Enabled by | unset / `OS_MULTI_ORG_ENABLED=false` | `OS_MULTI_ORG_ENABLED=true` **and** `@objectstack/organizations` installed |
-| Tenant isolation | **off** — `organization_id` is not auto-stamped and the wildcard `tenant_isolation` RLS is stripped | **on** — `organization_id` is auto-stamped and tenant RLS filters every read |
-| Access control | RBAC permission sets only | RBAC permission sets **plus** per-org tenant isolation |
-| Organization row | one bootstrapped "Default Organization" | many, operator/user created |
-| Org-management UI (create/switch/delete org) | hidden | shown |
+| `single` / `group` / `isolated` | *not consulted* | that posture |
+| `multi` (legacy spelling) | *not consulted* | `isolated` |
+| unset, or empty/whitespace | any value other than a case-insensitive `false` | `isolated` |
+| unset, or empty/whitespace | unset, or `false` | `single` |
+| anything else | *not consulted* | none — resolution **throws** rather than guessing |
 
-The multi-org runtime lives in the enterprise `@objectstack/organizations`
-package. When it is installed it registers an `org-scoping` service; the
-framework detects that and turns tenant isolation on.
+Values are trimmed and lower-cased before matching, so `Isolated` and ` group `
+resolve. An unrecognized value is never coerced to a weaker posture: resolution
+throws (`Invalid OS_TENANCY_POSTURE=…`) and `os serve` reports the error and
+exits non-zero rather than serving with a posture it could not parse.
+
+Two consequences worth stating plainly:
+
+- **The legacy boolean is an input, not a second switch.** With
+  `OS_TENANCY_POSTURE` set, `OS_MULTI_ORG_ENABLED` is not read at all — setting
+  it as well changes nothing, and *unsetting* it takes nothing away. A
+  deployment that sets only `OS_TENANCY_POSTURE=isolated` is fully walled.
+- **Never gate application code on `OS_MULTI_ORG_ENABLED`.** It reports `false`
+  on exactly the deployment shape the documentation recommends (posture set,
+  boolean unset), so any gate keyed off it inverts its own contract there. Ask
+  the posture instead — or, inside a running kernel, the `tenancy` service,
+  which additionally knows whether the requested wall is actually standing. Two
+  shipped defects came from getting this wrong, one of which 403'd
+  `organization/create` on a fully walled deployment.
 
 ### One source of truth: the `tenancy` service
 
-Rather than re-deriving "what mode is this?" from the env flag, a service probe,
-or row counts, the platform exposes a single `tenancy` kernel service:
+Rather than re-deriving "what posture is this?" from an env flag, a service
+probe, or row counts, the platform exposes a single `tenancy` kernel service
+(registered by `plugin-auth`):
 
 {/* os:check */}
 ```ts
+import type { TenancyPosture } from '@objectstack/spec/security';
+
 interface TenancyService {
-  mode: 'single' | 'multi';   // multi iff isolation is actually active
-  isolationActive: boolean;    // org-scoping wired?
-  requested: boolean;          // OS_MULTI_ORG_ENABLED
-  degraded: boolean;           // requested && !isolationActive
-  defaultOrgId(): Promise<string | null>; // single → default org; multi → null
+  /** The posture actually IN FORCE — an unenforceable request resolves to `single`. */
+  readonly posture: TenancyPosture;
+  /** What the operator asked for: OS_TENANCY_POSTURE, else OS_MULTI_ORG_ENABLED. */
+  readonly requestedPosture: TenancyPosture;
+  /** True iff an organization wall is actually enforced. */
+  readonly isolationActive: boolean;
+  /** True iff a wall-enforcing posture (`group` or `isolated`) was requested. */
+  readonly requested: boolean;
+  /** `requested && !isolationActive` — asked for a wall, did not get one. */
+  readonly degraded: boolean;
+  /** Single-org default org; `null` under any walled REQUEST, degraded included. */
+  defaultOrgId(): Promise<string | null>;
 }
 ```
 
-`/auth/config` reports `features.multiOrgEnabled` (from `mode`) and
-`features.degradedTenancy` so the console renders the correct UI.
+`posture` and `requestedPosture` are the two facts that can disagree, and the
+difference is the whole point: a request that cannot be enforced resolves to
+`posture: 'single'` and raises `degraded`, because a wall that is not standing is
+not a wall.
+
+`/auth/config` reports `features.tenancyPosture` (the **effective** posture),
+`features.multiOrgEnabled` (true iff that posture enforces a wall) and
+`features.degradedTenancy`, so the console renders the correct UI. The
+`organization/create` gate is derived from the *same* call, so the API can never
+refuse a capability `/auth/config` advertises — or mint an organization no engine
+walls. Concretely: creating additional organizations is refused (`403`) whenever
+the effective posture is `single`, including a degraded deployment that only
+booted because `OS_ALLOW_DEGRADED_TENANCY=1`.
 
 ---
 
@@ -62,75 +156,117 @@ The reconciler:
 - **yields** to any membership that already exists (e.g. one created by an
   invitation, `add-member`, SSO provisioning, or a host hook) — it never
   creates a second membership;
-- binds only to an **unambiguous** target org — in single-org mode, the default
-  organization; in multi-org mode it binds nothing (invitations, `add-member`,
-  and SSO provisioning own membership there, where guessing an org would risk
-  the wrong tenant);
+- binds only to an **unambiguous** target org — that is `tenancy.defaultOrgId()`,
+  which returns the single-org default organization under `single` and `null`
+  under any walled **request** (invitations, `add-member` and SSO provisioning
+  own membership there, where guessing an org would risk the wrong tenant);
 - is **best-effort** — a failure logs a warning and never fails user creation.
 
-### Membership policy
+The "walled request" wording is deliberate: a *degraded* deployment asked for a
+wall and did not get one, and the safe reading of that is "I don't know which org
+this user belongs to", not "everyone belongs to the only org I can see". So
+`defaultOrgId()` returns `null` there too.
 
-Control auto-binding with the `membershipPolicy` auth option:
+### Membership policy
 
 | Policy | Behavior |
 |---|---|
 | `'auto'` (default) | New member-less users are bound to the single-org default organization. |
 | `'invite-only'` | Users are **never** auto-bound; membership comes only from invitations, `add-member`, SSO provisioning, or host hooks. Choose this for a deployment whose end-users are deliberately not teammates. |
 
+Set it as an `AuthPlugin` option, as the `auth.membership_policy` platform
+setting, or via the `OS_AUTH_MEMBERSHIP_POLICY` env override:
+
 ```ts
 new AuthPlugin({ membershipPolicy: 'invite-only' /* … */ });
 ```
 
-> **Note** — In single-org mode, membership does **not** gate data access (there
-> is no tenant isolation to enforce); RBAC permission sets do. Membership drives
-> the Members list, the active-organization a session resolves, and invitations.
+The setting is read live on every use, so an admin changing it reaches both the
+sign-up reconciler and the backfill below without a restart. An unrecognized
+value is rejected rather than coerced: the deployment keeps its current policy
+and the reconciler refuses to auto-bind under it.
+
+<Callout type="info" title="Membership is not access control in the single posture">
+With no wall to enforce, membership does not gate data access — RBAC permission
+sets do. Membership drives the Members list, the active organization a session
+resolves, and invitations.
+</Callout>
 
 ### Backfill for pre-existing users
 
-On boot (`kernel:ready`), single-org / `auto` deployments backfill memberships
-for any pre-existing member-less users (e.g. accounts created before the
-reconciler existed), binding them to the default organization. It is bounded,
-idempotent, and self-guards (it no-ops under `invite-only` and in multi-org).
-Opt out with `OS_SKIP_MEMBERSHIP_BACKFILL=1`.
+On boot (`kernel:ready`), deployments with `membershipPolicy: 'auto'` backfill
+memberships for any pre-existing member-less users (e.g. accounts created before
+the reconciler existed), binding them to the default organization. It is bounded,
+idempotent, and self-guards: it no-ops under `invite-only`, and under any walled
+request `defaultOrgId()` is `null` so there is nothing to bind to. Opt out with
+`OS_SKIP_MEMBERSHIP_BACKFILL=1`.
 
 ---
 
 ## Degraded tenancy: the boot guard
 
-Setting `OS_MULTI_ORG_ENABLED=true` **without** a working
-`@objectstack/organizations` package is dangerous: tenant isolation cannot be
-enforced, so the wildcard tenant RLS is stripped and every organization
-boundary becomes inert — while the operator believes the deployment is
-multi-tenant.
+Requesting a walled posture **without** a working `@objectstack/organizations`
+package is dangerous: the organization wall cannot be enforced, so Layer 0 goes
+inert and every organization boundary becomes decorative — while the operator
+believes the deployment is walled. This applies to **both** walled postures;
+`group` is entitled exactly like `isolated` and degrades the same way.
 
 The platform **refuses to boot** in this state:
 
 ```
-✖ FATAL: OS_MULTI_ORG_ENABLED=true but @objectstack/organizations could not be
-  loaded, so tenant isolation is INACTIVE. Refusing to boot …
+  ✖ FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations could not be loaded,
+    so the organization wall is INACTIVE. Refusing to boot — a deployment that requested
+    multi-organization isolation must not serve traffic without it (ADR-0093 D5).
+
+    Fix one of:
+      • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP
+        — declare it in the app's package.json and install; the CLI resolves it from the
+          app, not from the framework it is linked out of. …
+      • set OS_TENANCY_POSTURE=single (or unset OS_MULTI_ORG_ENABLED) to run single-org, or
+      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.
 ```
 
-Resolve it one of three ways:
+So, three ways out:
 
 - **add `@objectstack/organizations`** (the enterprise multi-org runtime) **to the
   app you are serving** — declare it in that app's `package.json` and install it
   there. The CLI resolves the package from the served app, not from the framework
-  it is linked out of, so installing it anywhere else does not lift the guard; or
-- **unset `OS_MULTI_ORG_ENABLED`** to run single-org; or
+  it is linked out of, and being merely reachable through `NODE_PATH` or a hoisted
+  workspace store is deliberately not enough; or
+- **set `OS_TENANCY_POSTURE=single`** (and unset `OS_MULTI_ORG_ENABLED`) to run
+  single-org; or
 - **set `OS_ALLOW_DEGRADED_TENANCY=1`** to boot anyway in an explicitly degraded
   single-org state.
 
-When you opt into the degraded state, it is surfaced where an operator looks — a
-loud red **terminal boot warning** and `features.degradedTenancy: true` in
-`/auth/config` — so degraded operation is always a visible, chosen state, never a
-silent one. (The `/auth/config` flag is there for any tooling that wants to
-render its own warning; the framework itself does not ship a console banner for
-this extreme, opt-in-past-a-refusal case.)
+If the package is already declared but the install is broken, the message says so
+and tells you to repair the install rather than re-read `package.json`.
 
-> **Upgrading?** A deployment that was *silently* degraded before this guard
-> existed will now fail to boot after upgrade. That is intentional — it was not
-> actually isolating tenants. Either install the enterprise package or set
-> `OS_ALLOW_DEGRADED_TENANCY=1` to acknowledge the state.
+### A present-but-refusing runtime is a different failure
+
+If `@objectstack/organizations` **is** found and its plugin then refuses to
+mount, boot is refused unconditionally and the plugin's own message is printed
+verbatim. `OS_ALLOW_DEGRADED_TENANCY` does **not** get past that: the escape
+hatch means "the capability is ABSENT and I accept doing without it", not "a
+present runtime declined and I would like to ignore why".
+
+### What a degraded boot looks like
+
+When you opt into the degraded state, it is surfaced where an operator looks — a
+loud yellow **terminal boot warning** and `features.degradedTenancy: true` in
+`/auth/config` — so degraded operation is always a visible, chosen state, never a
+silent one. The effective posture is `single`, so organization creation is
+refused there as well. (The `/auth/config` flag is there for any tooling that
+wants to render its own warning; the framework itself does not ship a console
+banner for this extreme, opt-in-past-a-refusal case.)
+
+<Callout type="warn" title="Upgrading?">
+A deployment that was *silently* degraded before this guard existed will fail to
+boot after upgrade. That is intentional — it was not actually walling anything.
+Either install the enterprise package or set `OS_ALLOW_DEGRADED_TENANCY=1` to
+acknowledge the state. Deployments that adopted `OS_TENANCY_POSTURE=group` during
+the window when it self-activated are in the same position: `group` now requires
+the enterprise runtime.
+</Callout>
 
 ---
 
@@ -138,7 +274,12 @@ this extreme, opt-in-past-a-refusal case.)
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OS_MULTI_ORG_ENABLED` | `false` | Request multi-org tenancy. Requires `@objectstack/organizations`. |
-| `OS_ALLOW_DEGRADED_TENANCY` | `false` | Boot even when multi-org is requested but isolation is unavailable (degraded). |
-| `OS_ORG_LIMIT` | unset (unlimited) | Cap on organizations a single user may create (multi-org only). |
-| `OS_SKIP_MEMBERSHIP_BACKFILL` | unset | Skip the boot-time membership backfill. |
+| `OS_TENANCY_POSTURE` | derived from `OS_MULTI_ORG_ENABLED` | The authoritative knob: `single`, `group`, or `isolated` (legacy spelling `multi` = `isolated`). An unrecognized value throws instead of falling back. Both walled postures require `@objectstack/organizations`. |
+| `OS_MULTI_ORG_ENABLED` | `false` | Superseded by `OS_TENANCY_POSTURE` and still honoured **only** when it is unset: any value other than a case-insensitive `false` selects `isolated`. |
+| `OS_ALLOW_DEGRADED_TENANCY` | `false` | Boot even when a walled posture is requested but the runtime is absent (degraded). Accepts `1` / `true` / `on` / `yes`. Does not cover a runtime that refused to mount. |
+| `OS_ORG_LIMIT` | unset (unlimited) | Cap on organizations a single user may **own**; organizations they were merely invited into never count against it. Only meaningful under a walled posture, since org creation is refused otherwise. |
+| `OS_AUTH_MEMBERSHIP_POLICY` | `auto` | Env override for the `auth.membership_policy` setting — `auto` or `invite-only`. |
+| `OS_SKIP_MEMBERSHIP_BACKFILL` | unset | Set to `1` to skip the boot-time membership backfill. |
+
+See [Environment variables](/docs/deployment/environment-variables) for the full
+list.

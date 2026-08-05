@@ -206,16 +206,17 @@ export const ResponsiveConfigSchema = lazySchema(() => strictObject(
       // `useResponsiveConfig.ts`). `hidden` is that RESULT's spelling of the
       // authored `hiddenOn`, which is where the wrong word comes from.
       hidden: 'hiddenOn',
-      // `hideOn` is not a different word — it is the SAME word, and the
-      // distance fallback still cannot reach it. Measured, not assumed:
-      // `findClosestMatches('hideOn', ['hiddenOn'], 2)` returns `[]`, because
-      // the fallback lowercases the INPUT but not the CANDIDATES, so every
-      // capital in a declared key costs one extra edit — `hideOn` scores 3
-      // against a budget of 2 while the all-lowercase `hiddenon` scores 1 and
-      // resolves fine. That asymmetry is general to camelCase keys (i.e. to
-      // most of the spec, per AGENTS.md naming) and is filed as #4990; this
-      // entry covers the one instance this file owns.
-      hideOn: 'hiddenOn',
+      // `hideOn` USED to need an entry here. It is not a different word — it is
+      // the same word, and the distance fallback could not reach it only
+      // because of #4990: the fallback lowercased the INPUT but not the
+      // CANDIDATES, so `hiddenOn`'s capital O cost an extra edit and `hideOn`
+      // scored 3 against a budget of 2, while the all-lowercase `hiddenon`
+      // scored 1 and resolved fine. #4990 fixed that at the source by folding
+      // case on both sides, so this per-case workaround is retired: `hideOn`
+      // now reaches `hiddenOn` on distance alone. The measurement that
+      // justified the entry is preserved as an assertion in `responsive.test.ts`
+      // ("reaches `hiddenOn` from both wrong spellings") rather than as a
+      // comment, so it fails if the general fix ever regresses.
     },
     guidance: {
       ...BREAKPOINT_AT_TOP_LEVEL,

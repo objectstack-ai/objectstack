@@ -128,7 +128,11 @@ import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
-import { lintUniqueDeclarations, lintUnscopedDeclaredIndexes } from './data-model-rules.js';
+import {
+  lintUniqueDeclarations,
+  lintUnscopedDeclaredIndexes,
+  lintLegacyOrganizationComposites,
+} from './data-model-rules.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -785,6 +789,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'This is coverage recorded, not coverage missing: all three commands report the rule.',
     run: (stack) =>
       lintUniqueDeclarations(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.path,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // ADR-0120 D5c — a declared unique listing the organization column IS the
+  // hand-written per-organization composite (S6). Advisory nudge toward the
+  // `'organization'` respelling, which is also what closes its NULL hole
+  // (#5030). Never auto-fixed: opting in is a real D4 tightening.
+  {
+    name: 'lintLegacyOrganizationComposites',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ['validate', 'build'],
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    scopeReason:
+      '`os lint` already reports this rule through `lintDataModel`, which calls it directly alongside ' +
+      'R10/R11 in its best-practice sweep — registering it for `lint` as well would report every finding ' +
+      'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
+    run: (stack) =>
+      lintLegacyOrganizationComposites(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.path,

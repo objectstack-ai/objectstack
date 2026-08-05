@@ -12,62 +12,129 @@ Optimize query performance with indexes:
 indexes: [
   // Single field index
   { fields: ['name'], unique: false },
-  
-  // Unique index
-  { fields: ['email'], unique: true },
-  
+
+  // Unique index — one holder per organization
+  { fields: ['email'], unique: 'organization' },
+
+  // Unique index — one holder across the whole installation
+  { fields: ['hostname'], unique: 'global' },
+
   // Compound index
   { fields: ['type', 'is_active'], unique: false },
-  
+
   // Lookup field index
   { fields: ['owner'], unique: false },
 ]
 ```
 
-## Two ways to say "unique" — and they mean different things
+## Two ways to say "unique" — one vocabulary for both
 
-Uniqueness can be declared in two places, and the choice is not cosmetic:
+Uniqueness can be declared in two places: on a field, or as a declared index.
+Both use the same word to say **which boundary the value must be unique
+within** ([ADR-0120](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md)):
 
-| Declaration | Materializes as | Scope |
+| Scope | Meaning | Materializes as |
 |:---|:---|:---|
-| Field-level `unique: true` | `(organization_id, field)` | Unique **within** an organization |
-| Field-level `unique: 'global'` | `(field)` | Platform-wide |
-| Declared index `{ fields: ['email'], unique: true }` | `(email)` — exactly the listed columns | Platform-wide |
-
-A field-level `unique: true` is **tenant-scoped**. It has no syntax for a
-composite, so the platform supplies the tenant column for you — which is what
-a multi-tenant application almost always wants: two organizations may each
-have a contact `john@acme.com`.
-
-A **declared index is taken verbatim**. No tenant column is injected, because
-many declared indexes are legitimately platform-wide (a DNS hostname, a
-reserved slug, an external provider id). To scope one per tenant, list the
-column yourself: `{ fields: ['organization_id', 'email'], unique: true }`.
-
-<Callout type="warn">
-**Do not declare both on the same column.** The stricter one wins physically,
-so the platform-wide index enforces uniqueness and the per-tenant constraint
-can never be reached — one of the two intents you wrote is silently discarded:
+| `unique: 'organization'` | One holder **per organization** | `(COALESCE(organization_id, '__global__'), …fields)` |
+| `unique: 'global'` | One holder across the **whole installation** | exactly the listed column(s) |
 
 ```typescript
-// ⚠️ contradictory — the global index wins, the per-tenant scope is dead
-email: Field.email({ unique: true }),
-indexes: [{ fields: ['email'], unique: true }],
+// Field level — the scope is the same word in both places
+email: Field.email({ unique: 'organization' }),   // one contact per org
+hostname: Field.text({ unique: 'global' }),       // one holder, platform-wide
+
+indexes: [
+  // per organization — you do NOT list organization_id yourself
+  { fields: ['department', 'code'], unique: 'organization' },
+  // platform-wide — exactly the columns you list
+  { fields: ['source', 'dedup_key'], unique: 'global' },
+]
+```
+
+Two rules make the choice safe to write and safe to deploy:
+
+1. **You state a business boundary, never a deployment shape.** The same app
+   package runs unmodified under every tenancy posture — no index shape reads
+   the posture, so moving a deployment between postures has no schema
+   consequence.
+2. **`'organization'` is NULL-safe.** Rows with no organization (platform rows,
+   and *every* row on a single-organization deployment) collapse into one
+   platform bucket and are unique among themselves. Without this a plain
+   `(organization_id, …)` composite enforces nothing on those rows, because SQL
+   `UNIQUE` treats every `NULL` as distinct.
+
+<Callout type="info">
+**Bare `unique: true`.** On a **field** it means `'organization'` and stays
+valid indefinitely — `email: Field.email({ unique: true })` is correct, and the
+explicit spelling is simply preferred in new code.
+
+On a **declared index** it is the deprecated spelling of `'global'`: it
+materializes over exactly the listed columns. Because that reads like the
+field-level meaning but does the opposite, `os lint` / `os build` / `os validate`
+report it as `unique/unscoped-declared-index`, and it is rejected outright at
+protocol 18. State the scope.
+</Callout>
+
+<Callout type="warn">
+**Do not declare both on the same column.** The installation-wide one wins
+physically, so the per-organization constraint can never be reached — one of the
+two intents you wrote is silently discarded:
+
+```typescript
+// ⚠️ contradictory — the global index wins, the per-organization scope is dead
+email: Field.email({ unique: 'organization' }),
+indexes: [{ fields: ['email'], unique: 'global' }],
 ```
 
 `os lint` / `os build` report this as `unique/double-declaration`. Pick one:
-set `unique: 'global'` on the field and drop the index for platform-wide
-uniqueness, or drop the index for per-tenant uniqueness (the field-level
-declaration already builds the composite).
+keep `unique: 'global'` on the field and drop the index for platform-wide
+uniqueness, or drop the index and keep `unique: 'organization'` on the field.
 </Callout>
 
 <Callout type="warn">
-**Never put a platform-wide unique index on an `autonumber` field.** The
-autonumber sequence is per tenant — every organization counts from `1` — so a
-global unique index rejects the second organization's `CASE-00001` on insert.
-Use `{ fields: ['organization_id', 'case_number'], unique: true }` so the
-constraint matches the sequence that feeds it.
+**Never put a `'global'` unique index on an `autonumber` field.** The autonumber
+sequence is per organization — every organization counts from `1` — so an
+installation-wide unique index rejects the second organization's `CASE-00001`
+on insert. Use `unique: 'organization'` so the constraint matches the sequence
+that feeds it.
 </Callout>
+
+### Already have a hand-written organization composite?
+
+Metadata written before the vocabulary existed spells the per-organization
+constraint by listing the column itself:
+
+```typescript
+// the legacy spelling — still valid, still materialized exactly as written
+indexes: [{ fields: ['name', 'organization_id'], unique: true }]
+```
+
+This keeps working forever and forces no migration, so `os lint` only *suggests*
+the change (`unique/legacy-organization-composite`). Opting in is worth it
+because it closes the NULL hole above — keep `fields` exactly as they are and
+change the scope word:
+
+```typescript
+indexes: [{ fields: ['name', 'organization_id'], unique: 'organization' }]
+```
+
+The listed organization column becomes NULL-safe in place; no second
+organization key part is added. Because this genuinely tightens the constraint,
+it surfaces as a `recreate_index` migration guarded by a duplicate pre-flight
+probe — if rows the old index wrongly admitted are still there, `os migrate plan`
+reports them instead of failing a boot. See
+[CLI · migrations](/docs/deployment/cli).
+
+### Installing an app into an `isolated` deployment
+
+Under the `isolated` posture, organizations are separate **customers**. A
+`'global'` unique on an app's own object therefore constrains *across
+customers* — right for a DNS hostname or an external provider id, almost never
+right for a business rule. Installing such an app stops and lists each index so
+the installer can confirm it or rewrite it to `'organization'`; the answer is
+recorded in the install manifest and never asked again. `os doctor` and
+`os migrate plan` report the same finding for apps installed before that check
+existed, or for environments whose posture changed afterwards.
 
 ### When to Add Indexes
 
