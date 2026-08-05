@@ -419,6 +419,55 @@ function truncateClientMessage(message: string): string {
         : `${message.slice(0, CLIENT_MESSAGE_MAX - 1)}…`;
 }
 
+/**
+ * [#5462] The envelope for "the data store failed and the client cannot fix
+ * it": a sanitised 500 carrying the catalog's `DATABASE_ERROR`.
+ *
+ * The SQL-leak branch has emitted exactly this for as long as it has existed;
+ * it is a function now only so the missing-relation branch above it cannot
+ * drift into a second spelling of the same verdict. 500 is deliberately outside
+ * `isExpectedDataStatus`, which is what buys the log line the silent 404 never
+ * had — `handleRouteError` prints `[REST] Unhandled error` and `sendError`'s
+ * `logWithheldServerFault` (#5437) covers the routes that bypass it, so the
+ * withheld driver text always lands somewhere an operator can read it.
+ */
+const DATA_STORE_FAULT = (): { status: number; body: Record<string, unknown> } => ({
+    status: 500,
+    body: { error: 'Internal data error', code: 'DATABASE_ERROR' },
+});
+
+/**
+ * [#5462] Does a driver's missing-relation message name the very object this
+ * request asked for?
+ *
+ * Both halves must hold. `object` is the object the ROUTE named (`undefined` on
+ * every metadata / UI / discovery route — they call `handleRouteError(res,
+ * error)`), and the relation name is whatever the driver's phrasing carries:
+ *
+ *   SQLite    `SQLITE_ERROR: no such table: acct`      → `acct`
+ *   SQLite    `no such table: main.acct`               → `acct` (schema stripped)
+ *   Postgres  `relation "public.acct" does not exist`  → `acct`
+ *   generic   `table not found`                        → nothing to attribute
+ *
+ * Prime Directive #6 is what makes the comparison sound rather than a guess:
+ * the object `name` IS the table name, always, with no `tableName` mapping to
+ * launder it. So "the missing table is not the object you asked for" really
+ * does mean the failure is somewhere other than the caller's object — an
+ * auxiliary table, a system table, or the metadata plane itself.
+ *
+ * A message that names NO relation is unattributable and therefore not a
+ * match: the fail-loud direction is what this issue asked for, and there is no
+ * producer of the bare `table not found` phrasing in this repo to regress.
+ */
+function missingRelationIsObject(raw: string, object: string | undefined): boolean {
+    if (!object) return false;
+    const named =
+        /no such table:?\s*["'`[]?([a-z0-9_.$]+)/i.exec(raw) ||
+        /relation\s+["'`]?([a-z0-9_.$]+)["'`]?\s+does not exist/i.exec(raw);
+    const relation = named?.[1]?.toLowerCase().split('.').pop();
+    return relation !== undefined && relation === object.toLowerCase();
+}
+
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
@@ -763,10 +812,54 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         };
     }
 
-    const looksLikeUnknownObject =
+    // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
+    // verdict only when the missing relation IS the object the request named.
+    //
+    // These three limbs are the only ones in the heuristic below whose text is
+    // written by the DATABASE rather than by ObjectStack, and the database has
+    // no idea which of its tables the caller asked for. `sys_metadata` going
+    // away produces exactly the same words as a business object that was never
+    // registered — so the whole metadata plane collapsing came back as
+    // `404 {"error":"Object not found","code":"OBJECT_NOT_FOUND"}`, telling the
+    // caller to check their spelling, and 404 is an `isExpectedDataStatus`, so
+    // the infrastructure fault left NOT ONE LINE in the server log. Reproduced
+    // in process on the real engine + protocol: `PUT /api/v1/meta/object/acct`
+    // against a driver that fails every access with `SQLITE_ERROR: no such
+    // table: sys_metadata` answered 404 with zero log lines (see
+    // `rest-unknown-object-heuristic.test.ts`).
+    //
+    // #5437/#5464 fixed the sibling half — a producer that DECLARES `status:
+    // 5xx` is sanitised and logged. It deliberately did not touch the heuristic,
+    // and this path never reaches that branch: `saveMetaItem` rethrows the raw
+    // driver `Error` with no `status` and no `code` at all, so the whole
+    // message-text machinery below is what judges it.
+    //
+    // The criterion is attribution, and it takes BOTH halves: a request object
+    // to attribute to, and a relation name the phrasing actually carries. When
+    // either is missing the message cannot be shown to be about the object the
+    // caller asked for, and per the direction on this issue the safe way to be
+    // wrong is LOUD — a 500 that is sanitised and logged — never a silent 404.
+    // That covers the metadata/UI/discovery routes for free: they call
+    // `handleRouteError(res, error)` with no object at all, which is the exact
+    // shape this issue was raised on.
+    //
+    // The engine-authored limbs keep the old reading. `unknown object`,
+    // `object not found`, `[ObjectQL] No driver available for object '<name>'`
+    // and the quoted-object-name catch-all are OUR vocabulary about a named
+    // object — they mean what they say, and #3770's registry gate (which throws
+    // `code: 'OBJECT_NOT_FOUND'` and is matched far above) is the primary
+    // producer of this 404 anyway; the driver-string limb has been a legacy
+    // safety net since.
+    const looksLikeMissingRelation =
         lower.includes('no such table') ||
-        lower.includes('relation') && lower.includes('does not exist') ||
-        lower.includes('table not found') ||
+        (lower.includes('relation') && lower.includes('does not exist')) ||
+        lower.includes('table not found');
+    if (looksLikeMissingRelation && !missingRelationIsObject(raw, object)) {
+        return DATA_STORE_FAULT();
+    }
+
+    const looksLikeUnknownObject =
+        looksLikeMissingRelation ||
         lower.includes('unknown object') ||
         lower.includes('object not found') ||
         lower.includes('no driver available') ||
@@ -804,10 +897,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
                 },
             };
         }
-        return {
-            status: 500,
-            body: { error: 'Internal data error', code: 'DATABASE_ERROR' },
-        };
+        return DATA_STORE_FAULT();
     }
     return { status: 400, body: { error: raw || 'Bad request' } };
 }
