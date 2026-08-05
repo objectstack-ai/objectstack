@@ -25,6 +25,13 @@
 //    OPPOSITE overreach, a predicate widened to "any 4xx is expected", which
 //    would silence the un-coded 400 that `mapDataError` degrades an
 //    unrecognised error (a handler `TypeError`) to.
+//
+// [#5489] That last sentence describes the world before the unrecognised-error
+// fallback became a sanitised 500. The handler-bug case below now asserts 500;
+// its adversary is no longer a widened 4xx predicate but any future attempt to
+// add 500 to `isExpectedDataStatus`. The invariant it guards — a real handler
+// bug is never silent — is the same one, and is now carried by the status band
+// rather than by the absence of a `code`.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RestServer } from './rest-server';
@@ -168,11 +175,16 @@ describe('metadata routes — genuine faults keep the loud log (#4886)', () => {
         expect(res.statusCode).toBe(500);
     });
 
-    it('an UNRECOGNISED error (handler bug) stays loud even though it maps to 400', async () => {
-        // This is the case a blanket "any 4xx is expected" predicate would
-        // wrongly silence: `mapDataError` degrades anything it recognises
-        // nothing about to an UN-CODED 400, and that is where a real handler
-        // bug lands. Silencing it would be the mirror-image of #4886.
+    it('an UNRECOGNISED error (handler bug) stays loud — and is a 500, not a 400 (#5489)', async () => {
+        // The loudness is what #4886 pinned, and it is unchanged. What moved is
+        // WHY it is structural: this case used to land on `mapDataError`'s
+        // un-coded 400 fallback, so the guard read "loud even though it maps to
+        // 400" and its adversary was a predicate widened to "any 4xx is
+        // expected". #5489 made that fallback a sanitised 500
+        // (`UNCLASSIFIED_FAULT`) because a handler bug is not the caller's
+        // fault and an SDK must not read "do not retry" off it. 500 is outside
+        // `isExpectedDataStatus` entirely, so the log line no longer depends on
+        // the predicate staying narrow in the 4xx band.
         const bug = new TypeError('Cannot read properties of undefined (reading \'name\')');
         const { rest } = setup({ getMetaItem: vi.fn().mockRejectedValue(bug) });
 
@@ -180,8 +192,11 @@ describe('metadata routes — genuine faults keep the loud log (#4886)', () => {
 
         expect(unhandledLogs()).toHaveLength(1);
         expect(unhandledLogs()[0][1]).toBe(bug);
-        expect(res.statusCode).toBe(400);
-        expect(res.body?.code).toBeUndefined();
+        expect(res.statusCode).toBe(500);
+        expect(res.body?.code).toBe('INTERNAL_ERROR');
+        // The bug's own words are the operator's, not the client's — and the
+        // log line above is where they went.
+        expect(JSON.stringify(res.body)).not.toContain('Cannot read properties');
     });
 });
 
