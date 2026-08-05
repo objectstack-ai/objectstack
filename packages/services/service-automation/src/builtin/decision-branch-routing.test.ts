@@ -52,6 +52,15 @@ describe('decision branch routing (#4414)', () => {
                 return { success: true };
             },
         });
+        // This harness IS an embedded host, so it owes the host's half of the
+        // ADR-0018 contract: every executor it will contribute is registered
+        // above, so the vocabulary is closed (#4771). Without it the first
+        // `execute()` below reports the omission (#4792) and the
+        // zero-warning assertions in this file — which are about #4414 routing,
+        // not about node types — would count that line. Declaring the seal is
+        // the honest fix; filtering the warning out of the assertions would have
+        // hidden a real signal in every future test that borrows this harness.
+        engine.sealNodeTypeVocabulary();
     });
 
     /** The guard from `examples/app-crm/src/flows/convert-lead.flow.ts`. */
@@ -353,6 +362,10 @@ describe('objectui-authored decision shape (FlowEdgeInspector.applyBranch)', () 
                 { id: 'e3', source: 'check', target: 'auto', label: 'Standard', isDefault: true },
             ],
         });
+        // Same reason as the harness above: an embedded host closes its own
+        // vocabulary once every executor is in (#4771/#4792), and every node
+        // type this flow uses is registered above, so the seal is silent.
+        engine.sealNodeTypeVocabulary();
     });
 
     it('takes only the guarded branch when it matches', async () => {

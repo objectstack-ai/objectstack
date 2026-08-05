@@ -608,6 +608,22 @@ mirror-image failure: it trains everyone to skim `error`, which is what made the
 composition branch is usually functional and usually belongs at `warn`; a `catch`
 around a write, a DDL call, or a store initialization is where this rule bites.
 
+**A failure handed to the CALLER is not a degradation at all** — this is the
+third legal answer, and forgetting it is how the mirror-image failure gets
+written. Ask the judgment question honestly: a `/meta` PUT whose `catch` answers
+`errorFromThrown(e, 400)`, or a batch whose contract IS a per-item outcome report
+and whose `catch` writes the failure into it, does **not** look normal from the
+outside — the requester was told, per item, that the write did not land. That is
+already louder than a log line. Do **not** bolt a `logger.error` onto such a
+site: the common case on a validation path is an author submitting an off-spec
+body, so you would emit one durability `error` per rejected keystroke, which is
+exactly what makes `error` unreadable. Declare **how it delivers** instead —
+`FAILURE_PROPAGATION_CALLEES` (repo-wide names like `errorFromThrown`) or the
+function-scoped `FAILURE_PROPAGATION_SITES` (local report sinks, whose names mean
+nothing repo-wide) in the checker, which then proves structurally that *every*
+path out of the `catch` delivers. #5241 added it after #4754 was forced to park
+three correct sites in the baseline for want of a way to say this.
+
 **It has teeth** (a rule this repo only writes down is the very "declared ≠
 enforced" shape it keeps paying to fix): `pnpm check:durability-log-level` walks
 the AST for `catch` blocks guarding a declared vocabulary of durability-critical
@@ -617,7 +633,11 @@ known ones from regressing. Found a new one? Add it to
 `DURABILITY_CRITICAL_CALLEES` in `scripts/check-durability-degradation-log-level.mjs`
 in the same PR that fixes it. Accepted exceptions live in
 `scripts/durability-degradation.baseline.json`, hand-edited with a reason and
-shrink-only.
+shrink-only — and that file is currently **empty**, which is its intended steady
+state: an entry there means a real degradation nobody has fixed yet, never a site
+the gate merely cannot classify. If a red seam turns out to hand its failure to
+the caller, declare the propagation vocabulary above; do not baseline correct
+code.
 
 ---
 

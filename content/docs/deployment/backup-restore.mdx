@@ -76,12 +76,26 @@ Cloud-managed environments — the open framework does not ship that driver.)
 
 ## Backing up uploaded files
 
-The local storage adapter keeps uploads under `OS_STORAGE_ROOT` (default
+The local storage adapter keeps uploads under `OS_STORAGE_LOCAL_ROOT` (default
 `./.objectstack/data/uploads`). On single-host deployments, include that
 directory in the same schedule as the database so records and their
 attachments restore to the same point in time. Deployments using an external
 storage service (S3-compatible, etc.) inherit that service's durability and
 versioning instead.
+
+<Callout type="warn">
+**Verify the directory you are backing up actually holds the files.** This
+variable was previously named `OS_STORAGE_ROOT`, and on releases before the
+rename the CLI and the settings service spelled it differently — so any value
+other than the default was discarded at startup and uploads landed in
+`./.objectstack/data/uploads` instead of where the variable pointed. A backup
+job aimed at the configured path copied an **empty directory**. The old name
+still works for one release (with a startup warning), but it now resolves to
+the same place the adapter writes. Confirm with **Setup → Settings → File
+Storage → Root directory**: it shows the path in effect, and shows it as
+locked-by-env when the variable is set. If they disagree, trust the Setup page
+and back that path up too.
+</Callout>
 
 ## The restore drill
 
@@ -106,8 +120,8 @@ pg_restore --clean --if-exists -d "$OS_DATABASE_URL" backup-2026-07-14.dump
 ### Provide the original secrets
 
 Set `OS_SECRET_KEY` and `OS_AUTH_SECRET` to the **escrowed originals** — not
-freshly generated values. Restore `OS_STORAGE_ROOT` contents if you use local
-file storage.
+freshly generated values. Restore `OS_STORAGE_LOCAL_ROOT` contents if you use
+local file storage.
 
 ### Boot from the artifact and verify
 

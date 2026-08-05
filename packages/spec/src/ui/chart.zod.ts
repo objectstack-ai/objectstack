@@ -44,9 +44,20 @@ import { strictObject } from '../shared/strict-object';
 //   dimension/measure NAMES and adds no key of its own, so the inherited key
 //   set is exactly right and no `extraKeys` entry is needed.
 //
-// LEFT OPEN, DELIBERATELY (`ChartAggregateSchema`, `ChartGroupBySchema`) —
-// see the block above those two schemas. Short version: their carrier is the
-// REACT tier's `<ObjectChart aggregate={…}>` prop, and nothing parses them.
+// STILL OPEN (`ChartAggregateSchema`, `ChartGroupBySchema`) — but no longer for
+// the reason 批 15 recorded. Their carrier is the REACT tier's
+// `<ObjectChart aggregate={…}>` prop, which had NO parse behind it; #5020 wired
+// one (`packages/lint`'s react-page publish gate now calls
+// `ChartAggregateSchema.safeParse()` instead of re-deriving the vocabulary and
+// the count/field refinement by hand), so the `no gate` verdict is spent and
+// these two are ordinary `authorable` sites. What remains is the posture: both
+// are still STRIP, so an unknown key is dropped by that parse rather than
+// reported, and `groupby` / `dateGranularty` still degrade a chart silently.
+// Closing them is now a behaviour change with a gate to observe it — **#5583**,
+// which also carries the one product question this pair raises (is an ungrouped
+// single-value chart a supported shape? the renderer honours it, `groupBy` is
+// declared required, and #5020's gate reports the absence at `warning` until
+// that is answered).
 // ---------------------------------------------------------------------------
 
 /**
@@ -622,10 +633,45 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
  */
 
 // ---------------------------------------------------------------------------
-// THE TWO SITES BELOW ARE DELIBERATELY NOT CLOSED (#4001 批 15) — and this is
-// a measured verdict, not the batch running out of file.
+// THE TWO SITES BELOW ARE STILL OPEN — and as of #5020 the reason has CHANGED.
+// Read this header as two layers: what 批 15 measured (still accurate as
+// history), and what moved since (the parse exists now; the posture does not).
 //
-// `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm are the only
+// ## What moved (#5020)
+//
+// Point 3 below said "nothing parses these". That is no longer true. The
+// react-page publish gate — `packages/lint/src/validate-react-page-props.ts` —
+// now calls `ChartAggregateSchema.safeParse()` on a static
+// `aggregate={{…}}` literal, exactly as #5022 did for `ChartDrillDownSchema`
+// beside it, and the hand-derived `CHART_FUNCTIONS` list plus the hand-written
+// twin of the count/field refinement are DELETED: this file is the single source
+// of both again. So the ledger's `no gate` verdict is spent, and these two rows
+// are now ordinary `authorable` sites.
+//
+// ## What did NOT move, and why it is a separate issue
+//
+// Both are still STRIP-posture, so the parse the gate now runs still DROPS an
+// unknown key instead of reporting it — `groupby` for `groupBy`,
+// `dateGranularty` for `dateGranularity` — and a chart still degrades to a
+// single ungrouped point with `build`/`validate` green. Converting them to
+// `strictObject` is now a real behaviour change with a gate that observes it,
+// which is the whole point of doing it in this order, and it is **#5583**.
+// `validate-react-page-props.test.ts` pins today's tolerance out loud so the
+// wired gate cannot be mistaken for a closed one (#4583); those pins invert
+// when #5583 lands, as do the two "still STRIPS — deliberate" pins in
+// `chart.test.ts`.
+//
+// ⚠️ #5583 also carries the one product question this pair raises, which is NOT
+// a strictness question: `groupBy` is declared REQUIRED here and in the
+// published react-blocks type, while objectui's `ObjectChart` honours its
+// absence (`schema.aggregate?.groupBy || schema.xAxisKey`) and
+// `chartAggregateCategoryKey` in `./chart-aggregate.ts` documents the ungrouped
+// single-row result. Until that is answered, #5020's gate reports the absence at
+// `warning` rather than gating a shape the platform itself delivers.
+//
+// ## What 批 15 measured (the history, unchanged)
+//
+// `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm were the only
 // two of this file's seven object sites the 批 15 door measurement could not
 // find a PARSE for:
 //
@@ -657,12 +703,19 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
 // `groupby` / `fn` / `dateGranularty` are silently dropped today and would go
 // on being silently dropped after a `strictObject` here.
 //
-// The contract-first fix is to make the react-page publish gate PARSE this
+// The contract-first fix was to make the react-page publish gate PARSE this
 // schema instead of re-deriving it — a change in `packages/lint`, not a
-// strictness change in the spec. Filed rather than smuggled in here.
+// strictness change in the spec. Filed rather than smuggled in here, and
+// **DONE at #5020**, which is why the two paragraphs at the top of this header
+// now supersede this one.
 //
-// DO NOT convert these two to `strictObject` before that is decided: it would
-// read as load-bearing, and it would make the real gap harder to see.
+// The batch's standing instruction — "do not convert these two to
+// `strictObject` before the parse exists, it would read as load-bearing while
+// gating nothing" — is therefore SATISFIED, not repealed. The conversion is now
+// the right next step and has its own issue (#5583). Anyone reaching this
+// paragraph from a strictness sweep should go there rather than closing these
+// two in passing: the sweep would also have to invert four pins and answer the
+// `groupBy` product question above.
 // ---------------------------------------------------------------------------
 
 /**
