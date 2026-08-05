@@ -365,6 +365,49 @@ export function zodIssuesToFields(
     return out;
 }
 
+/**
+ * How many characters of a domain error's OWN message reach the client.
+ *
+ * Deliberately the same 500 the two status-passthrough branches have always
+ * used — #5423 changed what happens AT the bound, not where the bound sits.
+ */
+const CLIENT_MESSAGE_MAX = 500;
+
+/**
+ * [#5423] Bound an explicit-status domain error's message by TRUNCATING it,
+ * never by replacing it wholesale.
+ *
+ * Both status-passthrough branches (in {@link mapDataError} and
+ * {@link resolveErrorResponse}) used to swap any message of 500+ characters for
+ * the literal `'Request failed'` — `code` and `status` landed as usual and the
+ * entire body text vanished. That inverted the incentive on every carefully
+ * worded rejection in the repo: the driver-sql filter refusals exist ONLY to
+ * tell an author which operator/field they got wrong and how the spec declares
+ * it, and the two longest of them (#5158's unlowered `FilterArray`, #5347's
+ * `$null` non-boolean comparand) were already over the line — so the more
+ * precisely a rejection was written, the more certainly the client received
+ * nothing but `{ "code": "INVALID_FILTER", "error": "Request failed" }`.
+ * Adding `status: 400` to make a message client-visible (#4436's intent) made
+ * it strictly LESS readable in that band.
+ *
+ * Truncation keeps the part that is worth reading. These messages front-load
+ * the main clause — the operator, the field, the path, what arrived and what
+ * the spec declares — and back-load attribution and issue numbers, which
+ * belong in the log rather than the response.
+ *
+ * The bound is NOT a leak defence and never was: length is not a proxy for
+ * "contains SQL", a 200-character driver dump passed the old gate untouched,
+ * and these messages have already cleared `looksLikeInternalErrorLeak` /
+ * `isSqlLeak` before reaching here. Same shape as the drivers' own
+ * `safeShapePreview` (`packages/plugins/driver-sql`), which previews rather
+ * than erases.
+ */
+function truncateClientMessage(message: string): string {
+    return message.length < CLIENT_MESSAGE_MAX
+        ? message
+        : `${message.slice(0, CLIENT_MESSAGE_MAX - 1)}…`;
+}
+
 export function mapDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
@@ -564,8 +607,11 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // 5xx messages keep going through the sanitizing heuristics below so
     // internal/SQL details never reach the client verbatim.
     if (typeof error?.status === 'number' && error.status >= 400 && error.status < 500) {
-        const msg = typeof error?.message === 'string' && error.message.length > 0 && error.message.length < 500
-            ? error.message
+        // An over-long message is TRUNCATED, not swapped for generic text
+        // (#5423) — see {@link truncateClientMessage}. A missing or empty one
+        // still degrades to `'Request failed'`: there is nothing to truncate.
+        const msg = typeof error?.message === 'string' && error.message.length > 0
+            ? truncateClientMessage(error.message)
             : 'Request failed';
         return {
             status: error.status,
@@ -785,9 +831,26 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
     if (passThroughStatus) {
-        const safeMsg = typeof error.message === 'string' && error.message.length < 500
-            ? error.message
-            : 'Request failed';
+        // [#5423] Same bound as `mapDataError`'s 4xx passthrough, same cure —
+        // truncate rather than replace — but applied only to the 4xx half.
+        //
+        // This branch's range is 400-599, wider than `mapDataError`'s, and the
+        // 4xx/5xx split is the one distinction the repo already draws here:
+        // `mapDataError`'s sibling branch is "deliberately limited to 4xx: 5xx
+        // messages keep going through the sanitizing heuristics ... so
+        // internal/SQL details never reach the client verbatim". A 4xx message
+        // is addressed TO the caller and is the remedy; a 5xx message is a
+        // server fault's log diagnostic that happens to be reachable here. So
+        // 5xx keeps the wholesale replacement byte-for-byte — #5423 is about
+        // rejections a client is meant to read, and widening 5xx leniency is
+        // not in its scope.
+        const safeMsg = typeof error.message !== 'string'
+            ? 'Request failed'
+            : error.status < 500
+                ? truncateClientMessage(error.message)
+                : error.message.length < CLIENT_MESSAGE_MAX
+                    ? error.message
+                    : 'Request failed';
         return {
             status: error.status,
             body: {

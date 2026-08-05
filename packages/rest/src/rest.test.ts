@@ -2322,10 +2322,17 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.code).not.toBe('FORBIDDEN');
   });
 
-  it('guards the passthrough message length (oversized → generic text)', () => {
+  // [#5423] This case used to assert the oversized message became the literal
+  // 'Request failed'. The BOUND is still the guard — an oversized message must
+  // not reach the client whole — but it is now enforced by truncating rather
+  // than by erasing the body text. Full coverage of the new disposition lives
+  // in `rest-4xx-message-truncation.test.ts`.
+  it('guards the passthrough message length (oversized → truncated, not erased)', () => {
     const r = mapDataError(Object.assign(new Error('x'.repeat(600)), { status: 403, code: 'FORBIDDEN' }));
     expect(r.status).toBe(403);
-    expect(r.body.error).toBe('Request failed');
+    expect(r.body.error).not.toBe('Request failed');
+    expect(String(r.body.error)).toHaveLength(500);
+    expect(String(r.body.error).endsWith('…')).toBe(true);
   });
 
   it('keeps CONCURRENT_UPDATE 409 structured fields despite its own status property', () => {

@@ -450,10 +450,22 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * (`malformedFilterArrayError` / `unusableFilterError`): one condition — "this
  * filter cannot run" — has one wire code however the caller reached it.
  *
- * `status: 400` makes `@objectstack/rest`'s `sendError` pass the message
- * through instead of routing it to the SQL-leak heuristic, and puts the
- * rejection on the `isExpectedQueryRejection` list so a client mistake stops
- * being logged as an unhandled server error.
+ * `status: 400` puts the rejection on `@objectstack/rest`'s
+ * `isExpectedQueryRejection` list, so a client mistake stops being logged as an
+ * unhandled server error.
+ *
+ * It does NOT decide whether the message text survives, and the claim that it
+ * "makes `sendError` pass the message through instead of routing it to the
+ * SQL-leak heuristic" was backwards (#5423): WITHOUT a status these messages
+ * already reached the client verbatim through `mapDataError`'s final
+ * `{ status: 400, body: { error: raw } }` — the leak heuristics do not match
+ * this wording. WITH the status they entered the explicit-status passthrough,
+ * whose 500-character bound used to swap the whole body text for
+ * `'Request failed'` — so in that band adding the status made the message LESS
+ * readable, the opposite of what this comment promised. That bound now
+ * truncates instead of replacing, so the main clause survives either way; the
+ * tail (attribution, issue numbers) may be cut. Keep the actionable part —
+ * operator, field, path, what arrived, what the spec declares — at the FRONT.
  *
  * The `[sql-driver]` prefix these messages used to carry is GONE from the text:
  * it is driver-internal wording, and shipping it to clients is exactly what the
