@@ -2,6 +2,7 @@
 
 import chalk from 'chalk';
 import type { ZodError } from 'zod';
+import { formatZodIssue } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -164,6 +165,54 @@ export function createTimer() {
 
 // ─── Zod Error Formatting ───────────────────────────────────────────
 
+/**
+ * How far the branch lines of an expanded union are pushed to sit UNDER the
+ * `code: message` line this file prints for the union itself.
+ *
+ * `formatZodIssue` indents its own depth-0 line by 2 spaces and each nested
+ * level by 2 more; this file's per-issue block is at 4/6. Adding 4 puts the
+ * first branch level at 8 — one step below the `invalid_union: Invalid input`
+ * line it explains — and keeps every deeper level nested relative to it.
+ */
+const UNION_BRANCH_REINDENT = '    ';
+
+/**
+ * The lines that explain an `invalid_union`, or nothing at all.
+ *
+ * Zod folds every branch of a failed union into ONE issue whose own `message`
+ * is the literal `"Invalid input"`; each branch's real rejection sits in
+ * `issue.errors[]`, with paths relative to the union's own. A consumer that
+ * walks only the top level therefore prints `invalid_union: Invalid input` and
+ * drops the branch that says WHICH key is wrong — which is what `os validate`,
+ * `os build` and `os plugin build` did until #5341, so every curated
+ * prescription the #4001 campaign wrote for a strict shape behind a union was
+ * produced and never delivered to the author's terminal.
+ *
+ * The branch SELECTION (drop branches that only say "wrong kind of value",
+ * prefer the branch complaining least so one stray key is not reported once per
+ * branch, break ties on `unrecognized_keys`, absolute paths, bounded depth) is
+ * `@objectstack/spec`'s, reused rather than re-derived: this is the third
+ * consumer of the same defect after `formatZodError` (#4971, PR #5342) and the
+ * REST wire's `zodIssuesToFields` (#5014, PR #5362), and one mistake must not
+ * get three different prescriptions depending on which surface the author hit.
+ * Unlike the wire — which needs structured `{field, code, message}` entries and
+ * so had to re-implement the ranking — the terminal needs exactly the STRING
+ * that spec already exports, so here the reuse is a plain import.
+ *
+ * Line 0 of that render is the union's own verdict, which the caller has
+ * already printed in this file's own idiom; only the explanation is returned,
+ * so the change is strictly ADDITIVE — nothing that printed before #5341 stops
+ * printing. A non-union issue renders as a single line, hence never reaches
+ * here and could not add one anyway.
+ */
+function unionBranchLines(issue: unknown): string[] {
+  if ((issue as { code?: unknown } | null)?.code !== 'invalid_union') return [];
+  return formatZodIssue(issue as Parameters<typeof formatZodIssue>[0])
+    .split('\n')
+    .slice(1)
+    .map((line) => `${UNION_BRANCH_REINDENT}${line}`);
+}
+
 export function formatZodErrors(error: ZodError) {
   const issues = error.issues || (error as any).errors || [];
   
@@ -198,6 +247,11 @@ export function formatZodErrors(error: ZodError) {
       }
       if ((issue as any).received) {
         console.log(chalk.dim(`      received: ${chalk.red((issue as any).received)}`));
+      }
+
+      // [#5341] …and, for a union, the branch that actually explains it.
+      for (const line of unionBranchLines(issue)) {
+        console.log(chalk.dim(line));
       }
     }
   }
