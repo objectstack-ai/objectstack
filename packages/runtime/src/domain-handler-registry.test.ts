@@ -540,9 +540,19 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
 // ---------------------------------------------------------------------------
 
 describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
+    /**
+     * [#5519] `/automation` stands on the platform anonymous-deny baseline now.
+     * The cases below go through the REAL `dispatch()`, which re-resolves
+     * identity off the mock kernel, so an `auth` slot that answers with a
+     * session is what keeps each of them testing ROUTING (which service method
+     * a path reaches) instead of quietly re-testing the auth floor. Anonymity
+     * itself is pinned in `domains/anonymous-gate-actions-automation.test.ts`.
+     */
+    const auth = { api: { getSession: async () => ({ user: { id: 'u_test' } }) } };
+
     it('GET /automation lists flows via the automation service', async () => {
         const automation = { listFlows: vi.fn().mockResolvedValue(['flow-a', 'flow-b']) };
-        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation', undefined, {}, {} as any);
+        const result = await makeDispatcher({ automation, auth }).dispatch('GET', '/automation', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.total).toBe(2);
     });
@@ -556,7 +566,7 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
                 { name: 'a2', source: 'plugin', paradigms: ['workflow'] },
             ]),
         };
-        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation/actions', undefined, { source: 'plugin' }, {} as any);
+        const result = await makeDispatcher({ automation, auth }).dispatch('GET', '/automation/actions', undefined, { source: 'plugin' }, {} as any);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.actions).toHaveLength(1);
         // The /:name→getFlow catch-all must NOT have shadowed the guard route.
@@ -631,7 +641,7 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
         const execute = vi.fn().mockResolvedValue({ success: true });
         const automation = { trigger, execute, listFlows: vi.fn(), getFlow: vi.fn() };
 
-        const result = await makeDispatcher({ automation })
+        const result = await makeDispatcher({ automation, auth })
             .dispatch('POST', '/automation/trigger/nurture', {}, {}, {} as any);
 
         expect(result.response?.status).toBe(200);
@@ -653,7 +663,7 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
                 { name: 'nurture', enabled: true, bound: false, status: 'active', triggerType: 'on_create', object: 'sales_lead' },
             ]),
         };
-        const result = await makeDispatcher({ automation }).dispatch('GET', '/automation/_status', undefined, {}, {} as any);
+        const result = await makeDispatcher({ automation, auth }).dispatch('GET', '/automation/_status', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.flows?.[0]).toEqual({
             name: 'nurture', enabled: true, bound: false,

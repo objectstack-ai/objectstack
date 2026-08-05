@@ -207,8 +207,16 @@ describe('#5372 — the VALUE, other direction: name === id iff there is no disp
         expect(actionCtx.user.name).toBe('usr_admin');
     });
 
-    it('an anonymous / self-invoked dispatch is the `system` principal, unchanged (#2701)', async () => {
-        const { actionCtx } = await dispatchRest(undefined, makeQl(DEV_ADMIN));
+    it('a SELF-INVOKED dispatch is the `system` principal, unchanged (#2701); anonymous is 401 (#5519)', async () => {
+        // REPLACED, not re-spelled: driven with `undefined` this was the
+        // ANONYMOUS shape, and #5519 denies that at the door — `executeAction`
+        // is never called, so `actionCtx` would be `undefined` and every
+        // assertion below would read off nothing.
+        //
+        // The `system`-principal shape #2701 pinned is still real for the
+        // caller that reaches the body without a `userId`: the self-invoked
+        // `isSystem` context.
+        const { actionCtx } = await dispatchRest({ isSystem: true }, makeQl(DEV_ADMIN));
 
         expect(actionCtx.user.id).toBe('system');
         expect(actionCtx.user.name).toBe('system');
@@ -216,6 +224,14 @@ describe('#5372 — the VALUE, other direction: name === id iff there is no disp
         // "holds nothing" rather than needing a `?? []`.
         expect(actionCtx.user.permissions).toEqual([]);
         expect(actionCtx.user.systemPermissions).toEqual([]);
+    });
+
+    it('a genuinely ANONYMOUS dispatch never reaches the body at all (#5519)', async () => {
+        const ql = makeQl(DEV_ADMIN);
+        const { response } = await dispatchRest(undefined, ql);
+
+        expect(response.status).toBe(401);
+        expect(ql.executeAction).not.toHaveBeenCalled();
     });
 });
 

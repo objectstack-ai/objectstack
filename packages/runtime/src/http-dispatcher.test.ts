@@ -20,6 +20,17 @@ import type { IAuthService, IAutomationService } from '@objectstack/spec/contrac
  */
 type ContractMock<T> = Partial<Record<keyof T, unknown>>;
 
+/**
+ * [#5519] The dispatch domains below (`/actions`, `/automation`) now stand on
+ * the platform anonymous-deny baseline, so a route-behaviour test needs a
+ * caller. These cases are about ROUTING — which service method a path reaches,
+ * which status a miss returns — and were only ever anonymous incidentally
+ * (`{ request: {} }` is the smallest context that compiles). Anonymity itself
+ * is pinned in `domains/anonymous-gate-actions-automation.test.ts`; giving
+ * these a session keeps each file testing the thing it is named after.
+ */
+const AUTHED_CALLER = () => ({ request: {}, executionContext: { userId: 'u_test', isSystem: false, positions: [], permissions: [], systemPermissions: [] } }) as any;
+
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
     let dispatcher: HttpDispatcher;
@@ -234,13 +245,13 @@ describe('HttpDispatcher', () => {
         });
 
         it('should list flows via GET /', async () => {
-            const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual(['flow_a', 'flow_b']);
         });
 
         it('should return per-flow runtime enable/bound state via GET /_status', async () => {
-            const result = await dispatcher.handleAutomation('_status', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual([
                 { name: 'flow_a', enabled: true, bound: true },
@@ -251,41 +262,41 @@ describe('HttpDispatcher', () => {
         });
 
         it('should get a flow via GET /:name', async () => {
-            const result = await dispatcher.handleAutomation('flow_a', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.name).toBe('flow_a');
         });
 
         it('should return 404 for non-existent flow via GET /:name', async () => {
             mockAutomationService.getFlow.mockResolvedValue(null);
-            const result = await dispatcher.handleAutomation('missing', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('missing', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
 
         it('should create a flow via POST /', async () => {
             const body = { name: 'new_flow', label: 'New Flow' };
-            const result = await dispatcher.handleAutomation('', 'POST', body, { request: {} });
+            const result = await dispatcher.handleAutomation('', 'POST', body, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.registerFlow).toHaveBeenCalledWith('new_flow', body);
         });
 
         it('should update a flow via PUT /:name', async () => {
             const body = { definition: { label: 'Updated' } };
-            const result = await dispatcher.handleAutomation('flow_a', 'PUT', body, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a', 'PUT', body, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.registerFlow).toHaveBeenCalledWith('flow_a', { label: 'Updated' });
         });
 
         it('should delete a flow via DELETE /:name', async () => {
-            const result = await dispatcher.handleAutomation('flow_a', 'DELETE', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a', 'DELETE', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.unregisterFlow).toHaveBeenCalledWith('flow_a');
             expect(result.response?.body?.data?.deleted).toBe(true);
         });
 
         it('should trigger a flow via POST /:name/trigger', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/trigger', 'POST', { key: 'val' }, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/trigger', 'POST', { key: 'val' }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.execute).toHaveBeenCalledWith('flow_a', expect.objectContaining({
                 params: expect.objectContaining({ key: 'val' }),
@@ -294,26 +305,26 @@ describe('HttpDispatcher', () => {
         });
 
         it('should toggle a flow via POST /:name/toggle', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false);
         });
 
         it('should list runs via GET /:name/runs', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/runs', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/runs', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.runs).toHaveLength(1);
         });
 
         it('should get a run via GET /:name/runs/:runId', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/runs/run_1', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/runs/run_1', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.id).toBe('run_1');
         });
 
         it('should return 404 for non-existent run', async () => {
             mockAutomationService.getRun.mockResolvedValue(null);
-            const result = await dispatcher.handleAutomation('flow_a/runs/missing', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/runs/missing', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
@@ -321,7 +332,7 @@ describe('HttpDispatcher', () => {
         // ── screen-flow runtime (ADR-0019 durable pause, #3528) ──────────
         it('should resume a paused run via POST /:name/runs/:runId/resume', async () => {
             const result = await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { inputs: { new_assignee: 'ada' } }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { inputs: { new_assignee: 'ada' } }, AUTHED_CALLER(),
             );
             expect(result.handled).toBe(true);
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
@@ -332,7 +343,7 @@ describe('HttpDispatcher', () => {
 
         it('should accept `variables` as an alias for `inputs` on resume', async () => {
             await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { variables: { note: 'hi' } }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { variables: { note: 'hi' } }, AUTHED_CALLER(),
             );
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
                 variables: { note: 'hi' },
@@ -342,7 +353,7 @@ describe('HttpDispatcher', () => {
         it('should forward approval-style output + branchLabel on resume', async () => {
             await dispatcher.handleAutomation(
                 'flow_a/runs/run_1/resume', 'POST',
-                { output: { comment: 'ok' }, branchLabel: 'approve' }, { request: {} },
+                { output: { comment: 'ok' }, branchLabel: 'approve' }, AUTHED_CALLER(),
             );
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
                 output: { comment: 'ok' },
@@ -351,7 +362,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should resume with an empty signal when the body carries no input', async () => {
-            await dispatcher.handleAutomation('flow_a/runs/run_1/resume', 'POST', undefined, { request: {} });
+            await dispatcher.handleAutomation('flow_a/runs/run_1/resume', 'POST', undefined, AUTHED_CALLER());
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {});
         });
 
@@ -361,7 +372,7 @@ describe('HttpDispatcher', () => {
                 screen: { nodeId: 'step2', title: 'Confirm', fields: [] },
             });
             const result = await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, AUTHED_CALLER(),
             );
             expect(result.response?.body?.data?.status).toBe('paused');
             expect(result.response?.body?.data?.screen?.nodeId).toBe('step2');
@@ -378,7 +389,7 @@ describe('HttpDispatcher', () => {
                 error: "Run 'run_1' is paused at an 'approval' node, which only its owning service may resume",
             });
             const result = await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { branchLabel: 'approve' }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { branchLabel: 'approve' }, AUTHED_CALLER(),
             );
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(403);
@@ -391,7 +402,7 @@ describe('HttpDispatcher', () => {
         it('should not 403 an ordinary failed resume', async () => {
             mockAutomationService.resume.mockResolvedValue({ success: false, error: 'node blew up' });
             const result = await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, AUTHED_CALLER(),
             );
             expect(result.response?.status).not.toBe(403);
             expect(result.response?.body?.data?.success).toBe(false);
@@ -409,7 +420,7 @@ describe('HttpDispatcher', () => {
             });
             const result = await dispatcher.handleAutomation(
                 'flow_a/runs/run_1/resume', 'POST',
-                { output: { $mapItemDone: true } }, { request: {} },
+                { output: { $mapItemDone: true } }, AUTHED_CALLER(),
             );
             expect(result.response?.status).toBe(400);
             expect(result.response?.body?.error?.message).toMatch(/reserved by the flow engine/);
@@ -420,7 +431,7 @@ describe('HttpDispatcher', () => {
             await dispatcher.handleAutomation(
                 'flow_a/runs/run_1/resume', 'POST',
                 { inputs: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 }, output: { decision: 'ok' } },
-                { request: {} },
+                AUTHED_CALLER(),
             );
             expect(mockAutomationService.resume).toHaveBeenCalledWith('run_1', {
                 variables: { new_assignee: 'ada', 'collect.note': 'hi', price$: 3 },
@@ -431,14 +442,14 @@ describe('HttpDispatcher', () => {
         it('should return 501 when the automation service cannot resume', async () => {
             delete mockAutomationService.resume;
             const result = await dispatcher.handleAutomation(
-                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, { request: {} },
+                'flow_a/runs/run_1/resume', 'POST', { inputs: {} }, AUTHED_CALLER(),
             );
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
 
         it('should get the pending screen via GET /:name/runs/:runId/screen', async () => {
-            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.getSuspendedScreen).toHaveBeenCalledWith('run_1');
             expect(result.response?.body?.data?.screen?.nodeId).toBe('collect');
@@ -448,7 +459,7 @@ describe('HttpDispatcher', () => {
 
         it('should return 404 when the run is not awaiting a screen', async () => {
             mockAutomationService.getSuspendedScreen.mockResolvedValue(null);
-            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('flow_a/runs/run_1/screen', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(404);
         });
@@ -468,7 +479,7 @@ describe('HttpDispatcher', () => {
          * executionContext without dispatch() overwriting it.
          */
         it('routes the legacy POST /trigger/:name through execute, never a non-contract trigger()', async () => {
-            const result = await dispatcher.handleAutomation('trigger/flow_a', 'POST', { data: 1 }, { request: {} });
+            const result = await dispatcher.handleAutomation('trigger/flow_a', 'POST', { data: 1 }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.trigger).not.toHaveBeenCalled();
             expect(mockAutomationService.execute).toHaveBeenCalledTimes(1);
@@ -482,7 +493,7 @@ describe('HttpDispatcher', () => {
 
         // ── GET /actions — action descriptor registry (ADR-0018) ──────────
         it('should list action descriptors via GET /actions', async () => {
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.getActionDescriptors).toHaveBeenCalled();
             expect(result.response?.body?.data?.total).toBe(3);
@@ -492,7 +503,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('must NOT let GET /actions be shadowed by the /:name flow lookup', async () => {
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             // The actions registry is returned, NOT a getFlow('actions') result.
             expect(mockAutomationService.getFlow).not.toHaveBeenCalled();
@@ -500,14 +511,14 @@ describe('HttpDispatcher', () => {
         });
 
         it('should filter GET /actions by ?source', async () => {
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { source: 'plugin' });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER(), { source: 'plugin' });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.actions[0].type).toBe('send_sms');
         });
 
         it('should filter GET /actions by ?paradigm', async () => {
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} }, { paradigm: 'approval' });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER(), { paradigm: 'approval' });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.actions[0].type).toBe('http_request');
@@ -515,7 +526,7 @@ describe('HttpDispatcher', () => {
 
         it('should return an empty registry when the service lacks getActionDescriptors', async () => {
             delete mockAutomationService.getActionDescriptors;
-            const result = await dispatcher.handleAutomation('actions', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.actions).toEqual([]);
             expect(result.response?.body?.data?.total).toBe(0);
@@ -523,7 +534,7 @@ describe('HttpDispatcher', () => {
 
         // ── GET /connectors — connector descriptor registry (ADR-0022) ────
         it('should list connector descriptors via GET /connectors', async () => {
-            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(mockAutomationService.getConnectorDescriptors).toHaveBeenCalled();
             expect(result.response?.body?.data?.total).toBe(3);
@@ -533,7 +544,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('must NOT let GET /connectors be shadowed by the /:name flow lookup', async () => {
-            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             // The connector registry is returned, NOT a getFlow('connectors') result.
             expect(mockAutomationService.getFlow).not.toHaveBeenCalled();
@@ -541,7 +552,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should filter GET /connectors by ?type', async () => {
-            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} }, { type: 'database' });
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, AUTHED_CALLER(), { type: 'database' });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
             expect(result.response?.body?.data?.connectors[0].name).toBe('pg');
@@ -553,7 +564,7 @@ describe('HttpDispatcher', () => {
         // degraded one (ADR-0097 §4, #3017) — while the contract did not
         // declare the method, nothing pinned that they survive the hop.
         it('should preserve origin / state / degradedReason on GET /connectors', async () => {
-            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             const byName = Object.fromEntries(
                 result.response?.body?.data?.connectors.map((c: ConnectorDescriptor) => [c.name, c]),
@@ -568,7 +579,7 @@ describe('HttpDispatcher', () => {
 
         it('should return an empty registry when the service lacks getConnectorDescriptors', async () => {
             delete mockAutomationService.getConnectorDescriptors;
-            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('connectors', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.connectors).toEqual([]);
             expect(result.response?.body?.data?.total).toBe(0);
@@ -1105,7 +1116,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+                const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.body?.data?.flows).toEqual(['f1']);
             });
@@ -1117,7 +1128,7 @@ describe('HttpDispatcher', () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
 
-                const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+                const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(501);
                 expect(result.response?.body?.error?.message ?? '').toContain('service-automation');
@@ -1176,7 +1187,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).getService = vi.fn().mockReturnValue(syncAuto);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual(['flow_x']);
         });
@@ -1229,7 +1240,7 @@ describe('HttpDispatcher', () => {
             };
             (kernel as any).getServiceAsync = vi.fn().mockResolvedValue(asyncAuto);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual(['flow_async']);
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('automation');
@@ -2916,7 +2927,7 @@ describe('HttpDispatcher', () => {
             // the stub is NEVER CALLED, so nothing can read "flow executed"
             // off a flow that never ran.
             for (const [path, method] of [['', 'GET'], ['', 'POST'], ['trigger/x', 'POST'], ['x/trigger', 'POST']] as const) {
-                const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, { request: {} });
+                const result = await dispatcher.handleAutomation(path, method, { name: 'x' }, AUTHED_CALLER());
                 expect(result.response?.status, `${method} /automation/${path}`).toBe(501);
             }
             expect(stub.execute).not.toHaveBeenCalled();
@@ -2929,7 +2940,7 @@ describe('HttpDispatcher', () => {
             const svc = degraded({ listFlows: vi.fn().mockResolvedValue(['flow_a']) });
             serveOnly('automation', svc);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.flows).toEqual(['flow_a']);
         });
@@ -3549,10 +3560,21 @@ describe('HttpDispatcher — ADR-0066 D4 action requiredPermissions gate', () =>
     expect(executeAction).toHaveBeenCalledTimes(1);
   });
 
-  it('denies an unauthenticated caller for a gated action', async () => {
+  it('denies an unauthenticated caller for a gated action — now at the 401 FLOOR, not the 403 gate (#5519)', async () => {
+    // The one place #5519 visibly REORDERS two denials. This case used to
+    // reach `actionPermissionError` and answer 403 "you are missing
+    // [manage_platform_settings]" — a message that describes the wrong
+    // problem and implies a session exists. `/actions` now stands on the
+    // platform anonymous-deny baseline, which answers first and answers 401.
+    //
+    // The verdict is unchanged where it counts (denied, nothing dispatched);
+    // only the reason improved. The capability gate itself is untouched — the
+    // three cases above still exercise it for authenticated callers, which is
+    // the population it was ever able to judge.
     const { dispatcher, executeAction, ctx } = make(gated, undefined);
     const res = await dispatcher.handleActions('/sys_license/issue_and_sign', 'POST', {}, ctx);
-    expect(res.response.status).toBe(403);
+    expect(res.response.status).toBe(401);
+    expect(res.response.body?.error?.code ?? res.response.body?.error?.details?.code).toBe('UNAUTHENTICATED');
     expect(executeAction).not.toHaveBeenCalled();
   });
 });
@@ -3621,15 +3643,33 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     expect(session.tenantId).toBeUndefined();
   });
 
-  it('falls back to a `system` principal only when the request is anonymous', async () => {
-    const { dispatcher, executeAction, ctx } = captureCtx(undefined);
-    await dispatcher.handleActions('/lead/convert', 'POST', {}, ctx);
-    const user = actionUser(executeAction);
+  it('falls back to a `system` principal for a SELF-INVOKED call — the anonymous door is 401 now (#5519)', async () => {
+    // REPLACED, not re-spelled. This was driven with NO execution context —
+    // the shape an anonymous HTTP request has — and asserted over the action
+    // context the body received. Since #5519 an anonymous `/actions` POST is
+    // denied 401 before anything dispatches, so `executeAction` is never
+    // called and the old assertions would have been reading `undefined`:
+    // green for the empty reason, which is worse than red.
+    //
+    // What #2701's fallback actually still describes is the SELF-INVOKED
+    // caller — a context with `isSystem: true` and no `userId`, which is the
+    // one identity-less shape that legitimately reaches the body (and cannot
+    // be forged from the wire). That half is pinned here; the anonymous half
+    // is pinned as the denial it now is.
+    const selfInvoked = captureCtx({ isSystem: true });
+    await selfInvoked.dispatcher.handleActions('/lead/convert', 'POST', {}, selfInvoked.ctx);
+    const user = actionUser(selfInvoked.executeAction);
     expect(user.id).toBe('system');
     expect(user.roles).toEqual([]);
     expect(user.positions).toEqual([]);
     // No resolved caller → no session (parity with the hook surface).
-    expect(actionSession(executeAction)).toBeUndefined();
+    expect(actionSession(selfInvoked.executeAction)).toBeUndefined();
+
+    // …and the anonymous door, asserted rather than left implied.
+    const anon = captureCtx(undefined);
+    const denied: any = await anon.dispatcher.handleActions('/lead/convert', 'POST', {}, anon.ctx);
+    expect(denied.response.status).toBe(401);
+    expect(anon.executeAction).not.toHaveBeenCalled();
   });
 
   it('sources identity from executionContext, ignoring a stray `_context.user` (regression guard)', async () => {
