@@ -9,6 +9,8 @@ import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
   filterArrayReachedDriverError,
+  filterNodeExpectedError,
+  filterNodeListExpectedError,
   malformedBetweenError,
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
@@ -843,7 +845,7 @@ export class InMemoryDriver implements IDataDriver {
       const here = `${path}.${key}`;
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
-        if (!Array.isArray(value)) throw unknownLogicalOperatorError(key, here);
+        if (!Array.isArray(value)) throw filterNodeListExpectedError(key, value, here);
         result[key] = value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`));
         continue;
       }
@@ -867,7 +869,7 @@ export class InMemoryDriver implements IDataDriver {
         // At most one `$not` per node (it is one object key), so this never
         // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
         // the shape gate refuses undeclared combinators.
-        if (!value || typeof value !== 'object') throw unknownLogicalOperatorError(key, here);
+        if (!value || typeof value !== 'object') throw filterNodeExpectedError(value, here);
         result.$nor = [this.normalizeFilterCondition(value, object, here)];
         continue;
       }
