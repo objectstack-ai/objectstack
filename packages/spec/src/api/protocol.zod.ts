@@ -116,15 +116,56 @@ export const GetDiscoveryRequestSchema = lazySchema(() => z.object({}));
  * - `routes` provides a flat endpoint map for client routing.
  * - `services` is the single source of truth for service availability.
  * - `apiName` is kept as an optional alias for `name` for backward compatibility.
- * 
+ *
+ * ## This schema is the CLIENT's tolerance, never a producer's licence (#4828)
+ *
+ * `.partial()` exists so a client can parse an OLDER server's response without
+ * exploding, and zod's default unknown-key strip lets it parse a NEWER one.
+ * That tolerance is correct at this boundary and wrong as a producer contract —
+ * and for a long time it was the only schema anything referenced, so it acted
+ * as both. The result was `declared ≠ enforced` in both directions at once:
+ * `getDiscovery()` never emitted the required `name`/`environment`/`locale` and
+ * still parsed clean, while the runtime dispatcher emitted `features` and
+ * `endpoints` — declared nowhere — and also parsed clean.
+ *
+ * So the two schemas now have separate jobs, and a gate compares them:
+ *
+ * - **{@link DiscoverySchema} is authoritative for PRODUCERS.** Every producer's
+ *   live shape must satisfy it (`packages/metadata-protocol`, `packages/runtime`
+ *   and `packages/rest` each carry a `discovery-schema-conformance.test.ts`).
+ * - **This schema is the CONSUMER's parse**, and its key set is the allowance
+ *   those producer gates check against — i.e. `DiscoverySchema`'s keys plus the
+ *   declared deprecated aliases. `./discovery.test.ts` pins that equivalence, so
+ *   a key can never again appear on one side only.
+ *
+ * ## `apiName` retirement schedule (ADR-0087)
+ *
+ * `apiName` is the sole surviving deprecated alias here. `name` is canonical and
+ * REQUIRED by `DiscoverySchema`; as of protocol 17 every producer emits `name`,
+ * and `getDiscovery()` additionally emits `apiName` with the identical value so
+ * clients pinned to the alias keep working.
+ *
+ * - **Protocol 17 (now)**: both emitted; `name` canonical, `apiName` deprecated.
+ * - **Protocol 18**: producers stop emitting `apiName` and it is removed from
+ *   this schema. Consumers migrate to `name` — a pure rename with no semantic
+ *   change, which is why it needs no D2 conversion entry (that table converts
+ *   AUTHORED metadata at load; a response payload has no load seam).
+ *
+ * Consumers to migrate before 18 — measured 2026-08-05 across `objectstack`,
+ * `objectui` and `cloud`: `packages/client/tests/integration/01-discovery.test.ts`
+ * (TC-DISC-001/002). No product code in any of the three repos reads `apiName`.
+ *
  * @see DiscoverySchema in ./discovery.zod.ts — the canonical definition.
  */
 export const GetDiscoveryResponseSchema = lazySchema(() => DiscoverySchema
   .partial()
   .required({ version: true })
   .extend({
-    /** @deprecated Use `name` instead. Kept for backward compatibility. */
-    apiName: z.string().optional().describe('API name (deprecated — use name)'),
+    /**
+     * @deprecated Use `name` instead. Removed in protocol 18 — see the
+     * retirement schedule above. Emitted alongside `name` until then.
+     */
+    apiName: z.string().optional().describe('API name (deprecated — use `name`; removed in protocol 18)'),
   }));
 
 /**

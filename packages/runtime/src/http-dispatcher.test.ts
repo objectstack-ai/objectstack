@@ -2420,7 +2420,7 @@ describe('HttpDispatcher', () => {
             expect(info.services.i18n.enabled).toBe(true);
             expect(info.services.i18n.status).toBe('available');
             expect(info.routes.i18n).toBe('/api/v1/i18n');
-            expect(info.features.i18n).toBe(true);
+            expect(info.capabilities.i18n.enabled).toBe(true);
         });
 
         it('should report i18n as unavailable in discovery when service is not registered', async () => {
@@ -2431,7 +2431,7 @@ describe('HttpDispatcher', () => {
             expect(info.services.i18n.enabled).toBe(false);
             expect(info.services.i18n.status).toBe('unavailable');
             expect(info.routes.i18n).toBeUndefined();
-            expect(info.features.i18n).toBe(false);
+            expect(info.capabilities.i18n.enabled).toBe(false);
         });
 
         // [#4093 follow-up] Discovery's remedy line must name a package that can
@@ -2467,7 +2467,7 @@ describe('HttpDispatcher', () => {
                 const info = await dispatcher.getDiscoveryInfo('/api/v1');
                 expect(info.services).not.toHaveProperty('workflow');
                 expect(info.routes).not.toHaveProperty('workflow');
-                expect(info.features).not.toHaveProperty('workflow');
+                expect(info.capabilities).not.toHaveProperty('workflow');
             });
 
             it('never emits the old slot-name-derived template', async () => {
@@ -2585,7 +2585,7 @@ describe('HttpDispatcher', () => {
 
             // No HTTP/WS surface exists — a discovery-advertised route would 404.
             expect(info.routes.realtime).toBeUndefined();
-            expect(info.features.websockets).toBe(false);
+            expect(info.capabilities.websockets.enabled).toBe(false);
             expect(info.services.realtime.enabled).toBe(true);
             expect(info.services.realtime.status).toBe('degraded');
             expect(info.services.realtime.handlerReady).toBe(false);
@@ -2647,7 +2647,7 @@ describe('HttpDispatcher', () => {
 
             const info = await dispatcher.getDiscoveryInfo('/api/v1');
             expect(info.routes.analytics).toBeUndefined();
-            expect(info.features.analytics).toBe(false);
+            expect(info.capabilities.analytics.enabled).toBe(false);
             expect(info.services.analytics.enabled).toBe(true);
             expect(info.services.analytics.status).toBe('stub');
             expect(info.services.analytics.handlerReady).toBe(false);
@@ -3037,7 +3037,7 @@ describe('HttpDispatcher', () => {
                 expect(info.routes[key], `routes.${key}`).toBeUndefined();
             }
             for (const key of ['files', 'ai', 'notifications', 'i18n'] as const) {
-                expect(info.features[key], `features.${key}`).toBe(false);
+                expect(info.capabilities[key].enabled, `capabilities.${key}.enabled`).toBe(false);
             }
             for (const key of ['file-storage', 'automation', 'notification', 'ai', 'i18n'] as const) {
                 expect(info.services[key].enabled, `services.${key}.enabled`).toBe(true);
@@ -3064,8 +3064,8 @@ describe('HttpDispatcher', () => {
             expect(info.routes.notifications).toBe('/api/v1/notifications');
             expect(info.routes.ai).toBe('/api/v1/ai');
             expect(info.routes.i18n).toBe('/api/v1/i18n');
-            expect(info.features.files).toBe(true);
-            expect(info.features.i18n).toBe(true);
+            expect(info.capabilities.files.enabled).toBe(true);
+            expect(info.capabilities.i18n.enabled).toBe(true);
             expect(info.services['file-storage'].status).toBe('degraded');
             expect(info.services['file-storage'].handlerReady).toBe(true);
         });

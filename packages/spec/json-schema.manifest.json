@@ -182,6 +182,7 @@
     "api/DisablePackageRequest",
     "api/DisablePackageResponse",
     "api/Discovery",
+    "api/DiscoveryEnvironment",
     "api/DispatcherConfig",
     "api/DispatcherErrorCode",
     "api/DispatcherErrorResponse",

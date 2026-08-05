@@ -19,7 +19,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
-import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -2734,10 +2734,47 @@ export class ObjectStackProtocolImplementation implements
             capabilities[key] = { enabled };
         }
 
+        // [#4828] Locale, derived from the registered i18n service exactly the
+        // way the runtime dispatcher's `getDiscoveryInfo()` derives it — same
+        // accessors, same fallback. `DiscoverySchema` declares `locale`
+        // REQUIRED and this producer never emitted it, so the REST `/discovery`
+        // shape could not satisfy the schema at all; deriving it (rather than
+        // hardcoding `en`) keeps the answer honest on a stack that actually
+        // ships translations.
+        const i18nSvc = registeredServices.get('i18n');
+        let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
+        if (i18nSvc) {
+            const defaultLocale = typeof i18nSvc.getDefaultLocale === 'function'
+                ? i18nSvc.getDefaultLocale() : 'en';
+            const locales = typeof i18nSvc.getLocales === 'function'
+                ? i18nSvc.getLocales() : [];
+            locale = {
+                default: defaultLocale,
+                supported: locales.length > 0 ? locales : [defaultLocale],
+                timezone: 'UTC',
+            };
+        }
+
+        // [#4828] `name` is the canonical identity key (`DiscoverySchema`
+        // requires it); `apiName` is the deprecated alias, emitted with the
+        // IDENTICAL value until its scheduled removal in protocol 18 (schedule
+        // in `GetDiscoveryResponseSchema`). Before this, the two discovery
+        // producers spelled the same concept differently and disjointly — this
+        // one emitted only `apiName`, the dispatcher only `name` — so no
+        // consumer had a key that worked against both.
+        const name = 'ObjectStack API';
+
         return {
             version: '1.0',
-            apiName: 'ObjectStack API',
+            name,
+            /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
+            apiName: name,
+            environment: resolveDiscoveryEnvironment(
+                (globalThis as { process?: { env?: Record<string, string | undefined> } })
+                    .process?.env?.NODE_ENV,
+            ),
             routes,
+            locale,
             services,
             capabilities,
         };

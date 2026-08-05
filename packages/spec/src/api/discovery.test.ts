@@ -9,6 +9,7 @@ import {
   RouteHealthReportSchema,
   ServiceSelfInfoSchema,
   readServiceSelfInfo,
+  resolveDiscoveryEnvironment,
   SERVICE_SELF_INFO_KEY,
   type DiscoveryResponse,
   type ApiRoutes,
@@ -934,5 +935,131 @@ describe('Service self-description marker (ADR-0076 D12, #2462)', () => {
   it('readServiceSelfInfo ignores malformed markers', () => {
     expect(readServiceSelfInfo({ [SERVICE_SELF_INFO_KEY]: { status: 'available' } })).toBeUndefined();
     expect(readServiceSelfInfo({ [SERVICE_SELF_INFO_KEY]: 'stub' })).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// [#4828] The two-schema contract, and the gate that keeps them in step
+// ===========================================================================
+//
+// The discovery surface drifted for as long as it did because ONE lenient
+// schema stood in for two different jobs. `GetDiscoveryResponseSchema` is
+// `DiscoverySchema.partial().required({version}).extend({apiName})`: `.partial()`
+// hid every missing REQUIRED key, and zod's default unknown-key strip hid every
+// UNDECLARED emitted one. Two producers drifted in opposite directions through
+// the same blind spot — one omitted `name`/`environment`/`locale`, the other
+// invented `features` and `endpoints`.
+//
+// The split is now explicit: `DiscoverySchema` binds PRODUCERS, the protocol
+// schema is the CONSUMER's tolerant parse, and the producer-side conformance
+// tests (one per producer package) check emitted keys against the protocol
+// schema's shape. That last step only stays honest while the two shapes are
+// the same modulo declared aliases — which is what this gate pins.
+
+describe('[#4828] DiscoverySchema ↔ GetDiscoveryResponseSchema', () => {
+  /** The one declared deprecated alias, and its removal is scheduled (protocol 18). */
+  const DECLARED_ALIASES = ['apiName'] as const;
+
+  it('the protocol response schema declares exactly DiscoverySchema keys + declared aliases', async () => {
+    const { GetDiscoveryResponseSchema } = await import('./protocol.zod');
+
+    const canonical = Object.keys((DiscoverySchema as any).shape);
+    const response = Object.keys((GetDiscoveryResponseSchema as any).shape);
+
+    expect(new Set(response)).toEqual(new Set([...canonical, ...DECLARED_ALIASES]));
+  });
+
+  it('anti-vacuity: both shapes are non-trivial and carry the keys this issue is about', () => {
+    const canonical = Object.keys((DiscoverySchema as any).shape);
+
+    expect(canonical.length).toBeGreaterThan(5);
+    // Canonical capability key — the ruling's winner over `features`.
+    expect(canonical).toContain('capabilities');
+    // Newly declared (#4828 decision 3).
+    expect(canonical).toContain('scoping');
+    // The retired spellings must NOT come back as declared keys.
+    expect(canonical).not.toContain('features');
+    expect(canonical).not.toContain('endpoints');
+  });
+});
+
+describe('[#4828] scoping (decision 3 — declare what REST actually emits)', () => {
+  const base = {
+    name: 'ObjectStack',
+    version: '1.0.0',
+    environment: 'development',
+    routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+    services: minimalServices,
+    locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
+  };
+
+  it('accepts the shape the REST discovery endpoint emits on a scoped mount', () => {
+    const parsed = DiscoverySchema.parse({
+      ...base,
+      scoping: { enabled: true, resolution: 'auto', scoped: true, environmentId: 'env_alpha' },
+    });
+    expect(parsed.scoping?.environmentId).toBe('env_alpha');
+  });
+
+  it('accepts an unscoped mount, where environmentId is absent', () => {
+    const parsed = DiscoverySchema.parse({
+      ...base,
+      scoping: { enabled: false, resolution: 'auto', scoped: false },
+    });
+    expect(parsed.scoping?.scoped).toBe(false);
+    expect(parsed.scoping?.environmentId).toBeUndefined();
+  });
+
+  it('is optional — the dispatcher producer mounts no scoped variant and emits none', () => {
+    expect(DiscoverySchema.parse(base).scoping).toBeUndefined();
+  });
+
+  it('rejects a resolution outside RestApiConfig.projectResolution', () => {
+    expect(() => DiscoverySchema.parse({
+      ...base,
+      scoping: { enabled: true, resolution: 'whenever', scoped: true },
+    })).toThrow();
+  });
+});
+
+describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthrough)', () => {
+  it('maps every documented NODE_ENV spelling into the declared enum', () => {
+    const table: Array<[string, string]> = [
+      ['production', 'production'],
+      ['prod', 'production'],
+      ['sandbox', 'sandbox'],
+      ['staging', 'sandbox'],
+      ['development', 'development'],
+      ['dev', 'development'],
+      ['test', 'development'],
+    ];
+    for (const [raw, expected] of table) {
+      expect(resolveDiscoveryEnvironment(raw), `NODE_ENV=${raw}`).toBe(expected);
+    }
+  });
+
+  it('normalizes case and surrounding whitespace (operator-supplied value)', () => {
+    expect(resolveDiscoveryEnvironment('  Production ')).toBe('production');
+    expect(resolveDiscoveryEnvironment('STAGING')).toBe('sandbox');
+  });
+
+  it('never CLAIMS production for an unset or unrecognized value', () => {
+    for (const raw of [undefined, null, '', 'qa', 'preview', 'nonsense']) {
+      expect(resolveDiscoveryEnvironment(raw as any), String(raw)).toBe('development');
+    }
+  });
+
+  it('every mapped result actually satisfies the declared enum', () => {
+    for (const raw of ['production', 'prod', 'sandbox', 'staging', 'development', 'dev', 'test', 'qa', '']) {
+      const parsed = DiscoverySchema.parse({
+        name: 'ObjectStack',
+        version: '1.0.0',
+        environment: resolveDiscoveryEnvironment(raw),
+        routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+        services: minimalServices,
+        locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
+      });
+      expect(parsed.environment).toBeDefined();
+    }
   });
 });
