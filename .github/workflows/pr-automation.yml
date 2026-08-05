@@ -59,6 +59,27 @@ jobs:
     #     that was structurally unsatisfiable.
     # Pin the author as well as the branch name, so a hand-pushed branch of
     # that name cannot borrow the exemption as an escape hatch.
+    #
+    # The LABEL half of this expression is a fast path, NOT the authority (#5580).
+    # `github.event.pull_request.labels` is a snapshot frozen when the event
+    # fired, so a label applied seconds after `gh pr create` is invisible to the
+    # `opened` run -- and `rerun_failed_jobs` replays that SAME payload
+    # (pm-dispatch Operational notes 5), so the resulting red run can never be
+    # re-run green. It is permanently red by construction: three PRs in one day
+    # (#5467 -- this gate's own fix PR -- plus #5501 and #5577) each left a stale
+    # red that a human or agent had to stop and explain away.
+    # The authority is the live re-read in the first step below. This expression
+    # only short-circuits the case where the payload ALREADY shows the label, so
+    # the common path still costs no runner at all. The branch/author half needs
+    # no such treatment: head_ref and the PR author cannot change under a rerun.
+    #
+    # Keeping the fast path leaves ONE stale cell, in the opposite direction: a
+    # label REMOVED after the event fired still short-circuits this run, which is
+    # then permissive on the strength of a snapshot. That one is self-correcting
+    # and was left deliberately -- removing a label always fires an `unlabeled`
+    # event of its own, and the run it starts sees no label in either place and
+    # enforces. The direction #5580 is about has no such rescue: the `labeled`
+    # run's green verdict does not clear the `opened` run's red one.
     if: >-
       !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
       && !(github.head_ref == 'changeset-release/main'
@@ -68,23 +89,80 @@ jobs:
       pull-requests: write
 
     steps:
+      # The label read the frozen payload could not do. It runs BEFORE checkout
+      # on purpose: when the label is there, every step below is skipped and the
+      # whole job costs one API call, so converging on the live state is cheaper
+      # than the stale red it replaces.
+      #
+      # The direction of the tolerance is deliberate: an unreadable label list
+      # (API error, no PR number) resolves to `skip=false`, i.e. ENFORCE. A gate
+      # that could not read its input has verified nothing, and handing out an
+      # exemption on that basis is the #4690 anti-pattern -- a check that skips
+      # silently, exits 0 and reads as "no violations". The failure is announced
+      # as a warning and the changeset count below decides.
+      - name: Re-read this PR's labels live (the event payload can predate them)
+        id: labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::warning::No PR number on this event, so the labels could not be re-read. Enforcing the changeset check."
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The pulls endpoint carries the PR's full label set inline, and a GET
+          # on it is covered by this job's own pull-requests permission -- no
+          # pagination, no wider scope than the job already declares.
+          if ! LABELS=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name'); then
+            echo "::warning::Could not read the labels of PR #$PR_NUMBER, so this run cannot see a 'skip-changeset' applied after the event fired. Enforcing the changeset check."
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Labels on PR #$PR_NUMBER right now: ${LABELS:-(none)}"
+          # Whole-line fixed match, fed by a here-string rather than a pipe.
+          # `-x -F` because the payload expression this replaces, `contains(<array>,
+          # 'skip-changeset')`, matches an array ELEMENT exactly -- a substring
+          # match would newly exempt a PR labelled e.g. `skip-changeset-audit`.
+          # The here-string (as in release.yml) keeps `grep -q` out of a pipeline:
+          # -q closes the pipe on the first hit, so a piped writer can take
+          # SIGPIPE and, under `set -o pipefail`, flip this test to false for a
+          # long enough label list.
+          if grep -qxF 'skip-changeset' <<<"$LABELS"; then
+            echo "::notice::'skip-changeset' is on PR #$PR_NUMBER (read live, not from the event payload), so this PR declares no release of its own and the changeset check is exempt."
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Every step from here down carries the same guard rather than the job
+      # carrying one `if:`, because a job-level `if:` cannot read a step of its
+      # own job. Repeating it beats the alternatives: a separate gate job would
+      # add a check row and a brand-new way to go red to a repo already fighting
+      # check-list noise, and testing the label inside the counting step would
+      # pay for checkout + install before discovering the PR is exempt.
       - name: Checkout repository
+        if: steps.labels.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
+        if: steps.labels.outputs.skip != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Enable Corepack
+        if: steps.labels.outputs.skip != 'true'
         run: corepack enable
 
       - name: Install dependencies
+        if: steps.labels.outputs.skip != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Check for a changeset added by this PR
+        if: steps.labels.outputs.skip != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -157,5 +235,21 @@ jobs:
         # so a single `major` bump promotes the ENTIRE monorepo to a new major
         # version. During the launch window we ship breaking changes as `minor`.
         # Add the `allow-major` PR label when a whole-stack major is intended.
-        if: "!contains(github.event.pull_request.labels.*.name, 'allow-major')"
+        #
+        # The first clause keeps this step exempt exactly when the changeset check
+        # above is: before #5580 the `skip-changeset` label skipped the whole job,
+        # this step included, and a live-read label must not quietly re-arm it.
+        #
+        # The second clause still reads the frozen payload, and so still carries
+        # the #5580 race in its own right: an `allow-major` applied after the event
+        # fired is invisible to this run and a rerun replays the same payload.
+        # It is DORMANT while Changesets is in pre-release mode, because
+        # check-changeset-no-major.mjs stands aside for the whole RC window (see
+        # its RC EXEMPTION note), so the label is currently never needed. Tracked
+        # as #5620 rather than fixed here: #5580 scoped this change to the
+        # `skip-changeset` read, and widening a green gate's exemption path under
+        # cover of another issue is how exemptions grow unnoticed.
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && !contains(github.event.pull_request.labels.*.name, 'allow-major')
         run: node scripts/check-changeset-no-major.mjs

@@ -84,10 +84,18 @@ function makeDispatcher(opts: {
         listObjects: vi.fn(async () => (objectDef ? [objectDef] : [])),
         getObject: vi.fn(async () => objectDef),
     };
+    // [#5519] An `auth` slot that resolves a session for any request. The one
+    // case below that goes through the REAL `dispatch()` pipeline has its
+    // identity RE-RESOLVED off this kernel (a seeded `executionContext` on the
+    // passed context is overwritten), and `/actions` now denies an anonymous
+    // caller 401 before addressing anything — so without a session that case
+    // would stop testing addressing and start re-testing the auth floor.
+    // Every other case calls `handleActions` directly and carries `ctx()`.
+    const auth: any = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
     const kernel: any = {
         context: {
             getService: (n: string) =>
-                n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : null,
+                n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : n === 'auth' ? auth : null,
         },
     };
     return { dispatcher: new HttpDispatcher(kernel) as any, executeAction };

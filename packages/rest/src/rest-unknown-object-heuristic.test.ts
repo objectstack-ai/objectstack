@@ -212,6 +212,10 @@ describe('[#5462] sys_metadata unavailable is a fault, not a missing object', ()
         // falling through to `looksLikeInternalErrorLeak`: it contains no
         // `sqlite_`, no SQLSTATE, no statement prefix and no constraint dump,
         // so the terminal fallback would have shipped it verbatim as a 400.
+        // ([#5489] that fallback is a sanitised 500 now, so today the same
+        // message would at least land in the right band — but un-attributed,
+        // as `INTERNAL_ERROR` rather than this branch's `DATABASE_ERROR`. The
+        // limb below is what makes the verdict say "database".)
         const rest = await bootRealProtocol(PG_NO_RELATION);
 
         const res = await callRoute(rest, 'PUT', META_ITEM, {

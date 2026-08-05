@@ -837,6 +837,11 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - If the issue underspecifies a decision that changes the public contract
   (spec schema, API shape, naming), STOP and return status "needs_decision"
   with your open questions — do not guess.
+- Any NEW fake engine your tests introduce must open its `delete()` with
+  `assertEngineDeleteDispatch(options)` from `@objectstack/objectql`, never a
+  hand-mirrored `if (!where?.id && !multi)` — `check:engine-double-contract`
+  went red on four dev agents' new tests in two days (#5173 / #5191 / #5192 /
+  #5584), one CI lap each. Copy a pinned fake, don't write the guard.
 Return ONLY the JSON report defined in your agent definition.
 ```
 

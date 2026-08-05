@@ -217,12 +217,26 @@ describe('#3914 — REST /actions dispatch binds ctx.api and ctx.engine', () => 
         });
     });
 
-    it('still elevates for an anonymous / self-invoked call', async () => {
-        const { dispatcher, executeAction, ql, ctx } = makeDispatcher(undefined);
+    it('still elevates for a SELF-INVOKED call — and the anonymous half is 401 now (#5519)', async () => {
+        // REPLACED, not re-spelled. Driven with NO execution context this used
+        // to be the "anonymous" case; #5519 puts the platform anonymous-deny
+        // baseline in front of `/actions`, so an anonymous POST never reaches
+        // the body and `executeAction.mock.calls[0]` would be `undefined` —
+        // the assertions below would have been reading nothing.
+        //
+        // The elevation claim survives intact for the caller that can still
+        // get here without a `userId`: a self-invoked `isSystem` context.
+        const { dispatcher, executeAction, ql, ctx } = makeDispatcher({ isSystem: true });
         await dispatcher.handleActions('/crm_case/close_case', 'POST', {}, ctx);
         const actionCtx = executeAction.mock.calls[0]?.[2];
         await actionCtx.engine.update('crm_case', 'case_1', { status: 'closed' });
         expect(ql.writes.find((w: any) => w.op === 'update').context).toMatchObject({ isSystem: true });
+
+        // The anonymous door is shut — stated, not implied.
+        const anon = makeDispatcher(undefined);
+        const denied: any = await anon.dispatcher.handleActions('/crm_case/close_case', 'POST', {}, anon.ctx);
+        expect(denied.response.status).toBe(401);
+        expect(anon.executeAction).not.toHaveBeenCalled();
     });
 });
 

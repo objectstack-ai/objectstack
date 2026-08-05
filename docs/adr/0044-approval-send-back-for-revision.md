@@ -1,6 +1,6 @@
 # ADR-0044: Flow-level send-back-for-revision — `revise` branch + typed back-edge re-entry
 
-**Status**: Accepted — engine + model implemented; designer pending (objectui) (proposed 2026-06-12 · calibrated 2026-06-12 · **amended 2026-07-28 (#3823): the revise pause moves to a service-owned node — D3's generic `wait` is superseded, see the amendment below**)
+**Status**: Accepted — engine + model implemented; designer pending (objectui) (proposed 2026-06-12 · calibrated 2026-06-12 · **amended 2026-07-28 (#3823): the revise pause moves to a service-owned node — D3's generic `wait` is superseded; amendment ratified by the maintainer and implemented 2026-08-05 as the `approval_revise` node type, see the amendment below**)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0019](./0019-approval-as-flow-node.md) (approval as a durable-pause flow node), [ADR-0039](./0039-token-scope-tree-execution.md) (single-program-counter suspend model), thread interactions (#1740), [ADR-0042](./0042-approval-sla-escalation.md) (audit-first discipline)
 **Closes**: [#1744](https://github.com/objectstack-ai/objectstack/issues/1744)
@@ -78,7 +78,9 @@ stores all already understand it), not an invisible service limbo.
 > made `resume` authorization-bearing, that became exploitable (unauthorized
 > resubmit with no audit row; a colliding request can permanently destroy the
 > run). The revise pause moves to a **dedicated service-owned node** — still
-> visible on the canvas, no longer raw-resumable. See the amendment below.
+> visible on the canvas, no longer raw-resumable. Shipped 2026-08-05 as
+> **`approval_revise`**; read D3 as "the revise edge targets an
+> `approval_revise` node". See the amendment below.
 
 Resubmit is an explicit REST verb by the submitter:
 
@@ -147,7 +149,7 @@ them, under explicit constraints:
 | moment | request status | lock |
 |---|---|---|
 | round N pending | `pending` | locked |
-| revise window (run at wait node) | `returned` | **unlocked** (hook keys on pending) |
+| revise window (run at the `approval_revise` node) | `returned` | **unlocked** (hook keys on pending) |
 | after resubmit (round N+1) | new row `pending` | re-locked |
 
 - **unanimous × revise**: one approver's send-back finalizes the request
@@ -158,7 +160,7 @@ them, under explicit constraints:
   `recall` on the *latest `returned`* request (the one normal recall
   precondition `pending` doesn't cover) flips it `returned → recalled`
   (the one sanctioned terminal→terminal transition) and audits `recall`.
-  The run is paused at the *wait node*, which has no `reject` out-edge to
+  The run is paused at the *revise window* node, which has no `reject` out-edge to
   resume down — so this lands the engine's first **run-cancel primitive**:
   `cancelRun(runId, reason)` consumes the continuation and records a
   terminal `cancelled` log (`ExecutionStatus` already reserves the value).
@@ -269,6 +271,13 @@ no new machinery. The real axis was never visibility-vs-enforcement; it was
 **reuse-vs-a-new-type.** ADR-0044 chose reuse (no new node type), and reuse is
 what seated a generic node in a privileged position.
 
+**Ruling (2026-08-05).** The maintainer approved this reversal. The criterion set
+for the implementation was that the revise pause become visible to the existing
+#3801 `resumeAuthority` type gate **with zero new machinery**; the owner-claim
+alternative (a per-suspension capability) was rejected outright, its
+screen-inheritance hazard being part of why. See *Implementation* below for what
+shipped.
+
 **Decision of record (the short-term fix).**
 
 - The `revise` edge targets a **dedicated service-owned pause** — a distinct node
@@ -322,3 +331,64 @@ case that matters; the two deferred directions are how the platform would
 generalise if a third case appears.
 
 Refs #3801, #3853, #3879; security lineage in ADR-0019's #3801 / #3879 addenda.
+
+### Implementation (2026-08-05, #3823)
+
+Of the two equivalent shapes the amendment allowed, the **dedicated node type**
+shipped:
+
+- **`approval_revise`** (`APPROVAL_REVISE_NODE_TYPE`, `spec/automation/approval.zod.ts`)
+  — registered by `plugin-approvals` alongside the `approval` node, one call site
+  so no deployment can hold half the feature. Its descriptor declares
+  `resumeAuthority: 'service'`, `supportsPause`, `isAsync`, `category: 'human'`
+  and **no `configSchema`**: the window is pure position in the graph, with no
+  signal and no timer, so nothing invents an authorable surface that has no
+  reader. Its executor suspends and arms nothing, hence no
+  `onSuspensionReleased` pairing (contrast the wait node's timer one-shot).
+- **Nothing in the engine changed.** The #3801 gate keys on the suspended node's
+  registry type; a node type that declares service ownership is covered as-is.
+  That was the ruling's criterion and it held literally — the diff touches no
+  file in `service-automation`.
+- **Two refusals, both prescriptive.** `ApprovalService.sendBack` refuses a
+  `revise` edge whose target is not `approval_revise` **before any mutation**
+  (alongside the existing missing-edge check), so a run can never be parked in a
+  window something else can advance; and
+  `flow-approval-revise-target-not-service-owned` (`@objectstack/lint`,
+  severity `error`) rejects the shape at authoring time — `os build` / `os
+  validate` / `os lint` and the runtime metadata publish gate, via the already-wired
+  `lintFlowPatterns` entry. It qualifies for `error` under that module's stated
+  bar ("the runtime refuses"), which is why the deliberately-narrow lint promotion
+  needed no new rule wiring either.
+
+**Why the approval node does not re-suspend itself.** The equivalent shape was
+available and cheaper by one node type, but it would skip the author's `revise`
+edge — every node on that branch (a `notify`, a status update) would stop running,
+and the window would vanish from the canvas and the run log, which is the property
+D3 chose the generic `wait` for. Only the *reuse* was wrong.
+
+**Backward compatibility, stated plainly.** A flow authored against the original
+D3 (`revise` → a plain `wait`) keeps registering and running; its approvals stay
+decidable (`approve` / `reject` / `recall` / `reassign` are untouched). What
+changes is that its **send-back is refused** with a message naming the node and
+the one-token fix (`type: 'wait'` → `type: 'approval_revise'`), and re-publishing
+it reports the lint error. A run **already parked** in a legacy revise window
+before the upgrade stays raw-resumable: `SuspendedRun.nodeType` is recorded at
+pause time and read recorded-first on purpose, so a republish cannot re-type a
+node under a live run — such a run is drained by `resubmit` or `recall` as usual.
+
+An ADR-0087 D2 conversion (silently rewriting a `revise`-target `wait` to the new
+type at load) was considered and **rejected**: unlike the conversions in that
+layer it would not be a lossless re-spelling but a topology-conditional semantic
+rewrite, and it would silently drop a timer-flavoured wait's timer or make a wait
+shared by another in-edge service-only for that path too — breakage a conversion
+cannot see. The measured population argues the same way: the Studio designer
+cannot author revise edges yet (this ADR's own follow-up), the `cloud` repo has no
+revise flow, and this repo's single one is the showcase, migrated in the same PR.
+A loud refusal with a one-token fix beats a tolerance layer that would have to be
+retired later — and beats it most for AI authors, who read the diagnostic.
+
+**Narrowing worth knowing:** the `revise` edge's **immediate** target must be the
+window. A graph that wanted `revise → notify → window` is refused rather than
+analysed for "every pause reachable on this branch is service-owned", which is
+unbounded. Send-back already notifies the submitter itself, so the pattern has no
+lost capability behind it.

@@ -340,8 +340,19 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
  * params, #4190 stopped dropping filters) — a write that touched zero rows
  * reporting 200 is that shape one level up, on the verb where it costs the
  * most.
+ *
+ * [#5138] EXPORTED, for the same "cannot disagree about it" reason one layer
+ * out. `@objectstack/runtime`'s `callData` is protocol-first with an ObjectQL
+ * FALLBACK, and the fallback had reinvented this fact three incompatible ways
+ * (`get` → `null`, `update` → a bare `Error` with no status ⇒ 500, `delete` →
+ * no check at all ⇒ `200 { deleted: true }` for a row that never existed). It
+ * now calls THIS function, so the two paths behind one `callData` answer a
+ * missing id identically — which is the only reason a caller may stop caring
+ * which of them served it. Re-spelling the envelope there would have been a
+ * second not-found envelope; `RECORD_NOT_FOUND` (#5088) is the one this repo
+ * has.
  */
-function recordNotFoundError(object: string, id: string | number): Error {
+export function recordNotFoundError(object: string, id: string | number): Error {
     const err = new Error(`Record ${id} not found in ${object}`) as Error & {
         code?: string;
         status?: number;

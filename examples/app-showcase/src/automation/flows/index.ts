@@ -232,13 +232,18 @@ export const BudgetApprovalFlow = defineFlow({
     {
       // ADR-0044 revise window: the run parks here while the submitter reworks
       // the (now unlocked) record; their resubmit resumes it over the back-edge.
+      //
+      // `approval_revise`, not `wait` — the shape D3 originally prescribed and
+      // its 2026-07-28 amendment reversed (#3823). This pause is service-owned:
+      // `POST /api/v1/approvals/requests/:id/resubmit` is the only thing that
+      // may end it (submitter-only, audited, refusing a colliding pending
+      // request), and the descriptor says so with `resumeAuthority: 'service'`
+      // so the generic run-resume route refuses it. A `wait` here was
+      // raw-resumable by anyone holding the run id — hence no `waitEventConfig`
+      // either: the window has no signal to wait on.
       id: 'wait_revision',
-      type: 'wait',
+      type: 'approval_revise',
       label: 'Awaiting Revision',
-      // `waitEventConfig`, not a loose `config` — the latter is the undeclared
-      // back door retired in #4045. The conversion layer still rewrites it at
-      // load, but the showcase should demonstrate the declared spelling.
-      waitEventConfig: { eventType: 'signal', signalName: 'budget_revision' },
     },
     // A plain exclusive gateway: the predicate is on the out-edges (e4/e5).
     // It also carried `config.condition` — inert on every node but `start`, and
@@ -275,8 +280,8 @@ export const BudgetApprovalFlow = defineFlow({
     { id: 'e6', source: 'exec_review', target: 'approved', label: 'approve' },
     { id: 'e7', source: 'exec_review', target: 'rejected', label: 'reject' },
     // ADR-0044 send-back-for-revision loop on the manager step: revise walks
-    // to the wait node; the resubmit edge is the declared back-edge closing
-    // the cycle (type 'back' — excluded from DAG validation, traversed
+    // to the revise-window node; the resubmit edge is the declared back-edge
+    // closing the cycle (type 'back' — excluded from DAG validation, traversed
     // normally), re-entering the approval node as round 2.
     { id: 'e8', source: 'manager_review', target: 'wait_revision', label: 'revise' },
     { id: 'e9', source: 'wait_revision', target: 'manager_review', label: 'resubmit', type: 'back' },
