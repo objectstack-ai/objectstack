@@ -239,6 +239,12 @@ describe('MetadataManager', () => {
         stat: vi.fn().mockResolvedValue(null),
         list: vi.fn().mockResolvedValue([]),
         save: vi.fn().mockResolvedValue({ success: true }),
+        // [#5276] A `datasource:` loader that declares `capabilities.write` must
+        // implement `delete` — `registerLoader()` rejects it otherwise. This
+        // stub is a write-capable datasource loader by intent (that is the whole
+        // point of the assertion below), so it gains the method rather than
+        // narrowing its capabilities.
+        delete: vi.fn().mockResolvedValue(undefined),
       };
 
       const m = new MetadataManager({ formats: ['json'], loaders: [dbLoader] });
@@ -309,7 +315,7 @@ describe('MetadataManager', () => {
 
   describe('unregister — loader protocol filtering', () => {
     it('should delete from datasource: protocol loaders', async () => {
-      const deleteFn = vi.fn();
+      const deleteFn = vi.fn().mockResolvedValue(undefined);
       const dbLoader: MetadataLoader = {
         contract: { name: 'database', protocol: 'datasource:' as const, capabilities: { read: true, write: true, watch: false, list: true } },
         load: vi.fn().mockResolvedValue({ data: null }),
@@ -319,7 +325,7 @@ describe('MetadataManager', () => {
         list: vi.fn().mockResolvedValue([]),
         save: vi.fn().mockResolvedValue({ success: true }),
         delete: deleteFn,
-      } as any;
+      };
 
       const m = new MetadataManager({ formats: ['json'], loaders: [dbLoader] });
       await m.register('object', 'account', { name: 'account' });
@@ -329,7 +335,7 @@ describe('MetadataManager', () => {
     });
 
     it('should NOT delete from file: protocol loaders', async () => {
-      const deleteFn = vi.fn();
+      const deleteFn = vi.fn().mockResolvedValue(undefined);
       const fsLoader: MetadataLoader = {
         contract: { name: 'filesystem', protocol: 'file:' as const, capabilities: { read: true, write: true, watch: true, list: true } },
         load: vi.fn().mockResolvedValue({ data: null }),
@@ -339,7 +345,7 @@ describe('MetadataManager', () => {
         list: vi.fn().mockResolvedValue([]),
         save: vi.fn().mockResolvedValue({ success: true }),
         delete: deleteFn,
-      } as any;
+      };
 
       const m = new MetadataManager({ formats: ['json'], loaders: [fsLoader] });
       await m.register('object', 'account', { name: 'account' });
@@ -349,7 +355,7 @@ describe('MetadataManager', () => {
     });
 
     it('should NOT delete from datasource: protocol loaders with write: false', async () => {
-      const deleteFn = vi.fn();
+      const deleteFn = vi.fn().mockResolvedValue(undefined);
       const readOnlyDbLoader: MetadataLoader = {
         contract: { name: 'database-ro', protocol: 'datasource:' as const, capabilities: { read: true, write: false, watch: false, list: true } },
         load: vi.fn().mockResolvedValue({ data: null }),
@@ -359,7 +365,7 @@ describe('MetadataManager', () => {
         list: vi.fn().mockResolvedValue([]),
         save: vi.fn().mockResolvedValue({ success: true }),
         delete: deleteFn,
-      } as any;
+      };
 
       const m = new MetadataManager({ formats: ['json'], loaders: [readOnlyDbLoader] });
       await m.register('object', 'account', { name: 'account' });
