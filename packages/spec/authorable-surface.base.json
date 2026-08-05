@@ -1,6 +1,6 @@
 {
   "description": "In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the keys in authorable-surface.json as they stood at `baseRev`, a commit on origin/main. A build that CAN reach origin/main anchors on the merge base instead, and re-verifies this file against `baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) anchors here instead of failing. Written only by `gen:schema`, only from a git-resolved baseline — never from the build that is being checked. See #5235.",
-  "baseRev": "cdfbee2f08e3316d4606d21dd8e7c2403a59030b",
+  "baseRev": "168f60f1adf5e4f44ed818eccbba442052722328",
   "keys": [
     "ai/AIModelConfig:maxTokens",
     "ai/AIModelConfig:model",
@@ -2132,6 +2132,7 @@
     "automation/DecisionOutputDef:required",
     "automation/DecisionOutputDef:type",
     "automation/DeleteRecordConfig:filter",
+    "automation/DeleteRecordConfig:multi",
     "automation/DeleteRecordConfig:objectName",
     "automation/ETLDestination:config",
     "automation/ETLDestination:connector",
@@ -2418,6 +2419,7 @@
     "automation/TryCatchConfig:try",
     "automation/UpdateRecordConfig:fields",
     "automation/UpdateRecordConfig:filter",
+    "automation/UpdateRecordConfig:multi",
     "automation/UpdateRecordConfig:objectName",
     "automation/WaitExecutorConfig:conditionMaxPolls",
     "automation/WaitExecutorConfig:conditionPollIntervalMs",
