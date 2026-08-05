@@ -18,7 +18,10 @@ function setup(objectDefs: Record<string, any> = {}) {
     const protocol = { findData };
     const metadata = { getObject: async (name: string) => objectDefs[name] };
     const deps: any = {
-        resolveService: async (name: string) => (name === 'protocol' ? protocol : name === 'metadata' ? metadata : null),
+        // [#5155] The request is the first argument of every kernel-reading
+        // facility now; the fake takes it so a call site that forgot to pass
+        // one cannot silently resolve the wrong slot name.
+        resolveService: async (_ctx: any, name: string) => (name === 'protocol' ? protocol : name === 'metadata' ? metadata : null),
         getService: () => null,
         getObjectQL: async () => null,
         getRequestKernelService: async () => null,

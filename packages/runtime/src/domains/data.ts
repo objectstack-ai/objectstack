@@ -70,7 +70,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // data (`data: body`, `query: normalized`) instead of splatting it,
             // and the GET-by-id branch even allowlists its query params against
             // exactly this kind of parameter pollution.
-            const result = await actionExec.callData(deps, 'query', { ...body, object: objectName }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'query', { ...body, object: objectName }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -84,7 +84,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             if (select != null) allowedParams.select = select;
             if (expand != null) allowedParams.expand = expand;
             // Spec: returns GetDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, 'get', { object: objectName, id, ...allowedParams }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'get', { object: objectName, id, ...allowedParams }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -92,7 +92,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         if (parts.length === 2 && m === 'PATCH') {
             const id = parts[1];
             // Spec: returns UpdateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, 'update', { object: objectName, id, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'update', { object: objectName, id, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -100,7 +100,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         if (parts.length === 2 && m === 'DELETE') {
             const id = parts[1];
             // Spec: returns DeleteDataResponse = { object, id, deleted }
-            const result = await actionExec.callData(deps, 'delete', { object: objectName, id }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'delete', { object: objectName, id }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
     } else {
@@ -116,14 +116,14 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // here could only agree by inspection.
             //
             // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
-            const result = await actionExec.callData(deps, 'query', { object: objectName, query: { ...query } }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: { ...query } }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
         // POST /data/:object (Create)
         if (m === 'POST') {
             // Spec: returns CreateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, 'create', { object: objectName, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'create', { object: objectName, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
             const res = deps.success(result);
             res.status = 201;
             return { handled: true, response: res };

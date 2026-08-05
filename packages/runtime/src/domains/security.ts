@@ -68,7 +68,7 @@ export async function handleSecurityRequest(
     // `ISecurityService`. The contract was written, `plugin-security` registers
     // the slot, and all three methods used below were already declared — the
     // slot name simply was not in the ledger, so nothing connected them.
-    const service = await deps.resolveService('security', context.environmentId);
+    const service = await deps.resolveService(context, 'security', context.environmentId);
     if (!service || typeof service.listAudienceBindingSuggestions !== 'function') {
         return { handled: true, response: deps.error('Security service not available', 503) };
     }

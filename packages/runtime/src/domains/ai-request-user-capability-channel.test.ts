@@ -51,8 +51,11 @@ const TOOL_ROUTE = '/api/v1/ai/tools/:toolName/execute';
 function makeDeps(seen: { req?: any }): DomainHandlerDeps {
     const aiService: any = { chat: async () => ({ text: 'ok' }) };
     return {
-        resolveService: (async (name: string) => (name === 'ai' ? aiService : undefined)) as any,
-        getRegisteredAiRoutes: () => [
+        // [#5155] The request comes first on every kernel-reading facility —
+        // including the AI route table, which is cached on the request's own
+        // kernel (`__aiRoutes`), not on the host's.
+        resolveService: (async (_ctx: HttpProtocolContext, name: string) => (name === 'ai' ? aiService : undefined)) as any,
+        getRegisteredAiRoutes: (_ctx: HttpProtocolContext) => [
             {
                 method: 'POST',
                 path: TOOL_ROUTE,

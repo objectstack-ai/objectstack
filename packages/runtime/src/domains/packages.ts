@@ -54,7 +54,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
     // Try to get SchemaRegistry from the ObjectQL service
-    const qlService = await deps.getObjectQL();
+    const qlService = await deps.getObjectQL(_context);
     const registry = qlService?.registry;
 
     // If no registry available, return 503
@@ -103,7 +103,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 };
             }
             let pkg: any;
-            const protocolSvc: any = await deps.resolveService('protocol').catch(() => null);
+            const protocolSvc: any = await deps.resolveService(_context, 'protocol').catch(() => null);
             if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
                 const out = await protocolSvc.installPackage({ manifest, settings: body.settings });
                 pkg = out?.package ?? out;
@@ -144,7 +144,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/publish → publish package metadata
         if (parts.length === 2 && parts[1] === 'publish' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const metadataService = await deps.getService(CoreServiceName.enum.metadata);
+            const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
                 const result = await (metadataService as any).publishPackage(id, body || {});
                 return { handled: true, response: deps.success(result) };
@@ -159,7 +159,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // dependency, unlike /publish above.
         if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).publishPackageDrafts === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -270,7 +270,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             ...(((result as any)?.unhiddenApps ?? []) as string[]).map((n) => `app/${n}`),
                         ];
                         if (changed.length > 0) {
-                            await deps.announceKernelEvent('metadata:reloaded', { changed });
+                            await deps.announceKernelEvent(_context, 'metadata:reloaded', { changed });
                         }
                     } catch (e: any) {
                         (result as any).rebindError = e?.message ?? 'metadata:reloaded announce failed';
@@ -293,7 +293,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // path (no metadata-service dependency, unlike /revert below).
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).discardPackageDrafts === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -315,7 +315,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages/:id/commits → the commit timeline (newest-first).
         if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).listCommits === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -336,7 +336,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // restored to their pre-commit version; the revert is itself a commit.
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const commitId = decodeURIComponent(parts[2]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).revertCommit === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -356,7 +356,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/rollback  body { commitId } → roll the package
         // back THROUGH every commit newer than `commitId` (ADR-0067).
         if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).rollbackToPackageCommit === 'function') {
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
@@ -379,7 +379,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/revert → revert package to last published state
         if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const metadataService = await deps.getService(CoreServiceName.enum.metadata);
+            const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).revertPackage === 'function') {
                 await (metadataService as any).revertPackage(id);
                 return { handled: true, response: deps.success({ success: true }) };
@@ -403,7 +403,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // lets the env retire the "Local / Custom" scope once it has no orphans).
         if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (!protocol || typeof (protocol as any).reassignOrphanedMetadata !== 'function') {
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
@@ -425,7 +425,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // "duplicate base"). Body { targetPackageId, targetName?, targetNamespace? }.
         if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
             const id = decodeURIComponent(parts[0]);
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (!protocol || typeof (protocol as any).duplicatePackage !== 'function') {
                 return { handled: true, response: deps.error('Package duplication not supported', 501) };
             }
@@ -480,7 +480,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Body { name?, description?, version? } — nothing to update', 400) };
             }
 
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).updatePackage === 'function') {
                 try {
                     const updated = await (protocol as any).updatePackage({ packageId: id, patch });
@@ -508,7 +508,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // just the in-memory registry — the registry uninstall alone would
             // leave the rows and tables behind).
             let persisted: unknown = undefined;
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).deletePackage === 'function') {
                 try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -561,7 +561,7 @@ packageId: string,
 registry: any,
 context: HttpProtocolContext,
 ): Promise<Record<string, any> | null> {
-    const protocol = await deps.resolveService('protocol');
+    const protocol = await deps.resolveService(context, 'protocol');
     if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
 
     const organizationId = await deps.resolveActiveOrganizationId(context);
@@ -644,9 +644,9 @@ _context: HttpProtocolContext,
     // [#4127] `protocol` keeps its `any` — no written contract, so this is where
     // the ledger honestly ends. `metadata` and `ql` are both evidenced now,
     // `objectql` as of batch 3: it is the same instance the `data` slot holds.
-    const protocol: any = await deps.resolveService('protocol');
-    const metadata = await deps.getService(CoreServiceName.enum.metadata);
-    const ql = await deps.resolveService('objectql');
+    const protocol: any = await deps.resolveService(_context, 'protocol');
+    const metadata = await deps.getService(_context, CoreServiceName.enum.metadata);
+    const ql = await deps.resolveService(_context, 'objectql');
     if (!protocol || typeof protocol.getMetaItem !== 'function' || !ql || !metadata) {
         return { success: false, error: 'seed apply: required services unavailable' };
     }

@@ -246,7 +246,7 @@ describe('#3914 — MCP run_action dispatch binds ctx.api and ctx.engine', () =>
         };
         const ec = { userId: 'user_42', tenantId: 'org_acme', positions: [], permissions: [] };
 
-        await invokeBusinessAction(mcpDeps, 'close_case', { recordId: 'case_1' }, {
+        await invokeBusinessAction(mcpDeps, { request: {} } as any, 'close_case', { recordId: 'case_1' }, {
             driver: undefined,
             envId: 'platform',
             ec,

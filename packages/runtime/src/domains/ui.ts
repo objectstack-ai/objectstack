@@ -35,7 +35,7 @@ export async function handleUiRequest(
         // Support both path param /view/obj/list AND query param /view/obj?type=list
         const type = parts[2] || query?.type || 'list';
 
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
 
         if (protocol && typeof protocol.getUiView === 'function') {
             try {

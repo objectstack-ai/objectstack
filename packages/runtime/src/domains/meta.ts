@@ -72,7 +72,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // JSON Schemas, allowOrgOverride flags, domain, etc) needed by
         // the metadata admin UI. It internally also merges
         // MetadataService runtime types, so this path is strictly richer.
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
@@ -82,7 +82,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
         }
         // PRIORITY 2: MetadataService fallback (types only, no entries)
-        const metadataService = await deps.resolveService('metadata', _context.environmentId);
+        const metadataService = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metadataService && typeof (metadataService as any).getRegisteredTypes === 'function') {
             try {
                 const types = await (metadataService as any).getRegisteredTypes();
@@ -105,7 +105,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const name = parts[1];
         const field = parts[3];
         const from = query?.from !== undefined ? String(query.from) : undefined;
-        const qlService = await deps.getObjectQL();
+        const qlService = await deps.getObjectQL(_context);
         const schema = qlService?.registry?.getObject(name);
         if (!schema) return { handled: true, response: deps.error('Object not found', 404) };
         // Dynamic import (matches the runtime convention for @objectstack/objectql)
@@ -120,14 +120,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length >= 3 && parts[parts.length - 1] === 'published' && (!method || method === 'GET')) {
         const type = parts[0];
         const name = parts.slice(1, -1).join('/');
-        const metadataService = await deps.getService(CoreServiceName.enum.metadata);
+        const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
             const data = await (metadataService as any).getPublished(type, name);
             if (data === undefined) return { handled: true, response: deps.error('Not found', 404) };
             return { handled: true, response: deps.success(data) };
         }
         // Fallback — try MetadataService via resolveService
-        const metaSvc = await deps.resolveService('metadata', _context.environmentId);
+        const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
             try {
                 const fallbackData = await (metaSvc as any).getPublished(type, name);
@@ -151,7 +151,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // PUT /metadata/:type/:name (Save)
         if (method === 'PUT' && body) {
             // Try to get the protocol service directly
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
 
             if (protocol && typeof protocol.saveMetaItem === 'function') {
                 try {
@@ -167,7 +167,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
 
             // Fallback: try MetadataService directly
-            const metaSvc = await deps.resolveService('metadata', _context.environmentId);
+            const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
             if (metaSvc && typeof (metaSvc as any).saveItem === 'function') {
                 try {
                     const data = await (metaSvc as any).saveItem(type, name, body);
@@ -193,7 +193,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // service (which filters sys_metadata by environment_id) in that
                 // case, and fall back to the registry only for the
                 // unscoped (single-kernel / control-plane) path.
-                const protocol = await deps.resolveService('protocol') as any;
+                const protocol = await deps.resolveService(_context, 'protocol') as any;
                 const scopedEnv = typeof protocol?.getProjectId === 'function'
                     ? protocol.getProjectId()
                     : protocol?.environmentId;
@@ -211,7 +211,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     } catch { /* fall through to registry / 404 */ }
                 }
 
-                const qlService = await deps.getObjectQL();
+                const qlService = await deps.getObjectQL(_context);
                 if (qlService?.registry) {
                     const data = qlService.registry.getObject(name);
                     if (data) return { handled: true, response: deps.success(data) };
@@ -236,7 +236,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const singularType = pluralToSingular(type);
 
             // Try Protocol Service First (Preferred)
-            const protocol = await deps.resolveService('protocol');
+            const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof protocol.getMetaItem === 'function') {
                  try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -252,7 +252,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
 
             // Try MetadataService for runtime-registered types
-            const metaSvc = await deps.resolveService('metadata', _context.environmentId);
+            const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
             if (metaSvc && typeof (metaSvc as any).getItem === 'function') {
                 try {
                     // ADR-0048 — thread `?package=` so single-item resolution is
@@ -276,7 +276,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // `_drafts` is intercepted before the generic `:type` handler below so it
     // is never mistaken for a metadata type name.
     if (parts.length === 1 && parts[0] === '_drafts' && (!method || method.toUpperCase() === 'GET')) {
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
         if (protocol && typeof protocol.listDrafts === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -327,7 +327,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             };
         }
 
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
         if (!protocol || typeof (protocol as any).migrateStoredMetadata !== 'function') {
             return { handled: true, response: deps.error('Stored-metadata migration not supported', 501) };
         }
@@ -356,7 +356,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = query?.package || undefined;
 
         // Try protocol service first for any type
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -375,7 +375,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
 
         // Try MetadataService directly for runtime-registered metadata (agents, tools, etc.)
-        const metadataService = await deps.getService(CoreServiceName.enum.metadata);
+        const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).list === 'function') {
             try {
                 let items = await (metadataService as any).list(typeOrName);
@@ -396,7 +396,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
 
         // Try ObjectQL registry directly for object/type lookups
-        const qlService = await deps.getObjectQL();
+        const qlService = await deps.getObjectQL(_context);
         if (qlService?.registry) {
             if (typeOrName === 'objects') {
                 const objs = qlService.registry.getAllObjects(packageId);
@@ -418,14 +418,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 0) {
         // Prefer protocol service for the rich `entries` array (with
         // JSON Schemas etc); fall back to MetadataService types-only.
-        const protocol = await deps.resolveService('protocol');
+        const protocol = await deps.resolveService(_context, 'protocol');
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
                 return { handled: true, response: deps.success(result) };
             } catch { /* fall through */ }
         }
-        const metadataService = await deps.resolveService('metadata', _context.environmentId);
+        const metadataService = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metadataService && typeof (metadataService as any).getRegisteredTypes === 'function') {
             try {
                 const types = await (metadataService as any).getRegisteredTypes();

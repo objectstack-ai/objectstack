@@ -83,7 +83,7 @@ export async function handleAnalyticsRequest(
     context: HttpProtocolContext,
     query?: any,
 ): Promise<HttpDispatcherResult> {
-    const analyticsService = await deps.getService(CoreServiceName.enum.analytics);
+    const analyticsService = await deps.getService(context, CoreServiceName.enum.analytics);
     // Empty slot — or a slot filled by a self-declared stub (#4000), which is
     // the same amount of analytics capability. 404 handled by caller.
     if (!isServiceServeable(analyticsService)) return { handled: false };

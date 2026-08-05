@@ -51,7 +51,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     if (!isMcpServerEnabled()) {
         return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
     }
-    const mcp: any = await deps.resolveService('mcp', context.environmentId);
+    const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
         return { handled: true, response: deps.error('MCP server is not available', 501) };
     }
@@ -180,7 +180,7 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
             },
         };
     }
-    const mcp: any = await deps.resolveService('mcp', context.environmentId);
+    const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.renderSkill !== 'function') {
         return { handled: true, response: deps.error('MCP server is not available', 501) };
     }
@@ -197,7 +197,7 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         // now, so `?.()` reads a declared optional capability (an auth provider
         // without MCP/OAuth support fills this slot legitimately) instead of
         // guessing at a method the contract never mentioned.
-        const authService = await deps.resolveService('auth', context.environmentId);
+        const authService = await deps.resolveService(context, 'auth', context.environmentId);
         const url = authService?.getMcpResourceUrl?.();
         if (typeof url === 'string' && url) mcpUrl = url;
     } catch { /* fall through to host derivation */ }
@@ -247,7 +247,7 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
 async function getMcpResourceMetadataUrl(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<string | null> {
     try {
         // [#4127] Same `: any` erasure as the skill route above; same fix.
-        const authService = await deps.resolveService('auth', context.environmentId);
+        const authService = await deps.resolveService(context, 'auth', context.environmentId);
         const url = authService?.getMcpResourceMetadataUrl?.();
         return typeof url === 'string' && url ? url : null;
     } catch {
@@ -315,8 +315,11 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     const ec = context.executionContext;
     const envId = context.environmentId;
     const driver = (context as any).dataDriver;
-    const callData = actionExec.callData.bind(null, deps);
-    const getMeta = () => deps.resolveService('metadata', envId);
+    // [#5155] Both the facilities AND the request are bound here, once, so the
+    // bridge's tool surface below reads exactly as it did — while every call it
+    // makes stays pinned to THIS request's kernel.
+    const callData = actionExec.callData.bind(null, deps, context);
+    const getMeta = () => deps.resolveService(context, 'metadata', envId);
 
     return {
         listObjects: async () => {
@@ -395,7 +398,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // identity forwarded. No `@objectstack/service-ai`.
         listActions: async () => {
             const meta: any = await getMeta();
-            const hasAutomation = Boolean(await actionExec.resolveAutomationService(deps, envId));
+            const hasAutomation = Boolean(await actionExec.resolveAutomationService(deps, context, envId));
             const out: any[] = [];
             for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta)) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
@@ -414,6 +417,6 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         runAction: async (
             name: string,
             input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
-        ) => actionExec.invokeBusinessAction(deps, name, input ?? {}, { driver, envId, ec, getMeta, callData }),
+        ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, { driver, envId, ec, getMeta, callData }),
     };
 }

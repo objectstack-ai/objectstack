@@ -19,6 +19,7 @@ import { validateActionParams, type ResolvedActionParam } from '@objectstack/spe
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
+import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
@@ -78,21 +79,31 @@ function warnActionParamsOnce(key: string, message: string): void {
  * the pattern, alongside `ResolveOptions` in security/resolve-execution-context.
  * A lookup facade has to be typed everywhere it is re-declared, or the copy
  * that still says `any` becomes the way around all the others.
+ *
+ * [#5155] Both lookups take the REQUEST as their first parameter, for the
+ * reason spelled out on `DomainHandlerDeps` (of which this is the narrow view
+ * `HttpDispatcher.actionExecutionDeps` hands out): the object is shared by
+ * every request the host serves, so the kernel to resolve against is the
+ * request's, never the facade's.
  */
 export interface ActionExecutionDeps {
-    resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
-    resolveService(name: string, environmentId?: string): any;
-    getObjectQL(environmentId?: string): Promise<IObjectQLEngine | null>;
+    resolveService<K extends keyof ServiceSlotContracts>(context: HttpProtocolContext, name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
+    resolveService(context: HttpProtocolContext, name: string, environmentId?: string): any;
+    getObjectQL(context: HttpProtocolContext, environmentId?: string): Promise<IObjectQLEngine | null>;
 }
 
 /**
  * Direct data service dispatch — replaces broker.call('data.*').
  * Tries protocol service first (supports expand/populate), falls back to ObjectQL.
  *
+ * @param requestContext - The request being served (#5155). Carries the kernel
+ *   every service lookup below resolves against; see
+ *   {@link HttpProtocolContext.kernel}.
  * @param dataDriver - Optional environment-scoped driver to use instead of kernel default
  * @param scopeId - Optional project ID for scoped service resolution (SharedProjectPlugin mode)
  */
-export async function callData(deps: ActionExecutionDeps, 
+export async function callData(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     action: string,
     params: any,
     dataDriver?: any,
@@ -106,7 +117,7 @@ export async function callData(deps: ActionExecutionDeps,
     if (!executionContext?.isSystem && params?.object) {
         let def: any;
         try {
-            const meta = await deps.resolveService('metadata', scopeId);
+            const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
             def = await (meta as any)?.getObject?.(params.object);
         } catch {
             def = undefined; // fall open to schema defaults (apiEnabled=true)
@@ -117,9 +128,9 @@ export async function callData(deps: ActionExecutionDeps,
         }
     }
 
-    const protocol = await deps.resolveService('protocol', scopeId);
-    const qlService = dataDriver ?? await deps.getObjectQL(scopeId);
-    const ql = qlService ?? await deps.resolveService('objectql', scopeId);
+    const protocol = await deps.resolveService(requestContext, 'protocol', scopeId);
+    const qlService = dataDriver ?? await deps.getObjectQL(requestContext, scopeId);
+    const ql = qlService ?? await deps.resolveService(requestContext, 'objectql', scopeId);
     const qlOpts = executionContext ? { context: executionContext } : undefined;
     const findOpts = (extra?: any) => {
         const base = qlOpts ? { ...qlOpts } : {};
@@ -252,8 +263,8 @@ export async function callData(deps: ActionExecutionDeps,
         if (!Array.isArray(params.aggregations) || params.aggregations.length === 0) {
             throw { statusCode: 400, message: 'aggregate requires at least one aggregation' };
         }
-        const engine = (await deps.getObjectQL(scopeId))
-            ?? await deps.resolveService('objectql', scopeId).catch(() => null);
+        const engine = (await deps.getObjectQL(requestContext, scopeId))
+            ?? await deps.resolveService(requestContext, 'objectql', scopeId).catch(() => null);
         if (engine && typeof engine.aggregate === 'function') {
             const rows = await engine.aggregate(
                 params.object,
@@ -383,13 +394,13 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
  * the single availability probe behind `type: 'flow'` dispatch (both the
  * headless-invokability filter and the two invoke paths ask through it).
  */
-export async function resolveAutomationService(deps: ActionExecutionDeps, envId?: string): Promise<any | null> {
+export async function resolveAutomationService(deps: ActionExecutionDeps, requestContext: HttpProtocolContext, envId?: string): Promise<any | null> {
     try {
         // [#4127 batch 4] Was `: any`, which voided the gate here. `execute` is
         // declared on IAutomationService, so this needed no contract work — only
         // for someone to notice, and three grep sweeps over `domains/*.ts` never
         // reached this file. The lint rule did.
-        const svc = await deps.resolveService('automation', envId);
+        const svc = await deps.resolveService(requestContext, 'automation', envId);
         return svc && typeof svc.execute === 'function' ? svc : null;
     } catch {
         return null; // no automation service on this kernel
@@ -483,6 +494,7 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
  * doesn't keep.
  */
 export async function dispatchFlowAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     action: any,
     wiring: {
         objectName: string;
@@ -494,7 +506,7 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     },
 ): Promise<any> {
     const { objectName, record, params, recordId, ec, envId } = wiring;
-    const automation = await resolveAutomationService(deps, envId);
+    const automation = await resolveAutomationService(deps, requestContext, envId);
     if (!automation) {
         throw new Error(flowActionUnavailableError(action));
     }
@@ -790,7 +802,8 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
  * attributable and org-scoped. Flow actions differ: the flow engine receives
  * the caller's identity below and honours `runAs` (ADR-0049).
  */
-export async function invokeBusinessAction(deps: ActionExecutionDeps, 
+export async function invokeBusinessAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     name: string,
     input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
     wiring: {
@@ -821,7 +834,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     if (isSystemObjectName(objectName)) {
         throw new Error(`Action '${name}' is on a system object and is not exposed via MCP`);
     }
-    const hasAutomation = Boolean(await resolveAutomationService(deps, envId));
+    const hasAutomation = Boolean(await resolveAutomationService(deps, requestContext, envId));
     if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
         throw new Error(
             `Action '${name}' (type='${action?.type ?? 'script'}') cannot be invoked via MCP`,
@@ -873,7 +886,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // ── flow dispatch ── (shared with the REST /actions route, #3915)
     if (action.type === 'flow') {
-        const result = await dispatchFlowAction(deps, action, { objectName, record, params, recordId, ec, envId });
+        const result = await dispatchFlowAction(deps, requestContext, action, { objectName, record, params, recordId, ec, envId });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
 
@@ -881,7 +894,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // [#4127] `executeAction` is
     // ObjectQL's own surface, outside IDataEngine; `getObjectQL` exists to reach
     // exactly that. Closing this needs ObjectQL's contract written, not a cast.
-    const ql: any = await deps.getObjectQL(envId);
+    const ql: any = await deps.getObjectQL(requestContext, envId);
     if (!ql || typeof ql.executeAction !== 'function') {
         throw new Error('Data engine not available for action dispatch');
     }
@@ -1093,6 +1106,7 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
  * lookup.
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     args: { ql: any; objectName: string; actionName: string; envId?: string },
 ): Promise<{ action: any; obj: any; degraded?: boolean; reason?: string }> {
     const { ql, objectName, actionName, envId } = args;
@@ -1140,7 +1154,7 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         // and belongs in the batch that adds the four undeclared auth members.
         // [#4127 batch 4] `loadDiagnosed` is on IMetadataService now, so this
         // reads the contract instead of guessing at it.
-        const meta = await deps.resolveService('metadata', envId);
+        const meta = await deps.resolveService(requestContext, 'metadata', envId);
         if (meta && typeof meta.loadDiagnosed === 'function') {
             const diag: any = await meta.loadDiagnosed('action', actionName);
             if (diag?.data && ownsRoute(diag.data)) return { action: diag.data, obj };

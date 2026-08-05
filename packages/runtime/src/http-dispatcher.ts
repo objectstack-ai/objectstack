@@ -82,6 +82,29 @@ export interface HttpProtocolContext {
      * RBAC/RLS/FLS. Optional — anonymous requests carry an empty context.
      */
     executionContext?: ExecutionContext;
+    /**
+     * The kernel THIS request is served from (#5155).
+     *
+     * Written by {@link HttpDispatcher.resolveRequestScope}: the host's
+     * {@link KernelResolver} picks it, or it is the dispatcher's own
+     * `defaultKernel` when no resolver is registered / the resolver declines.
+     * Every service lookup the request makes afterwards — identity
+     * resolution, the domain handler, `callData` — resolves off THIS field.
+     *
+     * It lives on the per-request context and NOT on the dispatcher because
+     * one `HttpDispatcher` serves every route of a host: a single mutable
+     * `this.kernel` written per request and read across the request's
+     * subsequent `await`s let two interleaved requests on a multi-tenant host
+     * swap data sources under each other — request A resuming after request B
+     * resolved a different environment read B's kernel. Node's single thread
+     * only protects code that does NOT hold mutable shared state across an
+     * `await`; that code held it across several.
+     *
+     * Undefined until `resolveRequestScope` has run. Consumers must never
+     * default it themselves — `HttpDispatcher.requestKernel()` owns the one
+     * "not placed in any environment → the host kernel" answer.
+     */
+    kernel?: ObjectKernel;
 }
 
 export interface HttpDispatcherResult {
@@ -161,8 +184,15 @@ export interface HttpDispatcherOptions {
  * is intentionally NOT marked `@deprecated` while no working replacement exists.
  */
 export class HttpDispatcher {
-    private kernel: any; // Casting to any to access dynamic props like services
-    private defaultKernel: ObjectKernel;
+    /**
+     * The HOST kernel this dispatcher was constructed with — process-lifetime
+     * state, never per-request. Everything that describes the replica rather
+     * than a request (`/ready`, the driver-health probe, the single-environment
+     * default) reads it directly; a request reads `context.kernel`
+     * ({@link HttpProtocolContext.kernel}) instead. There is deliberately no
+     * `this.kernel` (#5155).
+     */
+    private readonly defaultKernel: ObjectKernel;
     private defaultProject?: { environmentId: string; orgId?: string };
     private kernelResolver?: KernelResolver;
     private scopeManager?: EnvironmentScopeManager;
@@ -208,7 +238,6 @@ export class HttpDispatcher {
      * but its value is ignored.
      */
     constructor(kernel: ObjectKernel, _envRegistryIgnored?: unknown, options?: HttpDispatcherOptions) {
-        this.kernel = kernel;
         this.defaultKernel = kernel;
         const resolveService = (name: string): any => {
             try { return (kernel as any).getService?.(name); } catch { return undefined; }
@@ -237,15 +266,23 @@ export class HttpDispatcher {
         // The parameters are annotated because an arrow cannot be contextually
         // typed against an overloaded signature. Resolution below stays
         // name-based and unchanged — the typing lives in what the DOMAINS see.
-        resolveService: (name: string, environmentId?: string) => this.resolveService(name, environmentId),
-        getService: (name: string) => this.getService(name as Parameters<HttpDispatcher['getService']>[0]),
-        getObjectQL: (environmentId) => this.getObjectQLService(environmentId),
-        // Reads off the per-request RESOLVED kernel (`this.kernel` is set by
-        // dispatch() before any handler runs) — see the deps contract note.
+        //
+        // [#5155] Every kernel-reading facility takes the REQUEST as its first
+        // parameter. This object is built once and shared by every request the
+        // host serves, so it cannot hold "the kernel of the request in flight"
+        // — there is no such thing here. The request carries its own.
+        resolveService: (context: HttpProtocolContext, name: string, environmentId?: string) =>
+            this.resolveService(this.requestKernel(context), name, environmentId),
+        getService: (context: HttpProtocolContext, name: string) =>
+            this.getService(this.requestKernel(context), name as Parameters<HttpDispatcher['getService']>[1]),
+        getObjectQL: (context, environmentId) =>
+            this.getObjectQLService(this.requestKernel(context), environmentId),
+        // Reads off the request's OWN resolved kernel — never the scoped
+        // factory, never the host kernel. See the deps contract note.
         // [#4127 batch 4] Annotated for the same reason as the two above: an
         // arrow cannot be contextually typed against an overloaded signature.
-        getRequestKernelService: async (name: string) => {
-            const k: any = this.kernel;
+        getRequestKernelService: async (context: HttpProtocolContext, name: string) => {
+            const k: any = this.requestKernel(context);
             return typeof k?.getServiceAsync === 'function'
                 ? k.getServiceAsync(name)
                 : k?.getService?.(name);
@@ -255,8 +292,8 @@ export class HttpDispatcher {
         routeNotFound: (route) => this.routeNotFound(route),
         errorFromThrown: (e, fallbackStatus) => this.errorFromThrown(e, fallbackStatus),
         resolveActiveOrganizationId: (context) => this.resolveActiveOrganizationId(context),
-        announceKernelEvent: async (event, payload) => {
-            const k: any = this.kernel;
+        announceKernelEvent: async (context, event, payload) => {
+            const k: any = this.requestKernel(context);
             if (k?.context?.trigger) await k.context.trigger(event, payload);
         },
         logger: (this as any).logger,
@@ -267,7 +304,11 @@ export class HttpDispatcher {
             try {
                 const projectKernel: any = await this.kernelResolver.resolveKernel(context, this.defaultKernel);
                 if (projectKernel) {
-                    this.kernel = projectKernel;
+                    // The swap this seam owns, written where it belongs: on THIS
+                    // request. Its callers keep making `deps.*` lookups
+                    // afterwards and must see the swapped kernel — but only they
+                    // may (#5155).
+                    context.kernel = projectKernel;
                     if (typeof projectKernel.getServiceAsync === 'function') {
                         return await projectKernel.getServiceAsync('objectql').catch(() => null);
                     }
@@ -275,8 +316,27 @@ export class HttpDispatcher {
             } catch { /* fall back to defaultKernel resolution downstream */ }
             return null;
         },
-        getRegisteredAiRoutes: () => (this.kernel as any)?.__aiRoutes,
+        getRegisteredAiRoutes: (context) => (this.requestKernel(context) as any)?.__aiRoutes,
     };
+
+    /**
+     * The kernel a given request is served from — the ONE place that answers
+     * it (#5155).
+     *
+     * `resolveRequestScope` writes {@link HttpProtocolContext.kernel} on every
+     * request that goes through `dispatch()` or the declarative-endpoint
+     * fallback. A context that never went through it has not been placed in
+     * any environment, and the honest answer for one of those is the HOST
+     * kernel — which is what a single-environment deployment serves from
+     * anyway. It is emphatically NOT "whichever tenant resolved most
+     * recently", which is what a dispatcher-level field answered before.
+     *
+     * Domains must never write this fallback themselves: a `??` at a call site
+     * is how a second, quieter answer to "which kernel" gets born.
+     */
+    private requestKernel(context: HttpProtocolContext | undefined): any {
+        return context?.kernel ?? this.defaultKernel;
+    }
 
     /**
      * Whether this dispatcher serves a multi-tenant host (a `kernel-resolver`
@@ -299,8 +359,14 @@ export class HttpDispatcher {
      *
      * It mutates `context` in place, exactly as it always did inside
      * `dispatch()`: the host's resolver writes `environmentId` (+ `dataDriver`),
-     * the identity step writes `executionContext`, and `this.kernel` is swapped
+     * the identity step writes `executionContext`, and `context.kernel` is set
      * to the kernel this request is served from.
+     *
+     * That last one used to be a dispatcher FIELD (#5155). One dispatcher
+     * serves the whole host, so a field could only ever hold "the kernel of
+     * the request that resolved most recently" — and every reader of it sat
+     * behind at least one `await`. Writing it on the context is what makes two
+     * interleaved requests on two environments independent.
      *
      * ## Its one out-of-band caller (#5040 E5b)
      *
@@ -328,10 +394,15 @@ export class HttpDispatcher {
         // resolver registered → single-environment: every request serves from
         // `defaultKernel` with no environment context.
         this.prepareResolverHints(context, cleanPath);
+        // [#5155] The resolved kernel is written on the REQUEST, not on the
+        // dispatcher. Two requests interleaving across the awaits below (and
+        // across every await their handlers make afterwards) each keep their
+        // own; before this, the second resolution silently moved the first
+        // request onto the second one's environment.
         if (this.kernelResolver) {
-            this.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+            context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
         } else {
-            this.kernel = this.defaultKernel;
+            context.kernel = this.defaultKernel;
         }
 
         // Touch scope for TTL/LRU tracking in shared-kernel mode
@@ -344,23 +415,26 @@ export class HttpDispatcher {
         // ctx.userId/roles/permissions/tenantId via opCtx.context.
         try {
             context.executionContext = await this.timedResolveExecutionContext({
-                getService: (n: string) => this.resolveService(n, context.environmentId),
+                getService: (n: string) => this.resolveService(this.requestKernel(context), n, context.environmentId),
                 // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
                 // `resolveService('objectql', envId)` factory can return a different
                 // instance that doesn't see THIS env's rows (the gotcha
                 // `handleActions` works around) — which made the api-key lookup miss
                 // `sys_api_key` on the MCP path and reject valid keys with 401, while
                 // REST accepted them (rest-server resolves identity via
-                // `kernel.getServiceAsync('objectql')`). Resolving off `this.kernel`
-                // keeps REST + MCP identity resolution aligned; falls back to the
-                // scoped path when the kernel can't hand back an objectql directly.
+                // `kernel.getServiceAsync('objectql')`). Resolving off THIS REQUEST's
+                // kernel keeps REST + MCP identity resolution aligned; falls back to
+                // the scoped path when the kernel can't hand back an objectql
+                // directly. [#5155] `context.kernel`, not a dispatcher field — this
+                // closure runs after several awaits, which is exactly where a shared
+                // field used to be rewritten by the next request.
                 getQl: async () => {
-                    const k: any = this.kernel;
+                    const k: any = this.requestKernel(context);
                     if (k && typeof k.getServiceAsync === 'function') {
                         const ql = await k.getServiceAsync('objectql').catch(() => undefined);
                         if (ql && (ql.registry || typeof ql.find === 'function')) return ql;
                     }
-                    return this.getObjectQLService(context.environmentId);
+                    return this.getObjectQLService(this.requestKernel(context), context.environmentId);
                 },
                 request: context.request,
                 // OAuth 2.1 access tokens are honoured ONLY on the MCP
@@ -435,8 +509,12 @@ export class HttpDispatcher {
         this.domainRegistry.register({
             prefix: '/ready', match: 'exact', methods: ['GET'],
             handler: async () => {
-                const state: string = typeof (this.kernel as any)?.getState === 'function'
-                    ? (this.kernel as any).getState()
+                // [#5155] The HOST kernel, deliberately: readiness is a
+                // property of this replica, not of whichever tenant happens to
+                // have made the last request.
+                const host: any = this.defaultKernel;
+                const state: string = typeof host?.getState === 'function'
+                    ? host.getState()
                     : 'running';
                 if (state !== 'running') {
                     return { handled: true, response: this.error('Service not ready', 503, { state }) };
@@ -511,7 +589,8 @@ export class HttpDispatcher {
             // when the slot holds an engine without a driver-health surface.
             let engine: (IDataEngine & Partial<Pick<IObjectQLEngine, 'checkDriversHealth'>>) | undefined;
             try {
-                engine = (this.kernel as any)?.getService?.('data');
+                // [#5155] Host kernel — see the `/ready` handler.
+                engine = (this.defaultKernel as any)?.getService?.('data');
             } catch {
                 // 'data' not registered — no data plane to gate readiness on.
             }
@@ -532,7 +611,11 @@ export class HttpDispatcher {
     private resolveDefaultProject(): { environmentId: string; orgId?: string } | undefined {
         if (this.defaultProject) return this.defaultProject;
         try {
-            const v = (this.kernel as any).getService?.('default-project');
+            // [#5155] Host kernel: `createSingleEnvironmentPlugin` registers
+            // this slot on the host, and the answer is memoized for the
+            // process — reading it off a per-request kernel would freeze one
+            // request's environment into dispatcher-lifetime state.
+            const v = (this.defaultKernel as any).getService?.('default-project');
             if (v?.environmentId) {
                 this.defaultProject = v;
                 return v;
@@ -833,7 +916,7 @@ export class HttpDispatcher {
             // — the whole auth gate turns on it — but IAuthService never declared
             // it. `packages/rest` probes it the same way, so two independent
             // callers agree on a member the contract does not mention.
-            const authService = await this.resolveService('auth', context.environmentId);
+            const authService = await this.resolveService(this.requestKernel(context), 'auth', context.environmentId);
             if (!authService || typeof authService.isAuthGateActive !== 'function' || !authService.isAuthGateActive()) {
                 return null;
             }
@@ -905,7 +988,7 @@ export class HttpDispatcher {
             // project scoping on, which is where the flag defaults to true.
             // Anonymous callers were still denied elsewhere (#2567/#3963), so
             // this was specifically the signed-in non-member case.
-            const authService = await this.resolveService(CoreServiceName.enum.auth);
+            const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
             const api = authService?.api ?? (typeof authService?.getApi === 'function' ? await authService.getApi() : undefined);
             const sessionData = await api?.getSession?.({
                 headers: context.request?.headers,
@@ -935,8 +1018,8 @@ export class HttpDispatcher {
 
         // Query sys_environment_member (control plane).
         try {
-            const qlService = await this.getObjectQLService();
-            const ql = qlService ?? await this.resolveService('objectql');
+            const qlService = await this.getObjectQLService(this.requestKernel(context));
+            const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
             if (!ql) return null; // No QL — cannot enforce; fail open.
 
             let rows = await ql.find('sys_environment_member', {
@@ -976,7 +1059,15 @@ export class HttpDispatcher {
      * handlers use, so the reported service status is always consistent
      * with the actual runtime availability.
      */
-    async getDiscoveryInfo(prefix: string) {
+    async getDiscoveryInfo(prefix: string, context?: HttpProtocolContext) {
+        // [#5155] Discovery describes the services of ONE kernel. Served from
+        // inside `dispatch()` it describes the request's own environment (the
+        // context is threaded through); served straight off the host by an
+        // adapter's `/discovery` route or the dispatcher plugin — neither of
+        // which resolves a request scope — it describes the HOST. Before this,
+        // both cases read a dispatcher field, so a host-level `/discovery`
+        // answered with whichever tenant had most recently made a request.
+        const kernel = this.requestKernel(context);
         // Resolve all services through the same async fallback chain
         // that request handlers (handleI18n, handleAuth, …) use.
         const [
@@ -985,31 +1076,31 @@ export class HttpDispatcher {
             protocolSvc, automationSvc, cacheSvc, queueSvc, jobSvc, mcpSvc,
             metadataSvc, dataSvc,
         ] = await Promise.all([
-            this.resolveService(CoreServiceName.enum.auth),
-            this.resolveService(CoreServiceName.enum.search),
-            this.resolveService(CoreServiceName.enum.realtime),
-            this.resolveService(CoreServiceName.enum['file-storage']),
-            this.resolveService(CoreServiceName.enum.analytics),
-            this.resolveService(CoreServiceName.enum.ai),
-            this.resolveService(CoreServiceName.enum.notification),
-            this.resolveService(CoreServiceName.enum.i18n),
+            this.resolveService(kernel, CoreServiceName.enum.auth),
+            this.resolveService(kernel, CoreServiceName.enum.search),
+            this.resolveService(kernel, CoreServiceName.enum.realtime),
+            this.resolveService(kernel, CoreServiceName.enum['file-storage']),
+            this.resolveService(kernel, CoreServiceName.enum.analytics),
+            this.resolveService(kernel, CoreServiceName.enum.ai),
+            this.resolveService(kernel, CoreServiceName.enum.notification),
+            this.resolveService(kernel, CoreServiceName.enum.i18n),
             // [#4093] What `/ui` actually reads (domains/ui.ts). The `ui` SLOT
             // is vestigial — nothing in the platform registers it (plugin-dev's
             // shapeless placeholder was its only occupant, now retired), and
             // the domain never consulted it.
-            this.resolveService('protocol'),
-            this.resolveService(CoreServiceName.enum.automation),
-            this.resolveService(CoreServiceName.enum.cache),
-            this.resolveService(CoreServiceName.enum.queue),
-            this.resolveService(CoreServiceName.enum.job),
+            this.resolveService(kernel, 'protocol'),
+            this.resolveService(kernel, CoreServiceName.enum.automation),
+            this.resolveService(kernel, CoreServiceName.enum.cache),
+            this.resolveService(kernel, CoreServiceName.enum.queue),
+            this.resolveService(kernel, CoreServiceName.enum.job),
             // Not a CoreServiceName — plugin-mcp registers under the bare
             // 'mcp' key, the same string handleMcpRequest resolves.
-            this.resolveService('mcp'),
+            this.resolveService(kernel, 'mcp'),
             // [#4089] Resolved for its self-description alone: the `metadata`
             // slot is reported from what actually fills it, not hardcoded.
-            this.resolveService(CoreServiceName.enum.metadata),
+            this.resolveService(kernel, CoreServiceName.enum.metadata),
             // [#4130] Same, for the last hardcoded entry in the kernel block.
-            this.resolveService(CoreServiceName.enum.data),
+            this.resolveService(kernel, CoreServiceName.enum.data),
         ]);
 
         const hasAuth         = !!authSvc;
@@ -1443,7 +1534,7 @@ export class HttpDispatcher {
         try {
             // [#4127 FINDING, batch 5]
             // Third `.api` reader on the auth service; see the note above.
-            const authService = await this.resolveService(CoreServiceName.enum.auth);
+            const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
             const rawHeaders = context.request?.headers;
             let headers: any = rawHeaders;
             if (rawHeaders && typeof rawHeaders === 'object' && typeof (rawHeaders as any).get !== 'function') {
@@ -1477,15 +1568,15 @@ export class HttpDispatcher {
         return handleAutomationRequest(this.domainDeps, path, method, body, context, query);
     }
 
-    private getServicesMap(): Record<string, any> {
-        if (this.kernel.services instanceof Map) {
-            return Object.fromEntries(this.kernel.services);
+    private getServicesMap(kernel: any): Record<string, any> {
+        if (kernel?.services instanceof Map) {
+            return Object.fromEntries(kernel.services);
         }
-        return this.kernel.services || {};
+        return kernel?.services || {};
     }
 
-    private async getService(name: CoreServiceName) {
-        return this.resolveService(name);
+    private async getService(kernel: any, name: CoreServiceName) {
+        return this.resolveService(kernel, name);
     }
 
     /**
@@ -1494,9 +1585,10 @@ export class HttpDispatcher {
      * Only returns when a non-null service is found; otherwise falls through to the next step.
      *
      * When `scopeId` is provided, tries the SCOPED factory on `defaultKernel` first (SharedProjectPlugin
-     * mode). Falls back to the current `kernel` for singleton / legacy services.
+     * mode). Falls back to `kernel` — THE REQUEST'S OWN kernel, passed in by the
+     * caller (#5155) — for singleton / legacy services.
      */
-    private async resolveService(name: string, scopeId?: string) {
+    private async resolveService(kernel: any, name: string, scopeId?: string) {
         // Prefer scoped lookup on defaultKernel when scopeId is given (shared-kernel / multi-environment mode)
         if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
             try {
@@ -1507,31 +1599,31 @@ export class HttpDispatcher {
             }
         }
         // Prefer async resolution to support factory-based services (e.g. auth, analytics, protocol)
-        if (typeof this.kernel.getServiceAsync === 'function') {
+        if (typeof kernel?.getServiceAsync === 'function') {
             try {
-                const svc = await this.kernel.getServiceAsync(name);
+                const svc = await kernel.getServiceAsync(name);
                 if (svc != null) return svc;
             } catch {
                 // Service not registered or async resolution failed — fall through
             }
         }
-        if (typeof this.kernel.getService === 'function') {
+        if (typeof kernel?.getService === 'function') {
             try {
-                const svc = await this.kernel.getService(name);
+                const svc = await kernel.getService(name);
                 if (svc != null) return svc;
             } catch {
                 // Service not registered or sync resolution threw "is async" — fall through
             }
         }
-        if (this.kernel?.context?.getService) {
+        if (kernel?.context?.getService) {
             try {
-                const svc = await this.kernel.context.getService(name);
+                const svc = await kernel.context.getService(name);
                 if (svc != null) return svc;
             } catch {
                 // Service not registered — fall through
             }
         }
-        const services = this.getServicesMap();
+        const services = this.getServicesMap(kernel);
         return services[name];
     }
 
@@ -1539,10 +1631,10 @@ export class HttpDispatcher {
      * Get the ObjectQL service which provides access to SchemaRegistry.
      * Tries multiple access patterns since kernel structure varies.
      */
-    private async getObjectQLService(scopeId?: string): Promise<IObjectQLEngine | null> {
+    private async getObjectQLService(kernel: any, scopeId?: string): Promise<IObjectQLEngine | null> {
         // 1. Try via resolveService (handles scoped, async factories, sync, context, and map)
         try {
-            const svc = await this.resolveService('objectql', scopeId);
+            const svc = await this.resolveService(kernel, 'objectql', scopeId);
             if (svc?.registry) return svc;
         } catch { /* service not available */ }
         return null;
@@ -1621,7 +1713,7 @@ export class HttpDispatcher {
         // Standard route: /discovery (protocol-compliant)
         // Legacy route: / (empty path, for backward compatibility — MSW strips base URL)
         if ((cleanPath === '/discovery' || cleanPath === '') && method === 'GET') {
-             const info = await this.getDiscoveryInfo(prefix ?? '');
+             const info = await this.getDiscoveryInfo(prefix ?? '', context);
              return {
                  handled: true,
                  response: this.success(info)

@@ -50,7 +50,7 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
     // that reached `handleAuth` directly WITH an auth service registered used to
     // get that mock's `mock_<uuid>` session instead of real authentication. It
     // now gets the auth service; #4113 removed the mock entirely (see below).
-    const authService = await deps.getService(CoreServiceName.enum.auth);
+    const authService = await deps.getService(context, CoreServiceName.enum.auth);
     if (authService && typeof authService.handleRequest === 'function') {
         const response = await authService.handleRequest(context.request as Request);
         return { handled: true, result: response };

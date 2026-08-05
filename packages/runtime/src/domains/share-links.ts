@@ -66,7 +66,7 @@ export async function handleShareLinksRequest(
     // doc-comment says "keep in sync with the SharingPlugin registration" — and a
     // drifted copy here resolves nothing, so every share link 501s with "Sharing
     // is not configured for this environment" on an environment where it is.
-    const svc = await deps.resolveService(SHARE_LINK_SERVICE, context.environmentId);
+    const svc = await deps.resolveService(context, SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
         return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
     }
@@ -99,10 +99,10 @@ export async function handleShareLinksRequest(
     // Inferred instead, so `engine.find` below is checked against IDataEngine.
     const getEngine = async () => {
         try {
-            const e = await deps.getRequestKernelService('objectql');
+            const e = await deps.getRequestKernelService(context, 'objectql');
             if (e) return e;
         } catch { /* fall through to scoped resolution */ }
-        return deps.resolveService('objectql', context.environmentId);
+        return deps.resolveService(context, 'objectql', context.environmentId);
     };
     const asArray = (rows: any): any[] => (Array.isArray(rows) ? rows : Array.isArray(rows?.value) ? rows.value : []);
     const applyRedaction = (record: any, redactFields: string[]): any => {

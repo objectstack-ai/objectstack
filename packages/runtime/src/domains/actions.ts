@@ -127,7 +127,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // [#4127] Same as the
     // action-execution site: `executeAction` is outside IDataEngine, and
     // ObjectQL's wider surface has no contract yet.
-    const ql: any = projectQl ?? await deps.getObjectQL(_context?.environmentId);
+    const ql: any = projectQl ?? await deps.getObjectQL(_context, _context?.environmentId);
     if (!ql || typeof ql.executeAction !== 'function') {
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
@@ -150,7 +150,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // authored `action` rows) resolve here too, so a route whose action
         // never appears inside an object definition is gated and dispatched
         // like any other (#3915).
-        const declaration = await actionExec.resolveRouteActionDeclaration(deps, {
+        const declaration = await actionExec.resolveRouteActionDeclaration(deps, _context, {
             ql,
             objectName,
             actionName,
@@ -239,7 +239,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     // A flow action on a kernel with no automation service is a deployment
     // gap, not a business failure — report it like the missing data engine
     // above (503) instead of burying it in a `{ success: false }` body.
-    if (actionType === 'flow' && !(await actionExec.resolveAutomationService(deps, _context?.environmentId))) {
+    if (actionType === 'flow' && !(await actionExec.resolveAutomationService(deps, _context, _context?.environmentId))) {
         return { handled: true, response: deps.error(actionExec.flowActionUnavailableError(actionDef), 503) };
     }
 
@@ -259,7 +259,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     let record: Record<string, unknown> = {};
     if (recordId && !actionExec.isObjectLessActionKey(objectName)) {
         try {
-            const got = await actionExec.callData(deps, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const got = await actionExec.callData(deps, _context, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
             if (got?.record) record = got.record;
         } catch { /* record may not exist for new-record actions; pass empty */ }
     }
@@ -315,7 +315,7 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // here — RLS/FLS-bypassing elevation is a script-BODY property, and a
         // flow does not get it.
         if (actionType === 'flow') {
-            const result = await actionExec.dispatchFlowAction(deps, actionDef, {
+            const result = await actionExec.dispatchFlowAction(deps, _context, actionDef, {
                 objectName,
                 record,
                 params: reqParams,

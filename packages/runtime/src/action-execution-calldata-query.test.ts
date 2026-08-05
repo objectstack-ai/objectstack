@@ -21,8 +21,16 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { callData, type ActionExecutionDeps } from './action-execution.js';
+import type { HttpProtocolContext } from './http-dispatcher.js';
 
 const EC = { userId: 'u1', isSystem: false, positions: [], permissions: [] } as any;
+/**
+ * The request `callData` is serving. [#5155] Every service lookup resolves off
+ * `context.kernel`, so the request has to be named at the call — a fake that
+ * ignored it would be modelling the shared-field shape this suite's subject no
+ * longer has.
+ */
+const REQ = { request: {} } as HttpProtocolContext;
 
 function makeHarness(opts: { withProtocol?: boolean } = {}) {
     const finds: any[] = [];
@@ -39,7 +47,7 @@ function makeHarness(opts: { withProtocol?: boolean } = {}) {
         ...(protocol ? { protocol } : {}),
     };
     const deps: ActionExecutionDeps = {
-        resolveService: (async (name: string) => services[name]) as any,
+        resolveService: (async (_ctx: HttpProtocolContext, name: string) => services[name]) as any,
         getObjectQL: async () => ql,
     };
     return { deps, finds, findData };
@@ -58,19 +66,19 @@ describe("callData('query') fallback serves the query it was given (#4386)", () 
             offset: 10,
             fields: ['id', 'title'],
         };
-        const out = await callData(h.deps, 'query', { object: 'task', query }, undefined, undefined, EC);
+        const out = await callData(h.deps, REQ, 'query', { object: 'task', query }, undefined, undefined, EC);
         expect(h.finds).toHaveLength(1);
         expect(h.finds[0]).toMatchObject({ ...query, context: EC });
         expect(out.records).toHaveLength(2);
     });
 
     it('extracts query fields from bare params when params.query is absent — same source as the protocol path', async () => {
-        await callData(h.deps, 'query', { object: 'task', where: { status: 'open' }, limit: 3 }, undefined, undefined, EC);
+        await callData(h.deps, REQ, 'query', { object: 'task', where: { status: 'open' }, limit: 3 }, undefined, undefined, EC);
         expect(h.finds[0]).toMatchObject({ where: { status: 'open' }, limit: 3 });
     });
 
     it('a caller-supplied context is dropped, never honoured — server-derived only, matching findData', async () => {
-        await callData(h.deps, 'query', { object: 'task', query: { where: { a: 1 }, context: { isSystem: true } } }, undefined, undefined, EC);
+        await callData(h.deps, REQ, 'query', { object: 'task', query: { where: { a: 1 }, context: { isSystem: true } } }, undefined, undefined, EC);
         expect(h.finds[0].context).toBe(EC);
     });
 
@@ -78,7 +86,7 @@ describe("callData('query') fallback serves the query it was given (#4386)", () 
         'refuses %s with 501 instead of part-serving — nothing reaches ql.find',
         async (key) => {
             await expect(
-                callData(h.deps, 'query', { object: 'task', query: { where: { a: 1 }, [key]: 'x' } }, undefined, undefined, EC),
+                callData(h.deps, REQ, 'query', { object: 'task', query: { where: { a: 1 }, [key]: 'x' } }, undefined, undefined, EC),
             ).rejects.toMatchObject({ statusCode: 501 });
             expect(h.finds).toHaveLength(0);
         },
@@ -86,24 +94,24 @@ describe("callData('query') fallback serves the query it was given (#4386)", () 
 
     it('names the unservable keys and the served set in the refusal', async () => {
         await expect(
-            callData(h.deps, 'query', { object: 'task', query: { sort: '-x', select: 'id' } }, undefined, undefined, EC),
+            callData(h.deps, REQ, 'query', { object: 'task', query: { sort: '-x', select: 'id' } }, undefined, undefined, EC),
         ).rejects.toMatchObject({ message: expect.stringMatching(/'sort', 'select'.*where, fields, orderBy, limit, offset/s) });
     });
 
     it('an empty query still lists (the protocol path lists too) — no refusal, no predicate', async () => {
-        const out = await callData(h.deps, 'query', { object: 'task' }, undefined, undefined, EC);
+        const out = await callData(h.deps, REQ, 'query', { object: 'task' }, undefined, undefined, EC);
         expect(h.finds[0]).toMatchObject({ context: EC });
         expect(out.total).toBe(2);
     });
 
     it('null-valued keys are withdrawals, not unservable', async () => {
-        await callData(h.deps, 'query', { object: 'task', query: { sort: null, where: { a: 1 } } }, undefined, undefined, EC);
+        await callData(h.deps, REQ, 'query', { object: 'task', query: { sort: null, where: { a: 1 } } }, undefined, undefined, EC);
         expect(h.finds[0]).toMatchObject({ where: { a: 1 } });
     });
 
     it('with the protocol service present the fallback never runs — findData gets the query verbatim, wire spellings included', async () => {
         const withP = makeHarness({ withProtocol: true });
-        await callData(withP.deps, 'query', { object: 'task', query: { sort: '-title', top: 5 } }, undefined, undefined, EC);
+        await callData(withP.deps, REQ, 'query', { object: 'task', query: { sort: '-title', top: 5 } }, undefined, undefined, EC);
         expect(withP.findData).toHaveLength(1);
         expect(withP.findData[0].query).toEqual({ sort: '-title', top: 5 });
         expect(withP.finds).toHaveLength(0);

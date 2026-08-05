@@ -39,7 +39,7 @@ export async function handleI18nRequest(
     query: any,
     _context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const i18nService = await deps.getService(CoreServiceName.enum.i18n);
+    const i18nService = await deps.getService(_context, CoreServiceName.enum.i18n);
     // [#4058] An empty slot and a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12) are the same amount of i18n. Both
     // in-memory providers of this slot really translate, so both declare

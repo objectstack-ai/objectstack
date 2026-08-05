@@ -76,8 +76,8 @@ export async function handleKeysRequest(
         expiresAt = new Date(ms).toISOString();
     }
 
-    const ql = (await deps.getObjectQL(context.environmentId))
-        ?? (await deps.resolveService('objectql', context.environmentId));
+    const ql = (await deps.getObjectQL(context, context.environmentId))
+        ?? (await deps.resolveService(context, 'objectql', context.environmentId));
     if (!ql || typeof ql.insert !== 'function') {
         return { handled: true, response: deps.error('Data service not available', 503) };
     }

@@ -1332,12 +1332,17 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // request kernel): a declared endpoint must reach the same
                         // occupant the built-in route reaches, or "same operation,
                         // same answer" (#5040 §4) stops being true.
+                        // [#5155] Every lookup names the request it belongs
+                        // to. `execDeps` is the ONE object the host built at
+                        // start(); it cannot know which of the requests in
+                        // flight is asking, and on a multi-tenant host guessing
+                        // means answering out of another tenant's kernel.
                         const execDeps = dispatcher.actionExecutionDeps;
                         const metadataService = await execDeps
-                            .resolveService('metadata', protocolContext.environmentId)
+                            .resolveService(protocolContext, 'metadata', protocolContext.environmentId)
                             .catch(() => undefined) as IMetadataService | undefined;
                         const automationService = await execDeps
-                            .resolveService('automation')
+                            .resolveService(protocolContext, 'automation')
                             .catch(() => undefined);
 
                         const answer = await runAppEndpointStep({
@@ -1379,7 +1384,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     // object, and therefore the same pipeline,
                                     // `/data` calls (`domains/data.ts`).
                                     callData: (action, params, driver, scope, ec) =>
-                                        callData(execDeps, action, params, driver, scope, ec),
+                                        callData(execDeps, protocolContext, action, params, driver, scope, ec),
                                     ...(automationService !== undefined ? { automationService } : {}),
                                 },
                                 ...(protocolContext.executionContext !== undefined

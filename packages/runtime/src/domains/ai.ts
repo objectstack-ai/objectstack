@@ -34,7 +34,7 @@ export function createAiDomain(deps: DomainHandlerDeps): DomainRoute {
 export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     let aiService: IAIService | undefined;
     try {
-        aiService = await deps.resolveService('ai');
+        aiService = await deps.resolveService(context, 'ai');
     } catch {
         // AI service not registered
     }
@@ -99,7 +99,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
     };
 
     // Try to get route definitions from the AI service's cached routes
-    const routes = deps.getRegisteredAiRoutes() as Array<{
+    const routes = deps.getRegisteredAiRoutes(context) as Array<{
         method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean;
     }> | undefined;
 

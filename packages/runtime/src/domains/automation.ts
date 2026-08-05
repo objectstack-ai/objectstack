@@ -122,7 +122,7 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
  */
 export async function handleAutomationRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
-    const automationService = await deps.getService(CoreServiceName.enum.automation);
+    const automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
     // automation capability. This domain is the sharpest case for the rule: a

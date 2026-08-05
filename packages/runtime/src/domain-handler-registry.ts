@@ -76,6 +76,25 @@ export interface DomainRoute {
  * WHOLE dependency contract, made explicit. Growing this interface is a
  * design decision, not a convenience: every addition couples all domains to
  * more dispatcher surface.
+ *
+ * ## Why every kernel-reading facility takes the request first (#5155)
+ *
+ * A host constructs exactly ONE `HttpDispatcher` and therefore exactly one of
+ * these objects — every route, every tenant, every concurrent request shares
+ * it. So it cannot hold "the kernel of the request currently in flight": on a
+ * multi-tenant host (a `kernelResolver` is registered) there is no such single
+ * value. It used to try, via a `this.kernel` field on the dispatcher written
+ * once per request, and the result was that a request resuming after an
+ * `await` resolved its services on whichever environment had resolved most
+ * recently — one tenant reading another tenant's data source.
+ *
+ * The per-request kernel therefore travels on the per-request object every
+ * handler already receives: {@link HttpProtocolContext.kernel}, written by
+ * `HttpDispatcher.resolveRequestScope`. Passing the context is not ceremony —
+ * it is what makes the dependency visible at the call site and impossible to
+ * forget, because the compiler asks for it. Do NOT add a facility here that
+ * reads a kernel without taking the request, and do not cache the resolved
+ * kernel anywhere that outlives one request.
  */
 export interface DomainHandlerDeps {
     /**
@@ -103,8 +122,8 @@ export interface DomainHandlerDeps {
      * answer with a change to the boot/criticality vocabulary; the ledger
      * extends past the enum instead. See {@link ServiceSlotContracts}.
      */
-    resolveService<K extends keyof ServiceSlotContracts>(name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
-    resolveService(name: string, environmentId?: string): any;
+    resolveService<K extends keyof ServiceSlotContracts>(context: HttpProtocolContext, name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
+    resolveService(context: HttpProtocolContext, name: string, environmentId?: string): any;
     /**
      * Unscoped service lookup on the current kernel, typed by the slot.
      *
@@ -123,7 +142,7 @@ export interface DomainHandlerDeps {
      * (`isServiceServeable` does it and also rejects a self-declared
      * non-handler, ADR-0076 D12).
      */
-    getService<K extends CoreServiceName>(name: K): Promise<CoreServiceContract<K> | undefined>;
+    getService<K extends CoreServiceName>(context: HttpProtocolContext, name: K): Promise<CoreServiceContract<K> | undefined>;
     /**
      * Environment-scoped ObjectQL lookup with a registry-shape check
      * (resolves the `objectql` service and returns it only when it exposes
@@ -140,7 +159,7 @@ export interface DomainHandlerDeps {
      * checked against the class by `implements` — so the honest type finally
      * exists, and this accessor uses it.
      */
-    getObjectQL(environmentId?: string): Promise<IObjectQLEngine | null>;
+    getObjectQL(context: HttpProtocolContext, environmentId?: string): Promise<IObjectQLEngine | null>;
     /**
      * Service lookup on the request's RESOLVED (per-environment) kernel —
      * NOT the default kernel and NOT the scoped-factory path. Domains whose
@@ -156,8 +175,8 @@ export interface DomainHandlerDeps {
      * this path and falls back to `resolveService` for the same `'objectql'`
      * slot, so before this the two arms of one expression had different types.
      */
-    getRequestKernelService<K extends keyof ServiceSlotContracts>(name: K): Promise<ServiceSlotContract<K> | undefined>;
-    getRequestKernelService(name: string): Promise<any>;
+    getRequestKernelService<K extends keyof ServiceSlotContracts>(context: HttpProtocolContext, name: K): Promise<ServiceSlotContract<K> | undefined>;
+    getRequestKernelService(context: HttpProtocolContext, name: string): Promise<any>;
     /** Standard success envelope. */
     success(data: any, meta?: any): { status: number; body: any };
     /**
@@ -188,7 +207,7 @@ export interface DomainHandlerDeps {
      * announce `metadata:reloaded` after a publish so boot-cached consumers
      * (the automation engine above all) re-sync without a restart.
      */
-    announceKernelEvent(event: string, payload: unknown): Promise<void>;
+    announceKernelEvent(context: HttpProtocolContext, event: string, payload: unknown): Promise<void>;
     /** Host logger when one is attached to the dispatcher; domains fall back to console. */
     logger?: any;
     /** Single-environment default environment id (createSingleEnvironmentPlugin), if registered. */
@@ -209,7 +228,7 @@ export interface DomainHandlerDeps {
      * The AI route table the AI plugin caches on the request kernel
      * (`__aiRoutes`); undefined until the plugin initializes it.
      */
-    getRegisteredAiRoutes(): Array<{ method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean }> | undefined;
+    getRegisteredAiRoutes(context: HttpProtocolContext): Array<{ method: string; path: string; handler: (req: any) => Promise<any>; auth?: boolean }> | undefined;
 }
 
 /**

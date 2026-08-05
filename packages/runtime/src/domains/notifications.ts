@@ -50,7 +50,7 @@ export async function handleNotificationRequest(
     // error rather than a runtime discovery. That is the check missing when
     // #4087 shipped a `/storage` handler calling `upload(key, data)` with two
     // wrong arguments for months.
-    const service = await deps.resolveService(
+    const service = await deps.resolveService(context, 
         CoreServiceName.enum.notification,
         context.environmentId,
     ) as INotificationService | undefined;

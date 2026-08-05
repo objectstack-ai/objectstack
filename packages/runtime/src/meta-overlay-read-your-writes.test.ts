@@ -80,6 +80,7 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
     let protocol: ObjectStackProtocolImplementation;
     let ql: any;
     let deps: ActionExecutionDeps;
+    let requestContext: any;
 
     beforeEach(() => {
         registry = new SchemaRegistry({ multiTenant: false });
@@ -98,6 +99,8 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
             resolveService: (async () => undefined) as any,
             getObjectQL: async () => ql,
         } as ActionExecutionDeps;
+        // [#5155] The request whose kernel these lookups resolve against.
+        requestContext = { request: {} } as any;
     });
 
     const saveAction = (item: any, mode?: 'draft' | 'publish') =>
@@ -109,7 +112,7 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         });
 
     const resolve = (actionName: string) =>
-        resolveRouteActionDeclaration(deps, {
+        resolveRouteActionDeclaration(deps, requestContext, {
             ql,
             objectName: OBJECT_DEF.name,
             actionName,
