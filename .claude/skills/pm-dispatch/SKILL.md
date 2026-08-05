@@ -478,7 +478,7 @@ label and classify each:
 - **Maintainer confirm (`needs-user-decision`)**: design cards, feature/
   contract-shape proposals, multi-week programs needing appetite and
   sequencing, anything touching stored-data migration shape or removing a
-  shipped capability. The label alone is the inbox entry; the deep two-axis
+  shipped capability. The label alone is the inbox entry; the deep three-axis
   analysis is written when the card is actually taken up.
 - **Hold (`finding`)**: observation-class findings — dormant code,
   unexercised drift, cosmetic polish; real, but nothing a user hits today.
@@ -1000,8 +1000,20 @@ is too vague to dispatch, or rework has failed twice:
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
 2. The analysis, wherever it lands (Chinese): 背景、具体问题、可选方案、
-   你的建议、关联的 issue / PR / 分支。**每个方案必须沿两条固定评估轴
+   你的建议、关联的 issue / PR / 分支。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
+   - **实际业务需求** — 每个方案先问:它服务的是**真实存在的业务场景**,
+     还是投机性的能力面?判据来源要求**实测**——谁在写这个键、谁在读这个
+     能力、示例应用(showcase / CRM)与真实部署里的用法;「读起来像有用」
+     不作数。**创业阶段聚焦原则**(维护者 2026-08-04 指示:「我们是一个
+     创业项目,应该先专注于核心能力」):能力扩张默认从紧——新能力 / 新
+     词表 / 新配置面需要真实业务拉动才立项;无拉动的声明面按
+     implementation-first 处置(退役,或停车、词表随未来实现回归)。已发布
+     但零消费的「能力」**不因沉没成本获得豁免**:#5021(主题排版 9 组)、
+     #4988(交互配置 22 站点)、#4834(plugin-runtime 五 schema)是先例。
+     这条轴会**改变结论**,不是陪衬,正反两例都有:#5021 因无业务拉动裁
+     退役,#4936 则因 showcase 自证了业务方向而裁「响亮拒绝而非退役」——
+     只看后两条轴,这两单会得出同一个答案,那是错的。
    - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(Prime
      Directive #5 no workarounds、#8 North Star、#12 contract-first),
      而不是眼下最省事;临时补丁式的选项要明说其长期代价。
@@ -1010,7 +1022,7 @@ is too vague to dispatch, or rework has failed twice:
      校验拒绝、错误响亮)优于消费端宽容(`??` 回退、静默容错)——宽容
      恰恰是 AI 批量犯错被掩盖的温床;声明即强制(declared = enforced),
      绝不让 AI 能声明一个运行时不兑现的能力。
-   推荐意见必须基于这两条轴给出理由;两轴冲突时如实呈现权衡,交维护者
+   推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
 3. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer
