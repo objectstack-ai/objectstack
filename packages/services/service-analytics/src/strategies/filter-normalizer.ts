@@ -113,6 +113,26 @@
  * still described the old emitter would have negated an always-false conjunction
  * and answered `{$not: {stage: {$eq: null}}}` with every row.
  *
+ * # A STRING comparand keeps its spelling (#5528, partial)
+ *
+ * #5332 is about the ENCODER ({@link stringifyForCube}); the same round trip has
+ * a DECODER — {@link recoverNumber}, behind {@link coerceFilterValueForSql} and
+ * {@link coerceFilterValueForObjectQL} — and it was guessing "this is a number"
+ * from the string's shape alone. So `{code: {$eq: '007'}}` bound the integer `7`
+ * and `{price: {$eq: '1.50'}}` bound `1.5`, on both consumers: against a TEXT
+ * column that is zero rows on SQLite and a type error on Postgres, reported to
+ * the author as "no data" (#5526's measured table).
+ *
+ * Recovery is now limited to a number's own canonical spelling
+ * (`String(Number(s)) === s`), which is exactly what a real number comparand
+ * produces on the way out — so `7` → `'7'` → `7` still works, while a string
+ * that `Number()` would rewrite is kept as the author wrote it.
+ *
+ * This is a STOPGAP, and named as one: `values: string[]` still has no escape,
+ * so the author strings `'null'` / `'true'` / `'false'` still collide with the
+ * tokens the encoder writes for the real values. Fixing the round trip itself —
+ * tagged values, or an `unknown[]` internal representation — is #5526.
+ *
  * # A `where` ARRAY is lowered here, not dropped (#5334)
  *
  * `FilterArray` — `['stage', '=', 'won']`, `['and', […], […]]`, `[[…], […]]` —
@@ -914,13 +934,63 @@ export function collectFilterLeaves(
   return node.children.flatMap(collectFilterLeaves);
 }
 
-/** Recover a finite number from a purely-numeric token, else undefined. */
+/**
+ * Recover a finite number from a token that is a number's OWN canonical
+ * spelling — `String(Number(s)) === s` — else undefined.
+ *
+ * This is the decoder half of the `values: string[]` round trip
+ * {@link stringifyForCube} encodes into, and it is a LAST RESORT by design:
+ * ADR-0053 D-A2 demoted textual type re-derivation behind the driver-backed
+ * `coerceTemporalFilterValue` hook, leaving this function only the
+ * boolean/number recovery for non-temporal columns. Guessing a type from a
+ * string's shape can only ever be a guess, so the narrower the guess, the fewer
+ * author values it can overwrite.
+ *
+ * # Why canonical form, not "looks numeric" (#5528, route C of #5526)
+ *
+ * The test used to be the SHAPE alone (`/^-?\d+(\.\d+)?$/`), which cannot tell
+ * a number that was stringified on the way out from a string the author wrote.
+ * `'007'` came back as `7` and `'1.50'` as `1.5` — on BOTH consumers (the SQL
+ * bind in `native-sql-strategy` and the engine comparand in
+ * `objectql-strategy`) — so a widget filtered `{code: {$eq: '007'}}` compared an
+ * INTEGER against a TEXT column: zero rows on SQLite (cross-type compare is
+ * never equal), a type error on Postgres. Silent, and drawn as "no data".
+ *
+ * Zero-padded and trailing-zero strings are ordinary business shapes — order
+ * numbers, work orders, SKUs, dialling codes, postcodes, `'1.50'` prices — not
+ * constructed edge cases (#5526's measured table).
+ *
+ * The canonical-form test separates the two cases without needing a type:
+ *
+ *   - a comparand that REALLY was a number arrives as `String(n)` by
+ *     construction, so it round-trips exactly and is still recovered
+ *     (`7` → `'7'` → `7`, `1.5` → `'1.5'` → `1.5`, `-3` → `'-3'` → `-3`);
+ *   - a string that survived `Number()` with information LOST — a leading zero,
+ *     a trailing zero, `'-0'`, more digits than a double can hold — cannot have
+ *     come from a number, so it is the author's string and stays one.
+ *
+ * The shape regex is kept AHEAD of the round-trip test so this change can only
+ * ever NARROW what is recovered: `'1e3'`, `'1e+21'`, `'+7'`, `' 7'`, `'0x10'`,
+ * `'Infinity'` and `'NaN'` were strings before and are strings still, even
+ * though some of them are canonical `String(Number(…))` output.
+ *
+ * ⛔ **Not fixed here, on purpose.** `'null'` / `'true'` / `'false'` still
+ * collide with the tokens {@link stringifyForCube} writes for the real `null`
+ * and booleans, so those three author strings still decode to non-strings. That
+ * collision is not a bad `if` — it is the `string[]` encoding having no escape,
+ * i.e. the root cause #5526 exists to rule on (tagged encoding, or an
+ * `unknown[]` internal representation). This function only stops the shapes that
+ * are unambiguously lossy from being downgraded; it does not make the round trip
+ * lossless.
+ */
 function recoverNumber(s: string): number | undefined {
-  if (/^-?\d+(\.\d+)?$/.test(s)) {
-    const n = Number(s);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return undefined;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return undefined;
+  // The round-trip test: only a string that IS `n`'s canonical spelling carries
+  // no writing `Number()` threw away, so only that string can be read as `n`.
+  if (String(n) !== s) return undefined;
+  return n;
 }
 
 /**
@@ -929,6 +999,9 @@ function recoverNumber(s: string): number | undefined {
  * boolean, so booleans are recovered as `1`/`0` integers; numbers are
  * recovered as numbers — avoiding string-vs-number mismatches against typed
  * columns.
+ *
+ * "Numbers" means only a number's own canonical spelling — see
+ * {@link recoverNumber} for why `'007'` and `'1.50'` bind as TEXT (#5528).
  */
 export function coerceFilterValueForSql(s: string): unknown {
   if (s === 'true') return 1;
@@ -942,6 +1015,11 @@ export function coerceFilterValueForSql(s: string): unknown {
  * aggregate engine. Unlike the SQL path, the engine compares against the
  * *stored* runtime type, so a boolean field holds a real `true`/`false` — bind
  * the boolean itself, NOT `1`/`0`, or the equality never matches.
+ *
+ * The number recovery is the SAME canonical-form test the SQL path uses
+ * ({@link recoverNumber}): the two consumers differ in how they spell a boolean,
+ * never in which strings they consider numbers, so `{code: {$eq: '007'}}` binds
+ * the string `'007'` on both paths (#5528).
  */
 export function coerceFilterValueForObjectQL(s: string): unknown {
   if (s === 'true') return true;
