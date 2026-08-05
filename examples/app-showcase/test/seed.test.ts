@@ -3,6 +3,29 @@
 import { describe, it, expect } from 'vitest';
 import stack from '../objectstack.config.js';
 import { ShowcaseSeedData } from '../src/data/seed/index.js';
+import * as viewBarrel from '../src/ui/views/index.js';
+import { ShowcaseTranslationBundle } from '../src/system/translations/index.js';
+
+/**
+ * The object a view CONTAINER targets (#5420).
+ *
+ * A container (`defineView({ list, form, formViews })`) carries no top-level
+ * `name` — per `view.zod.ts` it is keyed implicitly by the object its default
+ * list or form binds to, the same key objectql's `resolveMetadataItemName` and
+ * the i18n walker derive. Read structurally rather than through the spec types:
+ * `data` is a union (an `api`-provider view has no `object` at all), and a guard
+ * that only compiles for the `object` arm would stop compiling the day a
+ * showcase view switches provider — noise in a test about registration.
+ */
+function targetObject(container: unknown): string | undefined {
+  const objectOf = (node: unknown): string | undefined => {
+    const data = (node as { data?: unknown } | undefined)?.data;
+    const object = (data as { object?: unknown } | undefined)?.object;
+    return typeof object === 'string' ? object : undefined;
+  };
+  const c = container as { list?: unknown; form?: unknown } | undefined;
+  return objectOf(c?.list) ?? objectOf(c?.form);
+}
 
 /**
  * Smoke test — the stack loads and registers the expected breadth of
@@ -16,6 +39,87 @@ describe('showcase stack', () => {
     expect(names).toContain('showcase_field_zoo');
     // 6 objects: account, project, task, category, team, membership, field_zoo
     expect((stack.objects ?? []).length).toBeGreaterThanOrEqual(6);
+  });
+
+  /**
+   * #5420 — every view container the barrel exports must reach the stack.
+   *
+   * `src/ui/views/index.ts` is a barrel, and `objectstack.config.ts` names its
+   * members one by one in a hand-written import list. There is no directory
+   * scan behind `views:` — the CLI reads exactly that array — so an export the
+   * import list forgets is metadata that compiles, type-checks, lints clean and
+   * is never loaded by anything: no runtime container, and no static pass
+   * (`os validate` / `os lint` / `os i18n extract` / the coverage ratchet) can
+   * see it either. `ContactViews` sat that way while
+   * `content/docs/ui/create-vs-edit-form.mdx` cited it as the live reference
+   * implementation of "create form ≠ edit form", and the app's `nav_contacts`
+   * entry rendered the derived default form instead of the authored one.
+   *
+   * Matched by TARGET OBJECT, not by object identity: `defineStack` parses the
+   * config, so `stack.views[i]` is a structural copy and never `===` the
+   * exported container. A view container carries no top-level `name` (spec:
+   * `view.zod.ts`) — it is keyed implicitly by the object its default list or
+   * form binds to, which is the same key objectql's `resolveMetadataItemName`
+   * and the i18n walker use.
+   */
+  it('registers every view container the barrel exports', () => {
+    const registered = new Set(
+      (stack.views ?? []).map((v) => targetObject(v)).filter((o) => o !== undefined),
+    );
+    const missing = Object.entries(viewBarrel)
+      .filter(([, container]) => {
+        const object = targetObject(container);
+        // A container the guard cannot key is reported, never skipped —
+        // silently passing on an unresolvable one is how this guard would
+        // rot into the very "looks covered, covers nothing" shape #5420 is.
+        return object === undefined || !registered.has(object);
+      })
+      .map(([name]) => name);
+    expect(missing, `exported but absent from \`views:\` → ${missing.join(', ')}`).toEqual([]);
+    // The barrel is the authority for how many there are; assert it is not
+    // empty so a barrel that stops exporting cannot make this vacuously green.
+    expect(Object.keys(viewBarrel).length).toBeGreaterThanOrEqual(5);
+    expect(registered.has('showcase_contact')).toBe(true);
+  });
+
+  /**
+   * #5420 — the section headings the registration makes translatable, pinned
+   * from BOTH sides on the real stack.
+   *
+   * Registering `ContactViews` is what puts its four named `form.sections` in
+   * front of the i18n gates, and the two gates read the same set in opposite
+   * directions: `i18n/missing-section` (#5405) fails on a declared section
+   * with no bundle entry, `translation-target-unknown` (#5415/#5422) fails on
+   * a bundle entry no section declares. A test that checked one direction
+   * would stay green while the other broke, so this asserts set EQUALITY.
+   *
+   * Read on the composed stack, not on the imported container: what the gates
+   * see is `stack.views`, and that is exactly the reachability this issue was
+   * about. A section with no `name` (the sparse `formViews.create` section) is
+   * untranslatable by construction — every renderer guards the lookup on
+   * `name` — so it is deliberately outside the set.
+   */
+  it('keys the contact form sections to exactly what the container declares', () => {
+    const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact');
+    const form = (contact as { form?: unknown } | undefined)?.form;
+    const sections = (form as { sections?: unknown } | undefined)?.sections;
+    const declared = (Array.isArray(sections) ? sections : [])
+      .map((s) => (s as { name?: unknown } | undefined)?.name)
+      .filter((n): n is string => typeof n === 'string')
+      .sort();
+    expect(declared).toEqual(['contact', 'notes', 'status', 'work']);
+
+    const zh = ShowcaseTranslationBundle['zh-CN']?.objects?.showcase_contact as
+      | { _sections?: Record<string, { label?: string }> }
+      | undefined;
+    expect(Object.keys(zh?._sections ?? {}).sort()).toEqual(declared);
+    // Every entry carries an actual translation — an empty or echoed English
+    // label would satisfy the key set while faking the coverage.
+    for (const name of declared) {
+      const label = zh?._sections?.[name]?.label;
+      expect(label, `zh-CN _sections.${name}.label`).toBeTruthy();
+      expect(label).not.toMatch(/^[\x20-\x7e]+$/);
+    }
   });
 
   it('registers UI, automation, security, and AI metadata', () => {

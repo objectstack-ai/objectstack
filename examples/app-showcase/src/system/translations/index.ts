@@ -303,6 +303,35 @@ export const ShowcaseTranslationBundle = {
           lead_score: { label: '线索评分' },
           notes: { label: '备注' },
         },
+        // #5420 — `ContactViews` had never been listed in the config's `views:`
+        // array, so nothing (runtime or gate) could reach these two surfaces.
+        // Registering the container is what makes them translatable at all.
+        //
+        // `_views.list` — the container's DEFAULT list, which the resolver ids
+        // as `list` (`primary.name || 'list'`). Its source label is the bare
+        // plural "Contacts", so the object's own `pluralLabel` above is the
+        // right word; the `全部…` spelling the task/project lists use belongs to
+        // labels that actually say "All …".
+        _views: {
+          list: { label: '联系人' },
+        },
+        // `_sections` — the four groups of the default edit form in
+        // `ui/views/contact.view.ts`. Each declares a stable `name`, which is
+        // the only reason the heading is translatable (`ObjectForm` looks it up
+        // as `objects.showcase_contact._sections.<name>.label` and otherwise
+        // renders the English `label` verbatim). Wording reuses the vocabulary
+        // this bundle already established — 状态 and 备注 are exactly the words
+        // its `stage`-family and `notes` entries use — rather than minting a
+        // second term per idea. `contact` reads 联系方式 (contact DETAILS, its
+        // fields being 姓名/邮箱/电话) instead of a circular 联系人 heading
+        // inside a contact record; `work` follows the `…信息` shape the
+        // showcase_semantic_zoo headings set.
+        _sections: {
+          contact: { label: '联系方式' },
+          work: { label: '工作信息' },
+          status: { label: '状态' },
+          notes: { label: '备注' },
+        },
       },
       showcase_invoice: {
         label: '发票',
