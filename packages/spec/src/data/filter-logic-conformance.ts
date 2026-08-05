@@ -50,6 +50,74 @@
  * differ between a SQL engine and a JS matcher, and folding them in would make
  * the table unpassable rather than more useful. Keep it that way: a case belongs
  * here only if **every** backend must agree on it.
+ *
+ * ## Three case families that are RULED but not yet enrolled
+ *
+ * All three were ruled by the maintainer and are implemented in some backends.
+ * None is in the table yet — a red row here does not enforce a ruling, it just
+ * turns another lane's unfinished work into this table's failure, and each
+ * family still has one blocker standing, named per family below. Family 1 is
+ * recorded with what was actually measured against `main` at `175d789`;
+ * families 2 and 3 were re-measured at this PR's 2026-08-05 sync against
+ * `cdfbee2f0`, so the next author does not have to re-measure. Add the rows in
+ * the PR that closes the gap, not before.
+ *
+ * ### 1. Boolean identities of the empty combinators (#5239)
+ *
+ * `{ $and: [] }` = TRUE / all rows, `{ $or: [] }` = FALSE / **zero** rows,
+ * `{ $or: [{ a: 'x' }, {}] }` = all rows (`{}` is a TRUE disjunct),
+ * `{ $not: {} }` = FALSE / zero rows.
+ *
+ * | backend | `$and:[]` | `$or:[]` | `$or:[{a},{}]` | `$not:{}` |
+ * |---|---|---|---|---|
+ * | `formula` | all | zero | all | zero |
+ * | `driver-memory` | all | zero | all | zero |
+ * | `driver-sql` (#5134/PR #5243) | all | zero | all | zero |
+ * | `driver-sqlite-wasm` | all | zero | all | zero |
+ * | `driver-mongodb` (#5239) | all | zero | all | zero |
+ * | `read-scope-sql` | **THROWS** | **THROWS** | **rows 1,2** | **whole table** |
+ * | analytics `filter-normalizer` | **THROWS** | **THROWS** | **rows 1,2** | **whole table** |
+ *
+ * The two analytics backends do not merely lag: they hold the OPPOSITE
+ * position, in writing. `read-scope-sql.ts` and `filter-normalizer.ts` both
+ * refuse an empty `$and`/`$or` fail-closed ("An empty combinator has no
+ * defensible reading — dropping it widens the query, and treating it as 'match
+ * nothing' silently empties a chart"), and `read-scope-sql.test.ts` pins that
+ * throw. "Reject loudly" is a defensible answer — it is the one #5240 took for
+ * `{ field: {} }` — but it is not the same answer as "reduce to the identity",
+ * and one of the two has to give. That is a contract ruling, so it is escalated
+ * rather than guessed at: **#5322**.
+ *
+ * ### 2. NULL-safe `$not` (#5146)
+ *
+ * A row whose column is NULL does not satisfy the negated condition and IS
+ * returned. Landed in `driver-sql` via PR #5296; `driver-memory`, `formula`,
+ * `driver-sqlite-wasm` and `driver-mongodb` already agreed; `read-scope-sql`
+ * was aligned by #5326 (closing #5297) and `filter-normalizer` by #5335
+ * (closing #5325), so as of the 2026-08-05 sync (`cdfbee2f0`) every surface
+ * answers this family the same way — no backend blocker remains.
+ *
+ * What still keeps it out of the table is the fixture: every column of
+ * {@link FILTER_LOGIC_ROWS} is non-null by construction, so a NULL-bearing
+ * column has to be added here AND declared in all seven harnesses that seed
+ * it. That is the whole remaining work item, and it is why this family is not
+ * a one-line addition.
+ *
+ * ### 3. `{ field: {} }` — a field constrained by zero operators (#5240)
+ *
+ * Ruled **REJECT** (`INVALID_FILTER`), and since gated: #5327 landed the
+ * refusal on `driver-sql` (top level AND inside combinators),
+ * `driver-sqlite-wasm`, `driver-memory` (both filter surfaces) and `formula`,
+ * one wording, `INVALID_FILTER` / 400. As of the 2026-08-05 sync
+ * (`cdfbee2f0`) `driver-mongodb` is the one backend still ANSWERING it — an
+ * exact-match on an empty document — tracked by #5376. What blocks enrolment
+ * is the table's own shape: {@link FilterLogicCase} has no way to spell "this
+ * filter must be REJECTED" — `expected` is a row-id list, and an empty list
+ * means "matched nothing", which is precisely the FALSE answer the ruling did
+ * NOT take. Enrolling this case needs the shape extended first (an
+ * `expectRejection` discriminant, or a sibling table) — deliberately not
+ * invented here. The case lands with that extension, alongside the
+ * schema-side narrowing that stays with the spec lane.
  */
 
 import type { FilterCondition } from './filter.zod';

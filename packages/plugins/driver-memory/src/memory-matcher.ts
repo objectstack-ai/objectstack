@@ -193,6 +193,16 @@ function checkCondition(value: any, condition: any): boolean {
                 break;
             case '$null':
                 // $null: true → value must be null/undefined; $null: false → value must not be null/undefined
+                //
+                // [#5347] These two conditionals are EXHAUSTIVE now: the shape
+                // gate refuses a non-boolean `target` before evaluation starts.
+                // They were not, and that is what the issue's fixture could not
+                // see. A third value satisfied neither test, so the operator
+                // matched EVERY row — while the live query path compiled the
+                // same filter to IS NOT NULL and driver-sql to IS NULL. This
+                // face's answer was the widening one, which on an RLS read scope
+                // is a permission bypass, not a degraded filter (#3948, and the
+                // identical `$between` note above).
                 if (target === true && value != null) return false;
                 if (target === false && value == null) return false;
                 break;

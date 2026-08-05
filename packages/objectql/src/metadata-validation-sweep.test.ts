@@ -13,11 +13,15 @@
  *   2. A deliberately broken payload (missing required field) →
  *      expect `invalid_metadata` + status 422 + structured `issues[]`.
  *
- * Types without a Zod schema in the central registry (`function`,
- * `service`, `router`, plugin-only types like `theme`/`api`/`webhook`) are
- * still expected to pass through unvalidated — that is the documented
- * fall-through, not a regression. We pin it explicitly so any future
- * coverage gap is visible in the report.
+ * Types without a Zod schema in the central registry (plugin-only types like
+ * `theme`/`webhook`) are still expected to pass through unvalidated — that is
+ * the documented fall-through, not a regression. We pin it explicitly so any
+ * future coverage gap is visible in the report.
+ *
+ * [#5271] `api` LEFT that bucket. It was the specimen this paragraph named
+ * while `PUT /meta/api/:name` stored arbitrary JSON (#5206); it is now a
+ * registered kind with `ApiEndpointSchema` bound, so it is swept like any
+ * other runtime-creatable type and has a fixture below.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -192,6 +196,36 @@ const FIXTURES: Record<string, Fixture> = {
         // (the sync silently skips a locale-less item, so the door catches it).
         invalid: { apps: { sweep_app: { label: 'Sweep' } } },
         invalidatedField: 'locale',
+    },
+    // [#5271, part of #5206] `api` used to sit in this file's "no schema →
+    // fall-through" bucket (see the module doc). It now has one, so it gets a
+    // real fixture: the valid body is the E8-migrated showcase shape (an
+    // `object_operation` endpoint under its stack's ADR-0121 D1 carve-out), and
+    // the invalid body drops `target`, which `ApiEndpointSchema` requires.
+    //
+    // The invalid body is deliberately a SCHEMA violation, not a publish-gate
+    // violation: an off-carve-out path or an anonymous-without-armed-budget
+    // endpoint parses green here and is refused one door later, by
+    // `validateApiEndpointDeclarations` (publish) / `buildEndpointIndex`
+    // (load). This sweep must pin the door it actually is, or it would claim
+    // coverage for a judgement it never makes.
+    api: {
+        valid: {
+            name: 'sweep_task_feed',
+            path: '/api/v1/apps/sweep/tasks',
+            method: 'GET',
+            type: 'object_operation',
+            target: 'sweep_task',
+            objectParams: { object: 'sweep_task', operation: 'find' },
+            authRequired: true,
+        },
+        invalid: {
+            name: 'sweep_task_feed',
+            path: '/api/v1/apps/sweep/tasks',
+            method: 'GET',
+            type: 'object_operation',
+        },
+        invalidatedField: 'target',
     },
     email_template: {
         valid: {

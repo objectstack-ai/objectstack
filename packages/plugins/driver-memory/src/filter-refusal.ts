@@ -260,6 +260,52 @@ export function malformedBetweenError(field: string, value: unknown, path: strin
 }
 
 /**
+ * [#5347] `$null` whose comparand is not a boolean.
+ *
+ * `FieldOperatorsSchema` declares `$null: z.boolean()`, and nothing between an
+ * authored `where` and a driver validates against it — so a non-boolean really
+ * arrives. Every backend then read it, and they did NOT agree; measured on one
+ * row with `stage: 'won'` and one with `stage: null`, on `{ stage: { $null: 'yes' } }`:
+ *
+ * | backend | read as | rows |
+ * |---|---|---|
+ * | driver-sql / driver-sqlite-wasm / Turso local | IS NULL (anything but `false`) | the NULL row |
+ * | THIS driver's live path (mingo), driver-mongodb | IS NOT NULL (anything but `true`) | the valued row |
+ * | THIS driver's reference matcher | nothing at all — the constraint vanished | BOTH rows |
+ *
+ * Note the last line: this package's own two faces disagreed with EACH OTHER,
+ * which #5347 could not see because it measured a fixture with no null-valued
+ * row — there the matcher's "match everything" and mingo's "IS NOT NULL"
+ * coincide. The matcher's `$null` arm is written as two conditionals
+ * (`target === true && …`, `target === false && …`); a third value satisfies
+ * neither, so the operator silently stopped constraining anything. That is the
+ * #5240 / #5328 shape exactly — one filter, one package, two answers, and the
+ * widening one is a permission bypass on a read scope.
+ *
+ * Ruled on #5347: REFUSED everywhere, the same disposition `{ field: {} }` got
+ * and for the same reason — there is no reading of a non-boolean here that is
+ * not a guess about the author's intent. The string `"false"` is the sharpest
+ * case: it is truthy, so it landed on the opposite side from the `false` it was
+ * written to mean, and it is exactly what an AI-authored or JSON-round-tripped
+ * scope produces.
+ *
+ * The leading sentence is `driver-sql`'s, verbatim — one condition, one wording
+ * (#5240).
+ */
+export function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
+      `than coerced because the backends read a non-boolean in OPPOSITE directions — driver-sql ` +
+      `compiled IS NULL (anything but false), this driver's query path and driver-mongodb ` +
+      `compiled IS NOT NULL (anything but true), and this driver's matcher dropped the ` +
+      `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
+      `the false it was written to mean (#5347).`,
+  );
+}
+
+/**
  * [#5324] `$options` without the `$regex` it modifies.
  *
  * `$options` is in {@link SUPPORTED_FIELD_OPERATORS} as a MODIFIER, not a
@@ -385,6 +431,13 @@ function assertFieldConstraintShape(field: string, spec: unknown, path: string):
     if (!SUPPORTED_FIELD_OPERATORS.has(op)) throw unknownFieldOperatorError(op, field, path);
     if (op === '$between' && !isBetweenComparand(spec[op])) {
       throw malformedBetweenError(field, spec[op], `${path}.$between`);
+    }
+    // [#5347] `$null`'s comparand is a boolean by declaration. It joins
+    // `$between`'s arity as the second COMPARAND-shape check this gate makes,
+    // and for the identical reason: a shape the operator cannot evaluate was
+    // being answered silently, differently, by each face.
+    if (op === '$null' && typeof spec[op] !== 'boolean') {
+      throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
     }
   }
   // `$options` is the one entry in the vocabulary that is a modifier rather than

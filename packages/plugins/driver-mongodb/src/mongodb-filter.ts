@@ -32,6 +32,190 @@ import {
   type TemporalFieldKindResolver,
 } from './mongodb-temporal.js';
 
+// ── [#5239] Boolean identities for the empty combinators ─────────────────────
+
+/**
+ * Keys that reach this translator inside a `where` object but describe the
+ * QUERY rather than a predicate. The emitter has always skipped them; the
+ * reduction below has to agree, or "what this node is worth as a boolean" and
+ * "what this node emits" could disagree — which is the class of defect the
+ * reduction exists to remove.
+ */
+const QUERY_LEVEL_KEYS = new Set(['limit', 'offset', 'fields', 'orderBy']);
+
+/**
+ * A MongoDB query document that matches NO document, for the `false` verdict.
+ *
+ * `$in: []` is empty-set membership — no value satisfies it, on every server
+ * version, with no dependence on a collection's fields. `_id` is the one field
+ * MongoDB guarantees exists. This is the shape #5239 names, and it is emitted
+ * as a REAL condition: `$or: []` must reach `find` / `updateMany` /
+ * `deleteMany` as "zero rows", never as the absent filter `{}`, which those
+ * three read as "every document".
+ */
+function matchNothing(): Filter<any> {
+  return { _id: { $in: [] } };
+}
+
+/**
+ * [#5239, mirroring #5134] What a filter node is worth as a boolean, decided
+ * BEFORE any query document is built.
+ *
+ * - `'true'`  — matches every document; the translator emits no condition.
+ * - `'false'` — matches no document; the translator emits {@link matchNothing}.
+ * - `'clause'` — carries at least one real predicate; translate it normally.
+ */
+type FilterVerdict = 'true' | 'false' | 'clause';
+
+/**
+ * [#5239] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
+ * declares for every element of `$and`/`$or` and for the operand of `$not`?
+ *
+ * The PROTOTYPE check is the load-bearing half. The identity reduction turns
+ * "this node has no predicates" into "matches every document", so any object
+ * whose own enumerable keys are empty reads as TRUE. A `Date`, a `RegExp`, a
+ * `Map` or a class instance all satisfy `typeof x === 'object' &&
+ * !Array.isArray(x)` while enumerating to nothing — accepting them would
+ * PROMOTE garbage from "silently mistranslated" to "matches all documents",
+ * which on `deleteMany` is not a wrong row count but data loss. Measured on
+ * `main` before this change: `{ $or: [new Date()] }` translated to
+ * `{ $or: [{}] }`, i.e. every document, and `{ $or: 'x' }` / `{ $not: null }`
+ * translated to `{}`, likewise every document.
+ */
+function isFilterNode(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * [#5239] The gate that gives "this group translated to empty" exactly ONE
+ * cause.
+ *
+ * Identity reduction is sound only once an empty group can mean "the author
+ * wrote an empty group" and nothing else. Refusing non-nodes here — before any
+ * identity is applied — is what makes the reduction safe rather than a
+ * promotion of garbage to match-all. Same discipline as #5134 in `driver-sql`
+ * and cloud#1073 in Turso's `RemoteTransport.buildWhereSQL`.
+ */
+function assertFilterNode(value: unknown, path: string): asserts value is Record<string, unknown> {
+  if (isFilterNode(value)) return;
+  throw unsupportedFilterError(
+    `Filter node at ${path} is a ${describeFilterOperand(value)} (${safeShapePreview(value)}), not a filter ` +
+      `condition object. Every element of "$and"/"$or" and the operand of "$not" must be a plain object of ` +
+      `field constraints (e.g. { "status": "active" }) or nested combinators — @objectstack/spec ` +
+      `FilterConditionSchema declares this position as a FilterCondition. It is refused rather than skipped ` +
+      `because skipping it would silently change which documents match.`,
+  );
+}
+
+/** [#5239] `$and`/`$or` take a list; anything else is refused, never coerced. */
+function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
+  if (Array.isArray(value)) return;
+  throw unsupportedFilterError(
+    `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a ` +
+      `${describeFilterOperand(value)} (${safeShapePreview(value)}). @objectstack/spec FilterConditionSchema ` +
+      `declares "${key}" as FilterCondition[].`,
+  );
+}
+
+/**
+ * [#5239] Reduce one filter node to its boolean verdict, validating shapes on
+ * the way down.
+ *
+ * A node is the AND of its entries, so FALSE dominates and a node with no
+ * entries at all is TRUE (the empty conjunction) — which is why `{}` is a TRUE
+ * disjunct inside `$or` and why `{ $not: {} }` is FALSE.
+ *
+ * The walk does NOT short-circuit: a `$or: []` sibling must not stop it from
+ * reaching — and refusing — a malformed node further along, or the shape gate
+ * would depend on key order.
+ *
+ * Deciding STRUCTURALLY, rather than translating and then asking whether the
+ * emitted document came out empty, is the point. "Nothing was emitted" cannot
+ * distinguish "the author wrote an empty group" from "something failed to
+ * translate"; a structural verdict has no such blind spot.
+ */
+function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
+  let sawFalse = false;
+  let sawClause = false;
+  for (const [key, value] of Object.entries(node)) {
+    const verdict = reduceFilterKey(key, value, path);
+    if (verdict === 'false') sawFalse = true;
+    else if (verdict === 'clause') sawClause = true;
+  }
+  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+}
+
+/** [#5239] The verdict of ONE key of a filter node. */
+function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
+  const here = path ? `${path}.${key}` : key;
+
+  if (key === '$and' || key === '$or') {
+    assertFilterNodeList(value, key, here);
+    let sawTrue = false;
+    let sawFalse = false;
+    let sawClause = false;
+    value.forEach((element, index) => {
+      const elementPath = `${here}[${index}]`;
+      assertFilterNode(element, elementPath);
+      const verdict = reduceFilterNode(element, elementPath);
+      if (verdict === 'true') sawTrue = true;
+      else if (verdict === 'false') sawFalse = true;
+      else sawClause = true;
+    });
+    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
+    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). MongoDB itself
+    // answers neither: it rejects the empty array outright
+    // (`$and/$or/$nor must be a nonempty array`), so this filter used to be a
+    // 500-shaped throw rather than a verdict.
+    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
+  }
+
+  if (key === '$not') {
+    assertFilterNode(value, here);
+    const inner = reduceFilterNode(value, here);
+    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
+    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
+  }
+
+  // Query-level keys carry no predicate; the emitter skips them and so does the
+  // verdict, so the two never disagree about what this node is worth.
+  if (QUERY_LEVEL_KEYS.has(key)) return 'true';
+
+  // [#5347] `$null`'s comparand is a boolean by declaration. Checked on THIS
+  // walk rather than in the emitter's `$null` arm because the emitter is
+  // skipped wholesale by a boolean identity: `{ $or: [ {}, { stage: { $null:
+  // 'yes' } } ] }` reduces to TRUE on its first disjunct, so an emitter-side
+  // gate would refuse the comparand or ignore it depending on its SIBLINGS —
+  // the "gate conditional on evaluation order" #5368 placed driver-sql's and
+  // driver-memory's gates on their walks to rule out. #5368 landed this
+  // driver's gate in the emitter because no walk existed here yet; #5239's
+  // reduction is that walk, so the gate moved with it. `hasOwnProperty` rather
+  // than `'$null' in value` so an inherited key can never trip the gate.
+  // `{ $null: undefined }` still counts: the key is own and enumerable, and
+  // `undefined` is exactly one of the comparands #5347 measured a divergence
+  // on.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$null') &&
+    typeof value.$null !== 'boolean'
+  ) {
+    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+  }
+
+  // A field key always contributes a predicate. This stays `'clause'` even for
+  // `{ field: {} }` (a field constrained by zero operators), which this
+  // translator emits as `{ field: {} }` — an exact-match on an empty document.
+  // That shape is a SEPARATE divergence, ruled REJECT in #5240 and since gated
+  // on driver-sql / driver-sqlite-wasm / driver-memory / formula by #5327 —
+  // this driver is now the one backend still answering it, tracked by #5376.
+  // Classifying it as `'clause'` rather than `'true'` is precisely what keeps
+  // this change from silently ruling on it.
+  return 'clause';
+}
+
 /**
  * [#5158] A `FilterArray` reached the driver unlowered — the twin of
  * `driver-sql`'s and `driver-memory`'s `filterArrayReachedDriverError`, word
@@ -39,7 +223,7 @@ import {
  * ADR-0112 envelope (`400 INVALID_FILTER`) every sibling filter refusal speaks.
  */
 function filterArrayReachedDriverError(filters: unknown[]): Error {
-  const err = new Error(
+  return unsupportedFilterError(
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
     `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
     `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
@@ -47,10 +231,78 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
-  ) as Error & { code?: string; status?: number };
+  );
+}
+
+/**
+ * [#4436 / #5240] A filter this driver cannot evaluate, in the ADR-0112
+ * envelope every sibling filter refusal across the backends speaks.
+ *
+ * Extracted from {@link filterArrayReachedDriverError}, which built the same
+ * `INVALID_FILTER` / 400 error inline — it was this package's only refusal
+ * carrying a wire identity, so there was nothing to share it with until #5347
+ * added a second. It is deliberately the SAME envelope as `driver-sql`'s and
+ * `driver-memory`'s `unsupportedFilterError`, not a third: #3948 made the
+ * backends agree that an uncompilable filter is a refusal, and a suite that
+ * swaps one driver for another must see one `400 INVALID_FILTER`, not a coded
+ * refusal on three backends and a bare `{ error }` on the fourth.
+ *
+ * Note what this does NOT do: the `default:` arm of {@link translateFieldOperators}
+ * still throws a bare `Error` with a `[mongodb]` prefix, outside this envelope.
+ * That is #5346's, filed and measured separately — converting it here would be
+ * an unrelated behaviour change riding on #5347.
+ */
+function unsupportedFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#5347] `$null` whose comparand is not a boolean.
+ *
+ * The leading sentence is `driver-sql`'s, verbatim — one condition, one wording
+ * (#5240) — and the tail records the measurement that made the refusal the
+ * ruling: on one row with `stage: 'won'` and one with `stage: null`,
+ * `{ stage: { $null: 'yes' } }` returned the NULL row on driver-sql /
+ * driver-sqlite-wasm / Turso local, the VALUED row here and on driver-memory's
+ * query path, and BOTH rows through driver-memory's reference matcher. Three
+ * readings of one declared operator, none of them anyone's decision — just what
+ * a two-branch conditional does with a third value.
+ */
+function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
+      `than coerced because the backends read a non-boolean in OPPOSITE directions — driver-sql ` +
+      `compiled IS NULL (anything but false), this driver and driver-memory's query path ` +
+      `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
+      `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
+      `the false it was written to mean (#5347).`,
+  );
+}
+
+/** A short type name for an operand a filter refusal has to describe. */
+function describeFilterOperand(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  const kind = typeof value;
+  if (kind !== 'object') return kind;
+  const ctor = (value as { constructor?: { name?: string } }).constructor;
+  return ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+}
+
+/** A short, non-throwing rendering of an offending value for a message. */
+function safeShapePreview(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== 'string') return typeof value;
+    return json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    return typeof value;
+  }
 }
 
 /**
@@ -82,15 +334,35 @@ export function translateFilter(
 
   if (typeof where !== 'object') return {};
 
-  return translateCondition(where as Record<string, unknown>, temporalKind);
+  // [#5239] Shape gate + structural reduction FIRST, over the WHOLE tree. Only
+  // a `'clause'` node reaches the emitter, so `translateCondition` never has to
+  // ask whether what it built came out empty.
+  const node = where as Record<string, unknown>;
+  const verdict = reduceFilterNode(node, 'filter');
+  if (verdict === 'true') return {};
+  if (verdict === 'false') return matchNothing();
+
+  return translateCondition(node, temporalKind, 'filter');
 }
 
 /**
  * Translate a FilterCondition object to a MongoDB filter.
+ *
+ * [#5239] Every combinator key is decided by {@link reduceFilterKey} BEFORE
+ * anything is emitted, so an empty group is applied as its boolean IDENTITY
+ * rather than dropped: a `'true'` key contributes nothing to the node's AND, a
+ * `'false'` key contributes {@link matchNothing}, and only `'clause'` members
+ * are translated. That is why every `$and`/`$or` array this function emits is
+ * guaranteed non-empty — MongoDB rejects an empty one, and the old code handed
+ * it straight through.
  */
 function translateCondition(
   condition: Record<string, unknown>,
   temporalKind?: TemporalFieldKindResolver,
+  // [#5347] Where in the filter tree this node sits, so a refusal can name the
+  // position it refused — the same `filter.$or[0].stage` spelling driver-sql
+  // and driver-memory print.
+  path = 'filter',
 ): Filter<any> {
   const mongoFilter: Record<string, unknown> = {};
   const andClauses: Filter<any>[] = [];
@@ -98,39 +370,57 @@ function translateCondition(
   for (const [key, value] of Object.entries(condition)) {
     switch (key) {
       case '$and':
-        if (Array.isArray(value)) {
-          andClauses.push({
-            $and: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
-          });
+      case '$or': {
+        const here = `${path}.${key}`;
+        const keyVerdict = reduceFilterKey(key, value, path);
+        // TRUE is the AND identity for the node — it adds no condition. FALSE
+        // makes the node match nothing.
+        if (keyVerdict === 'true') break;
+        if (keyVerdict === 'false') {
+          andClauses.push(matchNothing());
+          break;
         }
+        // `'clause'` guarantees at least one branch survives: a TRUE member
+        // would have made a `$or` TRUE, a FALSE member would have made a `$and`
+        // FALSE, and both were handled above. Dropping the identity members is
+        // what makes `{ $or: [{ a: 'x' }, { $or: [] }] }` mean `a = x` rather
+        // than an empty `$or` MongoDB refuses.
+        const branches = (value as unknown[])
+          .map((sub, index) => ({ sub: sub as Record<string, unknown>, index }))
+          .filter(({ sub, index }) => reduceFilterNode(sub, `${here}[${index}]`) === 'clause')
+          .map(({ sub, index }) => translateCondition(sub, temporalKind, `${here}[${index}]`));
+        andClauses.push(key === '$and' ? { $and: branches } : { $or: branches });
         break;
+      }
 
-      case '$or':
-        if (Array.isArray(value)) {
-          andClauses.push({
-            $or: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
-          });
+      case '$not': {
+        const keyVerdict = reduceFilterKey(key, value, path);
+        // NOT FALSE ≡ TRUE — no condition. NOT TRUE ≡ FALSE — zero documents.
+        if (keyVerdict === 'true') break;
+        if (keyVerdict === 'false') {
+          andClauses.push(matchNothing());
+          break;
         }
+        const inner = translateCondition(
+          value as Record<string, unknown>,
+          temporalKind,
+          `${path}.$not`,
+        );
+        // MongoDB $not applies per-field; for top-level negation use $nor
+        andClauses.push({ $nor: [inner] });
         break;
-
-      case '$not':
-        if (value && typeof value === 'object') {
-          const inner = translateCondition(value as Record<string, unknown>, temporalKind);
-          // MongoDB $not applies per-field; for top-level negation use $nor
-          andClauses.push({ $nor: [inner] });
-        }
-        break;
+      }
 
       default:
         // Skip query-level keys that are not filter conditions
-        if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
+        if (QUERY_LEVEL_KEYS.has(key)) continue;
 
         if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
           // Check if this is an operator object (has $ keys)
           const objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
           if (hasOps) {
-            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key));
+            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
           } else {
             // Nested object — treat as exact match
             mongoFilter[key] = value;
@@ -172,6 +462,10 @@ function translateFieldOperators(
   // (ADR-0053 D-C1) left the two out of step and the call site stopped
   // compiling. One definition means the next temporal type is added once.
   kind?: TemporalFieldKind,
+  // [#5347] Carried only so a refusal can name the field and the position it
+  // refused, the way `driver-sql` and `driver-memory` do.
+  field = '<field>',
+  path = 'filter',
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const store = (v: unknown) => coerceTemporalValue(v, kind);
@@ -238,7 +532,28 @@ function translateFieldOperators(
         break;
 
       // Null check
+      //
+      // [#5347] The arm used to be a two-branch `if/else` on `value === true`,
+      // so EVERY non-boolean comparand fell to the `else` and translated to
+      // `$ne: null` — IS NOT NULL. `driver-sql` hung its default on the
+      // opposite side (`opValue === false` → IS NULL) and `driver-memory`'s
+      // reference matcher on neither (the constraint vanished), so one declared
+      // operator had three readings across four backends. Ruled REFUSED on
+      // #5347: `FieldOperatorsSchema` declares `$null: z.boolean()`, and there
+      // is no reading of a non-boolean here that is not a guess at intent.
+      //
+      // Since #5239's reduction, the LOAD-BEARING copy of this gate sits in
+      // `reduceFilterKey`, on the validating walk: this emitter is skipped
+      // wholesale whenever a boolean identity settles the enclosing node
+      // (`{ $or: [ {}, { stage: { $null: 'yes' } } ] }` reduces to TRUE before
+      // any arm here runs), so a gate only here would refuse or ignore the
+      // comparand depending on the shape's SIBLINGS — the evaluation-order
+      // dependence #5368 placed driver-sql's gates on its walk to rule out.
+      // This arm keeps the check as local defense for its own invariant; both
+      // call the one constructor with the same path spelling, so the wire
+      // answer is identical whichever fires.
       case '$null':
+        if (typeof value !== 'boolean') throw nonBooleanNullComparandError(field, value, `${path}.$null`);
         if (value === true) {
           result.$eq = null;
         } else {
