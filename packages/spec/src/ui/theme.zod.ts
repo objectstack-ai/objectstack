@@ -34,8 +34,11 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 //      Controls in the same run: `PageSchema` / `DashboardSchema` /
 //      `ReportSchema` / `WebhookSchema` / `StateMachineSchema` all resolve, and
 //      批 13's measured no-door shapes (`TouchTargetConfigSchema`,
-//      `GestureConfigSchema`) come back unreachable. So "reachable" here is a
+//      `GestureConfigSchema`) came back unreachable. So "reachable" here is a
 //      fact about the graph, not an instrument that says yes to everything.
+//      (Those two negative controls were RETIRED at #4988 — the whole no-door
+//      interaction family went — so a re-run supplies its own, e.g. an inline
+//      `z.object({ a: z.string() })`. The reading above is unaffected.)
 //   3. PARSE — `defineStack()` parses `ObjectStackSchema` on every app boot and
 //      on every `objectstack build`, so a theme key is judged on the path an
 //      author actually runs.
@@ -321,10 +324,13 @@ export const ThemeMode = ThemeModeSchema;
 // Two of them are deliberately worded NOT to hand the author a replacement
 // slot. `touchTarget` and `keyboardNavigation` read like they should point at
 // `ui/touch.zod.ts` / `ui/keyboard.zod.ts` — but 批 13 measured both of those
-// vocabularies as having no carrier key at all (#4988), so prescribing them
-// would walk an author out of a loud rejection and into a silent one. That is
-// the ledger's finding 7, and this campaign has now signposted its own failure
-// mode twice; it does not get to do it a third time.
+// vocabularies as having no carrier key at all, so prescribing them would walk
+// an author out of a loud rejection and into a silent one. That is the ledger's
+// finding 7, and this campaign has now signposted its own failure mode twice;
+// it does not get to do it a third time. **#4988 settled it the other way**:
+// both modules were RETIRED outright (ADR-0049), so the slot these two
+// prescriptions declined to name no longer exists at all — the refusal was
+// right, and it must stay a refusal rather than becoming a dangling pointer.
 //
 // The #5021 pair is the OPPOSITE case and it is worth keeping the distinction
 // visible: `animation` and `zIndex` DO get a replacement slot, because

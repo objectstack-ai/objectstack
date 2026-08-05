@@ -46,11 +46,54 @@
  * now a {@link NormalizedFilterNode} tree, and each strategy compiles it the
  * way its own backend expresses a disjunction.
  *
+ * # `null` is TRUE, and TRUE is a VALUE — not "nothing happened" (#5325)
+ *
+ * {@link buildNode} returns `null` for a condition that constrains nothing
+ * (`{}`, an all-`{}` `$and`). That `null` is the boolean constant TRUE, and the
+ * two places a compiler forgets it are exactly where this one used to be wrong —
+ * the same two squares `read-scope-sql.ts` was wrong on (#5297), because this
+ * module was written from it:
+ *
+ *   - TRUE is the AND identity, so dropping it from a `$and` is right — but it
+ *     ABSORBS a `$or`: one TRUE disjunct makes the whole disjunction TRUE.
+ *     Filtering it out (`{$or: [{}, {a: 1}]}` → `a = 1`) silently NARROWED a
+ *     widget's filter to its surviving branches.
+ *   - `NOT TRUE ≡ FALSE`, so `{$not: {}}` is the zero-row predicate. Producing
+ *     `null` for it meant no `WHERE` was emitted at all and the widget charted
+ *     the ENTIRE dataset — the #3650 / #4128 silent-widening class again.
+ *
+ * FALSE therefore has a spelling of its own ({@link NormalizedFilterNode}'s
+ * `const` kind) instead of being representable only as silence. Every compiler
+ * of this tree implements it: `native-sql-strategy.compileFilterNode`,
+ * `objectql-strategy.filterNodeToCondition` and its display-SQL twin
+ * `renderFilterNodeSql`.
+ *
+ * # `$not` is NULL-safe (#5146)
+ *
+ * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
+ * drops every row whose `col` is NULL — while `driver-memory`, `formula` and
+ * (since #5296) `driver-sql` return those rows. One widget filter, two row sets,
+ * chosen by whichever backend answered. #5146 ruled the JS answer canonical, and
+ * {@link nullSafeNegationOperand} applies the same leaf-wise totalisation
+ * `sql-driver.ts` and `read-scope-sql.ts` apply.
+ *
+ * The rewrite lives HERE rather than in `native-sql-strategy` on purpose: at
+ * this layer the guard is STRUCTURE (one more `{col: {$null: false}}` conjunct),
+ * not a SQL trick, so it survives `filterNodeToCondition` handing the tree to
+ * the ObjectQL engine and holds on any driver behind it — including one that is
+ * not NULL-safe by itself. Guarding only in the SQL strategy would make "what
+ * does this widget's `$not` mean" depend on which backend caught it, which is
+ * what #5146 spent a round eliminating. The cost is that the engine path can
+ * guard twice (this rewrite, then `driver-sql`'s own); that is idempotent —
+ * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
+ * so it buys portability for one redundant conjunct.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
- * vocabulary, and `native-sql-filter-logic-conformance.test.ts`, which runs
- * the SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL
- * compiler, the in-memory matcher, `formula` and `read-scope-sql` are already
- * held to.
+ * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
+ * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
+ * the in-memory matcher, `formula` and `read-scope-sql` are already held to, and
+ * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
+ * deliberately does not carry (NULL handling, boolean identities).
  */
 
 export interface NormalizedAnalyticsFilter {
@@ -112,12 +155,57 @@ function stringifyForCube(v: unknown): string {
  * are explicit so each strategy can compile them the way its own backend
  * expresses them — recursive SQL for the raw-SQL path, a passed-through
  * `$or`/`$not` for the engine path.
+ *
+ * The `const` kind is the boolean constant (#5325). The union carried only
+ * `leaf | and | or | not`, so there was no way to SAY "matches nothing": a
+ * `{$not: {}}` — whose meaning is exactly that — could only be expressed by
+ * emitting nothing, which every compiler reads as "no constraint", i.e. the
+ * opposite. TRUE keeps its existing spelling (`null` = no constraint, the AND
+ * identity); FALSE needs a node because it must survive into the WHERE clause.
  */
 export type NormalizedFilterNode =
   | { kind: 'leaf'; member: string; operator: string; values: string[] }
+  | { kind: 'const'; value: boolean }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
   | { kind: 'not'; child: NormalizedFilterNode };
+
+/**
+ * The SQL boolean constants the compilers of this tree emit for a `const` node.
+ *
+ * `1 = 0` / `1 = 1` are the spellings already used on both sides of the repo —
+ * `read-scope-sql.ts` compiles an empty `$in` to `1 = 0`, `driver-sql`'s
+ * `applyFalseConstant` emits the same (#5134), and Knex renders an empty
+ * `whereIn` that way. They need no bindings, are valid on every dialect these
+ * strategies target (unlike a bare `FALSE`), and keep the statement a normal
+ * SELECT so `GROUP BY` / `LIMIT` still behave.
+ */
+export const SQL_CONST_FALSE = '1 = 0';
+export const SQL_CONST_TRUE = '1 = 1';
+
+/** The tree's FALSE. A fresh object per call — nodes are never shared. */
+function falseNode(): NormalizedFilterNode {
+  return { kind: 'const', value: false };
+}
+
+/**
+ * `NOT` of a node, with `null` read as the constant TRUE it is.
+ *
+ * `NOT TRUE ≡ FALSE` is the whole point: `{$not: {}}` used to fall off the tree
+ * here, taking the WHERE clause with it (#5325). A `NOT` of a constant folds to
+ * the opposite constant, so `{$not: {$not: {}}}` is TRUE again rather than a
+ * `NOT (1 = 0)` that only happens to evaluate right.
+ */
+function notOf(inner: NormalizedFilterNode | null): NormalizedFilterNode {
+  if (!inner) return falseNode();
+  if (inner.kind === 'const') return { kind: 'const', value: !inner.value };
+  return { kind: 'not', child: inner };
+}
+
+/** A node the normalizer can walk: a plain object, not `null` and not an array. */
+function isFilterObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
+}
 
 /** `null` means "no constraint" — an empty object contributes no predicate. */
 function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
@@ -146,6 +234,21 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
 
   if (typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
     const wrapper = raw as Record<string, unknown>;
+    // A field constrained by ZERO operators, ruled on in #5240: REFUSE it, the
+    // way `driver-sql`, `driver-memory` and `formula` now do. This module used
+    // to produce no leaf for it — and "no leaf" is the constant TRUE, which is
+    // load-bearing since #5325 made TRUE absorb a `$or`: left alone,
+    // `{$or: [{a: {}}, {b: 2}]}` would have gone from `b = 2` to EVERY row.
+    // Neither silent reading is the author's intent (the shape is an authoring
+    // accident — a filter builder that recorded a field and never its operator),
+    // and a loud refusal is the answer the rest of the repo already gives.
+    if (Object.keys(wrapper).length === 0) {
+      throw new Error(
+        `[analytics] "${key}" carries a field constraint with zero operators ({}). ` +
+        `Refusing rather than reading it as "every row" or "no row" — #5240 ruled this ` +
+        `shape refused on every backend.`,
+      );
+    }
     const opKeys = Object.keys(wrapper).filter((k) => k.startsWith('$'));
     if (opKeys.length > 0) {
       for (const opKey of opKeys) {
@@ -194,6 +297,19 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           continue;
         }
 
+        // An EMPTY set is a boolean constant, not an absent predicate (#5134).
+        // `buildFilterClause` returns `null` for a value-less `in`/`notIn`, and
+        // a `null` clause is read as "no constraint" by every compiler of this
+        // tree — so `{stage: {$in: []}}` charted every row instead of none. It
+        // also has to be a CONSTANT rather than a dropped clause for the
+        // NULL-safe `$not` rewrite below to stay correct: a dropped conjunct
+        // inside a negation flips the whole negation's answer, while `1 = 0`
+        // negates to `1 = 1` the way `read-scope-sql.ts` already has it.
+        if ((opKey === '$in' || opKey === '$nin') && Array.isArray(wrapper[opKey]) && (wrapper[opKey] as unknown[]).length === 0) {
+          out.push({ kind: 'const', value: opKey === '$nin' });
+          continue;
+        }
+
         const cubeOp = MONGO_TO_CUBE_OP[opKey];
         if (!cubeOp) {
           // NEVER drop: a missing predicate does not narrow the query, it
@@ -223,21 +339,24 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     return out;
   }
 
-  // Implicit equality / array → in
-  if (Array.isArray(raw)) leaf('in', raw.map(stringifyForCube));
-  else leaf('equals', [stringifyForCube(raw)]);
+  // Implicit equality / array → in. An empty array is the same constant its
+  // explicit `{$in: []}` spelling is — see the note at that branch.
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) out.push({ kind: 'const', value: false });
+    else leaf('in', raw.map(stringifyForCube));
+  } else leaf('equals', [stringifyForCube(raw)]);
   return out;
 }
 
 /**
- * Compile a `FilterCondition` object into a node. `null` = no constraint.
+ * Compile a `FilterCondition` object into a node. `null` = no constraint (TRUE).
  *
  * Every entry of one object ANDs with its siblings, at every depth — the rule
  * `filter-logic-conformance.ts` exists to hold each backend to (#3774). The
  * combinator handling deliberately mirrors `read-scope-sql.ts`'s
- * `compileNode`, including its fail-closed empty-array rejection, so the two
- * SQL-producing paths in this package cannot drift apart about what a filter
- * MEANS.
+ * `compileNode`, including its fail-closed empty-array rejection AND (since
+ * #5325) its treatment of the two boolean identities, so the two SQL-producing
+ * paths in this package cannot drift apart about what a filter MEANS.
  */
 function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   const children: NormalizedFilterNode[] = [];
@@ -253,20 +372,53 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
           `nothing" silently empties a chart.`,
         );
       }
-      const branches = raw
-        .map((sub) => (sub && typeof sub === 'object' ? buildNode(sub as Record<string, unknown>) : null))
-        .filter((n): n is NormalizedFilterNode => n !== null);
-      if (branches.length === 0) continue;
+      const branches = raw.map((sub) => {
+        // A non-object element is refused rather than skipped: skipping it
+        // NARROWS a `$or` to its remaining branches and, under the TRUE-absorbs
+        // rule below, would otherwise have to be read as TRUE and widen the
+        // query to every row. Neither is a defensible reading of garbage input —
+        // `read-scope-sql.ts` refuses the same shape.
+        if (!isFilterObject(sub)) {
+          throw new Error(
+            `[analytics] "${key}" branches must be filter objects, got ${JSON.stringify(sub)}. ` +
+            `Skipping it would silently change which rows the filter admits.`,
+          );
+        }
+        return buildNode(sub);
+      });
+      // A `null` branch is the constant TRUE. It is the AND identity, so it
+      // drops out of a `$and` — but it ABSORBS a `$or`: one TRUE disjunct makes
+      // the whole disjunction TRUE, so the group contributes NO constraint
+      // rather than collapsing to its surviving branches. Collapsing is what
+      // narrowed `{$or: [{}, {stage: 'won'}]}` to `stage = 'won'` (#5325).
+      if (key === '$or' && branches.some((n) => n === null)) continue;
+      const kept = branches.filter((n): n is NormalizedFilterNode => n !== null);
+      if (kept.length === 0) continue;
       // `$and` folds into this object's own AND; `$or` becomes a node, since
       // OR is exactly the structure a flat list could not carry.
-      if (key === '$and') children.push(...branches);
-      else children.push(branches.length === 1 ? branches[0] : { kind: 'or', children: branches });
+      if (key === '$and') children.push(...kept);
+      else children.push(kept.length === 1 ? kept[0] : { kind: 'or', children: kept });
       continue;
     }
 
     if (key === '$not') {
-      const inner = raw && typeof raw === 'object' ? buildNode(raw as Record<string, unknown>) : null;
-      if (inner) children.push({ kind: 'not', child: inner });
+      if (!isFilterObject(raw)) {
+        // Same call as the branch elements above: a `$not` of garbage used to
+        // vanish, which turns "exclude these rows" into "exclude nothing".
+        throw new Error(
+          `[analytics] "$not" requires a filter object, got ${JSON.stringify(raw)}. ` +
+          `Dropping it would silently widen the query to rows the filter excludes.`,
+        );
+      }
+      // NULL-safe negation (#5146): totalise the operand's leaves FIRST, so the
+      // negation can never be UNKNOWN and this path admits the same rows
+      // `driver-memory` / `formula` / `driver-sql` admit. The guard is added as
+      // STRUCTURE here, which is what makes it survive into the ObjectQL engine
+      // path too (see the module header).
+      const inner = buildNode(nullSafeNegationOperand(raw));
+      // `notOf` turns a TRUE operand into FALSE instead of nothing: `{$not: {}}`
+      // is the zero-row filter, and emitting nothing for it charted every row.
+      children.push(notOf(inner));
       continue;
     }
 
@@ -281,6 +433,210 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   }
 
   return andOf(children);
+}
+
+// ── [#5146 / #5325] NULL-safe `$not` ─────────────────────────────────────────
+
+/**
+ * What one field constraint needs so the leaves it produces are TOTAL — TRUE or
+ * FALSE for every row, never UNKNOWN.
+ *
+ * - `'none'`         — already total (`set` / `notSet`, a boolean constant), or
+ *                      a shape this normalizer refuses, which must keep refusing.
+ * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
+ * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
+ */
+type NullGuard = 'none' | 'requireValue' | 'allowNull';
+
+/**
+ * Does a NULL column satisfy this one operator, under the semantics the JS
+ * backends (`driver-memory`'s `match`, `formula`'s `matchesFilterCondition`)
+ * give it? They evaluate a missing value in ordinary two-valued JS — `undefined
+ * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
+ *
+ * This is `sql-driver.ts`'s and `read-scope-sql.ts`'s table, with the
+ * differences that come from THIS module's emitter rather than from a different
+ * reading of #5146 — each guard matches its own emitter, which is the invariant,
+ * not the literal table:
+ *
+ *   - `$null` / `$exists` are read by IDENTITY (`=== true` / `=== false`)
+ *     because {@link fieldLeaves} reads them that way, where `read-scope-sql`
+ *     uses truthiness because its emitter does. Immaterial in practice: both
+ *     compile to a null predicate, so they are total either way and never
+ *     reach the polarity question.
+ *   - `$between` exists in this vocabulary; it lowers to `gte` + `lte`, two
+ *     positive comparisons, so it takes the same default they do.
+ *   - `$eq` / `$ne` do NOT get `read-scope-sql`'s `value === null` arms. That
+ *     compiler turns a `null` comparand into `IS NULL` / `IS NOT NULL`; this one
+ *     stringifies it (`stringifyForCube(null)` → `''`) and compares against the
+ *     empty string, so `{$eq: null}` here is an ordinary value comparison. The
+ *     guard follows the emitter; the `''` comparand itself is a separate defect,
+ *     filed on its own and deliberately not decided here.
+ *
+ * The default is the large positive-comparison family (`$gt` / `$in` /
+ * `$contains` / …), every member of which answers `false` for a value that is
+ * not there. An operator this module does not support also lands here; it is
+ * guarded and then still THROWS from {@link fieldLeaves}, so fail-closed is
+ * preserved.
+ */
+function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
+  switch (op) {
+    case '$ne': return true;
+    case '$null': return value === true;
+    case '$exists': return value === false;
+    // Negative-polarity set / substring tests hold vacuously for an absent value.
+    case '$nin': return true;
+    // `$notContains` is the one operator where the two JS backends disagree for
+    // a null-valued field (`driver-memory` answers false, `formula` true).
+    // `formula` is followed because `driver-sql` and `read-scope-sql` follow it,
+    // so this module casts no vote on a disagreement that is filed elsewhere.
+    case '$notContains': return true;
+    default: return false;
+  }
+}
+
+/** Is this operator's compiled leaf already total for a NULL column? */
+function operatorIsNullTotal(op: string, value: unknown): boolean {
+  switch (op) {
+    // Compile to `set` / `notSet` — `IS NULL` / `IS NOT NULL`, two-valued by
+    // construction, on every strategy that compiles this tree.
+    case '$null':
+    case '$exists':
+      return true;
+    // An EMPTY set compiles to a boolean CONSTANT (see `fieldLeaves`), and a
+    // constant is total. Wrapping a guard around it would only add a redundant
+    // conjunct to a predicate whose value is already decided.
+    case '$in':
+    case '$nin':
+      return Array.isArray(value) && value.length === 0;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The guard one field constraint needs. A constraint is the AND of its
+ * operators, so it is total when every operator is, and a NULL column satisfies
+ * it only when it satisfies all of them.
+ */
+function nullGuardForFieldSpec(spec: unknown): NullGuard {
+  // `{field: null}` compiles to `notSet` (`IS NULL`) — already total.
+  if (spec === null) return 'none';
+  // A bare array is an implicit `$in`; an EMPTY one is the FALSE constant.
+  if (Array.isArray(spec)) return spec.length === 0 ? 'none' : 'requireValue';
+  // A scalar / Date is an implicit `=`; a NULL column fails it.
+  if (typeof spec !== 'object' || spec instanceof Date) return 'requireValue';
+  const entries = Object.entries(spec as Record<string, unknown>);
+  // `{field: {}}` is REFUSED by `fieldLeaves` (#5240). Passing it through
+  // unrewritten is what keeps that refusal reachable — a guard wrapped around it
+  // would only change which message the caller sees.
+  if (entries.length === 0) return 'none';
+  let total = true;
+  let nullSatisfies = true;
+  for (const [op, value] of entries) {
+    if (!operatorIsNullTotal(op, value)) total = false;
+    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
+  }
+  if (total) return 'none';
+  return nullSatisfies ? 'allowNull' : 'requireValue';
+}
+
+/**
+ * Guard one `field: spec` entry, writing either the untouched entry into `out`
+ * or its guarded form into `guarded`.
+ *
+ * A nested relation spec (`{account: {region: 'NA'}}`) is flattened with the
+ * dotted key {@link fieldLeaves} would have produced, so the guard lands on the
+ * SAME member as the leaf it protects — guarding `account` when the leaf reads
+ * `account.region` would test a column that does not exist.
+ */
+function guardFieldEntry(
+  key: string,
+  spec: unknown,
+  out: Record<string, unknown>,
+  guarded: unknown[],
+): void {
+  if (
+    isFilterObject(spec) &&
+    Object.keys(spec).length > 0 &&
+    !Object.keys(spec).some((k) => k.startsWith('$'))
+  ) {
+    for (const [nested, value] of Object.entries(spec)) {
+      guardFieldEntry(`${key}.${nested}`, value, out, guarded);
+    }
+    return;
+  }
+
+  const guard = nullGuardForFieldSpec(spec);
+  if (guard === 'none') {
+    out[key] = spec;
+  } else if (guard === 'requireValue') {
+    // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
+    guarded.push({ [key]: { $null: false } }, { [key]: spec });
+  } else {
+    // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the AND
+    // this node's keys form.
+    guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: spec }] });
+  }
+}
+
+/**
+ * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
+ * predicate — which is what makes `NOT (…)` mean here what it means in
+ * `driver-memory`, `formula` and (since #5296) `driver-sql`.
+ *
+ * # Why the guard rides the LEAF, not the `NOT`
+ *
+ * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
+ * NULL` are the same predicate. They stop being the same as soon as the operand
+ * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
+ * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
+ * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
+ * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
+ * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
+ *
+ * # Why polarity is per operator
+ *
+ * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
+ * `{$not: {a: {$ne: 5}}}` means "a is 5", and both JS backends exclude a NULL
+ * row from it. Adding an unconditional null escape there would hand back exactly
+ * the rows the filter excludes. So each leaf is guarded in the direction its own
+ * operator answers, per {@link nullValueSatisfiesOperator}.
+ *
+ * # Why it is a REWRITE of the condition, not of the tree
+ *
+ * The output is still a `FilterCondition`, so `buildNode` compiles it with no
+ * new cases and — the point of doing it here rather than in the SQL strategy —
+ * the guard reaches the ObjectQL engine as structure too. Running only inside a
+ * `$not` keeps every other comparison's shape untouched, and a NESTED `$not` is
+ * left alone on purpose: its own branch totalises its operand, and
+ * `NOT <total>` is itself total, so recursing would stack a redundant guard on
+ * the same column.
+ */
+function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const guarded: unknown[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
+      // A non-object element is passed through so `buildNode` still refuses it
+      // with its own message.
+      out[key] = value.map((element) => (isFilterObject(element) ? nullSafeNegationOperand(element) : element));
+      continue;
+    }
+    if (key.startsWith('$')) {
+      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
+      // whatever this module does with them today — the rewrite rules on NULL,
+      // not on the operator vocabulary, and an unknown one must still throw.
+      out[key] = value;
+      continue;
+    }
+    guardFieldEntry(key, value, out, guarded);
+  }
+  if (guarded.length > 0) {
+    const existing = Array.isArray(out.$and) ? out.$and : [];
+    out.$and = [...existing, ...guarded];
+  }
+  return out;
 }
 
 /**
@@ -309,6 +665,9 @@ export function collectFilterLeaves(
 ): NormalizedAnalyticsFilter[] {
   if (!node) return [];
   if (node.kind === 'leaf') return [{ member: node.member, operator: node.operator, values: node.values }];
+  // A boolean constant names no member — it constrains rows, not columns — so
+  // it contributes nothing to the cross-object envelope check.
+  if (node.kind === 'const') return [];
   if (node.kind === 'not') return collectFilterLeaves(node.child);
   return node.children.flatMap(collectFilterLeaves);
 }

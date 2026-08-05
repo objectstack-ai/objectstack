@@ -584,8 +584,11 @@ describe('#4001 批 15 — ThemeSchema unknown-key strictness', () => {
   it('never prescribes a vocabulary with no carrier key (the ledger\'s finding 7)', () => {
     // `touchTarget` / `keyboardNavigation` look like they should point at
     // `ui/touch.zod.ts` / `ui/keyboard.zod.ts`. 批 13 measured both as having
-    // NO carrier (#4988), so prescribing them would walk an author out of a
-    // loud rejection into a silent one.
+    // NO carrier, so prescribing them would walk an author out of a loud
+    // rejection into a silent one. #4988 then RETIRED both modules, which makes
+    // this assertion stronger rather than moot: the strings they must not
+    // contain now name files that do not exist, so a future edit reaching for
+    // "a nearby-looking slot" would be prescribing a deleted module.
     const msg = reject({ ...base, touchTarget: 1, keyboardNavigation: true });
     expect(msg).not.toContain('touch.zod');
     expect(msg).not.toContain('keyboard.zod');

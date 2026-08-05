@@ -17,10 +17,6 @@ import {
 import { measureDoors } from './door-reachability.testkit';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { PageSchema } from './page.zod';
-import { ComponentAnimationSchema } from './animation.zod';
-import { DropZoneSchema, DragItemSchema } from './dnd.zod';
-import { KeyboardNavigationConfigSchema } from './keyboard.zod';
-import { TouchInteractionSchema } from './touch.zod';
 
 describe('I18nObjectSchema', () => {
   it('should accept valid i18n object with key only', () => {
@@ -367,17 +363,54 @@ describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => 
     expect(reject(objectuiAria as never, { ariaLabel: 'x', bogus: 1 })).toContain('these ARIA attributes');
   });
 
-  it('does NOT ride `.merge()` into the four no-door files — they stay open', () => {
-    // `X.merge(AriaPropsSchema.partial())` adopts the INCOMING posture, so
-    // closing this shape silently closed `animation` / `dnd` / `keyboard` /
-    // `touch` too — with zod's generic message, no changeset, and against
-    // #4988's measured verdict that nothing parses them. The explicit `.strip()`
-    // in those four files is what holds this line; this is its pin.
-    expect(ComponentAnimationSchema.safeParse({ name: 'a', notAnAnimationKey: 1 }).success).toBe(true);
-    expect(DropZoneSchema.safeParse({ accept: ['card'], notADropZoneKey: 1 }).success).toBe(true);
-    expect(DragItemSchema.safeParse({ type: 'card', notADraggableKey: 1 }).success).toBe(true);
-    expect(KeyboardNavigationConfigSchema.safeParse({ notAKeyboardKey: 1 }).success).toBe(true);
-    expect(TouchInteractionSchema.safeParse({ notATouchKey: 1 }).success).toBe(true);
+  it('has no `.merge()` riders left at all — the four it had were retired at #4988', async () => {
+    // REPLACED WHOLESALE at #4988, not re-spelled. This test used to name five
+    // shapes in `animation` / `dnd` / `keyboard` / `touch` and assert each still
+    // accepted an undeclared key, because `X.merge(AriaPropsSchema.partial())`
+    // adopts the INCOMING posture and closing `AriaPropsSchema` would otherwise
+    // have closed them silently. Those five modules are gone (ADR-0049
+    // enforce-or-remove, `interaction-config-retirement.test.ts`), and they were
+    // the ONLY `.merge(AriaPropsSchema…)` sites in the package.
+    //
+    // Simply dropping the five assertions would have left an empty test that
+    // passes because nothing is produced rather than because the logic holds —
+    // the PR #5046 trap. So the concern is re-pinned at the level it actually
+    // lives on: the merge-rider count is zero, and a future rider has to make
+    // the posture decision explicitly instead of inheriting `strictObject` by
+    // accident.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+    const riders: string[] = [];
+    let scanned = 0;
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.zod.ts')) {
+          scanned++;
+          const src = fs.readFileSync(full, 'utf-8');
+          if (/\.merge\(\s*AriaPropsSchema/.test(src)) riders.push(path.relative(srcRoot, full));
+        }
+      }
+    };
+    walk(srcRoot);
+
+    // Anti-vacuity, both halves: the walk really visited the package, and the
+    // matcher really fires — proven against a synthetic source, not by trusting
+    // a zero.
+    expect(scanned, 'the walk must have visited the schema files').toBeGreaterThan(100);
+    expect(/\.merge\(\s*AriaPropsSchema\.partial\(\)\)/.test('X.merge(AriaPropsSchema.partial())')).toBe(true);
+
+    expect(riders, 'a new `.merge(AriaPropsSchema…)` rider inherits strictObject silently — decide the posture in the file').toEqual([]);
+
+    // The other direction stays live: `.optional()` CARRIERS of the shared
+    // shape are the normal, intended pattern and must not have been swept away
+    // with the riders.
+    const pageShape = (PageSchema as never as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(pageShape)).toContain('aria');
   });
 });
 
