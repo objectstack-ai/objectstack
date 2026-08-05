@@ -1,0 +1,128 @@
+name: Prerelease Pin Watch
+
+# Has upstream shipped a STABLE release that retires one of our prerelease
+# `overrides` pins? (#5024)
+#
+# WHAT IT WATCHES, AND WHY IT IS A WORKFLOW AT ALL
+# -----------------------------------------------
+# `pnpm-workspace.yaml` pins the better-auth family to `1.7.0-rc.2` (scim one rc
+# behind at `1.7.0-rc.1`) and promises, in a comment:
+#
+#     revert to a stable `^1.7.x` line the moment one ships.
+#
+# #3002 (revert the family) and #3653 (the SCIM migration) are both gated on that
+# event, and until this workflow existed NOTHING watched for it — redeeming the
+# promise depended on a person remembering to check npm. That is the repo's
+# `declared != enforced` shape applied to a comment, and this workflow is the
+# missing producer. It never edits a pin; it only makes the trigger arrive as a
+# signal within a day instead of as a memory.
+#
+# The watch list is DERIVED from the pins (every override whose target is a
+# prerelease version), so it cannot drift from the file it polices, and it empties
+# itself when the last prerelease pin goes stable. See the script header.
+#
+# THREE EXIT CODES, ON PURPOSE
+# ----------------------------
+#   0  no stable release yet          → quiet, one line
+#   1  a stable release EXISTS        → job RED, report names #3002 / #3653
+#   2  a registry read failed         → `::warning::` + step summary, job GREEN
+#
+# Exit 2 is the considered trade-off, not an oversight. This is an unattended
+# nightly: a transient npm 5xx that turns it red teaches everyone to skim it, and
+# a nightly nobody reads is exactly the "nobody is watching" state #5024 is about.
+# Missing one night costs at most a day — the next run re-probes from scratch and
+# a published version is never unpublished back into silence. So red keeps meaning
+# exactly one thing here (a stable release is out), and an inconclusive probe is
+# loud-but-non-blocking instead of being silently reported as "no release yet",
+# which is the one thing it must never do. `--strict` promotes exit 2 to exit 1 if
+# the warnings ever start being missed.
+#
+# (Contrast `check:objectui-pin-fresh`, where an unreadable remote DOES fail: that
+# one is a required gate on the release PR, so silence there ships the defect.)
+#
+# WHY NOT lint.yml / validate-deps.yml
+# ------------------------------------
+# Not `lint.yml`: the probe needs the network, and no required PR gate in this
+# repo may depend on a third-party registry being up. Not `validate-deps.yml`
+# either, close as it is in subject matter — it is scheduled WEEKLY (Mon 03:00
+# UTC), and the acceptance criterion here is a signal within the first working
+# day of the release. A weekly slot can sit on the event for six days.
+#
+# On a PR that touches the probe, the pins, or this file, only the offline
+# `--self-test` runs ("a change to the guard runs the guard"). No `pnpm install`
+# anywhere: the script is dependency-free by design, which is what keeps this
+# whole workflow a ~15-second job.
+
+on:
+  schedule:
+    # 06:00 UTC nightly — after Rerun Safety (04:00) and Spec Coverage (05:00),
+    # before Showcase Smoke (07:00). Nightly, not weekly: see the note above.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/check-prerelease-pin-watch.mjs'
+      - '.github/workflows/prerelease-pin-watch.yml'
+      # The pins ARE the watch list, so a PR that edits them re-runs the
+      # self-test that proves the real file still parses into one.
+      - 'pnpm-workspace.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Stable release watch for prerelease pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # "A change to the guard runs the guard." Offline and hermetic — fabricated
+      # registry responses cover all three states plus the empty watch list — so
+      # it is safe on a PR where the probe itself would not be.
+      - name: Self-test the probe
+        run: node scripts/check-prerelease-pin-watch.mjs --self-test
+
+      - name: Probe is nightly-only on PRs
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice::Self-test only on a PR — the probe itself reads registry.npmjs.org, and no PR gate here may depend on a third-party registry. It runs nightly at 06:00 UTC (#5024)."
+
+      - name: Probe npm for a stable release
+        if: github.event_name != 'pull_request'
+        run: |
+          set -o pipefail
+          status=0
+          node scripts/check-prerelease-pin-watch.mjs --verbose 2>&1 \
+            | tee "$RUNNER_TEMP/prerelease-pin-watch.log" || status=$?
+
+          {
+            echo '### Prerelease pin watch (#5024)'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/prerelease-pin-watch.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          elif [ "$status" -eq 2 ]; then
+            # Loud but non-blocking — see the header for why this is not red.
+            # The script has already printed its own ::warning:: with the reason.
+            echo "::warning::Prerelease pin watch was INCONCLUSIVE (a registry read failed). This is NOT 'no stable release yet'. It re-probes tomorrow; if it stays inconclusive, run this workflow with --strict wired in and investigate (#5024)."
+            exit 0
+          fi
+
+          echo "::error::A STABLE release now exists for a pin this repo holds at a prerelease. The trigger condition of #3002 / #3653 has arrived — see the step summary for the per-package verdicts and the action list (#5024)."
+          exit "$status"
