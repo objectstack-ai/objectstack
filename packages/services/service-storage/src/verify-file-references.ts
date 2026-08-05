@@ -104,7 +104,7 @@ export interface VerifyReferencesOptions {
 }
 
 function slotKey(object: string, recordId: string, field: string): string {
-  return `${object}${recordId}${field}`;
+  return `${object}\u0001${recordId}\u0001${field}`;
 }
 
 function fileFieldsOf(engine: VerifyReferencesEngine, objectName: string): string[] {

@@ -76,14 +76,25 @@ jobs:
       - name: Slot-lookup ratchet
         run: pnpm check:slot-lookup
 
-      # Raw NUL guard (#3127): one literal U+0000 byte makes grep/ripgrep treat
-      # the whole file as binary and silently return ZERO matches — the file drops
-      # out of code search and out of every grep-based lint, with no error saying
-      # so. Nothing else catches it: git sniffs only the first 8000 bytes to decide
-      # binary-ness, and protocol.ts carried its NUL at offset 147230, so it kept
-      # diffing as ordinary text through review. That blind spot let six files
-      # accumulate the same defect. Authors must write the unicode escape instead.
-      - name: Raw NUL byte guard
+      # Raw control-byte guard (#3127 / #4890 / #5157). Scans every tracked TEXT
+      # file for a raw C0 control byte — 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f, i.e.
+      # everything except tab/LF/CR. Two distinct harms, one gate:
+      #   • A literal U+0000 makes grep/ripgrep treat the whole file as binary and
+      #     silently return ZERO matches — the file drops out of code search and
+      #     out of every grep-based lint, with no error saying so. Nothing else
+      #     catches it: git sniffs only the first 8000 bytes to decide binary-ness,
+      #     and protocol.ts carried its NUL at offset 147230, so it kept diffing as
+      #     ordinary text through review. That blind spot let six files accumulate
+      #     the same defect.
+      #   • The other C0 controls still match in grep but RENDER AS NOTHING, so a
+      #     load-bearing separator reads as an empty string in the diff and in
+      #     review: `keyParts.join('<0x01>')` shows up as `keyParts.join('')`.
+      #     Four tracked source files carried those past the NUL-only gate until
+      #     #5157 widened the scan surface; PR #5140 is the case that found it,
+      #     when a 0x01 sitting 14 bytes from a caught NUL went unfixed.
+      # The command name stays `check:nul-bytes` for continuity — see the script's
+      # header for why. Authors must write the unicode escape instead of the byte.
+      - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in

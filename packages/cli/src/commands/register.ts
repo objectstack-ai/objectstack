@@ -31,7 +31,7 @@ async function promptPassword(promptText: string): Promise<string> {
 
     const handler = (char: string) => {
       switch (char) {
-        case '': // Ctrl+C
+        case '\u0003': // Ctrl+C
           cleanup();
           process.kill(process.pid, 'SIGINT');
           break;

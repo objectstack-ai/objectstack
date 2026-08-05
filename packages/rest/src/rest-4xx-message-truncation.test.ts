@@ -29,6 +29,7 @@
 // mangling messages that were always fine).
 
 import { describe, it, expect, vi } from 'vitest';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { mapDataError, RestServer } from './rest-server';
 
 /** The bound both branches use. Unchanged by #5423 — only what happens at it. */
@@ -288,13 +289,17 @@ describe('sendError: the same bound, walked through a real route (#5423)', () =>
         expect(res.body).toEqual({ error: msg, code: 'NO_DRAFT' });
     }, 60_000);
 
-    it('an over-long 5xx is DELIBERATELY still replaced — the asymmetry is the point', async () => {
-        // This branch's passthrough range is 400-599, wider than mapDataError's.
-        // A 4xx message is addressed to the caller and is the remedy; a 5xx
-        // message is a server fault's log diagnostic that happens to be
-        // reachable here, and `mapDataError`'s sibling branch is already
-        // "deliberately limited to 4xx ... so internal/SQL details never reach
-        // the client verbatim". #5423 does not widen 5xx leniency.
+    it('a 5xx is NOT truncated — it is withheld, whatever its length (#5437)', async () => {
+        // This case used to pin the 400-599 passthrough, where an over-long 5xx
+        // became the literal 'Request failed' while a SHORT one went out word
+        // for word. That asymmetry WAS the #5437 leak: length is not a proxy
+        // for "this text is safe to publish", and `metadata-protocol`
+        // interpolates raw driver errors into 500s far shorter than the bound.
+        //
+        // The 4xx/5xx split survives and is still this file's subject; what
+        // changed is the 5xx disposition — "withheld regardless of length"
+        // instead of "withheld only above 500 characters". Full coverage lives
+        // in `rest-5xx-message-sanitization.test.ts`.
         const rest = setup({
             getMetaItem: vi.fn().mockRejectedValue(
                 Object.assign(new Error('z'.repeat(600)), { code: 'INTERNAL', status: 503 }),
@@ -305,6 +310,11 @@ describe('sendError: the same bound, walked through a real route (#5423)', () =>
         });
 
         expect(res.statusCode).toBe(503);
-        expect(res.body.error).toBe('Request failed');
+        expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+        // Withheld, not truncated: no prefix of the original survives at all.
+        expect(String(res.body.error)).not.toContain('z');
+        // The producer's own code still rides along — a SCREAMING_SNAKE
+        // constant is what the client keys on and is not a leak.
+        expect(res.body.code).toBe('INTERNAL');
     }, 60_000);
 });

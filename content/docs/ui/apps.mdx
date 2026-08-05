@@ -11,10 +11,11 @@ An **App** is a logical container that bundles objects, views, pages, and dashbo
 
 {/* os:check */}
 ```typescript
-const crmApp = {
+import { defineApp } from '@objectstack/spec';
+
+const crmApp = defineApp({
   name: 'crm',
   label: 'CRM',
-  version: '1.0.0',
   description: 'Customer Relationship Management',
   icon: 'briefcase',
   active: true,
@@ -33,7 +34,7 @@ const crmApp = {
   ],
 
   requiredPermissions: ['crm_access'],
-};
+});
 ```
 
 ## App Properties
@@ -42,7 +43,6 @@ const crmApp = {
 | :--- | :--- | :--- | :--- |
 | `name` | `string` | ✅ | Machine name (`snake_case`) |
 | `label` | `string` | ✅ | Display name |
-| `version` | `string` | optional | App version |
 | `description` | `string` | optional | App description |
 | `icon` | `string` | optional | App icon (Lucide) |
 | `active` | `boolean` | optional | Is app active (default: `true`) |
@@ -50,6 +50,25 @@ const crmApp = {
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
+
+<Callout type="warn">
+  **Older app samples no longer parse** — check yours before copying it forward.
+  `@objectstack/spec` 17.0.0 (2026-06 liveness audit, ADR-0049 enforce-or-remove)
+  removed `version` and `mobileNavigation`, and both are now refused at parse
+  time rather than ignored, so one leftover key fails the whole save.
+
+  - `version` — an app is versioned by its owning package. Use
+    `manifest.version` and delete the key; nothing in framework or objectui ever
+    read the per-app number, which could silently disagree with the package's.
+  - `mobileNavigation` — fully unimplemented: no renderer, `packages/mobile`
+    included, ever read it, so the `mode` picker changed nothing. Delete the
+    key; the block returns if and when a real mobile navigation ships.
+
+  `homePageId` (removed in the same major, #4667/#4709) is covered under
+  [Common Navigation Properties](#common-navigation-properties). Every rejection
+  carries its own replacement instruction, so paste the old app and read what
+  the error tells you.
+</Callout>
 
 ## Navigation Items
 
@@ -212,27 +231,15 @@ branding: {
 | `logo` | `string` | Logo image URL |
 | `favicon` | `string` | Favicon URL |
 
-## Mobile Navigation
-
-Configure mobile-specific navigation behavior:
-
-```typescript
-mobileNavigation: {
-  mode: 'bottom_nav',
-  bottomNavItems: ['nav_home', 'nav_accounts', 'nav_contacts', 'nav_settings'],
-}
-```
-
-`mode` accepts `'drawer'` (default), `'bottom_nav'`, or `'hamburger'`. `bottomNavItems` lists the navigation item `id`s to surface in the bottom bar (max 5).
-
 ## Complete Example
 
 {/* os:check */}
 ```typescript
-const projectApp = {
+import { defineApp } from '@objectstack/spec';
+
+const projectApp = defineApp({
   name: 'project_management',
   label: 'Project Management',
-  version: '2.0.0',
   description: 'Track projects, tasks, and team workload',
   icon: 'folder-kanban',
   active: true,
@@ -287,7 +294,7 @@ const projectApp = {
   // and the ROOT landing follows `isDefault`. The key was removed in 17.0.0
   // (#4667, #4709) — it did have a consumer, but it pointed at a navigation item
   // by id and fell back silently when that id dangled.
-};
+});
 ```
 
 ## Related
