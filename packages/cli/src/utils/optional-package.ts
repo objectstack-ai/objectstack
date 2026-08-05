@@ -105,8 +105,10 @@ function specifierResolves(specifier: string): boolean {
 /**
  * Load an optional package, saying which of the three things happened.
  *
- * @param specifier Bare package name, resolved from this file exactly as a
- * static import in it would be.
+ * @param specifier What a static import in THIS file would be given — normally
+ * a bare package name, resolved against this file's own `node_modules` chain.
+ * An absolute `file:` URL resolves as itself and is what the tests use to stand
+ * a real broken artefact up on disk.
  */
 export async function loadOptionalPackage(specifier: string): Promise<OptionalPackageLoad> {
   try {
