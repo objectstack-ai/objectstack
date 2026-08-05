@@ -278,6 +278,222 @@ describe('wait timer teardown when the pause ends another way (#5512)', () => {
 });
 
 /**
+ * The other half of "when may the one-shot disarm itself?" (#5529).
+ *
+ * #5512 gave the RUN-side question a hook (`onSuspensionReleased` — the pause
+ * ended, so drop the job). The JOB-side question stayed in the timer callback's
+ * `finally`, and that `finally` read nothing: `engine.resume()` reports failure
+ * by RETURNING a code, so a shot that consumed the pause and a shot that missed
+ * it looked identical, and both were cancelled. On `STORE_UNAVAILABLE` — the
+ * durable store unreadable, so per #4420 the pause is emphatically NOT gone —
+ * that cancelled the only thing left that would ever wake the run.
+ *
+ * Reachability is not equal across the two sites, and these tests are built to
+ * say so rather than to look symmetric: `resumeInternal` reads the durable store
+ * only on a hot-cache MISS, and a run that paused in this process stays cached
+ * for the life of its suspension. So the end-to-end specimen below is the
+ * **re-arm** callback (fresh process, empty cache, store consulted for real);
+ * the arming callback's branch is latent by construction and is pinned at the
+ * handler level, with the code injected rather than provoked.
+ */
+describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)', () => {
+  /** A logger that keeps its `error` lines so the diagnostic can be asserted. */
+  function capturingLogger() {
+    const errors: string[] = [];
+    const logger = {
+      info() {}, warn() {}, debug() {},
+      error(msg: string) { errors.push(msg); },
+      child() { return logger; },
+    } as any;
+    return { logger, errors };
+  }
+
+  /**
+   * A durable store that is fully working except that `load` — the read
+   * `resumeInternal` makes on a cache miss — is unreachable. Everything else
+   * delegates, so the underlying rows stay inspectable: that is how these tests
+   * prove the pause SURVIVED the failed shot instead of assuming it.
+   */
+  function storeWithUnreadableLoad(inner: InMemorySuspendedRunStore) {
+    return {
+      inner,
+      async save(run: any) { return inner.save(run); },
+      async load(_runId: string): Promise<any> { throw new Error('connection refused'); },
+      async delete(runId: string) { return inner.delete(runId); },
+      async list() { return inner.list(); },
+    };
+  }
+
+  const config = { eventType: 'timer', timerDuration: 'P1D' };
+
+  /**
+   * Suspend a run in "process 1", then cold-boot "process 2" whose durable
+   * `load` is broken, and let its re-arm pass re-schedule the wake-up. Returns
+   * the re-armed job so a test can fire it.
+   */
+  async function coldBootWithBrokenLoad() {
+    const inner = new InMemorySuspendedRunStore();
+    const boot1 = fakeJobCtx();
+    const e1 = new AutomationEngine(silentLogger());
+    e1.registerNodeExecutor(markerExecutor([]));
+    registerWaitNode(e1, boot1.ctx);
+    e1.setSuspendedRunStore(inner);
+    e1.registerFlow('wait_flow', waitFlow(config));
+    const paused = await e1.execute('wait_flow');
+    expect(paused.status).toBe('paused');
+
+    // Process 2: same durable rows, but the resume-time read fails.
+    const broken = storeWithUnreadableLoad(inner);
+    const boot2 = fakeJobCtx();
+    const ran: string[] = [];
+    const e2 = new AutomationEngine(silentLogger());
+    e2.registerNodeExecutor(markerExecutor(ran));
+    registerWaitNode(e2, boot2.ctx);
+    e2.setSuspendedRunStore(broken as any);
+    e2.registerFlow('wait_flow', waitFlow(config));
+
+    const { logger, errors } = capturingLogger();
+    const job = boot2.ctx.getService('job') as IJobService;
+    // The deadline is +24h, so the re-arm re-schedules rather than resuming now.
+    expect(await rearmSuspendedWaitTimers(e2, broken as any, job, logger)).toBe(1);
+    expect(boot2.scheduled).toHaveLength(1);
+    expect(boot2.cancelled).toEqual([]);
+
+    return { paused, inner, boot2, ran, errors, jobName: `flow-wait:${paused.runId}:pause` };
+  }
+
+  it('re-arm path: a STORE_UNAVAILABLE shot leaves the one-shot ARMED', async () => {
+    const { paused, inner, boot2, ran, jobName } = await coldBootWithBrokenLoad();
+
+    // The deadline arrives and the wake-up fires — into an unreachable store.
+    await boot2.scheduled[0].handler({ jobId: jobName });
+
+    // The pause was never consumed: the run is still parked, its row still there.
+    expect(ran).toEqual([]);
+    expect((await inner.list()).map((r) => r.runId)).toEqual([paused.runId]);
+    // …so the job that would wake it MUST survive. This is the regression: the
+    // unconditional `finally` cancelled here, and nothing would have re-armed
+    // until the next process start.
+    expect(boot2.cancelled).toEqual([]);
+  });
+
+  it('re-arm path: the failed shot is reported at error, naming the job and the run', async () => {
+    const { paused, boot2, errors, jobName } = await coldBootWithBrokenLoad();
+    await boot2.scheduled[0].handler({ jobId: jobName });
+
+    // Previously silent: the callback discarded the result without a single line.
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(jobName);
+    expect(errors[0]).toContain(paused.runId!);
+    // Both remedies an operator can act on, and the reason the job was kept.
+    expect(errors[0]).toMatch(/left ARMED on purpose/);
+    expect(errors[0]).toMatch(new RegExp(`trigger\\('${jobName}'\\)`));
+    expect(errors[0]).toMatch(new RegExp(`resume\\('${paused.runId}'\\)`));
+    expect(errors[0]).toContain('connection refused');
+  });
+
+  it('re-arm path: a shot that DOES resume still disarms the one-shot (unchanged)', async () => {
+    // Same cold boot, working store — the branch must not have swallowed the
+    // ordinary teardown along with the failing one.
+    const inner = new InMemorySuspendedRunStore();
+    const boot1 = fakeJobCtx();
+    const e1 = new AutomationEngine(silentLogger());
+    e1.registerNodeExecutor(markerExecutor([]));
+    registerWaitNode(e1, boot1.ctx);
+    e1.setSuspendedRunStore(inner);
+    e1.registerFlow('wait_flow', waitFlow(config));
+    const paused = await e1.execute('wait_flow');
+
+    const ran: string[] = [];
+    const boot2 = fakeJobCtx();
+    const e2 = new AutomationEngine(silentLogger());
+    e2.registerNodeExecutor(markerExecutor(ran));
+    registerWaitNode(e2, boot2.ctx);
+    e2.setSuspendedRunStore(inner);
+    e2.registerFlow('wait_flow', waitFlow(config));
+    const { logger, errors } = capturingLogger();
+    await rearmSuspendedWaitTimers(e2, inner, boot2.ctx.getService('job') as IJobService, logger);
+
+    await boot2.scheduled[0].handler({ jobId: boot2.scheduled[0].name });
+
+    expect(ran).toEqual(['after']);
+    expect([...new Set(boot2.cancelled)]).toEqual([`flow-wait:${paused.runId}:pause`]);
+    expect(errors).toEqual([]);
+  });
+
+  it('arming path: the same handler keeps the job armed on STORE_UNAVAILABLE', async () => {
+    // The arming callback shares one handler with the re-arm callback, so this
+    // pins the branch on THAT site too. The code is injected, not provoked: a run
+    // that paused in this process is in the engine's hot cache, so its own resume
+    // never reads the durable store and cannot produce STORE_UNAVAILABLE here.
+    // Fabricating a cache miss to "prove" otherwise would pin a scenario the
+    // engine does not have — what is verified is the handler's branch, and that
+    // the arming site routes through it rather than keeping its own `finally`.
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    const engine = new AutomationEngine(silentLogger());
+    const ran: string[] = [];
+    engine.registerNodeExecutor(markerExecutor(ran));
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow(config));
+
+    const paused = await engine.execute('wait_flow');
+    expect(scheduled).toHaveLength(1);
+
+    engine.resume = async () => ({
+      success: false,
+      code: 'STORE_UNAVAILABLE',
+      error: `Durable suspended-run store unreachable for run '${paused.runId}'`,
+    });
+    await scheduled[0].handler({ jobId: scheduled[0].name });
+
+    expect(cancelled).toEqual([]);
+    expect(ran).toEqual([]);
+  });
+
+  it('RESUME_IN_PROGRESS still disarms — the other resume owns the pause', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    const engine = new AutomationEngine(silentLogger());
+    const ran: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    engine.registerNodeExecutor({
+      type: 'mark',
+      async execute(node) { ran.push(node.id); await gate; return { success: true }; },
+    });
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow(config));
+    const paused = await engine.execute('wait_flow');
+
+    // A concurrent resume claims the pause and parks inside the next node.
+    const inFlight = engine.resume(paused.runId!);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ran).toEqual(['after']); // it really is mid-flight, holding the guard
+
+    // Ignore the release-hook teardown that claim already triggered, so what is
+    // asserted below can only have come from the timer's own settle step.
+    cancelled.length = 0;
+    await scheduled[0].handler({ jobId: scheduled[0].name });
+    expect(cancelled).toEqual([`flow-wait:${paused.runId}:pause`]);
+
+    release();
+    expect((await inFlight).success).toBe(true);
+  });
+
+  it('a thrown resume still disarms — a throw is not a store outage', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    const engine = new AutomationEngine(silentLogger());
+    engine.registerNodeExecutor(markerExecutor([]));
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow(config));
+    await engine.execute('wait_flow');
+
+    engine.resume = async () => { throw new Error('boom'); };
+    await expect(scheduled[0].handler({ jobId: scheduled[0].name })).rejects.toThrow('boom');
+    expect(cancelled).toEqual([scheduled[0].name]);
+  });
+});
+
+/**
  * The loose `config.*` back door the executor used to read alongside
  * `waitEventConfig` graduated into the ADR-0087 D2 conversion layer
  * (`flow-node-wait-event-config-lift`, #4045), so the executor now reads the
