@@ -17,11 +17,13 @@ Action ref (1 issue):
 
 while the same class of mistake on a plain `strictObject` rendered its full
 prescription. The prose was never lost — the REST error body and
-`ZodError.message` carry the payload through — but `formatZodError` is documented
-for, and used on, the CLI path (`os validate` / `os compile`), which is exactly
-where an author reads it. Every `strictObject` that sits inside a union was
-affected; `ActionRef` / `GuardRef` in `automation/state-machine.zod.ts` are the
-measured specimens, and the surface grows with each #4001 strictness batch.
+`ZodError.message` carry the payload through. What dropped it is every consumer
+that flattens to one line, and `formatZodError` is one: it is this package's
+documented CLI formatter and what `defineStack` throws through, so an author
+whose stack config has a union mistake reads it on every command that loads the
+stack. Every `strictObject` that sits inside a union was affected; `ActionRef` /
+`GuardRef` in `automation/state-machine.zod.ts` are the measured specimens, and
+the surface grows with each #4001 strictness batch.
 
 The formatter now expands a failed union one level deeper:
 
