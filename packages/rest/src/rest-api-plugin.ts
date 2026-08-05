@@ -6,6 +6,7 @@ import { RestServerConfig } from '@objectstack/spec/api';
 import { registerPackageRoutes } from './package-routes.js';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 import type { PackageService } from '@objectstack/service-package';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 
 export interface RestApiPluginConfig {
@@ -243,9 +244,11 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // so neither can publish an endpoint that answers 404. Returns
             // undefined when no `metadata` service is registered; the faces
             // then say so loudly rather than inventing a verdict.
-            const metadataServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const metadataServiceProvider = async (
+                _environmentId?: string,
+            ): Promise<IMetadataService | undefined> => {
                 try {
-                    return ctx.getService<any>('metadata');
+                    return ctx.getService<IMetadataService>('metadata');
                 } catch { return undefined; }
             };
 

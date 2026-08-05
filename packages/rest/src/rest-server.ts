@@ -1506,7 +1506,7 @@ export class RestServer {
      * machine-readable endpoint faces (`GET /meta/api`, `GET /openapi.json`)
      * so neither announces a declaration that answers 404.
      */
-    private metadataServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
+    private metadataServiceProvider?: (environmentId?: string) => Promise<unknown>;
     /**
      * One-shot latch for the "no matcher wired" degradation notice below, so a
      * host that never wired {@link metadataServiceProvider} says so once per
@@ -1541,7 +1541,7 @@ export class RestServer {
         serviceExistsProvider?: (name: string) => boolean,
         securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         requestEnvResolver?: RestRequestEnvResolver,
-        metadataServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        metadataServiceProvider?: (environmentId?: string) => Promise<unknown>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
