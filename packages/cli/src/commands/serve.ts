@@ -16,6 +16,10 @@ import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } f
 // boolean was the banner, and that was exactly the drift #4801 fixed.
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+// The posture vocabulary, read from the package that DEFINES it (#5359) — the
+// boot gate's fix list enumerates the accepted values, and a second literal
+// list would be free to drift the day a posture is added.
+import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 // The mail provider vocabulary, read from the package that materialises the
 // transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
@@ -514,6 +518,50 @@ export default class Serve extends Command {
       : (process.env.NODE_ENV === 'test' ? 'test'
         : (process.env.NODE_ENV || 'production'));
     dotenvFlow.config({ node_env: mode, silent: true });
+
+    // ── Tenancy-posture boot gate (#5359) ────────────────────────────
+    // Resolve the posture ONCE, here, and refuse an unrecognized value
+    // EXPLICITLY — before a config is read, before a plugin is loaded,
+    // before the kernel bootstraps.
+    //
+    // `resolveTenancyPosture()` throws on an unrecognized value and its
+    // message says "Refusing to boot". Reaching that refusal by letting the
+    // throw escape from wherever the first read happened to sit made the
+    // refusal arrive wrong in two ways:
+    //
+    //   • serve's first read sat inside the broad AuthPlugin `try` further
+    //     down, whose catch only warns. So the first thing an operator saw
+    //     for a typo'd env var was
+    //     `⚠ AuthPlugin failed to load: Invalid OS_TENANCY_POSTURE="…"` —
+    //     an env-spelling mistake disguised as a plugin-loading problem.
+    //   • Boot then continued, degraded and without plugin-auth, through the
+    //     whole capability slate (persisting a generated dev crypto key to
+    //     disk on the way) until the next UNGUARDED read — ObjectQL's
+    //     `SchemaRegistry` constructor, during kernel Phase 1 — aborted
+    //     `runtime.start()` and surfaced as a bare `printError`: the
+    //     resolver's sentence with no prescription and no ADR reference.
+    //
+    // Reading it here makes the refusal the FIRST thing that happens and
+    // gives it the ADR-0093 D5 shape: an explicit FATAL carrying a fix list,
+    // and `process.exit(1)` rather than a throw — a throw is what the
+    // swallowing catch below turns back into a warning.
+    //
+    // Placement is load-bearing twice over:
+    //   • AFTER `dotenvFlow.config()` — OS_TENANCY_POSTURE is routinely set in
+    //     a `.env` file, and a gate above that load would read it as unset,
+    //     pass, and hand the invalid value straight back to the swallowing path.
+    //   • OUTSIDE every `try` in this method, so nothing can demote it.
+    //
+    // Every later read of the posture — serve's own below, AuthPlugin's
+    // `createTenancyService({ requested: resolveTenancyPosture() })`,
+    // ObjectQL's `SchemaRegistry` — is downstream of this gate, so none of
+    // them can be the one that reports a typo'd posture.
+    const postureGate = resolveTenancyPostureOrRefusal();
+    if (!postureGate.ok) {
+      console.error(postureGate.fatal);
+      process.exit(1);
+    }
+    const tenancyPosture = postureGate.posture;
 
     const isDev = flags.dev || process.env.NODE_ENV === 'development';
 
@@ -1769,7 +1817,10 @@ export default class Serve extends Command {
             // `OS_TENANCY_POSTURE=group` skip the load AND the fail-fast below,
             // silently degrading to an unwalled single-org deployment — the exact
             // ADR-0049 class this guard exists to close.
-            const tenancyPosture = resolveTenancyPosture();
+            // #5359 — reuse the value the boot gate resolved at the top of
+            // `run()`. Re-invoking the resolver here is what put the throw
+            // inside this swallowing `try` in the first place; by the time
+            // control reaches this line the posture is known-valid.
             const multiTenant = tenancyPosture !== 'single';
             if (multiTenant) {
               // #4818 — TWO STAGES, TWO FAILURES, TWO DIAGNOSES. `import` and
@@ -2713,7 +2764,12 @@ export default class Serve extends Command {
         // that listed `Organizations` in the plugin table (cloud#1020). A
         // diagnostic surface that disagrees with the runtime costs every later
         // investigation an extra lap.
-        tenancyPosture: resolveTenancyPosture(),
+        // #5359 — the value the boot gate resolved once at the top of `run()`,
+        // not a fresh parse. The banner reading the resolver directly was also
+        // the LAST line of defence against an invalid posture, which made a
+        // diagnostic surface load-bearing for a safety property; the gate above
+        // owns that refusal now, and this row just reports what it decided.
+        tenancyPosture,
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,
@@ -2772,6 +2828,90 @@ export default class Serve extends Command {
       if (process.env.DEBUG) console.error(chalk.dim(error.stack));
       this.exit(1);
     }
+  }
+
+}
+
+/**
+ * What the tenancy-posture boot gate decided (#5359).
+ *
+ * A verdict object rather than a throw: the caller is `serve`'s `run()`, and the
+ * whole point of the gate is that the refusal must NOT travel as an exception —
+ * an exception is exactly what the broad AuthPlugin `try` downgraded to a
+ * warning while boot carried on unwalled.
+ */
+export type TenancyPostureGateVerdict =
+  | { ok: true; posture: TenancyPosture }
+  | { ok: false; fatal: string };
+
+/**
+ * One-line prescriptions for the accepted postures, keyed by the vocabulary
+ * `@objectstack/spec/security` owns. A posture added there but not described
+ * here still gets listed by the gate (bare, without prose) rather than silently
+ * dropped from the advice — the fix list can go terse, never stale.
+ */
+const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
+  single: 'one organization, no organization wall — the default',
+  group: 'organization wall enforced by the open engine, one shared database',
+  isolated:
+    'organization wall + the enterprise @objectstack/organizations runtime '
+    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+};
+
+/**
+ * Resolve the deployment's requested tenancy posture, or produce the FATAL text
+ * that refuses the boot (#5359).
+ *
+ * `resolveTenancyPosture()` (`@objectstack/types`) is the authority on the
+ * vocabulary and already refuses an unrecognized value — this wrapper does NOT
+ * re-decide that, it only changes HOW the refusal travels and what it says.
+ *
+ * Why the wrapper exists at all: the resolver's refusal is a `throw`, and serve
+ * used to take it wherever the first read happened to be. The first read sat
+ * inside the broad AuthPlugin `try`, whose catch prints
+ * `⚠ AuthPlugin failed to load: …` and continues — so a misspelled env var was
+ * announced as a plugin problem, boot proceeded degraded through the whole
+ * capability slate, and the real sentence only reached the operator much later,
+ * bare, from a generic `printError`. The exit code was right; nothing else was.
+ *
+ * The message follows ADR-0093 D5's shape (the sibling refusal in this file, for
+ * an unavailable multi-org runtime): name the fact, say it is refusing to boot,
+ * say why the alternative is unacceptable, then prescribe every way out.
+ */
+export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
+  try {
+    return { ok: true, posture: resolveTenancyPosture() };
+  } catch (err) {
+    const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.OS_TENANCY_POSTURE;
+    const cause = err instanceof Error ? err.message : String(err);
+    const fixes = TENANCY_POSTURES.map((posture) => {
+      const hint = TENANCY_POSTURE_FIX_HINTS[posture];
+      return `      • set OS_TENANCY_POSTURE=${posture}${hint ? ` — ${hint}` : ''}`;
+    }).join('\n');
+    return {
+      ok: false,
+      fatal: chalk.red(
+        `\n  ✖ FATAL: OS_TENANCY_POSTURE=${JSON.stringify(String(raw ?? ''))} is not a recognized tenancy posture.\n`
+        + '    Refusing to boot. Falling back to a default would silently drop the organization wall a\n'
+        + '    walled deployment asked for — a posture typo must never be the thing that removes it\n'
+        + '    (ADR-0105 D1; same refusal contract as ADR-0093 D5).\n\n'
+        // Deliberately NOT "no port has been bound": serve probes port
+        // availability (bind + immediate close) just above this gate, so that
+        // sentence would be false in the letter while true in the spirit. What
+        // is exactly true is the part an operator needs — no application code
+        // ran and nothing ever served a request.
+        + '    No config has been loaded, no plugin has been mounted, and the HTTP server was\n'
+        + '    never started — this deployment has not served a single request.\n\n'
+        + '    Fix one of:\n'
+        + `${fixes}\n`
+        + '      • unset OS_TENANCY_POSTURE entirely — the posture then derives from OS_MULTI_ORG_ENABLED\n'
+        + '        (true ⇒ isolated, anything else ⇒ single).\n\n'
+        + '    Checked the process environment and every .env file dotenv-flow loaded for this mode,\n'
+        + '    so a stale value in a committed `.env*` is as likely a source as the shell.\n\n'
+        + `    cause: ${cause}\n`,
+      ),
+    };
   }
 }
 
