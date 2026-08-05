@@ -43,7 +43,7 @@ Open <http://localhost:3000/_studio/> after `pnpm dev` boots.
 - Not a place to add new feature demos. Add them to
   [hotcrm](https://github.com/objectstack-ai/hotcrm) instead.
 - Not a driver-acceptance harness. Driver E2E lives next to each driver
-  package (`packages/plugins/driver-*/src/*.test.ts`) and in
+  package (`packages/drivers/driver-*/src/*.test.ts`) and in
   [hotcrm](https://github.com/objectstack-ai/hotcrm).
 
 ## License

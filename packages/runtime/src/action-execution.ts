@@ -239,7 +239,25 @@ export async function callData(deps: ActionExecutionDeps,
             const existing = (all as any[]).find((i: any) => i.id === params.id);
             if (!existing) throw recordNotFoundError(params.object, params.id);
             await ql.delete(params.object, findOpts({ where: { id: params.id } }));
-            return { object: params.object, id: params.id, deleted: true };
+            // [#5581] `success`, not `deleted`. The success body was the other
+            // half of the same "one `callData`, two answers" defect #5138 fixed
+            // on the not-found side: the protocol path returns the SPEC's shape
+            // (`DeleteDataResponseSchema` — `{ object, id, success }`,
+            // `packages/spec/src/api/protocol.zod.ts:472`) and this fallback
+            // returned `{ object, id, deleted: true }` — `success` missing, and
+            // `deleted` declared nowhere in the spec. A client written against
+            // the declared shape read `success === undefined` off an HTTP 200
+            // on any deployment that did not register the `protocol` slot, and
+            // had no way to tell which path had served it.
+            //
+            // The spec is the authority, not this literal: `success` is what
+            // `DeleteDataResponseSchema` declares, what the protocol path has
+            // returned since #4435, and what the public HTTP docs already
+            // document (`content/docs/protocol/kernel/http-protocol.mdx`).
+            // Teaching consumers to read `success ?? deleted` would have been
+            // the contract-first-forbidden shape — two spellings of one fact,
+            // kept alive by every reader.
+            return { object: params.object, id: params.id, success: true };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }

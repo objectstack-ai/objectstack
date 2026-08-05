@@ -326,6 +326,225 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * One entry of the `422 INVALID_METADATA` envelope's `issues[]` — the shape
+ * Studio's designer keys on to highlight the offending form control.
+ *
+ * `code` is zod's OWN issue code, passed through verbatim. That is deliberately
+ * NOT the ADR-0114 `fields[]` catalog the data surface speaks: this envelope is
+ * a metadata-authoring diagnostic, its consumers already read raw zod codes, and
+ * aligning the two vocabularies is a separate decision (#5364).
+ */
+interface MetadataIssueEntry {
+    path: string;
+    message: string;
+    code: string | undefined;
+}
+
+/**
+ * How many levels of nested `invalid_union` are expanded below a top-level
+ * issue, and how many equally-informative branches are emitted at one level.
+ *
+ * Both bounds — and the whole selection policy below — are the ones
+ * `formatZodError` landed for the CLI/spec side of this defect (#4971,
+ * `spec/src/shared/error-map.zod.ts`) and `zodIssuesToFields` landed for the
+ * REST wire (#5014, `rest/src/rest-server.ts`). This is the THIRD copy: spec
+ * exports only the STRING renderer and rest's version emits ADR-0114
+ * `{field, code}` catalog entries, while this envelope is
+ * `{path, message, code}` with zod's raw code. The *verdict* must match all the
+ * same, or one mistake gets three different prescriptions depending on whether
+ * the author published from the terminal, POSTed to the data API, or saved from
+ * Studio (#5364).
+ */
+const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * A zod issue, as much of it as the expansion reads.
+ *
+ * `errors` exists only on `invalid_union`: one issue list **per union branch**,
+ * with each branch's paths RELATIVE to the union issue's own path. Zod raises a
+ * single `invalid_union` issue whose own `message` is the literal
+ * `"Invalid input"`, so everything a failing branch has to say lives down there.
+ */
+interface ZodIssueLike {
+    path?: unknown;
+    message?: unknown;
+    code?: unknown;
+    errors?: unknown;
+}
+
+/** A zod issue path, normalised to the array zod always produces. */
+function issuePathOf(issue: ZodIssueLike): Array<string | number> {
+    return Array.isArray(issue?.path) ? (issue.path as Array<string | number>) : [];
+}
+
+/**
+ * True when a branch only complains that the value is the wrong *kind* at the
+ * branch root — `expected string, received object` for the string member of
+ * `z.union([z.string(), SomeObject])`.
+ *
+ * Such a branch carries no prescription: the author never intended it, and
+ * emitting it is the "N branches, N times the noise" failure. An empty branch
+ * (zod's "matched multiple" variant carries `errors: []`) counts as
+ * uninformative too — `every` on an empty list is `true`.
+ */
+function isKindMismatchOnly(issues: readonly ZodIssueLike[]): boolean {
+    return issues.every(
+        (issue) =>
+            issuePathOf(issue).length === 0
+            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
+    );
+}
+
+/** True when a branch carries the #4001 campaign's unknown-key prescription. */
+function carriesUnknownKey(issues: readonly ZodIssueLike[]): boolean {
+    return issues.some((issue) => issue?.code === 'unrecognized_keys');
+}
+
+/**
+ * Pick the branch(es) of a failed union whose issues actually explain the
+ * failure. Ranking, in order (identical to `selectUnionBranches` in
+ * `spec/src/shared/error-map.zod.ts` and `rest/src/rest-server.ts`):
+ *
+ * 1. **Kind-mismatch-only branches are dropped entirely.** If *every* branch is
+ *    one — a plain `z.union([z.string(), z.number()])` handed an object —
+ *    nothing is selected and the union reports exactly what it always has.
+ * 2. **Fewest issues wins.** The branch the author was closest to hitting
+ *    complains least, so "fewest" is what keeps ONE unknown key from arriving as
+ *    N `issues[]` entries, one per branch.
+ * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
+ *    where the curated prose lives.
+ * 4. Declaration order breaks what remains, so the envelope is deterministic.
+ *
+ * Branches that tie at the top are all emitted (capped): when two shapes explain
+ * the failure equally well, privileging the first by accident of declaration
+ * order would be a lie about which shape was expected.
+ */
+function selectUnionBranches(
+    branches: readonly (readonly ZodIssueLike[])[],
+): readonly (readonly ZodIssueLike[])[] {
+    const informative = branches
+        .map((issues, index) => ({ issues, index }))
+        .filter((branch) => !isKindMismatchOnly(branch.issues));
+    if (informative.length === 0) return [];
+
+    const rank = (branch: { issues: readonly ZodIssueLike[] }): [number, number] => [
+        branch.issues.length,
+        carriesUnknownKey(branch.issues) ? 0 : 1,
+    ];
+
+    const sorted = [...informative].sort((a, b) => {
+        const [aCount, aKeys] = rank(a);
+        const [bCount, bKeys] = rank(b);
+        return aCount - bCount || aKeys - bKeys || a.index - b.index;
+    });
+
+    const [bestCount, bestKeys] = rank(sorted[0]!);
+    return sorted
+        .filter((branch) => {
+            const [count, keys] = rank(branch);
+            return count === bestCount && keys === bestKeys;
+        })
+        .slice(0, UNION_BRANCH_EMIT_LIMIT)
+        .map((branch) => branch.issues);
+}
+
+/**
+ * One issue → its `issues[]` entries, appended to `out`.
+ *
+ * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
+ * bare `"Invalid input"`) FOLLOWED by the entries of the branches that explain
+ * it, with `path` resolved against the union's own — branch paths are RELATIVE
+ * to it, which is the trap #5014 paid for: a branch issue's `path` names a slot
+ * inside the union member, not inside the document.
+ *
+ * The union's entry is kept rather than replaced: it is the only entry naming
+ * the slot the client sent, existing consumers already read it, and when every
+ * branch is uninformative it is still the whole answer. So the expansion is
+ * strictly ADDITIVE — no entry that shipped before this changed is gone or
+ * renumbered, only newly accompanied.
+ *
+ * `seen` de-duplicates entries *within one top-level issue*: two branches that
+ * reject the same key with the same words say it once. Union entries themselves
+ * are exempt, since two same-path `"Invalid input"` entries can head genuinely
+ * different sub-trees.
+ *
+ * Deliberate divergence from the spec-side renderer: where it prints a trailing
+ * "… and N more branches rejected this value", this emits nothing. That line is
+ * a rendering affordance for a terminal; an `issues[]` entry is a machine-read
+ * record that must name a slot and carry a code, and the omission note has
+ * neither.
+ */
+function collectMetadataIssues(
+    issue: ZodIssueLike,
+    parentPath: Array<string | number>,
+    depth: number,
+    seen: Set<string>,
+    out: MetadataIssueEntry[],
+): void {
+    const path = [...parentPath, ...issuePathOf(issue)];
+    const branches: readonly (readonly ZodIssueLike[])[] =
+        issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
+            ? (issue.errors as unknown[]).filter(
+                (branch): branch is ZodIssueLike[] => Array.isArray(branch),
+            )
+            : [];
+    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+
+    const entry: MetadataIssueEntry = {
+        path: path.join('.'),
+        message: String(issue?.message ?? 'Invalid value'),
+        code: issue?.code === undefined ? undefined : String(issue.code),
+    };
+
+    if (!expandable) {
+        const key = JSON.stringify([entry.path, entry.code, entry.message]);
+        if (seen.has(key)) return;
+        seen.add(key);
+    }
+    out.push(entry);
+    if (!expandable) return;
+
+    for (const branch of selectUnionBranches(branches)) {
+        for (const nested of branch) {
+            collectMetadataIssues(nested, path, depth + 1, seen, out);
+        }
+    }
+}
+
+/**
+ * Zod issues → the `422 INVALID_METADATA` envelope's `issues[]`.
+ *
+ * A rejection behind a `z.union` is expanded (#5364): zod folds every branch of
+ * a failed union into ONE top-level issue whose message is the literal
+ * `"Invalid input"`, so mapping only top-level issues put
+ * `[{path: '', message: 'Invalid input', code: 'invalid_union'}]` on the wire —
+ * not one field name — while the branch that says WHICH key is wrong (the #4001
+ * curated unknown-key prose, the legal enum of a mistyped discriminator) was
+ * produced and dropped at the `.map()`.
+ *
+ * That mattered most HERE of the four consumers of this defect: `ViewMetadataSchema`
+ * is itself a top-level union, so EVERY failed `view` save degraded to that one
+ * rootless line and Studio's form had nothing to highlight. The other three —
+ * `formatZodError` (#4971), `zodIssuesToFields` (#5014), the CLI's
+ * `formatZodErrors` (#5341) — lost prescriptions; this one lost field
+ * localisation itself.
+ *
+ * Branch selection is described on {@link selectUnionBranches} and is identical
+ * to the other copies by construction.
+ */
+export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
+    if (!Array.isArray(issues)) return [];
+    const out: MetadataIssueEntry[] = [];
+    for (const issue of issues) {
+        // A fresh `seen` per top-level issue: de-duplication is about one
+        // union's branches agreeing, never about two independent issues.
+        collectMetadataIssues(issue as ZodIssueLike, [], 0, new Set<string>(), out);
+    }
+    return out;
+}
+
+/**
  * [#4435] The 404 a single-record operation answers when the id names no row.
  *
  * Extracted so the READ and the two WRITE paths cannot disagree about it. They
@@ -7132,16 +7351,21 @@ export class ObjectStackProtocolImplementation implements
         // — `parsed.data` would strip Studio-only auxiliary fields (e.g.
         // isPinned, isDefault, sortOrder) that intentionally ride along with
         // the overlay document. ADR-0005 §"Validation".
+        //
+        // [#5364] "so the Studio form can highlight the offending field" was
+        // the promise; a top-level `z.union` broke it. Mapping only the issues
+        // zod raises at the TOP level sent `[{path: '', message: 'Invalid
+        // input', code: 'invalid_union'}]` and nothing else — and since
+        // `ViewMetadataSchema` IS a top-level union, that was every failed view
+        // save. {@link zodIssuesToMetadataIssues} expands the branches that
+        // explain the rejection, which is where the #4001 curated prose and the
+        // real key names live.
         {
             const schema = resolveOverlaySchema(request.type, request.item);
             if (schema) {
                 const parsed = schema.safeParse(request.item);
                 if (!parsed.success) {
-                    const issues = parsed.error.issues.map((i: z.ZodIssue) => ({
-                        path: i.path.join('.'),
-                        message: i.message,
-                        code: i.code,
-                    }));
+                    const issues = zodIssuesToMetadataIssues(parsed.error.issues);
                     const summary = issues.slice(0, 3)
                         .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                         .join('; ');

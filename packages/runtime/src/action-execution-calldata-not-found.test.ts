@@ -33,6 +33,16 @@
  * two consuming faces the issue names: `/data` through the REAL `HttpDispatcher`,
  * and the declarative endpoint executor (#5092 / PR #5136) driven with the REAL
  * `callData` bound, which is where the status a client receives is decided.
+ *
+ * ---
+ *
+ * #5581 extended the suite to the SUCCESS side of the same family. `delete`'s
+ * fallback answered `{ object, id, deleted: true }` where the protocol path
+ * answered the spec's `{ object, id, success: true }`, so the same two paths
+ * disagreed once more — this time on every successful request rather than only
+ * on a mistaken id. Same fix shape: the fallback moves to what the spec
+ * declares, and the identity is pinned across the two paths so it cannot drift
+ * apart again. See the `#5581` describe block below.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,7 +54,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // already a `dependencies` entry of `@objectstack/runtime`, so no manifest
 // change is needed to reach it.
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
-import { ApiEndpointSchema } from '@objectstack/spec/api';
+import { ApiEndpointSchema, DeleteDataResponseSchema } from '@objectstack/spec/api';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
 import { callData, type ActionExecutionDeps } from './action-execution.js';
@@ -221,10 +231,14 @@ describe('the ObjectQL fallback answers a missing id with RECORD_NOT_FOUND (#513
         await expect(run(h.deps, v, 'r1')).resolves.toBeTruthy();
     }, 60_000);
 
-    it('a real delete still deletes, and still answers `deleted: true`', async () => {
+    it('a real delete still deletes, and answers the SPEC’s `success: true`', async () => {
+        // [#5581] Was `{ object, id, deleted: true }` here — `success` missing,
+        // `deleted` declared nowhere in `DeleteDataResponseSchema`. The delete
+        // itself is unchanged; only the key the answer spells it with.
         const h = fallbackHarness();
         const out: any = await run(h.deps, 'delete', 'r1');
-        expect(out).toEqual({ object: 'task', id: 'r1', deleted: true });
+        expect(out).toEqual({ object: 'task', id: 'r1', success: true });
+        expect(out.deleted).toBeUndefined();
         expect(h.deleted).toEqual(['r1']);
         expect(h.store.has('r1')).toBe(false);
     }, 60_000);
@@ -271,6 +285,63 @@ describe('one `callData`, one answer — the two paths are field-for-field ident
             message: reference.message,
             object: reference.object,
         });
+    }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// [#5581] The same claim on the SUCCESS side
+// ---------------------------------------------------------------------------
+
+/**
+ * #5138 unified what the two paths say when the id names no row. This unifies
+ * what they say when the delete SUCCEEDS — the other half of the same "one
+ * `callData`, two answers" family, and the half a caller reaches on every
+ * normal request rather than only on a mistake.
+ *
+ * Measured on `main` @ `2614aefb3`, same two harnesses, same single row:
+ *
+ * ```
+ * PROTOCOL del (hit): {"object":"task","id":"r1","success":true}
+ * FALLBACK del (hit): {"object":"task","id":"r1","deleted":true}
+ * ```
+ *
+ * `DeleteDataResponseSchema` is the authority and declares `success`; the
+ * protocol path has produced it since #4435. So the fallback was the only
+ * thing to move, exactly as in #5138.
+ *
+ * The schema is asserted AND the two bodies are compared field-for-field,
+ * because neither alone is enough: `z.object` strips unknown keys, so a body
+ * carrying BOTH `success` and a leftover `deleted` parses green — only the
+ * cross-path equality catches that. Conversely the equality alone would stay
+ * green if both paths drifted together, which the schema parse catches.
+ */
+describe('one `callData`, one success body — delete answers the spec shape on both paths (#5581)', () => {
+    it('the fallback’s success body parses as DeleteDataResponse', async () => {
+        const out = await run(fallbackHarness().deps, 'delete', 'r1');
+        const parsed = DeleteDataResponseSchema.safeParse(out);
+        expect(parsed.success, JSON.stringify((parsed as any).error?.issues ?? [])).toBe(true);
+    }, 60_000);
+
+    it('the protocol’s success body parses as DeleteDataResponse', async () => {
+        const out = await run(protocolHarness().deps, 'delete', 'r1');
+        const parsed = DeleteDataResponseSchema.safeParse(out);
+        expect(parsed.success, JSON.stringify((parsed as any).error?.issues ?? [])).toBe(true);
+    }, 60_000);
+
+    it('fallback success body === protocol success body, field for field', async () => {
+        const withoutProtocol = await run(fallbackHarness().deps, 'delete', 'r1');
+        const withProtocol = await run(protocolHarness().deps, 'delete', 'r1');
+        expect(withoutProtocol).toEqual(withProtocol);
+        expect(withoutProtocol).toEqual({ object: 'task', id: 'r1', success: true });
+    }, 60_000);
+
+    it('neither path carries the undeclared `deleted` key', async () => {
+        // The was-red assertion in its narrowest form. `z.object` would strip
+        // `deleted` and still report a valid parse, so the key is named here.
+        for (const deps of [fallbackHarness().deps, protocolHarness().deps]) {
+            const out: any = await run(deps, 'delete', 'r1');
+            expect(Object.keys(out).sort()).toEqual(['id', 'object', 'success']);
+        }
     }, 60_000);
 });
 
@@ -328,6 +399,20 @@ describe('/data through the real HttpDispatcher inherits the one answer (#5138)'
         expect(res.handled).toBe(true);
         expect(res.response.status).toBe(200);
     }, 60_000);
+
+    it('[#5581] DELETE on a row that exists answers 200 with the spec’s `success` body', async () => {
+        // The face the issue is actually about: a client reading the DELETE
+        // 200 off a deployment WITHOUT the protocol slot. It used to find
+        // `success === undefined` and an undeclared `deleted` in its place, so
+        // "did the delete succeed" was unreadable from a 200 response.
+        const { dispatcher, deleted } = dispatcherOverFallback();
+        const res: any = await dispatcher.dispatch('DELETE', '/data/task/r1', undefined, {}, { request: {} } as HttpProtocolContext);
+        expect(res.handled).toBe(true);
+        expect(res.response.status).toBe(200);
+        expect(res.response.body.data).toEqual({ object: 'task', id: 'r1', success: true });
+        expect(DeleteDataResponseSchema.safeParse(res.response.body.data).success).toBe(true);
+        expect(deleted).toEqual(['r1']);
+    }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -378,5 +463,30 @@ describe('a declared endpoint answers 404 RECORD_NOT_FOUND on the wire (#5092/#5
         // intact — the 5xx leak sanitiser must not have touched it.
         expect(error.message).toBe(`Record ${GHOST} not found in task`);
         expect(h.deleted).toEqual([]);
+    }, 60_000);
+
+    it('[#5581] a declared DELETE endpoint carries the spec’s `success` body too', async () => {
+        // The executor reuses `/data`'s delegation byte for byte, so it
+        // inherited the fork the same way. Note the two `success` flags are
+        // DIFFERENT facts and both are pinned here: `body.success` is the HTTP
+        // envelope's ok-flag (`successAnswer`), `body.data.success` is
+        // `DeleteDataResponse`'s "the deletion happened". Reading one for the
+        // other is the mistake this shape invites, so neither is left implied.
+        const h = fallbackHarness();
+        const ctx = buildEndpointExecutionContext({
+            request: { method: 'GET', path: '/api/v1/apps/showcase/task', query: { id: 'r1' }, headers: {} },
+            match: { endpoint: declaredEndpoint('delete'), params: {} },
+            executionContext: EC,
+        });
+        const answer = await executeEndpointTarget(ctx, {
+            callData: (action, params, driver, scope, ec) => callData(h.deps, REQ, action, params, driver, scope, ec),
+        });
+
+        expect(answer.status).toBe(200);
+        const body = answer.body as any;
+        expect(body.success).toBe(true);
+        expect(body.data).toEqual({ object: 'task', id: 'r1', success: true });
+        expect(DeleteDataResponseSchema.safeParse(body.data).success).toBe(true);
+        expect(h.deleted).toEqual(['r1']);
     }, 60_000);
 });

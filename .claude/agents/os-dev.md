@@ -270,13 +270,23 @@ backslash-u forms like `\u0000` / `\u0001` — never as raw bytes, in **any**
 file (source, markdown, fixtures) and in any prompt or tool payload you
 compose: describe the escape, do not paste the byte. Editing tools
 materialize escapes into real control bytes precisely when you are writing
-*about* them — this repo has paid four times: #4763 (raw NUL in a dispatch
-prompt), #4890 (a raw NUL landed in `SKILL.md` **while writing the
-no-raw-NUL rule**, outside every gate's scan surface), and PR #5140's two
-bytes — a NUL plus, 14 bytes away, a `0x01` that `check:nul-bytes` does not
-scan for (#5157). One raw control byte makes grep treat the whole file as
-binary: zero matches, no signal, and the rule you just wrote becomes
-invisible to every agent that greps for it. Run
+*about* them, and this repo has paid for it repeatedly — including #4763
+(raw NUL in a dispatch prompt), #4890 (a raw NUL landed in `SKILL.md`
+**while writing the no-raw-NUL rule**, outside every gate's scan surface),
+and PR #5140's two bytes: a NUL plus, 14 bytes away, a `0x01` that the
+then-NUL-only scan walked straight past — the gap #5157 closed by widening
+the scan surface beyond NUL. The harms are argued in the gate script's
+header (`scripts/check-nul-bytes.mjs`) — cite it, don't re-derive it.
+Measured, only a raw **NUL** makes grep and ripgrep treat the whole file as
+binary and report zero matches with no signal, so the rule you just wrote
+becomes invisible to every agent that greps for it. Every other scanned byte
+(`0x01`, `0x7f`, …) keeps matching line by line, and is rejected for the
+three harms that land on the whole set: it **renders as nothing**, so the
+code lies to every reader; it is unfindable in **both** spellings, since the
+file holds a byte and not the escape text you would search for; and the
+accident source **does not pick byte values**. "Mine is not a NUL and grep
+still finds my file" is therefore never a reason to read a gate failure or a
+self-scan hit as a false positive. Run
 `node scripts/check-nul-bytes.mjs` before pushing, and when your change so
 much as *mentions* control characters, self-scan beyond the gate
 (`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' <files>`) — the gate's blind

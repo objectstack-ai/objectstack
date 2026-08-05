@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - packages/apps/*
+  - packages/drivers/*
   - packages/plugins/*
   - packages/qa/*
   - packages/triggers/*

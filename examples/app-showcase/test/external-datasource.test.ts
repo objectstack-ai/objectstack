@@ -5,7 +5,7 @@
  * Asserts the datasource + federated objects are declared correctly — the
  * remote-table remap (`object.name !== external.remoteName`) is the whole point.
  * The live read path is covered by the driver-level integration test
- * (packages/plugins/driver-sql/src/sql-driver-external-remote-name.test.ts).
+ * (packages/drivers/driver-sql/src/sql-driver-external-remote-name.test.ts).
  */
 
 import { describe, it, expect } from 'vitest';

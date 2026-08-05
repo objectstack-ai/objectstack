@@ -284,11 +284,12 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 
 | Package | Description |
 | :--- | :--- |
-| [`@objectstack/driver-memory`](packages/plugins/driver-memory) | In-memory driver (development and testing) |
-| [`@objectstack/driver-sql`](packages/plugins/driver-sql) | SQL driver — PostgreSQL, MySQL, SQLite (production) |
-| [`@objectstack/driver-mongodb`](packages/plugins/driver-mongodb) | MongoDB driver (native document database) |
+| [`@objectstack/driver-memory`](packages/drivers/driver-memory) | In-memory driver (development and testing) |
+| [`@objectstack/driver-sql`](packages/drivers/driver-sql) | SQL driver — PostgreSQL, MySQL, SQLite (production) |
+| [`@objectstack/driver-mongodb`](packages/drivers/driver-mongodb) | MongoDB driver (native document database) |
+| [`@objectstack/driver-turso`](packages/drivers/driver-turso) | Turso / libSQL driver — edge-first SQLite, embedded replicas, remote mode |
 
-> Turso / libSQL driver (`@objectstack/driver-turso`) and the libSQL-backed vector knowledge plugin (`@objectstack/knowledge-turso`) live in the [ObjectStack Cloud](https://github.com/objectstack-ai/cloud) monorepo as of this release.
+> The libSQL-backed vector knowledge plugin (`@objectstack/knowledge-turso`) and Turso database-per-tenant routing live in the [ObjectStack Cloud](https://github.com/objectstack-ai/cloud) monorepo.
 
 ### Client
 

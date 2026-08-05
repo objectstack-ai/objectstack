@@ -46,7 +46,7 @@
  * and some files in it would not parse (#5413).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,6 +74,81 @@ const LEDGER_HEADLINE = 'Could not read the installed-package ledger';
 
 /** The head of its ENTRY-level sibling (#5413). Deliberately distinct text. */
 const SKIPPED_HEADLINE = 'installed-package ledger entr';
+
+/**
+ * ── Why this file needs a preflight (#5612) ──────────────────────────────
+ *
+ * Every end-to-end case below observes doctor's ledger half, and doctor reaches
+ * that half through a dynamic `import('@objectstack/cloud-connection')` whose
+ * `catch` is DELIBERATELY silent (`readInstalledPackageEntries()` in
+ * `doctor.ts`): `os doctor` must run to completion in a checkout that never had
+ * the optional package, so an unresolvable specifier means "nothing installed"
+ * and prints nothing. That contract is correct and is itself pinned by the last
+ * describe in this file.
+ *
+ * It also means this file cannot tell "the report face regressed" from "the
+ * optional package is simply not built in this worktree" — both arrive as the
+ * same total silence. In a worktree where `packages/cloud-connection/dist` is
+ * missing, doctor runs every other check, prints `✓ Unique scope`, and the
+ * seven cases that expect a ledger row fail with seven assertion diffs that
+ * read exactly like #5412/#5413 having been reverted. #5612 was filed on
+ * precisely that reading, after three unrelated causes had been eliminated:
+ * the only variable was the unbuilt package.
+ *
+ * The sister file `test/platform-page-i18n-parity.test.ts` imports the same
+ * package STATICALLY and therefore fails the honest way — one error that names
+ * the package — which is the failure mode this preflight gives back to a file
+ * that cannot use a static import (doctor's own load must stay dynamic, and
+ * this file's last describe must be able to make it throw).
+ *
+ * This is a precondition, not a tolerance: nothing below is relaxed, no
+ * assertion is weakened, and in a correctly built worktree the guard is a
+ * no-op. It only replaces a misleading red with an accurate one.
+ */
+const PREFLIGHT_HINT = [
+  'Preflight failed: the end-to-end ledger cases below cannot observe anything.',
+  '',
+  "`@objectstack/cloud-connection` is the package doctor reads the ledger through, and it is",
+  'either not built or built from a source older than #5413 in this worktree. Doctor swallows',
+  'that load failure on purpose, so without this guard the cases below would fail as seven',
+  'assertion diffs that look like the #5412/#5413 report face regressed (#5612).',
+  '',
+  'Build the dependency graph first:',
+  "    pnpm --workspace-concurrency=2 --filter '@objectstack/cli^...' build",
+].join('\n');
+
+/**
+ * Assert that the real ledger reader is loadable AND speaks the post-#5413
+ * contract doctor destructures without a fallback (`{ entries, skipped }`).
+ *
+ * The shape probe is not redundant with the load probe: a `dist/` built before
+ * #5413 resolves fine and returns a bare array, which reaches doctor as
+ * `skipped === undefined` and derails into the DIRECTORY-level failure row —
+ * a third distinct wrong report, and the AGENTS.md §9 stale-artefact trap in
+ * the exact place this file is least able to recognise it.
+ */
+async function assertLedgerReaderIsBuilt(): Promise<void> {
+  let mod: Record<string, any>;
+  try {
+    mod = await import('@objectstack/cloud-connection');
+  } catch (err) {
+    throw new Error(`${PREFLIGHT_HINT}\n\ncause: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (typeof mod.LocalManifestSource !== 'function') {
+    throw new Error(`${PREFLIGHT_HINT}\n\ncause: the module loaded but exports no LocalManifestSource.`);
+  }
+
+  // `list()` short-circuits on a non-existent directory, so this probes the
+  // return SHAPE without touching the filesystem.
+  const listing = new mod.LocalManifestSource(path.join(os.tmpdir(), 'os-5612-preflight-absent')).list();
+  if (!Array.isArray(listing?.entries) || !Array.isArray(listing?.skipped)) {
+    throw new Error(
+      `${PREFLIGHT_HINT}\n\ncause: LocalManifestSource.list() returned ${JSON.stringify(listing)}, ` +
+        'not the { entries, skipped } listing #5413 introduced — the built artefact predates it.',
+    );
+  }
+}
 
 describe('installedPackageLedgerFailureCheck — the finding the shared catch used to eat', () => {
   it('quotes what was thrown, in the row AND in the verbose detail', () => {
@@ -144,6 +219,10 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
   let tmp: string;
   let cwdSpy: ReturnType<typeof vi.spyOn>;
   const savedPosture = process.env.OS_TENANCY_POSTURE;
+
+  // #5612 — one accurate failure instead of seven misleading ones. See
+  // `assertLedgerReaderIsBuilt()`.
+  beforeAll(assertLedgerReaderIsBuilt);
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5412-e2e-'));
@@ -425,6 +504,16 @@ describe('the optional package being absent stays completely silent (#5412 does 
    * module registry is what keeps this scoped to this one test — every case
    * above needs the real module.
    */
+  /**
+   * #5612 — this case needs the guard MORE than the e2e block does, not less.
+   * It simulates the package being unloadable and asserts doctor stays silent;
+   * in a worktree where the package really is unloadable it passes for that
+   * reason instead of for the mock's, i.e. green because nothing was proven
+   * (the empty-verdict trap PR #5046 wrote down). The preflight is what keeps
+   * the simulation distinguishable from the accident it simulates.
+   */
+  beforeAll(assertLedgerReaderIsBuilt);
+
   afterEach(() => {
     vi.doUnmock('@objectstack/cloud-connection');
     vi.resetModules();

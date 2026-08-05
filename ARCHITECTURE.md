@@ -242,12 +242,13 @@ ObjectStack is organized as a **monorepo** with distinct package layers:
 **Dependencies**: `@objectstack/client`, `@objectstack/core`, `@objectstack/spec`  
 **Peer Dependencies**: `react`
 
-### Plugin Packages
+### Driver & Plugin Packages
 
-Located in `packages/plugins/*`:
+Drivers (`IDataDriver` implementations) live in `packages/drivers/*`; every other
+official plugin lives in `packages/plugins/*`.
 
 #### `@objectstack/driver-memory`
-**Location**: `packages/plugins/driver-memory/`  
+**Location**: `packages/drivers/driver-memory/`  
 **Role**: In-Memory Driver (Reference Implementation)
 
 - Complete ObjectQL driver implementation

@@ -618,8 +618,9 @@ jobs:
       # The per-package `typecheck` scripts the coverage gate above requires
       # (#4311). tsc resolves workspace imports through each dependency's built
       # dist/*.d.ts, so the task carries `dependsOn: ^build` in turbo.json —
-      # which also builds the handful of nested packages (packages/plugins/*,
-      # packages/services/*, …) the build step's direct-children glob misses
+      # which also builds the handful of nested packages (packages/drivers/*,
+      # packages/plugins/*, packages/services/*, …) the build step's
+      # direct-children glob misses
       # when no example depends on them. Three filters because the bare
       # `./packages/*` glob only matches direct children (see the build step's
       # comment): the nested group dirs and apps/ (docs) need their own globs.

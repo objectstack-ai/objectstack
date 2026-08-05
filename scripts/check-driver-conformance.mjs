@@ -23,7 +23,7 @@
 //
 // ## Scope: the IDataDriver implementers
 //
-// `packages/plugins/driver-*` -- discovered from disk, never listed here, so a
+// `packages/drivers/*` -- discovered from disk, never listed here, so a
 // new driver package is in scope the moment it exists. Other consumers of the
 // same case-sets (`packages/formula`'s `matchesFilter`, service-analytics'
 // native-SQL strategy) are DELIBERATELY out of scope: they are not drivers,
@@ -94,7 +94,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DRIVERS_DIR = join(ROOT, 'packages', 'plugins');
+const DRIVERS_DIR = join(ROOT, 'packages', 'drivers');
 const CASE_SETS_DIR = join(ROOT, 'packages', 'spec', 'src', 'data');
 
 // ── The case-sets ───────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ const CASE_SETS = [
 // name the marker export. That is deliberate (see "What 'covered' means"), and it
 // is why no entry below changed when #5517 made the mongodb suites that need a
 // real mongod OPT-IN (`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, gate in
-// `packages/plugins/driver-mongodb/src/test-mongod.ts`): the files still exist
+// `packages/drivers/driver-mongodb/src/test-mongod.ts`): the files still exist
 // and still import the markers, so CONSUMED still passes — honestly, but about
 // less than it did. Recorded here rather than as a ledger entry because an entry
 // for a covered cell fails RECONCILED; this is the only place the fact fits.
@@ -191,7 +191,54 @@ const CASE_SETS = [
 // investment is frozen (#5499). Un-freezing it is what should re-run these cells
 // in CI; until then, this note is the honest state of the mongo column.
 
-const LEDGER = [];
+// ## driver-turso arrived from `objectstack-ai/cloud` with three cells open (#4645)
+//
+// The package migrated into `packages/drivers/driver-turso` in Phase A of #4645
+// and entered this matrix the moment it landed on disk -- which is the gate
+// working as documented ("a new driver package is in scope the moment it
+// exists"), not a surprise. Measured on arrival: TEMPORAL_CASES and
+// TEMPORAL_TIME_CASES are genuinely covered, twice over
+// (`turso-temporal-conformance.test.ts` for the local transport,
+// `turso-remote-temporal-conformance.test.ts` for the remote one). The other
+// three had no suite in cloud either.
+//
+// They are DEBT rather than EXEMPT, and the reason is the driver's dual
+// transport. Local/replica mode does inherit SqlDriver's filter compiler and
+// paging -- but remote mode does not go through Knex at all:
+// `src/remote-transport.ts` carries its own `buildWhereSQL` (combinator
+// nesting, operator vocabulary, comparand refusal) and its own ORDER BY /
+// LIMIT / OFFSET assembly. That is an independent Nth backend, which is
+// precisely what #3774 and #4363 wrote the shared case-sets for. "Inherits,
+// therefore fine" is the assumption those suites exist to disprove -- the same
+// sentence driver-sqlite-wasm's cleared entry carried, and it was cleared by a
+// suite, not by the sentence.
+//
+// Clearing these: write the suites (both transports, hermetic -- the remote
+// half over `libsql-sqlite-stub.testkit.ts`), then delete these entries in the
+// same PR. Tracked as #5590.
+const LEDGER = [
+  {
+    driver: 'driver-turso',
+    marker: 'FILTER_LOGIC_CASES',
+    kind: 'DEBT',
+    why: "remote transport compiles its own WHERE (`src/remote-transport.ts` buildWhereSQL) instead of inheriting SqlDriver's, so combinator nesting is an independent implementation with no suite; local/replica inherits but is untested against the shared cases too.",
+    issue: '#5590',
+  },
+  {
+    driver: 'driver-turso',
+    marker: 'PAGINATION_CASES',
+    kind: 'DEBT',
+    why: 'remote transport assembles its own ORDER BY / LIMIT / OFFSET; no suite drives the sorted-partition property against either transport.',
+    issue: '#5590',
+  },
+  {
+    driver: 'driver-turso',
+    marker: 'PAGINATION_UNORDERED_CASES',
+    kind: 'DEBT',
+    why: 'same seam as PAGINATION_CASES, unsorted arm: the remote LIMIT/OFFSET path has no suite pinning that an unsorted paged read is still a partition.',
+    issue: '#5590',
+  },
+];
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
@@ -210,7 +257,7 @@ class DeadRootError extends Error {
  * Resolve every declared scan root before discovering anything; throw naming the
  * ones that are not directories.
  *
- * Deliberately no whitelist and no `optional: true` marker. `packages/plugins`,
+ * Deliberately no whitelist and no `optional: true` marker. `packages/drivers`,
  * `packages/spec/src/data` and every driver's `src/` are git-tracked directories
  * with tracked files in them, so any checkout that can run
  * `pnpm check:driver-conformance` has all of them. An optional marker "just in

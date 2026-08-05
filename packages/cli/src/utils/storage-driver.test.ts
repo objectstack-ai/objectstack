@@ -140,11 +140,17 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
 });
 
 describe('resolveStorageDefinition: turso / libSQL is recognized but fails loud', () => {
-  // turso is a cloud/EE driver (@objectstack/driver-turso) the open-core CLI
-  // cannot build. Selecting it must THROW a typed error — NOT fall through to
-  // the SQLite default. Remove the `turso` branch and these go red: in dev it
-  // resolves to the sqlite dev-default, in prod it returns null — both silently
-  // ignoring the requested turso engine (the reported bug).
+  // `turso` (@objectstack/driver-turso) is recognized as a kind but is not one
+  // this resolver constructs from a URL. Selecting it must THROW a typed error —
+  // NOT fall through to the SQLite default. Remove the `turso` branch and these
+  // go red: in dev it resolves to the sqlite dev-default, in prod it returns
+  // null — both silently ignoring the requested turso engine (the reported bug).
+  //
+  // Since #4645 the package lives in THIS repo (`packages/drivers/driver-turso`),
+  // so the refusal is no longer "it ships elsewhere" — it is "the CLI does not
+  // build it from a URL; register it explicitly". The behaviour is unchanged;
+  // only the reason given to the operator is. Whether URL inference should
+  // construct it is #5602.
   it('throws UnsupportedDriverError for `turso` in DEV and PROD', () => {
     expect(() => resolveStorageDefinition('turso', { isDev: true })).toThrow(UnsupportedDriverError);
     expect(() => resolveStorageDefinition('turso', { isDev: false })).toThrow(UnsupportedDriverError);
@@ -154,15 +160,20 @@ describe('resolveStorageDefinition: turso / libSQL is recognized but fails loud'
     expect(() => resolveStorageDefinition('libsql', { isDev: true })).toThrow(UnsupportedDriverError);
   });
 
-  // The message must be actionable: name the cloud/EE package and the open-core
-  // alternatives, so an operator knows exactly how to proceed.
-  it('carries an actionable message (cloud/EE package + open-core alternatives)', () => {
+  // The message must be actionable: name the package, name the way OUT (register
+  // it explicitly), and name the alternatives this resolver does build — so an
+  // operator knows exactly how to proceed. It must NOT claim the package ships
+  // somewhere else; that stopped being true at #4645 and an error message that
+  // sends an operator to the wrong repo is worse than a terse one.
+  it('carries an actionable message (package + explicit-registration route + alternatives)', () => {
     expect(() => resolveStorageDefinition('turso', { isDev: false })).toThrow(/@objectstack\/driver-turso/);
     let err: unknown;
     try { resolveStorageDefinition('turso', { isDev: false }); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(UnsupportedDriverError);
     expect((err as UnsupportedDriverError).driverType).toBe('turso');
-    expect((err as Error).message).toMatch(/cloud|enterprise/i);
+    expect((err as Error).message).toMatch(/register it explicitly/i);
+    expect((err as Error).message).toMatch(/sqlite \| postgres \| mysql \| mongodb \| memory/);
+    expect((err as Error).message).not.toMatch(/cloud|enterprise/i);
   });
 
   // A `libsql://` / Turso URL routes to the same loud failure — it is NOT left
