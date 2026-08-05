@@ -2320,6 +2320,14 @@ describe('mapDataError — schema/constraint envelopes', () => {
     // 5xx bypasses the passthrough and falls into the sanitizing heuristics.
     expect(r.status).not.toBe(502);
     expect(r.body.code).not.toBe('FORBIDDEN');
+    // [#5489] Both negatives above were satisfied by the OLD landing as well —
+    // a 400 carrying `connect ECONNREFUSED 10.0.0.5:5432 (internal pool)`
+    // verbatim, which is a server fault wearing a client-error status AND the
+    // leak the sanitizing heuristics were supposed to stop. Pinned positively
+    // now that the terminal branch is a sanitised 500.
+    expect(r.status).toBe(500);
+    expect(r.body.code).toBe('INTERNAL_ERROR');
+    expect(String(r.body.error)).not.toContain('ECONNREFUSED');
   });
 
   // [#5423] This case used to assert the oversized message became the literal
