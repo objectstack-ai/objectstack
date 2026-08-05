@@ -6,8 +6,8 @@
  * Extracted from `build-docs.ts` (#5452) for the same reason `format-type.ts`
  * was (#4912): the generator is a top-level script with side effects, so the
  * only way to assert on its escaping used to be to run the whole thing and grep
- * the emitted `.mdx` — which is how the doubled-brace defect below survived on
- * `main` across three reference pages.
+ * the emitted `.mdx` — which is how the nested-delimiter defect below survived
+ * on `main` across five rows of four reference pages.
  */
 
 /** Opening delimiter → its closing partner. */

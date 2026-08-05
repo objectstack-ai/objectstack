@@ -20,8 +20,8 @@
  *
  * MEASURED (reverse verification), both directions run:
  *   - restoring the old matcher (`raw.indexOf(close, i + 1)` in place of
- *     `findMatchingClose`) turns the four nested-delimiter unit cases red,
- *     each reporting the split shape;
+ *     `findMatchingClose`) turns all five nested-delimiter unit cases red
+ *     (`5 failed | 7 passed`), each reporting the split shape;
  *   - and, after re-running `gen:docs` over the restored escaper, the corpus
  *     gate goes red with 5 offenders — the same 5 that were on `main`.
  * The direction is the ordinary one (restore the defect → the new pins go red)
