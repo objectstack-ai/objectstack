@@ -1,0 +1,61 @@
+// The TEST-layer type-check program (#5476, the mechanism #5286/PR #5478 set for
+// `packages/spec` and PR #5546 carried to `packages/client`). `tsconfig.json`
+// beside this one stays as it is: it is the BUILD config, and `package.json`'s
+// `typecheck` script NAMES this sibling (`tsc --noEmit -p tsconfig.test.json`),
+// because a config no script invokes is exactly the phantom this change is about.
+//
+// THIS PACKAGE'S HOLE WAS A DIFFERENT SHAPE from spec's and client's, and that
+// is what dictates the two options below. Neither of those two configs excluded
+// `test/**` — they excluded `**/*.test.ts`, so the repair was to put an excluded
+// region back. Here nothing was excluded at all: `include` is `["src/**/*"]` and
+// the six files under `test/` simply live outside that root, so no `exclude`
+// entry names them and TESTS_COVERED (which counts only under the include roots)
+// never saw them either — this package's testFiles count was 0. The two test
+// files that live under `src/` (`protocol-handshake.test.ts`,
+// `objects/sys-view-definition.object.test.ts`) were compiled all along; the
+// sibling `test/` tree was not.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - `rootDir` widens from `src` to the package root. It steers emit layout
+//     only, and this program emits nothing (`noEmit`), but inherited as `src` it
+//     reports TS6059 ("not under rootDir") for all six `test/**` files — the
+//     check being misconfigured, not the tests being wrong. Widening it in the
+//     BUILD config instead is not an option: `tsc` there emits (`dev`:
+//     `tsc --watch`, `outDir: dist`), so a package-root `rootDir` would relocate
+//     `dist/index.js` to `dist/src/index.js` — breaking `main`/`exports` — and
+//     start writing `dist/test/**/*.test.js`, which ci.yml gates against ("No
+//     compiled test files in any dist"). Emit constraints belong to the build
+//     config; this one has none.
+//   - MODULE SEMANTICS ARE UNTOUCHED, unlike spec's and client's siblings. Those
+//     packages have no `"type": "module"`, so the build config's NodeNext
+//     compiled their ESM tests as CJS and reported errors about the CHECK
+//     (TS2835, TS1470, TS2550); switching to `esnext`/`bundler` was fidelity to
+//     how vitest executes them. `@objectstack/metadata-core` IS `"type":
+//     "module"`, so NodeNext already reads these files as ESM — and it is the
+//     STRICTER of the two, since it holds the `.js` import extensions this
+//     package must ship (`bundler` resolution would let a missing extension
+//     compile here and fail at runtime under Node). Nothing to fix, so nothing
+//     is changed.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns` and the rest are inherited from the root config.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// There is NO `test-typecheck-debt.json` beside this config, on purpose. The
+// whole test layer compiles at ZERO errors under it, so the per-file EXACT
+// shrink-only ledger (`scripts/check-test-typecheck.mts`, which spec and client
+// wire because they carry 691 and 6 residual errors) would hold nothing while
+// costing this package a `tsx` dependency and two more scripts. A bare
+// `tsc --noEmit -p tsconfig.test.json` is the strictly stronger gate at zero
+// residue: ANY error here is red immediately, with no ledger to be added to.
+// If this package ever acquires residue that cannot be fixed in its own PR,
+// that is the moment to wire the shared script — not before.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

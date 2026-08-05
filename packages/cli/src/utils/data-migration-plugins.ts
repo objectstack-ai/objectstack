@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { resolveStorageCapabilityArg } from '../commands/serve.js';
+import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../commands/serve.js';
 
 /**
  * The plugins a gated data migration boots with.
@@ -20,8 +20,11 @@ import { resolveStorageCapabilityArg } from '../commands/serve.js';
  *    S3-configured deployment's backfill uploads land in S3 rather than on
  *    this machine.
  *  - Storage config through the SAME resolver `os serve` uses
- *    (`resolveStorageCapabilityArg`), so the CLI materialises bytes exactly
- *    where the server would.
+ *    (`resolveStorageCapabilityArg`), fed by the SAME env channel
+ *    (`resolveStorageLocalRootEnv`, #4968), so the CLI materialises bytes
+ *    exactly where the server would. Reading `process.env.OS_STORAGE_ROOT`
+ *    here instead would reintroduce the split that made the settings service
+ *    swap the adapter out from under the root the operator named.
  */
 export async function buildDataMigrationPlugins(
   opts: { storage?: boolean; automation?: boolean } = {},
@@ -53,7 +56,7 @@ export async function buildDataMigrationPlugins(
       // optional — without it, constructor/env-driven storage config still applies
     }
     const { StorageServicePlugin } = await import('@objectstack/service-storage');
-    const { options } = resolveStorageCapabilityArg(process.env.OS_STORAGE_ROOT);
+    const { options } = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
     plugins.push(new StorageServicePlugin({ ...options, registerRoutes: false }));
   }
   return plugins;

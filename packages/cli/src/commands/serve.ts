@@ -2357,7 +2357,7 @@ export default class Serve extends Command {
             // In production mode we emit a single loud warning so the
             // operator knows to point storage at S3 / GCS / Azure before
             // shipping (data on a single pod is volatile / non-replicated).
-            const storageArg = resolveStorageCapabilityArg(process.env.OS_STORAGE_ROOT);
+            const storageArg = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
             arg = storageArg.options;
             if (storageArg.localRoot && !isDev) {
               // Names only the channels that actually work — `config.storage`
@@ -2933,11 +2933,17 @@ export interface StorageCapabilityArg {
  *
  * The fallback used to be `{ driver: 'local', root }` — neither of which
  * `StorageServicePluginOptions` declares. Both were dropped on the floor, so the
- * plugin applied its OWN default (`./storage`), `OS_STORAGE_ROOT` changed
+ * plugin applied its OWN default (`./storage`), the storage-root env var changed
  * nothing, and uploads landed somewhere the operator never named. The `storage`
  * settings namespace then corrected the root on its first read (its manifest
  * default IS `./.objectstack/data/uploads`), which swapped the adapter and
  * warned about stranded files — on every boot of a healthy server.
+ *
+ * #4096 fixed the option SHAPE; the value still could not reach the settings
+ * side, because the CLI and the settings service spelled the env var
+ * differently. {@link resolveStorageLocalRootEnv} is the channel that closes
+ * that gap (#4968) — read the root through it, never off `process.env`
+ * directly.
  *
  * `config.storage` is deliberately NOT read (framework#4167). It was never a
  * stack key: `ObjectStackDefinitionSchema` does not declare it, and the schema
@@ -2958,6 +2964,60 @@ export interface StorageCapabilityArg {
 export function resolveStorageCapabilityArg(envRoot?: string): StorageCapabilityArg {
   const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
   return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
+}
+
+/**
+ * The ONE env channel for the local storage root (#4968).
+ *
+ * The CLI used to invent its own name, `OS_STORAGE_ROOT`, while the settings
+ * service derives the env name for the same value from the namespace it owns:
+ * `envKeyOf('storage', 'local_root')` = `OS_STORAGE_LOCAL_ROOT`. Nothing in the
+ * repo ever set that name, so the two channels never met — the CLI constructed
+ * an adapter at the root the operator asked for, and `StorageServicePlugin`
+ * then re-resolved from settings at `kernel:ready`, found nothing but the
+ * manifest's schema DEFAULT, and swapped the adapter to
+ * `./.objectstack/data/uploads`.
+ *
+ * The consequences were not log noise:
+ *
+ *  - `OS_STORAGE_ROOT` took effect for exactly one value — the one that happens
+ *    to equal the manifest default. Every other value (`/srv/uploads`, a
+ *    `--fresh` tempdir) was constructed and then discarded, so an operator
+ *    following `backup-restore.mdx` backed up an empty directory.
+ *  - `dev --fresh` promised the tempdir "owns ALL persistent state for this
+ *    run"; uploads actually landed under the project cwd and survived exit.
+ *  - The "adapter swapped … may be unreachable" warning on every clean boot was
+ *    ACCURATE — the swap really happened. It is not touched here, and it stops
+ *    firing because the swap stops happening.
+ *
+ * So the fix is at the producer, not in a tolerant consumer: write the name the
+ * settings service already declares. The legacy name is read for one more
+ * release via {@link readEnvWithDeprecation} and, when it is the one that
+ * supplied the value, STAMPED onto the canonical name — the settings service
+ * reads `process.env` live through its own `env` reference and only ever looks
+ * up `OS_STORAGE_LOCAL_ROOT`, so without the stamp a legacy deployment would
+ * keep the exact bug this fixes. With it, settings resolves
+ * `source: 'env'`/`locked: true` at the value the adapter was built with,
+ * `needsStorageSwap` answers false, and the two channels agree by construction.
+ *
+ * Side-effecting on purpose, and idempotent: `readEnvWithDeprecation`
+ * deduplicates its warning process-wide, and once stamped the canonical branch
+ * wins on every later call.
+ *
+ * @returns The resolved root, or `undefined` when neither name is set (the
+ *          caller then falls through to `resolveStorageCapabilityArg`'s
+ *          built-in default, which matches the manifest default).
+ */
+export function resolveStorageLocalRootEnv(): string | undefined {
+  const value = readEnvWithDeprecation('OS_STORAGE_LOCAL_ROOT', 'OS_STORAGE_ROOT');
+  if (value === undefined) return undefined;
+  // Bridge the legacy spelling onto the canonical one the settings service
+  // reads. Guarded so we never rewrite a canonical value with itself.
+  if (typeof process !== 'undefined' && process.env
+    && process.env.OS_STORAGE_LOCAL_ROOT === undefined) {
+    process.env.OS_STORAGE_LOCAL_ROOT = value;
+  }
+  return value;
 }
 
 /**
