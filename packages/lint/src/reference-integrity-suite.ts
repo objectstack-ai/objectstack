@@ -62,6 +62,7 @@ import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
+import { validateTranslatableSections } from './validate-translatable-sections.js';
 import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
 import { validateAiSurfaceAffinity } from './validate-ai-surface-affinity.js';
 import { validateAiToolReferences } from './validate-ai-tool-references.js';
@@ -120,6 +121,14 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `component` (an unregistered ref renders a named diagnostic, not silence).
   { name: 'validateNavTargetRefs', run: validateNavTargetRefs },
   { name: 'validateTranslationReferences', run: validateTranslationReferences },
+  // The same family from the other end (#5417). Its sibling above asks "does
+  // this bundle key resolve?"; this one asks "is there a key at all?" — a form
+  // section authored with a `label` and no `name` renders a heading that
+  // `_sections` (keyed by name) can never address, so neither the orphan check
+  // nor the coverage walk can see it. A reference that cannot be written is
+  // still a reference question, and warning-only for the same reason its
+  // sibling is: one heading stays in the source locale, nothing breaks.
+  { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
   { name: 'validateAiToolReferences', run: validateAiToolReferences },
