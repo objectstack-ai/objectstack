@@ -32,6 +32,35 @@ interface HealthCheckResult {
   fix?: string;
 }
 
+/**
+ * The ONE way a `HealthCheckResult` reaches the terminal (#5403).
+ *
+ * Extracted from the environment block's `forEach` so that a finding produced
+ * later in the report — after that loop has already run — can still be printed
+ * the same way, instead of reaching for a bare `printWarning` and quietly
+ * inventing a second rendering with its own rules. The config-load failure was
+ * exactly that second rendering: a naked one-liner with no name column and,
+ * crucially, no `fix` channel, so `--verbose` had nothing to expand and the
+ * operator had no flag that could reveal more.
+ *
+ * `fix` shows unasked only for an `error`: an error's remedy is not optional
+ * reading, a warning's detail is.
+ */
+function renderHealthCheckResult(result: HealthCheckResult, verbose: boolean): void {
+  const padded = result.name.padEnd(20);
+  if (result.status === 'ok') {
+    printSuccess(`${padded} ${result.message}`);
+  } else if (result.status === 'warning') {
+    printWarning(`${padded} ${result.message}`);
+  } else {
+    printError(`${padded} ${result.message}`);
+  }
+
+  if (result.fix && (verbose || result.status === 'error')) {
+    console.log(chalk.dim(`      → ${result.fix}`));
+  }
+}
+
 // ─── Environment sources (#5387, #5397) ─────────────────────────────
 //
 // `serve` / `dev` / `start` all load `.env*` through dotenv-flow before they
@@ -961,6 +990,97 @@ function scanDeprecatedPatterns(dir: string): Array<{ file: string; line: number
   return results;
 }
 
+// ─── Config load ────────────────────────────────────────────────────
+
+/**
+ * Quote what was thrown, without paraphrasing it (#5403).
+ *
+ * Same posture as the tenancy-posture finding's `cause:` line: the thrower owns
+ * the wording. A config file's failure can come from four different authorities
+ * — the user's own `throw`, esbuild's bundle diagnostics, Node's module
+ * resolution, or `loadConfig()`'s own "no default export" — and doctor is not
+ * in a position to summarise any of them better than they summarise themselves.
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) {
+    // An `Error` thrown with no message still identifies itself by name.
+    // Quoting `''` would print a headline that trails off into nothing.
+    return err.message.trim().length > 0 ? err.message : err.name;
+  }
+  return String(err);
+}
+
+/**
+ * How much of the cause the single report row carries before `--verbose`.
+ * The full text always survives in `fix`; this bound only keeps one aligned
+ * line aligned.
+ */
+const CONFIG_LOAD_HEADLINE_MAX = 160;
+
+/**
+ * Fold a possibly multi-line cause onto the one line a report row is.
+ *
+ * Whitespace-collapsing, not rewriting: esbuild's failures open with
+ * `Build failed with 1 error:` and put the file, line and reason on the NEXT
+ * line, so a naive "first line" would quote the least informative sentence it
+ * has. Every word is upstream's, in upstream's order; only the line breaks and
+ * an overlong tail are ours.
+ */
+function configLoadHeadline(cause: string): string {
+  const collapsed = cause.replace(/\s+/g, ' ').trim();
+  return collapsed.length <= CONFIG_LOAD_HEADLINE_MAX
+    ? collapsed
+    : `${collapsed.slice(0, CONFIG_LOAD_HEADLINE_MAX - 1)}…`;
+}
+
+/** Keep a multi-line quote under the report's `      → ` gutter. */
+function indentUnderGutter(text: string): string {
+  return text.split('\n').join('\n      ');
+}
+
+/**
+ * What doctor reports when `objectstack.config.ts` cannot be loaded (#5403).
+ *
+ * The `catch` this replaces took no binding at all — `catch {` — so the error
+ * object was discarded where it was caught, and the run printed
+ * `Could not load config for analysis (config checks skipped)` and nothing
+ * else. No flag could reveal more: the sentence came from a bare
+ * `printWarning`, not from a `HealthCheckResult`, so `--verbose` had no `fix`
+ * to expand. `os serve`, in the same directory, prints the whole error. The
+ * diagnostic command was returning strictly less than the command it exists to
+ * diagnose, at the one moment it is most needed.
+ *
+ * Three deliberate choices:
+ *
+ *   • **Still a warning.** #5382 → #5387 → #5397 spent three issues making this
+ *     sentence's attribution true; #5403 is about what it SAYS, not how loudly.
+ *     Doctor keeps running the rest of its checks and keeps exiting 0.
+ *   • **The sentence is unchanged.** It survives verbatim as the head of
+ *     `message` — two changesets quote it, four comments in this file cite it,
+ *     and operators grep for it. #5403 adds everything after the dash.
+ *   • **The cause is in `message`, not only in `fix`.** `Environment files`
+ *     puts its cause in `fix` alone, and that is right there: the row already
+ *     states its own finding in full and the cause is a footnote. Here the
+ *     cause IS the finding — without it the row says only that something
+ *     unnamed went wrong — so a default run carries a bounded quote and
+ *     `--verbose` carries the untruncated one.
+ */
+export function configLoadFailureCheck(err: unknown): HealthCheckResult {
+  const cause = describeThrown(err);
+  return {
+    name: 'Config load',
+    status: 'warning',
+    message: `Could not load config for analysis (config checks skipped) — ${configLoadHeadline(cause)}`,
+    fix:
+      '`os serve` loads this same file the same way — bundle-require, under the `.env*`\n'
+      + '      cascade named above (#5397) — and prints this error in full, so a config that\n'
+      + '      lands here is one the server cannot boot either.\n'
+      + '      The config-aware checks were SKIPPED, not passed: spec version, circular\n'
+      + '      dependencies, unused objects, orphan views, dashboard integrity.\n'
+      + `      cause: ${indentUnderGutter(cause)}`,
+  };
+}
+
 // ─── Command ────────────────────────────────────────────────────────
 
 export default class Doctor extends Command {
@@ -1142,19 +1262,11 @@ export default class Doctor extends Command {
     
     console.log('');
     results.forEach((result) => {
-      const padded = result.name.padEnd(20);
-      if (result.status === 'ok') {
-        printSuccess(`${padded} ${result.message}`);
-      } else if (result.status === 'warning') {
-        printWarning(`${padded} ${result.message}`);
-      } else {
-        printError(`${padded} ${result.message}`);
-      }
-      
-      if (result.fix && (flags.verbose || result.status === 'error')) {
-        console.log(chalk.dim(`      → ${result.fix}`));
-      }
-      
+      // #5403 — the rendering rules live in `renderHealthCheckResult` so that
+      // the config-load finding further down prints identically instead of
+      // growing a second, flagless format of its own.
+      renderHealthCheckResult(result, flags.verbose);
+
       if (result.status === 'error') hasErrors = true;
       if (result.status === 'warning') hasWarnings = true;
     });
@@ -1317,14 +1429,31 @@ export default class Doctor extends Command {
             printSuccess('Dashboard integrity   All widgets resolve datasets, dimensions, and measures');
           }
         }
-      } catch {
+      } catch (err) {
         // #5397 — still fires, and deliberately so: with the `.env*` cascade now
         // applied around the load, a config that STILL cannot be loaded is one
         // `os serve` cannot load either. What changed is that this sentence is
         // no longer reachable by a config whose only problem was that doctor
         // withheld the environment from it. Silencing the warning outright would
         // have traded a misattributed warning for no warning at all.
-        printWarning('Could not load config for analysis (config checks skipped)');
+        //
+        // #5403 — and `err` is now BOUND. This `catch` took no binding, so the
+        // one artifact that could explain the failure was discarded at the
+        // moment it was caught: the operator got "could not load" with no
+        // subject, no flag that revealed more, and `os serve` one directory
+        // over printing the whole thing. Three issues fixed this sentence's
+        // attribution; this one gives it content.
+        const finding = configLoadFailureCheck(err);
+        // Rendered here, in place — the environment block's loop above has
+        // already run, and reordering the report to route this row through it
+        // would move the finding away from the step that produced it. Same
+        // renderer, same `--verbose` rule, same shape as `Environment files`
+        // and `Tenancy posture`; only the call site differs.
+        renderHealthCheckResult(finding, flags.verbose);
+        // Kept in `results` all the same, so the run's record is complete and
+        // the summary's fix list stays correct if this verdict is ever raised
+        // above a warning. Inert today: that list filters on `error`.
+        results.push(finding);
         hasWarnings = true;
       }
     }
