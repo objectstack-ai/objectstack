@@ -77,8 +77,19 @@ Advanced data pipelines for complex transformations, multi-source aggregation, a
 
 ### Example
 
+> **`ETLPipeline` is the AUTHOR shape.** It is `z.input` of `ETLPipelineSchema`
+> (#4963, the house `X` / `XParsed` convention), so every key carrying a
+> `.default()` — `syncMode`, `enabled`, `destination.writeMode`, a
+> transformation's `continueOnError`, `source.incremental.enabled` — is optional
+> when you write a pipeline, and `schedule` takes the bare cron string the
+> schema wraps for you. Annotate the **result** of
+> `ETLPipelineSchema.parse(…)` with **`ETLPipelineParsed`**, where those same
+> keys are all present. The example below states them anyway, because it is a
+> tour of the surface; the Migration Guide's examples omit them, because that is
+> what ordinary authoring looks like.
+
 ```typescript
-import { ETLPipeline } from '@objectstack/spec/automation';
+import type { ETLPipeline } from '@objectstack/spec/automation';
 
 const dataWarehousePipeline: ETLPipeline = {
   name: 'customer_360_pipeline',
@@ -377,9 +388,11 @@ const connector: Connector = {
 
 **After (L2):**
 ```typescript
+import type { ETLPipeline } from '@objectstack/spec/automation';
+
 const pipeline: ETLPipeline = {
   name: 'order_analytics_pipeline',
-  source: { type: 'api', connector: 'orders' },
+  source: { type: 'api', connector: 'orders', config: { endpoint: '/orders' } },
   transformations: [
     { type: 'aggregate', config: { groupBy: ['customer_id'] } }
   ],
@@ -387,14 +400,24 @@ const pipeline: ETLPipeline = {
 };
 ```
 
+Every endpoint carries a `config` bag — it is the one required key besides
+`type`, and it is where endpoint-specific settings (`table`, `endpoint`, `path`,
+`format`) live. `syncMode`, `enabled`, `destination.writeMode` and the
+transformation's `continueOnError` are omitted on purpose: they have defaults,
+and `ETLPipeline` is the author shape.
+
 ### From L2 to L3
 
 When your ETL pipeline needs webhooks, advanced auth, or rate limiting:
 
 **Before (L2):**
 ```typescript
+import type { ETLPipeline } from '@objectstack/spec/automation';
+
 const pipeline: ETLPipeline = {
-  source: { type: 'api', connector: 'external_api' }
+  name: 'external_api_ingest',
+  source: { type: 'api', connector: 'external_api', config: { endpoint: '/events' } },
+  destination: { type: 'database', config: { table: 'external_events' } }
 };
 ```
 

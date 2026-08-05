@@ -100,7 +100,46 @@ export const ETLEndpointTypeSchema = lazySchema(() => z.enum([
   'spreadsheet', // Google Sheets, Excel Online
 ]));
 
-export type ETLEndpointType = z.infer<typeof ETLEndpointTypeSchema>;
+// ─── `X` / `XParsed` — which shape the bare name means (#4963) ────────
+//
+// House convention, stated once here because this file exports nine pairs of
+// it: the **bare name is what an author writes** (`z.input` — defaults
+// unapplied, every defaulted key optional), and `XParsed` is **what a parse
+// returns** (`z.infer` — defaults applied, those same keys present). The
+// clearest write-up is on `shared/retry-policy.zod.ts`; the sibling automation
+// configs (`flow.zod.ts`, `io-node-config.zod.ts`,
+// `builtin-node-config.zod.ts`, `control-flow.zod.ts`) all export the pair.
+//
+// Until 17 all nine aliases here were `z.infer` under the bare name with no
+// `*Parsed` counterpart at all, and on this file that was not a style detail.
+// Six keys across four shapes carry `.default()` — `ETLDestination.writeMode`,
+// `ETLTransformation.continueOnError`, `ETLPipeline.syncMode` / `.enabled`,
+// `ETLSource.incremental.enabled`, plus the whole `retry` block — and `schedule`
+// is a `CronExpressionInputSchema` transform whose *output* is the `{ dialect,
+// source }` envelope. Under `z.infer` all six were REQUIRED and a bare-string
+// cron was rejected, so the one use this file actually has —
+// `const p: ETLPipeline = { … }`, hand-written, which is the whole authoring
+// door given there is no parse site in objectstack / objectui / cloud — did not
+// compile. `packages/spec/docs/SYNC_ARCHITECTURE.md` carried three examples
+// that proved it, and both ETL factories below were forced to spell defaults
+// out and pre-wrap their cron just to satisfy their own return type.
+//
+// Flipping the bare names is breaking and was done in one step (#4963): the
+// three-repo importer count was zero, so the migration surface is empty. A
+// consumer that reads a PARSE RESULT — `const p = ETLPipelineSchema.parse(raw)`
+// annotated by hand — renames its annotation to `ETLPipelineParsed`.
+//
+// The four enum aliases (`ETLEndpointType`, `ETLTransformationType`,
+// `ETLSyncMode`, `ETLRunStatus`) get the pair too, even though `z.input` and
+// `z.infer` are the same type for an enum. That is deliberate, not
+// cargo-culting: the convention's value is that a reader never has to know
+// WHICH of the nine has defaults before choosing an annotation, and a pair that
+// exists today keeps costing nothing while an enum that later gains a
+// `.transform()` or `.catch()` would otherwise reopen exactly this issue.
+
+export type ETLEndpointType = z.input<typeof ETLEndpointTypeSchema>;
+/** @see {@link ETLEndpointType} — the enum has no transform, so this is the same type. */
+export type ETLEndpointTypeParsed = z.infer<typeof ETLEndpointTypeSchema>;
 
 // ─── Unknown-key strictness (#4001 批 12, ADR-0078) ───────────────────
 //
@@ -308,7 +347,10 @@ export const ETLSourceSchema = lazySchema(() => strictObject({
   }).optional().describe('Incremental extraction config'),
 }));
 
-export type ETLSource = z.infer<typeof ETLSourceSchema>;
+/** What an author writes — `incremental.enabled` optional. */
+export type ETLSource = z.input<typeof ETLSourceSchema>;
+/** The post-parse shape — `incremental.enabled` present. */
+export type ETLSourceParsed = z.infer<typeof ETLSourceSchema>;
 
 /**
  * ETL Destination Configuration
@@ -349,7 +391,10 @@ export const ETLDestinationSchema = lazySchema(() => strictObject({
   primaryKey: z.array(z.string()).optional().describe('Primary key fields'),
 }));
 
-export type ETLDestination = z.infer<typeof ETLDestinationSchema>;
+/** What an author writes — `writeMode` optional (defaults to `append`). */
+export type ETLDestination = z.input<typeof ETLDestinationSchema>;
+/** The post-parse shape — `writeMode` present. */
+export type ETLDestinationParsed = z.infer<typeof ETLDestinationSchema>;
 
 /**
  * ETL Transformation Type
@@ -367,7 +412,9 @@ export const ETLTransformationTypeSchema = lazySchema(() => z.enum([
   'deduplicate', // Remove duplicates
 ]));
 
-export type ETLTransformationType = z.infer<typeof ETLTransformationTypeSchema>;
+export type ETLTransformationType = z.input<typeof ETLTransformationTypeSchema>;
+/** @see {@link ETLTransformationType} — the enum has no transform, so this is the same type. */
+export type ETLTransformationTypeParsed = z.infer<typeof ETLTransformationTypeSchema>;
 
 /**
  * ETL Transformation Configuration
@@ -408,7 +455,10 @@ export const ETLTransformationSchema = lazySchema(() => strictObject({
   continueOnError: z.boolean().default(false).describe('Continue on error'),
 }));
 
-export type ETLTransformation = z.infer<typeof ETLTransformationSchema>;
+/** What an author writes — `continueOnError` optional (defaults to `false`). */
+export type ETLTransformation = z.input<typeof ETLTransformationSchema>;
+/** The post-parse shape — `continueOnError` present. */
+export type ETLTransformationParsed = z.infer<typeof ETLTransformationSchema>;
 
 /**
  * ETL Sync Mode
@@ -419,7 +469,9 @@ export const ETLSyncModeSchema = lazySchema(() => z.enum([
   'cdc',         // Change Data Capture - real-time streaming
 ]));
 
-export type ETLSyncMode = z.infer<typeof ETLSyncModeSchema>;
+export type ETLSyncMode = z.input<typeof ETLSyncModeSchema>;
+/** @see {@link ETLSyncMode} — the enum has no transform, so this is the same type. */
+export type ETLSyncModeParsed = z.infer<typeof ETLSyncModeSchema>;
 
 /**
  * ETL Pipeline Schema
@@ -567,7 +619,21 @@ export const ETLPipelineSchema = lazySchema(() => strictObject({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata'),
 }));
 
-export type ETLPipeline = z.infer<typeof ETLPipelineSchema>;
+/**
+ * What an author writes — the annotation for a hand-written pipeline literal.
+ *
+ * `syncMode`, `enabled`, `destination.writeMode`, each transformation's
+ * `continueOnError`, `source.incremental.enabled` and every key of `retry` are
+ * optional here, and `schedule` accepts the bare cron string
+ * (`'0 2 * * *'`) that `CronExpressionInputSchema` wraps at parse.
+ */
+export type ETLPipeline = z.input<typeof ETLPipelineSchema>;
+/**
+ * The post-parse shape — every defaulted key present and `schedule` normalized
+ * to its `{ dialect: 'cron', source }` envelope. Annotate the RESULT of
+ * `ETLPipelineSchema.parse(…)` with this, never the literal you pass in.
+ */
+export type ETLPipelineParsed = z.infer<typeof ETLPipelineSchema>;
 
 /**
  * ETL Run Status
@@ -581,7 +647,9 @@ export const ETLRunStatusSchema = lazySchema(() => z.enum([
   'timeout',    // Timed out
 ]));
 
-export type ETLRunStatus = z.infer<typeof ETLRunStatusSchema>;
+export type ETLRunStatus = z.input<typeof ETLRunStatusSchema>;
+/** @see {@link ETLRunStatus} — the enum has no transform, so this is the same type. */
+export type ETLRunStatusParsed = z.infer<typeof ETLRunStatusSchema>;
 
 /**
  * ETL Pipeline Run Result
@@ -679,10 +747,47 @@ export const ETLPipelineRunSchema = lazySchema(() => z.object({
   logs: z.array(z.string()).optional().describe('Execution logs'),
 }));
 
-export type ETLPipelineRun = z.infer<typeof ETLPipelineRunSchema>;
+/**
+ * What a writer of a run result hands in — `stats`' four counters optional.
+ *
+ * A run result is engine-emitted, not authored (see the schema note above), so
+ * the pair here is about the READER's annotation, not an authoring door. It
+ * still follows the house convention rather than opting out, for the same
+ * reason `FlowVersionHistory` — the other wire shape in `automation/` — does:
+ * one rule for the whole namespace beats a per-shape exception nobody can
+ * predict from the outside.
+ */
+export type ETLPipelineRun = z.input<typeof ETLPipelineRunSchema>;
+/** The post-parse shape — `stats`' counters present, defaulted to 0. */
+export type ETLPipelineRunParsed = z.infer<typeof ETLPipelineRunSchema>;
 
 /**
- * Helper factory for creating ETL pipelines
+ * Helper factory for creating ETL pipelines.
+ *
+ * Both helpers return {@link ETLPipeline} — the AUTHOR shape. They construct a
+ * literal by hand, which is the same act an author performs, so the input type
+ * is the correct return type; the caller passes the result to
+ * `ETLPipelineSchema.parse` (or hands it to an engine that will) exactly as
+ * they would their own literal.
+ *
+ * The annotation is textually unchanged from pre-17 but its MEANING flipped
+ * with the alias (#4963), and that removed two workarounds these helpers were
+ * carrying purely to satisfy their own return type:
+ *
+ *  - **`enabled: true` is gone from both.** It stated the schema's own default
+ *    and was written only because `z.infer` made the key required. What each
+ *    helper still spells out is what it actually DECIDES:
+ *    `databaseSync` is `incremental` + `upsert` (neither is the default) and
+ *    `apiToDatabase` is `full` + `append`. The second pair does coincide with
+ *    the defaults, and is kept deliberately — the two helpers exist as a
+ *    contrast, and a reader comparing them must be able to see which extraction
+ *    and write posture each one picked without going to look up two defaults.
+ *  - **`schedule` is passed straight through.** It used to be pre-wrapped
+ *    (`typeof s === 'string' ? { dialect: 'cron', source: s } : s`) because
+ *    `z.infer` of `CronExpressionInputSchema` is the post-transform envelope
+ *    and would not accept the bare cron string these helpers advertise. The
+ *    union IS the input type, so the normalization belongs where it always
+ *    did — in the schema, at parse.
  */
 export const ETL = {
   /**
@@ -705,8 +810,7 @@ export const ETL = {
       writeMode: 'upsert',
     },
     syncMode: 'incremental',
-    schedule: typeof params.schedule === 'string' ? { dialect: 'cron', source: params.schedule } : params.schedule,
-    enabled: true,
+    schedule: params.schedule,
   }),
 
   /**
@@ -730,7 +834,6 @@ export const ETL = {
       writeMode: 'append',
     },
     syncMode: 'full',
-    schedule: typeof params.schedule === 'string' ? { dialect: 'cron', source: params.schedule } : params.schedule,
-    enabled: true,
+    schedule: params.schedule,
   }),
 } as const;
