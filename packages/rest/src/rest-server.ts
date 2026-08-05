@@ -3579,9 +3579,17 @@ export class RestServer {
                                 } else {
                                     // A `matchEndpoint` throw propagates: its
                                     // contract distinguishes an unreadable store
-                                    // from a miss, and this route answers 5xx
-                                    // (via handleRouteError) rather than claiming
-                                    // the deployment declares nothing.
+                                    // from a miss, so this route FAILS (through
+                                    // `handleRouteError`) rather than claiming
+                                    // the deployment declares nothing. Measured:
+                                    // that failure is currently reported as 400,
+                                    // because an unrecognised error lands on
+                                    // `mapDataError`'s terminal fallback — a
+                                    // pre-existing classification on every error
+                                    // this route reports, not something this
+                                    // narrowing chose. Filed separately; do not
+                                    // read the propagation here as a promise
+                                    // about which status arrives.
                                     const servedList = await selectServedEndpoints(list, authority, {
                                         error: (message: string, meta?: unknown) =>
                                             meta === undefined ? logError(message) : logError(message, meta),
