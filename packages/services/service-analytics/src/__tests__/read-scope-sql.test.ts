@@ -53,8 +53,13 @@ describe('compileScopedFilterToSql', () => {
 
   it('comparison + string operators', () => {
     expect(compileScopedFilterToSql({ amount: { $gte: 100 } }, 't').sql).toBe('"t"."amount" >= ?');
+    // [#5567] The LIKE family binds its pattern AND the escape character, so the
+    // comparand compares literally. `'A'` carries no metacharacter, so the
+    // pattern itself is unchanged — the second bind is the whole delta here.
+    // Metacharacter coverage (and the row sets) live in
+    // `like-metacharacter-escape.test.ts`.
     expect(compileScopedFilterToSql({ name: { $startsWith: 'A' } }, 't')).toEqual({
-      sql: '"t"."name" LIKE ?', params: ['A%'],
+      sql: '"t"."name" LIKE ? ESCAPE ?', params: ['A%', '\\'],
     });
   });
 

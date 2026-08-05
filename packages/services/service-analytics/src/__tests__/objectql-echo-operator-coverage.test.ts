@@ -235,24 +235,33 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
   // ── The issue's measured table, one case per row ────────────────────────────
 
   describe("the issue's measured table", () => {
+    /*
+     * [#5567] Each pattern is now followed by a bound `ESCAPE` argument, so the
+     * echo describes the comparand `driver-sql` actually compares (its
+     * `applyLike` has always escaped and bound `ESCAPE`). None of these three
+     * comparands carries a `_` or `%`, so the PATTERN is byte-identical to what
+     * #5333 pinned — the second bind is the whole delta. The metacharacter cases,
+     * where the pattern itself changes and the row set with it, are in
+     * `like-metacharacter-escape.test.ts`.
+     */
     it('`$startsWith` echoes `LIKE` with the prefix pattern — was no WHERE at all', async () => {
       const { sql, params } = await echo({ stage: { $startsWith: 'w' } });
       expect(sql).toContain('WHERE');
-      expect(sql).toContain('stage LIKE $1');
-      expect(params).toEqual(['w%']);
+      expect(sql).toContain('stage LIKE $1 ESCAPE $2');
+      expect(params).toEqual(['w%', '\\']);
     });
 
     it('`$endsWith` echoes `LIKE` with the suffix pattern — was no WHERE at all', async () => {
       const { sql, params } = await echo({ stage: { $endsWith: 'n' } });
       expect(sql).toContain('WHERE');
-      expect(sql).toContain('stage LIKE $1');
-      expect(params).toEqual(['%n']);
+      expect(sql).toContain('stage LIKE $1 ESCAPE $2');
+      expect(params).toEqual(['%n', '\\']);
     });
 
     it('`$contains` still echoes the substring pattern — the row that already worked', async () => {
       const { sql, params } = await echo({ stage: { $contains: 'o' } });
-      expect(sql).toContain('stage LIKE $1');
-      expect(params).toEqual(['%o%']);
+      expect(sql).toContain('stage LIKE $1 ESCAPE $2');
+      expect(params).toEqual(['%o%', '\\']);
     });
 
     it('the LIKE patterns are the ones the EXECUTED statement binds', async () => {
