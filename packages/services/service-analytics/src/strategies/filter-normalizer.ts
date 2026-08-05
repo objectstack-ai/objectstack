@@ -94,6 +94,25 @@
  * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
  * so it buys portability for one redundant conjunct.
  *
+ * # A `null` COMPARAND is a null predicate, not a value (#5332)
+ *
+ * `{stage: null}` compiled to `IS NULL` while `{stage: {$eq: null}}` compiled to
+ * `stage = ''` — one meaning, two answers, inside this one file. The cause was
+ * that the `$eq` / `$ne` pair fell through to {@link MONGO_TO_CUBE_OP} like any
+ * other comparison and `stringifyForCube(null)` handed it the empty STRING, so a
+ * "stage is empty" widget compared a real value against columns that are NULL
+ * and charted zero rows — silently, with nothing for the author to read. On a
+ * text column the `$ne` direction was worse than empty: `''` is a value rows
+ * genuinely store, so "stage is not empty" EXCLUDED exactly the rows it was asked
+ * to keep.
+ *
+ * The pair is not merely similar to `{$null: true|false}` — `driver-mongodb`
+ * TRANSLATES `$null` into it — so {@link fieldLeaves} now emits the same
+ * `notSet` / `set` leaves for all three spellings, and the #5146 guard table
+ * moved in the same commit (see {@link nullValueSatisfiesOperator}); a guard that
+ * still described the old emitter would have negated an always-false conjunction
+ * and answered `{$not: {stage: {$eq: null}}}` with every row.
+ *
  * # A `where` ARRAY is lowered here, not dropped (#5334)
  *
  * `FilterArray` — `['stage', '=', 'won']`, `['and', […], […]]`, `[[…], […]]` —
@@ -210,6 +229,16 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
  * `'1'`/`'0'` was indistinguishable from a numeric 1/0 and made every boolean
  * equality filter / boolean group-by compare a number against a boolean — and
  * never match.
+ *
+ * The `v == null → ''` arm is NOT a spelling of "is null": `values` is
+ * `string[]`, which has no null, so every leaf that MEANS null is emitted as
+ * `notSet` / `set` with EMPTY `values` and never calls this function — the
+ * `raw === null` branch, `$null` / `$exists`, and since #5332 a `null` comparand
+ * of `$eq` / `$ne`, which used to arrive here and become `= ''`. What still
+ * reaches this arm is a comparand position no ruling covers (`$gt: null`,
+ * `$in: [null]`), where `''` is a placeholder rather than an answer; #5332 scoped
+ * itself to the two spellings `filter.zod.ts` gives a null MEANING and left this
+ * arm untouched.
  */
 function stringifyForCube(v: unknown): string {
   if (v == null) return '';
@@ -369,6 +398,34 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         if (opKey === '$null' || opKey === '$exists') {
           const isNull = opKey === '$null' ? wrapper[opKey] === true : wrapper[opKey] === false;
           leaf(isNull ? 'notSet' : 'set', []);
+          continue;
+        }
+
+        // [#5332] A `null` COMPARAND is a null PREDICATE, not a value
+        // comparison: `$eq: null` is `IS NULL` (`notSet`) and `$ne: null` is
+        // `IS NOT NULL` (`set`) — the same two leaves the `raw === null` branch
+        // above and `{$null: true|false}` beside it already produce. `$eq: null`
+        // and `$null: true` are not merely similar spellings; `driver-mongodb`
+        // TRANSLATES the latter into the former (`mongodb-filter.ts`'s `$null`
+        // arm), so they are one predicate in the contract, and
+        // `read-scope-sql.ts`'s `compileOperator`, `driver-sql`, `driver-memory`
+        // and `formula` all compile them alike.
+        //
+        // Without this branch the pair fell through to MONGO_TO_CUBE_OP and
+        // `stringifyForCube(null)` → `''`, i.e. `stage = ''` / `stage != ''`
+        // (#5332). One meaning had two answers inside ONE file, and the wrong
+        // one bound a real value a NULL column can never equal: an "is empty"
+        // widget charted ZERO rows with no error to read, and on a text column —
+        // where `''` is a value rows genuinely store — `$ne: null` additionally
+        // EXCLUDED the empty-string rows it was asked to keep.
+        //
+        // Identity against `null`, matching `read-scope-sql` and `driver-sql`:
+        // `null` is what an authored `FilterCondition` can carry (JSON has no
+        // `undefined`, and `$eq: undefined` is a key the author did not mean to
+        // write). `stringifyForCube`'s wider `v == null` test is untouched — it
+        // still serves the comparand positions this branch does not claim.
+        if ((opKey === '$eq' || opKey === '$ne') && wrapper[opKey] === null) {
+          leaf(opKey === '$eq' ? 'notSet' : 'set', []);
           continue;
         }
 
@@ -560,12 +617,16 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  *     reach the polarity question.
  *   - `$between` exists in this vocabulary; it lowers to `gte` + `lte`, two
  *     positive comparisons, so it takes the same default they do.
- *   - `$eq` / `$ne` do NOT get `read-scope-sql`'s `value === null` arms. That
- *     compiler turns a `null` comparand into `IS NULL` / `IS NOT NULL`; this one
- *     stringifies it (`stringifyForCube(null)` → `''`) and compares against the
- *     empty string, so `{$eq: null}` here is an ordinary value comparison. The
- *     guard follows the emitter; the `''` comparand itself is a separate defect,
- *     filed on its own and deliberately not decided here.
+ *
+ * `$eq` / `$ne` DO carry `read-scope-sql`'s `value === null` arms — since #5332,
+ * and only since then. While {@link fieldLeaves} stringified a `null` comparand
+ * to `''`, these two arms had to describe THAT emitter: `{$eq: null}` was an
+ * ordinary value comparison here, the guard said so, and the TSDoc recorded the
+ * `''` comparand as a separate defect deliberately left undecided. #5332 decided
+ * it — the emitter now compiles the pair to `notSet` / `set` — so the arms moved
+ * with it, in the same commit. The invariant is not "copy the sibling table", it
+ * is "each guard matches its OWN emitter"; the two tables agreeing again is the
+ * consequence of the emitters agreeing, not the reason for the edit.
  *
  * The default is the large positive-comparison family (`$gt` / `$in` /
  * `$contains` / …), every member of which answers `false` for a value that is
@@ -575,7 +636,13 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  */
 function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
   switch (op) {
-    case '$ne': return true;
+    // [#5332] `$eq: null` IS the null predicate — a NULL column satisfies it,
+    // and no other comparand does.
+    case '$eq': return value === null;
+    // Mirror image: `$ne: null` compiles to `set` (`IS NOT NULL`), which a NULL
+    // column FAILS. Any other comparand is the two-valued JS `!==`, which an
+    // absent value passes — the arm this used to be for every comparand.
+    case '$ne': return value !== null;
     case '$null': return value === true;
     case '$exists': return value === false;
     // Negative-polarity set / substring tests hold vacuously for an absent value.
@@ -597,6 +664,14 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
     case '$null':
     case '$exists':
       return true;
+    // [#5332] A `null` comparand makes these null PREDICATES too — `notSet` /
+    // `set`, not comparisons — so they are total by construction and take NO
+    // guard. Left out, `{$not: {stage: {$eq: null}}}` wrapped `stage IS NOT NULL
+    // AND stage IS NULL` (an always-false conjunction) and negated it to EVERY
+    // row, for a filter meaning "stage is not empty".
+    case '$eq':
+    case '$ne':
+      return value === null;
     // An EMPTY set compiles to a boolean CONSTANT (see `fieldLeaves`), and a
     // constant is total. Wrapping a guard around it would only add a redundant
     // conjunct to a predicate whose value is already decided.

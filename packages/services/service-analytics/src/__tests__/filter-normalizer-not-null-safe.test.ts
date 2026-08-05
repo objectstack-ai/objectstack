@@ -55,6 +55,16 @@
  * `native-sql-filter-logic-conformance.test.ts`: a native binding is loadable
  * only by the exact Node ABI it was built for and aborts the vitest worker on
  * CI's Node, taking the file's cases silently with it.
+ *
+ * # The FOURTH square, added by #5332
+ *
+ * The last block pins what #5325 could not: a `null` COMPARAND. `{stage: null}`
+ * compiled to `IS NULL` while `{stage: {$eq: null}}` — the same predicate, and
+ * literally what `driver-mongodb` rewrites `{$null: true}` into — compiled to
+ * `stage = ''`, so the file's own emitter answered one question two ways.
+ * Pinning the `$not` row set for it while that held would have frozen the wrong
+ * answer, which is why the two ids in `'the OPERATOR spellings of a null
+ * comparand are untouched too'` were deliberately absent until now.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -63,6 +73,7 @@ import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contract
 
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
+import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 
 /**
@@ -384,6 +395,30 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(await ids({ $not: { stage: null } })).toEqual(['1', '2']);
     });
 
+    it('[#5332] the OPERATOR spellings of a `null` comparand are untouched too', async () => {
+      // The pin this file deliberately WITHHELD. While `$eq: null` compiled to
+      // `stage = ''` the guard table read it as an ordinary value comparison, so
+      // `{$not: {stage: {$eq: null}}}` became `NOT (stage IS NOT NULL AND stage =
+      // '')` — a negated always-false conjunction, i.e. EVERY row, for a filter
+      // meaning "stage is not empty" — and `{$not: {stage: {$ne: null}}}` became
+      // `NOT (stage IS NULL OR stage != '')`, i.e. NO row, for "stage is empty".
+      // Pinning either then would have frozen the wrong answer, so #5325 left
+      // both out and filed the comparand as #5332; these are its ids.
+      //
+      // Measured, not reasoned — the same two id sets the other three backends
+      // already assert for these filters on this fixture:
+      // `read-scope-not-null-safe.test.ts` (this package's other compiler),
+      // `driver-sql/sql-driver-not-null-safe.test.ts` and
+      // `formula/matches-filter-not-null-safe.test.ts`.
+      expect(await ids({ $not: { stage: { $eq: null } } })).toEqual(['1', '2']);
+      expect(await ids({ $not: { stage: { $ne: null } } })).toEqual(['3', '4']);
+      // Total already, so NO guard conjunct is wrapped around either — the same
+      // treatment `{$null: true}` gets two tests up.
+      expect((await sqlFor({ $not: { stage: { $eq: null } } })).sql).toContain('WHERE NOT (stage IS NULL)');
+      expect((await sqlFor({ $not: { stage: { $ne: null } } })).sql).toContain('WHERE NOT (stage IS NOT NULL)');
+      expect((await sqlFor({ $not: { stage: { $eq: null } } })).params).toEqual([]);
+    });
+
     it('an empty `$in` / `$nin` under a `$not` keeps its constant value', async () => {
       // Both are boolean CONSTANTS, so they are total and take no guard — and a
       // constant must survive the negation rather than be dropped from it.
@@ -596,6 +631,154 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // That divergence from the JS backends is real and out of #5146's scope.
       expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
       expect(await ids({})).toEqual(ALL);
+    });
+  });
+
+  // ── [#5332] A `null` comparand is a null PREDICATE, not the empty string ───
+
+  /**
+   * [#5332] `{stage: {$eq: null}}` compiled to `stage = ''`, `{$ne: null}` to
+   * `stage != ''`, while `{stage: null}` in the same file compiled to `IS NULL`.
+   *
+   * One meaning, two answers, one file. The measured table from the issue is the
+   * first block below, asserted on the generated SQL and its bindings because
+   * that is where the divergence lived; the row sets follow.
+   *
+   * `{$eq: null}` is not merely a near-synonym of `{$null: true}`:
+   * `driver-mongodb`'s translator REWRITES the latter into the former
+   * (`mongodb-filter.ts`'s `$null` arm), so the two are one predicate in the
+   * contract, and `read-scope-sql.ts`, `driver-sql`, `driver-memory` and
+   * `formula` all compile them alike. This module was the one dissenting half of
+   * one package.
+   */
+  describe('[#5332] `$eq: null` / `$ne: null` are `IS NULL` / `IS NOT NULL`', () => {
+    it("the issue's measured table: all four spellings, SQL and bindings", async () => {
+      // | `where`                  | was              | now              |
+      // |--------------------------|------------------|------------------|
+      // | `{stage: null}`          | `IS NULL`    ✅  | unchanged        |
+      // | `{stage: {$eq: null}}`   | `= $1` / `['']`  | `IS NULL`        |
+      // | `{stage: {$ne: null}}`   | `!= $1` / `['']` | `IS NOT NULL`    |
+      // | `{stage: {$null: true}}` | `IS NULL`    ✅  | unchanged        |
+      const bare = await sqlFor({ stage: null });
+      expect(bare.sql).toContain('WHERE stage IS NULL');
+      expect(bare.params).toEqual([]);
+
+      const eqNull = await sqlFor({ stage: { $eq: null } });
+      expect(eqNull.sql).toContain('WHERE stage IS NULL');
+      expect(eqNull.params).toEqual([]);
+
+      const neNull = await sqlFor({ stage: { $ne: null } });
+      expect(neNull.sql).toContain('WHERE stage IS NOT NULL');
+      expect(neNull.params).toEqual([]);
+
+      const nullTrue = await sqlFor({ stage: { $null: true } });
+      expect(nullTrue.sql).toContain('WHERE stage IS NULL');
+      expect(nullTrue.params).toEqual([]);
+    });
+
+    it('the row sets agree with the other three spellings', async () => {
+      // Was `[]` for `$eq: null` — an "is empty" widget drew NOTHING, with no
+      // error to read, because `stage = ''` cannot match a NULL column.
+      expect(await ids({ stage: { $eq: null } })).toEqual(['3', '4']);
+      expect(await ids({ stage: { $ne: null } })).toEqual(['1', '2']);
+      // The four spellings of one predicate, row for row.
+      expect(await ids({ stage: { $eq: null } })).toEqual(await ids({ stage: null }));
+      expect(await ids({ stage: { $eq: null } })).toEqual(await ids({ stage: { $null: true } }));
+      expect(await ids({ stage: { $ne: null } })).toEqual(await ids({ stage: { $null: false } }));
+      expect(await ids({ stage: { $ne: null } })).toEqual(await ids({ stage: { $exists: true } }));
+    });
+
+    it('the tree carries the same two leaves the other spellings produce', async () => {
+      // The emitter, without a database in the way: `notSet` / `set` with EMPTY
+      // `values`, which is what makes every compiler of this tree — both
+      // strategies AND the display-SQL echo — answer alike without a third arm.
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } })).toEqual({
+        kind: 'leaf', member: 'stage', operator: 'notSet', values: [],
+      });
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } })).toEqual({
+        kind: 'leaf', member: 'stage', operator: 'set', values: [],
+      });
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: null } } }))
+        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: null } }));
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $ne: null } } }))
+        .toEqual(normalizeAnalyticsFilterTree({ where: { stage: { $null: false } } }));
+    });
+
+    it('an EMPTY STRING comparand is still a value comparison — the fix does not over-reach', async () => {
+      // The mirror danger. `''` and `null` are different facts, and the defect
+      // was reading one as the other; conflating them in the other direction
+      // would be the same mistake with the sign flipped.
+      const { sql, params } = await sqlFor({ stage: { $eq: '' } });
+      expect(sql).toContain('WHERE stage = $1');
+      expect(params).toEqual(['']);
+      expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: '' } } })).toEqual({
+        kind: 'leaf', member: 'stage', operator: 'equals', values: [''],
+      });
+      // And a non-null comparand of the same operators is untouched.
+      expect(await ids({ stage: { $eq: 'won' } })).toEqual(['1']);
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
+    });
+
+    it('the ObjectQL path hands the engine a null predicate, not `\'\'`', async () => {
+      expect(await engineIds({ stage: { $eq: null } })).toEqual(['3', '4']);
+      // `convertFilter` maps `notSet` to a bare `null` — `{stage: null}`, the
+      // spelling every driver reads as IS NULL. It used to receive
+      // `{stage: ''}` (via `coerceFilterValueForObjectQL('')`), i.e. the empty
+      // string compared against stored `null` — never a match on any driver.
+      expect(lastEngineFilter).toEqual({ stage: null });
+      expect(await engineIds({ stage: { $ne: null } })).toEqual(['1', '2']);
+      expect(lastEngineFilter).toEqual({ stage: { $ne: null } });
+    });
+
+    it('the echoed display SQL renders the predicate it executes', async () => {
+      const echo = async (where: unknown) =>
+        new ObjectQLStrategy().generateSql(query(where), objectqlCtx);
+      // Was `stage = $1` / `['']` — an echo that could not reproduce the result
+      // it was shown next to.
+      const eqNull = await echo({ stage: { $eq: null } });
+      expect(eqNull.sql).toContain('IS NULL');
+      expect(eqNull.params).toEqual([]);
+      const neNull = await echo({ stage: { $ne: null } });
+      expect(neNull.sql).toContain('IS NOT NULL');
+      expect(neNull.params).toEqual([]);
+    });
+
+    it('on a TEXT column the `$ne` direction stops excluding the `\'\'` rows', async () => {
+      // The issue's severity argument, executed. In SQLite / MySQL `''` is a
+      // REAL value a row can store, so `stage != ''` — what `{$ne: null}` used
+      // to compile to — dropped exactly the rows "stage is not empty" keeps,
+      // and `stage = ''` matched the one row that is NOT null.
+      //
+      // A table of its own because the shared FIXTURE is row-for-row
+      // `driver-sql`'s and carries no empty string; adding one there would move
+      // every other file's expectations.
+      db.run(`CREATE TABLE "deal_text" ("id" TEXT PRIMARY KEY, "stage" TEXT);`);
+      const insert = db.prepare(`INSERT INTO "deal_text" ("id","stage") VALUES (?,?)`);
+      for (const r of [['e1', 'won'], ['e2', ''], ['e3', null]]) insert.run(r as any[]);
+      insert.free();
+      try {
+        const textCube = { ...CUBE, name: 'deals_text', sql: 'deal_text' } as unknown as Cube;
+        const textCtx = {
+          ...nativeCtx,
+          getCube: (name: string) => (name === 'deals_text' ? textCube : undefined),
+        } as StrategyContext;
+        const textIds = async (where: unknown): Promise<string[]> => {
+          const result = await new NativeSQLStrategy().execute(
+            { ...query(where), cube: 'deals_text' } as AnalyticsQuery,
+            textCtx,
+          );
+          return result.rows.map((r) => String(r.id)).sort((x, y) => x.localeCompare(y));
+        };
+        // `IS NULL` picks the null row, NOT the empty-string one. Was `['e2']` —
+        // the one row that is emphatically not empty of a value.
+        expect(await textIds({ stage: { $eq: null } })).toEqual(['e3']);
+        // `IS NOT NULL` keeps the empty-string row. Was `['e1']`.
+        expect(await textIds({ stage: { $ne: null } })).toEqual(['e1', 'e2']);
+        // …and an author who really means the empty string still gets it.
+        expect(await textIds({ stage: { $eq: '' } })).toEqual(['e2']);
+      } finally {
+        db.run(`DROP TABLE "deal_text";`);
+      }
     });
   });
 });
