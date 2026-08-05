@@ -1015,7 +1015,30 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       case 'gte': return { $gte: v0 };
       case 'lt': return { $lt: v0 };
       case 'lte': return { $lte: v0 };
-      case 'contains': return { $regex: values[0] };
+      // [#5557] `contains` was `{ $regex: values[0] }` — the comparand dropped
+      // VERBATIM into a regex position while its three siblings below already
+      // passed as canonical spec operators. Three things were wrong with that,
+      // and none of them waits on #4706's ruling about what `$regex` should
+      // mean:
+      //
+      //   1. `$regex` is not in `filter.zod.ts`'s `FILTER_OPERATORS`, so this
+      //      was a PRODUCER emitting an operator the contract does not declare
+      //      (Prime Directive #12 — fix the producer, not the consumers).
+      //   2. `compileScopedFilterToSql` in this very package is a
+      //      `FilterCondition` consumer and fails closed on `$regex`, so one
+      //      filter tree no longer travelled between two consumers of the same
+      //      contract sitting in the same directory.
+      //   3. On a backend that reads `$regex` as a real regex — driver-memory's
+      //      `memory-matcher.ts` does, deliberately, for plugin-auth's adapter
+      //      — an unescaped comparand changes what the author asked for:
+      //      `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
+      //      the `catch { return false }` answered zero rows in silence.
+      //      `driver-sql` meanwhile compiles `$regex` to a substring LIKE, so
+      //      the same widget returned different row sets per driver.
+      //
+      // `MONGO_TO_CUBE_OP` maps `$contains` → `contains` and nothing else does,
+      // so returning `$contains` here is the round trip of the author's own key.
+      case 'contains': return { $contains: values[0] };
       // `notContains` had no arm and fell to the `default` below, which returns
       // a BARE VALUE — i.e. `{field: 'x'}`, an equality. "does not contain x"
       // was compiled as "equals x". These three pass through as the canonical

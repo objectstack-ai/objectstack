@@ -96,30 +96,22 @@ async function locateWasm(): Promise<((file: string) => string) | undefined> {
   }
 }
 
-/**
- * The stand-in engine's one accommodation, and it is NOT about #5333.
+/*
+ * [#5557] The stand-in engine below used to need one accommodation, and it was
+ * NOT about #5333: `ObjectQLStrategy.convertFilter` sent the `contains` leaf to
+ * the engine as `{$regex: <comparand>}` while its three siblings passed as the
+ * canonical spec operators #4128 gave them, and `$regex` is not in
+ * `filter.zod.ts`'s `FILTER_OPERATORS`, so `compileScopedFilterToSql` — a
+ * `FilterCondition` consumer, not a driver — failed closed on it. An
+ * `asCondition()` helper rewrote `$regex` back to `$contains` here so this file
+ * could be about the echo.
  *
- * `ObjectQLStrategy.convertFilter` sends the `contains` leaf to the engine as
- * `{$regex: <comparand>}` while its three siblings (`notContains`,
- * `startsWith`, `endsWith`) pass as the canonical spec operators #4128 gave
- * them. `$regex` is not in `filter.zod.ts`'s `FILTER_OPERATORS`, so
- * `compileScopedFilterToSql` — a `FilterCondition` consumer, not a driver —
- * fails closed on it. Filed as #5557: it is a defect in what this path EXECUTES,
- * one function away from the echo this file is about, so it is translated here
- * rather than fixed or hidden.
+ * #5557 fixed the producer, so the helper is gone and `options.filter` reaches
+ * `compileScopedFilterToSql` untouched. That makes this file the other half of
+ * #5557's reverse verification: restore `case 'contains': return { $regex: … }`
+ * in `convertFilter` and the `$contains` row of the measured table below throws
+ * `unsupported operator "$regex" … (fail-closed)` from the stand-in engine.
  */
-function asCondition(filter: Record<string, unknown>): FilterCondition {
-  const out: Record<string, unknown> = {};
-  for (const [field, cond] of Object.entries(filter)) {
-    if (cond && typeof cond === 'object' && !Array.isArray(cond) && '$regex' in cond) {
-      const { $regex, ...rest } = cond as Record<string, unknown>;
-      out[field] = { ...rest, $contains: $regex };
-    } else {
-      out[field] = cond;
-    }
-  }
-  return out as FilterCondition;
-}
 
 /** One authorable `$op` spelling, with a comparand this fixture can answer. */
 const OPERATOR_CASES: Record<string, FilterCondition> = {
@@ -183,7 +175,7 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
         options: { groupBy?: string[]; filter?: Record<string, unknown> },
       ) => {
         const { sql, params } = compileScopedFilterToSql(
-          asCondition(options.filter ?? {}),
+          (options.filter ?? {}) as FilterCondition,
           'deal',
         );
         const stmt = db.prepare(
