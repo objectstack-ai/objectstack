@@ -30,6 +30,7 @@
  *   objects.<name>.fields.<field>.help
  *   objects.<name>.fields.<field>.placeholder
  *   objects.<name>.fields.<field>.options.<value>
+ *   objects.<name>._sections.<section>.label
  *   objects.<name>._views.<view>.label
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
@@ -64,6 +65,8 @@
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { walkPageComponents } from '@objectstack/lint';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
@@ -95,6 +98,7 @@ export interface ExpectedEntry {
     | 'object'
     | 'field'
     | 'option'
+    | 'section'
     | 'view'
     | 'action'
     | 'globalAction'
@@ -332,6 +336,165 @@ function pushActionResultDialog(
   }
 }
 
+// ─── Object sections (`objects.<o>._sections.<section>.label`) ─────────
+//
+// A section heading is authored in TWO independent places and rendered from
+// both, so a walk that reads only one of them under-reports (#5405):
+//
+//   (a) the object's `fieldGroups` semantic role (ADR-0085 §5) — the fields
+//       are the authority for which sections exist (a declared group nothing
+//       references never renders), `fieldGroups[].label` supplies the source
+//       text. Rendered by `RecordDetailView` via
+//       `deriveFieldGroupDetailSections` and by `ObjectFormDesigner`, both of
+//       which look the heading up as `sectionLabel(object, group.key, …)`.
+//
+//   (b) authored `sections[]` on a form view or inside a record page's
+//       component tree, keyed by the section's own `name`. Rendered by
+//       `plugin-form`'s `ObjectForm`/`ModalForm` and `plugin-detail`'s
+//       `record:details`.
+//
+// Both resolve through the SAME convention —
+// `objects.<object>._sections.<name>.label`, `useObjectLabel.sectionLabel` in
+// `@object-ui/i18n` — against the `_sections` slot `ObjectTranslationDataSchema`
+// declares. So one expected key per (object, section), whichever source found
+// it first.
+//
+// A section with no `name` is deliberately skipped: every renderer guards the
+// lookup on it (`s?.name ? sectionLabel(...) : s?.label`), so a nameless
+// section is untranslatable by construction and demanding a bundle entry for
+// it would be noise. The `_sections` schema says the same ("Each section in
+// the page schema must declare a stable `name` for the lookup to fire").
+
+/** object name → section name → source label (undefined = none authored). */
+type SectionIndex = Map<string, Map<string, string | undefined>>;
+
+/**
+ * Record one (object, section) pair.
+ *
+ * One heading, one key — however many surfaces declare it. The first AUTHORED
+ * label wins, and a later authored one upgrades an entry recorded without any
+ * (a group that declares no `label` of its own, whose heading text the page
+ * section carries): `inline` must report the text the reader actually sees,
+ * whichever surface happens to be walked first.
+ */
+function addSection(index: SectionIndex, objectName: unknown, sectionName: unknown, label: unknown): void {
+  if (typeof objectName !== 'string' || objectName.length === 0) return;
+  if (typeof sectionName !== 'string' || sectionName.length === 0) return;
+  let sections = index.get(objectName);
+  if (!sections) index.set(objectName, (sections = new Map()));
+  const authored = inlineText(label);
+  if (!sections.has(sectionName)) sections.set(sectionName, authored);
+  else if (sections.get(sectionName) === undefined && authored !== undefined) {
+    sections.set(sectionName, authored);
+  }
+}
+
+/** Read a `sections[]` array (form view / component props) into the index. */
+function addSectionList(index: SectionIndex, sections: unknown, objectName: unknown): void {
+  if (!Array.isArray(sections)) return;
+  for (const section of sections) {
+    if (!section || typeof section !== 'object') continue;
+    const s = section as Record<string, unknown>;
+    // `record:details` reads `title ?? label`, form views author `label`; a
+    // localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
+    // `inlineText` drops it to "nothing authored in plain text".
+    addSection(index, objectName, s.name, s.label ?? s.title);
+  }
+}
+
+/**
+ * Emit `objects.<object>._sections.<section>.label` for every section the
+ * stack renders, from both authoring surfaces.
+ */
+function walkObjectSections(config: any, out: ExpectedEntry[]): void {
+  const index: SectionIndex = new Map();
+
+  // (a) `fieldGroups` × field `group` membership. `deriveFieldGroupLayout` is
+  //     the shared derivation the renderers themselves consume, so "which
+  //     groups become sections" is decided in exactly one place: a group no
+  //     visible field references, or one that is referenced but never
+  //     declared, produces no heading and therefore no expected key.
+  const objects: any[] = Array.isArray(config?.objects) ? config.objects : [];
+  for (const obj of objects) {
+    if (!obj?.name) continue;
+    const derived = deriveFieldGroupLayout(obj);
+    if (!derived) continue;
+    // The derivation substitutes the key for a missing label; read the
+    // declared label back so `inline` stays honest about what was authored.
+    const declaredLabels = new Map<string, unknown>();
+    for (const group of Array.isArray(obj.fieldGroups) ? obj.fieldGroups : []) {
+      if (group && typeof group === 'object' && typeof group.key === 'string') {
+        declaredLabels.set(group.key, group.label);
+      }
+    }
+    for (const section of derived) {
+      // The trailing ungrouped bucket carries no key — it renders without
+      // chrome, so there is no heading to translate.
+      if (section.key === undefined) continue;
+      addSection(index, obj.name, section.key, declaredLabels.get(section.key));
+    }
+  }
+
+  // (b) authored form-view sections.
+  const views: any[] = Array.isArray(config?.views) ? config.views : [];
+  for (const view of views) {
+    const containerObject = viewObjectName(view);
+    addSectionList(index, view?.sections, containerObject);
+    if (view?.form && typeof view.form === 'object') {
+      addSectionList(index, view.form.sections, viewObjectName(view.form) ?? containerObject);
+    }
+    if (view?.formViews && typeof view.formViews === 'object') {
+      for (const form of Object.values<any>(view.formViews)) {
+        if (!form || typeof form !== 'object') continue;
+        addSectionList(index, form.sections, viewObjectName(form) ?? containerObject);
+      }
+    }
+  }
+
+  // (b) authored page sections — a record page's `record:details`.
+  //
+  // Reuses `@objectstack/lint`'s shared page traversal rather than growing a
+  // private copy. That walk exists precisely because duplicating it produced a
+  // dead rule once already (#3583): components hang off `regions[].components`
+  // AND `slots.<slot>` (which may be a bare component, not an array), sub-trees
+  // live inside the untyped `properties` bag (`page:tabs` →
+  // `properties.items[].children`, `page:card` → `properties.body`/`.footer`),
+  // and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
+  // DERIVED region cache that the author never wrote — scaffolding translation
+  // keys off that cache would invent an authoring surface.
+  //
+  // It also resolves each component's OWN binding
+  // (`dataSource.object` → `properties.object` → the page's `object`), which a
+  // page-level-only binding would get wrong rather than merely miss: a
+  // `record:details` retargeted at another object would key its headings under
+  // the page's object, and no bundle entry there would ever resolve.
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    if (!page || typeof page !== 'object') continue;
+    for (const walked of walkPageComponents(page, `pages[${pi}]`)) {
+      if (!walked.objectName) continue;
+      const props = walked.component.properties;
+      if (!props || typeof props !== 'object' || Array.isArray(props)) continue;
+      addSectionList(index, (props as Record<string, unknown>).sections, walked.objectName);
+    }
+  }
+
+  for (const [objectName, sections] of index) {
+    for (const [sectionName, label] of sections) {
+      pushDerived(
+        out,
+        ['objects', objectName, '_sections', sectionName, 'label'],
+        // Seed mirrors the renderer's own fallback (`s.label || s.name`).
+        label ?? sectionName,
+        label,
+        'section',
+        { objectName },
+      );
+    }
+  }
+}
+
 /** Collect every translatable entry from a normalized stack config. */
 export function collectExpectedEntries(config: any): ExpectedEntry[] {
   const out: ExpectedEntry[] = [];
@@ -538,6 +701,13 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       }
     }
   }
+
+  // ── Object sections (fieldGroups + authored form/page sections) ───
+  // Deliberately a pass of its own: the two authoring surfaces live in
+  // `objects`, `views` and `pages`, and one section may be declared by more
+  // than one of them — collecting first and emitting once keeps a heading
+  // from being counted twice against coverage.
+  walkObjectSections(config, out);
 
   // ── Metadata configuration forms (Studio admin UI) ────────────────
   // Registry-driven: always included, independent of stack config. These

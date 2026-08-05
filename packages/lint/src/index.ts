@@ -507,3 +507,11 @@ export {
   stackKeyForType,
 } from './runtime-gate.js';
 export type { RuntimeGateResult, RuntimeStackContext } from './runtime-gate.js';
+
+// The shared page-component traversal every `properties`-inspecting rule is
+// built on (#3583). Exported because the CLI's i18n walker needs the same
+// traversal to find `record:details` sections — and this walk is the one whose
+// duplication has already produced a dead rule, so a second copy in another
+// package is exactly what the module exists to prevent (#5405).
+export { walkPageComponents, isSourceAuthoredPage } from './page-walk.js';
+export type { WalkedComponent } from './page-walk.js';

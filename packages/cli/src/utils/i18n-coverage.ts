@@ -47,6 +47,7 @@ export interface CoverageIssue {
     | 'object'
     | 'field'
     | 'option'
+    | 'section'
     | 'view'
     | 'action'
     | 'globalAction'
@@ -191,6 +192,11 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   object: 'object',
   field: 'field',
   option: 'option',
+  // An object section heading (`objects.<o>._sections.<s>.label`) is the
+  // user's own metadata, not the Studio-form baseline — it keeps its own
+  // bucket so `os lint` reports it as `i18n/missing-section` rather than
+  // folding it away with `--include-platform`.
+  section: 'section',
   view: 'view',
   action: 'action',
   globalAction: 'globalAction',
@@ -208,6 +214,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   object: 'Object',
   field: 'Field',
   option: 'Option',
+  section: 'Section',
   view: 'View',
   action: 'Action',
   globalAction: 'Global action',
