@@ -209,6 +209,57 @@ export interface NodeExecutor {
         variables: Map<string, unknown>,
         context: AutomationContext,
     ): Promise<NodeExecutionResult>;
+
+    /**
+     * The mirror of `suspend: true` — called once a suspension THIS node type
+     * created is consumed, whichever path consumed it (#5512).
+     *
+     * A pausing executor usually arms something external on entry (a one-shot
+     * wake-up job, a reminder, a lease). Only its own wake path used to tear
+     * that down, so a pause ended by *anything else* — an external
+     * `resume(runId)` through the REST door, a {@link AutomationEngine.cancelRun},
+     * a subflow ancestor failing — left the armature live: #5512 was a
+     * `flow-wait` one-shot still `active` in `sys_job` a day after its run had
+     * completed, pointed at a run that no longer existed.
+     *
+     * Called by {@link AutomationEngine.forgetSuspendedRun}, the single choke
+     * point every consumption goes through, so an executor that implements this
+     * disarms on **all** of them and never needs to know which one fired. It
+     * runs after the suspension is gone from the cache and the durable store:
+     * teardown is best-effort observability work and must not hold up (or fail)
+     * the continuation — the engine catches and logs whatever it throws.
+     *
+     * @param release - Which suspension ended, and how. `correlation` is the
+     *   handle the executor itself returned at suspend time.
+     */
+    onSuspensionReleased?(release: SuspensionRelease): Promise<void> | void;
+}
+
+/** How a suspension ended — see {@link SuspensionRelease}. */
+export type SuspensionReleaseReason =
+    /** Continued past the paused node (timer fired, signal arrived, screen submitted, …). */
+    | 'resumed'
+    /** Terminally failed while paused (e.g. a subflow descendant failed under it). */
+    | 'failed'
+    /** Terminally cancelled while paused ({@link AutomationEngine.cancelRun}, ADR-0044). */
+    | 'cancelled';
+
+/**
+ * A consumed suspension, handed to {@link NodeExecutor.onSuspensionReleased} so
+ * the node that armed a pause can tear down what it armed (#5512).
+ */
+export interface SuspensionRelease {
+    runId: string;
+    flowName: string;
+    /** The node the run was paused at — the one whose executor is notified. */
+    nodeId: string;
+    /**
+     * The correlation key the node returned with `suspend: true` (its own handle
+     * on the pause — e.g. the `wait` node's one-shot job name). Absent when the
+     * node suspended without one.
+     */
+    correlation?: string;
+    reason: SuspensionReleaseReason;
 }
 
 /**
@@ -1182,18 +1233,75 @@ export class AutomationEngine implements IAutomationService {
      * Drop a suspended run from the in-memory cache and (best-effort) the
      * durable store. Called once the run is claimed for resume or reaches a
      * terminal state.
+     *
+     * This is the ONE choke point through which every consumption of a
+     * suspension passes (resume, terminal failure, cancel), which is why it —
+     * and not any individual caller — notifies the paused node's executor that
+     * its pause is over ({@link NodeExecutor.onSuspensionReleased}, #5512). It
+     * therefore takes the whole {@link SuspendedRun}: the notification needs the
+     * node and the correlation the executor minted, not just the id.
      */
-    private async forgetSuspendedRun(runId: string): Promise<void> {
-        this.suspendedRuns.delete(runId);
+    private async forgetSuspendedRun(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
+        this.suspendedRuns.delete(run.runId);
         if (this.store) {
             try {
-                await this.store.delete(runId);
+                await this.store.delete(run.runId);
             } catch (err) {
                 this.logger.warn(
-                    `[automation] failed to delete suspended run '${runId}' from durable store: ${(err as Error).message}`,
+                    `[automation] failed to delete suspended run '${run.runId}' from durable store: ${(err as Error).message}`,
                 );
             }
         }
+        await this.releaseSuspension(run, reason);
+    }
+
+    /**
+     * Tell the executor of the node a run was paused at that the pause is over,
+     * so it can disarm whatever it armed on entry (#5512).
+     *
+     * Runs AFTER the suspension is gone from cache and store: the run has
+     * definitively left the node, so a slow or broken job service can neither
+     * delay the continuation nor resurrect the pause. Failures are logged and
+     * swallowed for the same reason — a wake-up that outlives its run is a
+     * misleading `sys_job` row, not a broken run, and the log names the handle
+     * an operator needs to clean it up by hand.
+     *
+     * Routed by the node's own registry type (recorded on the suspension,
+     * falling back to the live flow for rows persisted before `nodeType`
+     * existed) rather than broadcast to every listener — the executor that
+     * created the pause is the one that owns tearing it down, and nothing else
+     * has to pattern-match correlation strings it does not own.
+     */
+    private async releaseSuspension(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
+        const nodeType = this.resolveSuspendedNodeType(run);
+        const executor = nodeType ? this.nodeExecutors.get(nodeType) : undefined;
+        if (!executor?.onSuspensionReleased) return;
+        try {
+            await executor.onSuspensionReleased({
+                runId: run.runId,
+                flowName: run.flowName,
+                nodeId: run.nodeId,
+                correlation: run.correlation,
+                reason,
+            });
+        } catch (err) {
+            this.logger.warn(
+                `[automation] run '${run.runId}': '${nodeType}' node '${run.nodeId}' failed to release its suspension ` +
+                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}): ${(err as Error)?.message ?? err} — ` +
+                    `the run continued; whatever the node armed on entry may still be scheduled`,
+            );
+        }
+    }
+
+    /**
+     * The registry type of the node a run is paused at: what the suspension
+     * recorded at pause time, falling back to the live flow definition for rows
+     * persisted before `nodeType` existed. Recorded-first on purpose — a flow
+     * republished mid-pause must not re-type the node out from under a run
+     * (see {@link SuspendedRun.nodeType}).
+     */
+    private resolveSuspendedNodeType(run: SuspendedRun): string | undefined {
+        return run.nodeType ?? this.flows.get(run.flowName)?.nodes.find(n => n.id === run.nodeId)?.type;
     }
 
     // ── Plugin Extension API ──────────────────────────────
@@ -1275,6 +1383,16 @@ export class AutomationEngine implements IAutomationService {
                     };
                 }
                 return target.execute(node, variables, context);
+            },
+            // Delegated for the same reason `resolveResumeAuthority` walks the
+            // alias to its canonical: a pause created through the old type name
+            // must not lose a capability the canonical declares. Without this,
+            // aliasing a pausing type would silently stop it disarming what it
+            // armed on entry (#5512) — the alias's own executor implements
+            // nothing. No alias of a pausing type exists today; this keeps it
+            // from becoming a hole the day one does.
+            async onSuspensionReleased(release) {
+                await engine.nodeExecutors.get(canonicalType)?.onSuspensionReleased?.(release);
             },
         });
         this.logger.info(`Node alias registered: ${alias} → ${canonicalType} (deprecated)`);
@@ -2535,7 +2653,7 @@ export class AutomationEngine implements IAutomationService {
         const run = await this.resolveEffectiveSuspension(runId);
         if (!run) return null;
 
-        const nodeType = run.nodeType ?? this.flows.get(run.flowName)?.nodes.find(n => n.id === run.nodeId)?.type;
+        const nodeType = this.resolveSuspendedNodeType(run);
         if (!nodeType) return null;
         if (this.resolveResumeAuthority(nodeType) !== 'service') return null;
         // The owning service stamped the signal — this resume IS the recorded
@@ -2859,7 +2977,9 @@ export class AutomationEngine implements IAutomationService {
             // resumes exactly once per pause, and a duplicate resume after a
             // partial restart must not double-run side effects. (Folding the
             // signal above is pure in-memory work, not downstream work.)
-            await this.forgetSuspendedRun(runId);
+            // This is also where the paused node learns its pause is over and
+            // disarms what it armed on entry (#5512) — see forgetSuspendedRun.
+            await this.forgetSuspendedRun(run, 'resumed');
 
             const steps = run.steps;
             const context = run.context;
@@ -3138,7 +3258,7 @@ export class AutomationEngine implements IAutomationService {
      * descendant fails — the ancestor awaiting it can never be resumed.
      */
     private async failSuspendedRun(run: SuspendedRun, error: string): Promise<void> {
-        await this.forgetSuspendedRun(run.runId);
+        await this.forgetSuspendedRun(run, 'failed');
         this.recordLog({
             id: run.runId,
             flowName: run.flowName,
@@ -3178,7 +3298,7 @@ export class AutomationEngine implements IAutomationService {
             }
         }
         if (!run) return false;
-        await this.forgetSuspendedRun(runId);
+        await this.forgetSuspendedRun(run, 'cancelled');
         this.recordLog({
             id: run.runId,
             flowName: run.flowName,

@@ -7,6 +7,10 @@ export type {
     RunSummaryLogLevel,
     NodeExecutor,
     NodeExecutionResult,
+    // The teardown half of a pause (#5512): a plugin node that arms something on
+    // entry needs these to name the callback that disarms it.
+    SuspensionRelease,
+    SuspensionReleaseReason,
     FlowTrigger,
     FlowTriggerBinding,
     ConnectorActionHandler,

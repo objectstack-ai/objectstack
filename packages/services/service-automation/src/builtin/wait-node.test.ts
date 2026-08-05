@@ -141,6 +141,143 @@ describe('wait node executor', () => {
 });
 
 /**
+ * #5512 — the one-shot wake-up job is dropped when the run leaves the wait node,
+ * whichever route it leaves by.
+ *
+ * The reported symptom: a `wait P1D` pause resumed early through the REST resume
+ * endpoint (a door the #3801 gate deliberately leaves open for `wait`) ran to
+ * completion while its `flow-wait:<runId>:<nodeId>` one-shot stayed `active` in
+ * `sys_job` with tomorrow's deadline — for 24h it read as "a run is still waiting
+ * to be woken", and then fired a ghost `resume` at a run that had completed the
+ * day before. Only the timer's OWN callback dropped its job.
+ *
+ * `cancelled` here is the fake job service's log of `IJobService.cancel(name)` —
+ * the call the DbJobAdapter turns into `active: false` on the `sys_job` row.
+ */
+describe('wait timer teardown when the pause ends another way (#5512)', () => {
+  let engine: AutomationEngine;
+  let ran: string[];
+
+  beforeEach(() => {
+    engine = new AutomationEngine(silentLogger());
+    ran = [];
+    engine.registerNodeExecutor(markerExecutor(ran));
+  });
+
+  it('cancels the one-shot when an external resume cuts a timer wait short', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'P1D' }));
+
+    const paused = await engine.execute('wait_flow');
+    expect(paused.status).toBe('paused');
+    expect(scheduled).toHaveLength(1); // armed for +24h
+    expect(cancelled).toEqual([]);
+
+    // The REST resume door: no signal, no job involvement — exactly the repro.
+    const resumed = await engine.resume(paused.runId!);
+    expect(resumed.success).toBe(true);
+    expect(ran).toEqual(['after']); // the run completed
+    expect(engine.listSuspendedRuns()).toEqual([]);
+
+    // …and tomorrow's wake-up is gone with it, instead of lingering `active`.
+    expect(cancelled).toEqual([scheduled[0].name]);
+    expect(scheduled[0].name).toBe(`flow-wait:${paused.runId}:pause`);
+  });
+
+  it('cancels the one-shot when the parked run is cancelled (ADR-0044)', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'P1D' }));
+
+    const paused = await engine.execute('wait_flow');
+    expect(await engine.cancelRun(paused.runId!, 'window abandoned')).toBe(true);
+
+    expect(cancelled).toEqual([scheduled[0].name]);
+    expect(ran).toEqual([]); // cancelled, not continued
+  });
+
+  it('cancels the re-armed one-shot too (cold boot, then an external resume)', async () => {
+    const store = new InMemorySuspendedRunStore();
+    const config = { eventType: 'timer', timerDuration: 'P1D' };
+
+    // Process 1: suspend at the wait, then "die".
+    const boot1 = fakeJobCtx();
+    const e1 = new AutomationEngine(silentLogger());
+    e1.registerNodeExecutor(markerExecutor([]));
+    registerWaitNode(e1, boot1.ctx);
+    e1.setSuspendedRunStore(store);
+    e1.registerFlow('wait_flow', waitFlow(config));
+    const paused = await e1.execute('wait_flow');
+
+    // Process 2: cold boot + re-arm, then someone resumes the run by hand.
+    const boot2 = fakeJobCtx();
+    registerWaitNode(engine, boot2.ctx);
+    engine.setSuspendedRunStore(store);
+    engine.registerFlow('wait_flow', waitFlow(config));
+    const job = boot2.ctx.getService('job') as IJobService;
+    expect(await rearmSuspendedWaitTimers(engine, store, job, silentLogger())).toBe(1);
+    expect(boot2.scheduled).toHaveLength(1);
+
+    const resumed = await engine.resume(paused.runId!);
+    expect(resumed.success).toBe(true);
+    expect(ran).toEqual(['after']);
+    // The re-armed job carries the same name, so the same teardown reaches it.
+    expect(boot2.cancelled).toEqual([`flow-wait:${paused.runId}:pause`]);
+  });
+
+  it('cancels nothing for a signal wait — it armed no job to cancel', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'signal', signalName: 'contract.renewed' }));
+
+    const paused = await engine.execute('wait_flow');
+    expect(scheduled).toEqual([]);
+    const resumed = await engine.resume(paused.runId!);
+
+    expect(resumed.success).toBe(true);
+    expect(ran).toEqual(['after']);
+    // The correlation of a signal wait is the AUTHOR's signal name, not a job
+    // name — the teardown must not hand it to `cancel()`.
+    expect(cancelled).toEqual([]);
+  });
+
+  it('cancels nothing for a timer wait that armed no job (no parseable duration)', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    // No `timerDuration` ⇒ no deadline ⇒ nothing scheduled; the pause carries
+    // the degraded `timer:<nodeId>` correlation instead of a job name.
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer' }));
+
+    const paused = await engine.execute('wait_flow');
+    expect(scheduled).toEqual([]);
+    expect(engine.listSuspendedRuns()[0]).toMatchObject({ correlation: 'timer:pause' });
+
+    const resumed = await engine.resume(paused.runId!);
+    expect(resumed.success).toBe(true);
+    expect(cancelled).toEqual([]);
+  });
+
+  it('still cancels exactly once when the timer itself fires (idempotent teardown)', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx();
+    registerWaitNode(engine, ctx);
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'PT2H' }));
+
+    const paused = await engine.execute('wait_flow');
+    await scheduled[0].handler({ jobId: scheduled[0].name });
+
+    expect(ran).toEqual(['after']);
+    // Two teardowns now cover this path — the release hook (the run left the
+    // node) and the one-shot's own `finally` (the job had its single shot) — and
+    // they target the same name. `cancel` is idempotent, so what is pinned is
+    // "cancelled, and nothing else cancelled"; the call COUNT is deliberately
+    // not pinned, since which of the two fires is not a behavioural promise.
+    expect(cancelled.length).toBeGreaterThan(0);
+    expect([...new Set(cancelled)]).toEqual([`flow-wait:${paused.runId}:pause`]);
+  });
+});
+
+/**
  * The loose `config.*` back door the executor used to read alongside
  * `waitEventConfig` graduated into the ADR-0087 D2 conversion layer
  * (`flow-node-wait-event-config-lift`, #4045), so the executor now reads the

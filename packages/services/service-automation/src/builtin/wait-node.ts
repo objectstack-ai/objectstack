@@ -6,6 +6,17 @@ import type { IJobService } from '@objectstack/spec/contracts';
 import type { AutomationEngine, SuspendedRunStore } from '../engine.js';
 
 /**
+ * The one-shot wake-up job's name for a timer `wait` pause — and, by
+ * construction, the `correlation` that pause suspends with. One declaration, so
+ * the three sites that must agree on it cannot drift: the arming path, the
+ * cold-boot re-arm ({@link rearmSuspendedWaitTimers}), and the teardown when the
+ * run leaves the node (#5512).
+ */
+function waitTimerJobName(runId: string, nodeId: string): string {
+  return `flow-wait:${runId}:${nodeId}`;
+}
+
+/**
  * `wait` built-in node — a durable pause (ADR-0019 suspend/resume), the timer /
  * signal sibling of the human-input `screen` and `approval` nodes.
  *
@@ -21,6 +32,10 @@ import type { AutomationEngine, SuspendedRunStore } from '../engine.js';
  *  - **signal / webhook / manual / condition** — suspend with the signal name as
  *    the correlation key; an external producer resumes the run when the event
  *    arrives (`resume(runId)`), exactly like a decision-less approval.
+ *
+ * Whatever wakes the run, the one-shot job is dropped when the pause ends — see
+ * `onSuspensionReleased` below (#5512). A timer wait cut short by an external
+ * `resume` used to leave its wake-up armed for the full duration.
  *
  * Reads its own run id from the `$runId` variable the engine injects at start
  * (same mechanism the approval node uses to map external state back to the run).
@@ -79,13 +94,19 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
 
         const job = getJobService();
         if (job && runId != null && at) {
-          const jobName = `flow-wait:${String(runId)}:${node.id}`;
+          const jobName = waitTimerJobName(String(runId), node.id);
           try {
             await job.schedule(jobName, { type: 'once', at }, async () => {
               try {
                 await engine.resume(String(runId));
               } finally {
-                // One-shot: drop the job so it never re-fires.
+                // One-shot: drop the job so it never re-fires. Kept alongside
+                // the `onSuspensionReleased` teardown below because the two
+                // answer different questions: that one fires when the RUN
+                // leaves the node, this one when the JOB has had its single
+                // shot — including the shots that did not consume a pause (the
+                // store was unreachable, another resume was already in
+                // flight). Both are `cancel`, which is idempotent.
                 try {
                   await job.cancel?.(jobName);
                 } catch {
@@ -115,6 +136,34 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       // resumes the run when the named event arrives.
       const signal = String(wec.signalName ?? `wait:${node.id}`);
       return { success: true, suspend: true, correlation: signal };
+    },
+
+    /**
+     * Disarm the one-shot wake-up when the run leaves this node by ANY route
+     * (#5512). Until this existed only the timer's own callback dropped its job,
+     * so a wait cut short — an external `resume` through the REST door (which
+     * the #3801 gate deliberately allows for `wait`), a `cancelRun`, a subflow
+     * ancestor failing — left the one-shot armed: it stayed `active` in
+     * `sys_job` with tomorrow's `schedule_expression`, read to every operator
+     * and test as "a run is still waiting to be woken", and eventually fired a
+     * ghost `resume` at a run that had completed the day before.
+     *
+     * The pause is already consumed when this runs, so cancelling cannot strand
+     * the run; and `cancel` on a name the job service no longer holds is a
+     * no-op, so a race with the timer's own teardown is harmless.
+     */
+    async onSuspensionReleased({ runId, nodeId, correlation }) {
+      // Only a pause that actually armed a job carries its name as the
+      // correlation. The degraded timer (`timer:<nodeId>`) and every signal wait
+      // (the author's own signal name) armed nothing, so there is nothing to
+      // cancel — and reconstructing the name we mint, rather than prefix-testing
+      // a string we may not own, keeps this from ever cancelling by coincidence.
+      if (correlation !== waitTimerJobName(runId, nodeId)) return;
+      const job = getJobService();
+      if (!job?.cancel) return;
+      // Errors propagate: the engine catches them and logs one line naming this
+      // correlation — which is the job name an operator would cancel by hand.
+      await job.cancel(correlation);
     },
   });
 
@@ -217,7 +266,7 @@ export async function rearmSuspendedWaitTimers(
       continue;
     }
 
-    const jobName = `flow-wait:${run.runId}:${run.nodeId}`;
+    const jobName = waitTimerJobName(run.runId, run.nodeId);
     try {
       await job.schedule(jobName, { type: 'once', at: wakeAt }, async () => {
         try {
