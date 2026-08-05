@@ -1,5 +1,6 @@
 ---
 "@objectstack/client": major
+"@objectstack/cli": patch
 ---
 
 fix(client)!: `DeleteDataResult` declares the schema it names — `success`, not `deleted` (#5638)
@@ -56,6 +57,23 @@ was wrong on ordinary deployments and accidentally right on slim ones; after
 it, both paths answer `{ object, id, success }` and the declaration was simply
 wrong everywhere. The consumer-side correction had to follow the producer, not
 lead it.
+
+## `os data delete` was reading the phantom key too
+
+`packages/cli/src/commands/data/delete.ts` built its `--format json` / `--format
+yaml` payload with `deleted: result.deleted`. That evaluated to `undefined`, and
+`JSON.stringify` drops undefined values — so the `deleted` key the command has
+always declared **never appeared in a single run**. It now carries
+`result.success`, the server's own verdict.
+
+Observable change: `os data delete --format json` gains `deleted: true` (YAML
+likewise) on a successful delete. The key name stays `deleted` deliberately —
+it is the CLI's output key, not the protocol's, and the payload's top-level
+`success` already means something different (the CLI envelope's "the command
+completed"). Conflating the two is the hazard #5641 called out when it noted
+that `body.success` and `body.data.success` are different facts. Scripts
+reading `.deleted` from this command were reading `undefined` before and get a
+boolean now; nothing that worked stops working.
 
 ## Downstream
 
