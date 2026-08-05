@@ -223,11 +223,18 @@ export const RecordHighlightsField = z.union([
     label: z.string().optional().describe('Display label (overrides schema label)'),
     icon: z.string().optional().describe('Icon name (lucide icon key)'),
     type: z.string().optional().describe('Override cell renderer type (rare)'),
+    // #5176 — declared because it is already enforced: the renderer's
+    // HeaderHighlight gate refuses inline editing on a chip carrying it. Kept
+    // as a declared key (ADR-0049 enforce-or-remove, satisfied on arrival)
+    // rather than an undeclared key the renderer happens to honour — an
+    // undeclared key is silently stripped here, which turns a machine-owned
+    // column editable again with no diagnostic anywhere.
+    readonly: z.boolean().optional().describe('Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header.'),
   }),
-]).describe('Highlight field: bare name, or {name,label?,icon?,type?}');
+]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
 
 export const RecordHighlightsProps = z.object({
-  fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?} for inline overrides.'),
+  fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
