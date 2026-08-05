@@ -166,20 +166,54 @@ describe('a config the schema accepts reaches the plugin intact', () => {
     expect(options.defaultFrom).toEqual({ name: 'Acme CRM', address: 'no-reply@acme-crm.local' });
   });
 
-  it('spreads defaultTemplateContext OVER the resolved appName, as documented', () => {
-    // Not the precedence the header TSDoc's "env overrides per setting" line
-    // would predict — `OS_APP_NAME` loses to an `appName` written inside
-    // `defaultTemplateContext`. Measured, documented in the schema, and filed
-    // as #5448; pinned here so a change to it is deliberate rather than
-    // discovered by an operator whose branded mail says the wrong name.
+  it('resolves appName by the five-rung chain — env over both declared keys (#5448)', () => {
+    // This pin used to record the OPPOSITE: `defaultTemplateContext` was
+    // spread OVER the resolved value, so `OS_APP_NAME` lost to an `appName`
+    // written inside it. That was measured behaviour, not intent, and was
+    // filed as #5448 — settled direction B (the env must win, per the header's
+    // "override per setting") and implemented by PR #5498, which resolves
+    // `appName` AFTER the spread. This pin now guards the new order.
+    //
+    // Its angle is this file's own, and not a restatement of
+    // `serve-email-appname-precedence.test.ts`: that file feeds the resolver
+    // raw objects, whereas the config below goes through the real
+    // `EmailServiceConfigSchema.parse()` first. So what is pinned here is that
+    // the two keys #5307 added to the CONTRACT survive the parse AND land on
+    // the rungs the schema's own prose promises — a schema that renamed,
+    // stripped or reshaped either key would be red here even while the
+    // resolver's own tests stayed green.
     const parsed = EmailServiceConfigSchema.parse({
       appName: 'From The Key',
-      defaultTemplateContext: { appName: 'From The Context' },
-    });
-    const { options } = resolveEmailCapabilityArg(parsed as Record<string, any>, {
-      OS_APP_NAME: 'From The Env',
+      defaultTemplateContext: { appName: 'From The Context', supportEmail: 'help@acme.test' },
     });
 
-    expect(options.defaultTemplateContext).toMatchObject({ appName: 'From The Context' });
+    // Rung 1 — all three sources distinct and present: the env var wins.
+    // (Three DIFFERENT values on purpose: asserting a value all three sources
+    // agree on would pass under any ordering, including the old one.)
+    const withEnv = resolveEmailCapabilityArg(parsed as Record<string, any>, {
+      OS_APP_NAME: 'From The Env',
+    }).options;
+    expect(withEnv.defaultTemplateContext).toEqual({
+      appName: 'From The Env',
+      supportEmail: 'help@acme.test',   // every other context key still spreads verbatim
+    });
+    // The blast radius #5448 named: the placeholder sender is slugged from the
+    // resolved name, so the envelope moves with the body or the fix is half done.
+    expect(withEnv.defaultFrom).toEqual({ name: 'From The Env', address: 'no-reply@from-the-env.local' });
+
+    // Rung 2 — no env: the declared `appName` key beats the context form.
+    // Under the old spread-over order this answered 'From The Context' too,
+    // so this half discriminates the two orders even without an env var set.
+    const noEnv = resolveEmailCapabilityArg(parsed as Record<string, any>, {}).options;
+    expect(noEnv.defaultTemplateContext).toMatchObject({ appName: 'From The Key' });
+
+    // Rung 3 — the context form is still IN the chain, not dropped behind the
+    // dedicated key: a config that declares only this shape keeps its name
+    // rather than being demoted to 'ObjectStack'.
+    const contextOnly = EmailServiceConfigSchema.parse({
+      defaultTemplateContext: { appName: 'From The Context' },
+    });
+    expect(resolveEmailCapabilityArg(contextOnly as Record<string, any>, {}).options
+      .defaultTemplateContext).toMatchObject({ appName: 'From The Context' });
   });
 });

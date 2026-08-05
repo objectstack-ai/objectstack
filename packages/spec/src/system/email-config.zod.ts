@@ -153,10 +153,18 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
    * template context this schema names explicitly because the runtime also
    * derives a *from-address* out of it.
    *
-   * Resolved as `OS_APP_NAME` env → this key → the top-level `appName` of
-   * `objectstack.config.ts` → `'ObjectStack'`. It is seeded into
-   * `defaultTemplateContext` as `appName`, so setting it here is exactly
-   * `defaultTemplateContext: { appName: … }` with the env layer in front.
+   * Resolved on a five-rung chain: `OS_APP_NAME` env → this key →
+   * `defaultTemplateContext.appName` → the top-level `appName` of
+   * `objectstack.config.ts` → `'ObjectStack'`. The resolved value is then
+   * written into `defaultTemplateContext` as `appName`, so templates read one
+   * answer whichever rung supplied it.
+   *
+   * This key and `defaultTemplateContext: { appName: … }` are therefore NOT
+   * interchangeable — this one is the higher rung, and both lose to the env
+   * var. That ordering was settled by #5448 (implemented in PR #5498): before
+   * it, the whole context was spread OVER the resolved value, which made
+   * `OS_APP_NAME` inert for any config that spelled the context form — the one
+   * per-environment lever over a repo-pinned config, silently doing nothing.
    *
    * When no `defaultFrom` resolves from any source, the resolved app name
    * also becomes the placeholder sender — `Acme CRM` ⇒
@@ -170,31 +178,40 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
       // into MDX as `` `{{x}` `` plus a stray `}` (three such sites already on
       // main — filed as #5452), so the name is spelled without them.
       'Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then '
-      + 'this, then the top-level config appName, then "ObjectStack". Also seeds the placeholder '
-      + 'no-reply sender when no defaultFrom is configured',
+      + 'this, then defaultTemplateContext.appName, then the top-level config appName, then '
+      + '"ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured',
     ),
 
   /**
    * Render context merged into every `sendTemplate()` call, under the
    * per-call `data`. Free-form on purpose: the CLI passes this object
-   * through to `EmailServicePlugin` unchanged and the template engine
-   * resolves whatever names a template happens to reference, so there is no
-   * closed vocabulary here to declare — put the values your own templates
-   * interpolate (support address, brand URL, footer text …).
+   * through to `EmailServicePlugin` as written — `appName` excepted, see
+   * below — and the template engine resolves whatever names a template
+   * happens to reference, so there is no closed vocabulary here to declare —
+   * put the values your own templates interpolate (support address, brand
+   * URL, footer text …).
    *
-   * `appName` is always present: it is computed first and this object is
-   * spread OVER it, so an `appName` written here wins over `OS_APP_NAME`
-   * and over the `appName` key above. That is the one place the header's
-   * "env overrides per setting" does not hold, measured rather than
-   * intended — whether it should is filed as #5448. Until it is settled,
-   * prefer `appName` (or the env var) for that one value and keep this map
-   * for everything else.
+   * One key is not passed through as written: `appName`. It is always
+   * present in the delivered context, and its value comes from the chain on
+   * the `appName` key above — `OS_APP_NAME` → `appName` → this map's
+   * `appName` → the top-level config `appName` → `'ObjectStack'`. So writing
+   * it here still works (it is the third rung, and a config that spells only
+   * this form keeps its name), but the env var and the dedicated key both
+   * override it.
+   *
+   * It used to be the other way round: the resolver computed the value and
+   * then spread this whole map OVER it, which made `OS_APP_NAME` inert and
+   * broke the header's "env overrides per setting" on exactly one key.
+   * #5448 settled that the env must win (implemented in PR #5498), and the
+   * exception is gone. Every OTHER key here has no env or dedicated-config
+   * carrier, so it remains the only source for itself and reaches templates
+   * verbatim.
    */
   defaultTemplateContext: z.record(z.string(), z.unknown()).optional()
     .describe(
       'Free-form render context merged into every sendTemplate() call, under the per-call data. '
-      + 'Passed through unchanged. An appName written here overrides both the appName key and '
-      + 'OS_APP_NAME',
+      + 'Passed through unchanged except appName, which is resolved by its own chain — '
+      + 'OS_APP_NAME and the appName key both override the value written here',
     ),
 }));
 export type EmailServiceConfig = z.infer<typeof EmailServiceConfigSchema>;

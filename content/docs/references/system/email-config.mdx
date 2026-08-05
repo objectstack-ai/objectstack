@@ -102,8 +102,8 @@ const result = EmailAddressConfigSchema.parse(data);
 | **persist** | `boolean` | optional | Persist to sys_email (default true) |
 | **queueDelivery** | `boolean` | optional | Deliver through the durable sys_job_queue instead of inline (or OS_EMAIL_QUEUE_ENABLED env). Default false. Reuses `retries` as the queue attempt budget; requires a queue service and sys_email persistence, else the boot fails |
 | **options** | `Record<string, any>` | optional | Provider-specific extras. smtp: host (required) / port / secure / user / password, mirroring OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER / _PASSWORD. postmark: messageStream |
-| **appName** | `string` | optional | Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then this, then the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured |
-| **defaultTemplateContext** | `Record<string, any>` | optional | Free-form render context merged into every sendTemplate() call, under the per-call data. Passed through unchanged. An appName written here overrides both the appName key and OS_APP_NAME |
+| **appName** | `string` | optional | Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then this, then defaultTemplateContext.appName, then the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured |
+| **defaultTemplateContext** | `Record<string, any>` | optional | Free-form render context merged into every sendTemplate() call, under the per-call data. Passed through unchanged except appName, which is resolved by its own chain — OS_APP_NAME and the appName key both override the value written here |
 
 
 ---

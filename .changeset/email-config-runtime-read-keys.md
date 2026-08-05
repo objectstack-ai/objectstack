@@ -19,8 +19,13 @@ spec: `EmailServiceConfigSchema` 补齐 CLI 实读的 `queueDelivery` / `appName
 
 本次是把契约追平既成事实,**运行时零改动**:三个键都是 optional,不带 `.default()`
 (默认值由 `resolveEmailCapabilityArg` 对着 env 与顶层 config 解析,schema 再造一个只会
-多出一个谁也不赢的答案),`defaultTemplateContext` 保持自由 record —— 读侧原样透传,
-声明一套读侧没有的约束等于发明契约。
+多出一个谁也不赢的答案),`defaultTemplateContext` 保持自由 record —— 除 `appName` 外
+读侧原样透传,声明一套读侧没有的约束等于发明契约。
+
+`appName` 与 `defaultTemplateContext` 的 TSDoc / `.describe()` 按 #5448 已裁定的新序落笔
+(`OS_APP_NAME` > `config.email.appName` > `defaultTemplateContext.appName` > 顶层
+`appName` > `'ObjectStack'`,PR #5498 落地),因此生成的 `email-config.mdx` 属性表文案
+随之更新:此前 context 里的 `appName` 压过 env 的旧行为已不复存在,文档不再那样承诺。
 
 同时新增跨包契约测试 `serve-email-config-parity.contract.test.ts`,把 issue 里那条手工
 grep 机械化:读侧多出一个未声明的键即变红,不必再等下一次人工比对。
