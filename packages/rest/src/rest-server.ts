@@ -766,6 +766,18 @@ export function mapDataError(error: any, object?: string): { status: number; bod
  * uniformly across CRUD, batch, metadata, UI and discovery routes.
  */
 function sendError(res: any, error: any, object?: string): void {
+    const { status, body } = resolveErrorResponse(error, object);
+    res.status(status).json(body);
+}
+
+/**
+ * The wire response `sendError` would emit for a thrown route error, WITHOUT
+ * emitting it. Split out of `sendError` so the logging decision
+ * (`handleRouteError`) reads the exact status/body the client is about to get
+ * instead of forming a second opinion that can drift from the responder — the
+ * drift this whole seam exists to prevent (#4886).
+ */
+function resolveErrorResponse(error: any, object?: string): { status: number; body: Record<string, unknown> } {
     // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
     // status-passthrough: `mapDataError` owns its canonical envelope
     // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
@@ -776,15 +788,16 @@ function sendError(res: any, error: any, object?: string): void {
         const safeMsg = typeof error.message === 'string' && error.message.length < 500
             ? error.message
             : 'Request failed';
-        res.status(error.status).json({
-            error: safeMsg,
-            ...(error.code ? { code: error.code } : {}),
-            ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
-        });
-        return;
+        return {
+            status: error.status,
+            body: {
+                error: safeMsg,
+                ...(error.code ? { code: error.code } : {}),
+                ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
+            },
+        };
     }
-    const mapped = mapDataError(error, object);
-    res.status(mapped.status).json(mapped.body);
+    return mapDataError(error, object);
 }
 
 /**
@@ -818,6 +831,61 @@ function isExpectedQueryRejection(body: Record<string, unknown> | undefined): bo
         || body?.code === 'INVALID_FILTER'
         || body?.code === 'INVALID_SORT'
         || body?.code === 'INVALID_QUERY';
+}
+
+/**
+ * THE predicate. Whether a resolved error response is an *expected* outcome —
+ * something the client caused or a normal lifecycle state — rather than a
+ * server fault worth an "[REST] Unhandled error" line plus a stack trace.
+ *
+ * The union of the three conditions the data routes had each open-coded:
+ *  - `isExpectedDataStatus` — 403/404/409/502/503 lifecycle outcomes
+ *  - `isExpectedQueryRejection` — the client-caused 400 vocabulary
+ *  - `VALIDATION_FAILED` — the per-field 400 envelope
+ *
+ * It is deliberately NOT "any 4xx". `mapDataError`'s final fallback degrades an
+ * error it recognised nothing about to an un-coded 400, and that bucket is
+ * where a genuine handler bug (a `TypeError`, say) lands — silencing it would
+ * be the mirror-image of the defect this fixes.
+ *
+ * [#4886] Every route catch now decides through this one function. Before, the
+ * metadata family logged unconditionally — the designer's `?state=draft` probe
+ * made `NO_DRAFT` (a structured 404, and the overwhelmingly common answer for
+ * any artifact nobody is editing) print 45 stack traces in one browsing
+ * session — while the data family open-coded four different spellings of
+ * "expected" at 12 sites. `isExpectedQueryRejection`'s own docblock records the
+ * previous lap of exactly this drift: the filter and sort codes shipped without
+ * joining the list, so every rejection they produced was logged as an unhandled
+ * error too. One predicate, one door, so there is no third lap.
+ */
+function isExpectedRouteError(status: number, body: Record<string, unknown> | undefined): boolean {
+    return isExpectedDataStatus(status)
+        || isExpectedQueryRejection(body)
+        || body?.code === 'VALIDATION_FAILED';
+}
+
+/**
+ * Log "[REST] Unhandled error" only when `resolved` is a genuine fault. For
+ * catch blocks that must emit their own response shape (the CRUD handlers that
+ * respond straight from a `mapDataError` envelope, one of which rewrites 400 →
+ * 404 on the wire) — they keep their responder and share only the verdict.
+ */
+function logUnexpectedRouteError(error: any, resolved: { status: number; body: Record<string, unknown> }): void {
+    if (!isExpectedRouteError(resolved.status, resolved.body)) {
+        logError('[REST] Unhandled error:', error);
+    }
+}
+
+/**
+ * The single door a route catch block should use: resolve the response once,
+ * log it only if it is a real fault, then send it. Wire behaviour is identical
+ * to a bare `sendError(res, error, object)` — this only decides whether the log
+ * line is printed.
+ */
+function handleRouteError(res: any, error: any, object?: string): void {
+    const resolved = resolveErrorResponse(error, object);
+    logUnexpectedRouteError(error, resolved);
+    res.status(resolved.status).json(resolved.body);
 }
 
 /**
@@ -2661,8 +2729,7 @@ export class RestServer {
 
                     res.json(discovery);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             };
 
@@ -2997,8 +3064,7 @@ export class RestServer {
                         res.header('Vary', 'Accept-Language');
                         res.json(translated);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3040,8 +3106,7 @@ export class RestServer {
                         });
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3080,8 +3145,7 @@ export class RestServer {
                         });
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3164,8 +3228,7 @@ export class RestServer {
                         });
                         res.json(report);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3392,8 +3455,7 @@ export class RestServer {
                         res.header('Vary', 'Accept-Language');
                         res.json(translated);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3426,8 +3488,7 @@ export class RestServer {
                         });
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3525,8 +3586,7 @@ export class RestServer {
                         }
                         res.json(tree);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3760,8 +3820,7 @@ export class RestServer {
                             res.json(await this.translateMetaItem(req, req.params.type, environmentId, visible));
                         }
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -3840,8 +3899,7 @@ export class RestServer {
                     } as any);
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -3901,8 +3959,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -3945,8 +4002,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -3984,8 +4040,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -4023,8 +4078,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -4072,8 +4126,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -4113,8 +4166,7 @@ export class RestServer {
                     });
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -4145,8 +4197,7 @@ export class RestServer {
                         res.header('Vary', 'Accept-Language');
                         res.json(await this.translateMetaItem(req, req.params.type, environmentId, item));
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error);
+                        handleRouteError(res, error);
                     }
                 },
                 metadata: {
@@ -4194,8 +4245,7 @@ export class RestServer {
                     } as any);
                     res.json(result);
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error);
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -4231,8 +4281,7 @@ export class RestServer {
                         res.status(501).json({ error: 'UI View resolution not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
                     }
                 } catch (error: any) {
-                    logError("[REST] Unhandled error:", error);
-                    sendError(res, error, req.params?.object);
+                    handleRouteError(res, error, req.params?.object);
                 }
             },
             metadata: {
@@ -4273,12 +4322,8 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (isExpectedDataStatus(mapped.status) || isExpectedQueryRejection(mapped.body)) {
-                            res.status(mapped.status).json(mapped.body);
-                        } else {
-                            logError("[REST] Unhandled error:", error);
-                            res.status(mapped.status).json(mapped.body);
-                        }
+                        logUnexpectedRouteError(error, mapped);
+                        res.status(mapped.status).json(mapped.body);
                     }
                 },
                 metadata: {
@@ -4312,7 +4357,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== "VALIDATION_FAILED") logError("[REST] Unhandled error:", error);
+                        logUnexpectedRouteError(error, mapped);
                         res.status(mapped.status === 400 ? 404 : mapped.status).json(mapped.body);
                     }
                 },
@@ -4367,7 +4412,7 @@ export class RestServer {
                         res.status(201).json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== "VALIDATION_FAILED") logError("[REST] Unhandled error:", error);
+                        logUnexpectedRouteError(error, mapped);
                         res.status(mapped.status).json(mapped.body);
                     }
                 },
@@ -4429,9 +4474,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status) && !isExpectedQueryRejection(mapped.body)) {
-                            logError("[REST] Unhandled error:", error);
-                        }
+                        logUnexpectedRouteError(error, mapped);
                         res.status(mapped.status).json(mapped.body);
                     }
                 },
@@ -4509,7 +4552,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== "VALIDATION_FAILED") logError("[REST] Unhandled error:", error);
+                        logUnexpectedRouteError(error, mapped);
                         res.status(mapped.status).json(mapped.body);
                     }
                 },
@@ -4551,7 +4594,7 @@ export class RestServer {
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
-                        if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== "VALIDATION_FAILED") logError("[REST] Unhandled error:", error);
+                        logUnexpectedRouteError(error, mapped);
                         res.status(mapped.status).json(mapped.body);
                     }
                 },
@@ -4615,13 +4658,9 @@ export class RestServer {
                     res.status(201).json(result);
                 } catch (error: any) {
                     // Clone's domain errors (CLONE_DISABLED/RECORD_NOT_FOUND)
-                    // carry an explicit `.status`; fall back to mapDataError for
-                    // driver/validation faults. Only log genuine server faults.
-                    const status = typeof error?.status === 'number'
-                        ? error.status
-                        : mapDataError(error, req.params?.object).status;
-                    if (!isExpectedDataStatus(status) && error?.code !== 'VALIDATION_FAILED') logError('[REST] Unhandled error:', error);
-                    sendError(res, error, req.params?.object);
+                    // carry an explicit `.status`; `handleRouteError` resolves
+                    // that passthrough itself and logs only genuine faults.
+                    handleRouteError(res, error, req.params?.object);
                 }
             },
             metadata: {
@@ -4700,8 +4739,7 @@ export class RestServer {
                         results: summary.results,
                     });
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, String(req.params?.object || ''));
+                    handleRouteError(res, error, String(req.params?.object || ''));
                 }
             },
             metadata: {
@@ -4893,8 +4931,7 @@ export class RestServer {
                         }
                     })();
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, String(req.params?.object || ''));
+                    handleRouteError(res, error, String(req.params?.object || ''));
                 }
             },
             metadata: {
@@ -4929,8 +4966,7 @@ export class RestServer {
                     }
                     res.json({ success: true });
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, '');
+                    handleRouteError(res, error, '');
                 }
             },
             metadata: { summary: 'Cancel an in-flight import job', tags: ['data', 'import'] },
@@ -5008,8 +5044,7 @@ export class RestServer {
                     });
                     res.json({ success: true, jobId, object: objectName, deleted, restored, failed });
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, '');
+                    handleRouteError(res, error, '');
                 }
             },
             metadata: { summary: 'Undo (logically roll back) a finished import job', tags: ['data', 'import'] },
@@ -5035,8 +5070,7 @@ export class RestServer {
                     const items = Array.isArray(stored?.items) ? stored.items : Array.isArray(stored) ? stored : [];
                     res.json({ ...importJobToProgress(row), results: items, resultsTruncated: !!stored?.truncated });
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, '');
+                    handleRouteError(res, error, '');
                 }
             },
             metadata: { summary: 'Import job results (capped per-row report)', tags: ['data', 'import'] },
@@ -5060,8 +5094,7 @@ export class RestServer {
                     }
                     res.json(importJobToProgress(row));
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, '');
+                    handleRouteError(res, error, '');
                 }
             },
             metadata: { summary: 'Import job progress', tags: ['data', 'import'] },
@@ -5095,8 +5128,7 @@ export class RestServer {
                                 : Array.isArray(r) ? r : [];
                     res.json({ jobs: rows.map(importJobToSummary) });
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
-                    sendError(res, error, '');
+                    handleRouteError(res, error, '');
                 }
             },
             metadata: { summary: 'List import jobs (history)', tags: ['data', 'import'] },
@@ -5458,10 +5490,9 @@ export class RestServer {
                         res.end();
                     }
                 } catch (error: any) {
-                    logError('[REST] Unhandled error:', error);
                     // Best-effort error envelope; if headers already sent the
                     // client receives a truncated stream which signals failure.
-                    try { sendError(res, error, String(req.params?.object || '')); }
+                    try { handleRouteError(res, error, String(req.params?.object || '')); }
                     catch { try { res.end(); } catch { /* swallow */ } }
                 }
             },
@@ -5536,9 +5567,7 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     const mapped = mapDataError(error);
-                    if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== 'VALIDATION_FAILED') {
-                        logError('[REST] Unhandled error:', error);
-                    }
+                    logUnexpectedRouteError(error, mapped);
                     res.status(mapped.status).json(mapped.body);
                 }
             },
@@ -5951,7 +5980,9 @@ export class RestServer {
                     res.status(201).json(result);
                 } catch (error: any) {
                     const mapped = mapDataError(error);
-                    if (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== 'VALIDATION_FAILED') {
+                    // Distinct message (this is not the "unhandled" channel),
+                    // same shared verdict — see `isExpectedRouteError`.
+                    if (!isExpectedRouteError(mapped.status, mapped.body)) {
                         logError('[REST] Public form submit error:', error);
                     }
                     res.status(mapped.status).json(mapped.body);
@@ -6099,7 +6130,9 @@ export class RestServer {
                     });
                 } catch (error: any) {
                     const mapped = mapDataError(error);
-                    if (!isExpectedDataStatus(mapped.status)) {
+                    // Distinct message (this is not the "unhandled" channel),
+                    // same shared verdict — see `isExpectedRouteError`.
+                    if (!isExpectedRouteError(mapped.status, mapped.body)) {
                         logError('[REST] Public form lookup error:', error);
                     }
                     res.status(mapped.status).json(mapped.body);
@@ -7651,9 +7684,12 @@ export class RestServer {
                 } catch (error: any) {
                     // Log only genuine server faults; client 4xx (validation,
                     // unresolved ref, atomic rollback of a bad op) are expected.
-                    const status = typeof error?.status === 'number' ? error.status : mapDataError(error).status;
-                    if (status >= 500) logError('[REST] Unhandled error:', error);
-                    sendError(res, error);
+                    // This site used to judge on `status >= 500` alone, which
+                    // also swallowed the un-coded 400 `mapDataError` degrades an
+                    // UNRECOGNISED error to — a handler `TypeError` inside a
+                    // batch transaction vanished here. The shared predicate
+                    // keeps that one loud while staying quiet on the coded 4xx.
+                    handleRouteError(res, error);
                 }
             },
             metadata: {
@@ -7707,8 +7743,7 @@ export class RestServer {
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error, req.params?.object);
+                        handleRouteError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -7760,8 +7795,7 @@ export class RestServer {
                         } as any);
                         res.status(201).json(result);
                     } catch (error: any) {
-                        logError("[REST] Unhandled error:", error);
-                        sendError(res, error, req.params?.object);
+                        handleRouteError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -7816,8 +7850,7 @@ export class RestServer {
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
-                        sendError(res, error, req.params?.object);
+                        handleRouteError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
@@ -7879,8 +7912,7 @@ export class RestServer {
                         } as any);
                         res.json(result);
                     } catch (error: any) {
-                        if (error?.code !== 'VALIDATION_FAILED') logError("[REST] Unhandled error:", error);
-                        sendError(res, error, req.params?.object);
+                        handleRouteError(res, error, req.params?.object);
                     }
                 },
                 metadata: {
