@@ -56,7 +56,14 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
-import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
+import { join } from 'node:path';
+
+import {
+    LocalManifestSource,
+    type InstalledManifestEntry,
+    type InstalledManifestListing,
+    type SkippedManifestEntry,
+} from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
@@ -183,7 +190,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const rawApp = httpServer.getRawApp();
 
             const postHandler = async (c: any) => this.handleInstall(c, ctx);
-            const getHandler = async (c: any) => this.handleList(c);
+            const getHandler = async (c: any) => this.handleList(c, ctx);
             const deleteHandler = async (c: any) => this.handleUninstall(c, ctx);
 
             const reseedHandler = async (c: any) => this.handleReseed(c, ctx);
@@ -209,7 +216,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * a marketplace package).
      */
     private rehydrate = async (ctx: PluginContext): Promise<void> => {
-        const entries = this.readAll();
+        const { entries, skipped } = this.readAll();
+
+        // #5413 — BEFORE the early return, not after. A ledger whose entries
+        // are ALL corrupt is the worst case of this bug, not an exempt one:
+        // every installed app silently missing from the runtime, and an
+        // `entries.length === 0` return above this loop would be the one path
+        // that still said nothing at all.
+        this.warnSkippedLedgerEntries(ctx, skipped, 'that installed app is NOT registered in this runtime');
+
         if (entries.length === 0) return;
 
         let manifestService: { register(m: any): void | Promise<void> } | null = null;
@@ -698,8 +713,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }, 200);
     };
 
-    private handleList = async (c: any): Promise<Response> => {
-        const entries = this.readAll();
+    /**
+     * `GET /…/installed` — the console's "Installed Apps" list.
+     *
+     * #5413: the WIRE SHAPE is deliberately unchanged. A corrupt ledger entry
+     * is reported to the operator's log, not to the HTTP client — putting it in
+     * the response body is a separate decision about this endpoint's schema and
+     * is explicitly NOT made here. What the fix removes is the case where a
+     * short list was served with `success: true` and nobody, anywhere, could
+     * have known.
+     */
+    private handleList = async (c: any, ctx: PluginContext): Promise<Response> => {
+        const { entries, skipped } = this.readAll();
+        this.warnSkippedLedgerEntries(ctx, skipped, 'it is MISSING from the installed-apps list served to the console');
         return c.json({
             success: true,
             data: {
@@ -1276,5 +1302,39 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         return null;
     };
 
-    private readAll = (): InstalledEntry[] => this.ledger.list();
+    /**
+     * Read the whole ledger — the entries it parsed AND the files it could not
+     * (#5413).
+     *
+     * Returns the listing rather than unwrapping `.entries` here on purpose: an
+     * unwrap at this seam would put the silence back one layer up, where it is
+     * even harder to find. Both call sites below report `skipped` before they
+     * do anything with `entries`.
+     */
+    private readAll = (): InstalledManifestListing => this.ledger.list();
+
+    /**
+     * One line per ledger file that could not be read (#5413).
+     *
+     * `warn`, deliberately, and the same tier as this plugin's existing
+     * "no `manifest` service — rehydrate skipped": this is a FUNCTIONAL
+     * degradation, not a durability one. Nothing that claimed to persist failed
+     * to land — the ledger file is still on disk, exactly as written — the
+     * runtime is simply, visibly smaller than the ledger says it should be, and
+     * the next person to look for the missing app finds out. (See AGENTS.md,
+     * "Degradation log levels".)
+     *
+     * The file name and the thrower's own words are both in the line, because
+     * they are the two things that turn "an app is missing" into a fix:
+     * `.objectstack/installed-packages/<file>` is the thing to repair or delete.
+     */
+    private warnSkippedLedgerEntries = (ctx: PluginContext, skipped: SkippedManifestEntry[], what: string): void => {
+        for (const { file, cause } of skipped) {
+            const reason = cause instanceof Error ? (cause.message || cause.name) : String(cause);
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] unreadable ledger entry ${file} — ${what} `
+                + `(repair or remove ${join(this.storageDir, file)}): ${reason}`,
+            );
+        }
+    };
 }

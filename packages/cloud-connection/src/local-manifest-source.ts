@@ -69,6 +69,52 @@ export interface InstalledManifestEntry {
     globalUniqueAttestation?: GlobalUniqueAttestation;
 }
 
+/**
+ * One ledger file {@link LocalManifestSource.list} could not turn into an entry
+ * (#5413).
+ *
+ * The `cause` is the thrown object itself, never a string this class invented:
+ * `ENOENT`, `EACCES` and `Unexpected end of JSON input` are three different
+ * operational facts with three different fixes, and the thrower words each of
+ * them better than any sentence here could. Consumers quote it (`os doctor`
+ * folds it onto a report row) or log it — that decision is theirs, which is the
+ * whole reason this is returned rather than logged in place.
+ */
+export interface SkippedManifestEntry {
+    /** The ledger file's basename, as it sits on disk (e.g. `com.acme.crm.json`). */
+    file: string;
+    /** What reading or parsing that file threw. Never re-wrapped, never stringified. */
+    cause: unknown;
+}
+
+/**
+ * What {@link LocalManifestSource.list} hands back — what it READ, and what it
+ * could NOT (#5413).
+ *
+ * Skipping a corrupt file is deliberate and stays that way: one truncated
+ * manifest must not stop a runtime from booting the packages that are fine.
+ * The defect was skipping it **silently**. `list()` used to return a bare
+ * array, so a short list was indistinguishable from a complete one — no
+ * difference in the return value, no log, no count — and all three consumers
+ * gave a confidently wrong answer: `rehydrate()` dropped an installed app out
+ * of the runtime with no line in the log, `handleList()` served the console a
+ * list that looked whole, and `os doctor` printed `✓ Unique scope` over
+ * packages it had never seen.
+ *
+ * Reporting is the CALLER's job, not this class's: a boot wants a `warn`, an
+ * HTTP handler wants a log line without changing its wire shape, and `os
+ * doctor` wants a `HealthCheckResult` row — not stderr. Returning the fact
+ * (rather than taking a logger, or an optional `onSkip` callback that defaults
+ * to silence) is what makes "I read only half the ledger" impossible to ignore
+ * by accident: it is in the type, so a consumer that drops it has to say so.
+ */
+export interface InstalledManifestListing {
+    /** Every file that parsed into an entry. */
+    entries: InstalledManifestEntry[];
+    /** Every `.json` file in the ledger that did not, and why. */
+    skipped: SkippedManifestEntry[];
+}
+
 /** Default ledger location, relative to the runtime's working directory. */
 export const DEFAULT_INSTALLED_PACKAGES_DIR = '.objectstack/installed-packages';
 
@@ -86,18 +132,36 @@ export class LocalManifestSource {
             : resolve(process.cwd(), DEFAULT_INSTALLED_PACKAGES_DIR);
     }
 
-    /** Every valid entry in the ledger (corrupt files are skipped). */
-    list(): InstalledManifestEntry[] {
-        if (!existsSync(this.dir)) return [];
-        const out: InstalledManifestEntry[] = [];
+    /**
+     * Read the ledger: every entry that parsed, AND every file that did not
+     * (#5413).
+     *
+     * Corrupt files are still skipped — deliberately, and that has not changed.
+     * What changed is that they are now **reported** in the return value
+     * instead of vanishing into an un-bound `catch`. See
+     * {@link InstalledManifestListing} for why this is the caller's fact to
+     * report rather than something logged here.
+     *
+     * ⚠️ Note what is NOT in `skipped`: a failure to enumerate the DIRECTORY
+     * still throws out of this method. That is a different fact — nothing at
+     * all was read, not "some of it" — and `os doctor` already distinguishes
+     * the two (#5412). Do not wrap `readdirSync` in a `try` here to make this
+     * method total; the throw is the signal.
+     */
+    list(): InstalledManifestListing {
+        if (!existsSync(this.dir)) return { entries: [], skipped: [] };
+        const entries: InstalledManifestEntry[] = [];
+        const skipped: SkippedManifestEntry[] = [];
         for (const name of readdirSync(this.dir)) {
             if (!name.endsWith('.json')) continue;
             try {
                 const raw = readFileSync(join(this.dir, name), 'utf8');
-                out.push(JSON.parse(raw));
-            } catch { /* skip corrupt files */ }
+                entries.push(JSON.parse(raw));
+            } catch (cause) {
+                skipped.push({ file: name, cause });
+            }
         }
-        return out;
+        return { entries, skipped };
     }
 
     /** Read one entry; null when absent or unreadable. */

@@ -807,8 +807,31 @@ interface UniqueScopeAdvisory {
  */
 interface InstalledPackageLedgerReading {
   entries: any[];
+  /**
+   * Ledger files that exist but could not be turned into entries (#5413).
+   *
+   * A DIFFERENT fact from `failure` below, and both can be empty while the
+   * other is not: `failure` means nothing at all was read, `skipped` means
+   * some of it was. Before #5413 this list could not exist — the producer
+   * dropped corrupt files inside its own un-bound `catch` and handed back a
+   * short array indistinguishable from a complete one.
+   */
+  skipped: SkippedLedgerEntry[];
   /** Present ONLY when the ledger EXISTS and could not be read. */
   failure?: { cause: unknown };
+}
+
+/**
+ * One unreadable ledger file, as `@objectstack/cloud-connection` reports it.
+ *
+ * Structurally identical to that package's `SkippedManifestEntry`, declared
+ * here rather than imported because the package is loaded through a dynamic
+ * `import()` that must be allowed to fail (`os doctor` runs in checkouts that
+ * never had it), so there is no static type import to take.
+ */
+interface SkippedLedgerEntry {
+  file: string;
+  cause: unknown;
 }
 
 /**
@@ -830,16 +853,18 @@ interface InstalledPackageLedgerReading {
  * tells the operator to stop looking. Case 2 now comes back as a `failure` the
  * caller turns into a warning row.
  *
- * ⚠️ SCOPE BOUNDARY — this covers DIRECTORY-level read failures only. A single
- * CORRUPT ENTRY never reaches this `catch`: `LocalManifestSource.list()` skips
- * unparseable files in its own per-file `catch`
- * (`packages/cloud-connection/src/local-manifest-source.ts`), so a truncated
- * manifest is dropped inside the producer and `list()` returns a short list
- * indistinguishable from a complete one. That is a producer-side defect with
- * the same false-PASS shape one layer down, and it cannot be fixed from here
- * without the consumer re-implementing the producer's parsing rules. Filed as
- * #5413; pinned by the SCOPE BOUNDARY case in
- * `doctor-ledger-read-failure.test.ts`, which goes red when #5413 lands.
+ * There is a THIRD fact, one layer down, and it is now reported too (#5413).
+ * A single CORRUPT ENTRY never reaches this `catch` and never will:
+ * `LocalManifestSource.list()` skips unparseable files in its own per-file
+ * `catch` (`packages/cloud-connection/src/local-manifest-source.ts`), which is
+ * the right behaviour — one truncated manifest must not stop a runtime from
+ * booting the packages that are fine. It used to skip them silently, returning
+ * a short list indistinguishable from a complete one, so doctor printed
+ * `✓ Unique scope` over packages it had never parsed: the same false PASS as
+ * case 2, one layer down. Fixing it from here would have meant re-implementing
+ * the producer's parsing rules in the consumer — the lenient-consumer
+ * workaround this repo forbids — so `list()` was changed to REPORT what it
+ * skipped, and this function passes that through as `skipped`.
  */
 async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackageLedgerReading> {
   let mod: any;
@@ -849,16 +874,21 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
     // catch, and only this one, is allowed to be silent.
     mod = await import('@objectstack/cloud-connection');
   } catch {
-    return { entries: [] };
+    return { entries: [], skipped: [] };
   }
 
   const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
   try {
     // No directory = nothing was ever installed. Genuinely not a finding.
-    if (!fs.existsSync(dir)) return { entries: [] };
-    return { entries: new mod.LocalManifestSource(dir).list() };
+    if (!fs.existsSync(dir)) return { entries: [], skipped: [] };
+    // #5413 — read BOTH halves of the listing. Destructured with no `??`
+    // fallback on purpose: `list()` declares this shape, and a tolerant read
+    // here would be the exact consumer-side accommodation that let the silence
+    // live in the first place.
+    const { entries, skipped } = new mod.LocalManifestSource(dir).list();
+    return { entries, skipped };
   } catch (err) {
-    return { entries: [], failure: { cause: err } };
+    return { entries: [], skipped: [], failure: { cause: err } };
   }
 }
 
@@ -870,6 +900,14 @@ interface UniqueScopeReading {
    * not clean, and the caller must not print its success line (#5412).
    */
   ledgerFailure?: { cause: unknown };
+  /**
+   * Ledger entries that could not be parsed (#5413). The advisory is
+   * incomplete in the same way `ledgerFailure` makes it incomplete — just
+   * partially rather than wholly — so it suppresses the success line too. An
+   * unreadable manifest may declare an installation-wide `unique`; nobody can
+   * say it does not.
+   */
+  skippedLedgerEntries: SkippedLedgerEntry[];
 }
 
 /**
@@ -893,7 +931,7 @@ async function findUnscopedGlobalUniques(
   // "Could not load config for analysis".
   posture: TenancyPosture,
 ): Promise<UniqueScopeReading> {
-  if (!postureGatesGlobalUniques(posture)) return { advisories: [] };
+  if (!postureGatesGlobalUniques(posture)) return { advisories: [], skippedLedgerEntries: [] };
 
   const out: UniqueScopeAdvisory[] = [];
   for (const finding of collectGlobalUniques(config?.objects)) {
@@ -910,7 +948,11 @@ async function findUnscopedGlobalUniques(
       out.push({ source: `installed package '${entry?.manifestId ?? entry?.packageId}'`, finding });
     }
   }
-  return { advisories: out, ...(ledger.failure ? { ledgerFailure: ledger.failure } : {}) };
+  return {
+    advisories: out,
+    skippedLedgerEntries: ledger.skipped,
+    ...(ledger.failure ? { ledgerFailure: ledger.failure } : {}),
+  };
 }
 
 // ─── Filesystem Checks ──────────────────────────────────────────────
@@ -1201,6 +1243,61 @@ export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckRes
       + '      project root; it exists here, which is why this is reported rather than\n'
       + '      treated as "nothing was ever installed".\n'
       + `      cause: ${indentUnderGutter(cause)}`,
+  };
+}
+
+/**
+ * What doctor reports when INDIVIDUAL ledger entries could not be parsed
+ * (#5413).
+ *
+ * The sibling of `installedPackageLedgerFailureCheck` one layer down. That one
+ * fires when the ledger DIRECTORY could not be read at all; this one fires when
+ * the directory read fine and some of the files in it did not. Both produce the
+ * same false PASS if unreported — `✓ Unique scope` over manifests doctor never
+ * parsed — and both therefore take the `Unique scope` name column and withhold
+ * the success line, for the reasons written out above.
+ *
+ * Why entry-level corruption is a finding at all, rather than something the
+ * producer just handles: skipping a corrupt file IS correct — one truncated
+ * manifest must not stop a runtime booting. But an unparsed manifest is a
+ * manifest nobody can vouch for, and this advisory's whole subject is
+ * installation-wide `unique` constraints that are dangerous under `isolated`.
+ * "It probably didn't declare one" is not an answer doctor is entitled to give.
+ *
+ * Two shape choices worth the words:
+ *
+ *   • **Every file is named, with its own cause.** A single count ("2 entries
+ *     skipped") would send the operator to `ls` the directory and guess. The
+ *     fix for this finding is per-file — repair it or delete it — so the row
+ *     has to carry which file, and `EACCES` vs `Unexpected end of JSON input`
+ *     are different repairs.
+ *   • **The row quotes the FIRST cause; `fix` carries them all** (#5390 body).
+ *     One row is one line, the same bound every other finding here respects.
+ */
+export function installedPackageLedgerSkippedEntriesCheck(
+  skipped: SkippedLedgerEntry[],
+): HealthCheckResult {
+  const described = skipped.map((s) => ({ file: s.file, cause: describeThrown(s.cause) }));
+  const n = described.length;
+  const noun = n === 1 ? 'entry' : 'entries';
+  const head = described[0]!;
+  const more = n > 1 ? ` (+${n - 1} more)` : '';
+  return {
+    name: 'Unique scope',
+    status: 'warning',
+    message:
+      `${n} installed-package ledger ${noun} could not be read (those packages NOT checked `
+      + `for installation-wide uniques) — ${reportRowHeadline(`${head.file}: ${head.cause}`)}${more}`,
+    fix:
+      'The ledger directory was read fine; these files inside it were not. Each one is an\n'
+      + '      installed package this runtime ALSO drops at boot — it is not registered with\n'
+      + '      the kernel and does not appear in the console\'s installed-apps list — so an\n'
+      + '      app missing from this environment is very likely one of the files below.\n'
+      + '      Repair the JSON, or delete the file to uninstall the package for real.\n'
+      + '      Under `.objectstack/installed-packages/`:\n'
+      + described
+        .map((s) => `        ${s.file}\n          cause: ${indentUnderGutter(s.cause).replace(/\n/g, '\n    ')}`)
+        .join('\n'),
   };
 }
 
@@ -1502,7 +1599,7 @@ export default class Doctor extends Command {
         // so nothing is silently lost.
         if (postureReading.ok && postureGatesGlobalUniques(postureReading.posture)) {
           printStep("Checking unique scopes against the 'isolated' tenancy posture...");
-          const { advisories, ledgerFailure } = await findUnscopedGlobalUniques(
+          const { advisories, ledgerFailure, skippedLedgerEntries } = await findUnscopedGlobalUniques(
             cwd,
             config,
             postureReading.posture,
@@ -1519,10 +1616,23 @@ export default class Doctor extends Command {
           // that exists and could not be read is reported in its place; a
           // false `✓` here is worse than a missing check, because it is the
           // one thing that stops the operator looking further.
+          //
+          // #5413 — entry-level corruption is the same claim failing one layer
+          // down, so it gates the `✓` in exactly the same way. The two are
+          // reported independently rather than as an either/or: a directory
+          // that read fine can still hold three unparseable files, and each
+          // names a different package the advisory could not look at.
+          if (skippedLedgerEntries.length > 0) {
+            hasWarnings = true;
+            renderHealthCheckResult(
+              installedPackageLedgerSkippedEntriesCheck(skippedLedgerEntries),
+              flags.verbose,
+            );
+          }
           if (ledgerFailure) {
             hasWarnings = true;
             renderHealthCheckResult(installedPackageLedgerFailureCheck(ledgerFailure.cause), flags.verbose);
-          } else if (advisories.length === 0) {
+          } else if (advisories.length === 0 && skippedLedgerEntries.length === 0) {
             printSuccess("Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment");
           }
         }

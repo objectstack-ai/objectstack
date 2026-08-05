@@ -39,7 +39,14 @@ export type { MarketplaceInstallLocalPluginConfig } from './marketplace-install-
 // ADR-0007 step ⑤ — the local desired-state ledger, exported as a first-class
 // seam so hosts/reconcilers can read the same ledger without going through HTTP.
 export { LocalManifestSource, DEFAULT_INSTALLED_PACKAGES_DIR } from './local-manifest-source.js';
-export type { InstalledManifestEntry } from './local-manifest-source.js';
+// `list()`'s return contract is part of that seam: it reports what it could NOT
+// read alongside what it could (#5413), so a consumer cannot mistake half a
+// ledger for a whole one.
+export type {
+    InstalledManifestEntry,
+    InstalledManifestListing,
+    SkippedManifestEntry,
+} from './local-manifest-source.js';
 export { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-connection-plugin.js';
 export type { CloudConnectionPluginConfig } from './cloud-connection-plugin.js';
 export { RuntimeConfigPlugin } from './runtime-config-plugin.js';

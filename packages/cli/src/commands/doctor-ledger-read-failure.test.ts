@@ -27,18 +27,23 @@
  *
  * A false PASS, on the one constraint the `isolated` posture makes dangerous.
  *
- * ── Scope boundary this file also pins ───────────────────────────────────
+ * ── The second half, one layer down (#5413) ──────────────────────────────
  *
- * The issue's stated repro — a truncated JSON entry inside the ledger — does
- * NOT reach that `catch`, and #5412's fix does not change it.
- * `LocalManifestSource.list()` skips unparseable files in its own per-file
- * `catch` (`packages/cloud-connection/src/local-manifest-source.ts`), so a
- * corrupt entry is dropped inside the PRODUCER and `list()` returns a short
- * list indistinguishable from a complete one. Doctor sees a successful call.
- * That is a real defect of the same family one layer down, it is a
- * cross-package contract change to fix (filed as #5413), and it is pinned here
- * as a boundary (`the corrupt-entry case is NOT covered`) rather than left for
- * the next reader to re-derive — see that test's comment.
+ * This file used to pin a SCOPE BOUNDARY: the issue's stated repro — a
+ * truncated JSON entry inside the ledger — did NOT reach that `catch`, because
+ * `LocalManifestSource.list()` skipped unparseable files in its own per-file
+ * `catch` (`packages/cloud-connection/src/local-manifest-source.ts`) and
+ * returned a short list indistinguishable from a complete one. Doctor saw a
+ * successful call and printed the same false `✓ Unique scope`, over manifests
+ * it had never parsed.
+ *
+ * #5413 fixed that at the PRODUCER, where it belonged — `list()` now returns
+ * `{ entries, skipped }`, so "I read only half the ledger" is a fact in the
+ * type rather than an absence — and doctor turns `skipped` into its own row.
+ * The boundary case went red exactly as its comment predicted and is now the
+ * positive assertion below. The two facts stay separately reported: the
+ * directory could not be enumerated at all (#5412) versus it enumerated fine
+ * and some files in it would not parse (#5413).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -64,8 +69,11 @@ const plain = (s: string) => s.replace(SGR, '');
 /** The success line that must NOT appear when only half the check ran. */
 const CLEAN_BILL = 'No unconfirmed installation-wide uniques';
 
-/** The head of the row that replaces it. */
+/** The head of the row that replaces it — the DIRECTORY-level failure (#5412). */
 const LEDGER_HEADLINE = 'Could not read the installed-package ledger';
+
+/** The head of its ENTRY-level sibling (#5413). Deliberately distinct text. */
+const SKIPPED_HEADLINE = 'installed-package ledger entr';
 
 describe('installedPackageLedgerFailureCheck — the finding the shared catch used to eat', () => {
   it('quotes what was thrown, in the row AND in the verbose detail', () => {
@@ -316,21 +324,23 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     expect(run.exitCode).toBeUndefined();
   }, 60_000);
 
-  it('⚠ SCOPE BOUNDARY: a CORRUPT ENTRY is still absorbed by the producer', async () => {
-    // This pins the issue's own stated repro as NOT FIXED, deliberately, and
-    // records why — so the next reader does not re-derive it from scratch or
-    // assume #5412 covered it.
-    //
-    // `LocalManifestSource.list()` skips unparseable files in its own per-file
-    // `catch`, so a truncated manifest never reaches doctor's `catch`: the
-    // call SUCCEEDS and returns a short list that is indistinguishable from a
-    // complete one. Doctor cannot tell the difference without re-implementing
-    // the producer's parsing rules in the consumer, which is precisely the
-    // lenient-consumer workaround this repo forbids. The fix belongs in
-    // `packages/cloud-connection` (a cross-package contract change to
-    // `list()`) and is filed as #5413.
-    //
-    // When #5413 lands, THIS TEST GOES RED — which is the point.
+  /**
+   * ── Was the ⚠ SCOPE BOUNDARY case, now flipped positive (#5413) ────────
+   *
+   * This slot used to pin the issue's own stated repro as deliberately NOT
+   * FIXED: a truncated entry never reached doctor's `catch` because
+   * `LocalManifestSource.list()` skipped unparseable files in its own per-file
+   * `catch` and returned a short list indistinguishable from a complete one.
+   * Doctor could not have told the difference without re-implementing the
+   * producer's parsing rules in the consumer — the lenient-consumer workaround
+   * this repo forbids — so the fix went to the producer instead: `list()` now
+   * returns `{ entries, skipped }` and doctor reports the second half.
+   *
+   * The old case asserted `not.toContain('broken')` and went red exactly as its
+   * comment predicted. Rewritten as the positive assertion rather than deleted:
+   * the repro is the same, only the expected verdict inverted.
+   */
+  it('reports a CORRUPT ENTRY by name instead of skipping it in silence', async () => {
     writeConfig();
     fs.mkdirSync(ledgerPath(), { recursive: true });
     fs.writeFileSync(path.join(ledgerPath(), 'good.json'), JSON.stringify(globalUniqueEntry('good')));
@@ -342,12 +352,66 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
 
     const run = await runDoctor();
 
-    // The readable entry is reported…
+    // The readable entry is still reported, unchanged.
     expect(run.out).toContain("installed package 'good'");
-    // …and the corrupt one is silently absent, with no row of any kind naming
-    // it. Not a passing behaviour — a pinned boundary.
-    expect(run.out).not.toContain('broken');
+    // ① The corrupt one is named — the row that did not exist before #5413.
+    expect(run.out).toContain(SKIPPED_HEADLINE);
+    expect(run.out).toContain('broken.json');
+    // ② With the parser's own words, not a summary doctor invented.
+    expect(run.out).toMatch(/JSON/i);
+    // ③ Under the `Unique scope` name column, like its directory-level sibling,
+    //    so the row an operator scans for is present rather than missing.
+    expect(run.out).toContain('Unique scope');
+    // ④ NOT the directory-level row: the directory read fine. Two distinct
+    //    facts, two distinct headlines (#5412 vs #5413).
     expect(run.out).not.toContain(LEDGER_HEADLINE);
+    // Gauge: still a warning, report finishes, exit stays 0.
+    expect(run.out).toContain('Environment is functional but has some warnings');
+    expect(run.exitCode).toBeUndefined();
+  }, 60_000);
+
+  it('withholds the clean bill when the ONLY finding is an unparseable entry', async () => {
+    // The false-PASS shape this issue is really about. The good entry declares
+    // no global unique, so before #5413 the advisory found nothing to say and
+    // printed `✓ Unique scope` — over a manifest it had never parsed. An
+    // unreadable manifest may declare an installation-wide unique; nobody can
+    // say it does not.
+    writeConfig();
+    fs.mkdirSync(ledgerPath(), { recursive: true });
+    fs.writeFileSync(
+      path.join(ledgerPath(), 'clean.json'),
+      JSON.stringify({ manifestId: 'clean', manifest: { objects: [] } }),
+    );
+    fs.writeFileSync(path.join(ledgerPath(), 'broken.json'), '{"manifestId":"broken"');
+
+    const run = await runDoctor();
+
+    expect(run.out).not.toContain(CLEAN_BILL);
+    expect(run.out).toContain(SKIPPED_HEADLINE);
+    expect(run.out).toContain('broken.json');
+  }, 60_000);
+
+  it('names EVERY unparseable entry, and expands the causes under --verbose', async () => {
+    writeConfig();
+    fs.mkdirSync(ledgerPath(), { recursive: true });
+    fs.writeFileSync(path.join(ledgerPath(), 'one.json'), '{oops');
+    fs.writeFileSync(path.join(ledgerPath(), 'two.json'), 'not json at all');
+
+    const plainRun = await runDoctor();
+    const verboseRun = await runDoctor(['--verbose']);
+
+    // One row is one line, so the row quotes the first cause and counts the
+    // rest; `fix` carries every file with its own cause.
+    expect(plainRun.out).toContain('2 installed-package ledger entries could not be read');
+    expect(plainRun.out).toContain('(+1 more)');
+    expect(plainRun.out).not.toContain('cause:');
+
+    expect(verboseRun.out).toContain('one.json');
+    expect(verboseRun.out).toContain('two.json');
+    expect(verboseRun.out).toContain('cause:');
+    // The fix is per-file, so it has to say what to do with each one.
+    expect(verboseRun.out).toContain('Repair the JSON, or delete the file');
+    expect(verboseRun.exitCode).toBeUndefined();
   }, 60_000);
 });
 
