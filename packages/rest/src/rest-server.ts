@@ -6078,8 +6078,52 @@ export class RestServer {
                     res.json(result);
                 } catch (error: any) {
                     const msg = String(error?.message ?? error ?? '');
+                    // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
+                    // A thrown error that already carries `code` + a 4xx
+                    // `status` has ANSWERED the classification question. This
+                    // route used to discard both and re-derive the answer from
+                    // the message text below, so every producer that took
+                    // ADR-0112 seriously was punished for it: analytics'
+                    // filter refusals (`INVALID_FILTER`/400 — a misspelled
+                    // operator in a dashboard widget, #3948/#5240/#5325/#5334),
+                    // the measure source-field gate (`INVALID_FIELD`/400,
+                    // #4437) and the cube-existence gate (`CUBE_NOT_FOUND`/404,
+                    // #3867) all landed as `500 ANALYTICS_QUERY_FAILED` — read
+                    // by the author as "the platform is broken" and by ops
+                    // alerting as a 5xx. The same mistakes answer 400 on
+                    // `/data`; one condition must not get two wire shapes
+                    // because a different face caught it.
+                    //
+                    // BOTH halves are required, deliberately. A 4xx status with
+                    // no code would force this route to invent one, which is
+                    // the consumer-side leniency ADR-0112 exists to remove — a
+                    // producer that ships half an envelope has a bug of its own
+                    // and should be found, not papered over here.
+                    //
+                    // 4xx ONLY: a 5xx-status error keeps going through the
+                    // `ANALYTICS_QUERY_FAILED` envelope below, so an internal
+                    // fault can never be re-labelled as the caller's fault (and
+                    // keeps its `logError` line).
+                    const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
+                    const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
+                    if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
+                        return res.status(envelopeStatus).json({ code: envelopeCode, message: msg.slice(0, 1000) });
+                    }
+                    // ── ② TRANSITIONAL fallback: message sniffing ────────────
                     // Dataset-compiler D-C / unsupported-aggregate / read-scope
                     // errors are client-side mistakes — surface as 400.
+                    //
+                    // ⚠️ This list survives only because those producers are
+                    // still bare `Error`s: nothing in the dataset compiler or
+                    // `read-scope-sql` carries a `code`/`status` yet, so with the
+                    // list gone they would regress from `400 DATASET_INVALID` to
+                    // 500. It is a placeholder for their enveloping, NOT a
+                    // second classification mechanism — a phrasing change in any
+                    // of these messages silently reclassifies the error, which
+                    // is exactly the fragility #5352 removed for the filter
+                    // family. Enveloping them retires this branch; until then,
+                    // do not add to it — give the new refusal a `code`/`status`
+                    // and it is served by ① for free.
                     if (/not declared in the dataset|not backed by a declared relationship|not supported by the v1 dataset runtime|read-scope-sql|not a selected dimension or measure|is not a subset of the selected dimensions/.test(msg)) {
                         return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });
                     }

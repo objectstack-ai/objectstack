@@ -1827,6 +1827,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/service-analytics':
+        specifier: workspace:*
+        version: link:../services/service-analytics
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

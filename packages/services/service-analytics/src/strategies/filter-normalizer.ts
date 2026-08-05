@@ -105,6 +105,25 @@
  * array spelling. {@link normalizeAnalyticsFilterTree} now gives the same three
  * answers the engine door gives, so one query means one thing on every path.
  *
+ * # Every refusal here is a 400, and SAYS so (#5352)
+ *
+ * All of the above only helps the author if the refusal REACHES them. Each
+ * refusal in this module is a caller-shaped mistake — a misspelled operator, a
+ * `$between` with one bound, a `{}` where an operator belongs — and ADR-0112's
+ * rule is that such an error carries its own machine-readable semantics
+ * (`code` + `status`) rather than leaving each consumer to guess from the
+ * message text. Until #5352 only the #5334 array refusals did; the other seven
+ * were bare `throw new Error(…)`, so `/analytics/dataset/query` had nothing to
+ * read and answered `500 ANALYTICS_QUERY_FAILED` — "the platform is broken" for
+ * what is a typo in a widget's filter, counted as a 5xx by ops alerting. The
+ * same mistake on `find()` has answered `400 INVALID_FILTER` since #3948.
+ *
+ * So {@link invalidFilterError} is now the ONLY way this module refuses, and
+ * `rest-server.ts`'s analytics catch reads that envelope before anything else.
+ * #5352 changed the SHAPE of these errors and nothing about WHICH inputs are
+ * refused — the refusal set is pinned input-by-input in
+ * `filter-refusal-envelope.test.ts` precisely so that stays true.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -121,6 +140,35 @@ export interface NormalizedAnalyticsFilter {
   member: string;
   operator: string;
   values: string[];
+}
+
+// ── [#5334 / #5352] The refusal envelope ─────────────────────────────────────
+
+/**
+ * [#5334, generalised by #5352] A filter refusal in the ADR-0112 envelope every
+ * sibling filter refusal in the repo speaks — `INVALID_FILTER` / 400.
+ *
+ * The twin of `driver-sql`'s and `driver-memory`'s `unsupportedFilterError`.
+ * A caller that writes a filter this module cannot compile has made a
+ * 400-class mistake, and a coded refusal is what lets the `/analytics` face
+ * answer it as one instead of as an opaque 500.
+ *
+ * ⛔ **The only way this module refuses.** #5334 introduced it for the two
+ * array-door refusals while the other seven sites stayed bare `Error`s, and a
+ * half-enveloped module is indistinguishable from an unenveloped one at the
+ * REST boundary: `error.code` was `undefined` for the operator typo that is by
+ * far the commonest of the nine, so the whole family landed as
+ * `500 ANALYTICS_QUERY_FAILED` (#5352). A new refusal added to this file must
+ * be thrown through here; a bare `throw new Error` is the defect returning.
+ *
+ * It carries no `#5352`-specific wording on purpose — the envelope is the
+ * contract, the message stays whatever the refusing site says.
+ */
+function invalidFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
 }
 
 /**
@@ -264,7 +312,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     // accident — a filter builder that recorded a field and never its operator),
     // and a loud refusal is the answer the rest of the repo already gives.
     if (Object.keys(wrapper).length === 0) {
-      throw new Error(
+      throw invalidFilterError(
         `[analytics] "${key}" carries a field constraint with zero operators ({}). ` +
         `Refusing rather than reading it as "every row" or "no row" — #5240 ruled this ` +
         `shape refused on every backend.`,
@@ -295,7 +343,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
             // branch exists to prevent, and it is indistinguishable from a
             // legitimately wide query. Same stance driver-memory took for the
             // same shape (#3948).
-            throw new Error(
+            throw invalidFilterError(
               `[analytics] "$between" on "${key}" needs a two-element [min, max] array, got ` +
               `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
             );
@@ -340,7 +388,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           // the emitted SQL. That failure mode is #3650's, and skipping
           // unmapped operators is how `$between` reproduced it (#4128).
           // driver-memory made the same call for the same reason in #3948.
-          throw new Error(
+          throw invalidFilterError(
             `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
             `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, ` +
             `and the $and/$or/$not combinators. ` +
@@ -387,7 +435,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
 
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(raw) || raw.length === 0) {
-        throw new Error(
+        throw invalidFilterError(
           `[analytics] "${key}" requires a non-empty array. An empty combinator has no ` +
           `defensible reading — dropping it widens the query, and treating it as "match ` +
           `nothing" silently empties a chart.`,
@@ -400,7 +448,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
         // query to every row. Neither is a defensible reading of garbage input —
         // `read-scope-sql.ts` refuses the same shape.
         if (!isFilterObject(sub)) {
-          throw new Error(
+          throw invalidFilterError(
             `[analytics] "${key}" branches must be filter objects, got ${JSON.stringify(sub)}. ` +
             `Skipping it would silently change which rows the filter admits.`,
           );
@@ -426,7 +474,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
       if (!isFilterObject(raw)) {
         // Same call as the branch elements above: a `$not` of garbage used to
         // vanish, which turns "exclude these rows" into "exclude nothing".
-        throw new Error(
+        throw invalidFilterError(
           `[analytics] "$not" requires a filter object, got ${JSON.stringify(raw)}. ` +
           `Dropping it would silently widen the query to rows the filter excludes.`,
         );
@@ -444,7 +492,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
     }
 
     if (key.startsWith('$')) {
-      throw new Error(
+      throw invalidFilterError(
         `[analytics] Unsupported top-level filter operator "${key}". ` +
         `Dropping it would silently widen the query to rows the filter excludes.`,
       );
@@ -661,22 +709,6 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
 }
 
 // ── [#5334] The FilterArray door ─────────────────────────────────────────────
-
-/**
- * [#5334] A filter refusal in the ADR-0112 envelope every sibling filter
- * refusal in the repo speaks — `INVALID_FILTER` / 400.
- *
- * The twin of `driver-sql`'s and `driver-memory`'s `unsupportedFilterError`.
- * A caller that writes an unlowerable filter has made a 400-class mistake, and
- * a coded refusal is what lets the `/analytics` face answer it as one instead
- * of as an opaque 500.
- */
-function invalidFilterError(message: string): Error {
-  const err = new Error(message) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.INVALID_FILTER;
-  err.status = 400;
-  return err;
-}
 
 /**
  * [#5334] A `where` array this door cannot lower.
