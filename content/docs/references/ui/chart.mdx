@@ -124,7 +124,7 @@ Inline aggregation for an object-bound chart
 | **enabled** | `boolean` | optional | Turn the segment drill on/off; the block being present already means on, so this is only needed to force it off |
 | **filter** | `Record<string, any>` | optional | Filter for the drilled list; values support $`{event.*}`. Omit to derive it from the clicked category |
 | **title** | `string` | optional | Drill drawer/dialog heading; supports $`{event.*}` interpolation |
-| **target** | `Enum<'drawer' \| 'dialog'>` | optional | Where the drilled list opens: 'drawer' (default, side sheet) or 'dialog' (centered modal) |
+| **target** | `Enum<'drawer' \| 'dialog' \| 'navigate'>` | optional | Where the drilled list opens: 'drawer' (default, side sheet), 'dialog' (centered modal), or 'navigate' (skip the in-place view and open the object's full list page; needs host drill navigation, else falls back to 'drawer') |
 | **columns** | `string[]` | optional | Field names to show as columns in the drilled list (default: the table's own columns) |
 | **maxRows** | `integer` | optional | Rows per page in the drilled list |
 

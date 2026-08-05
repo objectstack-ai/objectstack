@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import {
   PAGINATION_ALL_IDS,
   PAGINATION_CASES,
@@ -33,16 +33,15 @@ import {
   PAGINATION_UNORDERED_CASES,
 } from '@objectstack/spec/data';
 import { MongoDBDriver } from './mongodb-driver.js';
+import { createTestMongod } from './test-mongod.js';
 
-let sharedMongod: MongoMemoryServer | undefined;
-try {
-  sharedMongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
-} catch (err) {
-  console.warn(
-    '[driver-mongodb] Skipping pagination conformance — mongodb-memory-server could not start: ' +
-      `${(err as Error)?.message ?? String(err)}`,
-  );
-}
+// The live half needs a real mongod, so it is OPT-IN since #5517 (see
+// `test-mongod.ts`). It used to call `MongoMemoryServer.create()` itself, which
+// both started a download in every default run and bypassed the package's shared
+// deadline. The sort-spec half below runs regardless — it needs no server.
+const sharedMongod: MongoMemoryServer | undefined = await createTestMongod(
+  'pagination conformance',
+);
 
 describe.skipIf(!sharedMongod)('driver-mongodb — paged reads are a partition of the result set', () => {
   const mongod = sharedMongod as MongoMemoryServer;

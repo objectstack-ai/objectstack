@@ -24,24 +24,22 @@
  * because an untouched collection comes back in insertion order whether or not
  * a sort went out.
  *
- * Skips itself when the mongod binary cannot be fetched — the convention the
- * other suites in this package already use. A skip is not a pass.
+ * Needs a real mongod, so it is OPT-IN since #5517 — `createTestMongod` prints
+ * why and this suite skips unless `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`. It
+ * used to call `MongoMemoryServer.create()` itself, which both started a
+ * download in every default run and bypassed the package's shared deadline. A
+ * skip is not a pass.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoDBDriver } from './mongodb-driver.js';
 import { FINDONE_CASES, FINDONE_ROWS } from './mongodb-findone-cases.js';
+import { createTestMongod } from './test-mongod.js';
 
-let sharedMongod: MongoMemoryServer | undefined;
-try {
-  sharedMongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60_000 } });
-} catch (err) {
-  console.warn(
-    '[driver-mongodb] Skipping findOne query-execution suite — mongodb-memory-server could not '
-      + `start: ${(err as Error)?.message ?? String(err)}`,
-  );
-}
+const sharedMongod: MongoMemoryServer | undefined = await createTestMongod(
+  'findOne query-execution',
+);
 
 describe.skipIf(!sharedMongod)('driver-mongodb — findOne executes the whole query', () => {
   const mongod = sharedMongod as MongoMemoryServer;

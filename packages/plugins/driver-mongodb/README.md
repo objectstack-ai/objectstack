@@ -199,12 +199,31 @@ kernel.use(mongodbPlugin, {
 ## Development
 
 ```bash
-# Run tests
+# Run tests (the suites that need a real mongod SKIP — see below)
 pnpm test
+
+# Run every suite, including the ones that need a real mongod
+OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1 pnpm test
 
 # Build
 pnpm build
 ```
+
+### The mongod-backed suites are opt-in (#5517)
+
+Seven suites here need a real MongoDB, which `mongodb-memory-server` provides by
+downloading a ~123 MB binary on first use. With a cold cache, two vitest workers
+downloaded it at the same time and the loser's `rename` failed as an unhandled
+rejection — turning an all-green run into `exit 1` and ejecting unrelated PRs
+from the merge queue. Those suites are therefore gated behind
+`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`: without it they skip, each printing
+one line that names this issue and the switch, and **no download starts**.
+
+The rest of the package's tests — filter translation, the shared filter-logic
+conformance case-set over the emitted documents, sort specs, tenancy guard,
+temporal helpers — run by default and need no binary. The gate lives in
+`src/test-mongod.ts`, which documents the mechanism and what a default run gives
+up.
 
 ## License
 

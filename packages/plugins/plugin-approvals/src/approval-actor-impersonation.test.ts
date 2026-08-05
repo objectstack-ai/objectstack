@@ -27,6 +27,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService, SLA_ACTOR_ID } from './approval-service.js';
 
 interface FakeRow { [k: string]: any }
@@ -144,7 +145,12 @@ function makeAutomationStub() {
     async getFlow() {
       return {
         name: 'deal_approval',
-        nodes: [{ id: 'approve_step', type: 'approval' }, { id: 'wait_revision', type: 'wait' }],
+        // #3823 — the revise window is the service-owned node type; `sendBack`
+        // refuses a bare `wait` target, so this stub declares the real shape.
+        nodes: [
+          { id: 'approve_step', type: 'approval' },
+          { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE },
+        ],
         edges: [
           { id: 'e1', source: 'approve_step', target: 'ok', label: 'approve' },
           { id: 'e2', source: 'approve_step', target: 'no', label: 'reject' },

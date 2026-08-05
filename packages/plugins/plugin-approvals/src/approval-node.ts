@@ -26,6 +26,7 @@ import {
 } from '@objectstack/spec/automation';
 import type { SharingExecutionContext } from '@objectstack/spec/contracts';
 import type { ApprovalService } from './approval-service.js';
+import { registerApprovalReviseNode } from './approval-revise-node.js';
 
 /** Minimal surface of the automation engine this provider depends on. */
 export interface ApprovalAutomationSurface {
@@ -80,15 +81,23 @@ function nestVariables(variables: Map<string, unknown>): Record<string, unknown>
 }
 
 /**
- * Register the `approval` node executor on the automation engine. Idempotent at
- * the engine level (re-registering replaces). Safe to skip when no automation
+ * Register the `approval` node executor on the automation engine, plus the
+ * `approval_revise` window the ADR-0044 send-back parks on. Idempotent at the
+ * engine level (re-registering replaces). Safe to skip when no automation
  * service is present.
+ *
+ * The two register together deliberately (#3823): send-back resumes the run
+ * down the `revise` edge onto the revise-window node, and `sendBack` refuses a
+ * flow whose revise edge targets anything else — so an engine holding the
+ * `approval` node without the revise window would accept approvals whose
+ * send-back can never run.
  */
 export function registerApprovalNode(
   automation: ApprovalAutomationSurface,
   service: ApprovalService,
   logger?: MinimalLogger,
 ): void {
+  registerApprovalReviseNode(automation, logger);
   automation.registerNodeExecutor({
     type: APPROVAL_NODE_TYPE,
     descriptor: defineActionDescriptor({

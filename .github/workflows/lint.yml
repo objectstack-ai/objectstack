@@ -405,6 +405,25 @@ jobs:
       # Restore-only on PRs (same policy as ci.yml): PR-side saves churned the
       # 10 GB Actions cache pool and evicted the main seeds; only main pushes
       # save (the "Save Turbo cache" step at the end of the job).
+      #
+      # The build-core fallbacks are #5401. Only main writes, so a merge_group
+      # entry always restores by PREFIX — and this job's own namespace has a
+      # window where that prefix matches nothing: the previous main generation
+      # is already gone while the current one is still being written (measured
+      # 2026-08-05, run 30985524210 — all three keys reported "Cache not found"
+      # at 07:34:18Z and the workspace build went 4s -> 4m54s, while the very
+      # same queue entry's ci.yml jobs hit `-main-f417863f` in that same
+      # minute). build-core's entry is the one that survives that window: its
+      # main-push save had completed at 07:32:50Z, 88s earlier, and `pnpm
+      # build` (turbo run build --filter=!@objectstack/docs) is a SUPERSET of
+      # this job's build step, so the entries it carries are the ones this
+      # build needs — same reasoning as the fallbacks the Temporal
+      # Conformance / Dogfood Verify / Console Pin jobs already carry in
+      # ci.yml, whose spelling these two lines match exactly.
+      #
+      # Partial by construction, and that is the honest expectation: it warms
+      # the `build` tasks, not the `typecheck` tasks (build-core never runs
+      # those, so nothing seeds them outside this job's own namespace).
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
         with:
@@ -413,6 +432,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
