@@ -156,6 +156,47 @@ const NO_OUTPUT_VARIABLE_GUIDANCE =
   + 'one, which is why the key looks universal and is not. To use what was written, follow this node with a '
   + '`get_record` that reads the row back.';
 
+/**
+ * Bulk intent has exactly one spelling — `multi` — and the ENGINE named it
+ * first (#5393).
+ *
+ * `EngineUpdateOptions.multi` / `EngineDeleteOptions.multi` have carried this
+ * concept since the data layer was written, and `resolveEngineDeleteDispatch`
+ * makes it the only thing standing between a predicate write and
+ * `driver.deleteMany`. So the flow-authoring surface reuses the word rather
+ * than inventing a second one for the same concept (PD #12): one concept, one
+ * name, greppable end to end from the node config to the driver call.
+ *
+ * These four spellings were measured, not guessed: they are what a real
+ * `safeParse` was fed while #5225 was being diagnosed, back when NONE of them
+ * (including `multi` itself) was declared. Edit distance reaches `multi` from
+ * none of them, so without these entries the rejection would name the key and
+ * offer nothing — on the single most destructive surface the flow language has.
+ *
+ * `options` is the wrong-LAYER member of the set: `options: { multi: true }`
+ * is the shape of the data-engine call, not of node config. The executor is
+ * what performs that translation, and an author who writes the engine's bag
+ * into the node has the right concept at the wrong altitude.
+ */
+const BULK_INTENT_PRESCRIPTION =
+  'Bulk intent is declared with `multi: true` — the same word the data engine has always used for it '
+  + '(`options.multi`), so the concept keeps one name from node config to driver call. Until #5393 NO spelling of '
+  + 'it existed on this node, which is why a predicate write was refused by the engine '
+  + '(`… requires an ID or options.multi=true`) and no flow could reach `updateMany`/`deleteMany` at all. Leaving '
+  + 'it off is still a valid, deliberate choice: without it the write must name one row by scalar `id`.';
+
+const BULK_INTENT_OPTIONS_PRESCRIPTION =
+  'This is the NODE config, not the data engine\'s options bag — declare `multi: true` at the top level of '
+  + '`config`, never `options: { multi: true }`. Translating the declared intent into `options.multi` on the '
+  + 'engine call is the executor\'s job, and it is the only thing that should be doing it (#5393).';
+
+const CRUD_BULK_INTENT_GUIDANCE = {
+  bulk: BULK_INTENT_PRESCRIPTION,
+  all: BULK_INTENT_PRESCRIPTION,
+  multiple: BULK_INTENT_PRESCRIPTION,
+  options: BULK_INTENT_OPTIONS_PRESCRIPTION,
+} as const;
+
 // ─── CRUD quartet ────────────────────────────────────────────────────
 
 /**
@@ -221,6 +262,7 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
   history: BUILTIN_NODE_CONFIG_HISTORY,
   guidance: {
     ...CRUD_ALIAS_GUIDANCE,
+    ...CRUD_BULK_INTENT_GUIDANCE,
     recordId: CRUD_RECORD_ID_GUIDANCE,
     fieldValues: FIELD_VALUES_GUIDANCE,
     outputVariable: NO_OUTPUT_VARIABLE_GUIDANCE,
@@ -233,6 +275,28 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
     .describe('Field/value pairs identifying the record(s) to update'),
   /** Field values to write; values interpolate `{token}` templates. */
   fields: z.record(z.string(), z.unknown()).optional().describe('Field values to write'),
+  /**
+   * Declare BULK intent — this node may update EVERY row `filter` matches.
+   *
+   * Absent or `false` (the default): the executor passes no bulk intent, and
+   * the data engine accepts the write only when `filter` names one row by a
+   * **scalar** `id`. Anything else — a predicate, or `id: { $in: [...] }` —
+   * is refused with `Update requires an ID or options.multi=true`. That
+   * refusal is the contract, not a defect to route around: an unbounded write
+   * nobody declared is the #3810 hazard with the safety off.
+   *
+   * `true`: the executor passes `options.multi: true`, so the write lands on
+   * `driver.updateMany` and the step's `acted` metric reports the matched row
+   * count. Same word the engine has always used for the concept
+   * (`EngineUpdateOptions.multi`) — one concept, one name (PD #12).
+   *
+   * It does not weaken the #3810 erased-condition guard: a node whose authored
+   * filter condition interpolated to nothing is still refused before any write,
+   * `multi` or not. What it DOES make reachable is the deliberate whole-object
+   * write — `multi: true` with no `filter` at all is every row, by declaration.
+   */
+  multi: z.boolean().optional()
+    .describe('Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine)'),
 }));
 
 export type UpdateRecordConfig = z.input<typeof UpdateRecordConfigSchema>;
@@ -244,6 +308,7 @@ export const DeleteRecordConfigSchema = lazySchema(() => strictObject({
   history: BUILTIN_NODE_CONFIG_HISTORY,
   guidance: {
     ...CRUD_ALIAS_GUIDANCE,
+    ...CRUD_BULK_INTENT_GUIDANCE,
     recordId: CRUD_RECORD_ID_GUIDANCE,
     outputVariable: NO_OUTPUT_VARIABLE_GUIDANCE,
   },
@@ -253,6 +318,28 @@ export const DeleteRecordConfigSchema = lazySchema(() => strictObject({
   /** Field/value pairs identifying the record(s) to delete. */
   filter: z.record(z.string(), z.unknown()).optional()
     .describe('Field/value pairs identifying the record(s) to delete'),
+  /**
+   * Declare BULK intent — this node may delete EVERY row `filter` matches.
+   *
+   * Absent or `false` (the default): the executor passes no bulk intent, and
+   * the data engine accepts the delete only when `filter` names one row by a
+   * **scalar** `id`. Anything else — a predicate, or `id: { $in: [...] }` —
+   * is refused with `Delete requires an ID or options.multi=true`. That
+   * refusal is the contract, not a defect to route around.
+   *
+   * `true`: the executor passes `options.multi: true`, so the delete lands on
+   * `driver.deleteMany` and the step's `acted` metric reports the deleted row
+   * count. Same word the engine has always used for the concept
+   * (`EngineDeleteOptions.multi`) — one concept, one name (PD #12).
+   *
+   * The highest-stakes key on this shape, which is why it is a DECLARATION and
+   * not an inference from the filter's shape: the #3810 erased-condition guard
+   * still refuses a node whose authored condition interpolated to nothing, but
+   * `multi: true` with no `filter` at all is the whole object, by declaration.
+   * Write the constraint you mean.
+   */
+  multi: z.boolean().optional()
+    .describe('Declare bulk intent: delete every row the filter matches (default false — a predicate delete without it is refused by the engine)'),
 }));
 
 export type DeleteRecordConfig = z.input<typeof DeleteRecordConfigSchema>;
