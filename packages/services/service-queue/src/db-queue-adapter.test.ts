@@ -316,5 +316,14 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
       engine.delete('sys_job_queue', { where: { id: { $in: ['a', 'b'] } } }),
     ).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
     expect(rows()).toHaveLength(3);
+
+    // The property the removed mirror was ORIGINALLY written for (#4371): a
+    // top-level `{ id }` bag is not an address — the id lives at `where.id`.
+    // It is not one of ENGINE_DELETE_DISPATCH_CASES, so it is asserted here
+    // rather than left to lapse with the code that used to carry it.
+    await expect(
+      engine.delete('sys_job_queue', { id: 'a' } as any),
+    ).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+    expect(rows()).toHaveLength(3);
   });
 });
