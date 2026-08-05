@@ -176,6 +176,35 @@ export const SystemFieldName = {
   /** Record owner (lookup to user). INJECTED unless `ownership: 'org' | 'none'`. */
   OWNER_ID: 'owner_id',
   /**
+   * Record-level business-unit ownership — the middle tier between
+   * {@link SystemFieldName.OWNER_ID} (a person) and
+   * {@link SystemFieldName.ORGANIZATION_ID} (the tenant wall): *which department
+   * / legal entity does this row belong to*. A lookup to `sys_business_unit`.
+   *
+   * **NOT injected by open-core** — nothing provisions this column today. The
+   * NAME is reserved here by ADR-0117 (Accepted, D1/D3 scoped) so the canonical
+   * spelling has one reference before the injection lands, and so consumers stop
+   * inventing their own (`business_unit_id`, `bu_id`, `dept_id` …) — the drift
+   * mode framework#4330 / cloud#982 already paid for with `tenant_id`/`org_id`/
+   * `space`.
+   *
+   * It is on the public-form denylist as defense-in-depth: once stamped it is a
+   * kernel-owned ownership anchor, and a forged value on the anonymous surface
+   * would move the row behind another department's wall — the same forge class
+   * `owner_id`/`organization_id` are denied for. Denying it before it exists is
+   * free and fail-closed; adding it after would be a hole with a release in it.
+   *
+   * When injection lands (ADR-0117 D1 — gated on the `ownership` enum gaining
+   * its `business_unit` tier AND `applySystemFields`' `wantOwner` deny-list
+   * becoming an allow-list), this doc must flip to INJECTED and the objectql
+   * conformance test moves it from the reserved group to the injected group.
+   * Until then `ownership: 'business_unit'` is deliberately REJECTED by
+   * `ObjectSchema` — see `packages/spec/src/data/object.test.ts`.
+   *
+   * @see docs/adr/0117-owning-business-unit-record-stamp.md
+   */
+  OWNING_BUSINESS_UNIT_ID: 'owning_business_unit_id',
+  /**
    * THE tenant isolation key — a lookup to `sys_organization`. INJECTED unless
    * tenancy is disabled for the object; org-scoping populates it on insert and
    * it stays NULL on single-tenant stacks.
