@@ -32,7 +32,7 @@ interface HealthCheckResult {
   fix?: string;
 }
 
-// ─── Environment sources (#5387) ────────────────────────────────────
+// ─── Environment sources (#5387, #5397) ─────────────────────────────
 //
 // `serve` / `dev` / `start` all load `.env*` through dotenv-flow before they
 // read a single `OS_*` variable (`serve.ts:520`, `dev.ts`, `start.ts`); doctor
@@ -44,14 +44,24 @@ interface HealthCheckResult {
 // Doctor now reads the same cascade, with two deliberate constraints:
 //
 //   • It does NOT merge the values into `process.env` for the run. The overlay
-//     is applied around the individual read that needs it and taken back off in
-//     a `finally` (`withDotenvOverlay`), so nothing downstream — the config
-//     bundle, a spawned tool — silently inherits a different environment than
-//     the one it inherited yesterday.
+//     is applied around each read that needs it and taken back off in a
+//     `finally` (`withDotenvOverlay` / `withDotenvOverlayAsync`), so nothing
+//     outside those windows — a spawned tool, whatever runs next in the same
+//     process — silently inherits a different environment than the one it
+//     inherited yesterday.
 //   • Every env-derived value is REPORTED WITH ITS SOURCE (shell vs which
 //     file). A silent merge would trade "doctor cannot see your `.env`" for
 //     "doctor cannot tell you which of your four `.env*` files it believed",
 //     which is the same class of defect one layer along.
+//
+// #5397 added the second such window: `loadConfig()`. It is listed here rather
+// than left implicit because a user's `objectstack.config.ts` reads whatever
+// variables it likes — not just `DOCTOR_ENV_INPUTS` — so the config load is the
+// one place where the whole cascade, not a declared subset, reaches a reader.
+// `environmentSourcesCheck` names the files for exactly that reason: the set of
+// variables cannot be enumerated in advance, but the files that supplied them
+// can, and an unreported overlay of an unbounded key set would be the silent
+// merge in its worst form.
 
 /**
  * The environment variables doctor's own checks derive from.
@@ -267,17 +277,80 @@ function dotenvOverlay(
  * and removed in a `finally` — using dotenv-flow's own `unload()` test, which
  * deletes a variable only when it still holds the value that was written, so a
  * value `fn` deliberately changed is left alone.
+ *
+ * For an asynchronous reader — the config bundle, whose top level runs inside a
+ * dynamic `import()` — use {@link withDotenvOverlayAsync}. This one takes the
+ * overlay back off the moment `fn` RETURNS, which for an async `fn` is the
+ * moment it hands back a pending promise, i.e. before it has read anything.
  */
 export function withDotenvOverlay<T>(reading: DotenvReading, fn: () => T): T {
   const overlay = dotenvOverlay(reading);
-  const names = Object.keys(overlay);
-  for (const name of names) process.env[name] = overlay[name];
+  const applied = applyDotenvOverlay(overlay);
   try {
     return fn();
   } finally {
-    for (const name of names) {
-      if (process.env[name] === overlay[name]) delete process.env[name];
-    }
+    revertDotenvOverlay(overlay, applied);
+  }
+}
+
+/**
+ * {@link withDotenvOverlay} for a reader that finishes asynchronously (#5397).
+ *
+ * Doctor's other consumer of the cascade is `loadConfig()`, and a user's
+ * `objectstack.config.ts` typically reads its environment at MODULE TOP LEVEL —
+ * a datasource URL, a feature switch, sometimes a `throw` when the value is
+ * missing. That top level runs inside `bundleRequire`'s dynamic `import()`, so
+ * it happens one or more microtasks after `loadConfig()` was called. The
+ * synchronous wrapper's `finally` fires when the call returns its pending
+ * promise, which is strictly BEFORE the config file has been bundled, let alone
+ * evaluated: it would apply an overlay nothing ever reads and revert it before
+ * the read. Hence a real `await` inside the `try` rather than a second call
+ * shape that merely looks equivalent.
+ *
+ * Everything else is deliberately identical to the synchronous wrapper — same
+ * overlay set, same dotenv-flow `unload()` revert test, same revert-on-throw —
+ * because both share {@link applyDotenvOverlay} / {@link revertDotenvOverlay}
+ * rather than restating the policy. Two hand-written copies of "which variables
+ * doctor is allowed to touch, and when it puts them back" is exactly the drift
+ * #5387 spent its length arguing against.
+ *
+ * The window is still bounded, and its bound is worth naming: the overlay is
+ * live for the config file's LOAD, not for the checks that run on the loaded
+ * object afterwards. Everything doctor analyses is a plain value read out of
+ * the module at evaluation time, so this covers the real reads; a config that
+ * deferred an environment read to a lazy getter invoked later would fall
+ * outside it. That is the same restraint as the synchronous case — doctor never
+ * leaves a merged environment lying around for whatever runs next — not an
+ * oversight.
+ */
+export async function withDotenvOverlayAsync<T>(
+  reading: DotenvReading,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const overlay = dotenvOverlay(reading);
+  const applied = applyDotenvOverlay(overlay);
+  try {
+    return await fn();
+  } finally {
+    revertDotenvOverlay(overlay, applied);
+  }
+}
+
+/** Write the overlay into `process.env`. Returns the names actually written. */
+function applyDotenvOverlay(overlay: Record<string, string>): string[] {
+  const names = Object.keys(overlay);
+  for (const name of names) process.env[name] = overlay[name];
+  return names;
+}
+
+/**
+ * Take the overlay back off, using dotenv-flow's own `unload()` test: delete a
+ * variable only while it still holds the value that was written, so a value the
+ * callback deliberately changed survives.
+ */
+function revertDotenvOverlay(overlay: Record<string, string>, applied: string[]): void {
+  for (const name of applied) {
+    if (process.env[name] === overlay[name]) delete process.env[name];
   }
 }
 
@@ -290,6 +363,13 @@ export function withDotenvOverlay<T>(reading: DotenvReading, fn: () => T): T {
  * report that consults four files without naming them has only moved the
  * blind spot from "doctor never read my `.env`" to "which `.env` did doctor
  * believe?".
+ *
+ * #5397 widened the cascade's reach from doctor's own declared inputs to the
+ * config file's load, and this line remains the ONE place that says so. The
+ * variables a user's `objectstack.config.ts` reads are the user's, not
+ * `DOCTOR_ENV_INPUTS`, so they are not enumerated here — but the files that
+ * supplied them are, which is what makes the wider overlay a reported fact
+ * rather than the silent merge #5387 refused.
  */
 export function environmentSourcesCheck(
   reading: DotenvReading,
@@ -313,7 +393,9 @@ export function environmentSourcesCheck(
       .join('\n')
     + '\n      A variable set in this process wins over every `.env*` file, and a later file in\n'
     + '      the cascade wins over an earlier one — the same precedence `os serve` resolves.\n'
-    + '      Sources only: doctor reports where a value came from, never what it is.';
+    + '      Sources only: doctor reports where a value came from, never what it is.\n'
+    + '      These files are also applied while objectstack.config.ts is loaded, so a config\n'
+    + '      that reads process.env at top level sees the values `os serve` gives it.';
 
   if (reading.error) {
     return {
@@ -1107,7 +1189,33 @@ export default class Doctor extends Command {
     if (configExists()) {
       printStep('Loading configuration for analysis...');
       try {
-        const { config: rawConfig } = await loadConfig();
+        // #5397 — load the config under the SAME `.env*` cascade resolved at the
+        // top of `run()`, because that is the environment `os serve` hands the
+        // config file. Reading `process.env` at a config's top level is ordinary
+        // (a datasource URL, a feature switch), and `serve` calls
+        // `dotenvFlow.config()` before it bundles the file (`serve.ts:520`), so
+        // without this the two commands were analysing two different configs:
+        //
+        //   • quietly — a conditionally-declared object or datasource present
+        //     for serve and absent for doctor, so every check below judged a
+        //     shape the server never runs;
+        //   • loudly — a config that throws on a missing value landed in this
+        //     `catch` and printed `Could not load config for analysis`, blaming
+        //     the config, while `os serve` booted the same directory. That
+        //     sentence is exactly the misattribution #5382 was opened over, and
+        //     #5387 closed only the half of it that doctor's own env-derived
+        //     checks could see.
+        //
+        // `dotenvReading` — not a second `readDotenvFiles()`. One cascade
+        // resolution per run is what keeps the `Environment files` line an
+        // honest account of what the config load actually saw; two reads could
+        // disagree the moment a `.env` is written mid-run.
+        //
+        // Async wrapper, deliberately: a config's top level runs inside
+        // `bundleRequire`'s dynamic `import()`, so the synchronous
+        // `withDotenvOverlay` would revert the overlay while `loadConfig()`'s
+        // promise was still pending — applied, then removed, never read.
+        const { config: rawConfig } = await withDotenvOverlayAsync(dotenvReading, () => loadConfig());
         const config: any = normalizeStackInput(rawConfig as Record<string, unknown>);
 
         // Spec-version drift: installed platform newer than the app declares.
@@ -1210,6 +1318,12 @@ export default class Doctor extends Command {
           }
         }
       } catch {
+        // #5397 — still fires, and deliberately so: with the `.env*` cascade now
+        // applied around the load, a config that STILL cannot be loaded is one
+        // `os serve` cannot load either. What changed is that this sentence is
+        // no longer reachable by a config whose only problem was that doctor
+        // withheld the environment from it. Silencing the warning outright would
+        // have traded a misattributed warning for no warning at all.
         printWarning('Could not load config for analysis (config checks skipped)');
         hasWarnings = true;
       }
