@@ -782,8 +782,9 @@ from `origin/main` once and never refreshes itself.
 **In-flight overlap needs intercepting too — same-day churn only covers the
 dispatch instant.** The paragraph above handles "main moved before takeoff";
 main lands ~18 merges a day, so it moves **after** takeoff just as often.
-#5322's agent launched at 23:17Z and #5335 merged at 00:0xZ — the same two
-compilers, two of the same four cells. The PM's routine check read `git log
+#5322's agent launched at 23:17Z and #5335 merged 32 minutes into that flight
+(`merged_at` 2026-08-04T23:49:44Z) — the same two compilers, two of the same
+four cells. The PM's routine check read `git log
 origin/main`, spotted the overlap and sent an immediate SendMessage warning; the
 agent narrowed its scope twice and dropped its own design in favour of a minimal
 diff replayed inside the other PR's structure. Rule: **every round, when you
