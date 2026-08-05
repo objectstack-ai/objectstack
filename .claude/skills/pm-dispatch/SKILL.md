@@ -358,17 +358,35 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/plugins/driver-*` |
-| `domain:services` | `packages/services/*`、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`packages/connectors/*` |
+| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`packages/plugins/driver-*`、`plugin-pinyin-search`(全局写钩子,同 #4775 锚定) |
+| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`skills/**`、`content/docs/**`、`scripts/`(门禁类) |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`packages/vscode-objectstack`、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
 | `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
-| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types` |
+| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
+| (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
 `examples/**` belongs to the subsystem it exercises; anything that fits
 nowhere is judged at triage by its principal landing site. A package missing
 from the table is classified the first time it is triaged and the table
 updated **by PR** — the taxonomy evolves deliberately, never per-claim.
+
+最后一行的三处兜底位:`examples/*` 照上一句;另两处的读法如下(表按 #5095 逐包
+核过真实消费方向补全,`packages/` 下余包都已落到上面某一行):
+
+- `packages/apps/*` 今天只是 app manifest + plugin 壳,内容仍从
+  `@objectstack/platform-objects/apps` 再导出,落点可能在 platform-objects
+  (engine)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要落地站点
+  在分诊时判定。
+- `packages/console` 是 `../objectui` 构建产物的落盘位:仓内只跟踪
+  `package.json` / `README` / `CHANGELOG`,`dist/` 由 `scripts/build-console.sh`
+  生成且⛔禁止手改。控制台 UI 的缺陷走 `repo:objectui`;仓内唯一可改面是 pin /
+  刷新脚本(`build-console.sh`、`bump-objectui.sh`、`check-console-sha.mjs`、
+  `check-objectui-pin-fresh.mjs`),归 `scripts/`(门禁类)那一行。
+
+本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**仓库级分片**,
+routing 用 `repo:*` 表达(rule 4 的分片协议),不另打 `domain:*` —— 域车道是
+「同仓多 PM 并发」的切法,不是第二套仓库标签。
 
 **Label discipline.** `domain:*` is applied during the backlog sweep (round
 loop step 0) by whichever PM triages the issue. **Labeling ≠ claiming**: any
@@ -478,7 +496,7 @@ label and classify each:
 - **Maintainer confirm (`needs-user-decision`)**: design cards, feature/
   contract-shape proposals, multi-week programs needing appetite and
   sequencing, anything touching stored-data migration shape or removing a
-  shipped capability. The label alone is the inbox entry; the deep two-axis
+  shipped capability. The label alone is the inbox entry; the deep three-axis
   analysis is written when the card is actually taken up.
 - **Hold (`finding`)**: observation-class findings — dormant code,
   unexercised drift, cosmetic polish; real, but nothing a user hits today.
@@ -1000,8 +1018,20 @@ is too vague to dispatch, or rework has failed twice:
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
 2. The analysis, wherever it lands (Chinese): 背景、具体问题、可选方案、
-   你的建议、关联的 issue / PR / 分支。**每个方案必须沿两条固定评估轴
+   你的建议、关联的 issue / PR / 分支。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
+   - **实际业务需求** — 每个方案先问:它服务的是**真实存在的业务场景**,
+     还是投机性的能力面?判据来源要求**实测**——谁在写这个键、谁在读这个
+     能力、示例应用(showcase / CRM)与真实部署里的用法;「读起来像有用」
+     不作数。**创业阶段聚焦原则**(维护者 2026-08-04 指示:「我们是一个
+     创业项目,应该先专注于核心能力」):能力扩张默认从紧——新能力 / 新
+     词表 / 新配置面需要真实业务拉动才立项;无拉动的声明面按
+     implementation-first 处置(退役,或停车、词表随未来实现回归)。已发布
+     但零消费的「能力」**不因沉没成本获得豁免**:#5021(主题排版 9 组)、
+     #4988(交互配置 22 站点)、#4834(plugin-runtime 五 schema)是先例。
+     这条轴会**改变结论**,不是陪衬,正反两例都有:#5021 因无业务拉动裁
+     退役,#4936 则因 showcase 自证了业务方向而裁「响亮拒绝而非退役」——
+     只看后两条轴,这两单会得出同一个答案,那是错的。
    - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(Prime
      Directive #5 no workarounds、#8 North Star、#12 contract-first),
      而不是眼下最省事;临时补丁式的选项要明说其长期代价。
@@ -1010,7 +1040,7 @@ is too vague to dispatch, or rework has failed twice:
      校验拒绝、错误响亮)优于消费端宽容(`??` 回退、静默容错)——宽容
      恰恰是 AI 批量犯错被掩盖的温床;声明即强制(declared = enforced),
      绝不让 AI 能声明一个运行时不兑现的能力。
-   推荐意见必须基于这两条轴给出理由;两轴冲突时如实呈现权衡,交维护者
+   推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
 3. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer

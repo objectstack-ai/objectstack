@@ -179,9 +179,23 @@ semantics — or two readings of the issue lead to different architectures: make
 no guess, write no speculative code. Return `status: "needs_decision"` with
 each question, the options, their costs, and your recommendation in
 `open_questions`. A wrong guess shipped is far more expensive than a round-trip
-to the maintainer. **Analyze every option on two fixed axes — this framing is
+to the maintainer. **Analyze every option on three fixed axes — this framing is
 the core of the escalation, not decoration:**
 
+- **Real business need**: does this option serve a business scenario that
+  actually exists, or a speculative capability surface? The evidence must be
+  **measured**, not asserted — who writes this key, who reads this capability,
+  how the example apps (showcase / CRM) and real deployments use it. "It reads
+  like it would be useful" does not count. **Startup focus principle**
+  (maintainer, 2026-08-04): this is a startup project and core capability comes
+  first, so capability expansion is tight by default — a new capability, a new
+  vocabulary, a new configuration surface needs real business pull to be worth
+  building; a declared surface with no pull is handled implementation-first
+  (retire it, or park it and let the vocabulary return with the implementation).
+  A shipped-but-unconsumed "capability" gets no sunk-cost exemption. This axis
+  changes verdicts rather than decorating them — #5021 retired 9 groups for
+  lack of pull, while #4936 was ruled a loud rejection *instead of* retirement
+  because the showcase proved the business direction.
 - **Long-term soundness for THIS project**: which option aligns with the
   North Star and a sustainable architecture (no workarounds, contract-first),
   not which is cheapest today. Name the long-term cost of any patch-style
@@ -193,8 +207,8 @@ the core of the escalation, not decoration:**
   silent coercion). Lenient consumers are exactly where AI-generated metadata
   errors hide and multiply.
 
-Your recommendation must be justified on both axes; if they conflict, present
-the trade-off honestly and let the maintainer decide. Likewise return `blocked` (with evidence) when `main` is
+Your recommendation must be justified on all three axes; if they conflict,
+present the trade-off honestly and let the maintainer decide. Likewise return `blocked` (with evidence) when `main` is
 broken under you, a dependency issue is unmerged, or CI infrastructure fails —
 after retrying enough to be sure it is not your change.
 

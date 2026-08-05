@@ -13,7 +13,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * single source — no second hand-maintained field list:
  *
  *   - `group`     → which section a field belongs to (semantic grouping that
- *                   travels with the data model, not a per-form layout).
+ *                   travels with the data model, not a per-form layout). The
+ *                   group must also be DECLARED in `fieldGroups` below — that
+ *                   declaration is what authorizes the derivation (ADR-0085 §5).
  *   - declaration order = display order (there is no `field.order`; the order
  *                   you write fields in IS the default order everywhere).
  *   - `required`  → must appear on the create form.
@@ -67,4 +69,23 @@ export const Contact = ObjectSchema.create({
     // ── Notes group: long-form, edit-time only. ──
     notes: Field.text({ label: 'Notes', maxLength: 4000, group: 'notes' }),
   },
+
+  // [ADR-0085 §5] The DECLARATION side of the grouping edge, and the reason the
+  // section headings above are real sections rather than decoration.
+  //
+  // `Field.group` alone does not create a group: `deriveFieldGroupLayout` —
+  // the one derivation every renderer and the i18n walker consume — only
+  // buckets a field whose `group` matches a key declared HERE, and drops
+  // everything else into the trailing untitled bucket. So a `group` with no
+  // matching entry renders exactly like no `group` at all (`os lint` says so
+  // as `field-group-undeclared`), which is what these nine fields did before
+  // #5443. Array order is display order; the labels match the four sections
+  // `ui/views/contact.view.ts` writes out by hand, because the whole point of
+  // that file's comment is that the two agree.
+  fieldGroups: [
+    { key: 'contact', label: 'Contact' },
+    { key: 'work', label: 'Work' },
+    { key: 'status', label: 'Status' },
+    { key: 'notes', label: 'Notes' },
+  ],
 });
