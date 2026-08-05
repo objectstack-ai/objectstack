@@ -311,6 +311,18 @@ export type {
   TranslationRefSeverity,
 } from './validate-translation-references.js';
 
+// The other end of the same question (#5417): a form section authored with a
+// `label` and no `name` renders a heading `_sections` can never address — no
+// orphan key to report, and nothing for the coverage walk to demand.
+export {
+  validateTranslatableSections,
+  TRANSLATION_SECTION_NAME_MISSING,
+} from './validate-translatable-sections.js';
+export type {
+  TranslatableSectionFinding,
+  TranslatableSectionSeverity,
+} from './validate-translatable-sections.js';
+
 export {
   validateAiSurfaceAffinity,
   AI_SKILL_SURFACE_MISMATCH,
