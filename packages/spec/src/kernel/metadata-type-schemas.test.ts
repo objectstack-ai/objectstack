@@ -253,8 +253,34 @@ describe('registered metadata types', () => {
  * names — which is exactly the distinction the ledger's classification rule
  * exists to draw, arriving here as the campaign's final answer rather than as an
  * exception to it.
+ *
+ * ## `api` arrives (2026-08-04, #5271) with the SAME distinction, not a new one
+ *
+ * `api` joined the registry after the campaign ended, and it lands on this list
+ * for `view`'s reason wearing different clothes: `ApiEndpointSchema` is not only
+ * an authoring surface — it is what STORED rows are parsed with, by
+ * `buildEndpointIndex` (`packages/metadata/src/endpoint-matcher.ts`) and by
+ * `MetadataManager.publishPackage`'s `gateApiItemsForPublish`. A stored row
+ * carries the metadata layer's own bookkeeping (`packageId`, `state` — written
+ * by `register` / `publishPackage`, and read back by `publishPackage`'s package
+ * filter), which is not endpoint vocabulary.
+ *
+ * This was MEASURED, not assumed. Closing the shape with `strictObject` turns
+ * every stored row into `unrecognized_keys: ['packageId', 'state']`: the
+ * load-time backstop then excludes the endpoint (its route answers 404) and the
+ * publish gate reports a schema error in place of the ADR-0121 D6 verdict it
+ * exists to give — 10 tests in `packages/metadata` go red, which is what
+ * surfaced it. So the debt is real and it is NOT in this vocabulary: the fix is
+ * to separate the stored envelope from the body at the metadata layer, filed
+ * separately, after which `api` comes off this list. Teaching `ApiEndpointSchema`
+ * two bookkeeping keys to buy strictness would make the authoring contract
+ * describe the storage layer, which is the trade this campaign refuses.
+ *
+ * So: `view` is the end state; `api` is tracked debt with a named owner. Both
+ * are here for the same underlying reason — one type name serving both an
+ * authored document and a wire row.
  */
-const STILL_STRIP = new Set<string>(['view']);
+const STILL_STRIP = new Set<string>(['view', 'api']);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -325,7 +351,15 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
     // ADR-0088 retirement), taking an already-closed schema with it. The
     // campaign's closure ratio is unchanged — one fewer registered type, not
     // one fewer closed one.
+    //
+    // 24 → 25 on 2026-08-04: `api` JOINED the registry (#5271, part of #5206),
+    // the first new registered kind since the campaign ended. It declares the
+    // protection envelope (so `UNDECLARED_ENVELOPE` stays empty) but goes onto
+    // STILL_STRIP — measured, see that list's note: the same schema parses
+    // stored rows carrying `packageId` / `state`, so closing it breaks the
+    // load-time backstop and the publish gate. Closed count is therefore
+    // unchanged at 23 while the registered total moves to 25.
     expect(closed.length).toBe(23);
-    expect(types.length).toBe(24);
+    expect(types.length).toBe(25);
   });
 });

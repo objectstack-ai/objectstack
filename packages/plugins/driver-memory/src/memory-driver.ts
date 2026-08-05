@@ -12,6 +12,7 @@ import {
   filterNodeExpectedError,
   filterNodeListExpectedError,
   malformedBetweenError,
+  nonBooleanNullComparandError,
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
   unsupportedFilterError,
@@ -973,6 +974,16 @@ export class InMemoryDriver implements IDataDriver {
         case '$null':
           // $null: true → field is null, $null: false → field is not null
           // Use $eq/$ne null for Mingo compatibility
+          //
+          // [#5347] The arm used to be a two-branch `if/else` on `val === true`,
+          // so EVERY non-boolean comparand fell to the `else` and compiled
+          // `$ne: null` — IS NOT NULL. `driver-sql` hung its default on the
+          // opposite side (`opValue === false` → IS NULL) and the reference
+          // matcher on neither (the constraint vanished), so one declared
+          // operator had three readings. The shape gate refuses a non-boolean
+          // now; this throw is the totality floor, the same one `$between`
+          // keeps beside it.
+          if (typeof val !== 'boolean') throw nonBooleanNullComparandError(field, val, `${path}.$null`);
           if (val === true) {
             result.$eq = null;
           } else {

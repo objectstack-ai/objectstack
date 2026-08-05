@@ -740,6 +740,98 @@ function isEmptyFieldConstraint(spec: unknown): boolean {
   return isFilterNode(spec) && Object.keys(spec).length === 0;
 }
 
+/**
+ * [#5348] A `$`-prefixed key in a NODE position that is not a declared
+ * combinator.
+ *
+ * `FilterConditionSchema` declares exactly three (`LOGICAL_OPERATORS`: `$and`,
+ * `$or`, `$not`); every other key of a node is a FIELD NAME. This driver's
+ * emitter is written on that assumption and nothing checked it, so `$where`,
+ * `$nor`, `$expr` and friends fell through to the field arms and were compiled
+ * as COLUMNS — `remoteColumn(table, '$where', …)`. On SQLite a double-quoted
+ * name that resolves to no column degrades to a string literal, so the query
+ * compiled, ran, and returned ZERO ROWS:
+ *
+ * ```
+ * WHERE {"$where":"return true"}   → SELECT … WHERE "$where" = 'return true'  → []
+ * WHERE {"$nor":[{"stage":"won"}]} → (its array value missed the object arm)  → []
+ * ```
+ *
+ * Measured on better-sqlite3 in #5348. Other dialects reject the unknown
+ * identifier instead — a different symptom, the same cause, and neither is an
+ * answer to the filter that was asked.
+ *
+ * The refusal is this driver's FIELD-LEVEL posture (#3948 / #4436) finally
+ * reaching the node position: `{ stage: { $sounds_like: 'x' } }` has answered
+ * `INVALID_FILTER` / 400 for two releases while `{ $sounds_like: 'x' }` one
+ * level up answered "no rows". One driver, two positions, two answers — the
+ * same internal contradiction #5240 closed for `{ field: {} }`.
+ *
+ * The wording is `driver-memory`'s `unknownLogicalOperatorError`, verbatim
+ * through the vocabulary sentence, because #3948 made the backends AGREE that
+ * an uncompilable filter is a refusal and #5240 made one condition speak one
+ * wording. Only the closing clause differs: it names what THIS driver used to
+ * do with the key.
+ */
+function unknownLogicalOperatorError(key: string, path: string): Error {
+  return unsupportedFilterError(
+    `Unsupported filter combinator "${key}" at ${path}. A filter node's $-prefixed keys are the ` +
+      `declared logical operators $and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every ` +
+      `other key is a field name. It is refused rather than compiled as a COLUMN of that name, ` +
+      `which is what this driver used to do — producing a predicate that matched no row and ` +
+      `reported nothing, so a caller could not tell "no rows matched" from "the filter never ` +
+      `compiled" (#5348).`,
+  );
+}
+
+/**
+ * [#5347] `$null` whose comparand is not a boolean.
+ *
+ * `FieldOperatorsSchema` declares `$null: z.boolean()`, and nothing between an
+ * authored `where` and this driver validates against it — so a non-boolean
+ * really does arrive here. Every backend then read it, and they did NOT agree;
+ * measured in #5347 against one row with `stage: 'won'` and one with
+ * `stage: null`, on `{ stage: { $null: 'yes' } }`:
+ *
+ * | backend | compiled to | rows |
+ * |---|---|---|
+ * | driver-sql / driver-sqlite-wasm / Turso local | `IS NULL` (anything but `false`) | the NULL row |
+ * | driver-memory live path (mingo), driver-mongodb | `IS NOT NULL` (anything but `true`) | the valued row |
+ * | driver-memory reference matcher | nothing at all — the constraint vanished | BOTH rows |
+ *
+ * Three readings of one declared operator, and two of them are each other's
+ * exact complement. The cause is a pair of default branches hung on opposite
+ * sides: this driver's emitter asked `opValue === false`, the JS drivers asked
+ * `val === true`. Neither is a rule anyone wrote down; both are what a
+ * two-branch conditional does with a third value.
+ *
+ * Ruled on #5347: REFUSED, in every position, on every backend — the same
+ * disposition #5240 gave `{ field: {} }` and for the same reason. `$null: 0`
+ * read as IS NULL (this driver's rule) is almost certainly not what the author
+ * meant, `$null: 0` read as IS NOT NULL (the JS rule) is no better, and the
+ * string `"false"` — which an AI-authored or JSON-round-tripped scope produces
+ * readily — is truthy, so it lands on the opposite side from the `false` it was
+ * written to mean. There is no reading of a non-boolean here that is not a
+ * guess about the author's intent, so the driver stops guessing.
+ *
+ * `$exists` carries the identical `=== false` identity read one arm below and
+ * is deliberately NOT touched here: it diverges too, but on its own axis (what
+ * "exists" means for a null-valued key is #5299's open question), and #5347
+ * ruled on `$null`. Filed separately rather than settled as a rider.
+ */
+function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
+      `than coerced because the backends read a non-boolean in OPPOSITE directions — this driver ` +
+      `compiled IS NULL (anything but false), driver-memory's query path and driver-mongodb ` +
+      `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
+      `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
+      `the false it was written to mean (#5347).`,
+  );
+}
+
 /** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
 function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
   if (Array.isArray(value)) return;
@@ -812,6 +904,20 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
   }
 
+  // [#5348] Everything still `$`-prefixed at this point is an UNDECLARED
+  // combinator — the three declared ones each returned above. Refused here and
+  // not in the emitter for exactly the reason the two lines below are here, and
+  // the reason #5327 gave for `{ field: {} }`: this walk is exhaustive and does
+  // not short-circuit, while the emitter is skipped wholesale by a boolean
+  // identity. `{ $or: [ {}, { $where: '…' } ] }` reduces to TRUE on its first
+  // disjunct, so an emitter-side gate would refuse the `$where` or ignore it
+  // depending on its SIBLINGS — "a gate conditional on evaluation order", which
+  // this function's own doc comment warns against.
+  //
+  // It must also come BEFORE the field arms below, because that is precisely
+  // what those arms did wrong: they accepted `$where` as a field name.
+  if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
+
   // [#5240] `{ field: {} }` is refused HERE — on the validating walk, beside
   // `assertFilterNode` / `assertFilterNodeList` — rather than in the emitter
   // below, for the same reason those two sit here: the walk is exhaustive and
@@ -828,6 +934,26 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
   // it does not reclassify a surviving shape, so every filter that compiled
   // before compiles byte-identically now.
   if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+
+  // [#5347] `$null`'s comparand is a boolean by declaration. Checked on this
+  // walk rather than in the emitter's `$null` arm for the same
+  // evaluation-order reason, and checked on the RAW value so the message names
+  // the shape the caller sent rather than whatever `coerceFilterValue` made of
+  // it. Only `$null` is inspected: the surrounding operator vocabulary is the
+  // emitter's `default: throw` to enforce, and widening this walk into a second
+  // vocabulary gate is how two lists drift apart (#3948).
+  // `hasOwnProperty` rather than `'$null' in value` so an inherited key can
+  // never trip the gate, and rather than `Object.hasOwn` because this package
+  // targets es2020. `{ $null: undefined }` still counts: the key is own and
+  // enumerable, and `undefined` is exactly one of the comparands the issue
+  // measured a divergence on.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$null') &&
+    typeof value.$null !== 'boolean'
+  ) {
+    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+  }
 
   // A field key always contributes a predicate.
   return 'clause';
@@ -861,9 +987,28 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // `$eq: null` IS the null predicate; any other comparand is a value test.
     case '$eq': return value === null;
     case '$ne': return value !== null;
-    // The emitter reads `$null`/`$exists` by identity against `false`, so the
-    // guard must read them the same way or the two can disagree.
-    case '$null': return value !== false;
+    // [#5347] `$null` is now TOTAL over its declared domain: `reduceFilterKey`
+    // refuses a non-boolean comparand before this table is ever consulted, so
+    // the only values that reach here are `true` and `false`. The arm was
+    // `value !== false` — a lenient read written to mirror the emitter's own
+    // `opValue === false` identity test, because at the time BOTH had to agree
+    // about a third value that could arrive. Neither does any more, so the arm
+    // says what it means: a NULL column satisfies `$null` exactly when the
+    // caller asked for null.
+    //
+    // Tightened rather than left alone deliberately. `value !== false` and
+    // `value === true` are equivalent only while the refusal upstream holds; the
+    // lenient spelling would keep compiling if that gate were ever moved or
+    // removed, and would silently resume answering for shapes nobody ruled on.
+    // The strict spelling cannot — it is the same "declared = enforced" reflex
+    // the refusal itself is.
+    case '$null': return value === true;
+    // `$exists` keeps its lenient identity read: unlike `$null` it has NO
+    // comparand gate (#5347 ruled on `$null` only), so a non-boolean still
+    // reaches this table, and the guard must keep answering it the same way the
+    // emitter's `opValue === false` arm does or the two can disagree about a
+    // row. Tightening this one without the matching refusal would be the
+    // divergence, not the fix — filed separately.
     case '$exists': return value === false;
     // Negative-polarity set/substring tests: "not among" / "does not contain"
     // hold vacuously for a value that is absent.
@@ -6360,6 +6505,13 @@ export class SqlDriver implements IDataDriver {
             // (spec `parseFilterAST` maps those to `$null`). Previously this fell
             // to the equality default and compiled `field = true`, silently
             // returning the wrong rows (issue #2704).
+            //
+            // [#5347] `opValue` is a boolean here — `reduceFilterKey` refused
+            // anything else while validating the tree, which happens before this
+            // emitter runs. The `=== false` test is therefore an exhaustive
+            // two-way choice, not the "anything but false is IS NULL" rule it
+            // used to be; that rule was this driver's half of a three-way split
+            // across the backends. See {@link nonBooleanNullComparandError}.
             case '$null':
               (builder as any)[opValue === false
                 ? (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')

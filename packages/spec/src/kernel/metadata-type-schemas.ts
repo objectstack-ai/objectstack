@@ -46,6 +46,8 @@ import { DatasetSchema } from '../ui/dataset.zod';
 
 import { FlowSchema } from '../automation/flow.zod';
 
+import { ApiEndpointSchema } from '../api/endpoint.zod';
+
 import { JobSchema } from '../system/job.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -109,6 +111,22 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
 
   // System Protocol
   datasource: DatasourceSchema,
+  // [#5271, part of #5206] Declarative HTTP endpoints (ADR-0121). The kind was
+  // produced and consumed long before it resolved a schema: artifact ingest
+  // maps `defineStack({ apis })` → `api` items and the endpoint matcher indexes
+  // them. Without this entry `resolveOverlaySchema('api', …)` returned
+  // `undefined`, so `saveMetaItem` took its documented "unregistered type →
+  // store without validation" branch and `PUT /meta/api/:name` accepted ANY
+  // JSON. With it, the existing 422 `invalid_metadata` path applies to `api`
+  // like every other kind, and `/meta/types` emits a real JSON Schema so the
+  // metadata-admin engine renders a form instead of a raw-JSON textarea.
+  //
+  // This is a SHAPE check only. Whether a well-shaped endpoint is SERVABLE
+  // (ADR-0121 D1/D2 namespace carve-out, D6 anonymous-needs-armed-budget,
+  // supported target subset, mapping/policy rules) is judged by
+  // `validateApiEndpointDeclarations` / `identityFreeEndpointGateFailure` at
+  // publish and again at load — one judge, not two.
+  api: ApiEndpointSchema,
   translation: TranslationItemSchema,
   email_template: EmailTemplateDefinitionSchema,
   doc: DocSchema, // ADR-0046: flat Markdown package documentation

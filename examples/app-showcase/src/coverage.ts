@@ -115,6 +115,17 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
       'PERMANENT by design (ADR-0088): a runtime-created snapshot produced by Setup → Datasources → Sync (ADR-0062). A package shipping one would be stale on arrival; the showcase demos the federation flow that produces it.',
     issue: ISSUE.noAuthoringSurface,
   },
+  // [#5271] `api` graduated from STACK_COLLECTION_COVERAGE into the registry:
+  // it is now a real metadata kind (`DEFAULT_METADATA_TYPE_REGISTRY` +
+  // `BUILTIN_METADATA_TYPE_SCHEMAS`), so its coverage is owned here. The notes
+  // below moved verbatim from the old `STACK_COLLECTION_COVERAGE.apis` entry —
+  // the proof did not change, only which manifest is responsible for it.
+  api: {
+    status: 'demonstrated',
+    files: ['src/system/apis/index.ts'],
+    notes:
+      'Declarative ApiEndpoint metadata (object_operation + flow targets), MEASURED on a real boot rather than asserted: packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts boots the showcase through the artifact-ingestion path and proves each declared path is matched and executed (the find endpoint answers byte-identically to the built-in /data route for the same operation), that `authRequired` denies anonymous with 401, that `cacheTtl: 30` reaches the wire as Cache-Control on successes only, and that /openapi.json and GET /meta/api describe exactly what is mounted. This entry read "demonstrated … executed by the runtime dispatcher (handleApiEndpoint)" once BEFORE that was true — #4936 measured it and found a bare 404 on every declared path, which is why the waiver stood from #4936 until the #5040 executor landed. It is restored to `demonstrated` only because a real-boot test now fails if any of it stops being true (#5040 E8 / #5112). The `router` kind stays retired: code-only (ADR-0088). src/system/server/recalc-endpoint.ts remains the code-mounted HTTP counterpart.',
+  },
   translation: { status: 'demonstrated', files: ['src/system/translations/index.ts'] },
   email_template: { status: 'demonstrated', files: ['src/system/emails/index.ts'] },
   doc: {
@@ -179,12 +190,10 @@ export const STACK_COLLECTION_COVERAGE: Record<string, KindCoverage> = {
     files: ['src/data/extensions/account.extension.ts'],
     notes: 'Merged into showcase_account by the ObjectQL engine at registerApp (priority overlay).',
   },
-  apis: {
-    status: 'demonstrated',
-    files: ['src/system/apis/index.ts'],
-    notes:
-      'Declarative ApiEndpoint metadata (object_operation + flow targets), MEASURED on a real boot rather than asserted: packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts boots the showcase through the artifact-ingestion path and proves each declared path is matched and executed (the find endpoint answers byte-identically to the built-in /data route for the same operation), that `authRequired` denies anonymous with 401, that `cacheTtl: 30` reaches the wire as Cache-Control on successes only, and that /openapi.json and GET /meta/api describe exactly what is mounted. This entry read "demonstrated … executed by the runtime dispatcher (handleApiEndpoint)" once BEFORE that was true — #4936 measured it and found a bare 404 on every declared path, which is why the waiver stood from #4936 until the #5040 executor landed. It is restored to `demonstrated` only because a real-boot test now fails if any of it stops being true (#5040 E8 / #5112). The `router` kind stays waived: code-only. src/system/server/recalc-endpoint.ts remains the code-mounted HTTP counterpart.',
-  },
+  // `apis` is NOT listed here any more: as of #5271 it is a registry kind, so
+  // its coverage lives in `KIND_COVERAGE.api` above. Leaving a duplicate row in
+  // this manifest — whose contract is "stack collections that are NOT registry
+  // kinds" — would mean two places to update and one of them silently wrong.
   connectors: {
     status: 'demonstrated',
     files: ['src/system/connectors/index.ts', 'src/automation/flows/index.ts'],
