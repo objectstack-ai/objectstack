@@ -76,9 +76,10 @@ jobs:
       - name: Slot-lookup ratchet
         run: pnpm check:slot-lookup
 
-      # Raw control-byte guard (#3127 / #4890 / #5157). Scans every tracked TEXT
-      # file for a raw C0 control byte — 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f, i.e.
-      # everything except tab/LF/CR. Two distinct harms, one gate:
+      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
+      # tracked TEXT file for a raw ASCII control byte — 0x00-0x08, 0x0b, 0x0c,
+      # 0x0e-0x1f and 0x7f, i.e. everything except tab/LF/CR. Two distinct
+      # harms, one gate:
       #   • A literal U+0000 makes grep/ripgrep treat the whole file as binary and
       #     silently return ZERO matches — the file drops out of code search and
       #     out of every grep-based lint, with no error saying so. Nothing else
@@ -92,6 +93,13 @@ jobs:
       #     Four tracked source files carried those past the NUL-only gate until
       #     #5157 widened the scan surface; PR #5140 is the case that found it,
       #     when a 0x01 sitting 14 bytes from a caught NUL went unfixed.
+      #   • DEL (0x7f) is in the set for the same reason, added by #5460. It is
+      #     not a C0 control — it sits alone past the printable range — so the
+      #     C0-shaped set could not reach it, and two raw specimens survived in
+      #     the CLI's password prompts nine lines below a 0x03 #5157 had just
+      #     escaped, reading as `case ''`. The set is drawn by the accident
+      #     source (a tool materialising an escape into its byte), and that
+      #     source does not pick byte values.
       # The command name stays `check:nul-bytes` for continuity — see the script's
       # header for why. Authors must write the unicode escape instead of the byte.
       - name: Raw control-byte guard
