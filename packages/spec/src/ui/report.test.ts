@@ -181,6 +181,73 @@ describe('Report ordering (#3916)', () => {
   });
 });
 
+/**
+ * #5013 — the scope-filter prescription, pinned by PARSE rather than by reading
+ * the alias table.
+ *
+ * The structural half (every alias key is one the shape rejects, every target
+ * one it accepts) is gated package-wide in `shared/alias-integrity.test.ts`.
+ * What that gate cannot say is what the author actually SEES, which is the
+ * thing that was broken: `filter` pointed at `filters`, a key `ReportSchema`
+ * does not declare either, so the fix earned a second rejection carrying no
+ * suggestion at all.
+ *
+ * These assertions guard a KEY verdict — which spelling the rejection names —
+ * so the prescribed key is proved by a full green parse of an otherwise-valid
+ * report, not merely by the absence of an `unrecognized_keys` issue.
+ */
+describe('ReportSchema — scope-filter aliases point at `runtimeFilter` (#5013)', () => {
+  const VALID = {
+    name: 'pipeline', label: 'Pipeline', type: 'summary',
+    dataset: 'sales', rows: ['stage'], values: ['revenue'],
+  } as const;
+
+  const messageFor = (key: string): string => {
+    const r = ReportSchema.safeParse({ ...VALID, [key]: { won: true } });
+    expect(r.success, `\`${key}\` must still be rejected — it is not a declared key`).toBe(false);
+    return r.error!.issues.map((i) => i.message).join('\n');
+  };
+
+  it.each(['filter', 'filters', 'where', 'criteria'])(
+    '`%s` is renamed onto `runtimeFilter`, the key this schema really declares',
+    (key) => {
+      const message = messageFor(key);
+      expect(message).toContain(`\`${key}\` → \`runtimeFilter\``);
+      // The old prescription, and the reason it was a defect: `filters` is not
+      // a key of this schema, so being sent there is a second rejection.
+      expect(message).not.toContain('→ `filters`');
+    },
+  );
+
+  it('the prescribed key parses — taking the advice ends the conversation', () => {
+    // The half that was false before: following the suggestion has to WORK.
+    const r = ReportSchema.safeParse({ ...VALID, runtimeFilter: { won: true } });
+    expect(r.success).toBe(true);
+    expect(r.data!.runtimeFilter).toEqual({ won: true });
+  });
+
+  it('matches the block table verbatim — a sub-report corrects the author the same way', () => {
+    const block = JoinedReportBlockSchema.safeParse({
+      name: 'b', label: 'B', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'],
+      filter: { won: true },
+    });
+    expect(block.success).toBe(false);
+    expect(block.error!.issues.map((i) => i.message).join('\n')).toContain('`filter` → `runtimeFilter`');
+  });
+
+  it('`columns` and `chart` are real keys here, so nothing renames them away', () => {
+    // Both were alias KEYS on this schema until #5013 — entries that could
+    // never run, because the shape declares both. Pinned from the other side:
+    // authoring either must simply work.
+    const r = ReportSchema.safeParse({
+      ...VALID, type: 'matrix', columns: ['region'],
+      chart: { type: 'bar', xAxis: 'stage', yAxis: 'revenue' },
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.columns).toEqual(['region']);
+  });
+});
+
 describe('ReportChartSchema', () => {
   it('requires xAxis + yAxis', () => {
     expect(ReportChartSchema.parse({ type: 'bar', xAxis: 'stage', yAxis: 'revenue' }).type).toBe('bar');

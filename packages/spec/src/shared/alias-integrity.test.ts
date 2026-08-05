@@ -71,7 +71,12 @@ function specModules(dir = SPEC_SRC, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) specModules(full, out);
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') && !entry.name.endsWith('.d.ts')) {
+    else if (
+      entry.name.endsWith('.ts')
+      && !entry.name.endsWith('.test.ts')
+      && !entry.name.endsWith('.bench.ts')   // registers vitest suites on import
+      && !entry.name.endsWith('.d.ts')
+    ) {
       out.push(full);
     }
   }
@@ -269,6 +274,29 @@ describe('alias integrity — coverage', () => {
       if (!matched) unreached.push(`${site.file}:${site.line} (${site.surface ?? 'assembled surface'})`);
     }
     expect(unreached, 'these alias tables are not reachable from any module export, so nothing judges them').toEqual([]);
+  });
+
+  it('the surface this gate does NOT cover only ever shrinks', () => {
+    // `strictObject` is not the only way to get an alias table: the pre-helper
+    // wiring calls `strictUnknownKeyError` directly with a hand-transcribed
+    // `knownKeys` array, and those tables never reach the registry this gate
+    // reads. Measured at 44 call sites when the gate was written, and measured
+    // CLEAN on both criteria at the same time — so this is a coverage boundary,
+    // not hidden debt. It is pinned shrink-only rather than left implicit
+    // because an uncovered table that nobody can see growing is precisely the
+    // "green check over source nothing read" failure the campaign keeps paying
+    // for: migrating one to `strictObject` is free, adding a NEW one fails here
+    // and forces the choice to be deliberate. Extending the judgement over them
+    // is tracked separately — they carry a transcribed key list rather than a
+    // shape, so it is a different measurement, not more of this one.
+    const uncovered = MODULES.filter((f) => {
+      const rel = path.relative(SPEC_SRC, f);
+      return rel !== 'shared/suggestions.zod.ts' && rel !== 'shared/strict-object.ts';
+    }).flatMap((f) => {
+      const source = fs.readFileSync(f, 'utf8');
+      return [...source.matchAll(/\bstrictUnknownKeyError\s*\(/g)].map(() => path.relative(SPEC_SRC, f));
+    });
+    expect(uncovered.length).toBeLessThanOrEqual(44);
   });
 
   it('the runtime walk sees tables the AST provably cannot read', () => {

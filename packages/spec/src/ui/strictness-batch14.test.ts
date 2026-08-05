@@ -19,10 +19,13 @@
  *    verdict as ADR-0049 REMOVE and both shapes are gone, so the absence pins
  *    live in `notification-embed-retirement.test.ts` where they can actually
  *    fail. See the block's own header for why they are not restated here.
- * 3. **Prescription integrity** — every alias target this batch added is a key
- *    the schema really accepts (ledger finding 12: *never suggest a key the
- *    schema cannot accept*), checked by parsing the prescribed key, not by
- *    reading the table.
+ * 3. **Prescription integrity** — was here; now package-wide in
+ *    `shared/alias-integrity.test.ts` (#5013), which judges all 235
+ *    `strictObject` surfaces against their runtime `.shape` instead of the nine
+ *    this batch could hand-map. The six pre-existing defects this file used to
+ *    carry as a reverse-pinned debt list are fixed, so the pin fired and was
+ *    retired with them. What remains here is the parse-level assertion a
+ *    structural gate cannot make.
  */
 
 import fs from 'node:fs';
@@ -30,17 +33,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
-import ts from 'typescript';
 import { z } from 'zod';
 
-import { ActionParamSchema, ActionSchema as ActionSchemaForAudit } from './action.zod';
+import { ActionParamSchema } from './action.zod';
 import { SharingConfigSchema } from './sharing.zod';
-import { ReportSortSchema, JoinedReportBlockSchema, ReportSchema as ReportSchemaForAudit } from './report.zod';
-import {
-  DatasetDimensionSchema,
-  DatasetMeasureSchema,
-  DatasetSchema as DatasetSchemaForAudit,
-} from './dataset.zod';
+import { ReportSortSchema, JoinedReportBlockSchema } from './report.zod';
+import { DatasetDimensionSchema, DatasetMeasureSchema } from './dataset.zod';
 import { DashboardWidgetSchema } from './dashboard.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -246,193 +244,34 @@ describe('批 14 — curated prescriptions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Prescription integrity — every alias target must actually be accepted
+// 3. Prescription integrity — SUPERSEDED by the package-wide gate (#5013)
 // ---------------------------------------------------------------------------
 
 /**
- * The `aliases` table of every `strictObject(` call in one of this batch's six
- * files, read from the SOURCE by AST, keyed by the call's `surface` string.
+ * This section used to carry two assertions and a debt list: that every alias
+ * target 批 14 added is a key the schema declares, and a reverse pin naming the
+ * six pre-existing defects in these files that the batch did not own
+ * (`ReportSchema`'s `filter`/`columns`/`chart`, `DatasetSchema`'s
+ * `measures`/`filter`, `ActionSchema`'s `body`).
  *
- * Reading the source is what makes this a real check. The first version of this
- * suite hand-listed the prescribed keys beside the assertion — a second copy of
- * the truth — and it stayed GREEN under a deliberate sabotage that repointed a
- * live alias at a key the schema rejects. That is the failure the ledger keeps
- * recording in different instruments (finding 9, finding 19): a measurement
- * reporting completeness it does not have. `strictObject` exists precisely to
- * collapse two copies into one; a test over it must not reintroduce them.
+ * Both are gone because both were kept honest: #5013 fixed all six, so the
+ * reverse pin fired exactly as its comment promised — *"this list cannot
+ * outlive its debt"* — and the verdict itself now runs package-wide in
+ * `shared/alias-integrity.test.ts`, over all 235 `strictObject` surfaces rather
+ * than the nine this batch hand-mapped.
+ *
+ * It is deleted rather than emptied, because what would be left is a second,
+ * WEAKER copy of a live check: the version here read alias tables from the
+ * source with the TypeScript AST and bound each `surface` string to a schema by
+ * hand, which cannot see through a shape's spreads, reads the ten
+ * dynamically-assembled tables as empty, and mis-binds `'this field group'`
+ * (two schemas share that string). Keeping it would reintroduce exactly the
+ * two-copies-of-the-truth problem `strictObject` exists to collapse.
+ *
+ * The one assertion NOT subsumed stays: a structural gate proves a prescribed
+ * key is declared, never that the shape it prescribes actually parses.
  */
-function aliasTablesBySurface(file: string): Map<string, Record<string, string>> {
-  const source = ts.createSourceFile(
-    file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true,
-  );
-  const out = new Map<string, Record<string, string>>();
-  const literal = (n: ts.Node): string | null =>
-    ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ? n.text : null;
-  const prop = (o: ts.ObjectLiteralExpression, name: string): ts.Expression | null => {
-    for (const p of o.properties) {
-      if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name) return p.initializer;
-    }
-    return null;
-  };
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isCallExpression(node)
-      && ts.isIdentifier(node.expression)
-      && node.expression.text === 'strictObject'
-      && node.arguments.length === 2
-      && ts.isObjectLiteralExpression(node.arguments[0])
-    ) {
-      const opts = node.arguments[0];
-      const surfaceNode = prop(opts, 'surface');
-      const surface = surfaceNode ? literal(surfaceNode) : null;
-      if (surface) {
-        const table: Record<string, string> = {};
-        const aliases = prop(opts, 'aliases');
-        if (aliases && ts.isObjectLiteralExpression(aliases)) {
-          for (const p of aliases.properties) {
-            if (!ts.isPropertyAssignment(p)) continue;
-            const key = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
-            const target = literal(p.initializer);
-            if (key && target) table[key] = target;
-          }
-        }
-        out.set(surface, table);
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return out;
-}
-
-/** Unwrap lazy / optional / default / array / effects down to a plain object's `.shape`. */
-function shapeOf(schema: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 12 || schema == null) return null;
-  const direct = (schema as { shape?: Record<string, unknown> }).shape;
-  if (direct && typeof direct === 'object') return direct;
-  const def = (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def;
-  if (!def) return null;
-  for (const key of ['innerType', 'element', 'in', 'out', 'schema', 'type'] as const) {
-    const inner = def[key];
-    if (inner && typeof inner === 'object') {
-      const found = shapeOf(inner, depth + 1);
-      if (found) return found;
-    }
-  }
-  if (typeof (def as { getter?: unknown }).getter === 'function') {
-    return shapeOf((def as { getter: () => unknown }).getter(), depth + 1);
-  }
-  return null;
-}
-
-describe('批 14 — no prescription points at a key the schema rejects', () => {
-  /**
-   * `surface` string → the DECLARED keys of the shape that surface names,
-   * resolved at RUNTIME rather than from the source object literal.
-   *
-   * Runtime, specifically, because a shape can spread (`...MetadataProtectionFields`)
-   * and a source-literal reader cannot see through that — it has to suppress the
-   * check for every spreading schema, which is most of the interesting ones.
-   * `.shape` sees the spread keys.
-   */
-  const declaredKeys = (): Map<string, Set<string>> => {
-    const widget = shapeOf(DashboardWidgetSchema)!;
-    const measure = shapeOf(DatasetMeasureSchema)!;
-    const entries: Array<[string, Record<string, unknown> | null]> = [
-      ['this action param option', shapeOf(shapeOf(ActionParamSchema)!.options)],
-      ['this sharing config', shapeOf(SharingConfigSchema)],
-      ['this report order key', shapeOf(ReportSortSchema)],
-      ['this joined report block', shapeOf(JoinedReportBlockSchema)],
-      ['this dataset dimension', shapeOf(DatasetDimensionSchema)],
-      ['this dataset measure', measure],
-      ['this derived-measure spec', shapeOf(measure.derived)],
-      // #5011: `compareTo` converged from a union to a plain strict object,
-      // so the arm-unwrapper this entry used is gone with it.
-      ['this comparison window', shapeOf(widget.compareTo)],
-      ['this widget layout box', shapeOf(widget.layout)],
-    ];
-    return new Map(entries.map(([surface, shape]) => {
-      expect(shape, `could not resolve the shape behind "${surface}"`).toBeTruthy();
-      return [surface, new Set(Object.keys(shape!))];
-    }));
-  };
-
-  /**
-   * Pre-existing defects in tables this batch did NOT write, each already filed.
-   * Listed rather than skipped so the instrument stays complete over these six
-   * files: the day one is fixed, its entry here fails and gets deleted.
-   */
-  const KNOWN_DEFECTS: ReadonlyArray<readonly [string, string, string]> = [
-    // [surface, alias key, issue]
-    ['this report', 'columns', '#5013'],
-    ['this report', 'chart', '#5013'],
-    ['this report', 'filter', '#5013'],
-    ['this dataset', 'measures', '#5013'],
-    ['this dataset', 'filter', '#5013'],
-    ['this action', 'body', '#5013'],
-  ];
-
-  const BATCH14_SURFACES = [
-    'this action param option', 'this sharing config', 'this report order key',
-    'this joined report block', 'this dataset dimension', 'this dataset measure',
-    'this derived-measure spec', 'this comparison window', 'this widget layout box',
-  ] as const;
-
-  const FILES = [
-    'ui/action.zod.ts', 'ui/sharing.zod.ts', 'ui/report.zod.ts',
-    'ui/dataset.zod.ts', 'ui/dashboard.zod.ts',
-  ];
-
-  it('the AST reader really finds this batch\'s tables (self-test before the verdict)', () => {
-    const found = new Set<string>();
-    for (const f of FILES) for (const s of aliasTablesBySurface(path.join(SPEC_SRC, f)).keys()) found.add(s);
-    for (const surface of BATCH14_SURFACES) {
-      expect(found, `AST reader lost the table for "${surface}"`).toContain(surface);
-    }
-    // And it reads real content, not empty tables.
-    const sharing = aliasTablesBySurface(path.join(SPEC_SRC, 'ui/sharing.zod.ts'));
-    expect(sharing.get('this sharing config')!.anonymous).toBe('allowAnonymous');
-  });
-
-  it('every alias TARGET this batch added is a key the schema really declares', () => {
-    const declared = declaredKeys();
-    const failures: string[] = [];
-    for (const f of FILES) {
-      for (const [surface, table] of aliasTablesBySurface(path.join(SPEC_SRC, f))) {
-        const keys = declared.get(surface);
-        if (!keys) continue; // not a 批 14 surface — covered by the next test
-        for (const [written, target] of Object.entries(table)) {
-          if (!keys.has(target)) failures.push(`${surface}: \`${written}\` -> \`${target}\` (not declared)`);
-          if (keys.has(written)) failures.push(`${surface}: \`${written}\` is itself declared (dead entry)`);
-        }
-      }
-    }
-    expect(failures).toEqual([]);
-  });
-
-  it('the pre-existing defects in these files are exactly the ones already filed', () => {
-    // A reverse pin, the ADR-0010 debt-list idiom: this list cannot outlive its
-    // debt. Fix one upstream and this test names it and fails.
-    const seen: string[] = [];
-    for (const f of FILES) {
-      for (const [surface, table] of aliasTablesBySurface(path.join(SPEC_SRC, f))) {
-        if ((BATCH14_SURFACES as readonly string[]).includes(surface)) continue;
-        const shape = surface === 'this report' ? shapeOf(ReportSchemaForAudit)
-          : surface === 'this dataset' ? shapeOf(DatasetSchemaForAudit)
-          : surface === 'this action' ? shapeOf(ActionSchemaForAudit)
-          : null;
-        if (!shape) continue;
-        const keys = new Set(Object.keys(shape));
-        for (const [written, target] of Object.entries(table)) {
-          if (keys.has(written) || !keys.has(target)) seen.push(`${surface}|${written}`);
-        }
-      }
-    }
-    expect(seen.sort()).toEqual(
-      KNOWN_DEFECTS.map(([s, k]) => `${s}|${k}`).sort(),
-    );
-  });
-
+describe('批 14 — the prescribed action param option shape really parses', () => {
   it('the action param option shape accepts exactly the pair it prescribes', () => {
     const r = ActionParamSchema.safeParse({ name: 'p', options: [{ label: 'A', value: 'a' }] });
     expect(r.success).toBe(true);
