@@ -2161,9 +2161,14 @@ export class MetadataManager implements IMetadataService {
    * already resolve the `metadata` service for the environment they serve —
    * adding one here would create a second scoping mechanism.
    *
-   * Nothing reaches this method over HTTP in 17.x: the dispatcher seam is
-   * #5090's, and publish still rejects a non-empty `apis:` (#4936), so the
-   * whole path is structurally unreachable until the #5040 E7 flip.
+   * This method is reached over HTTP on a real boot. The dispatcher seam
+   * landed as #5090 (`packages/runtime/src/api-endpoint-step.ts`, called from
+   * the `setFallbackHandler` the dispatcher plugin installs), and #4936's
+   * wholesale publish refusal of a non-empty `apis:` was replaced by the
+   * #5040 E7 per-shape gates (`packages/spec/src/api/endpoint-publish-gate.ts`)
+   * — so declarations exist and requests arrive here. The showcase's two
+   * declared endpoints are matched and executed through this path in
+   * `packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`.
    *
    * @throws when the metadata store cannot be read — an outage must never be
    *   reported as a miss, because a miss becomes a 404.

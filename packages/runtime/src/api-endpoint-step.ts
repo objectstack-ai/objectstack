@@ -20,11 +20,14 @@
  * ## What it does today, and what it does not
  *
  * On a match it runs the WHOLE chain: policies (#5040 E4) and then target
- * execution (#5040 E5), wired together here by E5b. It is still structurally
- * unreachable — a non-empty `apis:` is rejected at publish / validate until the
- * E7 flip — so no deployment can observe it; the tests drive `matchEndpoint`
- * through a stub, exactly as #5040 §5 prescribes for every E-series unit that
- * lands before the flip.
+ * execution (#5040 E5), wired together here by E5b. Since the E7 publish flip
+ * (`packages/spec/src/api/endpoint-publish-gate.ts`) a non-empty `apis:` is no
+ * longer refused wholesale — only shape by shape — so a deployment CAN observe
+ * this step: the showcase declares two endpoints and a real boot serves them
+ * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`).
+ * The tests here still drive `matchEndpoint` through a stub, which is what
+ * keeps the decision (when to answer, when to write nothing) testable apart
+ * from the wiring.
  *
  * ## The chain, in the one order it can run in
  *

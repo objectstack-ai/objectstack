@@ -46,11 +46,16 @@
  * with anonymous traffic from the same address), then the meter runs, then the
  * gate. One lookup, used twice.
  *
- * ## Structurally unreachable today
+ * ## Live on a real deployment
  *
- * A non-empty `apis:` is rejected at publish / validate until the #5040 E7 flip,
- * so nothing here can be observed by a deployment. The tests drive it directly,
- * as #5040 §5 prescribes for every E-series unit landing before the flip.
+ * The #5040 E7 flip (`packages/spec/src/api/endpoint-publish-gate.ts`) ended
+ * the wholesale refusal of a non-empty `apis:`, so these keys now gate real
+ * traffic: `api-endpoint-step.ts` applies this chain on every match, and the
+ * showcase's two declared endpoints exercise it over a socket
+ * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`
+ * pins that `authRequired` denies anonymous and `cacheTtl` reaches the wire).
+ * The tests below still drive this module directly — a pure function over
+ * explicit deps is worth testing as one.
  */
 
 import {

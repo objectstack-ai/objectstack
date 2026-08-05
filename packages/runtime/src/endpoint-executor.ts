@@ -20,18 +20,18 @@
  * contributes is only: which pipeline, with which arguments, and how its answer
  * (or its throw) becomes an HTTP response.
  *
- * ## Nothing calls this yet
+ * ## What calls this, and since when
  *
- * The dispatch step (`api-endpoint-step.ts`, #5090) still answers 501 on a
- * match. Replacing that branch with `policy → execute` is a deliberate
- * follow-up single, landing after this and #5091 (E4, policy keys) are both on
- * `main` — the two were developed in parallel on disjoint file surfaces (#4604),
- * and wiring them together is one small reviewable change rather than a race
- * between two PRs over the same lines. Until that lands this module is
- * unreachable, and on top of that a non-empty `apis:` is still rejected at
- * publish/validate until the E7 flip. Zero live behavior change; the tests drive
- * it directly with stubs, exactly as #5040 §5 prescribes for every E-series unit
- * that lands before the flip.
+ * The dispatch step (`api-endpoint-step.ts`, #5090) calls it on every match:
+ * E5b replaced that step's provisional 501 with `policy → execute`, so this
+ * module runs whenever a declared endpoint is matched. The E7 publish flip
+ * (`packages/spec/src/api/endpoint-publish-gate.ts`) then made declarations
+ * possible at all — a non-empty `apis:` is no longer refused wholesale, only
+ * shape by shape — so this is LIVE code on a real deployment, not a unit
+ * waiting for its seam. The showcase exercises it end to end over a socket
+ * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`);
+ * the unit tests below still drive it directly with stubs, which is how the
+ * exact delegated call shape stays assertable.
  *
  * ## Pure by construction
  *

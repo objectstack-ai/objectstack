@@ -5,8 +5,10 @@
  *
  * Every case here is about ONE question: when does this step answer, and when
  * does it write nothing so the transport's existing unmatched answer stands?
- * Getting that wrong in either direction is a live behavior change on a surface
- * that is supposed to be inert until the #5040 E7 flip.
+ * Getting that wrong in either direction is a live behavior change — and since
+ * the #5040 E7 publish flip it is live for real traffic, not just in principle:
+ * endpoints can be declared, so a step that answers when it should stay silent
+ * now shadows the transport's 404 on a deployment.
  *
  * `matchEndpoint` is driven by a stub implementing the contract in
  * `@objectstack/spec/contracts` — deliberately, not by the real matcher: that

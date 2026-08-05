@@ -55,12 +55,20 @@
  * the mirror; it is not built here because Prime Directive #2 keeps logic out
  * of `packages/spec` and the frozen vocabulary is not this unit's to widen.
  *
- * ## Today it emits nothing
+ * ## What it emits today
  *
- * Publish/validate still rejects a non-empty `apis:` until the E7 flip, so the
- * enumeration yields an empty set and {@link enrichOpenApiWithEndpoints}
- * returns its input document BY REFERENCE — the served bytes are identical to
- * before this change. That invariant is pinned by a test rather than argued.
+ * Real documents. The #5040 E7 publish flip
+ * (`packages/spec/src/api/endpoint-publish-gate.ts`) ended the wholesale
+ * refusal of a non-empty `apis:`, so the enumeration is no longer empty on a
+ * deployment that declares endpoints: a real showcase boot serves an
+ * `/openapi.json` describing its two declared endpoints
+ * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`).
+ *
+ * The empty-set case is still exact rather than approximate — with nothing to
+ * add, {@link enrichOpenApiWithEndpoints} returns its input document BY
+ * REFERENCE — which is what keeps a deployment that declares no endpoint
+ * byte-identical to one built before this module existed. That invariant is
+ * pinned by a test rather than argued.
  */
 
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
@@ -328,8 +336,10 @@ export function selectDocumentableEndpoints(
  * Fold declared endpoints into an OpenAPI document's `paths`.
  *
  * Returns `doc` ITSELF when there is nothing to add — that is what makes the
- * empty-set case byte-identical rather than merely equivalent, and it is the
- * state of the world until the E7 flip lets a non-empty `apis:` publish.
+ * empty-set case byte-identical rather than merely equivalent, which is the
+ * state a deployment declaring no endpoint stays in. Since the E7 flip let a
+ * non-empty `apis:` publish, the other branch is the live one wherever
+ * endpoints are declared.
  *
  * A declaration never displaces a built-in: if the document already describes
  * the same path+method, the built-in keeps it and the declaration is reported.

@@ -77,9 +77,11 @@ describe('GET /api/v1/openapi.json — endpoint enrichment', () => {
   });
 
   it('serves a document identical to the pre-#5093 one while no endpoint is declared', async () => {
-    // The load-bearing invariant: publish rejects a non-empty `apis:` until the
-    // E7 flip, so this is the ONLY state that exists in production today, and
-    // the change is required to be invisible in it. Compared against the same
+    // The load-bearing invariant: a deployment that declares no endpoint must
+    // not be able to tell the enrichment step exists. Since the #5040 E7
+    // publish flip this is no longer the only state in production — endpoints
+    // do publish — which is exactly why the no-declaration state needs pinning
+    // rather than assuming. Compared against the same
     // handler fed a protocol with no `api` capability at all — i.e. the world
     // exactly as it was before the enrichment step existed.
     const withEmptyApis = await serveOpenApi(makeProtocol({ object: [], api: [] }).protocol);

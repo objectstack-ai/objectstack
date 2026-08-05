@@ -295,9 +295,12 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + 'service. `script` / `proxy` targets and the inputMapping / outputMapping keys are NOT '
       + 'executed and answer 501. A miss (or an occupant of the metadata slot with no matchEndpoint, '
       + 'or a multi-tenant request that resolves to no environment) writes nothing, leaving the '
-      + 'transport\'s 404/405 answer untouched. Structurally unreachable today: a non-empty `apis:` '
-      + 'is rejected at publish until the #5040 E7 flip, so nothing can be declared for this seam to '
-      + 'match. No SDK surface — app-declared endpoints are an external-integration channel '
+      + 'transport\'s 404/405 answer untouched. LIVE since the #5040 E7 publish flip: a non-empty '
+      + '`apis:` no longer fails wholesale, it is gated shape by shape '
+      + '(`packages/spec/src/api/endpoint-publish-gate.ts`), so declarations exist and a real boot '
+      + 'reaches this seam — the showcase serves two of them '
+      + '(`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`). '
+      + 'No SDK surface — app-declared endpoints are an external-integration channel '
       + '(ADR-0121 D3), called by the integrator\'s own client, not by `@objectstack/client`',
   },
 

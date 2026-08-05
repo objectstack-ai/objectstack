@@ -3,14 +3,17 @@
 /**
  * #5040 E6 — declared endpoints in the OpenAPI document.
  *
- * Two jobs, and the second one is the load-bearing one TODAY:
+ * Two jobs:
  *
  *  1. the positive shapes, driven straight through the pure enrichment with
- *    parsed declarations (publish still refuses to let any of them exist, so
- *    there is no boot that could exercise them end to end yet);
+ *    parsed declarations. Since the #5040 E7 publish flip these are the LIVE
+ *    path — a real showcase boot serves an `/openapi.json` carrying its two
+ *    declared endpoints
+ *    (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`);
+ *    the cases here pin the projection itself, apart from any boot;
  *  2. the empty-set invariant — with no declarations the document must come
- *    back not merely equivalent but IDENTICAL, because that is the entire
- *    live-behaviour claim this change makes until the E7 flip.
+ *    back not merely equivalent but IDENTICAL, which is what keeps a
+ *    deployment that declares nothing byte-for-byte unchanged.
  */
 
 import { describe, it, expect, vi } from 'vitest';

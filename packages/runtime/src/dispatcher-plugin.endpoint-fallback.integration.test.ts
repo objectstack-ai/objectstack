@@ -18,9 +18,12 @@
  * rides a success and never an error.
  *
  * The load-bearing assertion in most of these is a NEGATIVE one: that adding
- * this seam changed nothing for anybody. Today's unmatched answers — the bare
- * 404 and the 405 + `Allow` — must come back byte for byte, since a stack
- * cannot declare an endpoint at all until the E7 flip.
+ * this seam changed nothing for anybody who did not ask for it. The unmatched
+ * answers — the bare 404 and the 405 + `Allow` — must come back byte for byte
+ * for every path no declaration owns. Since the #5040 E7 publish flip that is
+ * the assertion's whole weight: stacks CAN declare endpoints now, so "the
+ * fallback stays silent unless a declaration matches" is a promise to live
+ * deployments rather than a property of a surface nothing could reach.
  *
  * NOTE on the body guarantee: that the fallback receives a READABLE `req.body`
  * (the difference from the `use()` middleware seam) is a transport promise, and

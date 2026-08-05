@@ -1426,16 +1426,22 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 ctx.logger.info('Declarative endpoint dispatch step armed', {
                     mount: appEndpointMountPrefix(prefix),
                     // True as of #5040 E5b: policy chain + target execution are
-                    // wired. Nothing can be DECLARED until the E7 publish flip, so
-                    // this still describes a surface no deployment can reach.
+                    // wired. And reachable as of the E7 publish flip — a
+                    // non-empty `apis:` publishes, so this describes a surface
+                    // deployments actually serve.
                     executes: true,
                 });
             } else {
-                // `debug`, not `warn`: no stack can declare an endpoint yet (a
-                // non-empty `apis:` is rejected at publish until #5040 E7), so
-                // nothing is missing from any deployment today. When that flip
-                // lands, THIS is where absence must become loud — an adapter
-                // without the seam can never serve a declared endpoint.
+                // Still `debug`, and that is now UNDER-STATED — tracked by
+                // #5400, deliberately not changed here (#5399 is comment-only).
+                // The reason this was debug has expired: it read "no stack can
+                // declare an endpoint yet", which stopped being true at the
+                // #5040 E7 publish flip. Declarations exist now, so on an
+                // adapter without this seam they are silently unservable and
+                // the operator's only signal is a line that the default `info`
+                // level does not even print. This is the "absence must be loud"
+                // case (AGENTS.md, Route & surface ownership §3); #5400 raises
+                // it to `warn` carrying the consequence and the remedy.
                 ctx.logger.debug(
                     '[dispatcher] http.server exposes no `setFallbackHandler`; declarative endpoints '
                     + 'would be unreachable on this transport.',

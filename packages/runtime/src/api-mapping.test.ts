@@ -14,9 +14,10 @@
  *     applied. `transform` is the case #5137 was filed over, but an unusable
  *     path and colliding targets are the same category and answer identically.
  *
- * And the property that makes both safe to land before the E7 flip: with no
- * declaration, the value that goes in is the value that comes out, by
- * reference.
+ * And the identity property both rest on: with no declaration, the value that
+ * goes in is the value that comes out, by reference. That is what made these
+ * keys safe to land ahead of the #5040 E7 publish flip, and it is still what
+ * keeps an endpoint declaring no mapping free of any projection cost.
  */
 
 import { describe, it, expect } from 'vitest';

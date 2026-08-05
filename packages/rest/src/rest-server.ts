@@ -2862,10 +2862,12 @@ export class RestServer {
                 //    ADR-0076): declared endpoints join it here rather than
                 //    growing a second generator somewhere else.
                 //
-                //    Until the E7 flip a non-empty `apis:` cannot publish, so
-                //    the enumeration is empty and `enrichOpenApiWithEndpoints`
-                //    hands `enriched` straight back — the served bytes today
-                //    are exactly the ones served before this change.
+                //    Since the E7 flip a non-empty `apis:` publishes, so this
+                //    enumeration returns real declarations on a deployment that
+                //    has them and the document grows a path entry per endpoint.
+                //    Where nothing is declared the enumeration is empty and
+                //    `enrichOpenApiWithEndpoints` hands `enriched` straight
+                //    back, byte for byte.
                 try {
                     const apiResult = await protocol?.getMetaItems?.({ type: 'api' });
                     const apiItems: unknown[] = Array.isArray((apiResult as any)?.items)
