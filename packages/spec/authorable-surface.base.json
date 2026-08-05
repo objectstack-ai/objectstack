@@ -1,6 +1,6 @@
 {
   "description": "In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the keys in authorable-surface.json as they stood at `baseRev`, a commit on origin/main. A build that CAN reach origin/main anchors on the merge base instead, and re-verifies this file against `baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) anchors here instead of failing. Written only by `gen:schema`, only from a git-resolved baseline — never from the build that is being checked. See #5235.",
-  "baseRev": "26e1029f5cdf7f63719e3f58eb661b19f65b78fe",
+  "baseRev": "1c3da1f6f0899f7299d4b28294e049b0b75d398d",
   "keys": [
     "ai/AIModelConfig:maxTokens",
     "ai/AIModelConfig:model",

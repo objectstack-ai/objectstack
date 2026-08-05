@@ -38,9 +38,14 @@ live declarations in `integration/connector.zod.ts` and `ui/offline.zod.ts` (the
   (strategy, direction, schedule, `conflictResolution`, batching, delete mode).
 - **Transformation pipelines** — `ETLPipeline` (`automation/etl.zod.ts`) for
   multi-source, multi-stage data movement.
-- **Client offline sync** — `SyncConfigSchema` / `ConflictResolution`
-  (`ui/offline.zod.ts`): a *different* concept (client/server conflict handling)
-  that now owns the bare `ConflictResolution` name package-wide.
+- **Client offline sync** — ~~`SyncConfigSchema` / `ConflictResolution`
+  (`ui/offline.zod.ts`)~~ **also retired, at #4988** (ADR-0049). That vocabulary
+  had no carrier key either: no schema in the protocol declared an `offline:`
+  slot, so nothing ever parsed it. Offline sync is a platform capability, and
+  when it is built its vocabulary arrives on the sync engine that owns the
+  queue, the conflict policy and the cache — not as a standalone `ui/` config
+  shape. The bare `ConflictResolution` name is consequently published by no def
+  at all; `ConnectorConflictResolution` above is the connector-sync one.
 
 ---
 
