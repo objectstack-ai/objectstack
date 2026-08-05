@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -8,6 +9,14 @@ import { SqlDriver } from '../src/index.js';
  * filters a real SQL rendering and must NOT forward an unknown operator to Knex
  * verbatim (which silently returned the whole table on a null comparand — a
  * filter-bypass on permission/assignment-scoped list views).
+ *
+ * [#5158] The array-format block below used to hand the raw
+ * `[['assignee','isnull',true]]` to the driver, which carried its own compiler
+ * for it. That dialect is deleted: `FilterArray` is input-only sugar, lowered
+ * through `parseFilterAST` at the engine/protocol doors. The authored shapes
+ * are unchanged — they now travel the declared route, which is what the block
+ * calls explicitly. #2704's condition is untouched: `isnull` must still render
+ * IS NULL and an unknown operator must still throw rather than scan the table.
  */
 describe('SqlDriver — null / empty operators (#2704)', () => {
   let driver: SqlDriver;
@@ -40,36 +49,51 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
   const ids = (rows: any[]) => rows.map((r) => r.id).sort();
 
-  describe('array-format where', () => {
+  describe('authored array form, lowered the declared way (#5158)', () => {
+    // The exact route the engine and the protocol face take: the caller's
+    // `FilterArray` through `parseFilterAST`, and only the `FilterCondition`
+    // reaches the driver. Feeding the array raw is what this driver no longer
+    // does — pinned at the bottom of this block.
+    const lowered = (where: unknown) =>
+      driver.find('tasks', { object: 'tasks', where: parseFilterAST(where) as FilterCondition });
+
     it('equals + null → IS NULL (baseline that already worked)', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', '=', null]] });
-      expect(ids(rows)).toEqual(['2', '4']);
+      expect(ids(await lowered([['assignee', '=', null]]))).toEqual(['2', '4']);
     });
 
     it.each(['is_null', 'isnull', 'is_empty'])('%s → IS NULL', async (op) => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', op, true]] });
-      expect(ids(rows)).toEqual(['2', '4']);
+      expect(ids(await lowered([['assignee', op, true]]))).toEqual(['2', '4']);
     });
 
     it.each(['is_not_null', 'isnotnull', 'is_not_empty'])('%s → IS NOT NULL', async (op) => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', op, true]] });
-      expect(ids(rows)).toEqual(['1', '3']);
+      expect(ids(await lowered([['assignee', op, true]]))).toEqual(['1', '3']);
     });
 
     it('!= null → IS NOT NULL (not a `<> NULL` that matches nothing)', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: [['assignee', '!=', null]] });
-      expect(ids(rows)).toEqual(['1', '3']);
+      expect(ids(await lowered([['assignee', '!=', null]]))).toEqual(['1', '3']);
     });
 
     it('unknown operator throws instead of returning the whole table', async () => {
-      await expect(
-        driver.find('tasks', { object: 'tasks', where: [['assignee', 'totally_bogus', null]] }),
-      ).rejects.toThrow(/Unsupported filter operator/);
+      // `parseFilterAST` is lenient here on purpose (`$${op}` fallback) — the
+      // ENGINE door gates on `isFilterAST` first and refuses this a layer
+      // earlier (engine-filter-array-lowering.test.ts). Either way it throws;
+      // what #2704 forbids is the whole-table answer.
+      await expect(lowered([['assignee', 'totally_bogus', null]]))
+        .rejects.toThrow(/Unsupported filter operator/);
     });
 
     it('count with is_null is scoped, not the whole table', async () => {
-      const count = await driver.count('tasks', { object: 'tasks', where: [['assignee', 'isnull', true]] });
+      const count = await driver.count('tasks', {
+        object: 'tasks',
+        where: parseFilterAST([['assignee', 'isnull', true]]) as FilterCondition,
+      });
       expect(count).toBe(2);
+    });
+
+    it('the raw array is refused by the driver — the dialect is gone (#5158)', async () => {
+      await expect(
+        driver.find('tasks', { object: 'tasks', where: [['assignee', 'isnull', true]] as any }),
+      ).rejects.toThrow(/A filter ARRAY reached the driver/);
     });
   });
 

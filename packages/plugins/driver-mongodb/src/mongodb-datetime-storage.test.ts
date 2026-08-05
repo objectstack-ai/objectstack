@@ -20,6 +20,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoDBDriver } from './mongodb-driver.js';
 import { createTestMongod } from './test-mongod.js';
@@ -136,8 +137,13 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
     } as any);
     expect(ids(between)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
 
+    // [#5158] The authored array form, lowered the declared way. The INFIX
+    // join (`[condA, 'and', condB]`) has no lowering at all and is refused at
+    // the door; the declared spelling of "both bounds" is the prefix group.
     const array = await driver.find('task', {
-      where: [['created_at', '>=', '2026-04-29'], 'and', ['created_at', '<=', '2026-07-28']],
+      where: parseFilterAST(
+        ['and', ['created_at', '>=', '2026-04-29'], ['created_at', '<=', '2026-07-28']],
+      ) as any,
     } as any);
     expect(ids(array)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
   });

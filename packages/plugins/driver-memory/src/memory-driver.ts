@@ -3,33 +3,24 @@
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
+import {
+  assertFilterConditionShape,
+  filterArrayReachedDriverError,
+  filterNodeExpectedError,
+  filterNodeListExpectedError,
+  malformedBetweenError,
+  unknownFieldOperatorError,
+  unknownLogicalOperatorError,
+  unsupportedFilterError,
+} from './filter-refusal.js';
 import {
   coerceTemporalValue,
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
-
-/**
- * [#4436] A filter this driver cannot COMPILE — see the twin in
- * `driver-sql`'s `unsupportedFilterError`, which carries the full rationale.
- *
- * Kept in lockstep with driver-sql deliberately: #3948 made the two backends
- * AGREE that an uncompilable filter is a refusal rather than a silent
- * match-everything, and the refusal's wire envelope has to agree too. A test
- * suite that swaps the memory driver for SQL must see the same `400
- * INVALID_FILTER`, not a coded refusal on one backend and a bare `{error}` on
- * the other.
- */
-function unsupportedFilterError(message: string): Error {
-  const err = new Error(message) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.INVALID_FILTER;
-  err.status = 400;
-  return err;
-}
 
 /**
  * Persistence adapter interface.
@@ -699,18 +690,29 @@ export class InMemoryDriver implements IDataDriver {
 
   /**
    * Convert ObjectQL filter format to MongoDB query format for Mingo.
-   * 
+   *
    * Supports:
    * 1. AST Comparison Node: { type: 'comparison', field, operator, value }
    * 2. AST Logical Node: { type: 'logical', operator: 'and'|'or', conditions: [...] }
-   * 3. Legacy Array Format: [['field', 'op', value], 'and', ['field2', 'op', value2]]
-   * 4. MongoDB Format: { field: value } or { field: { $eq: value } } (passthrough)
+   * 3. MongoDB Format: { field: value } or { field: { $eq: value } } (passthrough)
+   *
+   * The legacy ARRAY format (`[['field','op',value], 'and', […]]`) is no longer
+   * one of them — see {@link filterArrayReachedDriverError} and #5158. It was a
+   * second filter compiler for a shape the spec never declared on `where`, and
+   * both doors into the runtime now lower `FilterArray` through
+   * `parseFilterAST` before a driver is reached.
    */
   private convertToMongoQuery(filters?: any, object?: string): Record<string, any> {
     if (!filters) return {};
 
+    if (Array.isArray(filters)) {
+      // `[]` still means "no filter" — unchanged.
+      if (filters.length === 0) return {};
+      throw filterArrayReachedDriverError(filters);
+    }
+
     // AST node format (ObjectQL QueryAST)
-    if (!Array.isArray(filters) && typeof filters === 'object') {
+    if (typeof filters === 'object') {
       if (filters.type === 'comparison') {
         return this.convertConditionToMongo(filters.field, filters.operator, filters.value, object) || {};
       }
@@ -722,71 +724,20 @@ export class InMemoryDriver implements IDataDriver {
         return { [op]: conditions };
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
+      // [#5324/#5328] Shape first, then translate — the SAME gate the reference
+      // matcher runs (`filter-refusal.ts`), so the two faces cannot answer one
+      // filter differently again. It must run before `normalizeFilterCondition`
+      // and not inside it: the translator recurses per key and would therefore
+      // refuse or not refuse depending on where in the tree it gave up.
+      assertFilterConditionShape(filters, 'filter');
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
       return this.normalizeFilterCondition(filters, object);
     }
 
-    // Legacy array format
-    if (!Array.isArray(filters) || filters.length === 0) return {};
-
-    const logicGroups: { logic: 'and' | 'or'; conditions: Record<string, any>[] }[] = [
-      { logic: 'and', conditions: [] },
-    ];
-    let currentLogic: 'and' | 'or' = 'and';
-
-    for (const item of filters) {
-      if (typeof item === 'string') {
-        const lower = item.toLowerCase();
-        // Previously this cast ANY string to 'and' | 'or'. A bare comparison
-        // triple — which reaches a driver only when `isFilterAST()` refused its
-        // operator, leaving the array unparsed — therefore opened three empty
-        // logic groups, produced no conditions, and returned `{}`: a filter that
-        // matches EVERY record. An unapplied filter must not look like a
-        // satisfied one. #3948.
-        if (lower !== 'and' && lower !== 'or') {
-          throw unsupportedFilterError(
-            `Unrecognized filter operator "${item}" in a comparison triple. ` +
-              `A filter array is either a logical node (["and"|"or", …]) or nested ` +
-              `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
-              `reaches the driver when its operator is outside @objectstack/spec ` +
-              `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
-              `Filter was: ${JSON.stringify(filters)}`,
-          );
-        }
-        if (lower !== currentLogic) {
-          currentLogic = lower;
-          logicGroups.push({ logic: currentLogic, conditions: [] });
-        }
-      } else if (Array.isArray(item)) {
-        const [field, operator, value] = item;
-        // `convertConditionToMongo` now throws rather than returning null for an
-        // operator it cannot express, so a dropped condition can no longer
-        // silently widen the result set.
-        const cond = this.convertConditionToMongo(field, operator, value, object);
-        if (cond) logicGroups[logicGroups.length - 1].conditions.push(cond);
-      } else {
-        throw unsupportedFilterError(
-          `Unrecognized filter element of type ` +
-            `"${item === null ? 'null' : typeof item}" — expected a logical keyword ` +
-            `("and"/"or") or a condition array. Filter was: ${JSON.stringify(filters)}`,
-        );
-      }
-    }
-
-    const allConditions: Record<string, any>[] = [];
-    for (const group of logicGroups) {
-      if (group.conditions.length === 0) continue;
-      if (group.conditions.length === 1) {
-        allConditions.push(group.conditions[0]);
-      } else {
-        const op = group.logic === 'or' ? '$or' : '$and';
-        allConditions.push({ [op]: group.conditions });
-      }
-    }
-
-    if (allConditions.length === 0) return {};
-    if (allConditions.length === 1) return allConditions[0];
-    return { $and: allConditions };
+    // A truthy non-object, non-array `where` emits no predicate. Pre-existing
+    // behaviour on a shape only a cast can produce; untouched by #5158, which
+    // is about the array dialect.
+    return {};
   }
 
   /**
@@ -854,10 +805,11 @@ export class InMemoryDriver implements IDataDriver {
               : { $gte: store(value[0]), $lte: store(value[1]) },
           };
         }
-        throw unsupportedFilterError(
-          `"between" on field "${field}" needs a two-element array, got ` +
-            `${JSON.stringify(value)}. Returning no predicate would silently match every record.`,
-        );
+        // [#5328] One condition, one wording — the same refusal the
+        // FilterCondition `$between` arm raises. They used to differ, which is
+        // how a caller reading two messages could believe they had hit two
+        // different problems.
+        throw malformedBetweenError(field, value, `filter.${field}.between`);
       default:
         // Was `return null`, which the caller dropped — so an operator this
         // driver cannot express narrowed nothing instead of erroring. driver-sql
@@ -874,34 +826,65 @@ export class InMemoryDriver implements IDataDriver {
    * Normalize a FilterCondition object by converting non-standard $-prefixed
    * operators ($contains, $notContains, $startsWith, $endsWith, $between, $null)
    * to Mingo-compatible equivalents ($regex, $gte/$lte, null checks).
+   *
+   * [#5324/#5328] TRANSLATION ONLY. Every shape decision — the operator
+   * vocabulary, `$between`'s arity, what may sit in a node position — was made
+   * by `assertFilterConditionShape` before this ran, on the whole tree at once.
+   * The refusals still written here are the totality floor a translator owes
+   * itself (`driver-sql` keeps its emitter's `default: throw` beside
+   * `reduceFilterNode` for the same reason): unreachable through
+   * `convertToMongoQuery`, and the honest answer if this method is ever called
+   * from somewhere new.
    */
-  private normalizeFilterCondition(filter: Record<string, any>, object?: string): Record<string, any> {
+  private normalizeFilterCondition(filter: Record<string, any>, object?: string, path = 'filter'): Record<string, any> {
     const result: Record<string, any> = {};
     const extraAndConditions: Record<string, any>[] = [];
 
     for (const key of Object.keys(filter)) {
       const value = filter[key];
+      const here = `${path}.${key}`;
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
-        result[key] = Array.isArray(value)
-          ? value.map((child: any) => this.normalizeFilterCondition(child, object))
-          : value;
+        if (!Array.isArray(value)) throw filterNodeListExpectedError(key, value, here);
+        result[key] = value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`));
         continue;
       }
       if (key === '$not') {
-        result[key] = value && typeof value === 'object'
-          ? this.normalizeFilterCondition(value, object)
-          : value;
+        // [#5324] The whole point of the issue. `$not` is a declared combinator
+        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `memory-matcher`
+        // evaluates it, and `cel-to-filter` EMITS it — a CEL `!expr` in an RLS
+        // read scope lowers to `{ $not: {…} }`. Passing it through unchanged
+        // meant mingo received a document-level `$not`, which MongoDB does not
+        // have: `unknown top level operator: $not`, uncoded, on every query
+        // carrying a negated scope.
+        //
+        // `$nor` with one operand IS the document-level negation in MongoDB, and
+        // is what `driver-mongodb` rewrites to for the identical reason (#4405).
+        // It is also NULL-safe by construction, which is the semantics #5146
+        // ruled canonical: a row whose field is null or missing does not satisfy
+        // the inner condition, so `$nor` admits it — the same answer this
+        // package's matcher and `@objectstack/formula` give, and the one
+        // driver-sql was rewritten to match.
+        //
+        // At most one `$not` per node (it is one object key), so this never
+        // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
+        // the shape gate refuses undeclared combinators.
+        if (!value || typeof value !== 'object') throw filterNodeExpectedError(value, here);
+        result.$nor = [this.normalizeFilterCondition(value, object, here)];
         continue;
       }
-      // Skip $-prefixed keys that aren't field names (already handled or unknown)
-      if (key.startsWith('$')) {
-        result[key] = value;
-        continue;
-      }
+      if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
-        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key));
+        // A field spec with no `$` keys is a nested-object COMPARAND, not an
+        // operator map — mingo compares it structurally, `driver-mongodb` says
+        // so explicitly, and the matcher deep-equals it. Handing it to the
+        // operator translator would read its field names as operators.
+        if (!Object.keys(value).some((k) => k.startsWith('$'))) {
+          result[key] = value;
+          continue;
+        }
+        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
         // Handle multiple regex conditions on the same field (e.g. $startsWith + $endsWith)
         if (normalized._multiRegex) {
           const regexConditions: Record<string, any>[] = normalized._multiRegex;
@@ -940,8 +923,11 @@ export class InMemoryDriver implements IDataDriver {
    * Convert non-standard field operators to Mingo-compatible format.
    * When multiple regex-producing operators appear on the same field
    * (e.g. $startsWith + $endsWith), they are combined via $and.
+   *
+   * `field` and `path` are carried only so a refusal can name the position it
+   * refused — the vocabulary itself is enforced one level up (#5324).
    */
-  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind): Record<string, any> {
+  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind, field = '<field>', path = 'filter'): Record<string, any> {
     const store = (v: any) => coerceTemporalValue(v, kind);
     const result: Record<string, any> = {};
     const regexConditions: Record<string, any>[] = [];
@@ -961,15 +947,20 @@ export class InMemoryDriver implements IDataDriver {
         case '$endsWith':
           regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`, 'i') });
           break;
-        case '$between':
-          if (Array.isArray(val) && val.length === 2) {
-            result.$gte = store(val[0]);
-            // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
-            const betweenNextDay = nextUtcCalendarDay(val[1]);
-            if (betweenNextDay != null) result.$lt = store(betweenNextDay);
-            else result.$lte = store(val[1]);
-          }
+        case '$between': {
+          // [#5328] The arm used to be CONDITIONAL — a comparand that was not a
+          // two-element array skipped it and wrote nothing, so the field
+          // normalised to `{}` and mingo read that as "matches no row". The
+          // range simply vanished, and no one was told. The shape gate refuses
+          // it now; this throw is the totality floor.
+          if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
+          result.$gte = store(val[0]);
+          // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+          const betweenNextDay = nextUtcCalendarDay(val[1]);
+          if (betweenNextDay != null) result.$lt = store(betweenNextDay);
+          else result.$lte = store(val[1]);
           break;
+        }
         case '$lte': {
           // A bare-day upper bound means "through that whole day" (#4042; the
           // driver-sql twin is #3777). Order-equivalent to `<=` for plain
@@ -994,9 +985,19 @@ export class InMemoryDriver implements IDataDriver {
         case '$in': case '$nin':
           result[op] = store(val);
           break;
-        default:
+        // Evaluated by mingo under the same name. `$exists` is a presence
+        // predicate, `$regex`/`$options` a pattern and its flags — none of them
+        // is a comparand, so none takes the field's storage form (#4047).
+        case '$exists': case '$regex': case '$options':
           result[op] = val;
           break;
+        default:
+          // [#5324] Was `result[op] = val` — a GENERIC passthrough that handed
+          // every unrecognised `$op` to mingo, which answered with a bare
+          // `MingoError` (no `code`, no `status`) and so escaped the ADR-0112
+          // envelope as a 500-shaped body. The vocabulary gate refuses these
+          // before translation; this throw is the totality floor.
+          throw unknownFieldOperatorError(op, field, path);
       }
     }
 

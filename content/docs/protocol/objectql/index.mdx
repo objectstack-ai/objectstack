@@ -269,10 +269,12 @@ os package publish
 <Callout type="warn">
   Offline sync (on-device SQLite mirror + conflict resolution) is **not yet
   implemented** — there is no `offline_sync` capability in the object schema, and
-  the offline/sync config schemas that do exist in `@objectstack/spec`
-  (`OfflineConfigSchema` / `SyncConfigSchema`) are not consumed by any runtime or
-  client code yet. The example below illustrates the intended direction, not a
-  shipping feature.
+  there is no offline/sync vocabulary in `@objectstack/spec` either: the config
+  schemas that used to sit there (`OfflineConfigSchema` / `SyncConfigSchema`)
+  had no carrier key and no consumer, and were retired in v17 (#4988, ADR-0049
+  enforce-or-remove). When offline sync is built, its vocabulary arrives with
+  the sync engine that owns the queue, the conflict policy and the cache. The
+  example below illustrates the intended direction, not a shipping feature.
 </Callout>
 
 **Intended ObjectQL Solution:** because objects are defined once and the same

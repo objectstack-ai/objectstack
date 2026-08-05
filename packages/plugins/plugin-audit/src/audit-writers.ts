@@ -315,6 +315,68 @@ export function installAuditWriters(
   const getMessaging = opts.getMessaging ?? (() => undefined);
   const getI18n = opts.getI18n ?? (() => undefined);
 
+  /**
+   * Write the compliance ledger row (+ its activity mirror).
+   *
+   * Extracted as a NAMED callee so `pnpm check:durability-log-level` can anchor
+   * on it: the gate matches a declared vocabulary of durability-critical calls,
+   * and the bare `.create()` this used to be is far too generic a name to put
+   * in that vocabulary. Registered in `DURABILITY_CRITICAL_CALLEES`
+   * (`scripts/check-durability-degradation-log-level.mjs`) in the same PR, per
+   * the AGENTS.md rule — so a future edit cannot quietly walk the level back
+   * down to `warn`.
+   */
+  const persistAuditTrailRow = async (
+    api: any,
+    auditRow: Record<string, any>,
+    activityRow: Record<string, any> | undefined,
+  ): Promise<void> => {
+    const sys = api.sudo();
+    await sys.object('sys_audit_log').create(auditRow);
+    if (activityRow) await sys.object('sys_activity').create(activityRow);
+  };
+
+  /**
+   * Report a lost audit row — once per process, not once per failed write.
+   *
+   * AGENTS.md: "Say it once, at the first degradation, not once per failed
+   * write." An audit write runs on EVERY mutation, so a per-write `error` on a
+   * systemic cause (the table is unreachable from this connection) would emit
+   * one line per write and train everyone to skim `error` — the exact reflex
+   * that made #4420's `warn` unreadable. The first failure carries the full
+   * consequence + fix text; subsequent ones degrade to `debug` so the detail is
+   * still recoverable at a higher log level without drowning the channel.
+   */
+  let auditFailureReported = false;
+  const reportAuditWriteFailure = (object: string, action: string, err: unknown): void => {
+    const detail = String((err as any)?.message ?? err);
+    const logger = (engine as any).logger;
+    try {
+      if (auditFailureReported) {
+        logger?.debug?.('Audit write failed (already reported)', { object, action, err: detail });
+        return;
+      }
+      auditFailureReported = true;
+      // The two things an `error` here owes, both in the first line it prints:
+      // the CONSEQUENCE, concretely, and the FIX.
+      logger?.error?.(
+        'Audit write FAILED — the compliance trail is now INCOMPLETE. The audited write itself SUCCEEDED and is on ' +
+          'disk, so the API returned success and nothing downstream looks broken; only the `sys_audit_log` row that ' +
+          'records who did it never landed, and nothing retries it. Every subsequent audited write is likely losing ' +
+          'its row the same way (this is reported ONCE — raise the log level to `debug` to see the rest). ' +
+          'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on. Its ADR-0057 §3.6 ' +
+          "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
+          'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
+          'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
+          'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.',
+        err instanceof Error ? err : new Error(detail),
+        { object, action },
+      );
+    } catch {
+      /* logging must never break the audited write */
+    }
+  };
+
   // Workspace locale changes rarely, but writeAudit runs on every CRUD write —
   // memoize the settings lookup per principal scope with a short TTL so audit
   // logging doesn't add a settings query to every mutation's hot path.
@@ -652,9 +714,6 @@ export function installAuditWriters(
     const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
 
     try {
-      const sys = api.sudo();
-      await sys.object('sys_audit_log').create(auditRow);
-      if (activitiesEnabled) await sys.object('sys_activity').create(activityRow);
       // Assignment notifications are NOT emitted here (framework#3403). Deciding
       // that an owner/assignee change warrants a bell is a business policy, not a
       // platform default — the kernel version guessed "who is the assignee" from
@@ -666,9 +725,15 @@ export function installAuditWriters(
       // (Comment @mention notifications remain a platform behavior — they are
       //  handled separately by the sys_comment hook below, since SKIP_OBJECTS
       //  excludes it from this writer.)
+      await persistAuditTrailRow(api, auditRow, activitiesEnabled ? activityRow : undefined);
     } catch (err) {
-      // Log via engine logger if available, but never throw.
-      try { (engine as any).logger?.warn?.('Audit write failed', { object: ctx.object, action, err: String((err as any)?.message ?? err) }); } catch {}
+      // #5226 — DURABILITY degradation, not a functional one, so it is reported
+      // at `error` (AGENTS.md "Degradation log levels"): the audited write
+      // itself returned 200 and its row is on disk, so the system looks
+      // completely normal from the outside, while the compliance ledger entry
+      // that claims to record it never landed. Nothing retries it, and the gap
+      // surfaces — if ever — to an auditor who cannot connect it to this line.
+      reportAuditWriteFailure(ctx.object, action, err);
     }
   };
 

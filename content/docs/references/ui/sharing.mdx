@@ -9,11 +9,17 @@ description: Sharing protocol schemas
 
 Sharing & Embedding Protocol
 
-Public-link sharing and iframe-embed configuration. The module name is
+Public-link sharing of a form view. The module name is plural for historical
 
-plural, but the two shapes below are in **opposite** postures, and #4001 批 14
+reasons: it once held two shapes in **opposite** postures, and #4001 批 14
 
-measured why rather than assuming a file-level verdict:
+measured them per SCHEMA rather than assuming a file-level verdict —
+
+`SharingConfigSchema` a live authoring door, `EmbedConfigSchema` no door at
+
+all. That measurement is what let the two be disposed of separately, and the
+
+asymmetry survives as the reason this file reads the way it does:
 
 - `SharingConfigSchema` has a **live authoring door**. `FormViewSchema.sharing`
 
@@ -27,13 +33,17 @@ matches. Both example apps author it (`app-showcase` `inquiry.view.ts`,
 
 `app-crm` `lead.view.ts`). It is `strictObject` as of #4001 批 14.
 
-- `EmbedConfigSchema` has **no door at all** — see its own block below.
+- `EmbedConfigSchema` was **REMOVED** at #5015 (ADR-0049 enforce-or-remove) —
 
-That split is the point. The ledger's classification question is *"who writes
+see the block below where it stood.
 
-this schema's input?"*, and it is answered per SCHEMA, not per file; before
+The ledger's classification question is *"who writes this schema's input?"*,
 
-批 14 this file's row carried one verdict for both.
+and it is answered per SCHEMA, not per file; before 批 14 this file's row
+
+carried one verdict for both, and a file-level verdict would have been wrong
+
+in one direction or the other whichever way it fell.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/sharing.zod.ts`
@@ -42,29 +52,12 @@ this schema's input?"*, and it is answered per SCHEMA, not per file; before
 ## TypeScript Usage
 
 ```typescript
-import { EmbedConfigSchema, SharingConfigSchema } from '@objectstack/spec/ui';
-import type { EmbedConfig, SharingConfig } from '@objectstack/spec/ui';
+import { SharingConfigSchema } from '@objectstack/spec/ui';
+import type { SharingConfig } from '@objectstack/spec/ui';
 
 // Validate data
-const result = EmbedConfigSchema.parse(data);
+const result = SharingConfigSchema.parse(data);
 ```
-
----
-
-## EmbedConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ | Enable iframe embedding |
-| **allowedOrigins** | `string[]` | optional | Allowed iframe parent origins (e.g. ["https://example.com"]) |
-| **width** | `string` | ✅ | Embed width (CSS value) |
-| **height** | `string` | ✅ | Embed height (CSS value) |
-| **showHeader** | `boolean` | ✅ | Show interface header in embed |
-| **showNavigation** | `boolean` | ✅ | Show navigation in embed |
-| **responsive** | `boolean` | ✅ | Enable responsive resizing |
-
 
 ---
 

@@ -197,7 +197,7 @@ Optimize query performance:
 ```typescript
 indexes: [
   { fields: ['name'], type: 'btree', unique: false },
-  { fields: ['email'], type: 'btree', unique: true },
+  { fields: ['email'], type: 'btree', unique: 'organization' },
   { fields: ['type', 'status'], type: 'btree', unique: false },
 ]
 ```

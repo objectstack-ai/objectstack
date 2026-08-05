@@ -8,6 +8,10 @@ export * from './error-leak.js';
 export * from './keyset-walk.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
+// [ADR-0120 D5e] The `isolated`-posture install gate for `'global'` uniques —
+// the pure enumerator both the hard stop (install seam) and the advisories
+// (`os doctor` / `os migrate plan`) read, so the three cannot drift apart.
+export * from './unique-scope-install-gate.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

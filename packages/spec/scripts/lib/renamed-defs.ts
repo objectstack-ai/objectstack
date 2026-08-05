@@ -89,9 +89,14 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // def, no authorable properties). The automation side was retired outright
   // with the rest of `automation/sync.zod.ts` in the same change (deliberate
   // manifest removal, NOT carried here — a real retirement must never ride the
-  // rename table). `ui/ConflictResolution` keeps the bare name: it is a
-  // distinct concept (client/server offline sync) and the only side with
-  // cross-repo consumers (objectui useOffline + re-export + parity ratchet).
+  // rename table). `ui/ConflictResolution` kept the bare name at #4738 — a
+  // distinct concept (client/server offline sync). #4988 then RETIRED
+  // `ui/offline.zod.ts` whole (ADR-0049; deliberate manifest deletion, not
+  // carried here either), so the bare name is now emitted by no def at all.
+  // This entry is unaffected and STAYS: its source is still unemitted, its
+  // target still emitted, and `ConnectorConflictResolution` remains the
+  // connector vocabulary's real name — a freed word is not a reason to rename
+  // back, which would be a second breaking change carrying no keys.
   'integration/ConflictResolution': 'integration/ConnectorConflictResolution',
 
   // #4737 / ADR-0112 D9a — `ActionLocation` was published by ./studio AND ./ui

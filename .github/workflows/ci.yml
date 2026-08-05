@@ -38,6 +38,37 @@ jobs:
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
+      # ── THE FILTER CONTRACT, both halves (#4928) ──────────────────────────
+      #
+      # Half 1 is the `|| 'true'` above: when in doubt, RUN EVERYTHING. It
+      # covers a missing output VALUE.
+      #
+      # Half 2 is every downstream `if:` in this file, and it used to be
+      # missing. GitHub wraps an `if:` that names no status function in an
+      # IMPLICIT success(), so the original `if: needs.filter.outputs.core ==
+      # 'true'` had TWO independent paths to "skip" when this job DIED
+      # (checkout flake, a dorny/paths-filter fault, the 10-minute timeout):
+      # the implicit success() is false, and the output is no longer a
+      # trustworthy 'true'. Both roads led to skipping test / dogfood /
+      # build-core — and skipped counts as SUCCESS in branch protection, so a
+      # single flake here produced a fully green, zero-test-run, mergeable PR
+      # with no red signal anywhere.
+      #
+      # So every downstream job now spells the contract as "skip only when the
+      # filter EXPLICITLY said false":
+      #
+      #     if: ${{ !cancelled() && needs.filter.outputs.<name> != 'false' }}
+      #
+      # `!cancelled()` displaces the implicit success() (a genuine run-level
+      # cancellation still skips — #3668's lifecycle reasoning); `!= 'false'`
+      # makes the empty string mean "run", exactly like `|| 'true'` does. This
+      # is deliberately robust to BOTH readings of what a failed job's outputs
+      # are — null/empty or the `|| 'true'` fallback — because `'' != 'false'`
+      # and `'true' != 'false'` are both true. The old form was broken under
+      # both, because the implicit success() dominates either way.
+      #
+      # Third occurrence of this GitHub semantic in one audit; the other two
+      # were release.yml's publish-integrity guard and its docker job (#4900).
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -94,7 +125,9 @@ jobs:
     # (the #3622 lesson; see dogfood-gate).
     name: Test Core (${{ matrix.shard }}/3)
     needs: filter
-    if: needs.filter.outputs.core == 'true'
+    # "Skip only when the filter EXPLICITLY said no core paths changed" — see
+    # THE FILTER CONTRACT on the filter job's outputs (#4928).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
@@ -277,7 +310,7 @@ jobs:
     # dogfood-gate for why `cancelled` passes and why this must not be
     # `if: !cancelled()` on the job.
     name: Test Core
-    needs: test
+    needs: [test, filter]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -287,7 +320,29 @@ jobs:
       - name: Verify test shard results
         run: |
           result="${{ needs.test.result }}"
-          echo "test matrix aggregate result: $result"
+          filter_result="${{ needs.filter.result }}"
+          echo "test matrix aggregate result: $result (filter job: $filter_result)"
+          # `skipped` passes this gate, but only when `filter` is the thing that
+          # decided it. `skipped` alone cannot tell "the path filter said no
+          # core paths changed" apart from "the path filter itself exploded and
+          # took every downstream job with it" — #4928, where the second case
+          # published a green Test Core over zero test runs. The `if:` on the
+          # `test` job above now makes a filter failure RUN the suite rather
+          # than skip it, so this branch should be unreachable; it is kept as
+          # the standing assertion of that invariant, because the failure mode
+          # it guards is silent and the `if:` is one careless edit from coming
+          # back. `filter` is in `needs` for exactly this read.
+          #
+          # `cancelled` on either side stays a pass, for #3668's reason spelled
+          # out in dogfood-gate below: cancellation is a run-lifecycle state
+          # (cancel-in-progress supersession), not a verdict, and failing here
+          # would paint a false red on the superseded SHA.
+          if [ "$result" = "skipped" ] \
+             && [ "$filter_result" != "success" ] \
+             && [ "$filter_result" != "cancelled" ]; then
+            echo "::error::Test Core shards were skipped while the filter job did not succeed (filter result: $filter_result). Refusing to report a pass over zero test runs — see #4928."
+            exit 1
+          fi
           case "$result" in
             success|skipped|cancelled) echo "Test Core gate satisfied ($result)." ;;
             *) echo "::error::Test Core shards did not pass (aggregate result: $result)"; exit 1 ;;
@@ -322,7 +377,8 @@ jobs:
   temporal-conformance:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
-    if: needs.filter.outputs.core == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -510,7 +566,8 @@ jobs:
     # dogfood-gate job below — the shard count can change without touching it.
     name: Dogfood Regression Gate (${{ matrix.shard }}/3)
     needs: filter
-    if: needs.filter.outputs.core == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test step is the primary detector
     # for a #4250-style hang (see Test Core). 30 min is ~6× a shard (~5 min;
@@ -639,7 +696,8 @@ jobs:
   dogfood-verify:
     name: Dogfood Verify CLI
     needs: filter
-    if: needs.filter.outputs.core == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -727,9 +785,11 @@ jobs:
     # the split.
     #
     # `if: always()` + result inspection so a legitimately skipped matrix (the
-    # `filter` job says no core paths changed) still satisfies the gate.
+    # `filter` job says no core paths changed) still satisfies the gate —
+    # LEGITIMATELY being the operative word since #4928: `filter` must have
+    # concluded success (or the run been cancelled) for a skip to count.
     name: Dogfood Regression Gate
-    needs: [dogfood, dogfood-verify]
+    needs: [dogfood, dogfood-verify, filter]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -755,10 +815,27 @@ jobs:
           # #3622 merge-deadlock all over again.
           verify_result="${{ needs['dogfood-verify'].result }}"
           echo "dogfood-verify result: $verify_result"
+          # `skipped` is only a legitimate pass when the `filter` job is what
+          # decided it — the same #4928 hole test-gate documents above. A leg
+          # that is skipped while `filter` FAILED means the regression suite
+          # never ran and nothing anywhere is red. The `if:` conditions on
+          # dogfood / dogfood-verify make that unreachable today; this is the
+          # standing assertion that keeps it so. `cancelled` on `filter` still
+          # passes, same lifecycle reasoning as the paragraph above.
+          filter_result="${{ needs.filter.result }}"
+          echo "filter job result: $filter_result"
           fail=0
           for r in "dogfood:$result" "dogfood-verify:$verify_result"; do
             case "${r#*:}" in
-              success|skipped|cancelled) echo "Gate leg ${r%%:*} satisfied (${r#*:})." ;;
+              skipped)
+                if [ "$filter_result" != "success" ] && [ "$filter_result" != "cancelled" ]; then
+                  echo "::error::Gate leg ${r%%:*} was skipped while the filter job did not succeed (filter result: $filter_result). Refusing to report a pass over zero runs — see #4928."
+                  fail=1
+                else
+                  echo "Gate leg ${r%%:*} satisfied (skipped by filter)."
+                fi
+                ;;
+              success|cancelled) echo "Gate leg ${r%%:*} satisfied (${r#*:})." ;;
               *) echo "::error::Gate leg ${r%%:*} did not pass (result: ${r#*:})"; fail=1 ;;
             esac
           done
@@ -767,7 +844,11 @@ jobs:
   build-core:
     name: Build Core
     needs: filter
-    if: needs.filter.outputs.core == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). No
+    # aggregation gate stands behind this job — its own name IS the required
+    # context — so this `if:` is the only thing between a filter flake and a
+    # green "Build Core" that built nothing.
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -914,7 +995,9 @@ jobs:
   build-docs:
     name: Build Docs
     needs: filter
-    if: needs.filter.outputs.docs == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). `docs`, not
+    # `core` — each job keeps its own filter output.
+    if: ${{ !cancelled() && needs.filter.outputs.docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1000,7 +1083,9 @@ jobs:
   console-pin:
     name: Console Pin Gate
     needs: filter
-    if: needs.filter.outputs.console == 'true'
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). `console`,
+    # not `core` — each job keeps its own filter output.
+    if: ${{ !cancelled() && needs.filter.outputs.console != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

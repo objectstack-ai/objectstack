@@ -37,9 +37,11 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * (they need I/O or are client-side concerns), they were removed rather than left as silent
  * no-ops. Use the layer that already does each one correctly:
  *
- * - **Uniqueness** → a unique **index** (`ObjectSchema.indexes`, `{ fields, unique: true }`,
- *   with `partial` for a scoped/conditional constraint), or field-level `unique: true`. A
- *   SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB unique constraint is not.
+ * - **Uniqueness** → a unique **index** whose scope is stated (`ObjectSchema.indexes`, with
+ *   `unique: 'organization'` for one holder per organization or `unique: 'global'` for one
+ *   across the whole installation — ADR-0120; `partial` for a scoped/conditional constraint),
+ *   or field-level `unique`. A SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB
+ *   unique constraint is not.
  * - **Async / remote validation** → a client-form concern (`debounce`/`validatorUrl` only mean
  *   anything against keystrokes) and an SSRF/latency hazard on the server write path. Keep it in
  *   the form layer, or enforce the underlying invariant with a `unique` index / lifecycle hook.

@@ -6,6 +6,8 @@ import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
   normalizeAnalyticsFilterTree,
   coerceFilterValueForSql,
+  SQL_CONST_FALSE,
+  SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
@@ -574,6 +576,25 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * does bind tighter than `OR`, so `a AND b OR c` happens to be right, but
    * being right by construction is what keeps a future edit from making it
    * wrong.
+   *
+   * # `null` is the constant TRUE, and TRUE absorbs a disjunction (#5325)
+   *
+   * A `null` return means "constrains nothing", which is the boolean TRUE — the
+   * AND identity, so it drops out of an `and`, but the OR ABSORBER, so one TRUE
+   * disjunct makes the whole `or` TRUE. Filtering it out of an `or` narrowed the
+   * query to the surviving branches. `NOT TRUE ≡ FALSE`, so a negation whose
+   * operand constrains nothing compiles to the FALSE constant rather than
+   * disappearing (which added no `WHERE` and charted every row).
+   *
+   * # The invariant that keeps `params` aligned
+   *
+   * **A call that returns `null` leaves `params` exactly as it found it.** It
+   * has to: a value bound with no `$n` to consume it shifts every later
+   * placeholder onto the wrong value, and a filter that binds the WRONG comparand
+   * is worse than one that is merely too wide (#5297). Leaves decide emptiness
+   * before they bind, and the absorbing `or` — the one place a clause that HAS
+   * bound is discarded — truncates back to the length it started at, so the
+   * invariant holds inductively for every node kind.
    */
   private compileFilterNode(
     node: NormalizedFilterNode | null,
@@ -585,6 +606,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   ): string | null {
     if (!node) return null;
 
+    if (node.kind === 'const') {
+      return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+    }
+
     if (node.kind === 'leaf') {
       const colExpr = this.resolveFieldSql(cube, node.member, parentTable, joins);
       // Resolve the (object, column) this member binds against so the value
@@ -595,12 +620,30 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     if (node.kind === 'not') {
       const inner = this.compileFilterNode(node.child, cube, parentTable, joins, params, ctx);
-      return inner ? `NOT (${inner})` : null;
+      // `NOT TRUE ≡ FALSE`. Returning `null` here is what made `{$not: {}}` emit
+      // no `WHERE` at all — a filter meaning "no rows" that showed all of them.
+      // The normalizer already folds that case into a `const` node; this arm is
+      // the same identity applied to anything else that constrains nothing.
+      return inner ? `NOT (${inner})` : SQL_CONST_FALSE;
     }
 
-    const parts = node.children
-      .map((child) => this.compileFilterNode(child, cube, parentTable, joins, params, ctx))
-      .filter((s): s is string => !!s);
+    // Everything committed before this group, so an absorbed `or` can put both
+    // back exactly as they were.
+    const paramBase = params.length;
+    const joinBase = new Map(joins);
+    const parts: string[] = [];
+    for (const child of node.children) {
+      const clause = this.compileFilterNode(child, cube, parentTable, joins, params, ctx);
+      if (clause === null) {
+        // TRUE: the AND identity, the OR absorber.
+        if (node.kind !== 'or') continue;
+        params.length = paramBase;
+        joins.clear();
+        for (const [alias, clauseSql] of joinBase) joins.set(alias, clauseSql);
+        return null;
+      }
+      parts.push(clause);
+    }
     if (parts.length === 0) return null;
     if (parts.length === 1) return parts[0];
     return `(${parts.join(node.kind === 'or' ? ' OR ' : ' AND ')})`;

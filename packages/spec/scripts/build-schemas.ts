@@ -424,9 +424,21 @@ if (manifestChanged && !CHECK) {
 //              schemas is `.strict()`: Zod STRIPS an unknown key, so the setting
 //              vanishes and the metadata still parses clean.
 const AUTHORABLE_SURFACE_PATH = path.resolve(__dirname, '../authorable-surface.json');
+// The in-tree anchor the deletion gate falls back to when this build environment
+// cannot reach GitHub (#5235). See resolveSurfaceBase() below for the full story.
+const AUTHORABLE_SURFACE_BASE_PATH = path.resolve(__dirname, '../authorable-surface.base.json');
+const SURFACE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_PATH);
+const SURFACE_BASE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_BASE_PATH);
 const RETIRED_MARK = ' [RETIRED]';
 
 interface AuthorableSurface { description: string; keys: string[] }
+
+/**
+ * The committed mirror of `authorable-surface.json` as it stood at an UPSTREAM
+ * commit (`baseRev`) — the deletion gate's anchor in a build that cannot reach
+ * GitHub (#5235).
+ */
+interface AuthorableSurfaceBase { description: string; baseRev: string; keys: string[] }
 
 /** `retiredKey()` is `z.never()`, which Zod renders as `{ "not": {} }`. */
 function isRetired(prop: unknown): boolean {
@@ -780,15 +792,224 @@ function computeSurfaceReachability(): SurfaceReachability {
   };
 }
 
+const SURFACE_BASE_DESCRIPTION =
+  'In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the ' +
+  'keys in authorable-surface.json as they stood at `baseRev`, a commit on origin/main. A build that ' +
+  'CAN reach origin/main anchors on the merge base instead, and re-verifies this file against ' +
+  '`baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build ' +
+  'that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) ' +
+  'anchors here instead of failing. Written only by `gen:schema`, only from a git-resolved baseline — ' +
+  'never from the build that is being checked. See #5235.';
+
+/** Canonical bytes of the in-tree anchor — the one form the generator writes. */
+function serializeSurfaceBase(baseRev: string, keys: string[]): string {
+  const doc: AuthorableSurfaceBase = { description: SURFACE_BASE_DESCRIPTION, baseRev, keys };
+  return JSON.stringify(doc, null, 2) + '\n';
+}
+
+/**
+ * The committed in-tree anchor, or null when the file is absent.
+ *
+ * Malformed or non-canonical bytes are fatal in BOTH modes, deliberately: this
+ * file exists to be the baseline a commit cannot rewrite, so a hand-edit here is
+ * the #4650 attack itself, not a formatting slip to repair silently (#4662 made
+ * the same call for authorable-surface.json). Regenerating it needs origin/main,
+ * which is exactly the environment where that hand-edit is also detectable.
+ */
+function readCommittedSurfaceBase(): { raw: string; doc: AuthorableSurfaceBase } | null {
+  if (!fs.existsSync(AUTHORABLE_SURFACE_BASE_PATH)) return null;
+  const raw = fs.readFileSync(AUTHORABLE_SURFACE_BASE_PATH, 'utf-8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error(`\n❌ ${SURFACE_BASE_FILE_NAME} is not valid JSON (#5235): ${error}`);
+    process.exit(1);
+  }
+  const doc = parsed as AuthorableSurfaceBase;
+  if (!/^[0-9a-f]{40}$/.test(doc?.baseRev ?? '') || !Array.isArray(doc?.keys)) {
+    console.error(
+      `\n❌ ${SURFACE_BASE_FILE_NAME} is malformed (#5235): it must carry a 40-hex \`baseRev\` and a\n` +
+        `   \`keys\` array — the ${SURFACE_FILE_NAME} content at that commit.\n\n` +
+        `   Restore it (\`git checkout -- packages/spec/${SURFACE_BASE_FILE_NAME}\`), or delete it and\n` +
+        `   run \`pnpm --filter @objectstack/spec gen:schema\` in a checkout that can reach origin/main.`,
+    );
+    process.exit(1);
+  }
+  if (raw !== serializeSurfaceBase(doc.baseRev, doc.keys)) {
+    console.error(
+      `\n❌ ${SURFACE_BASE_FILE_NAME} does not match its generated form (#5235).\n\n` +
+        `   This file is the deletion gate's anchor — the baseline a commit is not supposed to be\n` +
+        `   able to rewrite. Every byte in it must come from \`gen:schema\`, so a hand-edit is fatal\n` +
+        `   here rather than repaired (the same call #4662 made for ${SURFACE_FILE_NAME}).\n\n` +
+        `   Restore it (\`git checkout -- packages/spec/${SURFACE_BASE_FILE_NAME}\`), or delete it and\n` +
+        `   run \`pnpm --filter @objectstack/spec gen:schema\` in a checkout that can reach origin/main.`,
+    );
+    process.exit(1);
+  }
+  return { raw, doc };
+}
+
+type GitRun = (...args: string[]) => { status: number | null; stdout: string; stderr: string };
+
+/**
+ * The in-tree anchor must be an authentic copy of an UPSTREAM commit's baseline,
+ * and this is the environment that can prove it (#5235).
+ *
+ * Two facts, both checked against origin/main rather than against anything the
+ * commit under test controls:
+ *
+ *   1. `baseRev` is an ancestor of origin/main — a PR cannot point it at one of
+ *      its own commits, because its own commits are not upstream. Decidable only
+ *      where history is walkable, so a shallow checkout says so and skips it;
+ *   2. the recorded keys ARE that commit's `authorable-surface.json` keys. This
+ *      one holds everywhere the object can be read, shallow included.
+ *
+ * Together those make hand-editing the anchor pointless: the only way to shed a
+ * line from it is to shed the line from an already-merged upstream commit, which
+ * a PR cannot do. A shallow clone may not hold the object at all; the run then
+ * says so and continues, because in that environment the merge-base anchor — not
+ * this file — is what the deletion check ran on anyway.
+ */
+function verifyCommittedSurfaceBase(
+  git: GitRun,
+  tip: string,
+  resolved: { rev: string; keys: string[] },
+  committed: AuthorableSurfaceBase,
+): void {
+  const rev = committed.baseRev;
+  const short = rev.slice(0, 12);
+  const fix =
+    `   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result — the generator\n` +
+    `   writes this file from the git-resolved baseline, which is the only thing it may come from.`;
+
+  // Fast path, and the common one right after a refresh: the anchor names the
+  // very rev this run resolved out of git, so the baseline to compare against is
+  // already in hand — no object lookup, and no ancestry question either (that
+  // rev IS origin/main's merge base or tip).
+  if (rev === resolved.rev) {
+    compareAnchorKeys(resolved.keys, committed, short, fix);
+    return;
+  }
+
+  let present = git('cat-file', '-e', `${rev}^{commit}`).status === 0;
+  if (!present) {
+    // Shallow checkout (CI's typecheck job): ask the remote for that one commit.
+    git('fetch', '--quiet', '--depth=1', 'origin', rev);
+    present = git('cat-file', '-e', `${rev}^{commit}`).status === 0;
+  }
+  if (!present) {
+    console.log(
+      `ℹ️  ${SURFACE_BASE_FILE_NAME}: commit ${short} is not in this checkout and could not be\n` +
+        `   fetched, so its authenticity is unverifiable here. This run anchored on the merge base\n` +
+        `   regardless (#5235).`,
+    );
+    return;
+  }
+  // Ancestry is only decidable where history is WALKABLE. CI checks out shallow
+  // (depth 1) and the fetch above grafts `rev` as its own shallow root, so
+  // `merge-base --is-ancestor` answers "not an ancestor" for a commit that
+  // demonstrably is one — the same truncation the merge-base fallback above
+  // already accounts for, and it fails the whole build if trusted (caught on this
+  // change's own first CI run). Ask whether the answer can mean anything first.
+  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+    console.log(
+      `ℹ️  ${SURFACE_BASE_FILE_NAME}: shallow checkout — cannot walk history to confirm ${short} is\n` +
+        `   on origin/main, so only its recorded keys are verified here (#5235). A full clone checks both.`,
+    );
+  } else if (git('merge-base', '--is-ancestor', rev, tip).status !== 0) {
+    console.error(
+      `\n❌ ${SURFACE_BASE_FILE_NAME} names a baseRev (${short}) that is NOT an ancestor of\n` +
+        `   origin/main (#5235).\n\n` +
+        `   The anchor for the #4650 deletion gate has to be a baseline this commit cannot rewrite,\n` +
+        `   so it may only mirror an already-merged upstream commit. A rev off origin/main is either\n` +
+        `   a local commit (which the PR does control) or a rewritten history.\n\n${fix}`,
+    );
+    process.exit(1);
+  }
+  const show = git('show', `${rev}:./${SURFACE_FILE_NAME}`);
+  if (show.status !== 0) {
+    console.error(
+      `\n❌ ${SURFACE_BASE_FILE_NAME} names baseRev ${short}, which has no ${SURFACE_FILE_NAME}\n` +
+        `   to mirror (#5235):\n${show.stderr}\n${fix}`,
+    );
+    process.exit(1);
+  }
+  let upstreamKeys: string[];
+  try {
+    upstreamKeys = (JSON.parse(show.stdout) as AuthorableSurface).keys ?? [];
+  } catch (error) {
+    console.error(`\n❌ ${SURFACE_FILE_NAME} at ${short} is not valid JSON (#5235): ${error}`);
+    process.exit(1);
+  }
+  compareAnchorKeys(upstreamKeys, committed, short, fix);
+}
+
+/** The anchor's keys must BE the upstream baseline it names — in both directions. */
+function compareAnchorKeys(
+  upstreamKeys: string[],
+  committed: AuthorableSurfaceBase,
+  short: string,
+  fix: string,
+): void {
+  const recorded = new Set(committed.keys);
+  const upstream = new Set(upstreamKeys);
+  const shed = upstreamKeys.filter((k) => !recorded.has(k));
+  const invented = committed.keys.filter((k) => !upstream.has(k));
+  if (shed.length === 0 && invented.length === 0) return;
+  console.error(
+    `\n❌ ${SURFACE_BASE_FILE_NAME} is not the baseline it claims to be (#4650, #5235):\n` +
+      `   it says it mirrors ${SURFACE_FILE_NAME} at ${short}, but ${shed.length} line(s) are missing\n` +
+      `   from it and ${invented.length} line(s) are not in that commit at all.`,
+  );
+  for (const k of shed.slice(0, 10)) console.error(`     - ${k}  (at ${short}, absent here)`);
+  for (const k of invented.slice(0, 10)) console.error(`     + ${k}  (here, absent at ${short})`);
+  if (shed.length + invented.length > 20) console.error(`     … and ${shed.length + invented.length - 20} more`);
+  console.error(
+    `\n   A build that cannot reach GitHub anchors the deletion gate on this file, so shedding a\n` +
+      `   line here is the #4650 bypass moved one file over. It is caught in every environment that\n` +
+      `   CAN reach origin/main, which is every dev checkout and every CI run.\n\n${fix}`,
+  );
+  process.exit(1);
+}
+
+/**
+ * Set when THIS run resolved the baseline from git. It is the ONLY input
+ * `gen:schema` may write the in-tree anchor from: an offline build must never be
+ * able to advance the anchor to its own state (#5235).
+ */
+let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
+
 /**
  * The committed authorable-surface.json this PR started from: its content at
  * the merge base of HEAD and origin/main. Returns null (with a note) only
  * when no baseline existed there at all; failure to ANCHOR the base is fatal —
  * a deletion check that silently skips is the #4650 bypass with extra steps.
+ *
+ * Two anchors, in strict preference order (#5235):
+ *
+ *   `merge-base` — origin/main is reachable (every dev checkout, every CI run).
+ *      Unchanged from #4650: the baseline is read out of git at the merge base,
+ *      and the in-tree anchor is additionally VERIFIED against it here, which is
+ *      what makes that file trustworthy in the environments that cannot check.
+ *   `in-tree`  — origin/main is not resolvable and no fetch can make it so. That
+ *      is not a developer who forgot to fetch; it is a build environment with no
+ *      route to GitHub: cloud's buildx image stages (framework is COPYed into the
+ *      Docker stage and built there), air-gapped builds, forks, and historical
+ *      tag reproductions. Those trees are immutable and already merged — there is
+ *      no "what did this PR delete relative to main" question to ask — so the
+ *      gate anchors on the committed baseline and the build proceeds.
+ *
+ * What is NOT offered is an env-var skip: that is precisely the bypass #4650
+ * closes. With no anchor of either kind this still exits 1.
  */
 function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
   const cwd = path.dirname(AUTHORABLE_SURFACE_PATH);
-  const git = (...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf-8' as const });
+  const git: GitRun = (...args: string[]) =>
+    // A network-less environment that BLACKHOLES rather than refuses (proxied
+    // air gaps do) would otherwise hang the whole build in the self-heal fetch.
+    spawnSync('git', args, { cwd, encoding: 'utf-8' as const, timeout: 60_000 });
+  const committed = readCommittedSurfaceBase();
 
   // CI's typecheck job checks out shallow with no branch refs, so fetch the
   // one ref this check needs (depth 1 — a single snapshot) before giving up.
@@ -797,48 +1018,68 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     git('fetch', '--quiet', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main');
     tipProbe = git('rev-parse', '--verify', '--quiet', 'origin/main^{commit}');
   }
-  if (tipProbe.status !== 0) {
-    console.error(
-      `\n❌ Cannot resolve origin/main to anchor the authorable-surface deletion check (#4650).\n\n` +
-        `   Deleted baseline lines are validated against authorable-surface.json at the\n` +
-        `   merge base with origin/main — a baseline this commit cannot rewrite. Without\n` +
-        `   that anchor the tombstone gate can be bypassed by hand-editing the file, so\n` +
-        `   this build fails instead of silently skipping the check.\n\n` +
-        `   Fix: \`git fetch origin main\` (or point refs/remotes/origin/main at your\n` +
-        `   upstream main) and re-run.`,
-    );
-    process.exit(1);
-  }
-  const tip = tipProbe.stdout.trim();
-  // Merge base, so a branch behind origin/main is compared against what it
-  // FORKED from (keys added on main since then are not "deleted" here). In a
-  // shallow clone there is no walkable ancestry — fall back to the tip, which
-  // on a PR's synthetic merge commit is the merge base anyway.
-  const mergeBase = git('merge-base', 'HEAD', tip);
-  const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
-  if (mergeBase.status !== 0) {
-    console.log(`   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)`);
-  }
-  const fileName = path.basename(AUTHORABLE_SURFACE_PATH);
-  const show = git('show', `${rev}:./${fileName}`);
-  if (show.status !== 0) {
-    if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
-      console.log(
-        `ℹ️  authorable-surface deletion check: no ${fileName} at base ${rev.slice(0, 12)} — nothing to compare.`,
-      );
-      return null;
+
+  if (tipProbe.status === 0) {
+    const tip = tipProbe.stdout.trim();
+    // Merge base, so a branch behind origin/main is compared against what it
+    // FORKED from (keys added on main since then are not "deleted" here). In a
+    // shallow clone there is no walkable ancestry — fall back to the tip, which
+    // on a PR's synthetic merge commit is the merge base anyway.
+    const mergeBase = git('merge-base', 'HEAD', tip);
+    const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
+    if (mergeBase.status !== 0) {
+      console.log(`   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)`);
     }
-    console.error(
-      `\n❌ Failed to read ${fileName} at base ${rev.slice(0, 12)} (#4650):\n${show.stderr}`,
+    const show = git('show', `${rev}:./${SURFACE_FILE_NAME}`);
+    if (show.status !== 0) {
+      if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
+        console.log(
+          `ℹ️  authorable-surface deletion check: no ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} — nothing to compare.`,
+        );
+        return null;
+      }
+      console.error(
+        `\n❌ Failed to read ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} (#4650):\n${show.stderr}`,
+      );
+      process.exit(1);
+    }
+    let doc: AuthorableSurface;
+    try {
+      doc = JSON.parse(show.stdout) as AuthorableSurface;
+    } catch (error) {
+      console.error(`\n❌ ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} is not valid JSON (#4650): ${error}`);
+      process.exit(1);
+    }
+    gitResolvedAnchor = { rev, keys: doc.keys ?? [] };
+    // The environment that CAN police the in-tree anchor is the one that must.
+    if (committed) verifyCommittedSurfaceBase(git, tip, gitResolvedAnchor, committed.doc);
+    return { rev, doc };
+  }
+
+  if (committed) {
+    console.log(
+      `\nℹ️  origin/main is not resolvable in this build environment — anchoring the authorable-surface\n` +
+        `   deletion check (#4650) on the committed ${SURFACE_BASE_FILE_NAME}: ${SURFACE_FILE_NAME}\n` +
+        `   as of ${committed.doc.baseRev.slice(0, 12)}, verified upstream when it landed (#5235).`,
     );
-    process.exit(1);
+    return {
+      rev: committed.doc.baseRev,
+      doc: { description: committed.doc.description, keys: committed.doc.keys },
+    };
   }
-  try {
-    return { rev, doc: JSON.parse(show.stdout) as AuthorableSurface };
-  } catch (error) {
-    console.error(`\n❌ ${fileName} at base ${rev.slice(0, 12)} is not valid JSON (#4650): ${error}`);
-    process.exit(1);
-  }
+
+  console.error(
+    `\n❌ No baseline to anchor the authorable-surface deletion check on (#4650, #5235).\n\n` +
+      `   Deleted baseline lines are validated against ${SURFACE_FILE_NAME} at the merge base with\n` +
+      `   origin/main, and — where origin/main is out of reach — against the committed\n` +
+      `   ${SURFACE_BASE_FILE_NAME}. Neither is available here: origin/main does not resolve and\n` +
+      `   ${SURFACE_BASE_FILE_NAME} is missing from the tree. Without an anchor the tombstone gate\n` +
+      `   can be bypassed by hand-editing the file, so this build fails instead of silently\n` +
+      `   skipping the check.\n\n` +
+      `   Fix: restore packages/spec/${SURFACE_BASE_FILE_NAME} (it is a committed artifact), or\n` +
+      `   \`git fetch origin main\` (or point refs/remotes/origin/main at your upstream main).`,
+  );
+  process.exit(1);
 }
 
 {
@@ -941,6 +1182,54 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
         );
         process.exit(1);
       }
+    }
+  }
+}
+
+// ─── The in-tree baseline anchor (#5235) ─────────────────────────────
+//
+// Refreshed here, AFTER the deletion gate above has adjudicated this build —
+// order is load-bearing: a run that exits on an unproven deletion never reaches
+// this line, so the anchor can never be advanced past a deletion it did not
+// bless. And it is written only from `gitResolvedAnchor`, never from
+// `currentEntries`: an anchor computed from the tree being checked is an anchor
+// that tree can rewrite, which is the whole defect #4650 exists for.
+//
+// Content therefore lags main by at most the last surface-changing PR — the
+// baseline at the merge base, not this branch's own state. That lag is what
+// makes the file worth committing: offline, it still holds keys this build would
+// have to account for. Staleness is NOT an error (on `main` itself the merge base
+// IS HEAD, so the file necessarily trails its own surface by one PR); only
+// inauthenticity is, and `verifyCommittedSurfaceBase` above is what proves it.
+{
+  const committed = readCommittedSurfaceBase();
+  if (gitResolvedAnchor) {
+    const anchor = gitResolvedAnchor;
+    const drifted = !committed || JSON.stringify(committed.doc.keys) !== JSON.stringify(anchor.keys);
+    if (!committed && CHECK) {
+      console.error(
+        `\n❌ ${SURFACE_BASE_FILE_NAME} is missing (#5235).\n\n` +
+          `   It is a committed artifact: builds that cannot reach GitHub (image-build stages,\n` +
+          `   air-gapped, fork, historical tag) anchor the #4650 deletion gate on it, and without it\n` +
+          `   they have nothing to anchor on and fail.\n\n` +
+          `   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result.`,
+      );
+      process.exit(1);
+    }
+    if (drifted && !CHECK) {
+      fs.writeFileSync(AUTHORABLE_SURFACE_BASE_PATH, serializeSurfaceBase(anchor.rev, anchor.keys));
+      console.log(
+        `\n⚓ ${SURFACE_BASE_FILE_NAME} ${committed ? 'refreshed to' : 'created at'} ` +
+          `${anchor.rev.slice(0, 12)} (${anchor.keys.length} keys) — commit it.`,
+      );
+    } else if (drifted && committed) {
+      // Reported, never fatal: see the note above on `main`'s own merge base.
+      const recorded = new Set(committed.doc.keys);
+      const behind = anchor.keys.filter((k) => !recorded.has(k)).length;
+      console.log(
+        `ℹ️  ${SURFACE_BASE_FILE_NAME} trails the merge base by ${behind} key(s) — expected right after\n` +
+          `   a surface change lands; \`gen:schema\` refreshes it on the next run that regenerates.`,
+      );
     }
   }
 }

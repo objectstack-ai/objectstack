@@ -127,7 +127,7 @@ export default ObjectSchema.create({
   indexes: [
     // One assignment per (project, employee) pair — uniqueness is an index
     // concern; there is no 'unique' validation type.
-    { fields: ['project_id', 'employee_id'], unique: true },
+    { fields: ['project_id', 'employee_id'], unique: 'organization' },
   ],
 });
 ```

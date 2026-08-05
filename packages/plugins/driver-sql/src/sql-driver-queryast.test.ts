@@ -103,7 +103,7 @@ describe('SqlDriver (QueryAST Format)', () => {
 
     it('should support QueryAST with where, offset, limit, and orderBy', async () => {
       const results = await driver.find('products', {
-        where: [['category', '=', 'Electronics']],
+        where: { category: 'Electronics' },
         offset: 1,
         limit: 1,
         orderBy: [{ field: 'price', order: 'asc' as const }],
@@ -136,7 +136,7 @@ describe('SqlDriver (QueryAST Format)', () => {
 
     it('should support count with QueryAST where clause', async () => {
       const count = await driver.count('products', {
-        where: [['price', '>', 300]],
+        where: { price: { $gt: 300 } },
       } as any);
       expect(count).toBe(3);
     });
@@ -191,7 +191,7 @@ describe('SqlDriver (QueryAST Format)', () => {
 
     it('should use "where" and ignore "filters" when both are present', async () => {
       const results = await driver.find('products', {
-        where: [['category', '=', 'Electronics']],
+        where: { category: 'Electronics' },
         filters: [['category', '=', 'Furniture']],
       } as any);
 

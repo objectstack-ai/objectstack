@@ -31,6 +31,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import type { GlobalUniqueAttestation } from '@objectstack/types';
+
 /** One installed-package entry — desired state + provenance. */
 export interface InstalledManifestEntry {
     packageId: string;
@@ -50,6 +52,21 @@ export interface InstalledManifestEntry {
      *  table after a purge is desired state, not data loss. Cleared again by
      *  install/reseed runs that land rows. */
     sampleDataPurged?: boolean;
+    /**
+     * [ADR-0120 D5e] The installer's answer to the `isolated`-posture question
+     * about this package's installation-wide (`'global'`) uniques — recorded
+     * ADR-0104 attestation style: the fact affirmed, by whom, when, and under
+     * which posture it was asked.
+     *
+     * This is what makes the hard stop a ONE-TIME ceremony rather than a
+     * recurring prompt: `unconfirmedGlobalUniques` subtracts these ids from the
+     * findings, so a reinstall or upgrade only ever asks about constraints
+     * nobody has answered for yet. The ledger is the right home because it is
+     * the desired-state record that survives restarts — a memory-only
+     * confirmation would re-ask on every process boot, which is precisely the
+     * boot-time nagging #4884 forbids.
+     */
+    globalUniqueAttestation?: GlobalUniqueAttestation;
 }
 
 /** Default ledger location, relative to the runtime's working directory. */

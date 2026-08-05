@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { I18nLabelSchema } from './i18n.zod';
 
 /**
  * Notification Type Schema
@@ -46,53 +45,50 @@ export const NotificationPositionSchema = lazySchema(() => z.enum([
 
 export type NotificationPosition = z.infer<typeof NotificationPositionSchema>;
 
-/**
- * Notification Action Schema
- * Defines an interactive action button within a notification.
- *
- * ⛔ **DELIBERATELY NOT `strictObject` — this shape has NO AUTHORING DOOR**
- * (#4001 批 14, ADR-0078 completeness gate). It is a **vocabulary**, consumed by
- * reading its `.shape`, never by parsing an authored payload. Three independent
- * measurements on 2026-08-03, each with a positive control that passed in the
- * same run:
- *
- * 1. **Carrier key** — nothing in `packages/spec/src` imports this schema except
- *    the `ui/index.ts` barrel. No metadata type declares a notification-actions
- *    key; the `./ui` "notification instance" and "notification system config"
- *    wrappers that once could have carried it were deleted in #4610 for having
- *    zero consumers (see the note at the bottom of this file).
- * 2. **Graph reachability** — BFS from the 24 metadata-type roots plus
- *    `defineStack`'s `ObjectStackSchema` (the closure `build-schemas.ts` uses for
- *    the #4650 deletion check) visits 6860 nodes and never reaches it. Controls
- *    `PageSchema` / `ActionSchema` / `DashboardWidgetSchema` / `WebhookSchema`
- *    were all `root-graph` in the same run, and injecting a synthetic carrier
- *    flipped this schema to `root-graph` — so "unreachable" is a fact about the
- *    graph, not a broken instrument.
- * 3. **Call sites** — no `.parse()` in framework or objectui outside this
- *    module's own `notification.test.ts`. objectui's use is the opposite of a
- *    parse: `animation-notification-spec-parity.test.tsx` reads
- *    `NotificationActionSchema.shape.variant` to pin its own hand-written
- *    `NotificationActionButton` interface against this enum, both ways. That pin
- *    depends on the SHAPE and is unaffected by the posture — which is precisely
- *    why closing the shape would buy nothing.
- *
- * `.strict()` is a property of a PARSE, and nothing parses this. Closing it
- * would spend a v17 breaking change to make the file look finished and leave a
- * precisely-validated dead slot — *"the more convincing lie"* (#4583). The
- * verdict this shape actually needs is ADR-0049 enforce-or-remove; filed as #5015
- * and recorded in the strictness ledger's `no door` class.
- *
- * The pin in `notification.test.ts` goes RED the moment anyone gives this shape
- * a carrier key — at which point it becomes authorable and this comment is wrong.
- */
-export const NotificationActionSchema = lazySchema(() => z.object({
-  label: I18nLabelSchema.describe('Action button label'),
-  action: z.string().describe('Action identifier to execute'),
-  variant: z.enum(['primary', 'secondary', 'link']).default('primary')
-    .describe('Button variant style'),
-}).describe('Notification action button'));
-
-export type NotificationAction = z.infer<typeof NotificationActionSchema>;
+// [#5015] `NotificationActionSchema` / `NotificationAction` were REMOVED per
+// ADR-0049 enforce-or-remove, ruled REMOVE on 2026-08-04.
+//
+// The shape declared an interactive action button inside a notification —
+// `{ label, action, variant }` — and had **no authoring door anywhere**. #4001
+// 批 14 measured it three ways on 2026-08-03, each with a positive control that
+// passed in the same run, and this retirement re-ran all three against
+// `origin/main` before removing anything:
+//
+//   1. **Carrier key** — no schema in `packages/spec/src` declared a
+//      notification-actions key; the barrel was this module's only non-test
+//      importer. The `./ui` "notification instance" and "notification system
+//      config" wrappers that could have carried it were themselves deleted in
+//      #4610 for having zero consumers (see the note below), which is what left
+//      this shape an orphan.
+//   2. **Graph reachability** — BFS from the 24 metadata-type roots plus
+//      `defineStack`'s `ObjectStackSchema` (the closure `build-schemas.ts` uses
+//      for the #4650 deletion check, including its derived-clone bridge) never
+//      reached it, while `Page` / `Action` / `DashboardWidget` / `Webhook` /
+//      `SharingConfig` all resolved `root-graph` in the same run and injecting a
+//      synthetic carrier flipped it to `root-graph`.
+//   3. **Call sites** — zero `.parse()` in objectstack, cloud or objectui
+//      outside this module's own unit test.
+//
+// So nobody could author one and nothing ever validated one: it was a published
+// vocabulary with no recipient, which #3950 records as the shape an AI author
+// reads as a capability. `.strict()` was deliberately NOT applied instead —
+// strictness is a property of a PARSE, and closing a shape nothing parses only
+// buys *"a precisely-validated dead slot, the more convincing lie"* (#4583).
+//
+// What stays: the three presentation enums above (`NotificationType` /
+// `NotificationSeverity` / `NotificationPosition`). objectui consumes them as a
+// vocabulary for its own toaster, and they are unaffected.
+//
+// objectui's `animation-notification-spec-parity.test.tsx` read
+// `NotificationActionSchema.shape.variant` to pin its hand-written
+// `NotificationActionButton` interface. That is a vocabulary read, not a parse,
+// and it is why "has a consumer" never meant "has an authoring door" here — the
+// pin loses its spec-side anchor when objectui refreshes this dependency, and
+// adapting it is tracked on the objectui side.
+//
+// If notification actions are ever wanted as METADATA, they return via the
+// enforce route of ADR-0049 — a carrier key on a real metadata type, with a
+// renderer that reads it, in one change. Vocabulary second, never first.
 
 // [#4610] `NotificationSchema` / `Notification` and `NotificationConfigSchema`
 // / `NotificationConfig` were removed from this module (dual-source cleanup,

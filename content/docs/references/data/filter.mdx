@@ -42,8 +42,8 @@ Design Principles:
 ## TypeScript Usage
 
 ```typescript
-import { EqualityOperatorSchema, FieldReferenceSchema, FilterConditionSchema, QueryFilterSchema, SetOperatorSchema, SpecialOperatorSchema, StringOperatorSchema } from '@objectstack/spec/data';
-import type { FieldReference, FilterCondition, QueryFilter } from '@objectstack/spec/data';
+import { EqualityOperatorSchema, FieldReferenceSchema, FilterArraySchema, FilterConditionSchema, QueryFilterSchema, SetOperatorSchema, SpecialOperatorSchema, StringOperatorSchema } from '@objectstack/spec/data';
+import type { FieldReference, FilterArray, FilterCondition, QueryFilter } from '@objectstack/spec/data';
 
 // Validate data
 const result = EqualityOperatorSchema.parse(data);
@@ -70,6 +70,41 @@ const result = EqualityOperatorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **$field** | `string` | ✅ | Field Reference/Column Name |
+
+
+---
+
+## FilterArray
+
+Input-only authoring sugar for a filter: [field, operator, value], ["and"|"or", ...conditions], or a bare list of those. Lowered to a FilterCondition at the single sink parseFilterAST (@objectstack/spec/data) the moment it arrives; it is never stored and never travels the wire as an array. A query "where" is a FilterCondition and does not accept this shape (#5158).
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `any[]`
+
+---
+
+#### Option 2
+
+Type: `any[]`
+
+---
+
+#### Option 3
+
+Type: `[FilterArray](#filterarray)[]`
+
+---
+
+#### Option 4
+
+Type: `[FilterArray](#filterarray)[]`
+
+---
 
 
 ---

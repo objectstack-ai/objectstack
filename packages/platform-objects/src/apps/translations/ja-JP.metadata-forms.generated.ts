@@ -937,7 +937,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       content: {
         label: "コンテンツ",
-        description: "このアプリが使用するオブジェクトと API。"
+        description: "アンビエントアシスタントの割り当て。オブジェクトとエンドポイントはアプリではなくスタックで宣言します。"
       },
       branding: {
         label: "ブランディング",
@@ -945,7 +945,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       access_and_sharing: {
         label: "アクセスと共有",
-        description: "このアプリにアクセス可能なユーザーと埋め込み方法。"
+        description: "このアプリにアクセスできるユーザー。公開アクセスと埋め込みはアプリ単位ではなくフォームビュー単位です。"
       }
     },
     fields: {
@@ -958,9 +958,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明"
-      },
-      version: {
-        label: "バージョン"
       },
       icon: {
         label: "アイコン",
@@ -981,22 +978,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "領域",
         helpText: "項目を折りたたみ可能なエリアにグループ化"
       },
-      homePageId: {
-        label: "ホームページ ID",
-        helpText: "アプリ起動時のランディングページ"
-      },
-      mobileNavigation: {
-        label: "モバイルナビゲーション",
-        helpText: "モバイル用ボトムタブバー設定"
-      },
-      objects: {
-        label: "オブジェクト権限",
-        helpText: "このアプリが公開するオブジェクト名"
-      },
-      apis: {
-        label: "API",
-        helpText: "API エンドポイント定義"
-      },
       defaultAgent: {
         label: "既定エージェント",
         helpText: "常駐アシスタントボタン用 AI エージェント"
@@ -1008,18 +989,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       requiredPermissions: {
         label: "必要な権限",
         helpText: "このアプリへのアクセスに必要な権限"
-      },
-      sharing: {
-        label: "共有",
-        helpText: "公開/内部/制限付きアクセス制御"
-      },
-      embed: {
-        label: "埋め込み",
-        helpText: "iFrame 埋め込み設定"
-      },
-      aria: {
-        label: "アクセシビリティ",
-        helpText: "アクセシビリティラベル"
       }
     }
   },

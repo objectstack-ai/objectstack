@@ -48,7 +48,11 @@ const GATED: ReadonlyArray<{ check: string; gen: string; artifact: string; reads
   { check: 'check:skill-docs', gen: 'gen:skill-docs', artifact: 'skill docs (from SKILL.md frontmatter)' },
   { check: 'check:skill-refs', gen: 'gen:skill-refs', artifact: 'skill references' },
   { check: 'check:react-blocks', gen: 'gen:react-blocks', artifact: 'react-blocks contract' },
-  { check: 'check:authorable-surface', gen: 'gen:schema', artifact: 'authorable-surface.json + JSON schemas' },
+  {
+    check: 'check:authorable-surface',
+    gen: 'gen:schema',
+    artifact: 'authorable-surface.json (+ its .base.json anchor) + JSON schemas',
+  },
   // Reads the BUILT `dist/*.d.ts`, not the source. On a stale dist it reports
   // every export added since the last build as a "breaking removal" — a phantom
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the

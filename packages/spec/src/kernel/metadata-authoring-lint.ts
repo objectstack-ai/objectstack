@@ -101,8 +101,21 @@ function unwrap(schema: unknown, depth = 0): any {
       return unwrap(d.innerType, depth + 1);
     case 'lazy':
       return unwrap(d.getter(), depth + 1);
-    case 'pipe':
-      return unwrap(d.in, depth + 1);
+    case 'pipe': {
+      // Two pipes, opposite authorable sides — the #4488 finding, applied here
+      // at #5074. `a.transform(fn)` authors against the IN side (a is the
+      // accepted input shape); `z.preprocess(fn, schema)` also compiles to a
+      // pipe, but its IN side is the TRANSFORM and the authorable surface is
+      // the OUT schema. Taking `def.in` unconditionally makes this walker
+      // return the transform, report "not key-bearing", and go SILENT on the
+      // type — the failure mode #4488 measured on `translation` and #5074
+      // would have reproduced on `view` the moment `ViewMetadataSchema` gained
+      // its console-decoration preprocess. A gate that stops covering a type is
+      // worse than one that fails.
+      const inner = unwrap(d.in, depth + 1);
+      const innerType = (inner?.def ?? inner?._def)?.type;
+      return innerType === 'transform' ? unwrap(d.out, depth + 1) : inner;
+    }
     default:
       return s;
   }

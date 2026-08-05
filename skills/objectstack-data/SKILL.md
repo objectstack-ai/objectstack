@@ -371,8 +371,9 @@ The **complete** set of validation types (`ValidationRuleSchema` discriminators)
 - `conditional` — Apply a nested rule only `when` a predicate holds
 
 > **There is NO `unique` validation type** (removed from the spec in #1475).
-> Enforce uniqueness — including composite — with a **unique index**:
-> `indexes: [{ fields: ['tenant_id', 'email'], unique: true }]`.
+> Enforce uniqueness — including composite — with a **unique index**, and state
+> its scope (ADR-0120):
+> `indexes: [{ fields: ['department', 'email'], unique: 'organization' }]`.
 
 See [rules/validation.md](./rules/validation.md) for all types and examples.
 
@@ -382,11 +383,19 @@ See [rules/validation.md](./rules/validation.md) for all types and examples.
 
 ```typescript
 indexes: [
-  { fields: ['status', 'created_at'] },              // btree (default)
-  { fields: ['email'], unique: true },                // btree + unique
-  { fields: ['description'], type: 'fulltext' },      // non-default type
+  { fields: ['status', 'created_at'] },                // btree (default)
+  { fields: ['email'], unique: 'organization' },       // unique per organization
+  { fields: ['hostname'], unique: 'global' },          // unique platform-wide
+  { fields: ['description'], type: 'fulltext' },       // non-default type
 ]
 ```
+
+> **A unique index must state its scope** — `'organization'` (one holder per
+> organization, NULL-safe) or `'global'` (one holder across the installation).
+> On a declared index bare `unique: true` is the deprecated spelling of
+> `'global'`: it reads like "per organization" and does the opposite, so `os lint`
+> warns and protocol 18 rejects it. On a FIELD, `unique: true` means
+> `'organization'` and stays valid.
 
 See [rules/indexing.md](./rules/indexing.md) for composite/partial/gin/gist indexes.
 

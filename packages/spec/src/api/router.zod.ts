@@ -37,11 +37,13 @@ export type RouteCategory = z.infer<typeof RouteCategory>;
  * read it). This enum survives that removal deliberately and is NOT a
  * re-introduction of the registry: it is pinned as a `@objectstack/spec/api`
  * export by two independent ratchets — `spec/src/automation/sync-retirement.test.ts`
- * (#4738: it is the FOURTH relative of the `ConflictResolution` family and must
- * never collapse into the `ui` declaration) and, cross-repo, objectui's
- * `offline-nav-performance-spec-parity.test.ts`, whose `useOffline` hook renamed
- * its own symbol precisely because this name was taken. Route conflicts are a
- * router concern, so the router module is where it belongs now.
+ * (#4738: it is the FOURTH relative of the `ConflictResolution` family; since
+ * #4988 retired `ui/offline.zod.ts` the bare name is published by nobody, and
+ * what that pin now asserts is that this relative keeps its OWN name and its
+ * `src/api/` home rather than drifting into the freed word) and, cross-repo,
+ * objectui's `offline-nav-performance-spec-parity.test.ts`, whose `useOffline`
+ * hook renamed its own symbol precisely because this name was taken. Route
+ * conflicts are a router concern, so the router module is where it belongs now.
  */
 export const ConflictResolutionStrategy = z.enum([
   'error',       // Throw error on conflict (safest, default)
