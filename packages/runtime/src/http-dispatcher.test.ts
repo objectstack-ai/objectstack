@@ -1921,6 +1921,75 @@ describe('HttpDispatcher', () => {
                 errorSpy.mockRestore();
             }
         });
+
+        // #5242 — the flip is a LOOP of independent writes, and each one that
+        // resolves is durable on its own. When app k of N throws, the k-1 that
+        // already persisted ARE visible on disk; a response that omits them
+        // tells the caller nothing happened for apps whose state DID change,
+        // and the 'metadata:reloaded' announce (which reads `unhiddenApps`)
+        // then skips exactly those apps, leaving boot-cached consumers stale.
+        it('POST /packages/:id/publish-drafts reports the apps already unhidden when the flip fails MID-LOOP', async () => {
+            const publishPackageDrafts = vi.fn().mockResolvedValue({
+                success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+            });
+            // 4 hidden apps; the write for the 3rd rejects. So `alpha` and
+            // `beta` are persisted visible, `gamma` and `delta` are not.
+            const getMetaItems = vi.fn().mockResolvedValue([
+                { name: 'alpha', hidden: true, navigation: [] },
+                { name: 'beta', hidden: true, navigation: [] },
+                { name: 'gamma', hidden: true, navigation: [] },
+                { name: 'delta', hidden: true, navigation: [] },
+            ]);
+            const saveMetaItem = vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+                if (name === 'gamma') throw new Error('sys_metadata write rejected');
+                return { ok: true };
+            });
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem });
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+            const trigger = vi.fn().mockResolvedValue(undefined);
+            (kernel as any).context.trigger = trigger;
+            const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+            try {
+                const result = await dispatcher.handlePackages('/app.partial/publish-drafts', 'POST', {}, {}, { request: {} });
+
+                // The loop stopped at `gamma` — `delta` was never attempted.
+                expect(result.response?.status).toBe(200);
+                expect(saveMetaItem).toHaveBeenCalledTimes(3);
+                expect(saveMetaItem).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'delta' }));
+
+                const data = (result.response as any)?.body?.data;
+                // The two flips that DID persist are reported, not discarded
+                // with the stack — and the failure is reported alongside them,
+                // so the body names what flipped AND that something did not.
+                expect(data?.unhiddenApps).toEqual(['alpha', 'beta']);
+                expect(data?.unhideError).toBe('sys_metadata write rejected');
+
+                // ...and the same two reach the re-sync broadcast, so a
+                // boot-cached consumer picks up the apps that really changed
+                // instead of waiting for a restart.
+                expect(trigger).toHaveBeenCalledWith(
+                    'metadata:reloaded',
+                    expect.objectContaining({ changed: ['app/alpha', 'app/beta'] }),
+                );
+
+                // The operator-facing line names BOTH halves: what flipped and
+                // what is still stored hidden. The old wording claimed "every
+                // hidden app is still stored hidden", which is false here.
+                const line = errorSpy.mock.calls
+                    .map((c) => String(c?.[0] ?? ''))
+                    .find((l) => l.includes('[Packages] publish-drafts')) ?? '';
+                expect(line).toContain('alpha, beta');
+                expect(line).toMatch(/PARTWAY/);
+                expect(line).toMatch(/REMAINING hidden app/);
+                expect(line).toContain('sys_metadata write rejected');
+            } finally {
+                errorSpy.mockRestore();
+            }
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

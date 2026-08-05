@@ -200,6 +200,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // caller never needs to know how the package was built).
                     // Best-effort: a custom protocol without the meta
                     // primitives keeps plain draft-publish semantics.
+                    //
+                    // #5242 — `unhidden` and its result assignment live OUTSIDE
+                    // this try. A name is pushed only AFTER its `saveMetaItem`
+                    // resolved, so at any moment the list is exactly "what is
+                    // already flipped on disk". When app k of N throws, the k-1
+                    // that DID persist are a fact the caller must be told about:
+                    // accumulating inside the try and assigning after the loop
+                    // discarded them with the stack, so the response claimed
+                    // nothing happened for apps that had already changed state,
+                    // and the 'metadata:reloaded' announce below — which reads
+                    // `unhiddenApps` — skipped them too, leaving boot-cached
+                    // consumers stale until the next restart.
+                    const unhidden: string[] = [];
                     try {
                         if (
                             typeof (protocol as any).getMetaItems === 'function' &&
@@ -213,7 +226,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             const apps: any[] = Array.isArray(appsRes)
                                 ? appsRes
                                 : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
-                            const unhidden: string[] = [];
                             for (const app of apps) {
                                 if (app && typeof app === 'object' && app.hidden === true && typeof app.name === 'string') {
                                     await (protocol as any).saveMetaItem({
@@ -227,7 +239,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                     unhidden.push(app.name);
                                 }
                             }
-                            if (unhidden.length > 0) (result as any).unhiddenApps = unhidden;
                         }
                     } catch (e: any) {
                         // #4754 — ADR-0045's visibility flip is a metadata WRITE
@@ -240,9 +251,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         // there". So it is reported at `error` (AGENTS.md →
                         // "Degradation log levels"), not swallowed.
                         const logger = deps.logger ?? console;
+                        // #5242 — a mid-loop failure leaves the package SPLIT: the
+                        // apps already saved are visible, the rest are not. Name
+                        // BOTH halves. The old wording asserted "every hidden app
+                        // is still stored hidden", which is plainly false once any
+                        // flip persisted, and it left the operator to infer
+                        // "nothing changed" from a bare failure line.
+                        const stillHidden = unhidden.length > 0
+                            ? `the flip stopped PARTWAY — ${unhidden.length} app(s) DID flip and are stored visible ` +
+                              `(${unhidden.join(', ')}; they are reported under \`unhiddenApps\` and were announced for ` +
+                              `re-sync), while every REMAINING hidden app bound to it`
+                            : `every hidden app bound to it`;
                         logger.error(
                             `[Packages] publish-drafts: the ADR-0045 visibility flip FAILED for package '${id}' — its drafts ARE ` +
-                            `published and live, but every hidden app bound to it is still STORED with \`hidden: true\`, so those ` +
+                            `published and live, but ${stillHidden} is still STORED with \`hidden: true\`, so those ` +
                             `apps stay invisible in the launcher while the publish reports success. Nothing retries this flip. ` +
                             `Re-run POST /packages/${id}/publish-drafts once the cause below is resolved (it is idempotent), or ` +
                             `unhide one app directly via PUT /meta/app/<name> with \`{"hidden": false}\`. Cause: ` +
@@ -250,6 +272,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         );
                         (result as any).unhideError = e?.message ?? 'visibility flip failed';
                     }
+                    // Assigned on BOTH paths — clean completion and mid-loop
+                    // failure alike. On the failure path it rides ALONGSIDE
+                    // `unhideError`: together they say what did flip and that
+                    // something did not, which is the honest report. It must
+                    // stay ABOVE the announce block, which reads this field.
+                    if (unhidden.length > 0) (result as any).unhiddenApps = unhidden;
                     // A publish promoted drafts to active (or unhid an additive
                     // app) at RUNTIME — but boot-cached consumers still hold the
                     // pre-publish view. The load-bearing one is the automation
