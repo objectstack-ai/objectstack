@@ -65,9 +65,17 @@ function expectConformantError(response: { status: number; body: any } | undefin
     return body.error;
 }
 
+/**
+ * [#5519] `/actions` stands on the platform anonymous-deny baseline now, and it
+ * answers ahead of the 400/405 branches below. These cases are about the ERROR
+ * ENVELOPE those branches produce, not about who may call them, so they carry a
+ * session — otherwise they would silently become a third copy of the 401 test.
+ */
+const AUTHED: any = { request: {}, executionContext: { userId: 'u_test', systemPermissions: [] } };
+
 describe('#3842 — every dispatcher error exit answers in the declared envelope', () => {
     it('derives a catalogued code when the branch has none of its own (400)', async () => {
-        const result = await makeDispatcher().handleActions('', 'POST', {}, { request: {} });
+        const result = await makeDispatcher().handleActions('', 'POST', {}, AUTHED);
 
         const error = expectConformantError(result.response);
         expect(error.code).toBe('VALIDATION_ERROR');
@@ -78,7 +86,7 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         // The two statuses `StandardErrorCode` had no member for until #3842 —
         // without them a 405 would have derived the generic 4xx bucket and read
         // as a validation failure.
-        const notAllowed = await makeDispatcher().handleActions('/task/close', 'GET', {}, { request: {} });
+        const notAllowed = await makeDispatcher().handleActions('/task/close', 'GET', {}, AUTHED);
         expect(expectConformantError(notAllowed.response).code).toBe('METHOD_NOT_ALLOWED');
 
         const notImplemented = await makeDispatcher().handleI18n('/labels/account', 'GET', {}, { request: {} });

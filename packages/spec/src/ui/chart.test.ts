@@ -377,6 +377,12 @@ describe('Chart ARIA Integration', () => {
 // by a later sweep "finishing the file" with a `strictObject` that gates
 // nothing (#4583). The same verdict is recorded in `chart.zod.ts`'s header and
 // in the ui/ row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+//
+// UPDATE (#5020): the open half's verdict moved from `no gate` to `authorable`
+// — the react-page publish lint now PARSES `ChartAggregateSchema` instead of
+// re-deriving it, so a `strictObject` here would no longer gate nothing. The
+// posture itself is unchanged, so every assertion below stands as written; the
+// conversion is #5583, and that is the change that inverts the two STRIP pins.
 // ============================================================================
 describe('#4001 批 15 — the five closed chart sites', () => {
   const reject = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string => {
@@ -521,11 +527,20 @@ describe('#4001 批 15 — the five closed chart sites', () => {
 describe('#4001 批 15 — the two chart sites deliberately LEFT OPEN (measured, not skipped)', () => {
   // `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm have a LIVE
   // carrier — the react tier's `<ObjectChart aggregate={…}>` prop, which
-  // objectui's ObjectChart reads to run the query — but no PARSE: they are
-  // unreachable from all 24 metadata-type roots and from `ObjectStackSchema`,
-  // and the react-page publish lint re-derives their rules by hand instead of
-  // parsing them. `.strict()` is a property of a parse, so closing them would
-  // gate nothing while making the real gap harder to see.
+  // objectui's ObjectChart reads to run the query — and, as of **#5020**, a
+  // PARSE: the react-page publish lint calls `ChartAggregateSchema.safeParse()`
+  // instead of re-deriving the vocabulary and the count/field refinement by
+  // hand. That retires the 批 15 `no gate` verdict; both sites are now ordinary
+  // `authorable` ones.
+  //
+  // The two pins below are therefore UNCHANGED and must stay GREEN: the posture
+  // did not move, only the parse did. `.strict()` is a property of a parse, and
+  // now that one exists, converting these two is a behaviour change with a gate
+  // to observe it — **#5583**, where these two assertions INVERT (the stripped
+  // key becomes a named rejection). Until then they record what the wired gate
+  // still cannot see, which is the difference between a gate and a closed door
+  // (#4583). The companion pins live in `packages/lint`'s
+  // `validate-react-page-props.test.ts`.
   it('ChartAggregateSchema still STRIPS an undeclared key — deliberate', () => {
     const parsed = ChartAggregateSchema.parse({ function: 'count', groupBy: 'status', groupby: 'status' }) as Record<string, unknown>;
     expect(parsed.groupby, 'if this is no longer stripped, re-read the header in chart.zod.ts').toBeUndefined();
@@ -588,12 +603,16 @@ describe('#5022 — ChartDrillDownSchema', () => {
 
   it('declares exactly the six keys ObjectChart was measured to read — no more', () => {
     // The honest subset. objectui's renderer-side `DrillDownConfig` is wider
-    // (`mode` / `report` / `view` / `sort`, and a `navigate` target) because it
-    // is shared with the table / pivot / metric widgets. A chart reads none of
-    // those, so copying the union would have promoted four keys a chart ignores
-    // — two of which NO widget reads (objectui#3354) — into protocol-declared
-    // capabilities. This assertion is what stops the next sweep "completing"
-    // the shape from the objectui type.
+    // (`mode` / `report`, and — until objectui#3354 removed them — `view` /
+    // `sort`) because it is shared with the table / pivot / metric widgets. A
+    // chart reads none of those, so copying the union would have promoted keys
+    // a chart ignores into protocol-declared capabilities. This assertion is
+    // what stops the next sweep "completing" the shape from the objectui type.
+    //
+    // The KEY set is what this pins. `target`'s VALUE union is a separate
+    // question with a separate answer: #5435 widened it to include `'navigate'`
+    // once objectui#3382 made ObjectChart honour that arm — declared because
+    // delivered, which is the same rule as this assertion, not an exception.
     const shape = Object.keys(
       (ChartDrillDownSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape,
     );
@@ -606,6 +625,7 @@ describe('#5022 — ChartDrillDownSchema', () => {
     ['title', { title: '${event.categoryLabel} deals' }],
     ['target drawer', { target: 'drawer' }],
     ['target dialog', { target: 'dialog' }],
+    ['target navigate', { target: 'navigate' }],
     ['columns', { columns: ['name', 'amount'] }],
     ['maxRows', { maxRows: 50 }],
     ['everything at once', {
@@ -664,22 +684,36 @@ describe('#5022 — ChartDrillDownSchema', () => {
     expect(msg, 'a guidance entry suppresses the rename suggestion').not.toContain(`\`${key}\` → `);
   });
 
-  it("target: 'navigate' is rejected with the reason a CHART cannot honor it", () => {
-    // The one arm of objectui's shared `target` union that ObjectChart does not
-    // implement: it falls through to the Sheet, so declaring it would promise a
-    // jump that never happens. A bare enum error would say only "invalid
-    // option" and leave the author to discover that by clicking.
-    const msg = reject({ target: 'navigate' });
-    expect(msg).toContain('objectui#3354');
-    expect(msg, 'and points at the arms that do work').toContain("'dialog'");
-    expect(msg, 'and at the affordance that replaces it').toContain('Open in list');
+  it("target: 'navigate' is ACCEPTED — objectui#3382 made the renderer deliver it (#5435)", () => {
+    // This test asserted the exact opposite until #5435, and the flip is the
+    // point: #5022 excluded `'navigate'` on a MEASUREMENT ("ObjectChart falls
+    // through to the Sheet"), not on a design preference. objectui#3382
+    // implemented the arm, the measurement expired, and the union followed.
+    //
+    // Kept as a NAMED case rather than folded into the `accepts` table above
+    // so that a future sweep re-narrowing the union has to delete a test whose
+    // title states why the arm exists, instead of quietly dropping a row.
+    expect(ChartDrillDownSchema.safeParse({ target: 'navigate' }).success).toBe(true);
+
+    // The prescription that used to fire for this value must be GONE, not
+    // merely unreachable — a rejection message asserting a chart "does not
+    // implement that arm" is now false, and #5046's lesson is that a dead limb
+    // left in place reads as live to the next author.
+    const msg = reject({ target: 'sidebar' });
+    expect(msg, 'the retired navigate prescription must not survive').not.toContain('objectui#3354');
+    expect(msg, 'nor its claim about what a chart cannot do').not.toContain('not supported by a chart');
   });
 
-  it('a plain wrong VALUE still gets zod\'s own message — the navigate text is not sprayed over everything', () => {
-    // The `previosPeriod` lesson from #5011: a targeted prescription must not
-    // fire for every wrong input, or it misinforms.
+  it('a target outside the three declared arms is still rejected — widening is not loosening', () => {
+    // The companion to the case above. `'navigate'` became legal because a
+    // renderer delivers it; `target` did not stop being an enum. Without this,
+    // deleting the union entirely would leave the suite green.
     const msg = reject({ target: 'sidebar' });
-    expect(msg).not.toContain('objectui#3354');
+    expect(msg, 'rejected as a value, not swallowed').toContain('invalid_value');
+    // Zod's own enum message enumerates the legal arms rather than echoing the
+    // bad input, so THIS is the string that proves the union still has exactly
+    // three members — and it fails loudly if a fourth is ever slipped in.
+    expect(msg, 'and the three arms that do work are named').toContain('"values":["drawer","dialog","navigate"]');
   });
 
   // ---- the near-key, both directions (the 2026-08-04 ruling, item 3) -------

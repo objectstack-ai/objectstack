@@ -422,11 +422,23 @@ continuity levers on the same request. All are `POST
 
 **Send-back → resubmit (ADR-0044).** An approver who wants changes rather than a
 hard reject calls `revise`: the round finalizes `returned`, the record unlocks,
-and the run parks at a wait point. The submitter reworks the record and
-`resubmit`s (a fresh round opens for all approvers) or `recall`s (abandons it).
-Past the node's `maxRevisions` budget (default 3) a send-back **auto-rejects**
-instead. The flow's approval node must declare a `revise` edge for send-back to
-be available.
+and the run parks in the **revise window** — an `approval_revise` node on the
+flow's `revise` edge. The submitter reworks the record and `resubmit`s (a fresh
+round opens for all approvers) or `recall`s (abandons it). Past the node's
+`maxRevisions` budget (default 3) a send-back **auto-rejects** instead. The
+flow's approval node must declare a `revise` edge, and that edge must target an
+`approval_revise` node, for send-back to be available.
+
+The window is deliberately **not** an ordinary `wait`: `resubmit` is what
+authorizes (submitter-only), orders (latest round) and records (an audit row) the
+continuation, and refuses when another request is already pending on the record —
+so the pause it parks on declares `resumeAuthority: 'service'` and the generic
+`POST /api/v1/automation/:name/runs/:runId/resume` route answers **403** for it.
+ADR-0044 D3 originally prescribed a `wait` here; its 2026-07-28 amendment
+reversed that (#3823). A flow still carrying the old shape publishes with an
+error (`flow-approval-revise-target-not-service-owned`) and its `revise` verb is
+refused at runtime until the node's `type` is changed — approve/reject are
+unaffected.
 
 ### Acting on requests in the console
 

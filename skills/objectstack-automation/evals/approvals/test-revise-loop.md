@@ -1,9 +1,9 @@
 # Eval: approval send-back-for-revision loop (ADR-0044)
 
 Validates that an AI assistant authoring an approval flow with a *send back for
-revision* step emits the full ADR-0044 shape — a `revise` branch, a signal
-`wait` node, and a resubmit edge typed `type: 'back'` — so the flow **registers**
-and the loop actually works at run time.
+revision* step emits the full ADR-0044 shape — a `revise` branch, an
+`approval_revise` window node, and a resubmit edge typed `type: 'back'` — so the
+flow **registers** and the loop actually works at run time.
 
 Skill rule referenced: `SKILL.md` → "Send-back for revision (ADR-0044)".
 
@@ -17,8 +17,8 @@ Skill rule referenced: `SKILL.md` → "Send-back for revision (ADR-0044)".
 
 ## Expected Output
 
-An approval node with **three** labelled out-edges, a signal `wait` node for the
-revision window, and a **declared back-edge** closing the loop:
+An approval node with **three** labelled out-edges, an `approval_revise` node
+for the revision window, and a **declared back-edge** closing the loop:
 
 ```typescript
 {
@@ -32,8 +32,9 @@ revision window, and a **declared back-edge** closing the loop:
     { id: 'manager_review', type: 'approval', label: 'Manager Review',
       config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true,
                 maxRevisions: 2 } },                         // send-back budget
-    { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision',
-      config: { eventType: 'signal', signalName: 'budget_revision' } },
+    // `approval_revise`, not `wait`: the window is service-owned, ended only by
+    // the submitter's resubmit — so it takes no config (#3823).
+    { id: 'wait_revision', type: 'approval_revise', label: 'Awaiting Revision' },
     { id: 'approved', type: 'end', label: 'Approved' },
     { id: 'rejected', type: 'end', label: 'Rejected' },
   ],
@@ -57,9 +58,10 @@ the framework repo.
 |---|---|---|
 | Missing `label` on the flow or on a node | `label` is required by `FlowSchema` — `FlowSchema.parse` / `registerFlow` rejects the definition before any graph validation runs | `registerFlow` (schema parse) |
 | Resubmit edge **without** `type: 'back'` | `registerFlow` validates the graph-minus-back-edges as a DAG, so it rejects the cycle as un-declared | `registerFlow`; lint `flow-approval-revise-unmarked-backedge` |
-| `revise` edge to a wait node that **never loops back** | A valid DAG (registerFlow accepts it), but the submitter has nowhere to resubmit — the branch dead-ends | lint `flow-approval-revise-dead-end` |
+| `revise` edge into a plain **`wait`** node (or any other type) | The window is a service-owned pause: a `wait` is `resumeAuthority: 'any'`, so a raw run-resume walks the back-edge with no submitter check and no audit row, and can destroy the run. `sendBack` refuses this metadata (#3823, amended ADR-0044) | lint `flow-approval-revise-target-not-service-owned` (**error**) |
+| `revise` edge to a window that **never loops back** | A valid DAG (registerFlow accepts it), but the submitter has nowhere to resubmit — the branch dead-ends | lint `flow-approval-revise-dead-end` |
 | `maxRevisions: 0` together with a `revise` edge | Send-back is disabled, so every revise auto-rejects and the branch never runs | lint `flow-approval-revise-disabled` |
-| Re-suspending the approval node in a "revise mode" (no wait node, no edge) | Hides a state machine inside one node — invisible to the canvas/run log; not the ADR-0044 model | design review |
+| Re-suspending the approval node in a "revise mode" (no window node, no edge) | Hides a state machine inside one node — invisible to the canvas/run log; not the ADR-0044 model. (The 2026-07-28 amendment made the window a dedicated node TYPE, which keeps it visible; it did not move the pause inside the approval node.) | design review |
 | Reusing `reject` for send-back | `reject` terminates; send-back is a *movement* that returns the record for rework (status `returned`, not `rejected`) | semantics |
 
 ## Validation Criteria
@@ -69,9 +71,9 @@ Score the generated flow:
 1. **Registers** — `registerFlow` accepts it (no un-declared-cycle error). *(required)*
 2. **Revise branch** — the approval node has an out-edge labelled `revise`. *(required)*
 3. **Back-edge** — exactly one edge closes the loop into the approval node, typed `type: 'back'`. *(required)*
-4. **Wait window** — the `revise` edge targets a `wait` node (signal flavour). *(required)*
+4. **Revise window** — the `revise` edge targets an `approval_revise` node. *(required)*
 5. **Guard** — `maxRevisions >= 1` on the approval config (the default `3` is fine; `0` fails). *(required)*
-6. **No lint findings** — `lint-flow-patterns` emits none of the three `flow-approval-revise-*` warnings. *(required)*
+6. **No lint findings** — `lint-flow-patterns` emits none of the four `flow-approval-revise-*` findings. *(required)*
 7. **Approve / reject intact** — the approval still has `approve` and `reject` out-edges. *(preferred)*
 
 Pass = criteria 1–6 all hold. The canonical failure this eval guards against is a

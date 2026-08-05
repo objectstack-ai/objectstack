@@ -157,6 +157,39 @@ const CASE_SETS = [
 // An empty ledger is the intended steady state, not a reason to delete the
 // mechanism: the next driver that arrives uncovered fails CONSUMED and lands
 // its measured entry here.
+//
+// ## What driver-mongodb's cells mean since #5517 — read this before trusting them
+//
+// This gate judges coverage by IMPORT: does some file under the package's `src/`
+// name the marker export. That is deliberate (see "What 'covered' means"), and it
+// is why no entry below changed when #5517 made the mongodb suites that need a
+// real mongod OPT-IN (`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, gate in
+// `packages/plugins/driver-mongodb/src/test-mongod.ts`): the files still exist
+// and still import the markers, so CONSUMED still passes — honestly, but about
+// less than it did. Recorded here rather than as a ledger entry because an entry
+// for a covered cell fails RECONCILED; this is the only place the fact fits.
+//
+// Measured on the day of that change, per marker, for driver-mongodb:
+//
+//   FILTER_LOGIC_CASES         still runs by default — `mongodb-filter-logic-
+//                              translation.test.ts` drives the whole case-set
+//                              server-free over the documents `translateFilter`
+//                              emits. The real-mongod twin
+//                              (`mongodb-filter-logic-conformance.test.ts`) is
+//                              opt-in.
+//   PAGINATION_CASES,          opt-in only. `mongodb-pagination-conformance.test.ts`
+//   PAGINATION_UNORDERED_CASES keeps a server-free half, but it asserts the SORT
+//                              SPEC, not the partition property the case-sets
+//                              define.
+//   TEMPORAL_CASES,            opt-in only — `mongodb-temporal-conformance.test.ts`
+//   TEMPORAL_TIME_CASES        has no server-free half.
+//
+// Why: on a cold binary cache two vitest workers downloaded the same ~123 MB
+// archive and the loser's `rename` blew up an all-green run as an unhandled
+// rejection, ejecting unrelated PRs from the merge queue. The maintainer retired
+// the download rather than fund single-flight/prewarm for a family whose
+// investment is frozen (#5499). Un-freezing it is what should re-run these cells
+// in CI; until then, this note is the honest state of the mongo column.
 
 const LEDGER = [];
 

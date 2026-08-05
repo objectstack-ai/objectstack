@@ -14,7 +14,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AutomationEngine } from '@objectstack/service-automation';
+import { AutomationEngine, registerScreenNodes } from '@objectstack/service-automation';
+import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
 import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.js';
@@ -98,11 +99,17 @@ describe('Send back for revision (ADR-0044)', () => {
       async execute(node: any) { marks.push(node.id); return { success: true }; },
     });
     // Signal-flavor wait stand-in: suspends until an external resume — the
-    // same contract as the built-in wait node's non-timer path.
+    // same contract as the built-in wait node's non-timer path. Still here
+    // because the LEGACY revise shape (#3823) is a wait, and one case below
+    // pins that send-back now refuses it.
     automation.registerNodeExecutor({
       type: 'wait',
       async execute(node: any) { return { success: true, suspend: true, correlation: `wait:${node.id}` }; },
     });
+    // The real screen executor, for the "approve → screen stays UI-resumable"
+    // case: the revise window's service ownership must not leak onto other
+    // pauses downstream of an approval.
+    registerScreenNodes(automation, { logger: noopLogger } as any);
   });
 
   function registerReviseFlow(opts?: {
@@ -124,7 +131,9 @@ describe('Send back for revision (ADR-0044)', () => {
             ...(opts?.maxRevisions !== undefined ? { maxRevisions: opts.maxRevisions } : {}),
           },
         },
-        { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision' },
+        // The revise window is its own service-owned node type (#3823) — a
+        // plain `wait` here is raw-resumable and no longer accepted.
+        { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE, label: 'Awaiting Revision' },
         { id: 'on_approved', type: 'mark', label: 'Approved' },
         { id: 'on_rejected', type: 'mark', label: 'Rejected' },
         { id: 'end', type: 'end', label: 'End' },
@@ -393,7 +402,7 @@ describe('Send back for revision (ADR-0044)', () => {
           id: 'review', type: 'approval', label: 'Review',
           config: { approvers: [{ type: 'user', value: 'u1' }], approvalStatusField: 'approval_status' },
         },
-        { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision' },
+        { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE, label: 'Awaiting Revision' },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -414,5 +423,161 @@ describe('Send back for revision (ADR-0044)', () => {
     expect(await mirror()).toBe('returned');
     await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
     expect(await mirror()).toBe('pending'); // round 2 re-mirrors
+  });
+
+  /**
+   * #3823 — the revise window is a SERVICE-OWNED pause.
+   *
+   * Demonstrated on `main` before this changed (issue comment, 2026-07-28): with
+   * the window parked on an ordinary `wait`, a raw `resume(runId)` — empty body,
+   * any caller — walked the resubmit back-edge into the approval node. Round 2
+   * opened with no `resubmit` audit row and no submitter check; and when another
+   * request was pending on the record, the re-entry failed AFTER the engine had
+   * consumed the suspension, killing the run for good.
+   *
+   * Reverse verification: re-typing `wait_revision` back to `wait` in this
+   * describe's flow makes every case below fail — the raw resume succeeds, round
+   * 2 opens, and the collision case leaves zero suspended runs. The refusal is
+   * the node TYPE's doing, so the type is the only thing that has to change to
+   * see it.
+   */
+  describe('the revise window is service-owned (#3823)', () => {
+    it('declares resumeAuthority: service on the revise-window node type', () => {
+      const descriptor = automation.getActionDescriptors().find(d => d.type === APPROVAL_REVISE_NODE_TYPE);
+      expect(descriptor).toMatchObject({
+        type: APPROVAL_REVISE_NODE_TYPE,
+        resumeAuthority: 'service',
+        supportsPause: true,
+        isAsync: true,
+      });
+      // The generic `wait` stays open to its external producer — this fix must
+      // not gate every author-placed wait in the system.
+      expect(automation.getActionDescriptors().find(d => d.type === 'wait')?.resumeAuthority)
+        .not.toBe('service');
+    });
+
+    it('refuses a raw resume of a run parked in the revise window', async () => {
+      registerReviseFlow();
+      const { runId, req } = await startFlow();
+      await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId, nodeId: 'wait_revision' }]);
+
+      // The demonstrated bypass, verbatim: empty body, no service marker.
+      const out = await automation.resume(runId);
+      expect(out).toMatchObject({ success: false, code: 'PERMISSION_DENIED' });
+      expect(out.error).toMatch(/only its owning service may resume/);
+
+      // Nothing moved: no round 2, no audit row, the window still open.
+      expect(await pendingReq()).toBeUndefined();
+      expect(await actionsOf(req.id)).toEqual(['submit', 'revise']);
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId, nodeId: 'wait_revision' }]);
+
+      // …and the legitimate door still works.
+      const re = await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
+      expect(re.resumed).toBe(true);
+      expect(await actionsOf(req.id)).toEqual(['submit', 'revise', 'resubmit']);
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId, nodeId: 'review' }]);
+    });
+
+    it('a raw resume can no longer destroy the run when a pending request collides', async () => {
+      registerReviseFlow();
+      const { runId, req } = await startFlow();
+      await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+
+      // A record-change trigger re-fired off an edit made inside the window.
+      await fake.insert('sys_approval_request', {
+        id: 'areq_collider', object_name: 'fin_expense', record_id: 'x1',
+        status: 'pending', flow_run_id: 'run_other', flow_node_id: 'review',
+        submitter_id: 'submitter', process_name: 'flow:expense_approval',
+        created_at: new Date().toISOString(),
+      });
+
+      // `resubmit` refuses BEFORE consuming the suspension (already pinned
+      // above); the raw resume used to go around that guard and consume it.
+      const out = await automation.resume(runId);
+      expect(out).toMatchObject({ success: false, code: 'PERMISSION_DENIED' });
+      expect(automation.listSuspendedRuns().some(r => r.runId === runId)).toBe(true);
+      expect((await fake.find('sys_approval_request', { where: { id: req.id } }))[0].status).toBe('returned');
+
+      // Clear the collision and the approval is still resolvable — the run was
+      // never consumed, so the revise window is still there to resubmit from.
+      await fake.delete('sys_approval_request', { where: { id: 'areq_collider' } });
+      const re = await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
+      expect(re.resumed).toBe(true);
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId, nodeId: 'review' }]);
+    });
+
+    it('refuses send-back into a bare wait node before anything mutates (legacy ADR-0044 D3 shape)', async () => {
+      automation.registerFlow('legacy_revise', {
+        name: 'legacy_revise', label: 'Legacy Revise', type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+          // The shape ADR-0044 D3 originally prescribed.
+          { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'review' },
+          { id: 'e2', source: 'review', target: 'end', label: 'approve' },
+          { id: 'e3', source: 'review', target: 'end', label: 'reject' },
+          { id: 'e4', source: 'review', target: 'wait_revision', label: 'revise' },
+          { id: 'e5', source: 'wait_revision', target: 'review', label: 'resubmit', type: 'back' },
+        ],
+      });
+      const paused = await automation.execute('legacy_revise', {
+        object: 'fin_expense', record: { id: 'x7' }, userId: 'submitter',
+      });
+      const req = await pendingReq();
+
+      await expect(service.sendBack(req.id, { actorId: 'u1' }, asUser('u1')))
+        .rejects.toThrow(/revise window must be an 'approval_revise' node/);
+
+      // Refused before any mutation: still pending, no `revise` audit row, and
+      // the run is still parked on the approval — so the request stays
+      // decidable (approve / reject) while the flow's metadata is fixed.
+      expect((await fake.find('sys_approval_request', { where: { id: req.id } }))[0].status).toBe('pending');
+      expect(await actionsOf(req.id)).toEqual(['submit']);
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId: paused.runId, nodeId: 'review' }]);
+    });
+
+    it('leaves an approve-branch screen resumable through the generic route', async () => {
+      automation.registerFlow('approve_then_screen', {
+        name: 'approve_then_screen', label: 'Approve then Screen', type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+          {
+            id: 'collect', type: 'screen', label: 'Collect Shipping',
+            config: { title: 'Shipping', fields: [{ name: 'carrier', label: 'Carrier', type: 'text' }] },
+          },
+          { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE, label: 'Awaiting Revision' },
+          { id: 'done', type: 'mark', label: 'Done' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'review' },
+          { id: 'e2', source: 'review', target: 'collect', label: 'approve' },
+          { id: 'e3', source: 'review', target: 'done', label: 'reject' },
+          { id: 'e4', source: 'review', target: 'wait_revision', label: 'revise' },
+          { id: 'e5', source: 'wait_revision', target: 'review', label: 'resubmit', type: 'back' },
+          { id: 'e6', source: 'collect', target: 'done' },
+        ],
+      });
+      const paused = await automation.execute('approve_then_screen', {
+        object: 'fin_expense', record: { id: 'x8' }, userId: 'submitter',
+      });
+      const req = await pendingReq();
+      const out = await service.decide(req.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+      expect(out).toMatchObject({ finalized: true, resumed: true });
+
+      // The run is now parked on the SCREEN, which the UI owns…
+      expect(automation.listSuspendedRuns()).toMatchObject([{ runId: paused.runId, nodeId: 'collect' }]);
+      // …and a plain resume — the flow runner's, no service marker — advances it.
+      const advanced = await automation.resume(paused.runId!, { variables: { carrier: 'DHL' } });
+      expect(advanced.success).toBe(true);
+      expect(advanced.code).toBeUndefined();
+      expect(marks).toEqual(['done']);
+      expect(automation.listSuspendedRuns()).toHaveLength(0);
+    });
   });
 });

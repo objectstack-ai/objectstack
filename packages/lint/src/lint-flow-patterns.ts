@@ -15,6 +15,11 @@
  *  - **The runtime refuses.** {@link FLOW_RUNAS_UNSCOPED} — a user-less trigger
  *    with `runAs:'user'` has no identity to scope to, so the data operation is
  *    refused outright (#3760).
+ *    {@link FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED} — a `revise` edge
+ *    into anything but the service-owned revise window is refused by
+ *    `ApprovalService.sendBack` before it mutates anything, so the branch can
+ *    never run; and the shape it replaces was a pause anyone holding the run id
+ *    could resume (#3823, amended ADR-0044).
  *  - **The declaration is inert and the route silently differs from what is
  *    written.** {@link FLOW_BRANCH_LABEL_UNMATCHED} — a decision computes a
  *    branch no out-edge carries, so the branch is discarded and every out-edge
@@ -39,6 +44,8 @@
  * specifically (range operators `>=`/`<=` are not flagged — they're the building
  * block of the correct pattern), keeping false positives near zero.
  */
+
+import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 
 export interface FlowLintFinding {
   where: string;
@@ -90,6 +97,12 @@ export const FLOW_BARE_DOLLAR_REF = 'flow-bare-dollar-reference';
 export const FLOW_APPROVAL_REVISE_DEAD_END = 'flow-approval-revise-dead-end';
 export const FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE = 'flow-approval-revise-unmarked-backedge';
 export const FLOW_APPROVAL_REVISE_DISABLED = 'flow-approval-revise-disabled';
+/**
+ * #3823 — the `revise` edge targets a node that is not the service-owned revise
+ * window. `error`: `ApprovalService.sendBack` refuses this metadata outright
+ * (see {@link scanApprovalReviseLoops}).
+ */
+export const FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED = 'flow-approval-revise-target-not-service-owned';
 /**
  * #3760 — renamed from `flow-schedule-runas-unscoped`. The old id named the
  * *schedule*, which was never the boundary: the rule is about a trigger that
@@ -292,13 +305,18 @@ function edgeLabelOf(e: AnyRec): string {
 
 /**
  * ADR-0044 send-back-for-revision footguns on an approval node that declares a
- * `revise` out-edge — the two shapes an AI authoring an approval flow gets wrong:
+ * `revise` out-edge — the shapes an AI authoring an approval flow gets wrong:
  *  - the revise branch never loops back to the approval (the submitter reworks
  *    the record with nowhere to resubmit). This is a VALID DAG, so `registerFlow`
  *    ACCEPTS it — the linter is the only place that catches the dead end.
  *  - the loop DOES return to the approval, but the closing edge isn't declared
  *    `type: 'back'`, so `registerFlow` rejects it as an un-declared cycle. The
  *    lint fires at compile time with the specific fix (mark the resubmit edge).
+ *  - the revise edge targets a plain `wait` — the shape ADR-0044 D3 originally
+ *    prescribed, reversed by its 2026-07-28 amendment (#3823). An AI author
+ *    following the old text generates it verbatim, which is exactly why this one
+ *    is an `error` rather than a warning: nothing in the metadata itself said the
+ *    node sat in a privileged position.
  */
 /**
  * #3863 — flag edges labelled like an error path but left at the default type.
@@ -538,9 +556,14 @@ function scanApprovalReviseLoops(
   edges: AnyRec[],
   findings: FlowLintFinding[],
 ): void {
-  const approvals = nodes.filter((n) => n.type === 'approval');
+  const approvals = nodes.filter((n) => n.type === APPROVAL_NODE_TYPE);
   if (approvals.length === 0) return;
   const nodeIds = new Set(nodes.map((n) => (typeof n.id === 'string' ? n.id : '')).filter(Boolean));
+  const nodeTypeById = new Map<string, string>(
+    nodes
+      .filter((n) => typeof n.id === 'string')
+      .map((n) => [n.id as string, typeof n.type === 'string' ? n.type : '']),
+  );
   const outEdges = new Map<string, AnyRec[]>();
   for (const e of edges) {
     const src = typeof e.source === 'string' ? e.source : '';
@@ -558,6 +581,34 @@ function scanApprovalReviseLoops(
       .filter((t) => t && nodeIds.has(t));
     if (reviseTargets.length === 0) continue; // only approvals that declare a revise branch
     const where = `flow '${flowName}' \u00b7 approval '${aid}'`;
+
+    // #3823 / amended ADR-0044 \u2014 the revise window must be the service-owned
+    // pause. `error`, under this module's stated bar ("the runtime refuses"):
+    // `ApprovalService.sendBack` refuses any other target before it mutates
+    // anything, so on this metadata send-back cannot run at all. Before that
+    // refusal existed the shape was worse than dead \u2014 the pause landed on a
+    // node anyone holding the run id could resume, walking the resubmit
+    // back-edge with no submitter check and no audit row.
+    for (const target of reviseTargets) {
+      const targetType = nodeTypeById.get(target) ?? '';
+      if (targetType === APPROVAL_REVISE_NODE_TYPE) continue;
+      findings.push({
+        where,
+        severity: 'error',
+        message:
+          `has a 'revise' out-edge into node '${target}' of type '${targetType || '(untyped)'}' \u2014 the revise ` +
+          `window must be an '${APPROVAL_REVISE_NODE_TYPE}' node. Send-back parks the run there while the ` +
+          `record is unlocked, and only the approvals service may continue it (submitter-only, audited, and ` +
+          `refusing a colliding pending request); \`sendBack\` refuses any other target, so this flow's ` +
+          `revise branch cannot run.`,
+        hint:
+          `Set node '${target}' to \`type: '${APPROVAL_REVISE_NODE_TYPE}'\` (drop any \`waitEventConfig\` \u2014 the ` +
+          `window is ended by POST /api/v1/approvals/requests/:id/resubmit, not by a signal). ADR-0044 D3 ` +
+          `originally said 'wait' here; its 2026-07-28 amendment reversed that, because a 'wait' is ` +
+          `resumable by anyone with the run id (#3823, #3801).`,
+        rule: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
+      });
+    }
 
     // maxRevisions:0 alongside a revise edge is self-contradictory — send-back is
     // disabled, so the branch always auto-rejects and never actually runs.
@@ -599,8 +650,9 @@ function scanApprovalReviseLoops(
           `has a 'revise' out-edge but no path loops back to it — the submitter reworks the record with ` +
           `nowhere to resubmit, so the revise branch dead-ends. (registerFlow accepts this — it's a valid DAG.)`,
         hint:
-          `Close the loop: the 'revise' edge should reach a wait node whose resubmit edge returns to ` +
-          `'${aid}' marked \`type: 'back'\` (ADR-0044). See examples/app-showcase showcase_budget_approval.`,
+          `Close the loop: the 'revise' edge should reach an '${APPROVAL_REVISE_NODE_TYPE}' node whose resubmit ` +
+          `edge returns to '${aid}' marked \`type: 'back'\` (ADR-0044). See examples/app-showcase ` +
+          `showcase_budget_approval.`,
         rule: FLOW_APPROVAL_REVISE_DEAD_END,
       });
     } else if (!returnEdges.some((e) => e.type === 'back')) {

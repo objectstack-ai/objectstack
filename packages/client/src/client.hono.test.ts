@@ -47,7 +47,7 @@ describe('ObjectStackClient (with Hono Server)', () => {
         // --- BROKER SHIM START ---
         // HttpDispatcher requires a broker to function. We inject a simple shim.
         (kernel as any).broker = {
-            call: async (action: string, params: any, opts: any) => {
+            call: async (action: string, params: any, _opts: any) => {
                 const parts = action.split('.');
                 const service = parts[0];
                 const method = parts[1];
@@ -159,9 +159,12 @@ describe('ObjectStackClient (with Hono Server)', () => {
 
         // Discovery is REST's, computed from its registry (#4018 D12: declared
         // === enforced). Every route it advertises must actually answer.
+        // `routes` is optional on the discovery payload, so it is reached
+        // optionally and asserted — a missing map fails `toContain` rather than
+        // being waved through by a `!` or a `?? {}` default (#5449).
         const endpoints = client['discoveryInfo']!.routes;
-        expect(endpoints.data).toContain('/api/v1/data');
-        expect(endpoints.metadata).toContain('/api/v1/meta');
+        expect(endpoints?.data).toContain('/api/v1/data');
+        expect(endpoints?.metadata).toContain('/api/v1/meta');
 
         // Enforced, not just declared — the pairing #4018 exists to hold.
         expect((await fetch(`${baseUrl}/api/v1/meta/objects`)).status).not.toBe(404);

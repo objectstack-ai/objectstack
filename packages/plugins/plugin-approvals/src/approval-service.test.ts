@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService, REMIND_COOLDOWN_MS } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 
@@ -3087,6 +3088,13 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
   /** A flow whose approval node declares the `revise` out-edge send-back needs. */
   const REVISE_FLOW = {
     name: 'deal_approval',
+    // The revise window must be the service-owned node type — `sendBack`
+    // checks the edge's TARGET as well as its existence (#3823), so the stub
+    // has to declare the node, not just the edge.
+    nodes: [
+      { id: 'approve_step', type: 'approval' },
+      { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE },
+    ],
     edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
   };
 
@@ -3202,6 +3210,13 @@ describe('status mirror identity (#3783)', () => {
 
   const REVISE_FLOW = {
     name: 'deal_approval',
+    // The revise window must be the service-owned node type — `sendBack`
+    // checks the edge's TARGET as well as its existence (#3823), so the stub
+    // has to declare the node, not just the edge.
+    nodes: [
+      { id: 'approve_step', type: 'approval' },
+      { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE },
+    ],
     edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
   };
 

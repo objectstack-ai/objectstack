@@ -251,7 +251,6 @@ const TEST_DEBT = {
   '@objectstack/driver-mongodb': { tests: 7, errors: 44, note: 'TS2345 x22, TS2591 x15 (`process` -- the test files need types:["node"] once included).' },
   '@objectstack/lint': { tests: 39, errors: 26, note: 'TS7006 x20, TS2835 x6.' },
   '@objectstack/plugin-security': { tests: 32, errors: 20, note: 'TS2739 x8, TS2740 x5 -- incomplete literals.' },
-  '@objectstack/client': { tests: 15, errors: 19, note: 'TS6059 x5 (rootDir), TS2740 x5, TS6133 x3.' },
   '@objectstack/formula': { tests: 13, errors: 12, note: 'TS2345 x3, TS2352 x3, TS2591 x3.' },
   '@objectstack/trigger-record-change': { tests: 4, errors: 8, note: 'TS2353 x8 -- one unknown-property shape repeated.' },
   '@objectstack/verify': { tests: 2, errors: 6, note: 'TS7006 x4, TS2835 x2.' },
@@ -276,12 +275,13 @@ const TEST_DEBT = {
 // spec took -- put the file in a tsc program (drop the exclusion, widen
 // `include`, or add a sibling `tsconfig.test.json` the typecheck script names)
 // -- and then delete the entry, which RECONCILED forces anyway.
-const PHANTOM_PIN_DEBT = {
-  'packages/client/src/client.test.ts':
-    'tsconfig.json excludes `**/*.test.ts` and the package has no sibling test config; also in TEST_DEBT (15 files / 19 errors). Onboarding it is #5449, not #5286 -- the two directives here pin retired client options.',
-  'packages/metadata-core/test/types.test.ts':
-    'Outside the program for a different reason, and one no exclusion names: `include` is `["src/**/*"]` while this file lives in a sibling `test/` tree, so TESTS_COVERED never saw it either (its testFiles count is 0). Repair is to widen `include` or add a test config; tracked by #5476, not by #5286 (which scoped itself to packages/spec).',
-};
+//
+// EMPTY, and that is the intended end state: both seeds #5286 planted have been
+// repaired and their entries deleted -- `packages/client` in #5449 (PR #5546),
+// `packages/metadata-core/test/types.test.ts` in #5476, each by naming a sibling
+// `tsconfig.test.json` in its `typecheck` script. A new entry here is not the
+// route for the next such finding; PINS_CHECKED going red is.
+const PHANTOM_PIN_DEBT = {};
 
 /**
  * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
@@ -383,8 +383,9 @@ function configsNamedByTypecheck(scripts) {
  *
  * `pinFiles` is PINS_CHECKED's input: test files carrying a `@ts-expect-error`
  * directive that no invoked program compiles. The scan walks the whole package,
- * not just the include roots -- `packages/metadata-core/test/` is outside
- * `include` with no exclusion naming it, and that is just as unchecked.
+ * not just the include roots -- `packages/metadata-core/test/` sat outside
+ * `include` with no exclusion naming it (until #5476 put it in a program), and
+ * that is just as unchecked.
  *
  * @returns {{excludesTests: boolean, testFiles: number, pinFiles: string[]}}
  */

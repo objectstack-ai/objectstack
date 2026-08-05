@@ -153,7 +153,7 @@ const result = BlueprintAppSchema.parse(data);
 | **field** | `string` | optional | Numeric field on the CHILD object to aggregate. Ignored for "count" (pass "id" or omit it). |
 | **relationshipField** | `string` | optional | The child FK field pointing back at this parent. Auto-detected from the child's lookup / master_detail; set it only when the child has more than one reference to this parent. |
 | **conditions** | `{ field: string; op: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq' \| 'ne'>; value: number \| string \| boolean }[]` | optional | CONDITIONAL roll-up: aggregate only the child rows matching these comparisons (ANDed). REQUIRED whenever the field name carries a qualifier — "已完成任务数 / 已收货金额 / 待处理工单数", any 已X / 未X / `<某状态>`的 count-or-sum → e.g. [`{ field: "status", op: "eq", value: "completed" }`]. WITHOUT it the roll-up silently counts EVERY child and reports a plausible-looking WRONG number, which is worse than a visible 0. |
-| **filter** | `any` | optional | The same predicate as a canonical query filter map (e.g. `{ status: "completed" }`, `{ status: { $in: ["received", "partial"] }` }). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given. |
+| **filter** | `any` | optional | The same predicate as a canonical query filter map (e.g. `{ status: "completed" }`, `{ status: { $in: ["received", "partial"] } }`). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given. |
 
 
 ---

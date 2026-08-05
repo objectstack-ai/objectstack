@@ -7,13 +7,14 @@ import { MongoDBDriver } from './mongodb-driver.js';
 import { createTestMongod } from './test-mongod.js';
 
 // `mongodb-memory-server` downloads a real MongoDB binary from
-// fastdl.mongodb.org on first use. In sandboxed / offline CI that download can
-// fail — or HANG, which this suite could not express until `createTestMongod`
-// put a deadline on the wait (see that module); both now land on the same skip.
-// When it does we **skip** this suite rather than failing the whole package's
-// test run (and, with it, the monorepo `Test Core` job). The startup is
-// attempted once here so availability is known at collection time — a throwing
-// `beforeAll` would *fail* every test instead of skipping it.
+// fastdl.mongodb.org on first use, which is why this suite is OPT-IN since
+// #5517: two workers downloading it at once made an all-green run `exit 1` and
+// ejected unrelated PRs from the merge queue. `createTestMongod` skips this
+// suite — printing why — unless `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`, and
+// an opted-in download that fails or HANGS lands on the same skip rather than
+// stalling the job. The acquisition happens once here so availability is known
+// at collection time — a throwing `beforeAll` would *fail* every test instead
+// of skipping it.
 const sharedMongod: MongoMemoryServer | undefined = await createTestMongod('MongoDBDriver');
 
 describe.skipIf(!sharedMongod)('MongoDBDriver', () => {

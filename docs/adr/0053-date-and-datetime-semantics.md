@@ -837,6 +837,36 @@ sets** — the ADR's original requirement — through their own real entry point
 MySQL under a skewed process zone), `driver-memory`, `driver-mongodb` (real
 MongoDB), the analytics preview evaluator, and `formula`'s write-side `check`.
 
+> **Coverage correction, 2026-08-05 (#5517 / PR #5538) — the `driver-mongodb`
+> cell no longer runs by default.** This corrects a statement of *coverage*,
+> not any decision recorded here: the consumer still exists, still drives the
+> shared table through the driver's own entry point, and nothing in D-A3 or
+> D-A3.1 is reversed.
+>
+> `driver-mongodb` is the one cell above that needs a real server process, and
+> the seven suites in that package which need one became **opt-in** behind
+> `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1` — among them
+> `mongodb-temporal-conformance.test.ts` (both `TEMPORAL_CASES` and
+> `TEMPORAL_TIME_CASES`, with no server-free half) and
+> `mongodb-datetime-storage.test.ts` (D-E4's row-result cover). Without the
+> switch they skip with a named notice and start no download. The reason was
+> not the matrix: `mongodb-memory-server` fetches a ~123 MB binary on first
+> use, two vitest workers raced that fetch, and the loser's abandoned download
+> surfaced as an unhandled rejection that turned all-green runs into `exit 1`
+> and ejected unrelated PRs from the merge queue. The maintainer retired the
+> download rather than fund single-flight or prewarm infrastructure for a
+> driver family whose investment is frozen (#5499); `test-mongod.ts` in that
+> package documents the mechanism.
+>
+> `scripts/check-driver-conformance.mjs` still reports these cells CONSUMED,
+> because that gate judges coverage by *import* and the files still import the
+> markers. Its ledger comment carries the per-marker state as measured on the
+> day of the change — read it before treating the mongo column as executed
+> coverage.
+>
+> Restoring these cells to CI hangs on #5499: whatever decision un-freezes that
+> family and provisions a mongod binary again also retires this note.
+
 It is modelled on `filter-logic-conformance.ts`, which exists for the same
 reason one layer down (#3774), and lives in `spec` for the D-D2 reason: every
 backend already depends on it.
@@ -975,6 +1005,15 @@ exactly what mingo performs and what a mongo text range uses — stays
 chronological across both widths.
 
 Coverage note: the mongo end-to-end sweep needs a real server
-(`mongodb-memory-server`), so it runs in CI and skips where no binary is
-available. The conversion itself is pinned by `mongodb-time-storage.test.ts`,
-which is pure and runs everywhere.
+(`mongodb-memory-server`), ~~so it runs in CI and skips where no binary is
+available~~ — **corrected 2026-08-05 (#5517 / PR #5538): it does not run in CI
+at all any more, and binary reachability stopped being the condition.** The
+mongod-backed suites are opt-in behind `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`
+(see the coverage correction under D-A3.1 for why), so
+`mongodb-temporal-conformance.test.ts` — which carries this axis's
+`TEMPORAL_TIME_CASES` and has no server-free half — skips with a named notice
+on every default run, whether or not a binary is reachable. It runs when a
+human asks for it, and returns to CI only if #5499 is un-frozen and something
+provisions a binary again. The conversion itself is pinned by
+`mongodb-time-storage.test.ts`, which is unaffected: it is pure, needs no
+server, and still runs everywhere.
