@@ -920,7 +920,7 @@ statement that no live subtask remains. Four agents stalled 6 times across the
   threshold (the cloud-mode ~2 h below): a threshold is for *no* answer, not for
   an answer that says the agent stopped.
 - **A third stall means unreliable** — re-dispatch a fresh agent onto that
-  branch under "Handing off an interrupted dev" below (worktree already exists,
+  branch under "Handing off an interrupted dev" in step 5 (worktree already exists,
   read every existing commit first, re-run the verification in full, claim and
   assignee untouched).
 
