@@ -3,6 +3,7 @@
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { execSync } from 'child_process';
+import dotenvFlow from 'dotenv-flow';
 import fs from 'fs';
 import path from 'path';
 import { normalizeStackInput } from '@objectstack/spec';
@@ -29,6 +30,314 @@ interface HealthCheckResult {
   status: 'ok' | 'warning' | 'error';
   message: string;
   fix?: string;
+}
+
+// ─── Environment sources (#5387) ────────────────────────────────────
+//
+// `serve` / `dev` / `start` all load `.env*` through dotenv-flow before they
+// read a single `OS_*` variable (`serve.ts:520`, `dev.ts`, `start.ts`); doctor
+// read none. So a value living in a committed `.env` — the most common home for
+// exactly these variables, and the reason PR #5381 put serve's posture gate
+// AFTER the dotenv load — reached the server and never reached the diagnostic:
+// doctor green, `os serve` refusing to boot the same directory.
+//
+// Doctor now reads the same cascade, with two deliberate constraints:
+//
+//   • It does NOT merge the values into `process.env` for the run. The overlay
+//     is applied around the individual read that needs it and taken back off in
+//     a `finally` (`withDotenvOverlay`), so nothing downstream — the config
+//     bundle, a spawned tool — silently inherits a different environment than
+//     the one it inherited yesterday.
+//   • Every env-derived value is REPORTED WITH ITS SOURCE (shell vs which
+//     file). A silent merge would trade "doctor cannot see your `.env`" for
+//     "doctor cannot tell you which of your four `.env*` files it believed",
+//     which is the same class of defect one layer along.
+
+/**
+ * The environment variables doctor's own checks derive from.
+ *
+ * Every entry's PROVENANCE is reported by {@link environmentSourcesCheck} — the
+ * variable's name and where its value came from, **never the value itself**.
+ * Reporting the source rather than the contents is what keeps this list safe to
+ * grow: a future env-derived check whose variable carries a credential can be
+ * declared here without doctor printing the credential. (The one value doctor
+ * does print is an *unrecognized* `OS_TENANCY_POSTURE`, quoted back by the
+ * posture finding so the operator can see their typo — a posture is a
+ * vocabulary word, not a secret.)
+ *
+ * A new env-derived check MUST add its variable here: `doctor-env-provenance.test.ts`
+ * fails when `doctor.ts` names an `OS_*` variable this list does not declare.
+ * Reading `.env` into a check that reports no attribution is precisely the
+ * defect #5387 closed, and it would otherwise creep back one variable at a time.
+ */
+export const DOCTOR_ENV_INPUTS = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED'] as const;
+
+/** Where one environment value actually came from. */
+export interface EnvValueProvenance {
+  name: string;
+  /** `'shell'` — this process's environment; `'file'` — a `.env*` file; `'unset'` — neither. */
+  source: 'shell' | 'file' | 'unset';
+  /** Absolute path of the winning `.env*` file. Only when `source === 'file'`. */
+  file?: string;
+}
+
+/** What doctor found when it read the `.env*` cascade `os serve` reads. */
+export interface DotenvReading {
+  /** The `node_env` the cascade was resolved for. */
+  nodeEnv: string;
+  /** The directory the cascade was read from (doctor's cwd). */
+  cwd: string;
+  /** Existing `.env*` files in dotenv-flow's ASCENDING priority order. */
+  files: string[];
+  /** varname → merged value across `files` (later file wins). */
+  fileValues: Map<string, string>;
+  /** varname → the highest-priority file that defines it. */
+  fileOrigin: Map<string, string>;
+  /** A file dotenv-flow could not read. `os serve` (silent: true) ignores this. */
+  error?: { file: string; message: string };
+}
+
+/**
+ * The `node_env` doctor resolves the `.env*` cascade for.
+ *
+ * Identical to `serve.ts:517-519` with its `--dev` flag out of the picture —
+ * doctor has no such flag, and the PM ruling on #5387 explicitly declined to
+ * invent one for this first version. serve's remaining expression is
+ * `NODE_ENV === 'test' ? 'test' : (NODE_ENV || 'production')`, whose first
+ * branch is a no-op once `flags.dev` is false, so this really is the same
+ * derivation and not a lookalike.
+ *
+ * Read from `process.env` only, never from a `.env*` file — a `NODE_ENV` set
+ * inside a `.env` cannot change which files are loaded under serve either
+ * (serve computes the mode before the load), and mirroring that is the point.
+ */
+export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
+  return env.NODE_ENV || 'production';
+}
+
+/**
+ * Read — without loading — the `.env*` files `os serve` would load from `cwd`.
+ *
+ * `dotenvFlow.listFiles()` is the same function `dotenvFlow.config()` uses to
+ * pick its files, so the list is serve's list by construction rather than by a
+ * reimplemented naming convention. Files are parsed one at a time (instead of
+ * `parse(files)`, which merges them) purely so each variable keeps the name of
+ * the file it won in: that per-key attribution is the whole deliverable.
+ */
+export function readDotenvFiles(cwd: string, nodeEnv: string): DotenvReading {
+  const reading: DotenvReading = {
+    nodeEnv,
+    cwd,
+    files: [],
+    fileValues: new Map(),
+    fileOrigin: new Map(),
+  };
+
+  try {
+    reading.files = dotenvFlow.listFiles({ node_env: nodeEnv, path: cwd });
+  } catch (err) {
+    reading.error = { file: cwd, message: err instanceof Error ? err.message : String(err) };
+    return reading;
+  }
+
+  // Ascending priority: a later file overwrites an earlier one, which is
+  // exactly how `dotenvFlow.parse(list)` merges them.
+  for (const file of reading.files) {
+    let parsed: Record<string, string>;
+    try {
+      parsed = dotenvFlow.parse(file);
+    } catch (err) {
+      reading.error = { file, message: err instanceof Error ? err.message : String(err) };
+      continue;
+    }
+    for (const [name, value] of Object.entries(parsed)) {
+      reading.fileValues.set(name, value);
+      reading.fileOrigin.set(name, file);
+    }
+  }
+
+  return reading;
+}
+
+/**
+ * Where `name`'s effective value comes from, under serve's precedence.
+ *
+ * dotenv-flow's `load()` skips any variable `process.env` already **has** —
+ * `hasOwnProperty`, not truthiness — so an explicitly empty shell value beats a
+ * populated `.env`. The same test is used here on purpose: a provenance report
+ * that disagreed with the loader on `FOO=` would be a second convention.
+ */
+export function provenanceOf(
+  reading: DotenvReading,
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): EnvValueProvenance {
+  if (Object.prototype.hasOwnProperty.call(env, name)) return { name, source: 'shell' };
+  const file = reading.fileOrigin.get(name);
+  if (file) return { name, source: 'file', file };
+  return { name, source: 'unset' };
+}
+
+/**
+ * The value a reader would see for `name` under serve's precedence.
+ *
+ * Deliberately separate from {@link provenanceOf}: provenance is what doctor
+ * PRINTS, and keeping the value out of that structure is what makes the report
+ * safe for a future secret-bearing input. The value is fetched only where it is
+ * genuinely needed — quoting an unrecognized posture back at the operator.
+ */
+export function effectiveEnvValue(
+  reading: DotenvReading,
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(env, name)) return env[name];
+  return reading.fileValues.get(name);
+}
+
+/** A `.env*` path as the operator typed it — relative to cwd when it lives there. */
+function displayEnvFile(reading: DotenvReading, file: string): string {
+  const rel = path.relative(reading.cwd, file);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : file;
+}
+
+/** One line of provenance, in the operator's vocabulary. Names the source, not the value. */
+export function describeProvenance(reading: DotenvReading, provenance: EnvValueProvenance): string {
+  switch (provenance.source) {
+    case 'shell':
+      return `${provenance.name} from this process's environment`;
+    case 'file':
+      return `${provenance.name} from ${displayEnvFile(reading, provenance.file!)}`;
+    default:
+      return `${provenance.name} not set`;
+  }
+}
+
+/**
+ * The attribution sentence a finding about a single variable carries: where the
+ * value came from, and which files were consulted to decide that.
+ *
+ * Written for the `fix` block's 6-space continuation indent. `source: 'unset'`
+ * cannot reach here from a finding — a variable nobody set produces no
+ * complaint — and is folded into the process-environment wording rather than
+ * given a fourth sentence nothing can print.
+ */
+function envSourceSentence(reading: DotenvReading, provenance: EnvValueProvenance): string {
+  const loaded = reading.files.map((file) => displayEnvFile(reading, file)).join(', ');
+
+  if (provenance.source === 'file') {
+    return `Read from ${displayEnvFile(reading, provenance.file!)} — \`os doctor\` loaded the same \`.env*\` cascade\n`
+      + `      \`os serve\` does (node_env=${reading.nodeEnv}: ${loaded}).`;
+  }
+  if (reading.files.length > 0) {
+    return `Read from this process's environment, which overrides the \`.env*\` files doctor also\n`
+      + `      read (node_env=${reading.nodeEnv}: ${loaded}) — the precedence \`os serve\` resolves.`;
+  }
+  return `Read from this process's environment; no \`.env*\` file exists in ${reading.cwd}\n`
+    + `      (node_env=${reading.nodeEnv}), so \`os serve\` would find none here either.`;
+}
+
+/**
+ * The variables `dotenvFlow.config()` would ADD to this process — i.e. the ones
+ * the shell has not already defined.
+ */
+function dotenvOverlay(
+  reading: DotenvReading,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const overlay: Record<string, string> = {};
+  for (const [name, value] of reading.fileValues) {
+    if (!Object.prototype.hasOwnProperty.call(env, name)) overlay[name] = value;
+  }
+  return overlay;
+}
+
+/**
+ * Run `fn` with the `.env*` overlay in `process.env`, then take it back off.
+ *
+ * Needed because the readers doctor must agree with — `resolveTenancyPosture()`
+ * in `@objectstack/types` — read `process.env` themselves. Reimplementing their
+ * resolution over a plain map instead would give doctor a *second* copy of a
+ * vocabulary `@objectstack/types` owns, free to drift from the one `os serve`
+ * enforces; that is the failure #5382 was careful to avoid when it quoted the
+ * resolver's own sentence rather than paraphrasing it.
+ *
+ * So the mutation is real but bounded: only variables the shell does NOT define
+ * (dotenv-flow's own precedence), only for the duration of a synchronous call,
+ * and removed in a `finally` — using dotenv-flow's own `unload()` test, which
+ * deletes a variable only when it still holds the value that was written, so a
+ * value `fn` deliberately changed is left alone.
+ */
+export function withDotenvOverlay<T>(reading: DotenvReading, fn: () => T): T {
+  const overlay = dotenvOverlay(reading);
+  const names = Object.keys(overlay);
+  for (const name of names) process.env[name] = overlay[name];
+  try {
+    return fn();
+  } finally {
+    for (const name of names) {
+      if (process.env[name] === overlay[name]) delete process.env[name];
+    }
+  }
+}
+
+/**
+ * The report line that says what doctor read, and where each declared
+ * environment input came from (#5387).
+ *
+ * Printed on every run, including a clean one. That is the point: after this
+ * change doctor's env-derived checks answer "what will `os serve` see", and a
+ * report that consults four files without naming them has only moved the
+ * blind spot from "doctor never read my `.env`" to "which `.env` did doctor
+ * believe?".
+ */
+export function environmentSourcesCheck(
+  reading: DotenvReading,
+  env: NodeJS.ProcessEnv = process.env,
+): HealthCheckResult {
+  const loaded = reading.files.map((file) => displayEnvFile(reading, file));
+  const provenances = DOCTOR_ENV_INPUTS.map((name) => provenanceOf(reading, name, env));
+  const set = provenances.filter((p) => p.source !== 'unset');
+
+  const where = loaded.length > 0
+    ? `${loaded.join(', ')} (node_env=${reading.nodeEnv}), the cascade \`os serve\` loads`
+    : `No .env* files here (node_env=${reading.nodeEnv}) — environment read from this process only`;
+  const attribution = set.length > 0
+    ? ` — ${set.map((p) => describeProvenance(reading, p)).join(', ')}`
+    : ' — no environment input set';
+
+  const detail =
+    'Where each environment input doctor reads comes from:\n'
+    + provenances
+      .map((p) => `        • ${describeProvenance(reading, p)}`)
+      .join('\n')
+    + '\n      A variable set in this process wins over every `.env*` file, and a later file in\n'
+    + '      the cascade wins over an earlier one — the same precedence `os serve` resolves.\n'
+    + '      Sources only: doctor reports where a value came from, never what it is.';
+
+  if (reading.error) {
+    return {
+      name: 'Environment files',
+      status: 'warning',
+      message: `${displayEnvFile(reading, reading.error.file)} could not be read — its values are missing from this report`,
+      // serve loads with `silent: true`, so it says nothing at all about an
+      // unreadable file and simply boots without those values. Doctor's job is
+      // to say so out loud; the verdict stays a warning because the environment
+      // still starts.
+      fix:
+        `${reading.error.message}\n`
+        + '      `os serve` ignores an unreadable `.env*` file silently and boots without those\n'
+        + '      values, so this is a real difference between what you wrote and what runs.\n'
+        + `      ${detail}`,
+    };
+  }
+
+  return {
+    name: 'Environment files',
+    status: 'ok',
+    message: `${where}${attribution}`,
+    fix: detail,
+  };
 }
 
 // ─── Tenancy Posture ────────────────────────────────────────────────
@@ -82,16 +391,25 @@ export type TenancyPostureReading =
  * The counterpart in `serve.ts` (`resolveTenancyPostureOrRefusal`, #5359) has
  * the same shape but a different verdict, and deliberately so: serve REFUSES
  * (FATAL + `process.exit(1)` before any boot work), doctor REPORTS (an `error`
- * health check that flows through doctor's own error summary). The wording
- * differs for the same reason — see the `.env` note below, which is true of
- * doctor and false of serve.
+ * health check that flows through doctor's own error summary).
+ *
+ * #5387 — the INPUT is now the `.env*` cascade serve reads, not the shell
+ * alone. `resolveTenancyPosture()` reads `process.env` itself, so the overlay is
+ * applied around that one call and removed again (see {@link withDotenvOverlay});
+ * the finding then names the file (or the shell) the value actually came from,
+ * because "OS_TENANCY_POSTURE is wrong" is only half an answer when four files
+ * could have set it.
  */
-export function resolveTenancyPostureOrFinding(): TenancyPostureReading {
+export function resolveTenancyPostureOrFinding(reading: DotenvReading): TenancyPostureReading {
   try {
-    return { ok: true, posture: resolveTenancyPosture() };
+    return { ok: true, posture: withDotenvOverlay(reading, () => resolveTenancyPosture()) };
   } catch (err) {
-    const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-      .process?.env?.OS_TENANCY_POSTURE;
+    // Read back through the reading, not `process.env`: the overlay is already
+    // off by the time this runs (the `finally` above), so `process.env` would
+    // report the shell's value — `undefined` — for a posture that came from a
+    // `.env` file, quoting the operator a value they never typed.
+    const raw = effectiveEnvValue(reading, 'OS_TENANCY_POSTURE');
+    const provenance = provenanceOf(reading, 'OS_TENANCY_POSTURE');
     const cause = err instanceof Error ? err.message : String(err);
     const fixes = TENANCY_POSTURES.map((posture) => {
       const hint = TENANCY_POSTURE_FIX_HINTS[posture];
@@ -110,13 +428,13 @@ export function resolveTenancyPostureOrFinding(): TenancyPostureReading {
           + `${fixes}\n`
           + '        • or unset OS_TENANCY_POSTURE entirely — the posture then derives from\n'
           + '          OS_MULTI_ORG_ENABLED (true ⇒ isolated, anything else ⇒ single)\n'
-          // Said out loud because it is a real limit of THIS report, and the
-          // opposite of serve's gate, which runs after `dotenv-flow` has loaded.
-          // `os doctor` loads no `.env*`, so a posture that lives in a committed
-          // `.env` reaches the server and never reaches this check — a green
-          // doctor is not proof that serve will accept the posture.
-          + '      Read from this process\'s environment only: unlike `os serve`, `os doctor` does not\n'
-          + '      load `.env*` files, so a value set in one is not visible here.\n'
+          // Attribution, not a disclaimer. This sentence used to read "unlike
+          // `os serve`, `os doctor` does not load `.env*` files, so a value set
+          // in one is not visible here" — honest at the time (#5382) and the
+          // reason #5387 was filed. Doctor now reads the same cascade, so the
+          // sentence states what it READ: the file (or the shell) this value
+          // came from, and the files it consulted to decide that.
+          + `      ${envSourceSentence(reading, provenance)}\n`
           // The resolver owns the vocabulary and its wording; quoting rather
           // than paraphrasing keeps doctor from maintaining a second copy that
           // can disagree with it.
@@ -598,7 +916,13 @@ export default class Doctor extends Command {
     // Note this REPORTS rather than refuses — no `process.exit(1)` here. The
     // finding is an ordinary `error` health check, so the rest of the report
     // still runs and doctor's own summary owns the non-zero exit.
-    const postureReading = resolveTenancyPostureOrFinding();
+    //
+    // #5387 — the posture is resolved against the `.env*` cascade `os serve`
+    // reads, not this shell alone. Read here, before any check, for the same
+    // reason serve loads dotenv before its gate: a posture committed to `.env`
+    // is the common case, not the exotic one.
+    const dotenvReading = readDotenvFiles(process.cwd(), doctorNodeEnv());
+    const postureReading = resolveTenancyPostureOrFinding(dotenvReading);
 
     // Check Node.js version
     try {
@@ -715,6 +1039,12 @@ export default class Doctor extends Command {
         fix: 'Install Git for version control',
       });
     }
+
+    // #5387 — what doctor read the environment FROM, reported before anything
+    // derived from it. Unconditional: an env-derived verdict whose inputs are
+    // not attributed is a verdict the operator cannot check, and after this
+    // change every such verdict has four possible sources.
+    results.push(environmentSourcesCheck(dotenvReading));
 
     // #5382 — the posture verdict resolved at the top of `run()`, reported here
     // among the other environment facts. Only an unrecognized value produces a

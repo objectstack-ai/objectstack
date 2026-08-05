@@ -33,16 +33,37 @@
  * Nothing, for doctor. `git grep -n OS_TENANCY_POSTURE packages/cli/src` matched
  * serve's prose, `verify`'s back-compat tests, and PR #5381's serve gate test —
  * no assertion of any kind on `doctor`.
+ *
+ * ── Amended by #5387 ─────────────────────────────────────────────────────
+ *
+ * `resolveTenancyPostureOrFinding()` now takes the `.env*` reading its verdict
+ * is resolved against: doctor reads the cascade `os serve` reads instead of this
+ * shell alone. Two things in this file legitimately changed premise and are
+ * updated rather than deleted:
+ *
+ *   • every call site passes a reading — built by the REAL `readDotenvFiles()`
+ *     over a real (empty) directory, so these cases keep testing shell-sourced
+ *     values, which is what they were always about;
+ *   • the case that pinned "doctor does not load `.env*`" pinned a sentence
+ *     that is now false. It is replaced by its opposite — the finding must name
+ *     what doctor DID read — with the anti-overclaim assertion kept, pointing at
+ *     the retired sentence so it cannot come back.
+ *
+ * The `.env`-sourced half of the behaviour lives in `doctor-env-provenance.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterEach, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TENANCY_POSTURES } from '@objectstack/spec/security';
 
-import Doctor, { resolveTenancyPostureOrFinding } from './doctor.js';
+import Doctor, {
+  resolveTenancyPostureOrFinding,
+  readDotenvFiles,
+  type DotenvReading,
+} from './doctor.js';
 
 /** `packages/cli` — the oclif root the command is loaded against below. */
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -60,6 +81,26 @@ const plain = (s: string) => s.replace(SGR, '');
 const TOUCHED = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED'] as const;
 let saved: Record<string, string | undefined> = {};
 
+/**
+ * A real reading of a real directory that contains no `.env*` file (#5387).
+ *
+ * Not a hand-built literal: `readDotenvFiles()` is the code under test in the
+ * sibling file, and a fake reading here would let these cases keep passing if
+ * the real one started reporting files that do not exist.
+ */
+let emptyDir: string;
+let shellOnly: DotenvReading;
+
+beforeAll(() => {
+  emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5387-noenv-'));
+  shellOnly = readDotenvFiles(emptyDir, 'production');
+  expect(shellOnly.files).toEqual([]);
+});
+
+afterAll(() => {
+  fs.rmSync(emptyDir, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   saved = Object.fromEntries(TOUCHED.map((k) => [k, process.env[k]]));
   for (const k of TOUCHED) delete process.env[k];
@@ -76,25 +117,25 @@ describe('resolveTenancyPostureOrFinding — accepted values', () => {
   it('passes every posture the spec vocabulary declares', () => {
     for (const posture of TENANCY_POSTURES) {
       process.env.OS_TENANCY_POSTURE = posture;
-      expect(resolveTenancyPostureOrFinding()).toEqual({ ok: true, posture });
+      expect(resolveTenancyPostureOrFinding(shellOnly)).toEqual({ ok: true, posture });
     }
   });
 
   it("keeps the legacy 'multi' spelling normalizing to isolated", () => {
     process.env.OS_TENANCY_POSTURE = 'multi';
-    expect(resolveTenancyPostureOrFinding()).toEqual({ ok: true, posture: 'isolated' });
+    expect(resolveTenancyPostureOrFinding(shellOnly)).toEqual({ ok: true, posture: 'isolated' });
   });
 
   it('unset falls back to the OS_MULTI_ORG_ENABLED derivation, not to a finding', () => {
-    expect(resolveTenancyPostureOrFinding()).toEqual({ ok: true, posture: 'single' });
+    expect(resolveTenancyPostureOrFinding(shellOnly)).toEqual({ ok: true, posture: 'single' });
 
     process.env.OS_MULTI_ORG_ENABLED = 'true';
-    expect(resolveTenancyPostureOrFinding()).toEqual({ ok: true, posture: 'isolated' });
+    expect(resolveTenancyPostureOrFinding(shellOnly)).toEqual({ ok: true, posture: 'isolated' });
   });
 
   it('treats a blank value as unset — reporting it would flag `OS_TENANCY_POSTURE=` in a .env', () => {
     process.env.OS_TENANCY_POSTURE = '   ';
-    expect(resolveTenancyPostureOrFinding()).toEqual({ ok: true, posture: 'single' });
+    expect(resolveTenancyPostureOrFinding(shellOnly)).toEqual({ ok: true, posture: 'single' });
   });
 });
 
@@ -107,15 +148,15 @@ describe('resolveTenancyPostureOrFinding — the finding', () => {
     // throw was caught by a `catch` that knows nothing about env vars and
     // downgraded "cannot start" to "config checks skipped". A verdict cannot be
     // caught by an unrelated catch.
-    expect(() => resolveTenancyPostureOrFinding()).not.toThrow();
+    expect(() => resolveTenancyPostureOrFinding(shellOnly)).not.toThrow();
 
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     expect(reading.ok).toBe(false);
   });
 
   it('is an ERROR health check — the severity that makes doctor exit non-zero', () => {
     process.env.OS_TENANCY_POSTURE = 'bogus';
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     if (reading.ok) throw new Error('expected a finding');
 
     // `status: 'error'` is load-bearing, not cosmetic: doctor's display loop
@@ -127,7 +168,7 @@ describe('resolveTenancyPostureOrFinding — the finding', () => {
 
   it('names the fact: the variable and the value the operator actually typed', () => {
     process.env.OS_TENANCY_POSTURE = 'islolated'; // a real transposition typo
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     if (reading.ok) throw new Error('expected a finding');
 
     const text = plain(`${reading.result.message}\n${reading.result.fix ?? ''}`);
@@ -142,7 +183,7 @@ describe('resolveTenancyPostureOrFinding — the finding', () => {
 
   it('prescribes a way out for EVERY posture the vocabulary declares (drift guard)', () => {
     process.env.OS_TENANCY_POSTURE = 'bogus';
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     if (reading.ok) throw new Error('expected a finding');
 
     const fix = plain(reading.result.fix ?? '');
@@ -158,7 +199,7 @@ describe('resolveTenancyPostureOrFinding — the finding', () => {
 
   it("carries the resolver's own sentence as `cause` rather than paraphrasing it", () => {
     process.env.OS_TENANCY_POSTURE = 'bogus';
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     if (reading.ok) throw new Error('expected a finding');
 
     // `@objectstack/types` owns the vocabulary and its wording; doctor must not
@@ -166,18 +207,27 @@ describe('resolveTenancyPostureOrFinding — the finding', () => {
     expect(plain(reading.result.fix ?? '')).toContain('cause: Invalid OS_TENANCY_POSTURE="bogus"');
   });
 
-  it('says what it did NOT read — doctor loads no .env, so a green report is not a serve guarantee', () => {
+  it('says WHERE it read the value — and no longer claims it skipped `.env*` (#5387)', () => {
     process.env.OS_TENANCY_POSTURE = 'bogus';
-    const reading = resolveTenancyPostureOrFinding();
+    const reading = resolveTenancyPostureOrFinding(shellOnly);
     if (reading.ok) throw new Error('expected a finding');
+    const fix = plain(reading.result.fix ?? '');
 
-    // Deliberately the OPPOSITE of serve's gate text, which says it checked
-    // "every .env file dotenv-flow loaded". serve calls `dotenvFlow.config()`;
-    // doctor does not load `.env*` at all, so claiming the same coverage here
-    // would be false. Overclaiming by one sentence is how a diagnostic stops
-    // being trustworthy — the same reason PR #5381 refused to write "no port
-    // has been bound".
-    expect(plain(reading.result.fix ?? '')).toContain('does not\n      load `.env*` files');
+    // The premise of this case changed, it was not softened. Until #5387 doctor
+    // read no `.env*` at all, and this text said so — the honest sentence for
+    // the code as it stood, and the reason #5387 was filed. Doctor now reads
+    // serve's cascade, so the same slot must carry the opposite fact: this
+    // value came from THIS PROCESS's environment, and doctor looked in the
+    // files too (here: none exist in the temp dir the reading was taken from).
+    expect(fix).toContain("Read from this process's environment");
+    expect(fix).toContain(`no \`.env*\` file exists in ${shellOnly.cwd}`);
+    expect(fix).toContain('node_env=production');
+
+    // Anti-overclaim, kept and pointed at the retired sentence: a diagnostic
+    // that says it did not look somewhere it now looks is as untrustworthy as
+    // one claiming coverage it never had. Both directions are failures.
+    expect(fix).not.toContain('does not\n      load `.env*` files');
+    expect(fix).not.toContain("Read from this process's environment only");
   });
 });
 
