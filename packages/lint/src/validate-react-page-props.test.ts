@@ -781,8 +781,8 @@ describe('validateReactPageProps — <ObjectForm subforms> resolve per child obj
 // this gate nothing on the react surface called one, which is exactly the
 // `no gate` verdict the strictness ledger records for `aggregate` two props
 // over. The rule parses instead of re-deriving, so the surface name, the
-// near-key guidance and the `target: 'navigate'` prescription all arrive
-// without being restated here.
+// near-key guidance and the `target` union all arrive without being restated
+// here — which is why #5435's widening needed no edit to the rule itself.
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
@@ -816,11 +816,26 @@ describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
     expect(hit!.severity).toBe('error');
   });
 
-  it("rejects target: 'navigate' with the chart-specific reason", () => {
+  it("passes target: 'navigate' — the renderer delivers it since objectui#3382 (#5435)", () => {
+    // This assertion was the exact inverse until #5435. #5022 excluded
+    // `'navigate'` on a MEASUREMENT — ObjectChart's hand-rolled drawer only
+    // branched on `'dialog'` and let `'navigate'` fall through to the Sheet —
+    // and objectui#3382 changed that measurement by implementing the arm.
+    // The gate parses `ChartDrillDownSchema`, so this case is what proves the
+    // widened union actually reaches the author-facing publish gate rather
+    // than only the type.
     const f = validateReactPageProps(drill(`{ target: 'navigate' }`));
+    expect(f).toEqual([]);
+  });
+
+  it('still rejects a target outside the three declared arms — widening is not loosening', () => {
+    // The companion to the case above: `'navigate'` became legal because a
+    // renderer delivers it, NOT because `target` stopped being checked.
+    const f = validateReactPageProps(drill(`{ target: 'sidebar' }`));
     const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
-    expect(hit!.message).toContain('objectui#3354');
+    expect(hit, 'an undeclared target must still be reported').toBeTruthy();
     expect(hit!.message).toContain('drillDown.target');
+    expect(hit!.severity).toBe('error');
   });
 
   it('rejects a key that belongs to another widget, with the reason rather than a rename', () => {
