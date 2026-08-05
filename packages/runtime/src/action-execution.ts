@@ -19,6 +19,13 @@ import { validateActionParams, type ResolvedActionParam } from '@objectstack/spe
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
+// [#5138] The ONE 404 envelope a single-record path answers. Imported rather
+// than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
+// falls back FROM cannot disagree about what "this id names no row" looks like.
+// A pure factory — no service resolution — so importing it costs the fallback
+// nothing on an assembly where the protocol plugin is absent, which is exactly
+// when the fallback runs.
+import { recordNotFoundError } from '@objectstack/metadata-protocol';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
@@ -165,7 +172,14 @@ export async function callData(deps: ActionExecutionDeps,
             if (all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             const match = (all as any[]).find((i: any) => i.id === params.id);
-            return match ? { object: params.object, id: params.id, record: match } : null;
+            // [#5138] Was `: null` — a miss resolved, and `/data` wrapped it as
+            // `200 { data: null }`. The protocol path this falls back from has
+            // answered `404 RECORD_NOT_FOUND` since #4435, so the same GET
+            // answered 200 or 404 depending only on whether the deployment
+            // registered the protocol slot — a difference the caller cannot see
+            // and never asked for.
+            if (!match) throw recordNotFoundError(params.object, params.id);
+            return { object: params.object, id: params.id, record: match };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -179,7 +193,15 @@ export async function callData(deps: ActionExecutionDeps,
             if (all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
-            if (!existing) throw new Error('[ObjectStack] Not Found');
+            // [#5138] Was `throw new Error('[ObjectStack] Not Found')`. That
+            // error carried neither `.status` nor `.statusCode`, so BOTH
+            // dispatcher exits fell through to their 500 fallback
+            // (`HttpDispatcher.errorFromThrown`, `dispatcher-plugin`'s
+            // `errorResponseBase`, and the endpoint executor's `errorAnswer`
+            // all read `.status` → `.statusCode` → 500). A caller mistake was
+            // reported as an internal fault and taken to the error reporter
+            // with it.
+            if (!existing) throw recordNotFoundError(params.object, params.id);
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
             return { object: params.object, id: params.id, record: { ...existing, ...params.data } };
         }
@@ -191,6 +213,31 @@ export async function callData(deps: ActionExecutionDeps,
             return await protocol.deleteData({ object: params.object, id: params.id, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
         }
         if (ql && typeof ql.delete === 'function') {
+            // [#5138] There was NO existence check here: the delete ran and the
+            // answer was `200 { deleted: true }` for any string in the path, so
+            // a typo'd id, an already-deleted row and a real deletion were
+            // indistinguishable — the exact shape #4435 removed from the
+            // protocol's `deleteData`, still live on the path that stands in
+            // for it. The "assume it worked" answer is the worst of the three
+            // this fallback gave, because an integrator reading 200 records the
+            // cleanup as done.
+            //
+            // The existence PROBE is a `find`, not a read of what `ql.delete`
+            // returned. `deleteData` can read its result because `IDataDriver.
+            // delete` declares `Promise<boolean>` ("true if deleted, false if
+            // not found"); `ql` here is the ObjectQL ENGINE (or, on the MCP
+            // multi-env path, a raw driver), and `IDataEngine.delete` declares
+            // `Promise<any>` — the engine passes its driver's result through
+            // the hook chain and returns `opCtx.result`. Testing that for
+            // `=== false` would be reading a signal the contract does not
+            // promise, which fails silently in the direction this issue is
+            // about: back to reporting a delete that removed nothing. The probe
+            // is the same one the sibling `get`/`update` fallbacks already run.
+            let all = await ql.find(params.object, findOpts({ where: { id: params.id }, limit: 1 }));
+            if (all && (all as any).value) all = (all as any).value;
+            if (!all) all = [];
+            const existing = (all as any[]).find((i: any) => i.id === params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id);
             await ql.delete(params.object, findOpts({ where: { id: params.id } }));
             return { object: params.object, id: params.id, deleted: true };
         }

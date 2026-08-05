@@ -265,13 +265,16 @@ describe('#5224 — GET /meta/api announces only what the matcher serves', () =>
     const { rest } = mountRest(ALL_ENUMERATED, outage);
 
     const res = await getMetaApi(rest);
-    // The pin is that the request FAILS rather than answering a set. The exact
-    // status is not this change's to decide: an unrecognised error reaching
-    // `handleRouteError` lands on `mapDataError`'s terminal fallback, which
-    // this route measured at 400 — a pre-existing classification shared by
-    // every error on the metadata routes, not a consequence of the narrowing.
-    // Asserting 5xx here would pin someone else's bug as if it were fixed.
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    // [#5489] Promoted from `>= 400` to the 5xx band. #5487 deliberately left
+    // it at `>= 400` because the terminal fallback in `mapDataError` measured
+    // 400 here, and asserting 5xx would have pinned someone else's bug as if it
+    // were fixed. #5489 fixed it: an outage the mapper cannot attribute to the
+    // request is a server fault, which is what an SDK must read to decide that
+    // retrying is the right move. The route's own pin — that it FAILS rather
+    // than confidently answering "this deployment declares no endpoints" — is
+    // unchanged and is the second assertion.
+    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    expect(res.body?.code).toBe('INTERNAL_ERROR');
     expect(res.body?.items ?? res.body).not.toEqual([SERVED]);
   }, 60_000);
 });
