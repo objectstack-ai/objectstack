@@ -251,6 +251,27 @@ export const ShowcaseTranslationBundle = {
             successMessage: '已为整个选中集重算工时。',
           },
         },
+        // Section headings of the four form-view projections in
+        // `ui/views/task.view.ts` (tabbed / wizard / split). Each section
+        // there declares a stable `name`, which is the only thing that makes
+        // the heading translatable — `ObjectForm` looks it up as
+        // `objects.showcase_task._sections.<name>.label` and otherwise renders
+        // the English `label` verbatim. Wording follows the vocabulary the
+        // rest of this bundle already uses (任务 / 负责人 / 进度), rather than
+        // introducing a second word per idea.
+        _sections: {
+          // tabbed
+          overview: { label: '概览' },
+          schedule: { label: '排期' },
+          details: { label: '详细信息' },
+          // wizard steps
+          step_basics: { label: '基本信息' },
+          step_assign: { label: '指派' },
+          step_schedule: { label: '排期' },
+          // split panes
+          split_task: { label: '任务' },
+          split_schedule: { label: '排期' },
+        },
       },
       showcase_account: {
         label: '客户',
@@ -341,6 +362,19 @@ export const ShowcaseTranslationBundle = {
         _views: {
           list: { label: '全部单元' },
           org_chart: { label: '组织架构图' },
+        },
+      },
+      // `_sections` only, on the same footing as the two `_views`-only blocks
+      // above: this ADR-0085 fixture has no zh-CN block of its own and its
+      // object/field debt sits inside the ratchet's baseline. Its two
+      // `fieldGroups` headings are what the coverage walker newly surfaces
+      // (#5405), and translating exactly those is what keeps the gate from
+      // widening; the rest is left exactly as it was. `财务信息` follows the
+      // group's own description ("Financial fields"), not the bare word Money.
+      showcase_semantic_zoo: {
+        _sections: {
+          basics: { label: '基本信息' },
+          money: { label: '财务信息' },
         },
       },
       showcase_field_zoo: {
