@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { FieldType } from '../data/field.zod';
 
 import { aliasProbe } from './alias-probe';
+import { registerDirectAliasTable } from './alias-table-registry';
 
 /**
  * "Did you mean?" Suggestion Utilities
@@ -267,8 +268,26 @@ export interface StrictUnknownKeyErrorOptions {
  *
  * First consumers: `ui/action.zod.ts` (#3746, the template this generalizes),
  * `security/permission.zod.ts`, `automation/flow.zod.ts`.
+ *
+ * ## The table is recorded as it is built (#5483)
+ *
+ * Every call registers its `{ surface, knownKeys, aliases, guidance }` with
+ * `alias-table-registry`, which is what puts the 44 remaining direct call sites
+ * under `alias-integrity.test.ts`. Registering **here** rather than at the call
+ * sites is the entire trick: the gate gains 44 tables and the schemas gain no
+ * edit, so the migration to `strictObject` (#5593) stays a clean, separable
+ * change rather than something this guard has already half-done.
+ *
+ * What the gate can judge from a registration is bounded by what a direct call
+ * offers. `knownKeys` is a hand-transcribed array, so "is this alias target a
+ * real key?" is answered against the transcription, not the shape — the
+ * array-vs-shape drift `strictObject` exists to abolish stays unguarded until
+ * the call site migrates. The `aliasProbe` collision claim has no such caveat:
+ * it reads the alias table alone, so it is judged here exactly as it is on a
+ * `strictObject` surface.
  */
 export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap {
+  registerDirectAliasTable(options);
   const { surface, knownKeys, guidance = {}, history } = options;
   const aliases: Record<string, string> = {};
   for (const [key, canonical] of Object.entries(options.aliases ?? {})) {
