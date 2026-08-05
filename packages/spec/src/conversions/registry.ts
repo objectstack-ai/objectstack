@@ -16,7 +16,15 @@
  */
 
 import type { ConversionApplication, MetadataConversion } from './types.js';
-import { mapCollection, mapDatasources, mapFlowNodes, mapPages, renameConfigKey, renameKey } from './walk.js';
+import {
+  mapCollection,
+  mapDatasources,
+  mapFlowNodes,
+  mapPageComponents,
+  mapPages,
+  renameConfigKey,
+  renameKey,
+} from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
 
 /**
@@ -4093,6 +4101,124 @@ const themeInertTokenScalesRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * The two spellings of the page-header node, both converted by
+ * {@link pageHeaderSubtitleAlias}.
+ *
+ * `page:header` is the protocol type (`PageComponentType`, `ComponentPropsMap`);
+ * `page-header` is objectui's kebab legacy alias (`@object-ui/layout`), which is
+ * authorable here because `PageComponentSchema.type` is deliberately
+ * `z.union([PageComponentType, z.string()])` — an open namespace for custom
+ * components.
+ */
+const PAGE_HEADER_COMPONENT_TYPES = new Set(['page:header', 'page-header']);
+
+/**
+ * Page-header component prop `description` → `subtitle` (protocol 17,
+ * objectui#3226 / #4827).
+ *
+ * One concept — the page's second line — carried two authorable spellings, one
+ * per renderer. `@objectstack/spec`'s `PageHeaderProps` (`ui/component.zod.ts`)
+ * declares `subtitle` and nothing else; objectui's kebab legacy alias
+ * `page-header` advertised `description` in its registration `inputs` and its
+ * renderer read a bare `subtitle ?? description`. That is the Prime Directive
+ * #12 shape exactly: a producer dialect held up by a consumer fallback, with
+ * the registry teaching the off-spec key on the way in.
+ *
+ * **Why a conversion and not a deletion** — the load-bearing half of this
+ * entry. The alias's entire reason to exist is out-of-repo consumer schemas,
+ * so "no in-repo author writes `description`" is not evidence that nobody
+ * does; on this key in particular, in-repo evidence has zero coverage.
+ * Deleting the consumer read would drop those pages' second line *silently* —
+ * the title still renders, one line vanishes, nothing errors — which is the
+ * least reportable failure shape there is. So the alias retires the ADR-0087
+ * D2 way instead: rewritten to the canonical key at load, and at every stored
+ * row's rehydration (`applyConversionsToStoredItem` walks `pages` for free),
+ * declared, loud, tested and expiring. objectui#3226 deletes its `??` once
+ * this ships.
+ *
+ * **Both spellings of the node are converted**, deliberately. `page-header` is
+ * the alias the fallback served; `page:header` is the canonical type, where an
+ * authored `description` is *already* dropped on the floor today because that
+ * renderer only ever read `subtitle` — the same defect, one spelling over. The
+ * alias here is the KEY, not the type: this entry does **not** rewrite
+ * `page-header` → `page:header`. That registration is objectui's to retire, on
+ * its own schedule, and rewriting a type over an open namespace is the class of
+ * move {@link flowNodeHttpRename}'s conflict guard exists for.
+ *
+ * Precedence is the house rule {@link renameKey} encodes and nothing new: an
+ * already-canonical `subtitle` WINS, and the shadowed `description` is left
+ * exactly where it sits — unconverted, unreported, unremoved — as in
+ * {@link flowNodeCrudObjectAlias}. Only header nodes are touched: `description`
+ * is a live declared prop elsewhere on the same surface (`element:text_input`
+ * helper text), and those components are not this entry's business.
+ *
+ * **Live window**; retires at 18.
+ */
+const pageHeaderSubtitleAlias: MetadataConversion = {
+  id: 'page-header-subtitle-alias',
+  toMajor: 17,
+  surface: 'page.component.page-header.description',
+  summary:
+    "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      const type = component.type;
+      if (typeof type !== 'string' || !PAGE_HEADER_COMPONENT_TYPES.has(type)) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'description', 'subtitle');
+      if (!renamed) return component;
+      emit({ from: 'description', to: 'subtitle', path: `${path}.properties.subtitle` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'crm_lead_detail',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The kebab legacy alias — the spelling the `??` fallback served.
+                { type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } },
+                // The canonical type authored with the legacy key: converted too,
+                // because today this second line is dropped on the floor.
+                { type: 'page:header', properties: { title: 'Lead', description: 'One lead' } },
+                // Canonical already present → the shadowed alias is left alone (no notice).
+                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'ignored' } },
+                // `description` is this component's OWN declared prop (helper text) — untouched.
+                { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'crm_lead_detail',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                { type: 'page-header', properties: { title: 'Leads', subtitle: 'All open leads' } },
+                { type: 'page:header', properties: { title: 'Lead', subtitle: 'One lead' } },
+                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'ignored' } },
+                { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -4143,6 +4269,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     hookBodyCryptoHashRemoved,
     connectorRateLimitConfigRemoved,
     themeInertTokenScalesRemoved,
+    pageHeaderSubtitleAlias,
   ],
 };
 

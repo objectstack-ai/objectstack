@@ -999,6 +999,7 @@ const step17: MigrationStep = {
     'dashboard-widget-action-aria-removed',
     'dashboard-widget-compareto-converged',
     'theme-inert-token-scales-removed',
+    'page-header-subtitle-alias',
   ],
   semantic: [
     {

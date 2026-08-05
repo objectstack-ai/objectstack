@@ -319,6 +319,12 @@
         "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
         "conversionId": "theme-inert-token-scales-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "page.component.page-header.description",
+        "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+        "conversionId": "page-header-subtitle-alias",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1013,6 +1019,12 @@
           "surface": "theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight / theme.typography.letterSpacing / theme.typography.fontFamily.heading / theme.typography.fontFamily.mono / theme.animation / theme.zIndex",
           "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
           "conversionId": "theme-inert-token-scales-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.page-header.description",
+          "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
+          "conversionId": "page-header-subtitle-alias",
           "toMajor": 17
         }
       ],

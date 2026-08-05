@@ -174,6 +174,54 @@ export function mapPages(stack: Dict, mapper: (page: Dict, path: string) => Dict
 }
 
 /**
+ * Immutably map every **region-level** page component in
+ * `stack.pages[].regions[].components[]`.
+ *
+ * `mapper` receives each component dict and its path
+ * (`pages[i].regions[j].components[k]`) and returns the same reference (no
+ * change) or a new dict. The stack, `pages`, a page, its `regions`, a region
+ * and its `components` are each copied only when a descendant actually
+ * changed — {@link mapPages}' contract, one level deeper.
+ *
+ * Region level is the whole surface a page-component conversion can reach:
+ * `PageComponentSchema` declares no children key, so anything nested (tab
+ * panels, card bodies) sits inside another component's free-form `properties`
+ * and is not typed page-component shape. Same boundary, drawn for the same
+ * reason, as `translatePage` in `system/i18n-resolver.ts`.
+ */
+export function mapPageComponents(
+  stack: Dict,
+  mapper: (component: Dict, path: string) => Dict,
+): Dict {
+  return mapPages(stack, (page, pagePath) => {
+    const regions = page.regions;
+    if (!Array.isArray(regions)) return page;
+
+    let regionsChanged = false;
+    const nextRegions = regions.map((region, ri) => {
+      if (!isDict(region)) return region;
+      const components = region.components;
+      if (!Array.isArray(components)) return region;
+
+      let componentsChanged = false;
+      const nextComponents = components.map((component, ci) => {
+        if (!isDict(component)) return component;
+        const mapped = mapper(component, `${pagePath}.regions[${ri}].components[${ci}]`);
+        if (mapped !== component) componentsChanged = true;
+        return mapped;
+      });
+
+      if (!componentsChanged) return region;
+      regionsChanged = true;
+      return { ...region, components: nextComponents };
+    });
+
+    if (!regionsChanged) return page;
+    return { ...page, regions: nextRegions };
+  });
+}
+
+/**
  * Immutably map every datasource in `stack.datasources[]`.
  *
  * `mapper` receives each datasource dict and its path (`datasources[i]`) and

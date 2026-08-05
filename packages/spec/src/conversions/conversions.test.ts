@@ -5,8 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { FlowSchema } from '../automation/flow.zod.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
+import { PageHeaderProps } from '../ui/component.zod.js';
+import { PageSchema } from '../ui/page.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
+import { applyConversionsToStoredItem } from './stored.js';
 import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
 
 describe('conversion layer (ADR-0087 D2)', () => {
@@ -642,6 +645,155 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
       expect(stack).toEqual(before);
       expect(notices).toHaveLength(0);
+    });
+  });
+
+  /**
+   * `page-header-subtitle-alias` (#4827, objectui#3226).
+   *
+   * The PD #12 retirement of objectui's `subtitle ?? description` fallback on
+   * the page header. Unlike the entries above this one is a LIVE window, so
+   * every case here runs the plain load posture (no `includeRetired`) — that
+   * the rewrite happens without it is the property objectui is waiting on.
+   */
+  describe('page-header-subtitle-alias (#4827 — the `subtitle ?? description` retirement)', () => {
+    const pageWith = (...components: Record<string, unknown>[]) => ({
+      pages: [{ name: 'crm_lead_detail', regions: [{ name: 'header', components }] }],
+    });
+    const componentsOf = (stack: Record<string, unknown>) =>
+      (stack.pages as Array<{ regions: Array<{ components: Array<Record<string, unknown>> }> }>)[0]!
+        .regions[0]!.components;
+
+    it('rewrites `description` → `subtitle` on the kebab legacy alias node', () => {
+      const before = pageWith({ type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } });
+      // Direction, stated before the run: the authored key is `description`
+      // and there is no `subtitle` at all — this is what a consumer's page
+      // looks like on the way in.
+      expect(componentsOf(before)[0]!.properties).toEqual({ title: 'Leads', description: 'All open leads' });
+
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+
+      // …and this is what the runtime sees: the second line survives under the
+      // canonical key, and the dialect spelling is gone rather than shadowing it.
+      expect(componentsOf(stack)[0]!.properties).toEqual({ title: 'Leads', subtitle: 'All open leads' });
+      expect(componentsOf(stack)[0]!.properties).not.toHaveProperty('description');
+      expect(notices).toHaveLength(1);
+    });
+
+    it('rewrites it on the CANONICAL `page:header` node too — where it is dropped on the floor today', () => {
+      const { stack, notices } = collectConversionNotices(
+        pageWith({ type: 'page:header', properties: { title: 'Lead', description: 'One lead' } }),
+      );
+      expect(componentsOf(stack)[0]!.properties).toEqual({ title: 'Lead', subtitle: 'One lead' });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('does NOT rewrite the node TYPE — the kebab alias is objectui\'s to retire', () => {
+      const { stack } = collectConversionNotices(
+        pageWith({ type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } }),
+      );
+      expect(componentsOf(stack)[0]!.type).toBe('page-header');
+    });
+
+    it('leaves a shadowed `description` alone when `subtitle` is already there (canonical wins)', () => {
+      // The house precedence `renameKey` encodes, same as
+      // flow-node-crud-object-alias: no rewrite, no notice, no deletion.
+      const before = pageWith({
+        type: 'page:header',
+        properties: { title: 'Both', subtitle: 'wins', description: 'ignored' },
+      });
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('touches header nodes ONLY — `description` is a live declared prop elsewhere', () => {
+      // element:text_input declares its own `description` (helper text). A
+      // conversion keyed on the key rather than the node would eat it.
+      const before = pageWith(
+        { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
+        { type: 'record:details', properties: { description: 'not a subtitle' } },
+      );
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('emits a notice that names the surface, the site and the live window', () => {
+      const { notices } = collectConversionNotices(
+        pageWith(
+          { type: 'element:divider' },
+          { type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } },
+        ),
+      );
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({
+        conversionId: 'page-header-subtitle-alias',
+        surface: 'page.component.page-header.description',
+        from: 'description',
+        to: 'subtitle',
+        path: 'pages[0].regions[0].components[1].properties.subtitle',
+        toMajor: 17,
+        retiresIn: 18,
+      });
+    });
+
+    it('is idempotent — the canonical shape is not a match', () => {
+      const before = pageWith({ type: 'page:header', properties: { title: 'Leads', subtitle: 'All open leads' } });
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('copies on write — a page with no header passes through by reference', () => {
+      const stack = pageWith({ type: 'record:details' });
+      expect(applyConversions(stack)).toBe(stack);
+    });
+
+    it('reaches a STORED page row, so data at rest canonicalizes on rehydration', () => {
+      // `applyConversionsToStoredItem` wraps the row as `{ pages: [row] }`
+      // (#3903) — the walker meets it there with no extra wiring.
+      const notices: ConversionNotice[] = [];
+      const row = {
+        name: 'crm_lead_detail',
+        regions: [{ name: 'header', components: [{ type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } }] }],
+      };
+      const out = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
+      expect(out.regions[0]!.components[0]!.properties).toEqual({ title: 'Leads', subtitle: 'All open leads' });
+      expect(notices.map((n) => n.conversionId)).toEqual(['page-header-subtitle-alias']);
+    });
+
+    /**
+     * The premise pin, and the one test that fails if the alias ever comes
+     * BACK. This conversion is only correct while the spec declares exactly one
+     * spelling: `PageHeaderProps` accepts `subtitle` and silently strips
+     * `description` (the schema is not `.strict()`), which is precisely why an
+     * authored `description` needed a conversion rather than an error.
+     */
+    it('the canonical props schema declares `subtitle` and no `description`', () => {
+      expect(PageHeaderProps.parse({ title: 'Leads', subtitle: 'All open leads' }).subtitle)
+        .toBe('All open leads');
+      expect(PageHeaderProps.parse({ title: 'Leads', description: 'All open leads' }))
+        .not.toHaveProperty('description');
+    });
+
+    /**
+     * Reachability, judged by what this rule guards: a KEY inside the page
+     * component's free-form `properties` record. So the criterion is that the
+     * page schema accepts the fixture at all — before AND after. Before-green
+     * is the defect's mechanism (nothing rejects the dialect spelling, which is
+     * why it fails silently); after-green is the conversion's obligation (it
+     * must not produce a page the loader then refuses).
+     */
+    it('both shapes parse green against PageSchema — the conversion moves a key, it does not fix a rejection', () => {
+      const page = (properties: Record<string, unknown>) => ({
+        name: 'crm_lead_detail',
+        label: 'Lead Detail',
+        type: 'record' as const,
+        regions: [{ name: 'header', components: [{ type: 'page:header', properties }] }],
+      });
+      expect(PageSchema.safeParse(page({ title: 'Leads', description: 'All open leads' })).success).toBe(true);
+      expect(PageSchema.safeParse(page({ title: 'Leads', subtitle: 'All open leads' })).success).toBe(true);
     });
   });
 });
