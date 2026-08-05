@@ -238,11 +238,13 @@ export function buildEndpointOperation(
   if (facts.readsBody && BODY_METHODS.has(endpoint.method)) {
     // Free-form object, deliberately: the executor forwards the body (through
     // `inputMapping`, when declared) to the same pipeline the built-in route
-    // uses, and this document has no per-object schemas to point at — its
-    // `components.schemas` is in fact EMPTY today (#5168), so a `$ref` emitted
-    // here would dangle exactly as the six built-in ones already do. An empty
-    // `type: object` says "a JSON object, shape not described here", which is
-    // true; naming fields we have not derived would not be.
+    // uses, and this document has no PER-OBJECT schemas to point at. Since
+    // #5168 `components.schemas` is no longer empty — it carries the nine
+    // contract schemas, and the six built-in `$ref`s resolve — but those are
+    // the generic CRUD envelopes (`CreateRequest`, `ApiError`, …), not the
+    // shape of `showcase_task`'s body. An empty `type: object` says "a JSON
+    // object, shape not described here", which is true; naming fields we have
+    // not derived would not be.
     operation.requestBody = {
       required: true,
       content: { 'application/json': { schema: { type: 'object' } } },

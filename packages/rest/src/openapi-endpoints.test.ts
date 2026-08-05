@@ -29,7 +29,14 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A document shaped like the one `@objectstack/spec/openapi.json` ships. */
+/**
+ * A document shaped like the one `@objectstack/spec/openapi.json` ships.
+ *
+ * `components.schemas` is left empty here on purpose: this module's enrichment
+ * never reads it (only `securitySchemes`, at `resolveSecurityRequirement`), so
+ * an empty map keeps the fixture minimal. The real artifact carries nine
+ * schemas since #5168.
+ */
 function baseDoc() {
   return {
     openapi: '3.1.0',
@@ -162,8 +169,10 @@ describe('path entries', () => {
   });
 
   it('never invents a response schema — only descriptions', () => {
-    // The shipped document has ZERO component schemas (#5168), so any `$ref`
-    // this module emitted would dangle. Descriptions are the honest maximum.
+    // The shipped document's component schemas are the generic CRUD envelopes,
+    // never a per-object response shape (before #5168 there were none at all),
+    // so any `$ref` this module emitted would name something that does not
+    // describe THIS endpoint. Descriptions are the honest maximum.
     const op = buildEndpointOperation(
       endpoint({ ...OBJECT_FIND, method: 'POST', objectParams: { object: 'showcase_task', operation: 'create' } }),
       undefined,

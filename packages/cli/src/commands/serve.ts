@@ -2974,6 +2974,27 @@ export interface EmailCapabilityArg {
 }
 
 /**
+ * The ONE truth table this file reads its `OS_EMAIL_*_ENABLED` booleans with
+ * (#5447).
+ *
+ * Extracted rather than restated: `OS_EMAIL_QUEUE_ENABLED` carried this list
+ * inline, and a second boolean flag written a second way is how one env var
+ * ends up accepting `on` while its neighbour does not — the operator-visible
+ * half of the "two literals describing one vocabulary" trap that split the
+ * settings dropdown from the transports (#5094).
+ *
+ * Tri-state on purpose: `undefined` means the variable is unset and the caller
+ * must fall through to config, which is what keeps an absent flag from
+ * silently reading as `false` and overriding a config that said `true`.
+ * An empty string is a SET variable and resolves to `false`, matching the
+ * behaviour `OS_EMAIL_QUEUE_ENABLED` already had.
+ */
+function envBooleanFlag(raw: string | undefined): boolean | undefined {
+  if (raw == null) return undefined;
+  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+}
+
+/**
  * Resolve what `EmailServicePlugin` is constructed with, from `config.email`
  * plus `OS_EMAIL_*` env (env wins, so an operator can override per environment).
  *
@@ -3007,6 +3028,18 @@ export interface EmailCapabilityArg {
  * delivery from inline to the durable `sys_job_queue` path (#5160). It reuses
  * `OS_EMAIL_RETRIES` as its attempt budget rather than adding a second retry
  * knob — see `EmailServicePlugin.makeQueueDelivery`.
+ *
+ * `OS_EMAIL_PERSIST_ENABLED=false` (or `config.email.persist: false`) stops
+ * every delivery attempt being written to `sys_email` (#5447). The plugin
+ * option has been live since the plugin had one — it builds no
+ * `EmailPersistence` when `persist === false` — but nothing carried the
+ * declared `config.email.persist` here, so a PII-sensitive deployment that
+ * switched persistence off in `objectstack.config.ts` type-checked, parsed,
+ * read "Persist to sys_email (default true)" in the generated reference, and
+ * went on writing every message body to the database. Resolution order is this
+ * function's own, per setting: env > `config.email.persist` > the plugin
+ * default (persist ON) — so a config and an env that say nothing leave the
+ * option absent and the plugin's default untouched.
  */
 export function resolveEmailCapabilityArg(
   cfgEmail: Record<string, any> = {},
@@ -3033,9 +3066,15 @@ export function resolveEmailCapabilityArg(
   // is not knowable here — no kernel exists yet — so the plugin asserts it on
   // `kernel:ready`, where the service registry has settled, and fails the boot
   // there if no durable queue showed up.
-  const queueDelivery = env.OS_EMAIL_QUEUE_ENABLED != null
-    ? ['1', 'true', 'yes', 'on'].includes(String(env.OS_EMAIL_QUEUE_ENABLED).trim().toLowerCase())
-    : cfgEmail.queueDelivery;
+  const queueDelivery = envBooleanFlag(env.OS_EMAIL_QUEUE_ENABLED) ?? cfgEmail.queueDelivery;
+  // `OS_EMAIL_PERSIST_ENABLED` — the carrier `config.email.persist` never had
+  // (#5447). `_ENABLED` is Prime Directive #9's boolean-flag shape; unlike the
+  // queue flag it is default-ON rather than default-off, because it does not
+  // enable a new capability — it is the off switch for one that has always
+  // been on, and a deployment that says nothing must keep its `sys_email`
+  // audit trail. Absent from BOTH sources means the key is left out of the
+  // constructor options entirely, so the plugin's own default decides.
+  const persist = envBooleanFlag(env.OS_EMAIL_PERSIST_ENABLED) ?? cfgEmail.persist;
   const defaultTemplateContext = {
     appName: env.OS_APP_NAME || cfgEmail.appName || configAppName || 'ObjectStack',
     ...(cfgEmail.defaultTemplateContext || {}),
@@ -3070,6 +3109,7 @@ export function resolveEmailCapabilityArg(
     defaultFrom,
     ...(retries != null && !Number.isNaN(retries) ? { retries } : {}),
     ...(queueDelivery != null ? { queueDelivery: !!queueDelivery } : {}),
+    ...(persist != null ? { persist: !!persist } : {}),
     defaultTemplateContext,
   };
 
