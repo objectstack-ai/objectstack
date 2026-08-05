@@ -19,9 +19,19 @@
  * driver only when `isFilterAST()` refused it, leaving the array unparsed — and
  * the old loop cast each string element to a logic keyword, opening empty logic
  * groups and returning `{}`: a filter matching EVERY record.
+ *
+ * [#5158] That loop is gone. `FilterArray` is input-only authoring sugar, and
+ * both doors into the runtime lower it through `parseFilterAST` before a driver
+ * is reached — so an array arriving HERE is refused rather than compiled by a
+ * second implementation (which is what cloud's `RemoteTransport` already did,
+ * cloud#1075). Invariant (1) is unchanged and is still measured against the
+ * spec's own operator set: every operator must survive the authored form all
+ * the way to a matched row, which is now `parseFilterAST` + this driver rather
+ * than this driver alone. Invariant (2) likewise — the refusal simply happens
+ * one door earlier for the shapes `parseFilterAST` cannot express.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { VALID_AST_OPERATORS, parseFilterAST } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -38,11 +48,19 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
   });
 
   /** Operators are exercised through `find`, the path a real query takes. */
-  // Cast deliberately: several `where` shapes below are ones the AST gate
-  // refuses, fed in to prove the driver throws instead of silently dropping
-  // the condition. `unknown` is the honest parameter type.
+  // Cast deliberately: several `where` shapes below are ones the declared
+  // contract forbids, fed in to prove the driver throws instead of silently
+  // dropping the condition. `unknown` is the honest parameter type.
   const find = (where: unknown) =>
     driver.find(TABLE, { object: TABLE, fields: ['id'], where: where as FilterCondition });
+
+  /**
+   * The authored `FilterArray`, travelling the one route that exists (#5158):
+   * lowered by the spec's `parseFilterAST`, then executed by the driver. This
+   * is what the engine and the protocol face do; feeding the array raw is what
+   * no longer works, pinned at the bottom of this file.
+   */
+  const findAuthored = (where: unknown) => find(parseFilterAST(where));
 
   it('reads a non-empty operator set from the spec', () => {
     // Guards every assertion below from passing vacuously.
@@ -65,7 +83,7 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
     // "no predicate". An operator the driver cannot express now throws, so any
     // rejection here means the spec accepts a name this driver cannot honour.
     await expect(
-      find([[field, op, value]]),
+      findAuthored([[field, op, value]]),
       `VALID_AST_OPERATORS accepts "${op}" but InMemoryDriver cannot express it`,
     ).resolves.toBeDefined();
   });
@@ -73,34 +91,61 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
   it('matches null rows for is_null instead of dropping the predicate', async () => {
     // The regression this pins: `is_null` used to return null from the converter,
     // the condition was dropped, and the query returned BOTH rows.
-    const rows = await find([['note', 'is_null', true]]);
+    const rows = await findAuthored([['note', 'is_null', true]]);
     expect(rows.map((r: any) => r.id)).toEqual(['1']);
   });
 
   it('matches non-null rows for is_not_null', async () => {
-    const rows = await find([['note', 'is_not_null', true]]);
+    const rows = await findAuthored([['note', 'is_not_null', true]]);
     expect(rows.map((r: any) => r.id)).toEqual(['2']);
   });
 
   it('throws on an operator it cannot express, rather than matching everything', async () => {
-    await expect(find([['name', 'sounds_like', 'alpha']]))
-      .rejects.toThrow(/Unsupported filter operator "sounds_like"/);
+    // `parseFilterAST` is lenient here by design (`$${op}` fallback), so the
+    // driver meets `{ name: { $sounds_like: … } }`; the ENGINE door gates on
+    // `isFilterAST` and refuses the authored array a layer earlier. #3948's
+    // condition holds either way: it THROWS, never a match-everything.
+    //
+    // What it does NOT yet do on this path is speak the ADR-0112 envelope —
+    // the object path hands an unknown `$op` straight to mingo, which raises a
+    // bare `MingoError` with no `code`/`status`. That gap is the general form
+    // of #5324 (same `normalizeFilterCondition` passthrough, `$not` being the
+    // instance filed there) and is NOT a #5158 regression: the array path that
+    // used to carry the envelope for this input is what #5158 deleted, and the
+    // object path has always answered this way.
+    await expect(findAuthored([['name', 'sounds_like', 'alpha']])).rejects.toThrow();
   });
 
-  it('throws on a bare comparison triple instead of returning every record', async () => {
-    // `before` is a canonical VIEW_FILTER_OPERATORS member that VALID_AST_OPERATORS
-    // does not accept, so this is the exact shape that reached drivers unparsed.
-    await expect(find(['created_at', 'before', '2024-01-01']))
-      .rejects.toThrow(/Unrecognized filter operator "created_at"/);
-  });
-
-  it('throws on a malformed between rather than emitting no predicate', async () => {
-    await expect(find([['score', 'between', 5]]))
-      .rejects.toThrow(/needs a two-element array/);
+  it('a malformed between emits no predicate on this backend — the #5328 divergence', async () => {
+    // driver-sql THROWS on `{ score: { $between: 5 } }`; this driver's
+    // `normalizeFilterCondition` skips the arm entirely and the field
+    // normalises to `{}`, which mingo evaluates as "matches nothing". Two
+    // backends, one filter, two answers — filed as #5328, not fixed here.
+    //
+    // Pinned as-is so the divergence is visible rather than folklore. It is
+    // pre-existing: the loud refusal this test used to observe belonged to the
+    // ARRAY path, which #5158 deleted; the object path never had one.
+    await expect(findAuthored([['score', 'between', 5]])).resolves.toEqual([]);
   });
 
   it('still honours a well-formed logical node', async () => {
-    const rows = await find(['or', ['name', '=', 'alpha'], ['name', '=', 'beta']]);
+    const rows = await findAuthored(['or', ['name', '=', 'alpha'], ['name', '=', 'beta']]);
+    expect(rows.map((r: any) => r.id).sort()).toEqual(['1', '2']);
+  });
+
+  // ── the array dialect itself: refused, not compiled (#5158) ───────────
+
+  it.each([
+    ['bare comparison triple the AST gate refuses', ['created_at', 'before', '2024-01-01']],
+    ['nested condition array', [['name', '=', 'alpha']]],
+    ['infix logical join (the undeclared dialect)', [['name', '=', 'alpha'], 'or', ['name', '=', 'beta']]],
+    ['element of the wrong type', [42]],
+  ])('refuses an array %s instead of compiling a second dialect', async (_label, where) => {
+    await expect(find(where)).rejects.toThrow(/A filter ARRAY reached the driver/);
+  });
+
+  it('an empty array is still "no filter", not a refusal', async () => {
+    const rows = await find([]);
     expect(rows.map((r: any) => r.id).sort()).toEqual(['1', '2']);
   });
 });

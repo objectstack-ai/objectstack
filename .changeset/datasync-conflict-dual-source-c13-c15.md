@@ -31,7 +31,7 @@ import { DataSyncConfig, ConflictResolution, Sync } from '@objectstack/spec/auto
   ```
 
 - 若你要的是**多源转换管道**:`import { ETLPipeline } from '@objectstack/spec/automation'`。
-- 若你要的是**客户端离线冲突策略**:`import { ConflictResolution } from '@objectstack/spec/ui'`(本次未动)。
+- 若你要的是**客户端离线冲突策略**:~~`import { ConflictResolution } from '@objectstack/spec/ui'`~~ —— ⚠️ **同一个 v17 窗口内,该形状已在 #4988 一并退役**(ADR-0049:`ui/offline.zod.ts` 同样没有承载键)。裸名 `ConflictResolution` 现在**没有任何 def 发布**;客户端离线冲突策略请在你自己的代码里就地声明该联合类型 —— 那是客户端策略,不是平台词表。
 
 ```ts
 // FROM —— integration 侧旧名,编译期起以 TS2305 失败

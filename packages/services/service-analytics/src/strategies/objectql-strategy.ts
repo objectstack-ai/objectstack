@@ -7,6 +7,8 @@ import {
   normalizeAnalyticsFilterTree,
   collectFilterLeaves,
   coerceFilterValueForObjectQL,
+  SQL_CONST_FALSE,
+  SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
@@ -768,23 +770,39 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (rendered) conjuncts.push(rendered);
   }
 
-  /** A node as a standalone `FilterCondition` the engine can consume. */
+  /**
+   * A node as a standalone `FilterCondition` the engine can consume.
+   *
+   * `null` = no constraint, which is the boolean TRUE — the AND identity but the
+   * OR ABSORBER, so a `null` branch makes the whole disjunction unconstrained
+   * instead of collapsing it to its surviving branches (#5325). FALSE is handed
+   * to the engine as `{$not: {}}`, the spelling `driver-sql`, `formula` and
+   * `driver-memory`'s matcher all already pin as the zero-row filter (#5134) —
+   * this strategy invents no second one.
+   */
   private filterNodeToCondition(
     node: NormalizedFilterNode | null,
     cube: Cube,
   ): Record<string, unknown> | null {
     if (!node) return null;
 
+    if (node.kind === 'const') {
+      return node.value ? null : { $not: {} };
+    }
+
     if (node.kind === 'not') {
       const inner = this.filterNodeToCondition(node.child, cube);
-      return inner ? { $not: inner } : null;
+      // `NOT TRUE ≡ FALSE` — a negation of nothing is the zero-row filter, not
+      // the absence of a filter (which is what let `{$not: {}}` chart every row).
+      return inner ? { $not: inner } : { $not: {} };
     }
 
     if (node.kind === 'or') {
-      const branches = node.children
-        .map((child) => this.filterNodeToCondition(child, cube))
-        .filter((c): c is Record<string, unknown> => !!c);
-      return branches.length > 0 ? { $or: branches } : null;
+      const branches = node.children.map((child) => this.filterNodeToCondition(child, cube));
+      // One TRUE disjunct absorbs the disjunction.
+      if (branches.some((c) => c === null)) return null;
+      const kept = branches.filter((c): c is Record<string, unknown> => !!c);
+      return kept.length > 0 ? { $or: kept } : null;
     }
 
     // `leaf` and `and` share the merge path so one field carrying several
@@ -802,6 +820,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * Render a normalized filter node as the display SQL `/analytics/sql`
    * echoes. Values still bind as `$n` placeholders — the echo travels to the
    * browser, so a comparand is never inlined.
+   *
+   * The boolean identities render too (#5325). This string exists to REPRODUCE
+   * execution: a `{$not: {}}` filter that runs as zero rows but echoes SQL with
+   * no `WHERE` hands whoever is debugging "why is this chart empty" a statement
+   * that returns the whole table. Same reason the absorbed `$or` branch and the
+   * `params` truncation below match {@link NativeSQLStrategy.compileFilterNode}
+   * exactly — including the invariant that a `null` return leaves `params`
+   * untouched, so no comparand is left with no placeholder to consume it.
    */
   private renderFilterNodeSql(
     node: NormalizedFilterNode | null,
@@ -809,6 +835,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     params: unknown[],
   ): string | null {
     if (!node) return null;
+
+    if (node.kind === 'const') {
+      return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+    }
 
     if (node.kind === 'leaf') {
       return this.buildFilterClauseSql(
@@ -821,12 +851,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     if (node.kind === 'not') {
       const inner = this.renderFilterNodeSql(node.child, cube, params);
-      return inner ? `NOT (${inner})` : null;
+      return inner ? `NOT (${inner})` : SQL_CONST_FALSE;
     }
 
-    const parts = node.children
-      .map((child) => this.renderFilterNodeSql(child, cube, params))
-      .filter((s): s is string => !!s);
+    const paramBase = params.length;
+    const parts: string[] = [];
+    for (const child of node.children) {
+      const clause = this.renderFilterNodeSql(child, cube, params);
+      if (clause === null) {
+        if (node.kind !== 'or') continue;
+        params.length = paramBase;
+        return null;
+      }
+      parts.push(clause);
+    }
     if (parts.length === 0) return null;
     if (parts.length === 1) return parts[0];
     return `(${parts.join(node.kind === 'or' ? ' OR ' : ' AND ')})`;

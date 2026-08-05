@@ -3,33 +3,20 @@
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { IDataDriver } from '@objectstack/spec/contracts';
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
+import {
+  emptyFieldConstraintError,
+  filterArrayReachedDriverError,
+  isEmptyFieldConstraint,
+  unsupportedFilterError,
+} from './filter-refusal.js';
 import {
   coerceTemporalValue,
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
-
-/**
- * [#4436] A filter this driver cannot COMPILE — see the twin in
- * `driver-sql`'s `unsupportedFilterError`, which carries the full rationale.
- *
- * Kept in lockstep with driver-sql deliberately: #3948 made the two backends
- * AGREE that an uncompilable filter is a refusal rather than a silent
- * match-everything, and the refusal's wire envelope has to agree too. A test
- * suite that swaps the memory driver for SQL must see the same `400
- * INVALID_FILTER`, not a coded refusal on one backend and a bare `{error}` on
- * the other.
- */
-function unsupportedFilterError(message: string): Error {
-  const err = new Error(message) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.INVALID_FILTER;
-  err.status = 400;
-  return err;
-}
 
 /**
  * Persistence adapter interface.
@@ -699,18 +686,29 @@ export class InMemoryDriver implements IDataDriver {
 
   /**
    * Convert ObjectQL filter format to MongoDB query format for Mingo.
-   * 
+   *
    * Supports:
    * 1. AST Comparison Node: { type: 'comparison', field, operator, value }
    * 2. AST Logical Node: { type: 'logical', operator: 'and'|'or', conditions: [...] }
-   * 3. Legacy Array Format: [['field', 'op', value], 'and', ['field2', 'op', value2]]
-   * 4. MongoDB Format: { field: value } or { field: { $eq: value } } (passthrough)
+   * 3. MongoDB Format: { field: value } or { field: { $eq: value } } (passthrough)
+   *
+   * The legacy ARRAY format (`[['field','op',value], 'and', […]]`) is no longer
+   * one of them — see {@link filterArrayReachedDriverError} and #5158. It was a
+   * second filter compiler for a shape the spec never declared on `where`, and
+   * both doors into the runtime now lower `FilterArray` through
+   * `parseFilterAST` before a driver is reached.
    */
   private convertToMongoQuery(filters?: any, object?: string): Record<string, any> {
     if (!filters) return {};
 
+    if (Array.isArray(filters)) {
+      // `[]` still means "no filter" — unchanged.
+      if (filters.length === 0) return {};
+      throw filterArrayReachedDriverError(filters);
+    }
+
     // AST node format (ObjectQL QueryAST)
-    if (!Array.isArray(filters) && typeof filters === 'object') {
+    if (typeof filters === 'object') {
       if (filters.type === 'comparison') {
         return this.convertConditionToMongo(filters.field, filters.operator, filters.value, object) || {};
       }
@@ -726,67 +724,10 @@ export class InMemoryDriver implements IDataDriver {
       return this.normalizeFilterCondition(filters, object);
     }
 
-    // Legacy array format
-    if (!Array.isArray(filters) || filters.length === 0) return {};
-
-    const logicGroups: { logic: 'and' | 'or'; conditions: Record<string, any>[] }[] = [
-      { logic: 'and', conditions: [] },
-    ];
-    let currentLogic: 'and' | 'or' = 'and';
-
-    for (const item of filters) {
-      if (typeof item === 'string') {
-        const lower = item.toLowerCase();
-        // Previously this cast ANY string to 'and' | 'or'. A bare comparison
-        // triple — which reaches a driver only when `isFilterAST()` refused its
-        // operator, leaving the array unparsed — therefore opened three empty
-        // logic groups, produced no conditions, and returned `{}`: a filter that
-        // matches EVERY record. An unapplied filter must not look like a
-        // satisfied one. #3948.
-        if (lower !== 'and' && lower !== 'or') {
-          throw unsupportedFilterError(
-            `Unrecognized filter operator "${item}" in a comparison triple. ` +
-              `A filter array is either a logical node (["and"|"or", …]) or nested ` +
-              `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
-              `reaches the driver when its operator is outside @objectstack/spec ` +
-              `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
-              `Filter was: ${JSON.stringify(filters)}`,
-          );
-        }
-        if (lower !== currentLogic) {
-          currentLogic = lower;
-          logicGroups.push({ logic: currentLogic, conditions: [] });
-        }
-      } else if (Array.isArray(item)) {
-        const [field, operator, value] = item;
-        // `convertConditionToMongo` now throws rather than returning null for an
-        // operator it cannot express, so a dropped condition can no longer
-        // silently widen the result set.
-        const cond = this.convertConditionToMongo(field, operator, value, object);
-        if (cond) logicGroups[logicGroups.length - 1].conditions.push(cond);
-      } else {
-        throw unsupportedFilterError(
-          `Unrecognized filter element of type ` +
-            `"${item === null ? 'null' : typeof item}" — expected a logical keyword ` +
-            `("and"/"or") or a condition array. Filter was: ${JSON.stringify(filters)}`,
-        );
-      }
-    }
-
-    const allConditions: Record<string, any>[] = [];
-    for (const group of logicGroups) {
-      if (group.conditions.length === 0) continue;
-      if (group.conditions.length === 1) {
-        allConditions.push(group.conditions[0]);
-      } else {
-        const op = group.logic === 'or' ? '$or' : '$and';
-        allConditions.push({ [op]: group.conditions });
-      }
-    }
-
-    if (allConditions.length === 0) return {};
-    if (allConditions.length === 1) return allConditions[0];
-    return { $and: allConditions };
+    // A truthy non-object, non-array `where` emits no predicate. Pre-existing
+    // behaviour on a shape only a cast can produce; untouched by #5158, which
+    // is about the array dialect.
+    return {};
   }
 
   /**
@@ -875,22 +816,33 @@ export class InMemoryDriver implements IDataDriver {
    * operators ($contains, $notContains, $startsWith, $endsWith, $between, $null)
    * to Mingo-compatible equivalents ($regex, $gte/$lte, null checks).
    */
-  private normalizeFilterCondition(filter: Record<string, any>, object?: string): Record<string, any> {
+  private normalizeFilterCondition(filter: Record<string, any>, object?: string, path = 'filter'): Record<string, any> {
     const result: Record<string, any> = {};
     const extraAndConditions: Record<string, any>[] = [];
 
     for (const key of Object.keys(filter)) {
       const value = filter[key];
+      const here = `${path}.${key}`;
+      // [#5240] `{ field: {} }` is refused in EVERY position, before mingo sees
+      // it. Left alone it normalises to `{ field: {} }`, which mingo reads as
+      // "the field deep-equals the empty document" — a filter that matches
+      // nothing in ordinary data and is therefore indistinguishable, from the
+      // outside, from the FALSE the reference matcher answered. Neither is what
+      // the author meant, and driver-sql read the same shape as TRUE inside a
+      // combinator. Refused rather than reinterpreted; see the ruling on #5240.
+      if (isEmptyFieldConstraint(value) && !key.startsWith('$')) {
+        throw emptyFieldConstraintError(key, here);
+      }
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
         result[key] = Array.isArray(value)
-          ? value.map((child: any) => this.normalizeFilterCondition(child, object))
+          ? value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`))
           : value;
         continue;
       }
       if (key === '$not') {
         result[key] = value && typeof value === 'object'
-          ? this.normalizeFilterCondition(value, object)
+          ? this.normalizeFilterCondition(value, object, here)
           : value;
         continue;
       }

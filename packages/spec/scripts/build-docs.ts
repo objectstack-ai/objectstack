@@ -588,7 +588,13 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   ui: [
     { section: 'Apps & Navigation', pages: ['app', 'page', 'view', 'action'] },
     { section: 'Visualization', pages: ['chart', 'dashboard', 'dataset', 'report', 'widget', 'component'] },
-    { section: 'Interaction & Layout', pages: ['animation', 'dnd', 'keyboard', 'touch', 'responsive', 'theme', 'offline'] },
+    // `animation` / `dnd` / `keyboard` / `touch` / `offline` left this section at
+    // #4988: the five `ui/` interaction config modules were retired whole
+    // (ADR-0049 — no carrier key, nothing parsed them), and their generated
+    // pages went with them. `buildCategoryPages` filters by what was emitted, so
+    // leaving the names here would have been silently harmless — which is why
+    // they are removed deliberately instead.
+    { section: 'Interaction & Layout', pages: ['responsive', 'theme'] },
     { section: 'Platform', pages: ['i18n', 'notification', 'sharing', 'http'] },
   ],
 };

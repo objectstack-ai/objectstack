@@ -14,16 +14,110 @@
  * node, an unknown operator, a nested relation object a flat record can't
  * satisfy — returns `false` (the write is denied), never `true`. The operator
  * vocabulary mirrors `read-scope-sql.ts` so the in-memory and SQL backends agree.
+ *
+ * ONE shape is refused instead of answered (#5240): `{ field: {} }`, a field
+ * constrained by zero operators, throws `INVALID_FILTER` rather than returning
+ * `false`. It is the shape the four backends could not agree on, so no answer
+ * here is defensible; the operation fails, which is the #4775 posture for a
+ * `check` that cannot be evaluated. Note this is not merely a louder denial:
+ * where such a constraint sat under an `$or` beside a satisfied branch, or under
+ * a `$not`, the old `false` was ABSORBED and the write was allowed. Those writes
+ * now fail. See {@link emptyFieldConstraintError}.
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
 import { nextUtcCalendarDay, utcInstantMs } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
+
+/**
+ * [#5240] `{ field: {} }` — a field constrained by ZERO operators — is REFUSED,
+ * not evaluated, and this is the ONE place this fail-closed evaluator throws.
+ *
+ * The shape had three answers in the repo: `driver-sql` refused it at the top
+ * level but dropped it inside `$and`/`$or`/`$not` (a predicate that emits
+ * nothing matches every row), `driver-memory` answered "matches nothing" by
+ * accident of structural equality, and THIS evaluator answered `false` from the
+ * explicit `keys.length === 0` arm below. Ruled on #5240: refused in all four
+ * backends, with the same `INVALID_FILTER` code, so an authoring accident — a
+ * filter builder that recorded a field and never its operator — fails loudly at
+ * the producer instead of quietly changing a row count per backend.
+ *
+ * # Why this one throw does not weaken the fail-closed posture
+ *
+ * "Fail closed" is about what an UNEVALUABLE condition does to an ANSWER: it
+ * must never widen access. Throwing is the strongest form of that — there is no
+ * answer to widen — and it lands on the posture #4775 already settled for this
+ * surface: a `check` that cannot be evaluated fails the operation. What changes
+ * is the shape of the failure, and one case where the outcome flips outright:
+ * a `check` whose broken constraint sat under an `$or` beside a satisfied
+ * branch, or under a `$not`, used to evaluate to ALLOW. Those writes now fail.
+ * That is a real, observable behaviour change and it is the point of the ruling
+ * — the alternative is a permission rule whose meaning depends on which of four
+ * backends evaluated it.
+ */
+function emptyFieldConstraintError(field: string, path: string): Error {
+  const err = new Error(
+    `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
+      `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
+      `comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated because the ` +
+      `backends disagreed on what it means — driver-sql dropped it inside $and/$or/$not (matching ` +
+      `EVERY row) while refusing it at the top level, and driver-memory / this evaluator ` +
+      `answered "matches nothing". #5240.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
 
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
 export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
   if (filter == null) return true;
   if (typeof filter !== 'object' || Array.isArray(filter)) return false;
+  // [#5240] Shape first, then evaluate. The refusal is raised by a walk of the
+  // WHOLE tree, up front, rather than from inside `evalField` — because the
+  // evaluator short-circuits (`every`/`some`, and a node returns on its first
+  // false entry), so a refusal raised mid-evaluation would fire or not fire
+  // depending on the RECORD being tested. A malformed permission rule must be
+  // refused for every record or none. Evaluation below is untouched.
+  assertFilterShape(filter as Record<string, unknown>, 'filter');
   return evalNode(record, filter as Record<string, unknown>);
+}
+
+/**
+ * [#5240] Walk the whole condition tree and refuse any zero-operator field
+ * constraint. Shapes this evaluator already answers fail-closed (a non-node
+ * `$and` element, an unknown `$`-operator, a bare array field spec) are left to
+ * it — this walk adds exactly one refusal and changes nothing else.
+ */
+function assertFilterShape(node: unknown, path: string): void {
+  if (node == null || typeof node !== 'object' || Array.isArray(node)) return;
+  for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (Array.isArray(val)) val.forEach((child, i) => assertFilterShape(child, `${here}[${i}]`));
+      continue;
+    }
+    if (key === '$not') {
+      assertFilterShape(val, here);
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (isEmptyFieldConstraint(val)) throw emptyFieldConstraintError(key, here);
+  }
+}
+
+/**
+ * [#5240] Is this field spec `{}` — a field constrained by ZERO operators?
+ *
+ * A plain object with no own enumerable keys, and nothing else: a `Date` also
+ * enumerates to nothing but is a COMPARAND (`evalField` treats it as implicit
+ * equality), not a constraint.
+ */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec) || spec instanceof Date) return false;
+  const proto = Object.getPrototypeOf(spec);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.keys(spec as Record<string, unknown>).length === 0;
 }
 
 function evalNode(record: Record<string, unknown>, node: Record<string, unknown>): boolean {
@@ -58,6 +152,12 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
   const keys = Object.keys(ops);
   // Must be all-operators; a non-`$` key means a nested relation a flat record
   // cannot satisfy → fail closed.
+  //
+  // [#5240] `keys.length === 0` no longer reaches this arm on the public entry
+  // point: `assertFilterShape` refuses `{ field: {} }` before evaluation starts.
+  // The clause stays because this function is also reachable from a recursive
+  // `evalNode` on a subtree, and a total function must stay total — but it is a
+  // floor, no longer this backend's ANSWER to the shape.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) return false;
   for (const op of keys) {
     if (!evalOp(actual, op, ops[op], record)) return false;
