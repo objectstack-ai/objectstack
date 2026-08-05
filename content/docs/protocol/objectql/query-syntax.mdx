@@ -82,7 +82,7 @@ interface QueryAST {
 
 `QuerySchema` validates the whole structure above, but `IDataEngine.find()` plus the
 shipped drivers run a subset. `SqlDriver.find()` builds only `where` / `orderBy` /
-`limit` / `offset` / `fields` (`packages/plugins/driver-sql/src/sql-driver.ts`), and
+`limit` / `offset` / `fields` (`packages/drivers/driver-sql/src/sql-driver.ts`), and
 `expand` is resolved afterwards by the engine as a batched `$in` read
 (`packages/objectql/src/engine.ts`). These members validate but are **not executed**
 on the `find()` path:

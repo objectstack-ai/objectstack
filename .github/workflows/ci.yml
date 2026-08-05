@@ -959,7 +959,7 @@ jobs:
       - name: Verify capability packages ship a runtime entry (no dts-only / half-built)
         run: |
           fail=0
-          for d in packages/triggers/* packages/services/* packages/plugins/*; do
+          for d in packages/triggers/* packages/services/* packages/drivers/* packages/plugins/*; do
             [ -f "$d/package.json" ] || continue
             has_build=$(node -p "Boolean((require('./$d/package.json').scripts||{}).build)" 2>/dev/null || echo false)
             [ "$has_build" = "true" ] || continue

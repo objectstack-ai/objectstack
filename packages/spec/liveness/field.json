@@ -32,7 +32,7 @@
     },
     "storage": {
       "status": "live",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts createColumn (notNullable from storage.notNull); packages/plugins/driver-sql/src/schema-drift.ts diffManagedTable (nullability drift compares against storage.notNull); proof: schema-drift.nullability.test.ts posture matrix",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts createColumn (notNullable from storage.notNull); packages/drivers/driver-sql/src/schema-drift.ts diffManagedTable (nullability drift compares against storage.notNull); proof: schema-drift.nullability.test.ts posture matrix",
       "verifiedAt": "2026-07-30",
       "note": "ADR-0113: the explicit physical constraint — owns the NOT NULL DDL and the destructive drift ceremony that required used to imply. Orthogonal to required (all four combinations legitimate). storage.notNull × requiredWhen rejected at the parse seam (FieldSchema.superRefine)."
     },
@@ -148,7 +148,7 @@
     },
     "unique": {
       "status": "live",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1853",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1853",
       "note": "CAVEAT — DDL-only; NOT validated on the write path (violations surface as raw driver errors)."
     },
     "precision": {

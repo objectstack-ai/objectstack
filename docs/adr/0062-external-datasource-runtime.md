@@ -185,4 +185,4 @@ Each phase is its own PR with its own changeset; Phase 1 lands behind the full d
 - `packages/runtime/src/standalone-stack.ts`, `packages/runtime/src/app-plugin.ts` (connection + registration sites).
 - `packages/objectql/src/engine.ts` (`getDriver`/`registerDriver` routing).
 - `packages/services/service-datasource/src/*` (driver factory, admin, external service, `SecretBinder`).
-- `packages/plugins/driver-sql/src/sql-driver.ts` (`registerExternalObject`, physical table/column resolution).
+- `packages/drivers/driver-sql/src/sql-driver.ts` (`registerExternalObject`, physical table/column resolution).

@@ -176,14 +176,14 @@
       "invariant": "The uniqueness rules judge SPELLINGS only, never inferred tenancy or posture (authoring-time tenancy inference is impossible — `organization_id` is kernel-injected; the dead end is documented on #4698). `unique/unscoped-declared-index` (D5a) fires on bare declared `unique: true` — warning in 17.x, the protocol-18 gate rejects the spelling (#5082). `unique/double-declaration` (D5b) is the four-quadrant scope matrix: cross-scope = contradiction (the installation-wide side wins physically), same-scope = redundancy. Fix texts speak the `'organization'`/`'global'` vocabulary — never resurrect the hand-written `['organization_id', …]` advice (not NULL-safe, #5030). `unique/legacy-organization-composite` (D5c) is the S6 respelling NUDGE and stays ADVISORY forever: the legacy hand-written composite is valid indefinitely and forces ZERO drift, so this rule must never gain an auto-fix or an `error` severity — opting in is a physical tightening that goes through the D4 duplicate pre-flight."
     },
     {
-      "file": "packages/plugins/driver-sql/src/schema-drift.ts",
+      "file": "packages/drivers/driver-sql/src/schema-drift.ts",
       "adrs": [
         "ADR-0120"
       ],
       "invariant": "The organization key part of every organization-scoped unique index is the NULL-safe COALESCE form — `COALESCE(<tenantField>, '__global__')` — never the bare column: SQL UNIQUE is NULL-distinct, so the bare composite enforces NOTHING on NULL-organization rows, which on a single-tenant stack is every row (#5030). Declared-index `unique: 'global'`/bare `true` stays VERBATIM (the #3696 contract, now the 'global' arm of the vocabulary); `'organization'` prepends the key part at registration. Expected and physical sides compare through the SAME normalization, literal-agnostic on the COALESCE literal — two spellings of the literal are one constraint, never drift (#4884)."
     },
     {
-      "file": "packages/plugins/driver-sql/src/sql-driver.ts",
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "adrs": [
         "ADR-0120"
       ],
@@ -207,7 +207,7 @@
       "invariant": "The ADR-0120 D5e gate runs at the INSTALL seam only, BEFORE hot-register and before any ledger write — a stopped install must leave the runtime exactly as it found it so the installer can respell to `'organization'` and retry without an uninstall. The confirmation is recorded in the install manifest (`InstalledManifestEntry.globalUniqueAttestation`, ADR-0104 attestation style: fact + who + when + under which posture) and CARRIED ACROSS reinstalls, which is the whole '之后不复问' half of the decision — moving it to memory would re-ask on every process boot, i.e. exactly the #4884 boot-time nagging the ADR forbids. Confirmations accumulate; a partial confirmation still stops on the remainder. Rehydrate at `kernel:ready` never evaluates the gate."
     },
     {
-      "file": "packages/plugins/driver-sql/src/adr0120-three-posture-conformance.test.ts",
+      "file": "packages/drivers/driver-sql/src/adr0120-three-posture-conformance.test.ts",
       "adrs": [
         "ADR-0120",
         "ADR-0105"

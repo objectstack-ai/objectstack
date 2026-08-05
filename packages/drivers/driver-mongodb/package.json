@@ -1,18 +1,8 @@
 {
-  "name": "@objectstack/driver-sqlite-wasm",
+  "name": "@objectstack/driver-mongodb",
   "version": "17.0.0-rc.2",
   "license": "Apache-2.0",
-  "description": "WASM SQLite Driver for ObjectStack — runs in browser/WebContainer (StackBlitz) without native bindings",
-  "keywords": [
-    "objectstack",
-    "driver",
-    "sqlite",
-    "wasm",
-    "sql.js",
-    "stackblitz",
-    "webcontainer",
-    "browser"
-  ],
+  "description": "MongoDB Driver for ObjectStack - Native document database driver via official mongodb client",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -30,23 +20,29 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "knex": "^3.3.0",
-    "nanoid": "^6.0.0",
-    "sql.js": "^1.14.1"
+    "@objectstack/types": "workspace:*",
+    "mongodb": "^7.5.0",
+    "nanoid": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "@types/sql.js": "^1.4.11",
+    "mongodb-memory-server": "^11.2.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
+  "keywords": [
+    "objectstack",
+    "driver",
+    "mongodb",
+    "nosql",
+    "document-database"
+  ],
   "author": "ObjectStack",
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
-    "directory": "packages/plugins/driver-sqlite-wasm"
+    "directory": "packages/drivers/driver-mongodb"
   },
   "homepage": "https://objectstack.ai/docs",
   "bugs": "https://github.com/objectstack-ai/objectstack/issues",

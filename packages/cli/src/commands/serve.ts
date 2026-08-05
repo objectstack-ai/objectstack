@@ -1091,8 +1091,8 @@ export default class Serve extends Command {
            }
          } catch (e: any) {
            // "declared ≠ enforced" guard (#3276-class): a driver that is
-           // RECOGNIZED but the open-core CLI cannot construct — currently
-           // `turso`/libSQL, a cloud/EE driver — must fail LOUDLY, never silently
+           // RECOGNIZED but the CLI's resolver does not construct — currently
+           // `turso`/libSQL, in-repo since #4645 but unwired — must fail LOUDLY, never silently
            // fall through to the SQLite default and ignore the selected engine.
            // Re-throw so run()'s fatal handler restores output, prints the
            // actionable message, and exits 1 (in dev AND prod). All OTHER driver

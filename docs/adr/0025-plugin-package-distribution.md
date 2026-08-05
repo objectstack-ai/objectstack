@@ -502,4 +502,4 @@ the developers and operators who compose Apps and provision runtimes.
 - `packages/runtime/src/cloud/marketplace-proxy-plugin.ts` — marketplace browse proxy
 - `packages/runtime/src/package-state-store.ts` — per-environment disable-state persistence
 - `packages/cli/src/commands/package/publish.ts` — existing package publish pipeline
-- `packages/plugins/driver-memory/objectstack.config.ts` — example plugin manifest (`ObjectStackManifest`)
+- `packages/drivers/driver-memory/objectstack.config.ts` — example plugin manifest (`ObjectStackManifest`)

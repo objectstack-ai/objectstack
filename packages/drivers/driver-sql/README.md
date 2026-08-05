@@ -529,5 +529,5 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 - [Knex.js Documentation](https://knexjs.org/)
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [MySQL Documentation](https://dev.mysql.com/doc/)
-- [@objectstack/driver-turso](https://github.com/objectstack-ai/cloud) - Edge-first SQLite alternative (cloud distribution)
+- [@objectstack/driver-turso](../driver-turso/) - Edge-first SQLite alternative (extends this driver)
 - [@objectstack/driver-memory](../driver-memory/) - In-memory driver for testing

@@ -186,7 +186,7 @@ importers:
         version: link:../../packages/connectors/connector-slack
       '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../../packages/plugins/driver-sql
+        version: link:../../packages/drivers/driver-sql
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -223,7 +223,7 @@ importers:
         version: link:../../packages/client
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:^
-        version: link:../../packages/plugins/driver-sqlite-wasm
+        version: link:../../packages/drivers/driver-sqlite-wasm
       '@objectstack/knowledge-memory':
         specifier: workspace:*
         version: link:../../packages/plugins/knowledge-memory
@@ -263,7 +263,7 @@ importers:
     dependencies:
       '@objectstack/driver-memory':
         specifier: workspace:*
-        version: link:../../packages/plugins/driver-memory
+        version: link:../../packages/drivers/driver-memory
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../packages/objectql
@@ -388,16 +388,16 @@ importers:
         version: link:../core
       '@objectstack/driver-memory':
         specifier: workspace:^
-        version: link:../plugins/driver-memory
+        version: link:../drivers/driver-memory
       '@objectstack/driver-mongodb':
         specifier: workspace:^
-        version: link:../plugins/driver-mongodb
+        version: link:../drivers/driver-mongodb
       '@objectstack/driver-sql':
         specifier: workspace:^
-        version: link:../plugins/driver-sql
+        version: link:../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:^
-        version: link:../plugins/driver-sqlite-wasm
+        version: link:../drivers/driver-sqlite-wasm
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
@@ -586,7 +586,7 @@ importers:
         version: 2.0.12(hono@4.12.34)
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../plugins/driver-sqlite-wasm
+        version: link:../drivers/driver-sqlite-wasm
       '@objectstack/hono':
         specifier: workspace:*
         version: link:../adapters/hono
@@ -811,6 +811,174 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
 
+  packages/drivers/driver-memory:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      mingo:
+        specifier: ^7.2.2
+        version: 7.2.2
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
+  packages/drivers/driver-mongodb:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
+      mongodb:
+        specifier: ^7.5.0
+        version: 7.5.0(socks@2.8.9)
+      nanoid:
+        specifier: ^6.0.0
+        version: 6.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      mongodb-memory-server:
+        specifier: ^11.2.0
+        version: 11.2.0(socks@2.8.9)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
+  packages/drivers/driver-sql:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/observability':
+        specifier: workspace:*
+        version: link:../../observability
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
+      knex:
+        specifier: ^3.3.0
+        version: 3.3.0(better-sqlite3@13.0.2)(mysql2@3.23.1(@types/node@26.1.2))(pg@8.22.0)(tedious@18.6.2)
+      mysql2:
+        specifier: ^3.0.0
+        version: 3.23.1(@types/node@26.1.2)
+      nanoid:
+        specifier: ^6.0.0
+        version: 6.0.0
+      pg:
+        specifier: ^8.0.0
+        version: 8.22.0
+      tedious:
+        specifier: ^18.0.0
+        version: 18.6.2
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+    optionalDependencies:
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
+
+  packages/drivers/driver-sqlite-wasm:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../driver-sql
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      knex:
+        specifier: ^3.3.0
+        version: 3.3.0(better-sqlite3@13.0.2)(mysql2@3.23.1(@types/node@26.1.2))(pg@8.22.0)(tedious@18.6.2)
+      nanoid:
+        specifier: ^6.0.0
+        version: 6.0.0
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      '@types/sql.js':
+        specifier: ^1.4.11
+        version: 1.4.11
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
+  packages/drivers/driver-turso:
+    dependencies:
+      '@libsql/client':
+        specifier: ^0.17.3
+        version: 0.17.4
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../driver-sql
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      nanoid:
+        specifier: ^6.0.0
+        version: 6.0.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@objectstack/verify':
+        specifier: workspace:*
+        version: link:../../verify
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/formula:
     dependencies:
       '@marcbachmann/cel-js':
@@ -927,7 +1095,7 @@ importers:
     devDependencies:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../plugins/driver-sqlite-wasm
+        version: link:../drivers/driver-sqlite-wasm
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -1096,137 +1264,6 @@ importers:
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.25)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.9.0)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-
-  packages/plugins/driver-memory:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
-      mingo:
-        specifier: ^7.2.2
-        version: 7.2.2
-    devDependencies:
-      '@types/node':
-        specifier: ^26.1.2
-        version: 26.1.2
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-
-  packages/plugins/driver-mongodb:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
-      '@objectstack/types':
-        specifier: workspace:*
-        version: link:../../types
-      mongodb:
-        specifier: ^7.5.0
-        version: 7.5.0(socks@2.8.9)
-      nanoid:
-        specifier: ^6.0.0
-        version: 6.0.0
-    devDependencies:
-      '@types/node':
-        specifier: ^26.1.2
-        version: 26.1.2
-      mongodb-memory-server:
-        specifier: ^11.2.0
-        version: 11.2.0(socks@2.8.9)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-
-  packages/plugins/driver-sql:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/observability':
-        specifier: workspace:*
-        version: link:../../observability
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
-      '@objectstack/types':
-        specifier: workspace:*
-        version: link:../../types
-      knex:
-        specifier: ^3.3.0
-        version: 3.3.0(better-sqlite3@13.0.2)(mysql2@3.23.1(@types/node@26.1.2))(pg@8.22.0)(tedious@18.6.2)
-      mysql2:
-        specifier: ^3.0.0
-        version: 3.23.1(@types/node@26.1.2)
-      nanoid:
-        specifier: ^6.0.0
-        version: 6.0.0
-      pg:
-        specifier: ^8.0.0
-        version: 8.22.0
-      tedious:
-        specifier: ^18.0.0
-        version: 18.6.2
-    devDependencies:
-      '@types/node':
-        specifier: ^26.1.2
-        version: 26.1.2
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.2)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(msw@2.14.6(@types/node@26.1.2)(typescript@6.0.3))(vite@8.0.16(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
-    optionalDependencies:
-      better-sqlite3:
-        specifier: ^13.0.2
-        version: 13.0.2
-
-  packages/plugins/driver-sqlite-wasm:
-    dependencies:
-      '@objectstack/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@objectstack/driver-sql':
-        specifier: workspace:*
-        version: link:../driver-sql
-      '@objectstack/spec':
-        specifier: workspace:*
-        version: link:../../spec
-      knex:
-        specifier: ^3.3.0
-        version: 3.3.0(better-sqlite3@13.0.2)(mysql2@3.23.1(@types/node@26.1.2))(pg@8.22.0)(tedious@18.6.2)
-      nanoid:
-        specifier: ^6.0.0
-        version: 6.0.0
-      sql.js:
-        specifier: ^1.14.1
-        version: 1.14.1
-    devDependencies:
-      '@types/node':
-        specifier: ^26.1.2
-        version: 26.1.2
-      '@types/sql.js':
-        specifier: ^1.4.11
-        version: 1.4.11
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1421,7 +1458,7 @@ importers:
         version: link:../../core
       '@objectstack/driver-memory':
         specifier: workspace:^
-        version: link:../driver-memory
+        version: link:../../drivers/driver-memory
       '@objectstack/objectql':
         specifier: workspace:^
         version: link:../../objectql
@@ -1742,13 +1779,13 @@ importers:
         version: link:../../core
       '@objectstack/driver-memory':
         specifier: workspace:*
-        version: link:../../plugins/driver-memory
+        version: link:../../drivers/driver-memory
       '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../../plugins/driver-sql
+        version: link:../../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../../plugins/driver-sqlite-wasm
+        version: link:../../drivers/driver-sqlite-wasm
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -1780,7 +1817,7 @@ importers:
     devDependencies:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../../plugins/driver-sqlite-wasm
+        version: link:../../drivers/driver-sqlite-wasm
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1856,13 +1893,13 @@ importers:
         version: link:../core
       '@objectstack/driver-memory':
         specifier: workspace:*
-        version: link:../plugins/driver-memory
+        version: link:../drivers/driver-memory
       '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../plugins/driver-sql
+        version: link:../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../plugins/driver-sqlite-wasm
+        version: link:../drivers/driver-sqlite-wasm
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
@@ -1936,7 +1973,7 @@ importers:
     optionalDependencies:
       '@objectstack/driver-mongodb':
         specifier: workspace:*
-        version: link:../plugins/driver-mongodb
+        version: link:../drivers/driver-mongodb
 
   packages/sdui-parser:
     devDependencies:
@@ -2077,16 +2114,16 @@ importers:
     devDependencies:
       '@objectstack/driver-memory':
         specifier: workspace:*
-        version: link:../../plugins/driver-memory
+        version: link:../../drivers/driver-memory
       '@objectstack/driver-mongodb':
         specifier: workspace:*
-        version: link:../../plugins/driver-mongodb
+        version: link:../../drivers/driver-mongodb
       '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../../plugins/driver-sql
+        version: link:../../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
-        version: link:../../plugins/driver-sqlite-wasm
+        version: link:../../drivers/driver-sqlite-wasm
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server
@@ -3479,6 +3516,63 @@ packages:
   '@js-joda/core@5.7.0':
     resolution: {integrity: sha512-WBu4ULVVxySLLzK1Ppq+OdfP+adRS4ntmDQT915rzDJ++i95gc2jZkM5B6LWEAwN3lGXpfie3yPABozdD3K3Vg==}
 
+  '@libsql/client@0.17.4':
+    resolution: {integrity: sha512-lYayFWasDV78A+TjlEhr6ubb3odBV6OHjb+wdp8VQcyWWAEIjuwbCHaraEUS4m4yWoo0BvZo96It4VdzZRmRWw==}
+
+  '@libsql/core@0.17.4':
+    resolution: {integrity: sha512-LqF9gIvnJ38nmAH1y/ChizHqDO/MO1wLgA96XrraulEEbqXxLjleSH92YWTolbuJKgPUmGu4aJk9W3UnAcxLOQ==}
+
+  '@libsql/darwin-arm64@0.5.29':
+    resolution: {integrity: sha512-K+2RIB1OGFPYQbfay48GakLhqf3ArcbHqPFu7EZiaUcRgFcdw8RoltsMyvbj5ix2fY0HV3Q3Ioa/ByvQdaSM0A==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@libsql/darwin-x64@0.5.29':
+    resolution: {integrity: sha512-OtT+KFHsKFy1R5FVadr8FJ2Bb1mghtXTyJkxv0trocq7NuHntSki1eUbxpO5ezJesDvBlqFjnWaYYY516QNLhQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@libsql/hrana-client@0.10.0':
+    resolution: {integrity: sha512-OoA4EMqRAC7kn7V2P6EQqRcpZf2W+AjsNIyCizBg339Tq/aMC7sRnzs3SklderhmQWAqEzvv8A2vhxVmWpkVvw==}
+
+  '@libsql/isomorphic-ws@0.1.5':
+    resolution: {integrity: sha512-DtLWIH29onUYR00i0GlQ3UdcTRC6EP4u9w/h9LxpUZJWRMARk6dQwZ6Jkd+QdwVpuAOrdxt18v0K2uIYR3fwFg==}
+
+  '@libsql/linux-arm-gnueabihf@0.5.29':
+    resolution: {integrity: sha512-CD4n4zj7SJTHso4nf5cuMoWoMSS7asn5hHygsDuhRl8jjjCTT3yE+xdUvI4J7zsyb53VO5ISh4cwwOtf6k2UhQ==}
+    cpu: [arm]
+    os: [linux]
+
+  '@libsql/linux-arm-musleabihf@0.5.29':
+    resolution: {integrity: sha512-2Z9qBVpEJV7OeflzIR3+l5yAd4uTOLxklScYTwpZnkm2vDSGlC1PRlueLaufc4EFITkLKXK2MWBpexuNJfMVcg==}
+    cpu: [arm]
+    os: [linux]
+
+  '@libsql/linux-arm64-gnu@0.5.29':
+    resolution: {integrity: sha512-gURBqaiXIGGwFNEaUj8Ldk7Hps4STtG+31aEidCk5evMMdtsdfL3HPCpvys+ZF/tkOs2MWlRWoSq7SOuCE9k3w==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@libsql/linux-arm64-musl@0.5.29':
+    resolution: {integrity: sha512-fwgYZ0H8mUkyVqXZHF3mT/92iIh1N94Owi/f66cPVNsk9BdGKq5gVpoKO+7UxaNzuEH1roJp2QEwsCZMvBLpqg==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@libsql/linux-x64-gnu@0.5.29':
+    resolution: {integrity: sha512-y14V0vY0nmMC6G0pHeJcEarcnGU2H6cm21ZceRkacWHvQAEhAG0latQkCtoS2njFOXiYIg+JYPfAoWKbi82rkg==}
+    cpu: [x64]
+    os: [linux]
+
+  '@libsql/linux-x64-musl@0.5.29':
+    resolution: {integrity: sha512-gquqwA/39tH4pFl+J9n3SOMSymjX+6kZ3kWgY3b94nXFTwac9bnFNMffIomgvlFaC4ArVqMnOZD3nuJ3H3VO1w==}
+    cpu: [x64]
+    os: [linux]
+
+  '@libsql/win32-x64-msvc@0.5.29':
+    resolution: {integrity: sha512-4/0CvEdhi6+KjMxMaVbFM2n2Z44escBRoEYpR+gZg64DdetzGnYm8mcNLcoySaDJZNaBd6wz5DNdgRmcI4hXcg==}
+    cpu: [x64]
+    os: [win32]
+
   '@manypkg/find-root@1.1.0':
     resolution: {integrity: sha512-mki5uBvhHzO8kYYix/WRy2WX8S3B5wdVSc9D6KcU5lQNglP2yt58/VfLuAK49glRXChosY8ap2oJ1qgma3GUVA==}
 
@@ -3519,6 +3613,9 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.3
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.3
+
+  '@neon-rs/load@0.0.4':
+    resolution: {integrity: sha512-kTPhdZyTQxB+2wpiRcFWrDcejc4JI6tkPuS7UZCG4l6Zvc5kU/gGQ/ozvHTh1XR5tS+UlfAfGuPajjzQjCiHCw==}
 
   '@next/env@16.2.12':
     resolution: {integrity: sha512-d0Z5Bc13Fa4nR8pFAKx2jay2yhJM16vlfHbTzYnUQAxlNb6B6lmn4hjt69lYNt4kRtyYP6gEM49lPRHNbIyneg==}
@@ -5836,6 +5933,10 @@ packages:
     resolution: {integrity: sha512-reYkTUJAZb9gUuZ2RvVCNhVHdg62RHnJ7WJl8ftMi4diZ6NWlciOzQN88pUhSELEwflJht4oQDv0F0BMlwaYtA==}
     engines: {node: '>=8'}
 
+  detect-libc@2.0.2:
+    resolution: {integrity: sha512-UX6sGumvvqSaXgdKGUsgZWqcUyIXZ/vZTrlRT/iobiKhGL0zL4d3osHj3uqllWJK+i+sixDS/3COVEOFbupFyw==}
+    engines: {node: '>=8'}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -6790,6 +6891,9 @@ packages:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
     engines: {node: '>=10'}
 
+  js-base64@3.9.2:
+    resolution: {integrity: sha512-6zayE8QlUdiweYI6cETD/XBSqFcoCUlufn/29PJR99r82x1yDnIprRca0YvAYpAW+ez0GuQkVBC6xG5QkD7OjA==}
+
   js-md4@0.3.2:
     resolution: {integrity: sha512-/GDnfQYsltsjRswQhN9fhv3EMw2sCpUdrdxyWDOUK7eyD++r3gRhzgiQgc/x4MAv2i1iuQ4lxO5mvqM3vj4bwA==}
 
@@ -6933,6 +7037,11 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libsql@0.5.29:
+    resolution: {integrity: sha512-8lMP8iMgiBzzoNbAPQ59qdVcj6UaE/Vnm+fiwX4doX4Narook0a4GPKWBEv+CR8a1OwbfkgL18uBfBjWdF0Fzg==}
+    cpu: [x64, arm64, wasm32, arm]
+    os: [darwin, linux, win32]
 
   lie@3.3.0:
     resolution: {integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==}
@@ -8085,6 +8194,9 @@ packages:
   process@0.11.10:
     resolution: {integrity: sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==}
     engines: {node: '>= 0.6.0'}
+
+  promise-limit@2.7.0:
+    resolution: {integrity: sha512-7nJ6v5lnJsXwGprnGXga4wx6d1POjvi5Qmf1ivTRxTjH4Z/9Czja/UCMLVmB9N93GeWOU93XaFaEt6jbuoagNw==}
 
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
@@ -10333,6 +10445,64 @@ snapshots:
 
   '@js-joda/core@5.7.0': {}
 
+  '@libsql/client@0.17.4':
+    dependencies:
+      '@libsql/core': 0.17.4
+      '@libsql/hrana-client': 0.10.0
+      js-base64: 3.9.2
+      libsql: 0.5.29
+      promise-limit: 2.7.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@libsql/core@0.17.4':
+    dependencies:
+      js-base64: 3.9.2
+
+  '@libsql/darwin-arm64@0.5.29':
+    optional: true
+
+  '@libsql/darwin-x64@0.5.29':
+    optional: true
+
+  '@libsql/hrana-client@0.10.0':
+    dependencies:
+      '@libsql/isomorphic-ws': 0.1.5
+      js-base64: 3.9.2
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@libsql/isomorphic-ws@0.1.5':
+    dependencies:
+      '@types/ws': 8.18.1
+      ws: 8.21.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@libsql/linux-arm-gnueabihf@0.5.29':
+    optional: true
+
+  '@libsql/linux-arm-musleabihf@0.5.29':
+    optional: true
+
+  '@libsql/linux-arm64-gnu@0.5.29':
+    optional: true
+
+  '@libsql/linux-arm64-musl@0.5.29':
+    optional: true
+
+  '@libsql/linux-x64-gnu@0.5.29':
+    optional: true
+
+  '@libsql/linux-x64-musl@0.5.29':
+    optional: true
+
+  '@libsql/win32-x64-msvc@0.5.29':
+    optional: true
+
   '@manypkg/find-root@1.1.0':
     dependencies:
       '@babel/runtime': 7.29.7
@@ -10427,6 +10597,8 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.3
     optional: true
+
+  '@neon-rs/load@0.0.4': {}
 
   '@next/env@16.2.12': {}
 
@@ -11584,7 +11756,6 @@ snapshots:
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 26.1.2
-    optional: true
 
   '@typescript-eslint/parser@8.65.0(eslint@10.8.0(jiti@2.7.0))(typescript@6.0.3)':
     dependencies:
@@ -12079,7 +12250,6 @@ snapshots:
   better-sqlite3@13.0.2:
     dependencies:
       node-addon-api: 8.9.1
-    optional: true
 
   bidi-js@1.0.3:
     dependencies:
@@ -12642,6 +12812,8 @@ snapshots:
   dequal@2.0.3: {}
 
   detect-indent@6.1.0: {}
+
+  detect-libc@2.0.2: {}
 
   detect-libc@2.1.2: {}
 
@@ -13751,6 +13923,8 @@ snapshots:
 
   joycon@3.1.1: {}
 
+  js-base64@3.9.2: {}
+
   js-md4@0.3.2: {}
 
   js-tokens@10.0.0: {}
@@ -13909,6 +14083,21 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libsql@0.5.29:
+    dependencies:
+      '@neon-rs/load': 0.0.4
+      detect-libc: 2.0.2
+    optionalDependencies:
+      '@libsql/darwin-arm64': 0.5.29
+      '@libsql/darwin-x64': 0.5.29
+      '@libsql/linux-arm-gnueabihf': 0.5.29
+      '@libsql/linux-arm-musleabihf': 0.5.29
+      '@libsql/linux-arm64-gnu': 0.5.29
+      '@libsql/linux-arm64-musl': 0.5.29
+      '@libsql/linux-x64-gnu': 0.5.29
+      '@libsql/linux-x64-musl': 0.5.29
+      '@libsql/win32-x64-msvc': 0.5.29
 
   lie@3.3.0:
     dependencies:
@@ -14849,8 +15038,7 @@ snapshots:
   node-addon-api@4.3.0:
     optional: true
 
-  node-addon-api@8.9.1:
-    optional: true
+  node-addon-api@8.9.1: {}
 
   node-rsa@1.1.1:
     dependencies:
@@ -15178,6 +15366,8 @@ snapshots:
   process-nextick-args@2.0.1: {}
 
   process@0.11.10: {}
+
+  promise-limit@2.7.0: {}
 
   property-information@7.2.0: {}
 
@@ -16413,8 +16603,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.21.1:
-    optional: true
+  ws@8.21.1: {}
 
   wsl-utils@0.1.0:
     dependencies:

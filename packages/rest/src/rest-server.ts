@@ -404,7 +404,7 @@ const CLIENT_MESSAGE_MAX = 500;
  * "contains SQL", a 200-character driver dump passed the old gate untouched,
  * and these messages have already cleared `looksLikeInternalErrorLeak` /
  * `isSqlLeak` before reaching here. Same shape as the drivers' own
- * `safeShapePreview` (`packages/plugins/driver-sql`), which previews rather
+ * `safeShapePreview` (`packages/drivers/driver-sql`), which previews rather
  * than erases.
  *
  * [#5437] That last paragraph turned out to be the other branch's bug report:
