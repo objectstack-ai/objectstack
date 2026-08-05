@@ -53,6 +53,27 @@ fix(objectql): `autonumber` 是运行时拥有的字段,写路径不再接受调
 引擎事件是整批的并集,但剥离只会移除**行自身提交过**的键,因此可以准确归属回具体行。
 导入器优先走的正是 `insertManyData` 这条部分成功路径。
 
+**与 `strictReadonlyWrites`(#5126 / #5610)叠加。** 该开关是"剥离即拒绝"的进程内出路,
+本次改动使它自然覆盖单号,两条路径同权:
+
+- **UPDATE 无需新代码** —— autonumber 限肢走的正是 `stripReadonlyFields` →
+  `reportDroppedFields` → `assertNoStrictDrops` 这条 #5126 已经铺好的接缝,因此 strict
+  开启时,调用者提交的单号与声明 `readonly` 的字段一样被拒绝,整笔写入不落库;
+- **INSERT 需要接上** —— #5126 当时把该开关在 insert 上留作惰性,并写下条件:"insert
+  一旦有了剥离,两个成员就在那个剥离点一起接上"。本次正是那个剥离点,于是
+  `onFieldsDropped` 与 `strictReadonlyWrites` 一并兑现:默认剥离+上报,strict 开启则在
+  任何驱动调用之前抛 `ERR_READONLY_FIELD_REJECTED`,且**监听器不触发**(被拒绝的写入
+  并未完成,这是 #5126 自己的设计要点)。
+
+接缝处**没有新增任何策略**:#5126 明确写着 strict "不引入第二套策略,它只是把既有策略
+报出来",且"剥离拿不走的字段也不会被拒绝"。照此逐字适用,`isSystem` 与 `preserveAudit`
+两个豁免在 strict 下依旧被接受(它们根本不会走到剥离分支)。
+
+`ReadonlyFieldRejectedError` 新增可选的 `operation`(默认 `'update'`,#5126 的 UPDATE
+文案逐字节不变):动词与补救办法确实因操作而异 —— INSERT 的拒绝必然关于运行时拥有的值,
+其合法写入者是 `isSystem` 与历史导入 `preserveAudit`,而 `readonlyWhen` 在 create 上
+根本锁不住任何东西。
+
 **升级影响。** 普通(非历史)导入若把遗留单号列映射到 `autonumber` 字段,该值现在会
 被丢弃并改由序列发号,同时在响应的 `droppedFields` 里上报、在服务端日志里留下一条
 带补救办法的 `warn`。要保留原始单号,请把导入标记为历史导入
