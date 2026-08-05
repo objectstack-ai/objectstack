@@ -200,8 +200,9 @@ unit 档用户眼前抹掉。因此：
 | 面 | 本轮（#4611） | 后续 |
 |---|---|---|
 | 规范名 `owning_business_unit_id` | ✅ 已登记为 `SystemFieldName.OWNING_BUSINESS_UNIT_ID`，标注 **open-core 暂不注入**，并进入公开表单 server-managed 拒收名单（防御纵深，匿名面永不可由客户端提供） | —— |
-| `ownership: 'business_unit'` 枚举档 | ❌ **本轮不加**。`packages/objectql/src/registry.ts` 的 `wantOwner` 是**排除式**判定（只排除 `org` / `none`），此时加入枚举会让该档照常注入 `owner_id`，与 D1 表格相反 —— 属 ADR-0049 所禁止的「声明而不执行」 | 与注入实现同 PR 落地 |
-| 列注入 / 盖章 / D3 校验 | ❌ 未实现 | engine-core 车道：`wantOwner` 翻为正面清单 + 列注入 + 盖章中间件 |
+| `ownership: 'business_unit'` 枚举档 | ❌ **本轮不加**。`packages/objectql/src/registry.ts` 的 `wantOwner` 是**排除式**判定（只排除 `org` / `none`），此时加入枚举会让该档照常注入 `owner_id`，与 D1 表格相反 —— 属 ADR-0049 所禁止的「声明而不执行」 | #5678（须与 #5677 同 PR 或严格后置） |
+| 列注入（`wantOwner` 翻为正面清单 + 列） | ❌ 未实现 | #5677（engine-core 车道） |
+| 盖章策略（D2）/ D3 校验 / D4 守卫 / D8 迁移 | ❌ 未实现，且 D2 默认值等四项**尚未裁定** | 各自单独评审后再开单 |
 
 即：**协议已接受，执行待实现**；在注入落地前，`ownership: 'business_unit'` 会被 Zod
 以「合法值为 user / org / none」响亮拒绝，这是**正确**行为，不得「顺手补全」。
