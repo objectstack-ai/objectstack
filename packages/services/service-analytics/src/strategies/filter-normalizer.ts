@@ -88,13 +88,34 @@
  * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
  * so it buys portability for one redundant conjunct.
  *
+ * # A `where` ARRAY is lowered here, not dropped (#5334)
+ *
+ * `FilterArray` — `['stage', '=', 'won']`, `['and', […], […]]`, `[[…], […]]` —
+ * is INPUT-ONLY authoring sugar (`spec/data/filter.zod.ts`, #5285), and #5158's
+ * ruling C says every door into the runtime LOWERS it through the one
+ * `parseFilterAST` sink before anything downstream sees a filter. #5329 closed
+ * the engine's six entry points that way and deleted the four drivers' array
+ * dialects. Analytics is the FIFTH door: it compiles `where` itself — to SQL
+ * (`NativeSQLStrategy`) or to a `FilterCondition` for the engine
+ * (`ObjectQLStrategy`) — so nothing upstream lowers for it.
+ *
+ * Until #5334 this function answered an array with `return null`: the WHOLE
+ * `where` disappeared, no error, no trace, and the widget charted the entire
+ * dataset — the #3650 / #4128 silent-widening class again, reached through the
+ * array spelling. {@link normalizeAnalyticsFilterTree} now gives the same three
+ * answers the engine door gives, so one query means one thing on every path.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
- * the in-memory matcher, `formula` and `read-scope-sql` are already held to, and
+ * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
- * deliberately does not carry (NULL handling, boolean identities).
+ * deliberately does not carry (NULL handling, boolean identities), and
+ * `filter-array-lowering.test.ts` for the array door (#5334).
  */
+
+import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 
 export interface NormalizedAnalyticsFilter {
   member: string;
@@ -639,16 +660,105 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
   return out;
 }
 
+// ── [#5334] The FilterArray door ─────────────────────────────────────────────
+
 /**
- * Normalize an analytics query's `where` (FilterCondition) into the tree the
- * strategies compile. `null` when the query carries no `where`.
+ * [#5334] A filter refusal in the ADR-0112 envelope every sibling filter
+ * refusal in the repo speaks — `INVALID_FILTER` / 400.
+ *
+ * The twin of `driver-sql`'s and `driver-memory`'s `unsupportedFilterError`.
+ * A caller that writes an unlowerable filter has made a 400-class mistake, and
+ * a coded refusal is what lets the `/analytics` face answer it as one instead
+ * of as an opaque 500.
+ */
+function invalidFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#5334] A `where` array this door cannot lower.
+ *
+ * Deliberately the same refusal the other doors give, in the same envelope:
+ * `driver-sql` / `driver-memory` / `driver-mongodb`'s
+ * `filterArrayReachedDriverError` (#5158/#5329) and the engine's own
+ * `lowerWhereFilterArray`. The INFIX join form (`[condA, 'or', condB]`) is the
+ * shape that makes this branch load-bearing — no schema declares it,
+ * `FilterArraySchema` excludes it and `parseFilterAST` has no lowering for it,
+ * so it can only be refused; silently dropping it returns the UNFILTERED
+ * dataset, which is what this whole module exists to prevent.
+ */
+function filterArrayNotLowerableError(where: unknown[]): Error {
+  return invalidFilterError(
+    `[analytics] received a 'where' array that is not a filter: ${JSON.stringify(where)}. ` +
+    `A filter array is a comparison [field, operator, value], a logical node ` +
+    `["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY sugar (spec ` +
+    `'FilterArray'), lowered to a FilterCondition by @objectstack/spec parseFilterAST() at ` +
+    `every door, this one included (#5158/#5334). This value cannot be lowered, and an ` +
+    `unapplied filter would have charted the UNFILTERED dataset. Recognised operators: ` +
+    `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
+    `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
+ * Normalize an analytics query's `where` into the tree the strategies compile.
+ * `null` when the query carries no `where` — i.e. no constraint.
+ *
+ * `where` is declared a `FilterCondition` (`AnalyticsQuerySchema`), and the
+ * object form is the whole of the contract downstream. An ARRAY nevertheless
+ * arrives — it is the `FilterArray` authoring sugar four published contracts
+ * teach, and analytics is a door into the runtime like any other — so it is
+ * LOWERED here (#5334, on #5158's ruling C), giving the same three answers
+ * `ObjectQL`'s six entry points give since #5329:
+ *
+ * 1. `[]` — "no filter", not a failed filter: `null`, the same reading every
+ *    layer gives it (the engine door DELETES the key; `parseFilterAST([])` is
+ *    `undefined`). No predicate is emitted and no error is raised.
+ * 2. A well-formed `FilterArray` — lowered through `parseFilterAST` and
+ *    compiled by {@link buildNode}, so the author gets the SAME rows either
+ *    spelling produces. `isFilterAST` gates first so the operator vocabulary is
+ *    checked before `parseFilterAST`'s lenient `$${op}` fallback can turn a
+ *    misspelling into a `$sounds_like` condition nothing executes.
+ * 3. Anything else array-shaped — REFUSED, loudly. Before #5334 all three of
+ *    these arrivals answered the same way: `return null`, which for (2) and (3)
+ *    means the predicate VANISHED and the chart was drawn over every row.
+ *
+ * Lowering rather than refusing outright is what keeps ONE dashboard's
+ * metadata meaning one thing: the same `where` on a plain `find()` already
+ * lowers at the engine door (#5329), so refusing it here would have forked the
+ * product by which face read the metadata.
  */
 export function normalizeAnalyticsFilterTree(
   query: { where?: unknown } | unknown,
 ): NormalizedFilterNode | null {
   if (!query || typeof query !== 'object') return null;
   const where = (query as { where?: unknown }).where;
-  if (!where || typeof where !== 'object' || Array.isArray(where)) return null;
+  if (!where || typeof where !== 'object') return null;
+
+  if (Array.isArray(where)) {
+    // (1) `[]` is "no filter", not a failed filter.
+    if (where.length === 0) return null;
+    // (3) Not a shape `parseFilterAST` can express.
+    if (!isFilterAST(where)) throw filterArrayNotLowerableError(where);
+    // (2) The declared path.
+    const condition = parseFilterAST(where);
+    if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+      // Unreachable by construction — `isFilterAST` accepted the shape, so
+      // `parseFilterAST` has a lowering for it. Loud rather than silent for the
+      // same reason the engine door is: the failure mode of the two spec
+      // functions disagreeing is a dropped predicate, i.e. every row.
+      throw invalidFilterError(
+        `[analytics] filter array ${JSON.stringify(where)} passed isFilterAST() but ` +
+        `parseFilterAST() lowered it to ${JSON.stringify(condition)}. Refusing rather than ` +
+        `charting the dataset unfiltered (#5158/#5334).`,
+      );
+    }
+    return buildNode(condition as Record<string, unknown>);
+  }
+
   return buildNode(where as Record<string, unknown>);
 }
 
