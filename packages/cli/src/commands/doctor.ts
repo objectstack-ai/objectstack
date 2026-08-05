@@ -19,12 +19,111 @@ import {
   GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION,
   type GlobalUniqueFinding,
 } from '@objectstack/types';
+// The posture vocabulary, read from the package that DEFINES it (#5382) — the
+// fix list below enumerates the accepted values, and a second literal list
+// would be free to drift the day a posture is added.
+import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
 
 interface HealthCheckResult {
   name: string;
   status: 'ok' | 'warning' | 'error';
   message: string;
   fix?: string;
+}
+
+// ─── Tenancy Posture ────────────────────────────────────────────────
+
+/**
+ * One-line descriptions of the accepted postures, keyed by the vocabulary
+ * `@objectstack/spec/security` owns. A posture declared there but not described
+ * here is still listed by the fix list (bare, without prose) rather than
+ * silently dropped — the advice can go terse, never stale.
+ */
+const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
+  single: 'one organization, no organization wall — the default',
+  group: 'organization wall enforced by the open engine, one shared database',
+  isolated:
+    'organization wall + the enterprise @objectstack/organizations runtime '
+    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+};
+
+/**
+ * What doctor's tenancy-posture read decided (#5382).
+ *
+ * A verdict object rather than a throw. `resolveTenancyPosture()` refuses an
+ * unrecognized value by throwing, and doctor's every posture read used to sit
+ * inside the broad config-analysis `try` — so the refusal arrived as
+ * `⚠ Could not load config for analysis`, a warning, about the wrong subject,
+ * with exit code 0. A verdict cannot be caught by an unrelated `catch`.
+ */
+export type TenancyPostureReading =
+  | { ok: true; posture: TenancyPosture }
+  | { ok: false; result: HealthCheckResult };
+
+/**
+ * Resolve the environment's requested tenancy posture, or produce the
+ * health-check finding that reports an unrecognized value (#5382).
+ *
+ * `resolveTenancyPosture()` (`@objectstack/types`) is the authority on the
+ * vocabulary and already refuses an unrecognized value — this wrapper does NOT
+ * re-decide that. It changes HOW the refusal travels and what it says.
+ *
+ * Why it exists: doctor read the posture in two places
+ * (`findUnscopedGlobalUniques()` and the ADR-0120 D5e gate), both of them under
+ * the wide `try` that guards config analysis, whose `catch` prints
+ * `Could not load config for analysis (config checks skipped)` and counts a
+ * WARNING. An environment that `os serve` flatly refuses to boot was therefore
+ * reported by `os doctor` as "functional", exit 0, without the string
+ * `OS_TENANCY_POSTURE` appearing anywhere in the run — sending the operator to
+ * look at their config, which was fine. That is the "diagnostic surface
+ * disagrees with the runtime" class of #4801 / cloud#1020, landed on the very
+ * command an operator reaches for after `serve` fails.
+ *
+ * The counterpart in `serve.ts` (`resolveTenancyPostureOrRefusal`, #5359) has
+ * the same shape but a different verdict, and deliberately so: serve REFUSES
+ * (FATAL + `process.exit(1)` before any boot work), doctor REPORTS (an `error`
+ * health check that flows through doctor's own error summary). The wording
+ * differs for the same reason — see the `.env` note below, which is true of
+ * doctor and false of serve.
+ */
+export function resolveTenancyPostureOrFinding(): TenancyPostureReading {
+  try {
+    return { ok: true, posture: resolveTenancyPosture() };
+  } catch (err) {
+    const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process?.env?.OS_TENANCY_POSTURE;
+    const cause = err instanceof Error ? err.message : String(err);
+    const fixes = TENANCY_POSTURES.map((posture) => {
+      const hint = TENANCY_POSTURE_FIX_HINTS[posture];
+      return `        • OS_TENANCY_POSTURE=${posture}${hint ? ` — ${hint}` : ''}`;
+    }).join('\n');
+    return {
+      ok: false,
+      result: {
+        name: 'Tenancy posture',
+        status: 'error',
+        message:
+          `OS_TENANCY_POSTURE=${JSON.stringify(String(raw ?? ''))} is not a recognized tenancy posture`
+          + ' — `os serve` refuses to boot this environment',
+        fix:
+          'Set one of the accepted values:\n'
+          + `${fixes}\n`
+          + '        • or unset OS_TENANCY_POSTURE entirely — the posture then derives from\n'
+          + '          OS_MULTI_ORG_ENABLED (true ⇒ isolated, anything else ⇒ single)\n'
+          // Said out loud because it is a real limit of THIS report, and the
+          // opposite of serve's gate, which runs after `dotenv-flow` has loaded.
+          // `os doctor` loads no `.env*`, so a posture that lives in a committed
+          // `.env` reaches the server and never reaches this check — a green
+          // doctor is not proof that serve will accept the posture.
+          + '      Read from this process\'s environment only: unlike `os serve`, `os doctor` does not\n'
+          + '      load `.env*` files, so a value set in one is not visible here.\n'
+          // The resolver owns the vocabulary and its wording; quoting rather
+          // than paraphrasing keeps doctor from maintaining a second copy that
+          // can disagree with it.
+          + `      cause: ${cause}`,
+      },
+    };
+  }
 }
 
 // ─── Config-Aware Checks ────────────────────────────────────────────
@@ -290,8 +389,15 @@ async function readInstalledPackageEntries(cwd: string): Promise<any[]> {
  * `'global'` is the correct, unambiguous meaning (`single` = one customer;
  * `group` = the installation IS the customer company).
  */
-async function findUnscopedGlobalUniques(cwd: string, config: any): Promise<UniqueScopeAdvisory[]> {
-  const posture = resolveTenancyPosture();
+async function findUnscopedGlobalUniques(
+  cwd: string,
+  config: any,
+  // #5382 — the posture the caller already resolved, not a fresh parse. This
+  // function runs inside doctor's broad config-analysis `try`, so a
+  // `resolveTenancyPosture()` here is a throw the wrong `catch` reports as
+  // "Could not load config for analysis".
+  posture: TenancyPosture,
+): Promise<UniqueScopeAdvisory[]> {
   if (!postureGatesGlobalUniques(posture)) return [];
 
   const out: UniqueScopeAdvisory[] = [];
@@ -469,9 +575,31 @@ export default class Doctor extends Command {
     const { flags } = await this.parse(Doctor);
 
     printHeader('Environment Health Check');
-    
+
     const results: HealthCheckResult[] = [];
-    
+
+    // ── Tenancy posture (#5382) ──────────────────────────────────────
+    // Resolve ONCE, here, OUTSIDE every `try` in this method.
+    //
+    // Placement is the whole fix. Doctor's two posture readers — the ADR-0120
+    // D5e unique-scope gate and `findUnscopedGlobalUniques()` — both sat under
+    // the wide config-analysis `try` further down, whose `catch` prints
+    // `Could not load config for analysis (config checks skipped)` and records
+    // a WARNING. So an unrecognized `OS_TENANCY_POSTURE` produced a report that
+    // blamed the config (which was fine), never printed the variable's name,
+    // and exited 0 under `⚠️  Environment is functional` — while `os serve`
+    // refused to boot the identical environment.
+    //
+    // Reading it here also widens the fix past the issue's own repro: those
+    // readers only ran `if (configExists())`, so an environment with no
+    // `objectstack.config.ts` never read the posture at all and said nothing
+    // whatsoever about it.
+    //
+    // Note this REPORTS rather than refuses — no `process.exit(1)` here. The
+    // finding is an ordinary `error` health check, so the rest of the report
+    // still runs and doctor's own summary owns the non-zero exit.
+    const postureReading = resolveTenancyPostureOrFinding();
+
     // Check Node.js version
     try {
       const nodeVersion = process.version;
@@ -587,7 +715,15 @@ export default class Doctor extends Command {
         fix: 'Install Git for version control',
       });
     }
-    
+
+    // #5382 — the posture verdict resolved at the top of `run()`, reported here
+    // among the other environment facts. Only an unrecognized value produces a
+    // row: a valid posture is not a finding, and doctor's output for every
+    // environment that can actually start is unchanged.
+    if (!postureReading.ok) {
+      results.push(postureReading.result);
+    }
+
     // Display environment results
     let hasErrors = false;
     let hasWarnings = false;
@@ -685,9 +821,15 @@ export default class Doctor extends Command {
         // Runs whenever a config loaded, whether or not it declares objects:
         // the ledger half reports installed packages this project never
         // declared.
-        if (postureGatesGlobalUniques(resolveTenancyPosture())) {
+        //
+        // #5382 — reads the verdict resolved at the top of `run()`. Re-invoking
+        // the resolver here is what put its throw inside this swallowing `try`
+        // in the first place. An unrecognized posture skips the advisory (there
+        // is no posture to gate on) and is already reported above as an error,
+        // so nothing is silently lost.
+        if (postureReading.ok && postureGatesGlobalUniques(postureReading.posture)) {
           printStep("Checking unique scopes against the 'isolated' tenancy posture...");
-          const scopeFindings = await findUnscopedGlobalUniques(cwd, config);
+          const scopeFindings = await findUnscopedGlobalUniques(cwd, config, postureReading.posture);
           if (scopeFindings.length > 0) {
             hasWarnings = true;
             for (const { source, finding } of scopeFindings) {
