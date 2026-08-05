@@ -197,10 +197,27 @@ describe('[#5112] object_operation endpoint: same pipeline, same answer', () => 
     expect(a.data).toEqual(b);
   });
 
-  it('carries the declared cacheTtl as a Cache-Control header', async () => {
+  it('carries the declared cacheTtl as a Cache-Control header — `private` included', async () => {
+    // Both halves of this header are pinned, and the FIRST one is the reason
+    // this assertion exists at all (#5396).
+    //
+    // `private` is not a tuning choice on this chain, it is a security rule:
+    // every endpoint answer may have been trimmed per-caller by RLS, so a
+    // shared cache must never store one and hand it to somebody else. The
+    // producer states that in `computeCacheControl`
+    // (`packages/runtime/src/endpoint-policy.ts`), and the unit tests below it
+    // pin the RETURN VALUE. This assertion is the only layer that sees what a
+    // caller actually receives after the whole stack has run — so if any layer
+    // between the policy chain and the socket ever rewrites `private` to
+    // `public`, this is the only place that can notice. It pinned `max-age=30`
+    // alone until #5396, i.e. it would have stayed green through exactly that
+    // rewrite.
     const res = await stack.apiAs(adminToken, 'GET', TASKS);
-    expect(res.headers.get('cache-control'), 'cacheTtl: 30 must reach the wire').toMatch(/max-age=30/);
-  });
+    expect(
+      res.headers.get('cache-control'),
+      'cacheTtl: 30 must reach the wire, and reach it as `private`',
+    ).toMatch(/^private, max-age=30$/);
+  }, 60_000);
 
   it('DENIES an anonymous caller with 401 — authRequired finally gates', async () => {
     // The security semantic #4936 found parsing green and enforcing nothing.
