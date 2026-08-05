@@ -352,7 +352,9 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
         buildFilterClauseSql(
           col: string,
           operator: string,
-          values: string[] | undefined,
+          // [#5526] `unknown[]`: a leaf carries the author's comparand at its
+          // own type, so this local mirror of the private signature does too.
+          values: unknown[] | undefined,
           params: unknown[],
         ): string | null;
       };
@@ -388,7 +390,9 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
         buildFilterClauseSql(
           col: string,
           operator: string,
-          values: string[] | undefined,
+          // [#5526] `unknown[]`: a leaf carries the author's comparand at its
+          // own type, so this local mirror of the private signature does too.
+          values: unknown[] | undefined,
           params: unknown[],
         ): string | null;
       };

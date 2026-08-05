@@ -6,7 +6,6 @@ import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
   normalizeAnalyticsFilterTree,
   collectFilterLeaves,
-  coerceFilterValueForObjectQL,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
@@ -631,9 +630,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * Render one normalized filter as a display SQL predicate for `generateSql`.
    *
    * Mirrors `NativeSQLStrategy.buildFilterClause`'s operator vocabulary so the
-   * two previews read alike, but binds through `coerceFilterValueForObjectQL`:
-   * the comparand shown is the one THIS path actually hands the engine (a real
-   * boolean, not SQL's 1/0).
+   * two previews read alike, but binds the comparand VERBATIM: the value shown is
+   * the one THIS path actually hands the engine (a real boolean, not SQL's 1/0).
+   *
+   * [#5526] "Verbatim" is now literal. This used to bind through
+   * `coerceFilterValueForObjectQL`, which decoded the string a `string[]` leaf
+   * carried back into a type — so an echo could show `7` for a filter the author
+   * wrote as `'007'`. A leaf carries the author's value at its own type, so the
+   * echo needs no conversion at all to stay honest about execution. The LIKE
+   * family is still the one exception, for the reason `filter.zod.ts` gives: its
+   * comparand is declared a `string`, and what binds is the PATTERN.
    *
    * `null` means "this leaf carries no predicate" — a value-less scalar leaf,
    * which `execute()` and `NativeSQLStrategy` drop too. It does NOT mean "I could
@@ -643,7 +649,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private buildFilterClauseSql(
     col: string,
     operator: string,
-    values: string[] | undefined,
+    values: unknown[] | undefined,
     params: unknown[],
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
@@ -653,15 +659,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     if (operator === 'in' || operator === 'notIn') {
       const placeholders = values
-        .map((v) => { params.push(coerceFilterValueForObjectQL(v)); return `$${params.length}`; })
+        .map((v) => { params.push(v); return `$${params.length}`; })
         .join(', ');
       return `${col} ${operator === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
     }
 
-    // The LIKE family binds its PATTERN, which is text by construction, so it
-    // skips `coerceFilterValueForObjectQL` — same reason `NativeSQLStrategy`
-    // keeps the un-normalised column reference for these: a prefix/suffix/
-    // substring match reads the column as stored.
+    // The LIKE family binds its PATTERN, which is text by construction — same
+    // reason `NativeSQLStrategy` keeps the un-normalised column reference for
+    // these: a prefix/suffix/substring match reads the column as stored.
     const like = LIKE_SQL_OPS[operator];
     if (like) {
       // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
@@ -702,7 +707,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         `one that ran (#5333).`,
       );
     }
-    params.push(coerceFilterValueForObjectQL(values[0]));
+    params.push(values[0]);
     return `${col} ${op} $${params.length}`;
   }
 
@@ -974,9 +979,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * performs the same half-open translation itself because it binds into raw
    * SQL, so one dashboard reads the same on every driver.
    *
-   * Comparands are coerced by the SAME helper the `where` path uses, so an
-   * epoch-ms bound recovers as a number and an ISO string stays a string. No
-   * STORAGE coercion happens here, deliberately: `NativeSQLStrategy` needs
+   * [#5526] Bounds are forwarded at the type `dateRange` is DECLARED with —
+   * `string` (`AnalyticsQuerySchema`'s `timeDimensions[].dateRange: string[]`) —
+   * and nothing re-types them. They used to pass through
+   * `coerceFilterValueForObjectQL`, whose TSDoc advertised that "an epoch-ms
+   * bound recovers as a number"; that was a lenient CONSUMER rescuing a shape the
+   * contract does not declare, and the same guess is what read a `'007'` filter
+   * comparand as `7` (Prime Directive #12 — the producer or the spec is where an
+   * epoch-ms window would have to be declared, not here). An author who wants an
+   * instant window writes it as one; a declared `string` binds as a string. No
+   * STORAGE coercion happens here either, deliberately: `NativeSQLStrategy` needs
    * `coerceTemporal` because it binds into raw SQL and had to learn that a
    * SQLite `Field.datetime` is an INTEGER epoch (#2034); this path goes through
    * `engine.aggregate()`, where the driver's own CRUD filter coercion applies —
@@ -1006,22 +1018,40 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       if (start == null) continue;
       out.push({
         field: this.resolveFieldName(cube, td.dimension, 'dimension'),
-        bounds: {
-          $gte: coerceFilterValueForObjectQL(String(start)),
-          $lte: coerceFilterValueForObjectQL(String(end)),
-        },
+        bounds: { $gte: start, $lte: end },
       });
     }
     return out;
   }
 
-  private convertFilter(operator: string, values?: string[]): unknown {
+  /**
+   * One leaf as the operand the engine's `FilterCondition` expects.
+   *
+   * [#5526] The comparand is passed through UNCONVERTED. That is the whole of
+   * this path's share of the fix: the engine compares against the value as
+   * STORED, and a leaf now carries the value the author wrote, so `'007'` stays
+   * `'007'`, `true` stays `true` and `7` stays `7` with nothing in between to
+   * re-type them. The two `coerceFilterValueForObjectQL` calls this replaced
+   * existed only to undo `stringifyForCube`, and undoing it required guessing.
+   *
+   * The four LIKE-family arms are the exception, and a contract one:
+   * `filter.zod.ts` declares `$contains` / `$notContains` / `$startsWith` /
+   * `$endsWith` as `z.string()`, so this PRODUCER must hand the engine a real
+   * string — `String(…)`, the same normalisation `like-pattern.ts` applies at the
+   * two SQL emitters and `driver-sql`'s `applyLike` applies at the driver, so one
+   * `$contains` means one thing on every face (#5567's invariant).
+   */
+  private convertFilter(operator: string, values?: unknown[]): unknown {
     if (operator === 'set') return { $ne: null };
     if (operator === 'notSet') return null;
     if (!values || values.length === 0) return undefined;
 
-    const v0 = coerceFilterValueForObjectQL(values[0]);
-    const all = values.map(coerceFilterValueForObjectQL);
+    const v0 = values[0];
+    // A COPY, not the leaf's own array: the `$in` / `$nin` operand below travels
+    // into the filter object the engine receives, and a node of this tree is
+    // never shared (see `falseNode`). The old `values.map(coerce…)` copied as a
+    // side effect of converting; dropping the conversion must not drop the copy.
+    const all = [...values];
     switch (operator) {
       case 'equals': return v0;
       case 'notEquals': return { $ne: v0 };
@@ -1052,15 +1082,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       //
       // `MONGO_TO_CUBE_OP` maps `$contains` → `contains` and nothing else does,
       // so returning `$contains` here is the round trip of the author's own key.
-      case 'contains': return { $contains: values[0] };
+      case 'contains': return { $contains: String(v0) };
       // `notContains` had no arm and fell to the `default` below, which returns
       // a BARE VALUE — i.e. `{field: 'x'}`, an equality. "does not contain x"
       // was compiled as "equals x". These three pass through as the canonical
       // spec operators every driver implements directly, so an anchored match
       // stays anchored rather than depending on regex dialect (#4128).
-      case 'notContains': return { $notContains: values[0] };
-      case 'startsWith': return { $startsWith: values[0] };
-      case 'endsWith': return { $endsWith: values[0] };
+      case 'notContains': return { $notContains: String(v0) };
+      case 'startsWith': return { $startsWith: String(v0) };
+      case 'endsWith': return { $endsWith: String(v0) };
       case 'in': return { $in: all };
       case 'notIn': return { $nin: all };
       default:

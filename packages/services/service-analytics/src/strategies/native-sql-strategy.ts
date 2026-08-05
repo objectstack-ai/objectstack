@@ -5,7 +5,7 @@ import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
   normalizeAnalyticsFilterTree,
-  coerceFilterValueForSql,
+  toSqlBindValue,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
@@ -525,14 +525,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * driver-backed `coerceTemporalFilterValue` hook (single source of truth for
    * the date/datetime storage convention — see StrategyContext); when the hook
    * is absent, or returns the value unchanged (the field is not a temporal
-   * column, or the dialect stores it as a native timestamp), falls back to the
-   * generic boolean/number recovery so non-temporal typed columns still bind
-   * correctly.
+   * column, or the dialect stores it as a native timestamp), falls back to
+   * {@link toSqlBindValue} so an unbindable JS type still reaches the driver as
+   * something it can bind.
+   *
+   * [#5526] `value` is `unknown`, not `string`, because a leaf now carries the
+   * author's comparand at its own type. Both halves of this method were already
+   * `unknown`-typed for it: the hook's contract is
+   * `coerceTemporalFilterValue(object, field, value: unknown)` and the fallback
+   * converts only what a driver cannot bind. What CHANGED is that a string is no
+   * longer re-typed on the way out — the fallback used to be
+   * `coerceFilterValueForSql`, which read `'007'` as the integer `7`.
    */
   private coerceTemporal(
     ctx: StrategyContext,
     target: { object: string; field: string },
-    value: string,
+    value: unknown,
   ): unknown {
     if (typeof ctx.coerceTemporalFilterValue === 'function') {
       const coerced = ctx.coerceTemporalFilterValue(target.object, target.field, value);
@@ -540,7 +548,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // columns; only short-circuit when it actually changed the value.
       if (coerced !== value) return coerced;
     }
-    return coerceFilterValueForSql(value);
+    return toSqlBindValue(value);
   }
 
   /**
@@ -653,7 +661,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   private buildFilterClause(
     rawCol: string,
     operator: string,
-    values: string[] | undefined,
+    // [#5526] `unknown[]`: the author's comparands, at their own types. Every
+    // conversion below is one a BOUNDARY demands — `likePattern` because
+    // `filter.zod.ts` declares the LIKE comparand a `string`, `coerceTemporal`
+    // because a driver cannot bind every JS type — never a guess about which
+    // type a string "really" was.
+    values: unknown[] | undefined,
     params: unknown[],
     ctx: StrategyContext,
     target: { object: string; field: string },

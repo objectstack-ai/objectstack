@@ -203,7 +203,20 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
       where: { score: { $gte: '80' } },
     };
     const { params } = await strategy.generateSql(query, ctx);
-    // hook returns the string unchanged → falls back to numeric recovery
-    expect(params).toEqual([80]);
+    // The hook returns the value unchanged for a non-temporal column, and the
+    // fallback binds it as the author wrote it.
+    //
+    // [#5526] This assertion used to read `[80]`. It was pinning the DECODER
+    // half of the deleted `values: string[]` round trip: the fallback was
+    // `coerceFilterValueForSql`, which re-read a numeric-LOOKING string as a
+    // number — the same guess that bound `'007'` as `7` against a TEXT column
+    // and drew "no data". A string comparand now binds as a string, and the
+    // comparison is decided by the database's own type resolution (SQLite
+    // applies this INTEGER column's numeric affinity to it; Postgres infers the
+    // parameter type from the column). What this test still proves is unchanged
+    // and is why it stays here: the temporal hook does not touch a non-temporal
+    // column. The full comparand-type table lives in
+    // `filter-value-type-fidelity.test.ts`.
+    expect(params).toEqual(['80']);
   });
 });

@@ -146,7 +146,9 @@ const ACCEPTED: Array<{ name: string; where: unknown; tree: unknown }> = [
   {
     name: 'an explicit operator',
     where: { amount: { $gte: 10 } },
-    tree: { kind: 'leaf', member: 'amount', operator: 'gte', values: ['10'] },
+    // [#5526] `values` is `unknown[]`, so the number the author wrote stays a
+    // number instead of being encoded to `'10'` and guessed back.
+    tree: { kind: 'leaf', member: 'amount', operator: 'gte', values: [10] },
   },
   {
     name: '$between lowered to its two bounds',
@@ -154,8 +156,8 @@ const ACCEPTED: Array<{ name: string; where: unknown; tree: unknown }> = [
     tree: {
       kind: 'and',
       children: [
-        { kind: 'leaf', member: 'amount', operator: 'gte', values: ['10'] },
-        { kind: 'leaf', member: 'amount', operator: 'lte', values: ['20'] },
+        { kind: 'leaf', member: 'amount', operator: 'gte', values: [10] },
+        { kind: 'leaf', member: 'amount', operator: 'lte', values: [20] },
       ],
     },
   },
