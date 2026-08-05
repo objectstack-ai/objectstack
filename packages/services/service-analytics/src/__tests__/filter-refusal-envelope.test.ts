@@ -85,16 +85,22 @@ const REFUSALS: Array<{ name: string; where: unknown; message: RegExp; issueBull
     message: /needs a two-element \[min, max\] array/,
     issueBullet: true,
   },
+  // FLIPPED with the #5322 ruling: these two entries were "$and/$or with an
+  // empty array". The refusing SITE is unchanged (the combinator guard #5352's
+  // body bulleted, hence issueBullet stays true) but its empty-array half
+  // graduated to a boolean identity — `{$and: []}` = TRUE, `{$or: []}` = FALSE,
+  // asserted in ACCEPTED below — so the site's remaining refusal is the
+  // non-array spelling, still carrying the same envelope.
   {
-    name: '$and with an empty array',
-    where: { $and: [] },
-    message: /"\$and" requires a non-empty array/,
+    name: '$and that is not an array',
+    where: { $and: 'won' },
+    message: /"\$and" requires an array of filter objects/,
     issueBullet: true,
   },
   {
-    name: '$or with an empty array',
-    where: { $or: [] },
-    message: /"\$or" requires a non-empty array/,
+    name: '$or that is not an array',
+    where: { $or: { stage: 'won' } },
+    message: /"\$or" requires an array of filter objects/,
     issueBullet: true,
   },
   {
@@ -175,6 +181,20 @@ const ACCEPTED: Array<{ name: string; where: unknown; tree: unknown }> = [
     name: 'an empty filter object as TRUE (#5325)',
     where: {},
     tree: null,
+  },
+  {
+    // #5322: the AND identity — a conjunction of zero conditions constrains
+    // nothing. Was in REFUSALS ("requires a non-empty array") until the ruling.
+    name: 'an empty $and as TRUE (#5322)',
+    where: { $and: [] },
+    tree: null,
+  },
+  {
+    // #5322: the OR identity — a disjunction of zero conditions matches
+    // nothing. Fail-closed for a scope whose disjunct list looped to zero items.
+    name: 'an empty $or as the FALSE constant (#5322)',
+    where: { $or: [] },
+    tree: { kind: 'const', value: false },
   },
   {
     // #5334: `[]` is "no filter", not a failed filter.

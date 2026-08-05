@@ -289,22 +289,33 @@ export type FilterCondition = {
  * Directive #10, and this sentence is kept as the record that the tracking
  * worked.
  *
+ * ## Empty combinators are boolean identities (#5322, maintainer ruling 2026-08-04)
+ *
+ * `{ $and: [] }` is TRUE — the AND identity, no constraint. `{ $or: [] }` is
+ * FALSE — the OR identity, zero rows. A `{}` disjunct is TRUE and ABSORBS its
+ * `$or`; `{ $not: {} }` is `NOT TRUE` — FALSE. The ruling took the reduction
+ * over the analytics compilers' fail-closed throw for two reasons: only a
+ * reduction can evaluate a NESTED tree (a rejection must first reduce to
+ * judge an empty combinator sitting inside a `$or` branch, which concedes the
+ * point), and `{ $or: [] }` = zero rows is fail-closed exactly where it
+ * matters — an RLS scope whose disjunct list loops to zero items hides every
+ * row instead of exposing the table (#5134). An earlier revision of this
+ * paragraph kept the identities OUT of the contract because two compilers
+ * still refused them; that gap closed with PR #5365 (both
+ * `service-analytics` compilers reduce, and the four cases are enrolled in
+ * `filter-logic-conformance.ts` against every backend — the five drivers
+ * already reduced: `driver-sql` #5243, `driver-mongodb` #5323). Loud
+ * AUTHORING-time rejection of the literal spellings is a separate, optional
+ * lint concern (#5330), not a runtime semantic.
+ *
  * ## Deliberately NOT declared here
  *
- * The boolean identities of the EMPTY combinators (`{ $and: [] }` = TRUE,
- * `{ $or: [] }` = FALSE, `{ $not: {} }` = FALSE) are RULED — #5322
- * (maintainer, 2026-08-04) took the identity over the analytics compilers'
- * fail-closed throw — but not yet stated here as contract: on main today
- * `read-scope-sql` and `filter-normalizer` still refuse an empty `$and`/`$or`,
- * and the ruling's implementation PR #5365 (aligns both compilers, enrolls the
- * four cases in `FILTER_LOGIC_CASES`) is sequenced to land after this one. The
- * declaration flips to stated contract with that PR, not here — declaring it
- * first would out-run enforcement. Likewise `{ field: {} }` (a field
- * constrained by zero operators): #5240 ruled it REJECTED and #5327 gated
- * driver-sql / driver-sqlite-wasm / driver-memory / formula; `driver-mongodb`
- * still answers it (tracked by #5376), and the schema-side narrowing stays
- * with the spec lane. Declaring either before it is enforced everywhere would
- * be exactly the `declared ≠ enforced` shape this file exists to prevent.
+ * `{ field: {} }` (a field constrained by zero operators): #5240 ruled it
+ * REJECTED and #5327 gated driver-sql / driver-sqlite-wasm / driver-memory /
+ * formula; `driver-mongodb` still answers it (tracked by #5376), and the
+ * schema-side narrowing stays with the spec lane. Declaring it before it is
+ * enforced everywhere would be exactly the `declared ≠ enforced` shape this
+ * file exists to prevent.
  */
 export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> = z.lazy(() =>
   z.record(z.string(), z.unknown()).and(
