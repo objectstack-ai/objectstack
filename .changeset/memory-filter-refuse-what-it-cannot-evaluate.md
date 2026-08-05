@@ -45,4 +45,7 @@ runs through the real driver, as it does for the other three backends.
 
 Accepted operators are the spec's `FILTER_OPERATORS`, plus `$regex` (produced by
 plugin-auth's ObjectQL adapter, compiled by `driver-sql`) and its `$options`
-companion.
+companion. `$options` is a modifier, not a predicate: on its own, with no
+`$regex` beside it, it is refused like any other filter this driver cannot
+evaluate — it used to raise the same uncoded engine error on the live path and
+match every row in the matcher.
