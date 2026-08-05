@@ -48,6 +48,14 @@
  * that exist in the source, and the walk must have reached every one of them.
  * That is the half that makes absence loud: a table the walk cannot reach is a
  * table this gate is not judging, and it fails rather than passing quietly.
+ *
+ * ## What it deliberately does not judge
+ *
+ * - Tables reaching `strictUnknownKeyError` directly, which carry a transcribed
+ *   `knownKeys` array instead of a shape — measured clean, pinned shrink-only
+ *   below, extension tracked as #5483.
+ * - Two alias keys in one table colliding under the suggester's own
+ *   `aliasProbe` normalisation, where the later entry silently wins (#5481).
  */
 
 import fs from 'node:fs';
@@ -287,8 +295,8 @@ describe('alias integrity — coverage', () => {
     // "green check over source nothing read" failure the campaign keeps paying
     // for: migrating one to `strictObject` is free, adding a NEW one fails here
     // and forces the choice to be deliberate. Extending the judgement over them
-    // is tracked separately — they carry a transcribed key list rather than a
-    // shape, so it is a different measurement, not more of this one.
+    // is #5483 — they carry a transcribed key list rather than a shape, so it
+    // is a different measurement, not more of this one.
     const uncovered = MODULES.filter((f) => {
       const rel = path.relative(SPEC_SRC, f);
       return rel !== 'shared/suggestions.zod.ts' && rel !== 'shared/strict-object.ts';
