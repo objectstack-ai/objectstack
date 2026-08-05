@@ -166,9 +166,12 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
    */
   appName: z.string().optional()
     .describe(
-      'Product name for template rendering ({{appName}}) — OS_APP_NAME env wins, then this, then '
-      + 'the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply '
-      + 'sender when no defaultFrom is configured',
+      // No `{{…}}` in this string: the docs generator escapes a doubled brace
+      // into MDX as `` `{{x}` `` plus a stray `}` (three such sites already on
+      // main — filed as #5452), so the name is spelled without them.
+      'Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then '
+      + 'this, then the top-level config appName, then "ObjectStack". Also seeds the placeholder '
+      + 'no-reply sender when no defaultFrom is configured',
     ),
 
   /**

@@ -23,6 +23,24 @@ Resolution order in `serve.ts`:
 
 3. Default → provider='log' (LogTransport, no real send)
 
+`appName` is the one key whose env layer is not `OS_EMAIL_*` — it is
+
+`OS_APP_NAME`, because the same product name names the whole deployment,
+
+not just its mail.
+
+Every key here is one `resolveEmailCapabilityArg` reads (the single reader
+
+of `config.email`); the schema is the operator-facing contract for that
+
+function, so a key the runtime honours and this object omits is a type
+
+error on a config that boots fine — the declared ≠ implemented gap of
+
+#5104 (provider='smtp') and #5307 (queueDelivery / appName /
+
+defaultTemplateContext), both times with the spec on the lagging side.
+
 SMTP delivery is built in (ADR-0012): select it with provider='smtp'
 
 and supply the connection through `options` (host / port / secure /
@@ -82,7 +100,10 @@ const result = EmailAddressConfigSchema.parse(data);
 | **defaultFrom** | `{ name?: string; address: string }` | optional |  |
 | **retries** | `integer` | optional | Retry attempts on transport throw |
 | **persist** | `boolean` | optional | Persist to sys_email (default true) |
+| **queueDelivery** | `boolean` | optional | Deliver through the durable sys_job_queue instead of inline (or OS_EMAIL_QUEUE_ENABLED env). Default false. Reuses `retries` as the queue attempt budget; requires a queue service and sys_email persistence, else the boot fails |
 | **options** | `Record<string, any>` | optional | Provider-specific extras. smtp: host (required) / port / secure / user / password, mirroring OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER / _PASSWORD. postmark: messageStream |
+| **appName** | `string` | optional | Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then this, then the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured |
+| **defaultTemplateContext** | `Record<string, any>` | optional | Free-form render context merged into every sendTemplate() call, under the per-call data. Passed through unchanged. An appName written here overrides both the appName key and OS_APP_NAME |
 
 
 ---
