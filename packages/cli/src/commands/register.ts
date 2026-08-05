@@ -40,7 +40,7 @@ async function promptPassword(promptText: string): Promise<string> {
           cleanup();
           resolve(chars.join(''));
           break;
-        case '': // Backspace
+        case '\u007f': // Backspace
           if (chars.length > 0) {
             chars.pop();
             process.stdout.clearLine(0);
