@@ -26,6 +26,23 @@ const SCALAR_SQL_OPS: Record<string, string> = {
   equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
 };
 
+/**
+ * The LIKE family: SQL spelling + the pattern each wraps its comparand in.
+ *
+ * Deliberately the same pair of tables `NativeSQLStrategy.buildFilterClause`
+ * carries (`opMap` / `likePattern`), because this file renders a description of
+ * the statement THAT compiler produces. Keeping them as one table here is the
+ * point of #5333: `startsWith` / `endsWith` were in neither the branch above nor
+ * `SCALAR_SQL_OPS`, so they fell to the unmapped exit and the predicate vanished
+ * from the echo while the query it documents ran `LIKE 'w%'`.
+ */
+const LIKE_SQL_OPS: Record<string, { sql: string; pattern: (v: string) => string }> = {
+  contains: { sql: 'LIKE', pattern: (v) => `%${v}%` },
+  notContains: { sql: 'NOT LIKE', pattern: (v) => `%${v}%` },
+  startsWith: { sql: 'LIKE', pattern: (v) => `${v}%` },
+  endsWith: { sql: 'LIKE', pattern: (v) => `%${v}` },
+};
+
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
 interface CrossObjectPlanDim {
   /** The caller's dimension name (output key), e.g. `region`. */
@@ -607,8 +624,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * Mirrors `NativeSQLStrategy.buildFilterClause`'s operator vocabulary so the
    * two previews read alike, but binds through `coerceFilterValueForObjectQL`:
    * the comparand shown is the one THIS path actually hands the engine (a real
-   * boolean, not SQL's 1/0). Returns null for an operator/value combination
-   * that carries no predicate, matching `execute()`, which drops it too.
+   * boolean, not SQL's 1/0).
+   *
+   * `null` means "this leaf carries no predicate" — a value-less scalar leaf,
+   * which `execute()` and `NativeSQLStrategy` drop too. It does NOT mean "I could
+   * not render that operator": #5333 was exactly that conflation, and an
+   * unrenderable operator now THROWS (see the exit below).
    */
   private buildFilterClauseSql(
     col: string,
@@ -628,13 +649,45 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return `${col} ${operator === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
     }
 
-    if (operator === 'contains' || operator === 'notContains') {
-      params.push(`%${values[0]}%`);
-      return `${col} ${operator === 'contains' ? 'LIKE' : 'NOT LIKE'} $${params.length}`;
+    // The LIKE family binds its PATTERN, which is text by construction, so it
+    // skips `coerceFilterValueForObjectQL` — same reason `NativeSQLStrategy`
+    // keeps the un-normalised column reference for these: a prefix/suffix/
+    // substring match reads the column as stored.
+    const like = LIKE_SQL_OPS[operator];
+    if (like) {
+      params.push(like.pattern(values[0]));
+      return `${col} ${like.sql} $${params.length}`;
     }
 
     const op = SCALAR_SQL_OPS[operator];
-    if (!op) return null;
+    if (!op) {
+      // [#5333] THROW rather than `return null`. `renderFilterNodeSql` reads a
+      // `null` as "this node constrains nothing", so the old exit deleted the
+      // predicate from the echoed statement — and a rendering WIDER than
+      // execution is the failure this whole render block exists to prevent
+      // (#3601 / #3602 / #3650): the author runs it to reproduce a result, gets
+      // more rows, and concludes the filter never applied.
+      //
+      // It can throw because the vocabulary upstream is CLOSED: `fieldLeaves`
+      // in `filter-normalizer.ts` is the only producer of leaf nodes, and it
+      // refuses an operator outside `MONGO_TO_CUBE_OP` with `INVALID_FILTER` /
+      // 400 before a leaf exists. So no caller-authored filter can land here —
+      // an arrival means the normalizer's table gained an entry this renderer
+      // has no arm for, which is our bug, not the caller's, and the one answer
+      // that must never be given for it is a silently wider query. Same call
+      // `convertFilter`'s `default:` arm made when it stopped reading an
+      // unmapped operator as equality (#4128). Deliberately NOT
+      // `invalidFilterError`'s 400 envelope: this is drift between two of our
+      // own tables, not a caller-shaped mistake.
+      throw new Error(
+        `[analytics] ObjectQLStrategy cannot render display SQL for filter operator ` +
+        `"${operator}" (on "${col}"). The analytics operator vocabulary is closed — ` +
+        `filter-normalizer.ts refuses anything it cannot map — so this means a new ` +
+        `operator reached the normalizer without an arm here. Add one rather than ` +
+        `dropping the predicate: an echo without it describes a WIDER query than the ` +
+        `one that ran (#5333).`,
+      );
+    }
     params.push(coerceFilterValueForObjectQL(values[0]));
     return `${col} ${op} $${params.length}`;
   }
