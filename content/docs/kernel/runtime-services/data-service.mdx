@@ -30,7 +30,8 @@ services.data.delete(object: string, id: string): Promise<DeleteDataResult>
 - `get`: single record payload
 - `find`: list payload + pagination metadata
 - `create`/`update`: mutated record payload
-- `delete`: success marker / deleted ID payload
+- `delete`: `{ object, id, success }` — the spec's `DeleteDataResponse`. The
+  flag is `success`, not `deleted` (#5638)
 
 ## Typical Errors
 
