@@ -12,6 +12,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
@@ -27,20 +28,28 @@ const SCALAR_SQL_OPS: Record<string, string> = {
 };
 
 /**
- * The LIKE family: SQL spelling + the pattern each wraps its comparand in.
+ * The LIKE family: SQL spelling + where each one puts the wildcard.
  *
  * Deliberately the same pair of tables `NativeSQLStrategy.buildFilterClause`
- * carries (`opMap` / `likePattern`), because this file renders a description of
+ * carries (`opMap` / `likeShape`), because this file renders a description of
  * the statement THAT compiler produces. Keeping them as one table here is the
  * point of #5333: `startsWith` / `endsWith` were in neither the branch above nor
  * `SCALAR_SQL_OPS`, so they fell to the unmapped exit and the predicate vanished
  * from the echo while the query it documents ran `LIKE 'w%'`.
+ *
+ * [#5567] The pattern comes from the shared `likePattern`, which ESCAPES the
+ * comparand, and the renderer binds an explicit `ESCAPE` alongside it. That is
+ * not cosmetic for an echo: the execution this file describes goes through the
+ * engine to `driver-sql`, whose `applyLike` has always escaped and bound
+ * `ESCAPE`. Rendering the raw comparand meant the echoed statement was WIDER
+ * than the query it claims to reproduce whenever the comparand carried a `_` or
+ * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
  */
-const LIKE_SQL_OPS: Record<string, { sql: string; pattern: (v: string) => string }> = {
-  contains: { sql: 'LIKE', pattern: (v) => `%${v}%` },
-  notContains: { sql: 'NOT LIKE', pattern: (v) => `%${v}%` },
-  startsWith: { sql: 'LIKE', pattern: (v) => `${v}%` },
-  endsWith: { sql: 'LIKE', pattern: (v) => `%${v}` },
+const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape }> = {
+  contains: { sql: 'LIKE', shape: 'contains' },
+  notContains: { sql: 'NOT LIKE', shape: 'contains' },
+  startsWith: { sql: 'LIKE', shape: 'starts' },
+  endsWith: { sql: 'LIKE', shape: 'ends' },
 };
 
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
@@ -655,8 +664,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // substring match reads the column as stored.
     const like = LIKE_SQL_OPS[operator];
     if (like) {
-      params.push(like.pattern(values[0]));
-      return `${col} ${like.sql} $${params.length}`;
+      // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
+      // `driver-sql`'s `applyLike` binds for the same operator — so an author
+      // who copies this statement out runs the predicate that ran.
+      params.push(likePattern(like.shape, values[0]));
+      const patternRef = `$${params.length}`;
+      params.push(LIKE_ESCAPE_CHAR);
+      return `${col} ${like.sql} ${patternRef} ESCAPE $${params.length}`;
     }
 
     const op = SCALAR_SQL_OPS[operator];

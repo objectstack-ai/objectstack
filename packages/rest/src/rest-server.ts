@@ -437,6 +437,59 @@ const DATA_STORE_FAULT = (): { status: number; body: Record<string, unknown> } =
 });
 
 /**
+ * [#5489] The envelope for "nothing in this mapper recognised the error": a
+ * sanitised 500 carrying the catalog's `INTERNAL_ERROR`.
+ *
+ * This is `mapDataError`'s TERMINAL branch, and until now it answered
+ * `{ status: 400, error: <the raw message> }`. Both halves of that were wrong
+ * in the same direction:
+ *
+ *  - **400 says the CALLER is at fault**, and an SDK reads it as "do not
+ *    retry, fix the request". The errors that actually reach here are the ones
+ *    no branch above could attribute to the request at all — a metadata store
+ *    that cannot be read (`matchEndpoint` throws rather than answering an empty
+ *    set, precisely so an outage does not masquerade as a miss; ADR-0110 D3),
+ *    or a plain handler bug (`TypeError: x is not a function`). Both are server
+ *    faults that a caller cannot fix and a caller SHOULD retry. Measured on
+ *    `GET /api/v1/meta/api` with a store that throws
+ *    `Error('metadata store unreachable')`: HTTP 400 (#5224 / PR #5487 left the
+ *    assertion at `>= 400` rather than pin this as intended).
+ *  - **The raw message shipped verbatim**, which is the exact discipline
+ *    #5437/#5464 closed one branch up: a declared 5xx drops its prose because
+ *    length was never a proxy for leakage. An error that matched no heuristic
+ *    is the LEAST attributable text in the file — this branch is reached only
+ *    because `looksLikeInternalErrorLeak` said nothing, and #5462 already
+ *    recorded that a negative from a keyword heuristic is not evidence of
+ *    safety. The words still reach the operator: 500 is outside
+ *    `isExpectedDataStatus`, so `handleRouteError` prints `[REST] Unhandled
+ *    error` with the whole error, and `sendError`'s `logWithheldServerFault`
+ *    covers the routes that bypass it.
+ *
+ * `INTERNAL_ERROR` rather than {@link DATA_STORE_FAULT}'s `DATABASE_ERROR`, and
+ * the distinction is deliberate: `DATA_STORE_FAULT` is emitted where the
+ * evidence NAMES a store failure (a driver's missing-relation phrasing, a
+ * `looksLikeInternalErrorLeak` hit), so it can honestly say "database". Here
+ * the defining fact is that there is no evidence of anything — sending a
+ * handler `TypeError` back as `DATABASE_ERROR` would point an operator at a
+ * database that is fine. `INTERNAL_ERROR` is not a third vocabulary either: it
+ * is what `standardErrorCodeForHttpStatus(500)` yields (`HttpStatusErrorCodeMap`
+ * in `@objectstack/spec`) — the catalog's own floor for "500 with no more
+ * specific code" — and the message is the same `INTERNAL_ERROR_MESSAGE` the
+ * declared-5xx branch of {@link resolveErrorResponse} already emits.
+ *
+ * What did NOT move: every branch above this one. A client error is a 4xx here
+ * because a producer DECLARED `status` in the 4xx band or because a branch
+ * matched it by `code`/name/phrasing — validation, permission, unknown object,
+ * unknown field, not-null drift, unique violation, the sandbox unwraps. This
+ * branch is the one that had nothing to go on, and "no idea" is a server-side
+ * answer, not a client-side one.
+ */
+const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> } => ({
+    status: 500,
+    body: { error: INTERNAL_ERROR_MESSAGE, code: 'INTERNAL_ERROR' },
+});
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -899,7 +952,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         }
         return DATA_STORE_FAULT();
     }
-    return { status: 400, body: { error: raw || 'Bad request' } };
+    return UNCLASSIFIED_FAULT();
 }
 
 /**
@@ -1086,10 +1139,17 @@ function isExpectedQueryRejection(body: Record<string, unknown> | undefined): bo
  *  - `isExpectedQueryRejection` — the client-caused 400 vocabulary
  *  - `VALIDATION_FAILED` — the per-field 400 envelope
  *
- * It is deliberately NOT "any 4xx". `mapDataError`'s final fallback degrades an
- * error it recognised nothing about to an un-coded 400, and that bucket is
- * where a genuine handler bug (a `TypeError`, say) lands — silencing it would
- * be the mirror-image of the defect this fixes.
+ * It is deliberately NOT "any 4xx". [#5489] That used to be argued from
+ * `mapDataError`'s final fallback, which degraded an error it recognised
+ * nothing about to an UN-CODED 400 — the bucket a genuine handler bug (a
+ * `TypeError`, say) landed in, so a predicate widened to "any 4xx is expected"
+ * would have silenced it. That fallback is now {@link UNCLASSIFIED_FAULT}'s
+ * 500, which this predicate cannot treat as expected at all
+ * (`isExpectedDataStatus` names 502/503 and nothing else in the 5xx band), so
+ * the handler bug is loud STRUCTURALLY rather than by this sentence. The
+ * narrowness still matters for what remains in the un-coded 4xx band — the
+ * sandbox unwraps' business-rule 400s — and for the next author tempted to
+ * simplify the predicate down to a status range.
  *
  * [#4886] Every route catch now decides through this one function. Before, the
  * metadata family logged unconditionally — the designer's `?state=draft` probe

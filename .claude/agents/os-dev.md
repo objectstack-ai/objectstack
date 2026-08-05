@@ -271,7 +271,7 @@ binary: zero matches, no signal, and the rule you just wrote becomes
 invisible to every agent that greps for it. Run
 `node scripts/check-nul-bytes.mjs` before pushing, and when your change so
 much as *mentions* control characters, self-scan beyond the gate
-(`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f]' <files>`) — the gate's blind
+(`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' <files>`) — the gate's blind
 spots are exactly where these bytes hide.
 
 The GitHub body sanitizer is the same discipline's other half: it strips `<`
