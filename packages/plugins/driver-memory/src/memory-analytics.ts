@@ -28,10 +28,11 @@ import {
  *
  * A row here means the face ATTEMPTS the operator, not that the predicate it
  * builds is correct — `$notContains` lowers to a bare mingo `{$not: 'x'}` that
- * constrains nothing (#5374), and the comparand round-trip through `string[]`
- * loses booleans and `null` (#5373). Both are out of #5345's scope (which ruled
- * on operators with NO mapping) and are filed rather than fixed here; do not
- * read this list as eleven operators known to work.
+ * constrains nothing (#5374). That one is out of #5345's scope (which ruled on
+ * operators with NO mapping) and is filed rather than fixed here; do not read
+ * this list as eleven operators known to work. The comparand half of that
+ * caveat is closed: #5373 removed the `string[]` round-trip that lost booleans
+ * and `null` (see {@link NormalizedCubeFilter}).
  */
 const MONGO_TO_CUBE_OPERATOR: Readonly<Record<string, string>> = Object.freeze({
   $eq: 'equals',
@@ -61,6 +62,51 @@ export const ANALYTICS_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.free
   fieldOperators: new Set<string>(Object.keys(MONGO_TO_CUBE_OPERATOR)),
   combinators: new Set<string>(['$and']),
 });
+
+/**
+ * [#5373] One lowered constraint: the private intermediate between
+ * {@link MemoryAnalyticsService.normalizeFilters} and the two exits that consume
+ * it (`query()` → a mingo `$match`, `generateSql()` → a SQL literal).
+ *
+ * # Why `values` is `unknown[]` and not `string[]`
+ *
+ * It was `string[]`, because the cube WIRE format serialises filter values as
+ * strings. So every comparand made a JS value → string → JS value round trip,
+ * and that round trip is lossy for everything that is not already a string:
+ *
+ * | authored | stringified | recovered | compared against | result |
+ * |---|---|---|---|---|
+ * | `true` | `'1'` | `1` (the `/^-?\d+$/` arm wins) | stored `true` | **0 rows** |
+ * | `null` | `''` | `''` | stored `null` | `$ne` matched everything |
+ * | `'100'` (text column) | `'100'` | `100` | stored `'100'` | **0 rows** |
+ *
+ * mingo compares across JS types the way MongoDB compares across BSON types —
+ * never equal — so each of those is a wrong row set rather than an error. The
+ * encoding's own justification (booleans as `'1'`/`'0'`, "so downstream
+ * consumers expecting SQLite-style numeric booleans match correctly") was true
+ * for the SQL-generating exit and false for the in-memory one, and both exits
+ * shared the one encoding. There is no string form that is correct for both.
+ *
+ * So the round trip is gone rather than made lossless: the value stays whatever
+ * the author wrote, and each exit converts at ITS boundary, where it knows what
+ * it needs — `toSqlLiteral` in `generateSql()`, nothing at all in `query()`.
+ *
+ * This is an INTERNAL representation, which is what makes that affordable.
+ * `AnalyticsQuery.where` is a `FilterCondition` and nothing else (#5375 removed
+ * the leg that also accepted a cube-style array as input), and the API layer
+ * actively REJECTS a `{member, operator, values}` array on the wire — so no
+ * caller, no spec schema and no serialized form observes this triple's shape.
+ */
+interface NormalizedCubeFilter {
+  member: string;
+  operator: string;
+  /**
+   * The comparands, as authored. Temporal values are put into the field's
+   * storage form at the exits ({@link MemoryAnalyticsService.comparandsFor}),
+   * never here — that rule needs the resolved field path, which only an exit has.
+   */
+  values: unknown[];
+}
 
 /**
  * Configuration for MemoryAnalyticsService
@@ -138,11 +184,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         const fieldPath = this.resolveFieldPath(cube, filter.member);
 
         if (filter.values && filter.values.length > 0) {
-          // Coerce each filter value to a sensible runtime type so
-          // `$eq` against in-memory numeric/boolean records still
-          // matches. The cube spec serialises values as `string[]`,
-          // but the in-memory driver compares with strict equality.
-          const coerced = filter.values.map(v => this.coerceFilterValue(v));
+          // [#5373] The comparands as authored, in the storage form of the field
+          // they are compared against. There is no type recovery step any more,
+          // because there is no longer a stringification to recover FROM: a
+          // boolean reaches mingo as a boolean and `null` as `null`, so a
+          // predicate over `is_active` or `closed_at` selects the same rows
+          // `find()` selects instead of none / all of them.
+          const coerced = this.comparandsFor(cube, filter.member, filter.values);
           if (mongoOp === '$in') {
             matchStage[fieldPath] = { $in: coerced };
           } else if (mongoOp === '$nin') {
@@ -405,8 +453,18 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         const fieldPath = this.resolveFieldPath(cube, filter.member);
         const sqlOp = this.operatorToSql(filter.operator);
         if (filter.values && filter.values.length > 0) {
-          const literal = this.toSqlLiteral(filter.values[0]);
-          whereClauses.push(`${fieldPath} ${sqlOp} ${literal}`);
+          const comparand = this.comparandsFor(cube, filter.member, filter.values)[0];
+          // [#5373] A null comparand is a NULLNESS test, not a comparison. SQL's
+          // `= NULL` is never true (and `!= NULL` never true either), so emitting
+          // one would move the very loss this issue is about from the mingo exit
+          // to this one: `{closed_at: null}` would compile to a WHERE that
+          // selects nothing while `query()` selects the two null rows. The two
+          // exits have to mean the same thing.
+          if (comparand == null && (filter.operator === 'equals' || filter.operator === 'notEquals')) {
+            whereClauses.push(`${fieldPath} IS ${filter.operator === 'notEquals' ? 'NOT ' : ''}NULL`);
+          } else {
+            whereClauses.push(`${fieldPath} ${sqlOp} ${this.toSqlLiteral(comparand)}`);
+          }
         }
       }
     }
@@ -465,10 +523,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * which sibling branch was walked first. Both public entry points (`query()`
    * and `generateSql()`) go through this method, so both refuse identically.
    */
-  private normalizeFilters(query: unknown): Array<{ member: string; operator: string; values: string[] }> {
+  private normalizeFilters(query: unknown): NormalizedCubeFilter[] {
     if (!query || typeof query !== 'object') return [];
 
-    const out: Array<{ member: string; operator: string; values: string[] }> = [];
+    const out: NormalizedCubeFilter[] = [];
     const where = (query as { where?: unknown }).where;
 
     if (where && typeof where === 'object' && !Array.isArray(where)) {
@@ -481,12 +539,28 @@ export class MemoryAnalyticsService implements IAnalyticsService {
 
   private flattenFilterCondition(
     cond: Record<string, unknown>,
-    out: Array<{ member: string; operator: string; values: string[] }>,
+    out: NormalizedCubeFilter[],
     path: string,
   ): void {
     for (const [key, raw] of Object.entries(cond)) {
       const here = `${path}.${key}`;
-      if (raw == null) continue;
+
+      // [#5373] There is deliberately no `if (raw == null) continue` here.
+      //
+      // There was, and it was the more dangerous half of this issue: `null` is a
+      // COMPARAND, not an absent constraint, so `{closed_at: null}` produced no
+      // cube entry at all and the predicate simply vanished. One fewer
+      // constraint means MORE rows — a "closed_at is empty" widget silently
+      // aggregated the whole table, including the closed records it was written
+      // to exclude, and a widened chart looks exactly like a working chart. That
+      // is the #3948 direction, and on an RLS read scope it is an unauthorized
+      // read rather than a wrong number.
+      //
+      // `undefined` falls through with it, matching the live query path, which
+      // has never distinguished the two (`normalizeFilterCondition` sends both
+      // to `toStorageForm` and lets mingo's null-equality rule decide). Agreeing
+      // with that path is the invariant (#5240); inventing a third reading of
+      // `{field: undefined}` here would break it in the other direction.
 
       // Logical combinators. `$and` folds into the same implicit-AND list; the
       // gate above has already proven it is an array of filter nodes.
@@ -506,17 +580,19 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       }
 
       // Operator wrapper: { field: { $op: value, ... } }
-      if (typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
+      //
+      // `raw !== null` carries real weight now that the blanket `raw == null`
+      // skip above is gone: `typeof null === 'object'`, so a null comparand
+      // would otherwise be read as an operator map and reach `Object.keys(null)`.
+      // It is a comparand — it belongs to the implicit-equality arm below.
+      if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
         const wrapper = raw as Record<string, unknown>;
         const opEntries = Object.keys(wrapper).filter(k => k.startsWith('$'));
         if (opEntries.length > 0) {
           for (const opKey of opEntries) {
             const cubeOp = this.mongoOperatorToCubeOperator(opKey, key, `${here}.${opKey}`);
             const v = wrapper[opKey];
-            const values = Array.isArray(v)
-              ? v.map(x => this.stringifyForCube(x))
-              : [this.stringifyForCube(v)];
-            out.push({ member: key, operator: cubeOp, values });
+            out.push({ member: key, operator: cubeOp, values: Array.isArray(v) ? [...v] : [v] });
           }
           continue;
         }
@@ -529,13 +605,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       }
 
       // Implicit equality: { field: scalar | array }
-      const values = Array.isArray(raw)
-        ? raw.map(x => this.stringifyForCube(x))
-        : [this.stringifyForCube(raw)];
       out.push({
         member: key,
         operator: Array.isArray(raw) ? 'in' : 'equals',
-        values,
+        values: Array.isArray(raw) ? [...raw] : [raw],
       });
     }
   }
@@ -558,52 +631,53 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Stringify a filter value for cube-style storage. Booleans become
-   * `'1'/'0'` so that downstream consumers expecting SQLite-style
-   * numeric booleans match correctly. The in-memory pipeline uses
-   * {@link coerceFilterValue} to recover real JS types from these
-   * strings.
+   * [#5373] The comparands of one lowered entry, in the storage form of the
+   * field they are compared against — the ONE place either exit converts a
+   * value, so the two exits cannot drift apart.
+   *
+   * The only conversion left is the temporal one (#4047): a `datetime` column
+   * holds canonical UTC ISO text, so a `Date` comparand has to become that text
+   * or mingo's cross-type comparison drops every row. That rule is keyed on the
+   * DECLARED field kind and belongs to the driver, so it is borrowed from the
+   * driver rather than re-derived here — a second derivation of it is the
+   * in-package divergence #5240 ruled against.
+   *
+   * Everything else passes through untouched. That is the point of #5373: a
+   * boolean stays a boolean, `null` stays `null`, and a text column's `'100'`
+   * stays the string `'100'` instead of becoming the number `100`.
    */
-  private stringifyForCube(v: unknown): string {
-    if (v == null) return '';
+  private comparandsFor(cube: Cube, member: string, values: unknown[]): unknown[] {
+    const table = this.extractTableName(cube.sql);
+    const fieldPath = this.resolveFieldPath(cube, member);
+    return values.map(v => this.driver.filterComparandStorageForm(table, fieldPath, v));
+  }
+
+  /**
+   * [#5373] A JS comparand as a SQL literal — the one point where a value is
+   * stringified, and the reason it may be.
+   *
+   * This used to take the cube-stringified `string`, which meant it could only
+   * guess the original type back out of the text: `'100'` from a TEXT column
+   * looked exactly like `100` from a numeric one, and it emitted both unquoted
+   * (`WHERE code = 100`). Given the real value there is nothing to guess.
+   *
+   * Booleans keep the SQLite-style `1`/`0` spelling the old encoding chose —
+   * that justification was always sound for THIS half, and only wrong because
+   * the in-memory half was forced to share it.
+   *
+   * A `null` comparand never reaches here from `equals`/`notEquals`; the WHERE
+   * builder emits `IS NULL` / `IS NOT NULL` for those. `NULL` is the honest
+   * literal for the remaining operators, which cannot be satisfied by it.
+   */
+  private toSqlLiteral(v: unknown): string {
+    if (v == null) return 'NULL';
     if (typeof v === 'boolean') return v ? '1' : '0';
-    if (v instanceof Date) return v.toISOString();
-    if (typeof v === 'object') return JSON.stringify(v);
-    return String(v);
-  }
-
-  /**
-   * Recover a runtime value from its cube-stringified form for in-memory
-   * comparison. Booleans, integers, floats and ISO-date-like strings are
-   * coerced; everything else stays as a string.
-   */
-  private coerceFilterValue(s: string): unknown {
-    if (s === 'true') return true;
-    if (s === 'false') return false;
-    if (s === 'null') return null;
-    // Numeric strings: integer or float (no leading zeros except '0')
-    if (/^-?\d+$/.test(s)) {
-      const n = Number(s);
-      if (Number.isFinite(n)) return n;
-    }
-    if (/^-?\d+\.\d+$/.test(s)) {
-      const n = Number(s);
-      if (Number.isFinite(n)) return n;
-    }
-    return s;
-  }
-
-  /**
-   * Type-aware SQL literal formatter. Booleans and numbers are emitted
-   * unquoted; everything else is single-quoted with embedded quotes
-   * escaped.
-   */
-  private toSqlLiteral(s: string): string {
-    if (s === 'true') return '1';
-    if (s === 'false') return '0';
-    if (s === 'null') return 'NULL';
-    if (/^-?\d+(\.\d+)?$/.test(s)) return s;
-    return `'${s.replace(/'/g, "''")}'`;
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+    if (typeof v === 'bigint') return String(v);
+    const text = v instanceof Date
+      ? v.toISOString()
+      : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return `'${text.replace(/'/g, "''")}'`;
   }
 
   private resolveFieldPath(cube: Cube, member: string): string {

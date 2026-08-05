@@ -55,6 +55,23 @@
  * and ADR-0078 / #4286 each ruled on, and it stays true if the cube pipeline
  * later learns `$or` — the case simply moves from the refused column to the
  * agreeing one without this file changing.
+ *
+ * # The COMPARAND axis (#5373)
+ *
+ * `FILTER_LOGIC_CASES` is a table of operator and combinator SHAPES, and every
+ * column in its fixture is a string — deliberately, so that nothing in it is
+ * about coercion. That is a real hole on a face whose defect was coercion: all
+ * three cases above passed while `{is_active: true}` returned zero rows and
+ * `{closed_at: null}` returned the whole table, because the cube lowering
+ * round-tripped every comparand through `string[]` and that round trip is lossy
+ * for anything that is not already a string.
+ *
+ * So the second half of this file runs the same invariant over a fixture built
+ * to vary the comparand's TYPE instead of the filter's shape. It belongs beside
+ * the shape table rather than in a file of its own for the reason the shape
+ * table exists at all: the thing being defended is "this package's filter faces
+ * agree", and a divergence introduced on either axis has to fail in the place
+ * someone looks when they change a lowering.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -241,5 +258,217 @@ describe('[#5345] MemoryAnalyticsService — the same table, through the THIRD f
     for (const c of uncompilable) {
       expect(refused, `${c.name}: a $or/$not case must refuse, never answer`).toContain(c.name);
     }
+  });
+});
+
+/**
+ * [#5373] The same invariant, over comparand TYPES rather than filter shapes.
+ *
+ * The fixture is the one measured in the issue, plus the columns that separate
+ * the third symptom: `code` is TEXT holding `'100'`, `qty` is NUMBER holding
+ * `100`, so a comparand that silently became a number is visible as a wrong row
+ * set on one and invisible on the other. `made_at` is a declared `datetime`,
+ * which is the one comparand that legitimately still converts (#4047) and so is
+ * the one a "stop converting" fix is most likely to break.
+ */
+const COMPARAND_TABLE = 'comparand_deal';
+
+const COMPARAND_FIELDS = {
+  id: { type: 'text', name: 'id' },
+  is_active: { type: 'boolean', name: 'is_active' },
+  name: { type: 'text', name: 'name' },
+  closed_at: { type: 'text', name: 'closed_at' },
+  code: { type: 'text', name: 'code' },
+  qty: { type: 'number', name: 'qty' },
+  made_at: { type: 'datetime', name: 'made_at' },
+} as const;
+
+const COMPARAND_ROWS: Array<Record<string, unknown>> = [
+  { id: '1', is_active: true, name: 'alpha', closed_at: null, code: '100', qty: 100, made_at: new Date('2026-01-01T00:00:00Z') },
+  { id: '2', is_active: false, name: 'beta', closed_at: '2026-01-01', code: '200', qty: 200, made_at: new Date('2026-06-01T00:00:00Z') },
+  { id: '3', is_active: true, name: 'gamma', closed_at: null, code: '100', qty: 100, made_at: new Date('2026-01-01T00:00:00Z') },
+];
+
+const COMPARAND_CUBE: Cube = {
+  name: COMPARAND_TABLE,
+  title: 'Comparand round-trip',
+  sql: COMPARAND_TABLE,
+  measures: { count: { name: 'count', label: 'Rows', type: 'count', sql: 'id' } },
+  dimensions: Object.fromEntries(
+    Object.keys(COMPARAND_FIELDS).map((f) => [f, { name: f, label: f, type: 'string' as const, sql: f }]),
+  ),
+  public: true,
+};
+
+/**
+ * Each case is `[name, where, expected ids]`. `expected` is asserted against the
+ * live path too, so a case whose expectation is simply wrong fails loudly rather
+ * than certifying whatever the two faces happen to agree on.
+ */
+const COMPARAND_CASES: Array<[name: string, where: FilterCondition, expected: string[]]> = [
+  // The issue's measured table. Booleans round-tripped `true` → `'1'` → the
+  // NUMBER 1, and mingo never equates 1 with true, so both of these were 0 rows.
+  ['boolean true selects the true rows', { is_active: true } as FilterCondition, ['1', '3']],
+  ['boolean false selects the false row', { is_active: false } as FilterCondition, ['2']],
+  // The widening one: `{closed_at: null}` produced no cube entry at all, so the
+  // predicate vanished and the query answered with the whole table (#3948).
+  ['a null comparand is a predicate, not an absent one', { closed_at: null } as FilterCondition, ['1', '3']],
+  ['negated null selects the complement', { closed_at: { $ne: null } } as FilterCondition, ['2']],
+  // The issue's UNVERIFIED third symptom, measured and real: `'100'` from a TEXT
+  // column round-tripped to the number 100 and matched nothing.
+  ['a numeric-looking STRING stays a string', { code: '100' } as FilterCondition, ['1', '3']],
+  ['a numeric-looking string inside $in stays a string', { code: { $in: ['100', '200'] } } as FilterCondition, ['1', '2', '3']],
+  ['a real number comparand still matches a numeric column', { qty: 100 } as FilterCondition, ['1', '3']],
+  ['a real number inside $in still matches', { qty: { $in: [100, 200] } } as FilterCondition, ['1', '2', '3']],
+  // Same root cause, opposite direction: `$ne` against the number 1 excluded
+  // nothing, so a negated boolean answered with every row.
+  ['negated boolean excludes only the matching rows', { is_active: { $ne: true } } as FilterCondition, ['2']],
+  // The comparand that must STILL convert: a `Date` against a declared
+  // `datetime` column, which stores canonical UTC ISO text (#4047).
+  ['a Date comparand still meets a datetime column', { made_at: new Date('2026-01-01T00:00:00Z') } as FilterCondition, ['1', '3']],
+  ['a Date bound still orders against a datetime column', { made_at: { $lte: new Date('2026-03-01T00:00:00Z') } } as FilterCondition, ['1', '3']],
+  // Ordinary strings were never broken; pinned so a fix aimed at the others
+  // cannot quietly cost the common case.
+  ['a plain string comparand is unchanged', { name: 'alpha' } as FilterCondition, ['1']],
+  ['$and folds comparands of mixed type', { $and: [{ is_active: true }, { code: '100' }] } as FilterCondition, ['1', '3']],
+];
+
+describe('[#5373] comparand types — the analytics face against the live query path', () => {
+  let driver: InMemoryDriver;
+  let service: MemoryAnalyticsService;
+
+  beforeAll(async () => {
+    driver = new InMemoryDriver({ persistence: false });
+    await driver.connect();
+    await driver.syncSchema(COMPARAND_TABLE, { fields: { ...COMPARAND_FIELDS } } as never);
+    for (const row of COMPARAND_ROWS) await driver.create(COMPARAND_TABLE, { ...row });
+    service = new MemoryAnalyticsService({ driver, cubes: [COMPARAND_CUBE] });
+  });
+
+  const sorted = (ids: string[]): string[] => [...ids].sort((x, y) => x.localeCompare(y));
+
+  const findIds = async (where: FilterCondition): Promise<string[]> => {
+    const rows = await driver.find(COMPARAND_TABLE, { object: COMPARAND_TABLE, fields: ['id'], where });
+    return sorted((rows as Array<Record<string, unknown>>).map((r) => String(r.id)));
+  };
+
+  const analyticsIds = async (where: FilterCondition): Promise<string[]> => {
+    const result = await service.query({
+      cube: COMPARAND_TABLE,
+      measures: [`${COMPARAND_TABLE}.count`],
+      dimensions: [`${COMPARAND_TABLE}.id`],
+      where,
+    });
+    return sorted((result.rows as Array<Record<string, unknown>>).map((r) => String(r[`${COMPARAND_TABLE}.id`])));
+  };
+
+  it('the fixture really is all three rows', async () => {
+    expect(await findIds({})).toEqual(['1', '2', '3']);
+    expect(await analyticsIds({})).toEqual(['1', '2', '3']);
+  });
+
+  for (const [name, where, expected] of COMPARAND_CASES) {
+    it(name, async () => {
+      // The live path first: it is the reference, so a wrong `expected` is
+      // reported as such instead of being blamed on the analytics face.
+      expect(await findIds(where), `${name}: the LIVE path disagrees with the expectation`).toEqual(sorted(expected));
+      expect(
+        await analyticsIds(where),
+        `${name}: the analytics face answered a different row set than find() — the #5240 divergence`,
+      ).toEqual(sorted(expected));
+    });
+  }
+
+  /**
+   * The whole point, stated once as a predicate over the whole table: no case
+   * may be answered differently by the two faces. Case-by-case assertions above
+   * already imply it, but stated here it survives the expectations being edited.
+   */
+  it('no comparand case is answered differently by the two faces', async () => {
+    for (const [name, where] of COMPARAND_CASES) {
+      expect(await analyticsIds(where), `${name}: the two faces disagree`).toEqual(await findIds(where));
+    }
+  });
+
+  /**
+   * The counter-test for the fixture itself. If `is_active` were stored as
+   * `1`/`0` rather than `true`/`false`, the boolean cases above would pass
+   * without the bug ever having been fixed.
+   */
+  it('the fixture stores real booleans and real nulls, not their stringified forms', async () => {
+    const rows = (await driver.find(COMPARAND_TABLE, {
+      object: COMPARAND_TABLE,
+      fields: ['id', 'is_active', 'closed_at', 'code'],
+    })) as Array<Record<string, unknown>>;
+    const one = rows.find((r) => r.id === '1')!;
+    expect(one.is_active).toBe(true);
+    expect(one.closed_at).toBeNull();
+    expect(one.code).toBe('100');
+    expect(rows.find((r) => r.id === '2')!.is_active).toBe(false);
+  });
+});
+
+/**
+ * [#5373] The OTHER exit.
+ *
+ * `query()` and `generateSql()` compile the same lowered entries into different
+ * targets, and the defect existed precisely because one encoding served both. A
+ * fix that satisfies mingo while emitting SQL that means something else has
+ * moved the bug rather than closed it, so the SQL exit is pinned on the same
+ * cases — including the two where the correct SQL is not a comparison at all.
+ */
+describe('[#5373] the generateSql exit emits literals that mean the same thing', () => {
+  let service: MemoryAnalyticsService;
+
+  beforeAll(async () => {
+    const driver = new InMemoryDriver({ persistence: false });
+    await driver.connect();
+    await driver.syncSchema(COMPARAND_TABLE, { fields: { ...COMPARAND_FIELDS } } as never);
+    service = new MemoryAnalyticsService({ driver, cubes: [COMPARAND_CUBE] });
+  });
+
+  const whereClause = async (where: FilterCondition): Promise<string> => {
+    const { sql } = await service.generateSql({
+      cube: COMPARAND_TABLE,
+      measures: [`${COMPARAND_TABLE}.count`],
+      where,
+    });
+    const m = /WHERE (.*?)(?: GROUP BY | ORDER BY | LIMIT | OFFSET |$)/.exec(sql);
+    return m ? m[1].trim() : '';
+  };
+
+  it('a boolean keeps the SQLite-style numeric spelling', async () => {
+    expect(await whereClause({ is_active: true } as FilterCondition)).toBe('is_active = 1');
+    expect(await whereClause({ is_active: false } as FilterCondition)).toBe('is_active = 0');
+  });
+
+  /**
+   * `= NULL` is never true in SQL, so emitting it would make this exit select
+   * nothing while `query()` selects the null rows — the same divergence one
+   * layer over. Before #5373 the clause was absent entirely, which is the
+   * widening direction instead.
+   */
+  it('a null comparand becomes a nullness test, not a comparison', async () => {
+    expect(await whereClause({ closed_at: null } as FilterCondition)).toBe('closed_at IS NULL');
+    expect(await whereClause({ closed_at: { $ne: null } } as FilterCondition)).toBe('closed_at IS NOT NULL');
+  });
+
+  /**
+   * The third symptom at this exit: with only the stringified form to read,
+   * a TEXT `'100'` and a numeric `100` were indistinguishable and both were
+   * emitted unquoted.
+   */
+  it('a numeric-looking string is quoted and a real number is not', async () => {
+    expect(await whereClause({ code: '100' } as FilterCondition)).toBe("code = '100'");
+    expect(await whereClause({ qty: 100 } as FilterCondition)).toBe('qty = 100');
+  });
+
+  it('a string comparand escapes its embedded quotes', async () => {
+    expect(await whereClause({ name: "O'Brien" } as FilterCondition)).toBe("name = 'O''Brien'");
+  });
+
+  it('a Date comparand is emitted as quoted canonical UTC text', async () => {
+    expect(await whereClause({ made_at: new Date('2026-01-01T00:00:00Z') } as FilterCondition))
+      .toBe("made_at = '2026-01-01T00:00:00.000Z'");
   });
 });

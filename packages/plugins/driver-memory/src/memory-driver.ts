@@ -1214,6 +1214,26 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
+   * [#5373] {@link toStorageForm}, for the analytics (cube) face.
+   *
+   * That face compiles its own `where` (`memory-analytics.ts`) and must compare
+   * against the same stored bytes this driver wrote, so it needs the same
+   * comparand rule — and the rule is keyed on the DECLARED field kind
+   * (`temporalFields`, populated by `syncSchema`), which only the driver holds.
+   * The alternative was for the analytics face to re-derive a temporal form from
+   * the value's shape, and a second implementation of this rule is precisely the
+   * in-package divergence #5240 ruled against: mingo compares cross-type as
+   * never-equal, so the two faces would answer one `where` with different rows
+   * the moment the two derivations disagreed.
+   *
+   * Deliberately narrow — one comparand, no filter semantics — so it exposes the
+   * convention without exposing the filter pipeline.
+   */
+  filterComparandStorageForm(object: string | undefined, field: string, value: unknown): unknown {
+    return this.toStorageForm(object, field, value);
+  }
+
+  /**
    * Put every declared temporal field of a record into its storage form — the
    * write half of the convention the filter path reads against. Returns the
    * input unchanged (same reference) when nothing needed converting, so the
