@@ -200,4 +200,37 @@ describe('ObjectStackClient (with Hono Server)', () => {
         expect(resultsResponse.records.length).toBeGreaterThan(0);
         expect(resultsResponse.records[0].name).toBe('Hono User');
     });
+
+    // [#5638] The one method whose declared return shape this suite never
+    // exercised — and the one that was wrong. `DeleteDataResult` claimed
+    // `deleted: boolean`; the schema it names declares `success`. This is the
+    // runtime half of the pin: a REAL delete, over HTTP, against the server
+    // this package's consumers talk to, read through the declared type.
+    //
+    // Nothing in this test is mocked into the answer: the DELETE route calls
+    // `protocol.deleteData` (rest-server.ts), NOT the broker shim above, so the
+    // body asserted here is the server's own.
+    it('should delete data via hono, answering the SPEC\'s `success` body', async () => {
+        const client = new ObjectStackClient({ baseUrl });
+        await client.connect();
+
+        const created = await client.data.create('customer', {
+            name: 'Doomed User',
+            email: 'doomed@example.com',
+        });
+
+        // Spec: DeleteDataResponse = { object, id, success }
+        const deleted = await client.data.delete('customer', created.id);
+        expect(deleted.success).toBe(true);
+        expect(deleted.object).toBe('customer');
+        expect(deleted.id).toBe(created.id);
+        // The undeclared key must not ride along (a passing schema parse would
+        // strip it silently, so assert the key set itself).
+        expect(Object.keys(deleted).sort()).toEqual(['id', 'object', 'success']);
+
+        // And the delete actually happened — a success flag nobody cross-checks
+        // is the cheapest thing in the world to keep green.
+        const remaining = await client.data.find('customer', { where: { id: created.id } });
+        expect(remaining.records.length).toBe(0);
+    });
 });

@@ -232,11 +232,21 @@ export interface UpdateDataResult<T = any> {
   droppedFields?: DroppedFieldsEvent[];
 }
 
-/** Spec: DeleteDataResponseSchema */
+/**
+ * Spec: DeleteDataResponseSchema
+ *
+ * [#5638] The success flag is `success`, matching the schema this comment
+ * names (`packages/spec/src/api/protocol.zod.ts`). It was declared `deleted`
+ * — a key no schema has ever declared and no server path has ever returned on
+ * `/data/:object/:id`, so `r.deleted` compiled and read `undefined` at
+ * runtime. Both `delete` surfaces below are pure `unwrapResponse` / `_unwrap`
+ * passthroughs: this interface is a claim about the server's body, never a
+ * rewrite of it, so the claim has to be the schema's.
+ */
 export interface DeleteDataResult {
   object: string;
   id: string;
-  deleted: boolean;
+  success: boolean;
 }
 
 export interface StandardError {

@@ -37,6 +37,15 @@
  * do both". Failing a customer's build on a shape we cannot prove wrong is a
  * worse trade than letting the warning be ignored.
  *
+ * #5482 — the declared WHOLE-OBJECT write. A `delete_record`/`update_record`
+ * with `multi: true` and no filter condition empties (or rewrites) the object on
+ * every run. It stays a warning under the bar above — the engine's own dispatch
+ * table grants "bulk intent, no predicate" on purpose, so the shape has a
+ * legitimate reading — but before this rule the author's only feedback was the
+ * step's `acted` count, after the rows were gone. See
+ * {@link scanUnboundedBulkWrites}, including why it is not a second copy of the
+ * #3810 run-time erased-condition guard.
+ *
  * #1874 — time-relative rules via record-change date-EQUALITY. A start-node
  * trigger condition like `end_date == daysFromNow(60)` on a `record-*` trigger
  * only fires if the record happens to be written on that exact day; the robust
@@ -173,6 +182,18 @@ export const FLOW_DEFAULT_EDGE_WITH_CONDITION = 'flow-default-edge-with-conditio
 export const FLOW_MULTIPLE_DEFAULT_EDGES = 'flow-multiple-default-edges';
 /** #4414 — `config.condition` on a node whose executor never reads it. */
 export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
+/**
+ * #5482 — a `delete_record` / `update_record` node that declares `multi: true`
+ * and bounds it with NOTHING: the whole-object write, by declaration.
+ *
+ * Named descriptor-first per the family note on
+ * `flow-time-relative-descriptor-invalid` in `validate-flow-trigger-readiness.ts`
+ * (`flow-<descriptor>-<verdict>`, #5496): the descriptor is the
+ * `multi` bulk declaration on a write node, the verdict is that no predicate
+ * bounds it. See {@link scanUnboundedBulkWrites} for why this is a warning and
+ * how it divides labour with the #3810 run-time guard.
+ */
+export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
 
 /**
  * Node types that ship in the box. `config.condition` is only ever READ on the
@@ -199,6 +220,36 @@ const INERT_CONDITION_NODE_TYPES = new Set([
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+
+/**
+ * #5482 — the two node types that carry the `multi` bulk declaration, with the
+ * words their diagnostic uses for what an unbounded one does.
+ *
+ * `create_record` has no `filter` and no `multi`; `get_record` has a `filter`
+ * but no `multi` and does not write. So this is the whole set, and it is spelled
+ * out rather than derived from {@link DATA_NODE_TYPES} because membership means
+ * "this executor forwards `config.multi` to the engine as bulk intent", which is
+ * a claim about the executor, not about being a data node.
+ */
+const BULK_WRITE_CONSEQUENCE: ReadonlyMap<
+  string,
+  { readonly verb: string; readonly engineCall: string; readonly dispatchNote: string }
+> = new Map([
+  ['delete_record', {
+    verb: 'deleted',
+    engineCall: 'driver.deleteMany',
+    // The delete dispatch is the one that is EXTRACTED and case-set-pinned
+    // (`engine-delete-dispatch.ts`), so it can be cited by name.
+    dispatchNote: "the engine's delete-dispatch case-set lists `multi with no predicate at all` as a legal `multi` call",
+  }],
+  ['update_record', {
+    verb: 'overwritten',
+    engineCall: 'driver.updateMany',
+    // Update has no extracted dispatch module, so the branch itself is the
+    // authority — and its refusal fires only WITHOUT the declaration.
+    dispatchNote: "the engine takes its bulk branch on `options.multi` alone (`Update requires an ID or options.multi=true` is refused only when the declaration is absent)",
+  }],
+]);
 
 /**
  * #3863 — an edge LABELLED like an error path but not TYPED as one.
@@ -606,6 +657,133 @@ function scanBranchRouting(
   }
 }
 
+/**
+ * #5482 — is this AUTHORED `filter` provably carrying no condition at all, so
+ * that the write it is supposed to bound is bounded by nothing?
+ *
+ * Exactly two shapes answer `true`, and the narrowness is the point — a warning
+ * that says "this is the whole object" has to be right about it:
+ *
+ *  - the key is **absent** (`undefined` / `null`). The executor substitutes `{}`
+ *    (`resolveNodeFilter(cfg.filter ?? {}, …)` in `crud-nodes.ts`).
+ *  - a plain object with **zero own keys** (`{}`), which the executor passes
+ *    through unchanged.
+ *
+ * Both arrive at the engine as `where: {}`, which `resolveEngineDeleteDispatch`
+ * classifies as `multi` (its case-set lists `multi with no predicate at all` as
+ * legal) and the driver reads as every row — `driver-memory`'s matcher opens
+ * with `if (!filter || Object.keys(filter).length === 0) return true`.
+ *
+ * Everything else is left alone, deliberately:
+ *
+ *  - **any object with ≥1 key** — including an authored `{token}` that will
+ *    interpolate to nothing. That is the #3810 guard's fact, judged at run time
+ *    against the interpolation result, and this rule must not pre-empt it: at
+ *    authoring time the condition IS written.
+ *  - **an empty combinator array** (`{ $and: [] }`, `{ $or: [] }`). Not because
+ *    the answer is unclear — #5322/#5134 ruled it and every driver implements
+ *    it: empty `$and` is TRUE (so `{ $and: [] }` on a `multi` write IS the whole
+ *    object), empty `$or` is FALSE (so `{ $or: [] }` matches NOTHING and must
+ *    never be warned about), `$not` of an empty group is FALSE. Deciding which
+ *    is which requires the identity REDUCTION, and that reduction already exists
+ *    three times (`reduceFilterNode` in driver-sql, driver-mongodb, and the
+ *    matcher/refusal walk in driver-memory). Hand-writing a fourth copy inside a
+ *    linter is how the scan and the validator come to answer with two different
+ *    predicates — the failure `engine-delete-dispatch.ts` was extracted to
+ *    prevent. Filed separately, to be done from one shared predicate.
+ *  - **a non-object `filter`** (string, array, number). `DeleteRecordConfigSchema`
+ *    /`UpdateRecordConfigSchema` type it `z.record(z.string(), z.unknown())`, so
+ *    the node is refused BY NAME at execute time (`parseNodeConfig`). Warning
+ *    "the object is unbounded" about metadata the schema already rejects would
+ *    describe a run that never happens.
+ */
+function filterCarriesNoCondition(filter: unknown): boolean {
+  if (filter === undefined || filter === null) return true;
+  if (typeof filter !== 'object' || Array.isArray(filter)) return false;
+  return Object.keys(filter as AnyRec).length === 0;
+}
+
+/**
+ * #5482 — a `delete_record` / `update_record` that DECLARES `multi: true` and
+ * bounds it with nothing: the whole-object write.
+ *
+ * Reachable only since #5393 gave these nodes a bulk declaration at all. Before
+ * it, the executor never passed `options.multi`, so the engine refused every
+ * predicate write (`Delete requires an ID or options.multi=true`) and "empty
+ * filter + bulk" was not an authoring surface. It is one now, and it is a
+ * legitimate one: the engine's own dispatch case-set lists `multi with no
+ * predicate at all` as a valid `multi` call, so an explicit whole-object purge
+ * is expressible by design (`engine-delete-dispatch.ts`).
+ *
+ * Which is why this WARNS and does not gate, and why the fix for #5482 is not a
+ * spec refine: forbidding the shape would delete an intent the platform grants
+ * on purpose. What was missing is only that the author hears about it BEFORE the
+ * rows go — until now the sole feedback was the step's `acted` count, reported
+ * after the fact.
+ *
+ * ## Not a second copy of the #3810 guard
+ *
+ * `crud-nodes.ts` refuses a node at run time when a condition the author WROTE
+ * interpolated to nothing (`{record.ownr}` — a typo — leaving `{}`), and it is
+ * deliberately keyed on "a condition the author wrote is gone", not on "the
+ * filter is empty": losing one of two conditions still widens the blast radius,
+ * and an intentionally empty filter erases nothing, so `crud-filter-guard.test.ts`
+ * pins that such a filter is still allowed.
+ *
+ * So the two judge different facts and neither subsumes the other:
+ *
+ * | fact                                  | judged by            | when      | verdict |
+ * |---------------------------------------|----------------------|-----------|---------|
+ * | a written condition vanished          | #3810 filter guard   | run time  | refuse  |
+ * | no condition was ever written         | this rule            | authoring | warn    |
+ *
+ * A node with `filter: { owner: '{record.ownr}' }` is silent here (a condition
+ * IS written) and refused there. A node with no `filter` at all is warned about
+ * here and — correctly — allowed there.
+ */
+function scanUnboundedBulkWrites(
+  at: string,
+  nodes: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  for (const node of nodes) {
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    const consequence = BULK_WRITE_CONSEQUENCE.get(nodeType);
+    if (!consequence) continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    // `=== true` is the executor's own test (`multi: cfg.multi === true`), and
+    // the schema types the key `z.boolean()` — a `multi: 'true'` is refused by
+    // the parse, so treating it as declared bulk intent would warn about a node
+    // that cannot run.
+    if (cfg.multi !== true) continue;
+    if (!filterCarriesNoCondition(cfg.filter)) continue;
+
+    const objectName = typeof cfg.objectName === 'string' && cfg.objectName ? cfg.objectName : '(unnamed object)';
+    const filterState = cfg.filter === undefined || cfg.filter === null ? 'no `filter` key' : 'an EMPTY `filter`';
+    findings.push({
+      where: `${at} · node '${String(node.id)}' (${nodeType})`,
+      message:
+        `declares \`multi: true\` with ${filterState} — this is a WHOLE-OBJECT write, by declaration: every ` +
+        `row of '${objectName}' is ${consequence.verb} on every run. The executor forwards \`where: {}\` plus the ` +
+        `bulk intent, ${consequence.dispatchNote}, and it lands on \`${consequence.engineCall}\` with no predicate. ` +
+        `Nothing refuses it at run time, so the only feedback is the step's \`acted\` row count — reported ` +
+        `AFTER the rows are gone.`,
+      hint:
+        `Write the constraint you mean into \`filter\` (e.g. \`{ status: 'closed' }\` — see ` +
+        `examples/app-showcase \`showcase_inquiry_purge\`, bulk intent bounded by a predicate). If emptying ` +
+        `'${objectName}' really is the intent, keep it: this is a warning, not a gate, and the run-time path ` +
+        `stays open. Distinct from the #3810 erased-condition guard, which REFUSES this node at run time when ` +
+        `a condition you WROTE interpolated to nothing — that guard is keyed on "a written condition is gone" ` +
+        `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
+        `time. (#5482, #5393)`,
+      // Warning, not `error`: see the severity policy at the top of this file.
+      // The shape has a legitimate reading the engine grants on purpose, so it is
+      // not provably wrong — unlike the gating members of this family.
+      rule: FLOW_MULTI_WRITE_UNFILTERED,
+    });
+  }
+}
+
 function scanApprovalReviseLoops(
   at: string,
   nodes: AnyRec[],
@@ -886,6 +1064,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     unclaimable branch label, an unconditional sibling that runs anyway,
       //     or a self-contradictory / duplicated `isDefault` marker.
       scanBranchRouting(at, graphNodes, graphEdges, findings);
+
+      // (f) #5482 — a `multi: true` write with nothing bounding it: the declared
+      //     whole-object delete/update. Scanned per graph like the rest, which is
+      //     what puts the loop-body sweep — the standard shape for a scheduled
+      //     purge, and this rule's main habitat — in range (#5383/#5635).
+      scanUnboundedBulkWrites(at, graphNodes, findings);
     }
   }
   return findings;

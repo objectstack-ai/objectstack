@@ -53,6 +53,7 @@ export {
   validateFlowTriggerReadiness,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
+  FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -467,6 +468,7 @@ export {
   FLOW_DEFAULT_EDGE_WITH_CONDITION,
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
+  FLOW_MULTI_WRITE_UNFILTERED,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';

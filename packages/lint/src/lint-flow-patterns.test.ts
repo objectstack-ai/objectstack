@@ -20,6 +20,7 @@ import {
   FLOW_DEFAULT_EDGE_WITH_CONDITION,
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
+  FLOW_MULTI_WRITE_UNFILTERED,
 } from './lint-flow-patterns.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
@@ -993,5 +994,221 @@ describe('#5383 — a recursive config scan does not double-report the container
     // but judged against a node that does not carry the string. So for this rule
     // the fix is re-attribution, not new visibility.
     expect(fnds[0].where).not.toContain("node 'loop_leads'");
+  });
+});
+
+/**
+ * #5482 — the declared WHOLE-OBJECT write: `multi: true` on a
+ * `delete_record` / `update_record` with nothing bounding it.
+ *
+ * Reachable only since #5393 gave these nodes a bulk declaration: before it the
+ * executor never passed `options.multi`, the engine refused every predicate
+ * write, and "empty filter + bulk" was not an authoring surface at all. Measured
+ * on `origin/main` before this rule existed, all four shapes below — top-level
+ * delete, empty-object filter, update, and the same node inside a `loop` body —
+ * returned `[]` from `lintFlowPatterns`. The only feedback an author got was the
+ * step's `acted` row count, after the rows were gone.
+ */
+
+/** A janitor flow: one bulk write node, scheduled, correctly `runAs: 'system'`. */
+function purgeFlow(nodeType: string, config: unknown) {
+  return {
+    flows: [{
+      name: 'nightly_purge',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 3 * * *' } },
+        { id: 'purge', type: nodeType, config },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'purge' }],
+    }],
+  };
+}
+
+describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
+  it('flags a delete_record with `multi: true` and NO filter', () => {
+    const fnds = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: true }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+    expect(fnds[0].where).toBe("flow 'nightly_purge' · node 'purge' (delete_record)");
+    // Advisory: the engine's dispatch table grants "bulk intent, no predicate"
+    // on purpose, so the shape is not provably wrong (severity policy at the top
+    // of lint-flow-patterns.ts). `undefined` is how this family spells warning.
+    expect(fnds[0].severity).toBeUndefined();
+    // Says WHAT it does — the object by name, and that it is every row.
+    expect(fnds[0].message).toContain('no `filter` key');
+    expect(fnds[0].message).toContain('WHOLE-OBJECT write');
+    expect(fnds[0].message).toContain("every row of 'lead' is deleted");
+    expect(fnds[0].message).toContain('driver.deleteMany');
+    // The authority it cites is the delete dispatch that is actually extracted
+    // and case-set-pinned — not a hand-waved "the engine allows it".
+    expect(fnds[0].message).toContain('delete-dispatch case-set');
+    expect(fnds[0].message).toContain('multi with no predicate at all');
+    // …and that the only run-time feedback arrives too late to help.
+    expect(fnds[0].message).toMatch(/`acted` row count/);
+    expect(fnds[0].message).toMatch(/AFTER the rows are gone/);
+  });
+
+  it('flags an EMPTY filter the same way, and says which of the two it saw', () => {
+    const fnds = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: {}, multi: true }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+    expect(fnds[0].message).toContain('an EMPTY `filter`');
+    expect(fnds[0].message).not.toContain('no `filter` key');
+  });
+
+  it('flags an update_record too, in the words of an overwrite', () => {
+    const fnds = lintFlowPatterns(
+      purgeFlow('update_record', { objectName: 'lead', fields: { status: 'stale' }, multi: true }),
+    );
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+    expect(fnds[0].where).toBe("flow 'nightly_purge' · node 'purge' (update_record)");
+    expect(fnds[0].message).toContain("every row of 'lead' is overwritten");
+    expect(fnds[0].message).toContain('driver.updateMany');
+    // Update has no extracted dispatch module, so the message cites the branch
+    // itself rather than borrowing delete's case-set.
+    expect(fnds[0].message).toContain('bulk branch on `options.multi`');
+    expect(fnds[0].message).not.toContain('delete-dispatch case-set');
+  });
+
+  it('names the #3810 run-time guard and says the two judge DIFFERENT facts', () => {
+    const [f] = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: true }));
+    // Cross-naming, not duplication: the run-time guard refuses "a condition you
+    // WROTE is gone"; this rule warns "no condition was ever written".
+    expect(f.hint).toContain('#3810');
+    expect(f.hint).toMatch(/REFUSES this node at run time/);
+    expect(f.hint).toMatch(/a written condition is gone/);
+    expect(f.hint).toMatch(/the filter is empty/);
+    // Both ways out are offered, and the run-time path is explicitly NOT closed.
+    expect(f.hint).toMatch(/Write the constraint you mean/);
+    expect(f.hint).toMatch(/warning, not a gate/);
+    expect(f.hint).toContain('showcase_inquiry_purge');
+  });
+
+  describe('does NOT flag (false-positive guards)', () => {
+    it('a bulk write BOUNDED by a filter — the showcase purge shape', () => {
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', {
+          objectName: 'showcase_inquiry', filter: { status: 'closed' }, multi: true,
+        })),
+      ).toHaveLength(0);
+    });
+
+    it('a filter whose only condition is a TEMPLATE — that is #3810\'s fact, at run time', () => {
+      // `{record.ownr}` (a typo) interpolates to nothing and the run-time guard
+      // REFUSES the node. At authoring time the condition is written, so warning
+      // "nothing bounds this" here would be false — and would put two diagnostics
+      // on one defect, one of them wrong about what the author did.
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', {
+          objectName: 'lead', filter: { owner: '{record.ownr}' }, multi: true,
+        })),
+      ).toHaveLength(0);
+    });
+
+    it('no `multi` at all — the engine refuses that call BY NAME already', () => {
+      // `Delete requires an ID or options.multi=true`. Nothing silent to warn
+      // about, and #5482 is scoped to the declared-bulk shape.
+      expect(lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead' }))).toHaveLength(0);
+      expect(lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: {} }))).toHaveLength(0);
+    });
+
+    it('`multi: false` — the declaration says the opposite', () => {
+      expect(lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: false }))).toHaveLength(0);
+    });
+
+    it('`multi: \'true\'` (a string) — the schema refuses the node, so it cannot run', () => {
+      // The executor tests `cfg.multi === true` and the schema types the key
+      // `z.boolean()`; a string is a parse refusal, not declared bulk intent.
+      expect(lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: 'true' }))).toHaveLength(0);
+    });
+
+    it('a node type that carries no `multi` declaration', () => {
+      // `get_record` does not write and has no bulk intent; `create_record` has
+      // neither `filter` nor `multi`. A stray key there is the schema's business.
+      expect(lintFlowPatterns(purgeFlow('get_record', { objectName: 'lead', multi: true }))).toHaveLength(0);
+      expect(lintFlowPatterns(purgeFlow('create_record', { objectName: 'lead', multi: true }))).toHaveLength(0);
+    });
+
+    it('a non-object `filter` — refused by name at execute time, so no run to describe', () => {
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: 'status = closed', multi: true })),
+      ).toHaveLength(0);
+    });
+
+    it('an empty COMBINATOR array — deliberately out of range, both directions', () => {
+      // #5322/#5134 ruled these and every driver implements the ruling: `$and: []`
+      // is TRUE (this one IS a whole-object write and goes unwarned — filed as a
+      // follow-up), `$or: []` is FALSE (matches nothing — warning about it would
+      // be a false alarm). Telling them apart needs the identity REDUCTION, which
+      // already exists three times producer-side; a fourth hand-written copy in a
+      // linter is the divergence `engine-delete-dispatch.ts` exists to prevent.
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $and: [] }, multi: true })),
+      ).toHaveLength(0);
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $or: [] }, multi: true })),
+      ).toHaveLength(0);
+    });
+  });
+
+  /**
+   * The rule's main habitat. A scheduled sweep whose per-item work sits in a
+   * `loop` body is the standard shape for a janitor flow, so a rule that only
+   * saw top-level nodes would miss the case it was written for — the #5383/#5635
+   * blind spot, in the exact family that closed it.
+   */
+  describe('inside a nested region (#5383 / #5635)', () => {
+    it('flags a loop-body sweep, scoped to the region, exactly once', () => {
+      const fnds = lintFlowPatterns(loopBodyFlow({
+        nodes: [
+          { id: 'sweep', type: 'delete_record', config: { objectName: 'campaign_member', multi: true } },
+        ],
+        edges: [],
+      }));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+      expect(fnds[0].where).toBe(
+        "flow 'campaign_enrollment' · loop 'loop_leads' body · node 'sweep' (delete_record)",
+      );
+      // Not attributed to the enclosing container: the `loop`'s own config
+      // CONTAINS the body, but this rule reads named keys (`multi`, `filter`) off
+      // each node, and a `loop` declares neither — so there is no second copy.
+      expect(fnds[0].where).not.toContain("node 'loop_leads'");
+      expect(fnds[0].message).toContain("every row of 'campaign_member' is deleted");
+    });
+
+    it('flags an update_record two regions deep', () => {
+      const fnds = lintFlowPatterns(loopBodyFlow({
+        nodes: [{
+          id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints',
+          config: {
+            collection: '{lead.touchpoints}', itemVar: 'tp',
+            body: {
+              nodes: [{ id: 'reset', type: 'update_record', config: { objectName: 'touchpoint', fields: { done: false }, multi: true } }],
+              edges: [],
+            },
+          },
+        }],
+        edges: [],
+      }));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+      expect(fnds[0].where).toBe(
+        "flow 'campaign_enrollment' · loop 'loop_leads' body → loop 'loop_touchpoints' body · " +
+        "node 'reset' (update_record)",
+      );
+    });
+
+    it('leaves a BOUNDED loop-body sweep alone', () => {
+      expect(lintFlowPatterns(loopBodyFlow({
+        nodes: [{
+          id: 'sweep', type: 'delete_record',
+          config: { objectName: 'campaign_member', filter: { lead_id: '{lead.id}' }, multi: true },
+        }],
+        edges: [],
+      }))).toHaveLength(0);
+    });
   });
 });

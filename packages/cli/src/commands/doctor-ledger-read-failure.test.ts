@@ -44,6 +44,28 @@
  * positive assertion below. The two facts stay separately reported: the
  * directory could not be enumerated at all (#5412) versus it enumerated fine
  * and some files in it would not parse (#5413).
+ *
+ * ── The third half, one boundary UP (#5644) ──────────────────────────────
+ *
+ * The `import('@objectstack/cloud-connection')` that reaches all of the above
+ * had its own un-bound `catch`, and it merged the same two kinds of thing one
+ * level higher: a specifier that does not resolve (the optional package is not
+ * installed — silence is correct and stays) and a package that IS installed and
+ * will not load (unbuilt or pruned `dist/`, interrupted install, an artefact
+ * that throws). The second was answered with the first one's silence, so a
+ * ledger declaring an installation-wide `unique` produced `✓ Unique scope` and
+ * the finding appeared nowhere — measured, under `--verbose` included.
+ *
+ * The two are now separated by resolution rather than by the `import()` having
+ * thrown (`utils/optional-package.ts`, pinned against the real runtime in
+ * `utils/optional-package.test.ts`), and only the absent half is silent.
+ *
+ * That changes what the last describe of this file can simulate. Absence used
+ * to be simulated by making the module's evaluation throw; under the new
+ * contract that is precisely the OTHER state, so the case now pins the report
+ * it produces, and the absent contract is pinned separately through the loader
+ * seam. Both facts are still here — one of them changed how it is spelled,
+ * because the fact it used to spell was the defect.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
@@ -52,7 +74,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Doctor, { installedPackageLedgerFailureCheck } from './doctor.js';
+import Doctor, {
+  installedPackageLedgerFailureCheck,
+  installedPackageLedgerReaderFailureCheck,
+} from './doctor.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** `packages/cli` — the oclif root the real command is loaded against below. */
@@ -74,6 +99,15 @@ const LEDGER_HEADLINE = 'Could not read the installed-package ledger';
 
 /** The head of its ENTRY-level sibling (#5413). Deliberately distinct text. */
 const SKIPPED_HEADLINE = 'installed-package ledger entr';
+
+/**
+ * The head of the READER-level row (#5644) — the boundary above both.
+ *
+ * Deliberately not a superstring of `LEDGER_HEADLINE` ("read" vs "load"), so
+ * the `not.toContain(LEDGER_HEADLINE)` assertions below keep meaning what they
+ * say when this row is the one on screen.
+ */
+const READER_HEADLINE = 'Could not load the installed-package ledger reader';
 
 /**
  * ── Why this file needs a preflight (#5612) ──────────────────────────────
@@ -206,6 +240,58 @@ describe('installedPackageLedgerFailureCheck — the finding the shared catch us
   it('reports a thrown non-Error rather than swallowing it', () => {
     expect(installedPackageLedgerFailureCheck('boom').message).toContain('boom');
     expect(installedPackageLedgerFailureCheck(42).message).toContain('42');
+  });
+});
+
+describe('installedPackageLedgerReaderFailureCheck — the finding one boundary up (#5644)', () => {
+  it('quotes what was thrown, in the row AND in the verbose detail', () => {
+    const check = installedPackageLedgerReaderFailureCheck(
+      new Error("Cannot find module '/app/node_modules/@objectstack/cloud-connection/dist/index.js'"),
+    );
+
+    expect(check.message).toContain('dist/index.js');
+    expect(check.fix).toContain('dist/index.js');
+  });
+
+  it('takes the `Unique scope` name column and stays a warning, like its two siblings', () => {
+    const check = installedPackageLedgerReaderFailureCheck(new Error('boom'));
+
+    // Same reasoning as #5412: an operator scans the report by its name column,
+    // and a row under a different name leaves `Unique scope` simply missing —
+    // the silence this family of issues is about, wearing a different hat.
+    expect(check.name).toBe('Unique scope');
+    // The environment still runs; what broke is doctor's sight of part of it.
+    expect(check.status).toBe('warning');
+  });
+
+  it('says the package is PRESENT — the one thing that separates it from silence', () => {
+    const check = installedPackageLedgerReaderFailureCheck(new Error('boom'));
+    const fix = check.fix ?? '';
+
+    // A checkout that never installed the package prints nothing at all, so
+    // the row's whole meaning is "it is here and it is broken". If the text did
+    // not say so, the reader's first move would be to install what is already
+    // installed.
+    expect(fix).toContain('IS installed here');
+    expect(check.message).toContain('installed packages NOT checked');
+    // And it names the remedy for the state repo developers hit daily.
+    expect(fix).toContain('@objectstack/cloud-connection build');
+  });
+
+  it('does not claim to know whether a ledger exists', () => {
+    // It cannot: `DEFAULT_INSTALLED_PACKAGES_DIR` is an export of the package
+    // that would not load. Saying "the ledger is there" (the #5412 row's
+    // wording, correct for #5412) would be doctor asserting what it just lost
+    // the ability to check.
+    const fix = installedPackageLedgerReaderFailureCheck(new Error('boom')).fix ?? '';
+
+    expect(fix).not.toContain('it exists here');
+    expect(fix).toContain('cannot even tell you');
+  });
+
+  it('never trails off into nothing, and reports a thrown non-Error', () => {
+    expect(installedPackageLedgerReaderFailureCheck(new TypeError()).message).toContain('TypeError');
+    expect(installedPackageLedgerReaderFailureCheck('boom').message).toContain('boom');
   });
 });
 
@@ -494,23 +580,29 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
   }, 60_000);
 });
 
-describe('the optional package being absent stays completely silent (#5412 does not regress it)', () => {
+/**
+ * ── The two states the `import()` boundary used to merge (#5644) ─────────
+ *
+ * These two describes were ONE before #5644, and it asserted silence for a
+ * simulation that produced the wrong state. It made the module's evaluation
+ * throw — "the way an unresolvable specifier does", its comment said — and
+ * pinned that doctor said nothing. That is exactly the false PASS #5644 is
+ * about: an evaluation that throws means the package is HERE and unusable, and
+ * silence over it is a clean bill of health for a ledger nobody read.
+ *
+ * So the simulation keeps its mechanism and swaps its verdict (the "replace the
+ * assertion, not the repro" disposition #5413 used one layer down), and the
+ * contract it used to stand for — a package that is genuinely NOT INSTALLED is
+ * silent — moves to its own describe, spelled the only way that is now honest.
+ */
+describe('the optional package INSTALLED BUT UNLOADABLE is reported (#5644)', () => {
   /**
-   * ③, second half — the one branch that is SUPPOSED to swallow.
-   *
-   * `@objectstack/cloud-connection` resolves inside this monorepo, so absence
-   * is simulated by making its module evaluation throw the way an unresolvable
-   * specifier does. `vi.doMock` (not the hoisted `vi.mock`) plus a fresh
-   * module registry is what keeps this scoped to this one test — every case
-   * above needs the real module.
-   */
-  /**
-   * #5612 — this case needs the guard MORE than the e2e block does, not less.
-   * It simulates the package being unloadable and asserts doctor stays silent;
-   * in a worktree where the package really is unloadable it passes for that
-   * reason instead of for the mock's, i.e. green because nothing was proven
-   * (the empty-verdict trap PR #5046 wrote down). The preflight is what keeps
-   * the simulation distinguishable from the accident it simulates.
+   * #5612's preflight still earns its place here, and for its original reason.
+   * This case makes the real module's evaluation throw and asserts the row that
+   * follows; in a worktree where `cloud-connection` is genuinely unbuilt, the
+   * SAME row appears without the mock having done anything — green because the
+   * accident reproduced the simulation (PR #5046's empty-verdict trap in
+   * reverse). The guard is what keeps the two distinguishable.
    */
   beforeAll(assertLedgerReaderIsBuilt);
 
@@ -519,31 +611,50 @@ describe('the optional package being absent stays completely silent (#5412 does 
     vi.resetModules();
   });
 
-  it('prints no ledger row when the optional package cannot be loaded', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5412-nopkg-'));
+  it('withholds the clean bill and names the reader, with a ledger it never read', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5644-broken-'));
     fs.mkdirSync(path.join(tmp, 'node_modules'));
     fs.writeFileSync(
       path.join(tmp, 'objectstack.config.ts'),
       [
         'export default {',
-        "  manifest: { name: 'os5412np', label: 'No Package', version: '1.0.0' },",
+        "  manifest: { name: 'os5644', label: 'Broken Reader', version: '1.0.0' },",
         "  objects: [{ name: 'account', label: 'Account', fields: [{ name: 'name', type: 'text', label: 'Name' }] }],",
         '};',
         '',
       ].join('\n'),
     );
-    // A ledger directory EXISTS — so if the `import()` failure were still
-    // sharing a `catch` with the read failure, this is where the two would be
-    // confused in the other direction and produce a spurious warning.
-    fs.mkdirSync(path.join(tmp, '.objectstack/installed-packages'), { recursive: true });
+    // A ledger that DOES declare an installation-wide unique. Before #5644 this
+    // exact tree printed `✓ Unique scope` and `invoice.code` appeared nowhere,
+    // under `--verbose` included — the false PASS, measured.
+    const ledger = path.join(tmp, '.objectstack/installed-packages');
+    fs.mkdirSync(ledger, { recursive: true });
+    fs.writeFileSync(
+      path.join(ledger, 'billing.json'),
+      JSON.stringify({
+        manifestId: 'billing',
+        manifest: {
+          objects: [
+            {
+              name: 'invoice',
+              label: 'Invoice',
+              fields: [{ name: 'code', type: 'text', label: 'Code', unique: 'global' }],
+            },
+          ],
+        },
+      }),
+    );
 
     const savedPosture = process.env.OS_TENANCY_POSTURE;
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmp);
 
     vi.resetModules();
+    // The package RESOLVES — it is a workspace dependency of this very package
+    // — and its evaluation throws. That is the "installed and broken" state,
+    // and the classifier's real `import.meta.resolve()` is what recognises it.
     vi.doMock('@objectstack/cloud-connection', () => {
-      throw new Error("Cannot find package '@objectstack/cloud-connection'");
+      throw new Error('simulated corrupt build artefact');
     });
     const { default: FreshDoctor } = await import('./doctor.js');
 
@@ -556,7 +667,7 @@ describe('the optional package being absent stays completely silent (#5412 does 
     }) as never);
 
     try {
-      await FreshDoctor.run([], { root: CLI_ROOT });
+      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {
@@ -569,9 +680,179 @@ describe('the optional package being absent stays completely silent (#5412 does 
     }
 
     const out = plain(logs.join('\n'));
-    // Silence about the ledger, and the advisory's own half still reports.
+
+    // ① THE assertion of #5644: no clean bill over a ledger nobody read.
+    expect(out).not.toContain(CLEAN_BILL);
+    // ② …replaced by a row that names what could not be loaded.
+    expect(out).toContain(READER_HEADLINE);
+    expect(out).toContain('Unique scope');
+    // ③ NOT the directory-level row: the directory was never reached, and its
+    //    text asserts a ledger exists — which doctor cannot know from here.
     expect(out).not.toContain(LEDGER_HEADLINE);
+    expect(out).not.toContain(SKIPPED_HEADLINE);
+    // ④ The verbose channel carries the cause, like every other warning row.
+    expect(out).toContain('cause:');
+    // Gauge: warning, the report finishes, exit stays 0.
+    expect(out).toContain('Environment is functional but has some warnings');
+  }, 60_000);
+
+  it('quotes the load failure verbatim and keeps the row to one line', async () => {
+    // Driven through the loader seam so the cause is a fixed string rather than
+    // whatever the mocking machinery wraps a thrown error in. What the previous
+    // case proves is that the REAL mechanism reaches this row; what this one
+    // proves is what the row says once it does.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5644-cause-'));
+    fs.mkdirSync(path.join(tmp, 'node_modules'));
+    fs.writeFileSync(
+      path.join(tmp, 'objectstack.config.ts'),
+      [
+        'export default {',
+        "  manifest: { name: 'os5644c', label: 'Cause', version: '1.0.0' },",
+        "  objects: [{ name: 'account', label: 'Account', fields: [{ name: 'name', type: 'text', label: 'Name' }] }],",
+        '};',
+        '',
+      ].join('\n'),
+    );
+
+    const savedPosture = process.env.OS_TENANCY_POSTURE;
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmp);
+
+    vi.resetModules();
+    vi.doMock('../utils/optional-package.js', () => ({
+      loadOptionalPackage: async () => ({
+        state: 'broken',
+        cause: new Error(
+          "Cannot find module '/app/node_modules/@objectstack/cloud-connection/dist/index.js'",
+        ),
+      }),
+    }));
+    const { default: FreshDoctor } = await import('./doctor.js');
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__PROCESS_EXIT__:${code}`);
+    }) as never);
+
+    let exitCode: number | undefined;
+    try {
+      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
+      exitCode = Number(err.message.split(':')[1]);
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+      cwdSpy.mockRestore();
+      vi.doUnmock('../utils/optional-package.js');
+      vi.resetModules();
+      if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = savedPosture;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    const out = plain(logs.join('\n'));
+    const row = out.split('\n').find((l) => l.includes(READER_HEADLINE)) ?? '';
+
+    // The producer's own words, on the row and in the detail.
+    expect(row).toContain('dist/index.js');
+    expect(out).toContain('IS installed here');
+    // One row is one line — the cause is folded, never wrapped into the report.
+    expect(row.includes('\n')).toBe(false);
+    expect(out).not.toContain(CLEAN_BILL);
+    expect(exitCode).toBeUndefined();
+  }, 60_000);
+});
+
+describe('the optional package being genuinely ABSENT stays completely silent (#5412, unchanged)', () => {
+  /**
+   * ③, second half — the one branch that is SUPPOSED to swallow, and the
+   * constraint #5644 was not allowed to break: `os doctor` must run to
+   * completion, and print its clean bill, in a checkout that never had the
+   * optional package.
+   *
+   * Simulated through the loader seam, and it has to be. Absence is now defined
+   * by RESOLUTION — `@objectstack/cloud-connection` is a declared dependency of
+   * this package, so it resolves here no matter what a module mock does to its
+   * evaluation, and a mock that throws now means "installed and broken" (the
+   * describe above). The seam is where the two states are decided, so it is the
+   * seam this case has to speak through.
+   *
+   * Which layer proves what, deliberately split:
+   *   - that a real unresolvable specifier IS classified absent, against the
+   *     real runtime: `utils/optional-package.test.ts`.
+   *   - that doctor stays silent when told so: here.
+   *
+   * No `assertLedgerReaderIsBuilt` preflight, and that is not a rollback of
+   * #5612: the preflight exists to stop a case passing because the real package
+   * happened to be unloadable. Nothing here reads the real package at all — the
+   * seam is mocked — so there is no accident left for it to catch.
+   */
+  afterEach(() => {
+    vi.doUnmock('../utils/optional-package.js');
+    vi.resetModules();
+  });
+
+  it('prints no ledger row, and still prints the clean bill', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'os-doctor-5412-nopkg-'));
+    fs.mkdirSync(path.join(tmp, 'node_modules'));
+    fs.writeFileSync(
+      path.join(tmp, 'objectstack.config.ts'),
+      [
+        'export default {',
+        "  manifest: { name: 'os5412np', label: 'No Package', version: '1.0.0' },",
+        "  objects: [{ name: 'account', label: 'Account', fields: [{ name: 'name', type: 'text', label: 'Name' }] }],",
+        '};',
+        '',
+      ].join('\n'),
+    );
+    // A ledger directory EXISTS — so if "not installed" were confused with
+    // "installed and broken" in the other direction, this is where the
+    // confusion would surface as a spurious warning.
+    fs.mkdirSync(path.join(tmp, '.objectstack/installed-packages'), { recursive: true });
+
+    const savedPosture = process.env.OS_TENANCY_POSTURE;
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmp);
+
+    vi.resetModules();
+    vi.doMock('../utils/optional-package.js', () => ({
+      loadOptionalPackage: async () => ({ state: 'absent' }),
+    }));
+    const { default: FreshDoctor } = await import('./doctor.js');
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__PROCESS_EXIT__:${code}`);
+    }) as never);
+
+    try {
+      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
+    } finally {
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+      cwdSpy.mockRestore();
+      if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = savedPosture;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    const out = plain(logs.join('\n'));
+    // Silence about the ledger, in all three of its shapes…
+    expect(out).not.toContain(LEDGER_HEADLINE);
+    expect(out).not.toContain(SKIPPED_HEADLINE);
+    expect(out).not.toContain(READER_HEADLINE);
+    // …not even the package's name, under `--verbose`.
     expect(out).not.toContain('cloud-connection');
+    // …and the advisory's own half still reports.
     expect(out).toContain(CLEAN_BILL);
   }, 60_000);
 });

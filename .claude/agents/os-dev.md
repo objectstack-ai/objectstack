@@ -132,6 +132,25 @@ Definition of done, in order:
   failure with backoff).
 - **Draft** PR to `main`, body starting `Fixes #<n>`, explanatory prose in
   Chinese per repo convention.
+- **`skip-changeset` label — your step, not CI's; the read-back is the proof.**
+  A test-only / workflow-only / `.claude/`-only PR releases nothing and writes
+  no changeset, so it needs the `skip-changeset` label — apply it yourself the
+  moment the PR exists. Nothing applies it for you: `.github/labeler.yml` has no
+  rule for it, and in every 2026-08-05 case
+  (#5533/#5538/#5542/#5624/#5642/#5645) the label came from an agent, never from
+  `github-actions[bot]`. **Add** the one label instead of writing the label set
+  — a set-write wipes the `size/*` / `documentation` / `tests` the bots just
+  applied, and CI's own write can wipe yours back (#5533's lasted one second).
+  Then read the labels back once the bots have settled and quote that list in
+  the report; the read, not the POST, is what closes this step. Check Changeset
+  re-reads the labels live in its first step (#5580), so the first run is a race
+  between that step and your POST, decided by runner start-up — and it is
+  attested both ways: #5542 labelled correctly and still logged a red `opened`
+  run, while #5650's label landed 41 s ahead of the re-read and that same
+  `opened` run went green. So land the label fast, and read the first run's
+  colour as information rather than as your verdict — every run after the label
+  is exempt. Declaring the label in the PR body is not applying it: #5533 and
+  #5538 each said so in prose and each still cost a PM hand-fix.
 - Tear down anything you started (dev servers on random ports).
 
 **Reverse verification — decide the expected direction BEFORE you run it.**

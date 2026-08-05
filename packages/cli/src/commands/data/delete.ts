@@ -57,15 +57,24 @@ export default class DataDelete extends Command {
       // Delete the record
       const result = await client.data.delete(args.object, args.id);
 
+      // [#5638] `deleted` is THIS COMMAND's output key; its value is the
+      // protocol's `DeleteDataResponse.success`. Two different booleans live
+      // in this payload and must not be conflated: the top-level `success` is
+      // the CLI envelope's "the command completed" flag (this branch is only
+      // reached when it did), while the server's flag is its statement that
+      // the deletion happened. Until now this read was `result.deleted` — a
+      // key no server has ever returned — so it evaluated to `undefined` and
+      // `JSON.stringify` dropped it: the documented key was simply absent
+      // from every `os data delete --format json` run.
       if (flags.format === 'json') {
         await emitJson({
           success: true,
           object: result.object,
           id: result.id,
-          deleted: result.deleted,
+          deleted: result.success,
         });
       } else if (flags.format === 'yaml') {
-        await formatOutput({ success: true, object: result.object, id: result.id, deleted: result.deleted }, 'yaml');
+        await formatOutput({ success: true, object: result.object, id: result.id, deleted: result.success }, 'yaml');
       } else {
         printSuccess(`Record deleted: ${result.id}`);
       }

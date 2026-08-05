@@ -137,8 +137,12 @@ const CASE_SETS = [
 // covered, is not yet) or EXEMPT (cannot meaningfully apply). Both are measured
 // claims; neither is a default.
 //
-// EMPTY, as of #4405 — every cell of the matrix is covered by a suite. The two
-// FILTER_LOGIC_CASES rows this ledger opened with are both cleared:
+// EMPTY, as of #5590 — every cell of the matrix is covered by a suite. Five
+// entries have passed through here across two generations, and every one of
+// them was cleared the same way: by writing the suite, never by the argument
+// that predicted the suite was unnecessary.
+//
+// The two FILTER_LOGIC_CASES rows this ledger opened with (#4405):
 //
 //   driver-mongodb      `translateFilter` was the independent fifth backend
 //                       #3774 never enrolled when it named "the four". It now
@@ -153,6 +157,45 @@ const CASE_SETS = [
 //                       rather than EXEMPT because "inherits, therefore fine" is
 //                       the assumption those suites exist to disprove; the suite
 //                       is what disproves it, not the entry.
+//
+// The three driver-turso rows Phase A of #4645 measured on arrival, cleared by
+// #5590. All three were DEBT for one reason — the driver is DUAL-TRANSPORT.
+// Local/replica inherits SqlDriver's filter compiler and its paging; remote
+// does not go through knex at all, and `src/remote-transport.ts` carries its
+// own `buildWhereSQL` (combinator nesting, operator vocabulary, comparand
+// refusal) and its own ORDER BY / LIMIT / OFFSET assembly. That is an
+// independent Nth backend, which is what #3774 and #4363 wrote the case-sets
+// for. So each cell took TWO suites, one per transport, in the shape the
+// temporal cells already had:
+//
+//   FILTER_LOGIC_CASES         driven by `turso-filter-logic-conformance` for
+//                              the local transport and by `turso-remote-filter-
+//                              logic-conformance` for the remote one. Both green
+//                              on arrival.
+//   PAGINATION_CASES,          driven by `turso-pagination-conformance` and
+//   PAGINATION_UNORDERED_CASES `turso-remote-pagination-conformance`, same two
+//                              transports. Also green — but read the note below
+//                              before trusting the remote half of these two the
+//                              way you can trust the local half.
+//
+// Both remote suites run over the `libsql-sqlite-stub.testkit` SQLite stub, so
+// the whole set is hermetic: no network, no credentials, on by default in CI —
+// which is what the temporal pair next door already established for this
+// package.
+//
+// ## What driver-turso's PAGINATION cells mean — read this before trusting them
+//
+// The local suite passes because `SqlDriver.orderKeysFor()` appends the `id`
+// tie-breaker the contract asks for. The remote suite passes WITHOUT that
+// mechanism: `buildSelectSQL` maps the caller's `orderBy` verbatim and appends
+// no unique column, so the cases hold on the stub's twelve-row `better-sqlite3`
+// table — one plan, one arrangement, every time — rather than by a promise the
+// transport makes. On a real endpoint that arrangement is not promised across
+// two statements, which is the defect `pagination-conformance.ts` is about.
+// Filed as #5653; the remote suite carries two `records the measured mechanism`
+// tests that pin the current no-tie-breaker behaviour so it cannot go quiet
+// under a green cell. Not a ledger entry, because the cells ARE covered — an
+// entry for a covered cell fails RECONCILED, and this is where the fact fits.
 //
 // An empty ledger is the intended steady state, not a reason to delete the
 // mechanism: the next driver that arrives uncovered fails CONSUMED and lands
@@ -191,54 +234,7 @@ const CASE_SETS = [
 // investment is frozen (#5499). Un-freezing it is what should re-run these cells
 // in CI; until then, this note is the honest state of the mongo column.
 
-// ## driver-turso arrived from `objectstack-ai/cloud` with three cells open (#4645)
-//
-// The package migrated into `packages/drivers/driver-turso` in Phase A of #4645
-// and entered this matrix the moment it landed on disk -- which is the gate
-// working as documented ("a new driver package is in scope the moment it
-// exists"), not a surprise. Measured on arrival: TEMPORAL_CASES and
-// TEMPORAL_TIME_CASES are genuinely covered, twice over
-// (`turso-temporal-conformance.test.ts` for the local transport,
-// `turso-remote-temporal-conformance.test.ts` for the remote one). The other
-// three had no suite in cloud either.
-//
-// They are DEBT rather than EXEMPT, and the reason is the driver's dual
-// transport. Local/replica mode does inherit SqlDriver's filter compiler and
-// paging -- but remote mode does not go through Knex at all:
-// `src/remote-transport.ts` carries its own `buildWhereSQL` (combinator
-// nesting, operator vocabulary, comparand refusal) and its own ORDER BY /
-// LIMIT / OFFSET assembly. That is an independent Nth backend, which is
-// precisely what #3774 and #4363 wrote the shared case-sets for. "Inherits,
-// therefore fine" is the assumption those suites exist to disprove -- the same
-// sentence driver-sqlite-wasm's cleared entry carried, and it was cleared by a
-// suite, not by the sentence.
-//
-// Clearing these: write the suites (both transports, hermetic -- the remote
-// half over `libsql-sqlite-stub.testkit.ts`), then delete these entries in the
-// same PR. Tracked as #5590.
-const LEDGER = [
-  {
-    driver: 'driver-turso',
-    marker: 'FILTER_LOGIC_CASES',
-    kind: 'DEBT',
-    why: "remote transport compiles its own WHERE (`src/remote-transport.ts` buildWhereSQL) instead of inheriting SqlDriver's, so combinator nesting is an independent implementation with no suite; local/replica inherits but is untested against the shared cases too.",
-    issue: '#5590',
-  },
-  {
-    driver: 'driver-turso',
-    marker: 'PAGINATION_CASES',
-    kind: 'DEBT',
-    why: 'remote transport assembles its own ORDER BY / LIMIT / OFFSET; no suite drives the sorted-partition property against either transport.',
-    issue: '#5590',
-  },
-  {
-    driver: 'driver-turso',
-    marker: 'PAGINATION_UNORDERED_CASES',
-    kind: 'DEBT',
-    why: 'same seam as PAGINATION_CASES, unsorted arm: the remote LIMIT/OFFSET path has no suite pinning that an unsorted paged read is still a partition.',
-    issue: '#5590',
-  },
-];
+const LEDGER = [];
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
