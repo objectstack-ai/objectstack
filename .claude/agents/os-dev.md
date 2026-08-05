@@ -143,10 +143,13 @@ Definition of done, in order:
   applied, and CI's own write can wipe yours back (#5533's lasted one second).
   Then read the labels back once the bots have settled and quote that list in
   the report; the read, not the POST, is what closes this step. Check Changeset
-  re-reads labels live seconds after the PR opens (#5580), so expect its
-  `opened` run to have started before your label lands — #5542 did this right
-  and still logged one red `opened` run, which the label then exempted on every
-  later run. Declaring the label in the PR body is not applying it: #5533 and
+  re-reads the labels live in its first step (#5580), so the first run is a race
+  between that step and your POST, decided by runner start-up — and it is
+  attested both ways: #5542 labelled correctly and still logged a red `opened`
+  run, while #5650's label landed 41 s ahead of the re-read and that same
+  `opened` run went green. So land the label fast, and read the first run's
+  colour as information rather than as your verdict — every run after the label
+  is exempt. Declaring the label in the PR body is not applying it: #5533 and
   #5538 each said so in prose and each still cost a PM hand-fix.
 - Tear down anything you started (dev servers on random ports).
 
