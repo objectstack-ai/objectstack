@@ -41,6 +41,7 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -227,10 +228,13 @@ const ENGINE_DRIVER_PASSTHROUGH_KEYS = [
  * quoted instead of a generic rejection — the schema keeps them ONLY to carry
  * that message, and this runtime path never parses); `searchFields` (read by
  * `find` at the `$search` expansion, sent by the protocol layer);
- * `onFieldsDropped` (`WriteObservabilityOptions` — contract-declared,
- * unrepresentable in the serializable Zod schema); and the driver
- * pass-through keys above. The alias spellings (`filter`/`top`) are folded
- * and deleted BEFORE this check runs, so they never reach it.
+ * `onFieldsDropped` and `strictReadonlyWrites` (`WriteObservabilityOptions` —
+ * contract-declared, deliberately outside the serializable Zod schema: the
+ * first because a function is unrepresentable in JSON Schema, the second
+ * because #5126 ruled that a write-refusal switch must not be settable from a
+ * wire body); and the driver pass-through keys above. The alias spellings
+ * (`filter`/`top`) are folded and deleted BEFORE this check runs, so they
+ * never reach it.
  *
  * A drift pin in engine-unknown-option.test.ts asserts each set equals its
  * schema's shape (minus tombstones, plus the documented extras) so a key
@@ -242,7 +246,7 @@ const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'upsert', 'multi', 'returning', 'onFieldsDropped',
+  'context', 'where', 'upsert', 'multi', 'returning', 'onFieldsDropped', 'strictReadonlyWrites',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
@@ -4827,6 +4831,11 @@ export class ObjectQL implements IObjectQLEngine {
   // legitimately seed read-only columns), and the FLS write gate throws
   // instead of stripping. If insert ever gains a silent strip, wire the
   // listener at that strip site — do not let it go silent.
+  // [#5126] `strictReadonlyWrites` is inert here for the SAME reason and by the
+  // same rule: it refuses a write that would be stripped, and insert strips
+  // nothing. It is not silently ignored in the #4371 sense — there is no
+  // behaviour to execute. If insert ever gains a strip, both members wire up
+  // together at that site.
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
@@ -5169,21 +5178,62 @@ export class ObjectQL implements IObjectQLEngine {
      // every strip helper returns the SAME reference when nothing was dropped,
      // else a shallow copy with keys removed. A listener fault must never break
      // the write.
+     //
+     // [#5126] The LOUD half of the same seam. `strictReadonlyWrites` is the
+     // caller's per-call choice to have the write REFUSED rather than committed
+     // without the stripped columns — the out #4903 could not add, because the
+     // option key had to be declared in `packages/spec` first
+     // (`WriteObservabilityOptions`, ruled Option B: in-process, not the
+     // client-serializable bag).
+     //
+     // Two design points that are easy to get wrong later:
+     //
+     //  - The strips still RUN under strict. Diffing their before/after is how
+     //    we learn which fields would go; the stripped payload is then thrown
+     //    away with the write. So the flag adds no second policy — it reports
+     //    the existing one. A field the strip does not take (an `isSystem`
+     //    caller's statically-`readonly` column, an unlocked `readonlyWhen`)
+     //    is not rejected either.
+     //  - Under strict the listener does NOT fire. `DroppedFieldsEvent` is
+     //    contracted as "dropped, and the write completed without them"; a
+     //    refused write did not complete, and a flow step listening for drops
+     //    would otherwise report a partial success for a write that never
+     //    happened. Quiet-and-observable or loud — one per call.
+     //
+     // Drops accumulate across BOTH passes and throw ONCE (below, after the
+     // static strip) so the caller gets every offending field in one error
+     // instead of a round-trip per field. The throw lands before any driver
+     // call, so nothing is written.
      const onFieldsDropped = options?.onFieldsDropped;
+     const strictReadonlyWrites = options?.strictReadonlyWrites === true;
+     const strictDrops: DroppedFieldsEvent[] = [];
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
        reason: DroppedFieldsEvent['reason'],
      ): void => {
-       if (!onFieldsDropped || before === after || !before) return;
+       if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
        const fields = Object.keys(before).filter((k) => !(k in afterObj));
        if (fields.length === 0) return;
+       if (strictReadonlyWrites) {
+         strictDrops.push({ object, fields, reason });
+         return;
+       }
        try {
-         onFieldsDropped({ object, fields, reason });
+         onFieldsDropped!({ object, fields, reason });
        } catch (err) {
          this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
        }
+     };
+     /**
+      * Refuse the write if strict is on and any pass dropped something. Called
+      * once per branch, AFTER both strip passes and BEFORE the driver write.
+      */
+     const assertNoStrictDrops = (): void => {
+       if (strictDrops.length === 0) return;
+       const fields = [...new Set(strictDrops.flatMap((d) => d.fields))];
+       throw new ReadonlyFieldRejectedError(object, fields, strictDrops);
      };
 
      await this.executeWithMiddleware(opCtx, async () => {
@@ -5280,6 +5330,12 @@ export class ObjectQL implements IObjectQLEngine {
                    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#5126] Both strip passes are done; refuse now if the caller
+               // asked for loud. Before `evaluateValidationRules` deliberately:
+               // strict is about the payload the caller SENT, and reporting
+               // "you sent a read-only field" should not depend on whether some
+               // other field also failed a business rule.
+               assertNoStrictDrops();
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
@@ -5366,6 +5422,11 @@ export class ObjectQL implements IObjectQLEngine {
                    hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#5126] Same refusal on the predicate path. A bulk strip is
+               // "locked in ≥1 matched row ⇒ dropped for ALL", so a strict bulk
+               // caller is told before N rows are written with a column missing
+               // — the failure mode a bulk write makes N times larger.
+               assertNoStrictDrops();
                // [#3106] Same enforcement the single-id branch runs at its
                // `evaluateValidationRules` call, applied per matched row: any
                // error-severity violation rejects the WHOLE batch before
