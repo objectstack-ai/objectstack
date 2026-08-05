@@ -52,7 +52,7 @@ write state only through these signals:
 | label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
 | label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
 | label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
-| label `pm:epic`(on a parent)| 整棵子树已委托给登记在册的 epic PM(登记表 #4604)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
+| label `pm:epic`(on a parent)| 整棵子树已委托给一个专职 epic PM(会话与文件领地写在**父单正文**;`label:pm:epic` 即全量索引,座位表 #4604 不重复记)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
 
@@ -95,7 +95,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — do not dispatch, do not nag; restart condition in the hold comment" || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" || true
-  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (registry #4604) — other PMs never dispatch into its subtree" || true
+  gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (session + territory in the parent's own body) — other PMs never dispatch into its subtree" || true
 done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
@@ -239,11 +239,11 @@ draft、解绑 `Fixes`,免得一个错结论继续被当作已立案的事实引
 The product spans three repos with a fixed dependency direction:
 `objectstack` (backend; `packages/spec` is the single contract) →
 `objectui` (frontend; its build flows back via `pnpm objectui:refresh`) and
-`cloud`. The loop coordinates them with four rules:
+`cloud`. The loop coordinates them with five rules:
 
 **1. One main backlog.** Feature-level issues live in `objectstack`,
 whatever repo the code lands in. A `repo:objectui` / `repo:cloud` label
-routes the dev agent's working repo; no routing label = backend. **The PM
+routes the dev agent's working repo; no routing label = backend. **分诊座位
 applies these labels itself at triage (round loop step 2)** — the maintainer
 just files the task and is never expected to pre-route it. The dev
 still branches/pushes/PRs **in the target repo** (its own worktree there —
@@ -266,82 +266,115 @@ artifacts flow into another repo, the PM immediately files the follow-up in
 the consuming repo's backlog instead of relying on anyone remembering. The
 known case: accepting a `repo:objectui` PR ⇒ file a `pm:queue` issue in
 `objectstack` — "run `pnpm objectui:refresh` and land the console bump",
-referencing the merged PR, blocked-by it until it actually merges.
+referencing the merged PR, blocked-by it until it actually merges. 立单者是
+**接受那个 PR 的执行座位**(它才知道产物流向哪里);`domain:*` 仍由分诊座位补
+—— 链接类杂事天然带 `Blocked-by:`,等一个分诊周期不损失任何东西,而多一个
+`domain:*` 生产者会损失 rule 4 的全部机械保障。
 
-**4. Multiple PM sessions shard by repo; one shared queue only under
-domain lanes.** The claim protocol makes concurrent PMs *safe*, not
-*useful* on its own: batch independence (file-disjointness) is only checked
-within one PM's view, so two PMs on the same queue can claim different
-issues that collide on shared files, and the merge queue is one lane
-regardless. Making that check **global** is exactly what the next section
-does. Scaling order:
+**4. 纵向拆分:一个分诊 PM + N 个执行 PM,一人一车道双射**(维护者
+2026-08-05 拍板,#5472)。The claim protocol makes concurrent PMs *safe*, not
+*useful* on its own: batch independence (file-disjointness) is only ever
+checked inside one PM's own view, so two PMs on the same queue can claim
+issues that collide on shared files — and「谁来分诊」原本是每个 PM 各做一遍的
+重复劳动。objectstack 是最大的仓,单个 PM 的认知吞吐不够,同仓多 PM 必须保留;
+所以把协调税**降为结构性防撞**,而不是靠自由文本申报互相躲。角色**纵向**拆开,
+所有权是**双射**:
 
-1. One PM, bigger batch (`batch:5` is the maintainer's chosen operating
-   point, riding on the resource discipline above), heavy tasks via
-   `mode:cloud` — adds compute without adding schedulers.
-2. When one PM genuinely can't keep up: a second session takes a **whole
-   repo** as its shard (`/pm-dispatch repo:objectstack-ai/objectui`) —
-   file universes are disjoint by construction. A sharded PM states its
-   shard in every claim comment and **never claims outside it**.
-3. Multiple PMs on the SAME queue: **prohibited unless the Domain-lanes
-   protocol (next section) is active** — every PM in its own session and
-   its own container, domain sets registered in the registry issue, label
-   discipline observed, and the global in-flight check run at every batch
-   selection. Without that protocol the ban stands as written: all cost,
-   no throughput, and the collision stays invisible to both PMs until the
-   merge.
+- **分诊 PM(全仓唯一)** — 只扫、只分类、只打标签(`domain:*` / `pm:queue` /
+  `finding` / `needs-user-decision` / `repo:*`)、只拆跨域 issue、只查重。
+  ⛔ **永不认领、永不派发、永不写代码。** 它是 `domain:*` 的**唯一生产者**,
+  于是「未打标签的 issue 谁都不得认领」这条纪律第一次有机械保障:标签只有一个
+  产出者,缺标签就意味着分诊还没走到它,而不是某个 PM 可以自己判一下。
+- **执行 PM(N 个)** — 信任标签、**跳过分诊**(round loop 的 step 0 与 step 2
+  分类半边不属于它),只在**本车道**认领与派发。发现标签错了**不自行改**:在
+  issue 上留一句「疑似域误标:落点在 X 包」交分诊座位改。单一生产者是这套协议
+  唯一的防撞机制,两个生产者等于没有。
+- **双射** — 每个执行 PM 恰好持有**一个** `domain:*` 车道,每个车道恰好一个
+  PM。「域 X 谁管」与「PM Y 管什么」都**恰好一个答案**,不需要读任何评论流。
+- **越界许可(旧条款的 borrowing)已删除**,本条是全文唯一一处提及,作墓碑
+  用 —— 学过旧协议的会话 grep 得到的应该是这句话,不是沉默。突发积压 → 调高
+  该座位的频率或 `batch`(`batch:5` 是维护者选定的运行点,骑在上面那套资源
+  纪律上;重活走 `mode:cloud` 给它自己的容器);持续积压 → **拆域**:改 SKILL
+  域表 + 座位表加行,**走 PR**。借调看着省事,代价是把「这个域现在谁管」重新
+  变成要翻评论才知道的事实 —— 那正是本次改版要消灭的成本。
+- **姊妹仓仍是整仓座位。** `repo:objectui` / `repo:cloud` 各占一行,同一套双射
+  与登记规则,接管方式不变(`/pm-dispatch repo:objectstack-ai/objectui`);域车道
+  是「同仓多 PM 并发」的切法,不是第二套仓库标签。
+- **分诊座位空缺时**:欠账由任一**会话型**执行 PM **代扫** —— 只做分诊动作
+  (标签、拆分、查重、审计评论),⛔ 代扫不解除双射,仍不得跨车道认领 —— 并在
+  座位表「说明」栏写明处于代扫状态。座位有主后代扫立即停止。
 
-**Shard ownership is registered, never assumed.** A registry issue in the
-main backlog (`[PM] 分片分工登记表`) records which session owns which
-shard; a PM taking over a shard comments there as its FIRST action, and
-comments again when handing off. An unowned shard may be **caretaken** by
-the main-backlog PM (triage + dispatch), but the moment a shard is
-registered to another session, the caretaker stops dispatching into it —
-in-flight claimed tasks finish under whoever claimed them (the claim
-protocol makes the handoff collision-free), and everything else belongs to
-the new owner. State the mode in claim comments (「cloud 分片,主 PM 代管」
-vs a registered shard PM's own tag) so the registry and the claims never
-disagree silently.
+**跨域例外路径 —— 唯一的越界通道。** 真拆不动的跨域单 PR(拆分成本大于收益,
+判据同 rule 2 的 contract-first 拆分):由**分诊 PM 指定一个**车道 PM 认领,该
+认领评论**申报完整文件面**,并且只在这条路径上跑**定向在飞检查**(范围与触发
+条件见「Domain lanes」)。全局在飞检查因此从每轮常备税**降级为例外路径专用**:
+旧条款要求每个 PM 每次批次选择都扫全仓在飞单,开销 O(PM 数 × 在飞数)、每轮
+重复,而判据只是自由文本申报 —— 越贵越不可靠。
 
-**Cross-shard transfer protocol — work crosses shard lines, PMs never
-do.** When a sharded PM's task (or a sub-task of its parent issue) needs a
-change in another shard's repo:
+**座位表协议 —— 正文表格即真相(#4604)。** 主 backlog 的登记 issue
+(`[PM] 分片分工登记表`,#4604)**正文的座位表格是唯一权威现状**:
+
+- **行 = 座位**(分诊 + 各 `domain:*` + 姊妹仓整仓),**列 = 座位 | 范围 |
+  当前 PM(会话或 Routine ID) | 说明**。接管 / 移交 = **就地编辑你那一行**
+  外加一条审计评论;**评论只作交接审计,不承载状态** —— 不要靠读评论流对账
+  现状。起因是实测:#4604 三天累积 79 条登记评论,「现状」与「历史」挤在同一
+  通道,对账成本随评论数线性涨。
+- **无心跳。** 座位不定期报活;活性是**惰性判定**,只在**接管冲突**时评估一次
+  —— Routine 座位查调度器(`last_fired` / `next_run`),会话座位查它最近一条
+  产出评论的时间戳,**>24h 无产出即可回收**(编辑该行 + 一条审计评论)。子树/
+  批次里在飞的认领仍按认领协议由原认领者跟完。
+- **epic 委托不在座位表登记** —— `pm:epic` 父单正文自带会话与领地,
+  `label:pm:epic` 即全量索引(见「Epic 子树车道」)。座位表只记常设座位,一件
+  事只记一处。
+- **`packages/spec` 恒归 spec 座位**(见下「shared contract surfaces have one
+  owner」),无论谁需要它。
+
+**跨座位转移协议 —— 工作跨座位线,PM 永不跨。** 当一个座位的任务(或其父
+issue 的子任务)需要另一个座位范围内的改动 —— 姊妹仓座位与域座位同理:
 
 - **Transfer via the target queue**: file the piece as an issue in the
   target repo with `pm:queue` and a source line (`Part of
-  <owner/repo>#<n>`). The target shard's PM picks it up through its own
+  <owner/repo>#<n>`). The target seat's PM picks it up through its own
   backlog sweep — the queue label IS the inter-PM channel; PMs never need
   to talk directly, and never dispatch into a repo whose in-flight batch
-  they cannot see (that is the same collision the same-queue ban exists
-  for).
+  they cannot see(在飞可见性是本协议的全部前提:看不见的批次撞不掉)。
 - **Dependencies via `Blocked-by:`** on the waiting side; the waiting PM's
   batch selection skips it until the upstream merges.
-- **Follow-up chores belong to the consuming shard**: when the upstream
+- **Follow-up chores belong to the consuming seat**: when the upstream
   change lands (say spec gained a key), the dependent-repo adaptation issue
-  is filed by the PM of the repo that consumes it — it knows its surfaces.
+  is filed by the PM of the repo/lane that consumes it — it knows its surfaces.
 - **Shared contract surfaces have one owner**: anything touching
-  `packages/spec` transfers to the main-backlog (objectstack) PM
-  regardless of who needs it — only that PM sees the repo's in-flight
-  batch and generated-baseline collisions.
-- Cross-repo parent/sub-issue chains as a whole stay coordinated by the
-  main-backlog PM; sharded PMs coordinate only chains fully inside their
-  shard.
+  `packages/spec` transfers to the **`domain:spec` 座位** regardless of who
+  needs it — only that seat sees the spec queue's in-flight batch and the
+  generated-baseline collisions(`.gitattributes` 的 `merge=os-regen` 那八条
+  路径,见「入队与落地 A」)。
+- 跨仓 parent/sub-issue 链的**拆分与排序**由**分诊座位**一次做完(rule 2 的
+  contract-first 拆分 + `Blocked-by:` 行),各段的落地由各自座位按依赖顺序
+  自然接续 —— 没有第二个协调者,也不需要有。
 
-**5. One board, no second tracker.** The pm labels above are the state
-machine; an org-level GitHub Project pulling issues/PRs from all three repos
-gives the maintainer a single view (filter by `repo:*` and `pm:*`). The PM
-maintains no tracking state outside GitHub — that invariant is what keeps
-the loop resumable and the board honest.
+**5. One board, no second tracker —— org Project 是视图层,不是权威层。**
+The pm labels above are the state machine. org 级 GitHub Project 用 auto-add
+workflow 按 `pm:*` / `domain:*` / `repo:*` 把三个仓聚合成维护者的**单一视图**,
+它的定位必须写死在协议里,否则视图迟早长成第二个 tracker:
+
+- **没有任何机器读它。** 候选获取、认领、在飞检查、僵尸回收、轮次报告的三项
+  指标 —— 全部读 issue 标签与 #4604 正文。Project 的字段不参与**任何**判据;
+  一旦有判据读它,它就是 rule 5 禁止的第二个 tracker,而且是一个**没有历史**
+  的 tracker(Project 字段改动不留 diff,issue 正文改动留)。
+- **权威层坚持 issue 正文 + REST。** Project 的读写只有 GraphQL 入口,而
+  GraphQL 配额(5000/时)实测极易打满(Operational note 3:峰值 10402/5000,
+  一天三次归零、每次卡死整个循环),所以 **Project 绝不进循环的热路径**;座位表
+  是 issue 正文,读写走 REST,成本落在 core 配额(15000/时,与 GraphQL 独立计)。
+  视图层可以在配额耗尽时不可用而循环照跑 —— 这个不对称正是分层的目的。
+- PM 在 GitHub 之外**不维护任何跟踪状态** —— 这条不变量是循环可从零本地状态
+  恢复、看板不说谎的原因。
 
 ## Domain lanes(同仓多 PM 并发)
 
-Rule 4's ladder ran out at one PM per repo because file-disjointness is only
-ever checked inside one PM's own view. Domain lanes are the **third rung**:
-one PM's triage verdict is cached as a `domain:*` label every other PM can
-read, so batch selection filters at the label layer instead of at the merge.
-Premise: each PM is its **own session in its own container** — adding a PM
-adds compute, not contention — and collisions are prevented by the
-domain→package mapping, not by hoping two PMs pick different work.
+车道是 rule 4 双射的落地层:**分诊座位的一次判断被缓存成机器可读的
+`domain:*` 标签**,执行座位的批次选择因此在**标签层**过滤,而不是在合并时才
+发现撞车。前提:每个 PM 是**自己的会话、自己的容器** —— 加一个 PM 是加算力,
+不是加争用;防撞靠 域→包 的映射,不靠「希望两个 PM 挑到不同的活」。
 
 **Anchoring rule.** The whole scheme rests on this one sentence:
 
@@ -351,14 +384,15 @@ domain→package mapping, not by hoping two PMs pick different work.
 
 The counter-example that makes it a rule: #4775 is a hook `condition`, which
 reads as automation, but the fix lands in
-`packages/objectql/src/hook-wrappers.ts` ⇒ `domain:engine`. Labeling by topic
+`packages/objectql/src/hook-wrappers.ts` ⇒ `domain:engine-core`. Labeling by topic
 would have routed it to a different PM than the one already inside that
 package — the exact collision lanes exist to prevent. If you cannot say which
 file the fix touches, you have not triaged it yet, and it is not labelable.
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`packages/plugins/driver-*`、`plugin-pinyin-search`(全局写钩子,同 #4775 锚定) |
+| `domain:engine-core` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
+| `domain:drivers` | `packages/plugins/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`packages/vscode-objectstack`、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
@@ -376,49 +410,61 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 
 - `packages/apps/*` 今天只是 app manifest + plugin 壳,内容仍从
   `@objectstack/platform-objects/apps` 再导出,落点可能在 platform-objects
-  (engine)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要落地站点
-  在分诊时判定。
+  (`engine-core`)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要
+  落地站点在分诊时判定。
 - `packages/console` 是 `../objectui` 构建产物的落盘位:仓内只跟踪
   `package.json` / `README` / `CHANGELOG`,`dist/` 由 `scripts/build-console.sh`
   生成且⛔禁止手改。控制台 UI 的缺陷走 `repo:objectui`;仓内唯一可改面是 pin /
   刷新脚本(`build-console.sh`、`bump-objectui.sh`、`check-console-sha.mjs`、
   `check-objectui-pin-fresh.mjs`),归 `scripts/`(门禁类)那一行。
 
-本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**仓库级分片**,
-routing 用 `repo:*` 表达(rule 4 的分片协议),不另打 `domain:*` —— 域车道是
+本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**整仓座位**,
+routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 域车道是
 「同仓多 PM 并发」的切法,不是第二套仓库标签。
 
-**Label discipline.** `domain:*` is applied during the backlog sweep (round
-loop step 0) by whichever PM triages the issue. **Labeling ≠ claiming**: any
-PM may label any issue, including ones it will never claim — the label is
-shared routing, not a reservation. An **unlabeled issue may not be claimed by
-anyone**: triage and label it first, or selection has silently gone back to
-happening inside one PM's private view.
+**`engine` 一分为二(#5472,与 #5095 同批)。** 旧 `domain:engine` 同时覆盖
+objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
+在双射之下**一个 PM 吃不下**(它是全仓最大的一块,且 driver 族的落地节律与
+查询/元数据核心完全不同)。切分线就是上表:**`engine-core` = 编译/查询/元数据
+核心**,**`drivers` = 存储后端适配层**。两条配套纪律:
 
-**Claim scope.** Each PM session registers its **domain set** in the registry
-issue (`[PM] 分片分工登记表`, #4604 — the same registry that records repo
-shards) and claims only issues whose label falls inside that set. A set, not
-a single domain: lanes are a routing table, not a job title.
+- **迁移**:存量带 `domain:engine` 的 open issue 由**分诊座位**按落点逐条改标为
+  `engine-core` / `drivers`,清零后删除旧标签 —— 双射要求「域 X 谁管」有唯一
+  答案,一个仍在流通的旧标签就是一个无主车道。
+- **座位表(#4604)同批加行**:`domain:engine` 那一行一分为二,各自的范围列
+  照抄上表(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入
+  冻结指令锚在 `drivers` 那一行,`formula` / `driver-sql` 不受影响)。
 
-**Cross-domain issues.** Prefer the contract-first split of rule 2 — one
-sub-issue per domain, each carrying its own `domain:*` label, ordered with
-`Blocked-by:`. When a split costs more than it buys, a single PM claims the
-whole issue and **declares the full file surface** in its claim comment, so
-every other PM's in-flight check can see all of it.
+**Label discipline —— 单一生产者。** `domain:*` 只由**分诊座位**在 backlog
+sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:分诊座位
+打完从不认领,执行座位读到从不重打。**未打标签的 issue 任何人都不得认领** ——
+那意味着分诊还没走到它,不是「可以自己判一下」;自己判一下就是把选择重新塞回
+单个 PM 的私有视野,车道协议当场归零。执行座位认为标签错了走上报(rule 4 的
+误标路径),⛔ 不自行改写 `domain:*`。
 
-**Borrowing.** An idle PM may claim outside its registered set when all three
-hold: (a) that domain's PM has not claimed the issue, (b) the claim comment
-declares the file surface, (c) the global in-flight check below passes.
-Borrowing is a one-issue exception, not a lane transfer — the registry entry
-does not change, so nobody has to guess who owns the domain afterwards.
+**Claim scope.** 执行 PM 的车道 = 座位表(#4604)正文里它那一行的 `domain:*`,
+**恰好一个**;认领只发生在车道内。旧条款允许「一个域集合」,双射之后不再允许:
+一个 PM 一个座位,「域 X 谁管 / PM Y 管什么」各只有一个答案。需要更细的分工就
+拆域(rule 4),不是给某个 PM 塞第二个域。
 
-**Global in-flight check — run it at batch selection (step 3).** List every
-`pm:dispatched` issue across the repo, read the file-surface declaration on
-each one's latest claim comment, and require your candidates to be disjoint
-from all of them. This is step 3's independence test raised from your batch
-to the whole repo; skip it and two individually-independent batches are
-jointly dependent, which is precisely the failure the same-queue ban was
-protecting against.
+**Cross-domain issues.** 首选 rule 2 的 contract-first 拆分 —— 一域一
+sub-issue,各带自己的 `domain:*`,用 `Blocked-by:` 排序,**由分诊座位做**。
+拆分成本大于收益时走 rule 4 的**跨域例外路径**:分诊座位**指定**单一车道 PM
+认领,该 PM 在认领评论里**申报完整文件面**,并跑下面的定向在飞检查。这是唯一
+的越界通道,**没有第二条** —— 旧条款那种「闲着的 PM 自行越界拿一单」的一次性
+许可已随 rule 4 删除。
+
+**定向在飞检查(只在跨域例外路径上跑)。**
+
+- **触发条件**:**当且仅当**你正在认领一条由分诊座位指定的跨域例外单。日常
+  同域批次选择**不跑**这个检查。
+- **检查范围**:不是全仓,而是**该单申报文件面所触及的那几个域**。列出这些域
+  当前的 `pm:dispatched` 在飞单,读各自最新认领评论里的「文件面」申报,要求与
+  你的申报**不相交**;相交即让行(让那条单先落地),不要指望合并队列兜底。
+- **为什么不再每轮全局跑**:旧条款让每个 PM 在每次批次选择时扫全仓在飞单,
+  开销 O(PM 数 × 在飞数)、每轮重复,判据却只是自由文本申报 —— 越贵越不可靠。
+  双射之后,**同域内**的批次独立性由该域自己的 step 3 保证(一个域只有一个 PM,
+  它看得见自己的全部在飞);跨域相交只可能从例外路径进来,所以检查跟着例外走。
 
 **The merge queue is still one shared serial resource.** Lanes buy parallel
 authorship, not parallel landing: the flaky-test tax (#4796) scales linearly
@@ -430,25 +476,30 @@ it rather than re-queuing past it, whichever lane it came from.
 
 Domain lanes 按「修复落点的包」**横向**切分;epic 车道是**纵向**的第二种切法:
 一个大开发(父 issue + 一批 sub-issue)整体委托给一个专职 PM 会话,从立项跟到
-收尾。两者组合使用,不互斥:epic 内的 sub-issue 照常在分诊时打 `domain:*`
-标签(标签是共享路由信息,全局在飞检查要读它),但**认领权属于 epic PM**,
-不属于域 PM。
+收尾。两者组合使用,不互斥:epic 内的 sub-issue 照常由分诊座位打 `domain:*`
+标签(标签是共享路由信息,谁都可以读),但**认领权属于 epic PM**,不属于域 PM。
+双射的推论(座位表「每个 PM 恰好一个座位」):**一个 epic PM 会话不同时持有
+`domain:*` 座位** —— epic 就是它的座位,只是登记面在父单正文,不在座位表。
 
 **启动**:`/pm-dispatch epic:#<n>`。队列定义 = 父 issue #n 的 open、未认领
 sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条就是衍生任务的
 吸收机制:开发中新挂到父单下的 sub-issue,下一轮自动进入队列,零新标签、
 零额外登记。
 
-**委托信号(标签 + 登记成对落地,同 label discipline)**:
+**委托信号(标签 + 正文登记成对落地,同 label discipline)**:
 
-- 父 issue 打 `pm:epic`,同时在登记表(#4604)登记:会话 ID、父 issue 号、
-  **声明的文件领地**(packages/目录清单,同一份也写进父 issue 正文)。缺一半
-  就是 label discipline 禁止的过夜半状态。
-- 其它 PM(主 backlog / 域 PM)的候选获取(step 1)**跳过 `pm:epic` 父单的
-  整棵子树** —— 这是该标签的第一消费点;第二消费点是登记表,第三是收尾流程。
-- epic 与非 epic 工作的**文件相交**由既有机制兜住:epic PM 的每条认领评论
-  照常声明「文件面」,所有 PM 的全局在飞检查照常读它。epic 不豁免任何一条
-  认领纪律(assign + claim comment + race check 全套照做)。
+- 父 issue 打 `pm:epic`,同时**在父单正文**写清:会话 ID、**声明的文件领地**
+  (packages/ 目录清单)。⛔ **不在座位表(#4604)重复登记** —— `label:pm:epic`
+  就是全量索引,座位表只记常设座位,一件事只记一处(rule 4 的座位表协议)。
+  标签与正文登记仍是成对落地,缺一半就是 label discipline 禁止的过夜半状态。
+- 其它 PM(分诊 / 域座位)的候选获取(step 1)**跳过 `pm:epic` 父单的整棵
+  子树** —— 这是该标签的第一消费点;第二消费点是 `label:pm:epic` 这个索引
+  查询(领地盘点与僵尸回收都据它),第三是收尾流程。
+- epic 与域车道的**文件相交**:全局在飞检查已删除(rule 4),替代机制是
+  **索引 + 正文** —— 域座位在批次选择时读一次 `label:pm:epic`(开销 O(epic
+  数),不是 O(在飞数)),避开与本批相交的领地;epic PM 的每条认领评论照常
+  声明「文件面」。epic 不豁免任何一条认领纪律(assign + claim comment +
+  race check 全套照做)。
 - 触 `packages/spec` 的 sub-issue 照常受「shared contract surfaces have one
   owner」约束 —— epic 委托不改变 spec 的单一所有者。
 
@@ -458,8 +509,8 @@ sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条�
 | 类型 | 判据 | 去向 | 谁派发 |
 |:--|:--|:--|:--|
 | in-scope 衍生 | 不修则 epic 验收不过 | 挂为父单 sub-issue(原生) | epic PM,下轮自动入队 |
-| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进主 backlog(查重先行,`finding` 分诊纪律照旧) | 主/域 PM;epic 不吸收 |
-| 触 spec / 公共契约 | 无论是否阻塞 epic | 按跨分片转移协议转主 PM 队列,epic 侧 sub-issue 写 `Blocked-by:` | 主 PM |
+| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进主 backlog(查重先行,`finding` 分诊纪律照旧) | 分诊座位定级 → 域座位派发;epic 不吸收 |
+| 触 spec / 公共契约 | 无论是否阻塞 epic | 按跨座位转移协议转 `domain:spec` 座位队列,epic 侧 sub-issue 写 `Blocked-by:` | spec 座位 |
 
 第一行防「衍生项没人管、epic 烂尾」;第二行防「epic 无限膨胀吞掉整个仓」;
 第三行维持契约面的单一调度权。发现分诊轮的**归挂限定在 epic 内同样成立**:
@@ -472,20 +523,35 @@ in-scope,验收依据 …」),维护者可否决。
 本身仍锚在具体 sub-issue 上(step 8 不变),父单只汇总、不承载分析。
 
 **收尾与僵尸回收。** 最后一个 sub-issue 关闭 → epic PM 在父单留总结评论、
-关闭父单、摘 `pm:epic`、登记表注销 —— 四步是一组,缺一步就是过夜半状态。
-僵尸判据:登记在册但整棵子树 ~48h 无任何认领/分支/PR 动静 → 主 PM 在登记表
-评论询问,再静默一窗后摘 `pm:epic` 收回子树;子树内仍在飞的认领按认领协议
-由原认领者跟完(stale-claim reclaim 的既有规则逐单适用)。
+关闭父单、摘 `pm:epic`、正文的领地段标注收官 —— 四步是一组,缺一步就是过夜
+半状态(摘标签即从索引注销,座位表本就无行可销)。僵尸判据:父单正文有登记但
+整棵子树 ~48h 无任何认领/分支/PR 动静 → **分诊座位**(全仓唯一的扫描者,只动
+标签、不认领)在父单评论询问,再静默一窗后摘 `pm:epic` 收回子树;子树内仍在飞
+的认领按认领协议由原认领者跟完(stale-claim reclaim 的既有规则逐单适用)。
 
-**残余风险(如实声明)。** epic 领地与其它车道的文件相交靠「声明 + 全局
-在飞检查」防,不是机械保证;撞上了由合并队列兜底(代价是返工,不是脏数据)。
-这与 domain lanes 的风险形状相同,epic 车道没有更差 —— 但也没有更好,所以
-领地声明写得越窄越诚实,越宽越要在登记表里说明为什么。
+**残余风险(如实声明)。** epic 领地与域车道的文件相交靠「父单正文的领地声明
++ 域座位每轮读一次 `label:pm:epic` 索引」防,是声明式的,**不是机械保证**;
+撞上了由合并队列兜底(代价是返工,不是脏数据)。这与 domain lanes 的风险形状
+相同,epic 车道没有更差 —— 但也没有更好,所以领地声明写得越窄越诚实,越宽越
+要在父单正文里说明为什么。
 
 ## The round loop
 
+**谁跑哪一步(纵向拆分后的职责划分,rule 4)。** 同一个循环由两种座位分头跑,
+不是每个 PM 都跑全套:
+
+| 步骤 | 座位 |
+|:--|:--|
+| **step 0**(backlog sweep,含发现分诊轮)、**step 2** 的分类/路由/拆分半边 | **分诊座位**(全仓唯一)—— 只产出标签、拆分与审计评论,⛔ 到此为止 |
+| **step 1、3–9** | **执行座位**(每个恰好一个 `domain:*` 车道)—— 从读标签开始,不重做分诊 |
+
+分诊座位**永不进入 step 4 及其后的任何一步**(认领、派发、复核、入队全不碰);
+执行座位读到的标签一律当作既成事实,除误标上报外不改。分诊座位空缺期间,
+欠账按 rule 4 的**代扫**条款由会话型执行 PM 兜住(只做分诊动作,不跨车道认领)。
+
 ### 0. Backlog sweep — classification is a standing duty, not a request
 
+(**分诊座位的活** —— 执行座位跳过本步,rule 4。)
 The maintainer does not pre-sort the backlog. On every round (and every
 idle check-in), sweep issues that carry no `pm:*` / `needs-user-decision`
 label and classify each:
@@ -508,6 +574,11 @@ label and classify each:
 - **Repair first**: a body truncated by GitHub's sanitizer (bare `<x>`
   swallows the rest at rest) cannot be dispatched — comment the repair
   instruction and move on.
+
+**扫描范围的三处排除**(#5474 试点定稿时补入,否则每轮都要现场判一次):
+`tracking` 与 `status:parked` 的 issue(它们的状态由别的机制管,分诊不重判)、
+以及**座位表 #4604 本身**(它是协议载体,不是待分诊的工作)。存量大时**每轮
+限量、优先最新**(试点用 ~15 条/轮),防一轮吃光存量把轮次拖过一个调度周期。
 
 #### 发现分诊轮 —— 队列的出水口(objectstack#4949)
 
@@ -538,7 +609,7 @@ List open issues matching the filter, excluding anything assigned or labeled
 `needs-user-decision`. **Open sub-issues of a matching parent are candidates
 too** — they inherit the parent's queue membership and need no label of their
 own. **Exception: a parent carrying `pm:epic`** — its whole subtree belongs
-to the registered epic PM, and no other PM treats those sub-issues as
+to the epic PM registered **in that parent's own body**, and no other PM treats those sub-issues as
 candidates(见「Epic 子树车道」;没有这条排除,本句的自动继承会让两个 PM
 抢同一批子任务). Read each candidate's full body **and its comments — all of them,
 before the issue can even be a candidate.** A comment may record that half
@@ -566,6 +637,8 @@ this still true?" costs minutes; one that doesn't costs an agent-run.
 
 ### 2. Triage — routing is the PM's job, never the maintainer's
 
+(**分诊座位的活**,rule 4 —— 执行座位在认领前只确认「标签已在」,不重做路由;
+标签疑似错了走误标上报,不自行改写。)
 The maintainer's only input is the issue itself plus `pm:queue` (or naming
 the task in chat). They are **not** expected to know which repo a change
 lands in — that answer usually *is* the analysis. For each candidate whose
@@ -671,9 +744,9 @@ execute as **one atomic pair**, in order:
    > 域:`domain:<x>`
    > 文件面:`<预计触碰的目录列表>`(越界即停,报告说明)
 
-   「文件面」is **required** for cross-domain and borrowed claims and
-   **recommended** for ordinary same-domain ones — it is the only input
-   another PM's global in-flight check has to read. The branch name must
+   「文件面」is **required** for 跨域例外路径的认领(rule 4 —— 那是唯一的
+   越界形态)and **recommended** for ordinary in-lane ones —
+   它是**定向在飞检查**唯一的输入,也是 epic 领地相交判断的输入。The branch name must
    carry the issue number: #5032's losing claim promised
    `claude/issue-osv-fast-uri-hono-undici`, which
    `git ls-remote --heads origin | grep issue-5032` cannot find — the #4588
@@ -861,6 +934,43 @@ to `mode:subagent`). Per issue:
 2. `fire_trigger` to launch it, then `delete_trigger` once the report has
    been collected (step 6) so poke-only triggers don't accumulate.
 
+#### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
+
+上面两个 backend 决定**开发 agent** 跑在哪;这一段决定**PM 座位自己**怎么被
+唤醒 —— 它不是第三个 dispatch backend。目标形态:**每个座位一个 cron
+Routine**(`create_new_session_on_fire: true`),频率**随该座位的队列深度独立
+调**(轻域每日,重域每小时)。每次 fire:
+
+1. 读 **#4604 正文**拿到本座位的范围(座位表即真相,⛔ 不读评论流);
+2. **从 labels 重建状态** —— 没有本地状态,`pm:queue` / `pm:dispatched` /
+   `domain:*` / assignee / `Blocked-by:` 就是全部输入(见「State model」);
+3. 跑一轮 —— 执行座位 step 1 → 9;分诊座位 step 0 与 step 2 的分类半边,
+   ⛔ 永不认领;
+4. 结束会话。下一次 fire 从 GitHub 重建,不继承任何上下文。
+
+**轮次互斥(防上一 fire 未完成时重入)。** fire 开始时先查**本座位上一轮的
+产出时间**(座位表活性判据的同一读数:该座位最近一条审计/认领评论,或 Routine
+的 `last_fired`);距上一轮不足一个轮次时长即**自退**,不做任何写入 —— 宁可
+少跑一轮,不要两个同座位会话并行写标签。配套两条自限(#5474 试点定稿):**每轮
+限量、优先最新**(试点值 ~15 条),以及 step 0 那三处扫描排除。
+
+⛔ **实测运维约束 —— fresh-session Routine 必须带 GitHub 连接器创建。** 经 CCR
+**会话内** `create_trigger` 创建的 Routine **不携带** GitHub 连接器(平台限制:
+connector grant 只能传递调用会话自身持有的,CCR 平台注入的 github 工具不在其
+列),fired session 因此拿不到 `mcp__github__*` 工具 —— 连自退守卫的第一步(读
+#4604)都执行不了,表现为**静默零产出**。#5474 的分诊座位试点 2026-08-05 正是
+这样失败并回滚的:烟测轮近 50 分钟零标签、零评论、零审计,与创建时平台给出的
+警告完全吻合。因此:
+
+- 座位 Routine **由维护者从 claude.ai 的 Routines UI 创建**并勾上 GitHub
+  连接器;⛔ 不要在会话里 `create_trigger` 出一个座位 Routine 就当它在跑。
+- 创建后**先手动 fire 一轮烟测**,判据取 **GitHub 上的产出**(标签写入 / 审计
+  评论 / 座位表编辑),不取「会话看起来起来了」;零产出即技术性失败,按回滚
+  处方 `delete_trigger` + 清空座位行 + 失败注记。
+- 模型不能经 API 钉住(`update_trigger` 返回 `model_update_disabled`,本部署
+  禁用工具侧改模型):Routine **继承环境默认模型**,环境默认变了它跟着变;
+  要硬钉同样走 Routines UI。
+
 ### 6. Collect
 
 **Subagent mode:** wait for the background task notifications — do not poll,
@@ -873,6 +983,14 @@ issues for `<!-- os-dev-report -->` comments and linked PRs, then re-arm
 silently until every dispatch of the round has reported or a dispatch has
 been silent for over ~2 h (count it as `blocked` and move on). Never treat
 the absence of a report as success.
+
+**座位 Routine 模式下的收集边界。** 一次 fire 就是一轮,fire 结束会话即销毁,
+所以 `mode:subagent` 的 dev **必须在同一次 fire 内收完** —— 报告是 subagent 的
+返回消息,会话没了就没了(那不是 blocked,是丢失)。跑不完一个轮次的重活改用
+`mode:cloud`:它的报告落在 issue 评论(`<!-- os-dev-report -->`),**下一次 fire
+从 GitHub 就能收到** —— 这是座位 Routine 唯一的跨轮收集通道。跨轮未收的
+dispatch 由下一轮按同一判据处置(~2h 无报告即 `blocked`),`delete_trigger` 的
+清理也顺延到收到报告的那一轮。
 
 ### 7. Review each report
 
@@ -1061,6 +1179,12 @@ area; that is the loop working, not failing):
 - **decision inbox** — `needs-user-decision` count awaiting the maintainer;
 - **finding median age** — aging findings mean the 发现分诊轮 is overdue.
 
+**座位 Routine 没有交互通道。** fresh-session fire 没有对话对面的人,轮次报告
+因此走 Routine 的**完成通知**(`notifications`,fresh-session Routine 专有;
+座位 Routine 创建时就该开)。需要留档的结论 —— 裁决、否决窗口项、分诊理由 ——
+照常落在**对应的 issue** 上(step 8 的锚点规则不变);⛔ 不要把轮次报告堆进座位表
+评论,那正是「评论不承载状态」要防的东西。
+
 ## Stop conditions
 
 Stop the loop and report when any of these hits:
@@ -1083,6 +1207,10 @@ Stop the loop and report when any of these hits:
   `guard-main-checkout.sh`; the os-dev definition repeats it).
 - Parallelism is capped by `batch`. Dev agents for one batch must be
   file-disjoint by construction (step 3).
+- **分诊座位永不认领、永不派发、永不写代码** —— 它的产出只有标签、拆分、审计
+  评论(rule 4)。**执行座位只在自己那一个 `domain:*` 车道里认领**,唯一例外是
+  分诊座位指定的跨域例外单(且必须申报文件面 + 跑定向在飞检查)。
+- **`domain:*` 只有一个生产者**(分诊座位)。执行座位不改标签,只上报误标。
 - When any rule here conflicts with AGENTS.md, **AGENTS.md wins**.
 
 ## Report contract (what os-dev returns)
