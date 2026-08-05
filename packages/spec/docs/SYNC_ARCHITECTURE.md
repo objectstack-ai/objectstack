@@ -210,10 +210,29 @@ Complete, production-grade integration with external systems. Includes authentic
 
 ### Example
 
-```typescript
-import { Connector } from '@objectstack/spec/integration';
+> **`ConnectorInput` is the AUTHOR shape.** It is `z.input` of
+> `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
+> `status`, `connectionTimeoutMs`, `requestTimeoutMs`, all of `syncConfig`'s
+> `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
+> `batchSize` / `deleteMode`, a mapping's `required` / `syncMode`, a webhook's
+> `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` — is optional when
+> you write a connector, and `syncConfig.schedule` takes the bare cron string
+> the schema wraps for you. Annotate the **result** of
+> `ConnectorSchema.parse(…)` with the bare **`Connector`**, which is `z.infer`:
+> there those keys are all present and `schedule` is already the
+> `{ dialect: 'cron', source }` envelope. Note the asymmetry with L2 above,
+> where the bare `ETLPipeline` *is* the author shape and the parse result is
+> `ETLPipelineParsed` — `integration/connector.zod.ts` has not been moved onto
+> that house convention yet (#5551). The example below states the defaulted
+> keys anyway, because it is a tour of the surface; the Migration Guide's
+> sketches omit them, because that is what ordinary authoring looks like.
+> To have the literal validated as you write it, prefer `defineConnector(…)`,
+> which takes this same input shape and returns the parsed one.
 
-const sapConnector: Connector = {
+```typescript
+import type { ConnectorInput } from '@objectstack/spec/integration';
+
+const sapConnector: ConnectorInput = {
   name: 'sap_erp_connector',
   label: 'SAP ERP Integration',
   type: 'saas',
@@ -241,22 +260,28 @@ const sapConnector: Connector = {
     deleteMode: 'soft_delete'
   },
 
-  // Field Mappings with Transformations
+  // Field Mappings with Transformations.
+  // The keys are `source` / `target` — the canonical spelling of the base
+  // protocol in `shared/mapping.zod.ts`, which every mapping surface extends.
   fieldMappings: [
     {
-      sourceField: 'customer_number',
-      targetField: 'customer_id',
+      source: 'customer_number',
+      target: 'customer_id',
       dataType: 'string',
       required: true,
       syncMode: 'bidirectional'
     },
     {
-      sourceField: 'order_value',
-      targetField: 'order_total',
+      source: 'order_value',
+      target: 'order_total',
       dataType: 'number',
+      // `transform.type` is a discriminated union with exactly five members:
+      // `constant` / `cast` / `lookup` / `javascript` / `map`. The bare string
+      // below is `ExpressionInput` shorthand — the schema wraps it into an
+      // `{ dialect, source }` envelope on parse.
       transform: {
-        type: 'custom',
-        function: 'value => parseFloat(value) / 100' // Convert cents to dollars
+        type: 'javascript',
+        expression: 'value / 100' // Convert cents to dollars
       },
       syncMode: 'bidirectional'
     }
@@ -270,11 +295,11 @@ const sapConnector: Connector = {
       events: ['record.created', 'record.updated'],
       secret: process.env.WEBHOOK_SECRET!,
       signatureAlgorithm: 'hmac_sha256',
-      retryPolicy: {
-        maxRetries: 3,
-        backoffStrategy: 'exponential',
-        initialDelayMs: 1000
-      },
+      // (`retryPolicy` sat here until #3494 retired it — webhook delivery
+      // retries are owned by the messaging outbox on a fixed schedule, and the
+      // authored policy was never read. There is no replacement, and it is a
+      // different thing from `retryConfig` below, which governs the calls this
+      // connector MAKES.)
       timeoutMs: 30000,
       isActive: true
     }
@@ -283,7 +308,7 @@ const sapConnector: Connector = {
   // (`rateLimitConfig` sat here until #4911 retired it — no outbound
   // rate-limiting engine ever existed. Throttle at the provider/gateway.)
 
-  // Retry Configuration
+  // Retry Configuration — for the connector's own outbound requests
   retryConfig: {
     strategy: 'exponential_backoff',
     maxAttempts: 5,
@@ -378,7 +403,7 @@ When a connector's declarative sync needs complex transformations:
 
 **Before (L3 `syncConfig`):**
 ```typescript
-const connector: Connector = {
+const connector: ConnectorInput = {
   name: 'orders',
   type: 'saas',
   authentication: { type: 'api-key', ... },
@@ -423,7 +448,7 @@ const pipeline: ETLPipeline = {
 
 **After (L3):**
 ```typescript
-const connector: Connector = {
+const connector: ConnectorInput = {
   authentication: { type: 'oauth2', ... },
   webhooks: [...],
   retryConfig: { ... }
