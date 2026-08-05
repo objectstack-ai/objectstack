@@ -151,12 +151,14 @@ describe('Session is not declared here (#4641)', () => {
   // (`expires` vs `expiresAt`, `sessionToken` vs `token`).
   //
   // Why this asserts at RUNTIME rather than with the `typeof import(...)`
-  // conditional-type pin used by #4581 / #4610: that pin cannot fail here.
-  // `packages/spec/tsconfig.json` excludes `**/*.test.ts`, so `pnpm typecheck`
-  // never compiles this file, and vitest transpiles without typechecking — a
-  // conditional-type assertion in a spec test is inert. (Filed separately; it
-  // silently weakens the pins those two PRs landed.) The module-namespace check
-  // below is cheap — this file already imports the module — and it actually runs.
+  // conditional-type pin used by #4581 / #4610: when this was written that pin
+  // could not fail here. `packages/spec/tsconfig.json` excluded `**/*.test.ts`,
+  // so `pnpm typecheck` never compiled this file, and vitest transpiles without
+  // typechecking — a conditional-type assertion in a spec test was inert.
+  // #5286 closed that hole (the sibling `tsconfig.test.json` compiles the test
+  // layer, and PINS_CHECKED keeps it that way). The module-namespace check
+  // below is cheap — this file already imports the module — and it actually
+  // runs, which is why it stays the load-bearing one.
   //
   // Scope, deliberately: this covers the VALUE export. A type-only
   // `export type Session` has no runtime footprint, so no unit test can see it.

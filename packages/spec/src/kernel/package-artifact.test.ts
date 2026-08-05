@@ -151,7 +151,10 @@ describe('PackageArtifactSchema', () => {
         { path: 'data/seed.json', size: 8192 },
         { path: 'locales/en.json', size: 256 },
       ],
-      metadataCategories: ['objects', 'views'] as const[],
+      // Was `as const[]` — which TypeScript reads as "array of the type named
+      // `const`", i.e. TS2304 "Cannot find name 'const'". A typo that survived
+      // because esbuild strips the annotation without resolving it (#5286).
+      metadataCategories: ['objects', 'views'],
       checksums: {
         algorithm: 'sha256' as const,
         files: {

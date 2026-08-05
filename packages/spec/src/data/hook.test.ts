@@ -469,7 +469,9 @@ describe('HookContextSchema', () => {
         ql: {},
       });
 
-      expect(context.input.doc.name).toBe('New Account');
+      // `input` is `z.record(z.string(), z.unknown())` by contract — the payload
+      // shape varies per event — so a parsed read is narrowed at the read site.
+      expect((context.input.doc as { name: string }).name).toBe('New Account');
     });
 
     it('should accept update input', () => {
@@ -485,7 +487,7 @@ describe('HookContextSchema', () => {
       });
 
       expect(context.input.id).toBe('123');
-      expect(context.input.doc.status).toBe('active');
+      expect((context.input.doc as { status: string }).status).toBe('active');
     });
 
     it('should accept delete input', () => {
@@ -517,7 +519,7 @@ describe('HookContextSchema', () => {
         ql: {},
       });
 
-      expect(context.result.id).toBe('123');
+      expect((context.result as { id: string }).id).toBe('123');
     });
 
     it('should accept array result', () => {
@@ -671,7 +673,12 @@ describe('HookContextSchema', () => {
         },
         session: {
           userId: 'user_123',
-          tenantId: 'tenant_456',
+          // `session.tenantId` was removed in v11 (#3280/#3290); the blessed
+          // developer-facing name is `organizationId`. This fixture kept
+          // spelling the retired alias for two majors because nothing
+          // type-checked it — vitest only sees `HookContextSchema.parse`,
+          // which strips unknown keys silently (#5286).
+          organizationId: 'org_456',
           roles: ['user'],
         },
         transaction: { id: 'tx_789' },
@@ -760,7 +767,7 @@ describe('Integration Tests', () => {
 
     expect(hook.events).toContain('beforeInsert');
     expect(beforeContext.event).toBe('beforeInsert');
-    expect(afterContext.result.id).toBe('123');
+    expect((afterContext.result as { id: string }).id).toBe('123');
   });
 });
 

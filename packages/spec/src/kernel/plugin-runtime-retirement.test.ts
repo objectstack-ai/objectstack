@@ -15,10 +15,13 @@ import { describe, it, expect } from 'vitest';
 // paragraph; #4834 is that decision, answered.
 //
 // Why THIS pin, and not a type-level one: #4642 established that a
-// compile-time conditional-type assertion in this package is a no-op (the
-// package tsconfig excludes `**/*.test.ts`, and vitest never enables
-// `typecheck`), so a `Assert< Equal< … > >` here would be decoration. The
-// load-bearing pin is the TypeScript compiler-API program below, which resolves
+// compile-time conditional-type assertion in this package was a no-op (the
+// package tsconfig excluded `**/*.test.ts`, and vitest never enables
+// `typecheck`). #5286 closed that hole — `tsconfig.test.json` now compiles this
+// file — so a type-level assertion here would no longer be dead text. It stays
+// a runtime pin anyway, because a conditional over `keyof typeof import(...)`
+// only enumerates VALUE exports (#4642) and this retirement covers types too.
+// The load-bearing pin is the TypeScript compiler-API program below, which resolves
 // the REAL export surface of EVERY public entry from `package.json`'s exports
 // map and asserts each retired name has zero holders — by symbol identity, not
 // by grepping text.
@@ -135,6 +138,13 @@ describe('[#4834] plugin-runtime family removal — no entry exports any of the 
     // The names could be absent from the barrels while the module still sat on
     // disk, importable by deep path and still emitting json-schema defs. It
     // does not.
-    await expect(import('./plugin-runtime.zod')).rejects.toThrow();
+    //
+    // The specifier is held in a variable on purpose. Now that tsc compiles
+    // this file (#5286), a literal `import('./plugin-runtime.zod')` is a
+    // TS2307 "cannot find module" — the compiler is agreeing with the test and
+    // failing the build for it. An indirect specifier keeps the RUNTIME
+    // assertion (the load must reject) exactly as it was, which is the pin.
+    const retiredModule = './plugin-runtime.zod';
+    await expect(import(retiredModule)).rejects.toThrow();
   });
 });

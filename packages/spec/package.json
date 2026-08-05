@@ -217,7 +217,9 @@
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",
     "check:skill-examples": "tsx scripts/check-skill-examples.ts",
-    "typecheck": "tsc --noEmit"
+    "check:test-typecheck": "tsx scripts/check-test-typecheck.mts --self-test && tsx scripts/check-test-typecheck.mts --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx scripts/check-test-typecheck.mts --update --project tsconfig.test.json",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
   },
   "keywords": [
     "objectstack",

@@ -26,7 +26,7 @@ import { describe, it, expect } from 'vitest';
 // so renaming it would replay the objectui#3235 downstream breakage.
 //
 // #4642 established that a compile-time conditional-type pin in this package
-// is a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables
+// was a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables
 // `typecheck`), so the load-bearing pin is the compiler-API test below, with
 // anti-vacuity guards; sabotage-verified in the PR (re-exporting the ui enum
 // from ./studio under the bare name — green to the dual-source gate, a lie to

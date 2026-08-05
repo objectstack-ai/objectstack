@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest';
+// `z` is used in a type position below (`z.infer<typeof HttpMethod>`) and was
+// never imported — TS2503, invisible to vitest because esbuild strips type
+// annotations without resolving them (#5286).
+import type { z } from 'zod';
 import {
   RouteCategory,
   RouteDefinitionSchema,

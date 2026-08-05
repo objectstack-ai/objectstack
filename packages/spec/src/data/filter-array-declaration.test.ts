@@ -204,31 +204,33 @@ describe('the authoring gate is stricter than the runtime detector, in exactly t
 });
 
 /**
- * ⚠️ **These assertions do not run in CI, and saying so is the point.**
+ * **These assertions DO run in CI now — #5286 is what made that true.**
  *
- * `packages/spec/tsconfig.json` excludes `**` + `/*.test.ts` under the measured
- * `TEST_DEBT` entry in `scripts/check-type-check-coverage.mjs` (272 test files,
- * 902 errors), so `pnpm --filter @objectstack/spec typecheck` never reads this
- * file and every `@ts-expect-error` below is INERT — it looks like a pinned
- * contract and pins nothing. That is true of all 17 `@ts-expect-error`
- * directives across spec's test layer, not just these two; filed as #5305.
+ * The history is worth keeping, because it is the whole reason the gate exists.
+ * `packages/spec/tsconfig.json` excludes `**` + `/*.test.ts` and the package's
+ * `typecheck` script was a bare `tsc --noEmit` reading that same config, so
+ * `pnpm --filter @objectstack/spec typecheck` never read this file and every
+ * `@ts-expect-error` below was INERT — it looked like a pinned contract and
+ * pinned nothing. That was true of all 17 `@ts-expect-error` directives across
+ * spec's test layer, not just these two (#5305, folded into #5286).
  *
- * They are kept because they are correct and become live the day spec
- * graduates off `TEST_DEBT`. Verified by hand on this branch, with the
- * exclusion lifted:
+ * The build config still excludes tests, on purpose: ci.yml gates that no test
+ * file reaches the published artifact. What changed is the sibling
+ * `tsconfig.test.json`, named by the `typecheck` script, which compiles the test
+ * layer with the module semantics vitest actually executes under. Two gates now
+ * keep this honest: `check:test-typecheck` fails on any error in a file the
+ * per-file ledger does not cover (these two directives going unused is exactly
+ * such an error), and `check:type-check-coverage`'s PINS_CHECKED invariant fails
+ * repo-wide on a `@ts-expect-error` sitting outside every tsc program.
  *
- * ```
- * # tsconfig extending spec's, "include": [this file], "exclude": []
- * npx tsc -p tsconfig.typetest.tmp.json   # => exit 0, both directives live
- * ```
- *
- * and reverse-verified by widening `FilterArrayOperator` back to `string`
- * (restoring the `Record< string, string >` annotation on `AST_OPERATOR_MAP`),
- * which reports exactly one new error — `TS2578: Unused '@ts-expect-error'
- * directive` on the misspelled-operator line, the narrowing this declaration
- * adds. Do not read a green `pnpm test` as evidence for anything in this block.
+ * Reverse-verified in the #5286 PR by widening `FilterArrayOperator` back to
+ * `string` (restoring the `Record< string, string >` annotation on
+ * `AST_OPERATOR_MAP`), which reports exactly one new error — `TS2578: Unused
+ * '@ts-expect-error' directive` on the misspelled-operator line, the narrowing
+ * this declaration adds. A green `pnpm test` is still not evidence for this
+ * block; `pnpm typecheck` now is.
  */
-describe('FilterArray type-level declaration (NOT type-checked in CI — see above)', () => {
+describe('FilterArray type-level declaration (type-checked since #5286 — see above)', () => {
   it('narrows the operator position to the canonical vocabulary', () => {
     const canonical: FilterArrayOperator = 'starts_with';
     const comparison: FilterArray = ['name', canonical, 'A'];

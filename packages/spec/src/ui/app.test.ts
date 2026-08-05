@@ -1536,9 +1536,10 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
     // The type-level half, and the only way to measure it that is not a no-op.
     //
     // `NavigationArea` is a TYPE — erased before any runtime assertion can see
-    // it — so an `Assert< Equal< … > >` pin written in this file would never
-    // run: `packages/spec/tsconfig.json` excludes `**/*.test.ts` and vitest does
-    // not type-check (#4642). Every assertion above would stay green if the two
+    // it — and when this was written an `Assert< Equal< … > >` pin in this file
+    // would never have run: `packages/spec/tsconfig.json` excluded
+    // `**/*.test.ts` and vitest does not type-check (#4642; the tsconfig half is
+    // closed by #5286). Every assertion above would stay green if the two
     // keys were re-added to the schema's TS shape while the parse kept
     // rejecting them. This resolves the exported type through the TypeScript
     // compiler API and reads its members — the same symbol-identity measurement

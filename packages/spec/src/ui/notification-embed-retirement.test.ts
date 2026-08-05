@@ -32,9 +32,9 @@ import { describe, it, expect } from 'vitest';
 // form sharing, and "the names are gone" alone cannot tell the two apart.
 //
 // Why THIS pin and not a type-level one: #4642 established that a compile-time
-// conditional-type assertion in this package is a no-op (the package tsconfig
-// excludes `**/*.test.ts`, and vitest never enables `typecheck`), so an
-// `Assert< Equal< … > >` here would be decoration. The load-bearing pin is the
+// conditional-type assertion in this package was a no-op until #5286 (the package tsconfig
+// excluded `**/*.test.ts`, and vitest never enables `typecheck`), so an
+// `Assert< Equal< … > >` here was decoration until #5286. The load-bearing pin is the
 // TypeScript compiler-API program below, which resolves the REAL export surface
 // of every public entry from `package.json`'s exports map and asserts each
 // retired name has zero holders — by symbol identity, not by grepping text.

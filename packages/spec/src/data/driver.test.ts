@@ -122,8 +122,8 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
   });
 });
 
-// #4642 established that a compile-time conditional-type pin in this package is
-// a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables `typecheck`),
+// #4642 established that a compile-time conditional-type pin in this package was
+// a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables `typecheck`),
 // so the load-bearing tsc-channel proof is the compiler-API test below, with
 // anti-vacuity guards; sabotage-verified in the PR (S1: re-adding a live
 // `streaming: z.boolean()` turns it red).

@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
+// Fixtures below are AUTHORED objects — what a developer writes before the
+// schema applies its defaults — so they are annotated with `ServiceObjectInput`
+// (`z.input`), not `ServiceObject` (`z.infer`, defaults already materialised).
+// Under `z.infer` every fixture owes `isSystem`, `datasource`, `searchable`,
+// `activities`, … and the annotation stops being a contract check at all. This
+// only became visible when tsconfig.test.json put these files in front of tsc
+// (#5286).
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObjectInput } from './object.zod';
+import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
   it('should apply default values correctly', () => {
@@ -224,7 +232,7 @@ describe('IndexSchema', () => {
 describe('ObjectSchema', () => {
   describe('Basic Object Properties', () => {
     it('should accept minimal valid object', () => {
-      const validObject: ServiceObject = {
+      const validObject: ServiceObjectInput = {
         name: 'account',
         fields: {},
       };
@@ -259,7 +267,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Fields', () => {
     it('should accept object with multiple fields', () => {
-      const objectWithFields: ServiceObject = {
+      const objectWithFields: ServiceObjectInput = {
         name: 'contact',
         label: 'Contact',
         pluralLabel: 'Contacts',
@@ -417,7 +425,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Metadata', () => {
     it('should accept object with full metadata', () => {
-      const fullObject: ServiceObject = {
+      const fullObject: ServiceObjectInput = {
         name: 'opportunity',
         label: 'Opportunity',
         pluralLabel: 'Opportunities',
@@ -440,7 +448,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Indexes', () => {
     it('should accept object with indexes', () => {
-      const objectWithIndexes: ServiceObject = {
+      const objectWithIndexes: ServiceObjectInput = {
         name: 'user',
         fields: {
           email: {
@@ -475,7 +483,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Capabilities', () => {
     it('should accept object with custom capabilities', () => {
-      const objectWithCapabilities: ServiceObject = {
+      const objectWithCapabilities: ServiceObjectInput = {
         name: 'case',
         fields: {},
         enable: {
@@ -510,7 +518,7 @@ describe('ObjectSchema', () => {
 
   describe('Complete Real-World Examples', () => {
     it('should accept CRM Account object', () => {
-      const accountObject: ServiceObject = {
+      const accountObject: ServiceObjectInput = {
         name: 'account',
         label: 'Account',
         pluralLabel: 'Accounts',
@@ -575,7 +583,7 @@ describe('ObjectSchema', () => {
     });
 
     it('should accept Task object with parent relationship', () => {
-      const taskObject: ServiceObject = {
+      const taskObject: ServiceObjectInput = {
         name: 'task',
         label: 'Task',
         pluralLabel: 'Tasks',
@@ -663,13 +671,17 @@ describe('ObjectSchema', () => {
       };
 
       const result = ObjectSchema.parse(objectWithState);
-      const rule = result.validations!.find((v) => v.name === 'leave_flow');
+      // `validations` is typed as the open `BaseValidationRuleShape` (index
+      // signature, see validation.zod.ts) — the discriminated union does the
+      // real rejecting at parse time. Narrow to the member this test is about
+      // instead of asserting through a shape that does not overlap it.
+      const rule = result.validations!.find((v) => v.name === 'leave_flow') as
+        | StateMachineValidation
+        | undefined;
       expect(rule).toBeDefined();
       expect(rule!.type).toBe('state_machine');
-      expect((rule as { field: string }).field).toBe('status');
-      expect((rule as { transitions: Record<string, string[]> }).transitions.draft).toEqual([
-        'pending',
-      ]);
+      expect(rule!.field).toBe('status');
+      expect(rule!.transitions.draft).toEqual(['pending']);
     });
 
     it('should allow multiple state_machine rules over distinct fields', () => {

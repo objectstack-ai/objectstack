@@ -27,8 +27,8 @@ import { describe, it, expect } from 'vitest';
 // `kernel/ResolvedPackageDependency` (4 authorable keys, all four still
 // present under the new def ⇒ zero tombstone, zero ADR-0087 conversion).
 //
-// #4642 established that a compile-time conditional-type pin in this package is
-// a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables `typecheck`),
+// #4642 established that a compile-time conditional-type pin in this package was
+// a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables `typecheck`),
 // so the load-bearing pin is the compiler-API test below, with anti-vacuity
 // guards. Sabotage-verified in the PR: S1 resurrecting the old kernel const,
 // and S2 re-exporting the cloud declaration from ./kernel under the bare name

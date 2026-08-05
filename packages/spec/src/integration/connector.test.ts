@@ -666,9 +666,9 @@ describe('ConnectorHealthSchema', () => {
 // ─── [#4911] Outbound rate limiting retired — with the [#4684] pin folded in ──
 //
 // RUNTIME + compiler-API assertions, deliberately. #4642 established that a
-// compile-time pin in `packages/spec` is a no-op: `tsconfig.json` excludes
+// compile-time pin in `packages/spec` was a no-op until #5286: `tsconfig.json` excluded
 // `**/*.test.ts` and `vitest.config.ts` never enables `typecheck`, so an
-// `Assert< Equal< … > >` here would be dead text. The last test below is the
+// `Assert< Equal< … > >` here was dead text until #5286. The last test below is the
 // only shape in this repo that actually pins a TYPE — which is what makes it the
 // load-bearing one here: `ConnectorRateLimitConfig` is a TYPE, erased before any
 // runtime assertion can see it, so re-adding `export type ConnectorRateLimitConfig`
@@ -1048,8 +1048,8 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
   // The load-bearing one, and the reason this block exists at all: `FieldMapping`
   // is a TYPE. Every runtime assertion above stays green if any entry re-adds
   // `export type FieldMapping = z.infer<…>`, which IS the defect. #4642 proved a
-  // compile-time `Assert< Equal< … > >` is dead text in this package
-  // (`tsconfig.json` excludes `**/*.test.ts`, vitest never enables `typecheck`),
+  // compile-time `Assert< Equal< … > >` was dead text until #5286 in this package
+  // (`tsconfig.json` excluded `**/*.test.ts`, vitest never enables `typecheck`),
   // so this resolves each entry's exports through their alias chains with the
   // TypeScript compiler API — the same symbol-identity measurement
   // `check:dual-source-exports` makes against `dist`, run over `src/` so it is

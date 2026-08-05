@@ -12,11 +12,13 @@
  *
  * ## Why these assertions run at RUNTIME
  *
- * A compile-time pin cannot fail in this package (#4642): `tsconfig.json`
- * excludes `**\/*.test.ts` so `pnpm typecheck` never compiles this file, and
- * vitest transpiles without typechecking — a conditional-type assertion here
- * would be inert. Worse, `keyof typeof import(...)` enumerates only VALUE
- * exports, so a bare type name cannot be asserted that way at all. These are
+ * A compile-time pin could not fail in this package when this was written
+ * (#4642): `tsconfig.json` excluded `**\/*.test.ts` so `pnpm typecheck` never
+ * compiled this file, and vitest transpiles without typechecking — a
+ * conditional-type assertion here was inert. #5286 fixed the tsconfig half.
+ * The second reason stands unchanged and is why these assertions do not move:
+ * `keyof typeof import(...)` enumerates only VALUE exports, so a bare type name
+ * cannot be asserted that way at all. These are
  * reference-identity and shape checks on the loaded module namespaces, which
  * actually execute.
  *

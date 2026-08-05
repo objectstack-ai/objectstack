@@ -33,8 +33,10 @@ describe('HttpServerConfig retirement (#4938)', () => {
   // runtime `in` check is a real witness for them — reverse-verified by pasting
   // the removed limb back, which turns these red plus the barrel assertion
   // below. `HttpServerConfigInput` is type-only and cannot be seen from here at
-  // all: a `@ts-expect-error` pin would be a PHANTOM check, because this
-  // package's tsconfig excludes `**/*.test.ts` from `tsc --noEmit`. Its witness
+  // all: when this was written a `@ts-expect-error` pin would have been a
+  // PHANTOM check, because the package tsconfig excluded `**/*.test.ts` from
+  // `tsc --noEmit` — the hole #5286 closed with a sibling `tsconfig.test.json`,
+  // so a type-level pin here would evaluate today. Its longer-lived witness
   // is `api-surface.json`, which lost all three entries in this change and is
   // ratcheted by `check:api-surface` against the built `dist/*.d.ts`.
   it.each([

@@ -49,7 +49,7 @@ import { describe, it, expect } from 'vitest';
 //
 // Form follows #4834 / PR #5300: resolved symbol identity over every public
 // entry in `package.json`'s exports map. #4642 established that a compile-time
-// conditional-type pin in this package is a no-op (tsconfig excludes
+// conditional-type pin in this package was a no-op until #5286 (tsconfig excluded
 // `**/*.test.ts`; vitest never enables `typecheck`), so the compiler-API walk
 // with anti-vacuity guards is the load-bearing instrument.
 describe('[#4988] ui/ interaction config family retirement', () => {

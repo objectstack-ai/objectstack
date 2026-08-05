@@ -56,6 +56,29 @@
 //               #4311 is actually about. This invariant is why the ledger is
 //               two ledgers: DEBT is "src does not check", TEST_DEBT is "src
 //               checks, tests are hidden", and they are independent.
+//
+//               Read across ALL of a package's tsconfigs, not just
+//               `tsconfig.json` (#5286). The build config has a reason to
+//               exclude tests -- ci.yml gates that no test file reaches the
+//               published artifact -- so the supported repair is a SIBLING
+//               `tsconfig.test.json` wired into the `typecheck` script. Judging
+//               only `tsconfig.json` would keep calling such a package hidden
+//               while tsc reads every one of its tests. The sibling must be
+//               NAMED in the typecheck script chain: a config no script invokes
+//               reads as coverage and delivers none, which is this gate's own
+//               subject matter.
+//   PINS_CHECKED
+//               a test file containing a `@ts-expect-error` directive sits
+//               inside a tsc program, or is listed in PHANTOM_PIN_DEBT below.
+//               `@ts-expect-error` is the retirement channel the
+//               spec-property-retirement playbook leans on ("tsc is the best
+//               sweeper"): the directive is supposed to go red the day the
+//               removed key comes back. In an unchecked file it evaluates
+//               NEVER -- deleting the directive line leaves the suite just as
+//               green, which is a phantom check wearing a pin's clothes
+//               (#5286). Independent of TESTS_COVERED: a file can sit outside
+//               `include` without any exclusion naming it, which is how
+//               `packages/metadata-core/test/` hid.
 //   RUNNABLE    turbo.json declares the `typecheck` task, the root `typecheck`
 //               script aggregates it (`turbo run typecheck`, the build/test
 //               convention), and lint.yml invokes it -- a script CI never
@@ -98,6 +121,12 @@ const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/431
 // "does this config steer tsc away from the test layer", not "which exact glob".
 const TEST_GLOB = /\*\.(test|spec)\.tsx?$/;
 const TEST_FILE = /\.(test|spec)\.tsx?$/;
+// A `@ts-expect-error` in DIRECTIVE position -- first thing on its own comment
+// line, where the compiler reads it. Prose that merely mentions the directive
+// (several files in this repo explain why they do NOT use one) must not count,
+// or PINS_CHECKED would fire on documentation.
+const PIN_DIRECTIVE = /^[ \t]*(?:\/\/|\/\*|\*)[ \t]*@ts-expect-error\b/m;
+const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 
 // Package name -> { errors, note? }. `errors` is the raw `tsc --noEmit` count
 // measured per package on main @ b07d829 (2026-07-31), re-measured after the
@@ -199,12 +228,16 @@ const EXEMPT = {
 // declare `typecheck`. What they hide is the test layer, which is where #4311
 // found the defects (a passing vitest run proves the code executes, not that
 // the call shapes match). Sorted by what each is hiding, worst first.
+// `@objectstack/spec` graduated in #5286: `tsconfig.test.json` (a sibling of
+// the build config, named by the `typecheck` script) compiles its 295 test
+// files, so nothing is hidden any more and TESTS_COVERED no longer wants an
+// entry here. The residue that lifting the exclusion surfaced did not vanish
+// with the entry -- it moved to `packages/spec/test-typecheck-debt.json`, a
+// PER-FILE exact ratchet re-measured by tsc on every run, which is strictly
+// stronger than the frozen package-level number this ledger could hold. The
+// number that used to sit here (272 files / 902 errors) was also stale by 23
+// files, which is the other argument for a measurement the gate derives.
 const TEST_DEBT = {
-  '@objectstack/spec': {
-    tests: 272,
-    errors: 902,
-    note: 'TS6133 x208, TS2739 x193, TS2741 x146, TS2322 x96 -- overwhelmingly incomplete object literals in test fixtures against the schemas spec itself defines.',
-  },
   '@objectstack/plugin-approvals': {
     tests: 13,
     errors: 467,
@@ -229,6 +262,25 @@ const TEST_DEBT = {
   '@objectstack/http-conformance': { tests: 2, errors: 1, note: 'TS2740 x1.' },
   '@objectstack/service-sms': { tests: 3, errors: 1, note: 'TS2493 x1.' },
   '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1.' },
+};
+
+// Repo-relative path -> why this test file's `@ts-expect-error` directives are
+// still phantom. PINS_CHECKED's escape hatch, and the narrowest of the three
+// ledgers on purpose: an unchecked pin is not "debt we measured", it is a
+// retirement guard that reads as enforced and enforces nothing. A directive in
+// one of these files can be DELETED with no gate noticing -- which is how
+// #5286's 17 spec directives were found.
+//
+// Shrink-only, and closed: a file that starts carrying a pin while unchecked
+// fails PINS_CHECKED rather than joining this list. The repair is the same one
+// spec took -- put the file in a tsc program (drop the exclusion, widen
+// `include`, or add a sibling `tsconfig.test.json` the typecheck script names)
+// -- and then delete the entry, which RECONCILED forces anyway.
+const PHANTOM_PIN_DEBT = {
+  'packages/client/src/client.test.ts':
+    'tsconfig.json excludes `**/*.test.ts` and the package has no sibling test config; also in TEST_DEBT (15 files / 19 errors). Onboarding it is #5449, not #5286 -- the two directives here pin retired client options.',
+  'packages/metadata-core/test/types.test.ts':
+    'Outside the program for a different reason, and one no exclusion names: `include` is `["src/**/*"]` while this file lives in a sibling `test/` tree, so TESTS_COVERED never saw it either (its testFiles count is 0). Repair is to widen `include` or add a test config; measured separately from #5286, which scoped itself to packages/spec.',
 };
 
 /**
@@ -256,43 +308,112 @@ function workspaceGlobs() {
 }
 
 /**
- * Does this package's tsconfig `exclude` its own test files, and how many are
- * there to hide? Read with a tolerant parse -- these configs carry `//`
- * comments, and a parse failure must not silently read as "excludes nothing"
- * (that would turn TESTS_COVERED into a gate that passes on unparseable input).
+ * One `tsconfig*.json` of a package, read with a tolerant parse -- these configs
+ * carry `//` comments, and a parse failure must not silently read as "excludes
+ * nothing" (that would turn TESTS_COVERED into a gate that passes on
+ * unparseable input).
  *
- * @returns {{excludesTests: boolean, testFiles: number}}
+ * `roots` come from the `include` glob prefixes (`src/**\/*` -> `src`); no
+ * `include` at all means tsc walks the whole package directory, which is the
+ * empty root.
+ *
+ * @returns {{file: string, roots: string[], excludesTests: boolean}}
  */
-function testCoverage(dir) {
-  const tsconfigPath = join(ROOT, dir, 'tsconfig.json');
-  let excludesTests = false;
-  let parsedInclude = null;
-  if (existsSync(tsconfigPath)) {
-    const raw = readFileSync(tsconfigPath, 'utf8').replace(/^\s*\/\/.*$/gm, '');
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (cause) {
-      throw new Error(`${dir}/tsconfig.json is not parseable, so its test coverage cannot be judged`, { cause });
-    }
-    excludesTests = (parsed.exclude ?? []).some((pattern) => TEST_GLOB.test(pattern));
-    parsedInclude = parsed.include ?? null;
+function readTsconfig(dir, file) {
+  const raw = readFileSync(join(ROOT, dir, file), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error(`${dir}/${file} is not parseable, so its test coverage cannot be judged`, { cause });
   }
-
-  // Count only under the `include` roots: `exclude` subtracts from what
-  // `include` selected, so a test file outside those roots is already out of
-  // the program and is not what this exclusion hides. Several packages keep a
-  // sibling `test/` tree that their `include` never mentions -- counting it
-  // here would attribute files to an exclusion that has no bearing on them.
-  // Roots come from the glob prefix (`src/**/*` -> `src`); no `include` at all
-  // means tsc walks the whole package directory.
-  const roots = Array.isArray(parsedInclude) && parsedInclude.length > 0
-    ? [...new Set(parsedInclude.map((g) => g.split('*')[0].replace(/\/$/, '')).filter((p) => !p.includes('..')))]
+  const include = parsed.include ?? null;
+  const roots = Array.isArray(include) && include.length > 0
+    ? [...new Set(include.map((g) => g.split('*')[0].replace(/\/$/, '')).filter((p) => !p.includes('..')))]
     : [''];
+  return {
+    file,
+    roots,
+    excludesTests: (parsed.exclude ?? []).some((pattern) => TEST_GLOB.test(pattern)),
+  };
+}
+
+/** Is `rel` (posix, relative to the package) inside this config's program? */
+function configCovers(config, rel) {
+  if (config.excludesTests && TEST_FILE.test(rel)) return false;
+  return config.roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`));
+}
+
+/**
+ * Which tsconfig files does the `typecheck` script actually put in front of
+ * tsc? Expanded through same-package `pnpm <script>` / `npm run <script>`
+ * indirection, because a package that splits the work across two scripts is
+ * still running both. A bare `tsc` reads `tsconfig.json`, so any mention of tsc
+ * credits the default config; every other config must be NAMED (`-p
+ * tsconfig.test.json`), which is what keeps a decorative sibling config from
+ * reading as coverage (#5286).
+ */
+function configsNamedByTypecheck(scripts) {
+  const visited = new Set();
+  let text = '';
+  const visit = (name, depth) => {
+    if (depth > 4 || visited.has(name) || typeof scripts[name] !== 'string') return;
+    visited.add(name);
+    text += ` ${scripts[name]}`;
+    for (const m of scripts[name].matchAll(/\b(?:pnpm(?:\s+run)?|npm\s+run|yarn(?:\s+run)?)\s+([\w:.-]+)/g)) {
+      visit(m[1], depth + 1);
+    }
+  };
+  visit('typecheck', 0);
+  const named = new Set();
+  for (const m of text.matchAll(/tsconfig[\w.-]*\.json/g)) named.add(m[0]);
+  if (/\btsc\b/.test(text)) named.add('tsconfig.json');
+  return named;
+}
+
+/**
+ * What this package's tsc programs read, and what they leave out.
+ *
+ * `excludesTests` is the TESTS_COVERED trigger and now means "some config
+ * steers tsc away from the tests AND no config the typecheck script invokes
+ * reads them" -- so a package repaired the supported way (a sibling
+ * `tsconfig.test.json` named in the script) is covered rather than eternally in
+ * debt, while a package that merely OWNS such a file without invoking it is not
+ * (#5286).
+ *
+ * `pinFiles` is PINS_CHECKED's input: test files carrying a `@ts-expect-error`
+ * directive that no invoked program compiles. The scan walks the whole package,
+ * not just the include roots -- `packages/metadata-core/test/` is outside
+ * `include` with no exclusion naming it, and that is just as unchecked.
+ *
+ * @returns {{excludesTests: boolean, testFiles: number, pinFiles: string[]}}
+ */
+function testCoverage(dir, scripts) {
+  let configFiles = [];
+  try {
+    configFiles = readdirSync(join(ROOT, dir)).filter((f) => /^tsconfig[\w.-]*\.json$/.test(f)).sort();
+  } catch {
+    configFiles = [];
+  }
+  const configs = configFiles.map((file) => readTsconfig(dir, file));
+  const named = configsNamedByTypecheck(scripts);
+  const invoked = configs.filter((c) => named.has(c.file));
+  const anyExcludesTests = configs.some((c) => c.excludesTests);
+  const testsInvoked = invoked.filter((c) => !c.excludesTests);
+
+  const primary = configs.find((c) => c.file === 'tsconfig.json');
+  // Count only under the primary config's `include` roots: `exclude` subtracts
+  // from what `include` selected, so a test file outside those roots is already
+  // out of the program and is not what this exclusion hides. Several packages
+  // keep a sibling `test/` tree that their `include` never mentions -- counting
+  // it here would attribute files to an exclusion that has no bearing on them
+  // (PINS_CHECKED is what covers those).
+  const countRoots = primary ? primary.roots : [''];
 
   let testFiles = 0;
+  const pinFiles = [];
   const seen = new Set();
-  const walk = (abs, depth) => {
+  const walk = (abs, rel, depth, counting) => {
     let entries = [];
     try {
       entries = readdirSync(abs, { withFileTypes: true });
@@ -301,18 +422,30 @@ function testCoverage(dir) {
     }
     for (const entry of entries) {
       const child = join(abs, entry.name);
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
         if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
-        walk(child, depth + 1);
-      } else if (TEST_FILE.test(entry.name) && !seen.has(child)) {
-        seen.add(child); // overlapping include roots must not double-count
-        testFiles++;
+        walk(child, childRel, depth + 1, counting);
+      } else if (TEST_FILE.test(entry.name)) {
+        if (counting && !seen.has(child)) {
+          seen.add(child); // overlapping include roots must not double-count
+          testFiles++;
+        }
+        if (!counting && PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) {
+          if (!testsInvoked.some((c) => configCovers(c, childRel))) pinFiles.push(posix.join(dir, childRel));
+        }
       }
     }
   };
-  for (const root of roots) walk(join(ROOT, dir, root), 0);
-  return { excludesTests, testFiles };
+  for (const root of countRoots) walk(join(ROOT, dir, root), root, 0, true);
+  walk(join(ROOT, dir), '', 0, false);
+
+  return {
+    excludesTests: anyExcludesTests && testsInvoked.length === 0,
+    testFiles,
+    pinFiles: pinFiles.sort(),
+  };
 }
 
 /** Every workspace member as { name, dir, scripts, hasTsconfig, excludesTests, testFiles }. */
@@ -340,7 +473,7 @@ function workspacePackages() {
       dir,
       scripts: manifest.scripts ?? {},
       hasTsconfig: existsSync(join(ROOT, dir, 'tsconfig.json')),
-      ...testCoverage(dir),
+      ...testCoverage(dir, manifest.scripts ?? {}),
     };
   });
 }
@@ -351,11 +484,12 @@ function workspacePackages() {
  * semantics the gate applies.
  *
  * @param {Array<{name: string, dir: string, scripts: Record<string,string>, hasTsconfig: boolean,
- *                excludesTests?: boolean, testFiles?: number}>} packages
+ *                excludesTests?: boolean, testFiles?: number, pinFiles?: string[]}>} packages
  * @param {{name: string, scripts: Record<string,string>}} root
  * @param {{ debt: Record<string, {errors: number, note?: string}>,
  *           exempt: Record<string, string>,
  *           testDebt: Record<string, {tests: number, errors: number, note?: string}>,
+ *           phantomPins: Record<string, string>,
  *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean }} state
  * @returns {string[]} problems, empty when the ratchet holds
  */
@@ -378,8 +512,9 @@ function evaluate(packages, root, state) {
         problems.push(
           `${pkg.name} (${pkg.dir}): tsconfig.json excludes its own test files, hiding ${pkg.testFiles} of them ` +
             `from \`tsc --noEmit\` -- the check reports green over source it never read (${TRACKING_ISSUE}). ` +
-            `Drop the \`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, or measure what surfaces and add a ` +
-            `TEST_DEBT entry in ${SELF}.`,
+            `Drop the \`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, add a sibling \`tsconfig.test.json\` ` +
+            `and name it in the \`typecheck\` script (the #5286 route, when the build config must keep the ` +
+            `exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
         );
       } else {
         const entry = state.testDebt[pkg.name];
@@ -395,6 +530,23 @@ function evaluate(packages, root, state) {
         `${pkg.name}: has a TEST_DEBT entry but ${pkg.testFiles === 0 ? 'has no test files' : 'no longer excludes its tests'} -- ` +
           `it graduated; delete its entry from TEST_DEBT in ${SELF}.`,
       );
+    }
+
+    // PINS_CHECKED. A `@ts-expect-error` outside every invoked tsc program is a
+    // retirement guard that cannot fail -- deleting the directive changes
+    // nothing, which is the definition of a phantom check (${PIN_ISSUE}).
+    for (const file of pkg.pinFiles ?? []) {
+      if (!Object.hasOwn(state.phantomPins, file)) {
+        problems.push(
+          `${file}: carries a \`@ts-expect-error\` directive but no tsc program the \`typecheck\` script ` +
+            `runs compiles it, so the directive is never evaluated -- delete the line and every gate stays ` +
+            `green (${PIN_ISSUE}). Put the file in a program (drop the exclusion, widen \`include\`, or add a ` +
+            `sibling \`tsconfig.test.json\` the typecheck script names), or replace the pin with a runtime ` +
+            `assertion. PHANTOM_PIN_DEBT in ${SELF} is closed to new entries.`,
+        );
+      } else if (!String(state.phantomPins[file] ?? '').trim()) {
+        problems.push(`${file}: PHANTOM_PIN_DEBT entry has no reason -- say why the pin is still unchecked.`);
+      }
     }
 
     if (script !== undefined) {
@@ -500,6 +652,19 @@ function evaluate(packages, root, state) {
       problems.push(`TEST_DEBT entry for "${name}" names no workspace package -- remove it from ${SELF}.`);
     }
   }
+  // RECONCILED for PINS_CHECKED: an entry survives only while the file really
+  // is an unchecked pin. Once it is compiled -- or loses its directives, or
+  // moves -- the entry is a claim about nothing, and a worklist that outlives
+  // its work is the failure mode this repo keeps paying for.
+  const phantomSeen = new Set(packages.flatMap((p) => p.pinFiles ?? []));
+  for (const file of Object.keys(state.phantomPins)) {
+    if (!phantomSeen.has(file)) {
+      problems.push(
+        `PHANTOM_PIN_DEBT entry for "${file}" is no longer an unchecked pin (compiled now, or the file/` +
+          `directives are gone) -- delete it from ${SELF}. That is the ratchet: this list only shrinks.`,
+      );
+    }
+  }
 
   // RUNNABLE: coverage that nothing executes is not coverage.
   if (!state.turboHasTask) {
@@ -535,6 +700,7 @@ function observed() {
       debt: DEBT,
       exempt: EXEMPT,
       testDebt: TEST_DEBT,
+      phantomPins: PHANTOM_PIN_DEBT,
       turboHasTask: Object.hasOwn(turbo.tasks ?? {}, 'typecheck'),
       ciInvokesTask: /turbo run typecheck/.test(lintYml),
       ciInvokesRoot: /typecheck:root/.test(lintYml),
@@ -554,7 +720,7 @@ function selfTest() {
     name: 'root',
     scripts: { typecheck: 'turbo run typecheck', 'typecheck:root': 'tsc --noEmit' },
   };
-  const okState = { debt: {}, exempt: {}, testDebt: {}, turboHasTask: true, ciInvokesTask: true, ciInvokesRoot: true };
+  const okState = { debt: {}, exempt: {}, testDebt: {}, phantomPins: {}, turboHasTask: true, ciInvokesTask: true, ciInvokesRoot: true };
   const cases = [
     {
       label: 'covered package passes',
@@ -579,6 +745,42 @@ function selfTest() {
       root: okRoot,
       state: { ...okState, testDebt: { a: { tests: 3, errors: 9 }, b: { tests: 4, errors: 0 } } },
       expect: [/b: TEST_DEBT entry has no measured error count/],
+    },
+    {
+      label: 'a pin in a file no tsc program compiles fails PINS_CHECKED',
+      packages: [
+        pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, pinFiles: ['packages/a/src/x.test.ts'] }),
+      ],
+      root: okRoot,
+      state: okState,
+      expect: [/packages\/a\/src\/x\.test\.ts: carries a `@ts-expect-error` directive but no tsc program/],
+    },
+    {
+      label: 'a PHANTOM_PIN_DEBT entry covers it, but only with a reason',
+      packages: [
+        pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, pinFiles: ['packages/a/src/x.test.ts'] }),
+        pkg('b', { scripts: { typecheck: 'tsc --noEmit' }, pinFiles: ['packages/b/src/y.test.ts'] }),
+      ],
+      root: okRoot,
+      state: {
+        ...okState,
+        phantomPins: { 'packages/a/src/x.test.ts': 'excluded, tracked by #9999', 'packages/b/src/y.test.ts': '  ' },
+      },
+      expect: [/packages\/b\/src\/y\.test\.ts: PHANTOM_PIN_DEBT entry has no reason/],
+    },
+    {
+      label: 'a pin that entered a tsc program fails RECONCILED until its entry is deleted',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit && tsc -p tsconfig.test.json' }, pinFiles: [] })],
+      root: okRoot,
+      state: { ...okState, phantomPins: { 'packages/a/src/x.test.ts': 'excluded, tracked by #9999' } },
+      expect: [/PHANTOM_PIN_DEBT entry for "packages\/a\/src\/x\.test\.ts" is no longer an unchecked pin/],
+    },
+    {
+      label: 'a checked test file with pins is silent — PINS_CHECKED is about the unchecked ones only',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, pinFiles: [] })],
+      root: okRoot,
+      state: okState,
+      expect: [],
     },
     {
       label: 'excluding tests when there are none to hide is not debt',
@@ -694,12 +896,61 @@ function selfTest() {
       failures.push(`${c.label}: expected ${c.expect.length} problem(s) matching ${c.expect}, got ${JSON.stringify(got)}`);
     }
   }
+
+  // The observation half is where the :267 blind spot lived: `excludesTests`
+  // read only `tsconfig.json`, so a sibling test config was invisible however
+  // it was wired. These two helpers now decide it, so they are pinned too.
+  const namedCases = [
+    { label: 'a bare tsc credits the default config only', scripts: { typecheck: 'tsc --noEmit' }, expect: ['tsconfig.json'] },
+    {
+      label: 'an explicitly named sibling config counts',
+      scripts: { typecheck: 'tsc --noEmit && tsc --noEmit -p tsconfig.test.json' },
+      expect: ['tsconfig.json', 'tsconfig.test.json'],
+    },
+    {
+      label: 'one level of `pnpm <script>` indirection is followed',
+      scripts: { typecheck: 'tsc --noEmit && pnpm check:tests', 'check:tests': 'tsx x.mts --project tsconfig.test.json' },
+      expect: ['tsconfig.json', 'tsconfig.test.json'],
+    },
+    {
+      label: 'a config no script names is not coverage, however present the file is',
+      scripts: { typecheck: 'tsc --noEmit', 'some:other': 'tsc -p tsconfig.test.json' },
+      expect: ['tsconfig.json'],
+    },
+    { label: 'no typecheck script names nothing', scripts: {}, expect: [] },
+  ];
+  for (const c of namedCases) {
+    const got = [...configsNamedByTypecheck(c.scripts)].sort();
+    if (JSON.stringify(got) !== JSON.stringify([...c.expect].sort())) {
+      failures.push(`configsNamedByTypecheck — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  const src = { file: 'tsconfig.json', roots: ['src'], excludesTests: false };
+  const srcNoTests = { file: 'tsconfig.json', roots: ['src'], excludesTests: true };
+  const whole = { file: 'tsconfig.test.json', roots: [''], excludesTests: false };
+  const coverCases = [
+    { label: 'a file under the include root is in the program', config: src, rel: 'src/a.test.ts', expect: true },
+    { label: 'a sibling test/ tree outside include is not', config: src, rel: 'test/a.test.ts', expect: false },
+    { label: 'an exclusion takes the test back out', config: srcNoTests, rel: 'src/a.test.ts', expect: false },
+    { label: 'an exclusion does not touch non-test sources', config: srcNoTests, rel: 'src/a.ts', expect: true },
+    { label: 'no include walks the whole package', config: whole, rel: 'test/a.test.ts', expect: true },
+    { label: 'a root prefix must match a path SEGMENT', config: src, rel: 'srcfixtures/a.test.ts', expect: false },
+  ];
+  for (const c of coverCases) {
+    const got = configCovers(c.config, c.rel);
+    if (got !== c.expect) failures.push(`configCovers — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
     process.exit(1);
   }
-  console.log(`✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) hold.`);
+  console.log(
+    `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
+      `${namedCases.length + coverCases.length} observation case(s) hold.`,
+  );
 }
 
 if (process.argv.includes('--self-test')) {

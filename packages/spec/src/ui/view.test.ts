@@ -2655,12 +2655,13 @@ describe('HttpMethodSchema/HttpRequestSchema backward compat', () => {
 // ─── [#4688] Dual-source regression pin ──────────────────────────────
 //
 // RUNTIME assertions, deliberately. #4642 established that a compile-time pin in
-// `packages/spec` is a no-op: `tsconfig.json` excludes `**/*.test.ts` and
-// `vitest.config.ts` never enables `typecheck`, so neither path type-checks a
-// test file. A conditional-type `Assert< Equal< … > >` here would be dead text —
-// and so, for the same reason, is the bare `type HttpRequest` import at the top
-// of this file: vitest's transform erases it, so it proves nothing about the
-// export still existing. The third test below is what actually proves that.
+// `packages/spec` was a no-op until #5286: `tsconfig.json` excluded `**/*.test.ts` and
+// `vitest.config.ts` never enables `typecheck`, so neither path type-checked a
+// test file. A conditional-type `Assert< Equal< … > >` here was dead text until
+// #5286. One half of that argument survives #5286 untouched and is why these
+// stay runtime assertions: the bare `type HttpRequest` import at the top of this
+// file proves nothing about the export still existing, because vitest's
+// transform erases it. The third test below is what actually proves that.
 //
 // What these defend: `HttpRequest` naming ONE declaration across both published
 // entries. `HttpRequestSchema` was never duplicated — `./ui` imports and
@@ -2765,7 +2766,7 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
 //
 // Same reasoning as #4688 on the mechanism: `HttpMethod` is a TYPE, erased
 // before any runtime assertion can see it, and #4642 established that a
-// compile-time pin in this package is a no-op (`tsconfig.json` excludes
+// compile-time pin in this package was a no-op until #5286 (`tsconfig.json` excluded
 // `**/*.test.ts`; vitest never enables `typecheck`). The compiler-API test is
 // therefore the load-bearing one; the runtime tests below it guard the value
 // ranges the whole argument rests on.

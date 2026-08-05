@@ -18,8 +18,8 @@ import { describe, it, expect } from 'vitest';
 // re-export #4653 had just added) are deleted.
 //
 // Why a compiler-API pin rather than a type-level one: #4642 established that
-// a compile-time conditional-type pin in this package is a no-op (tsconfig
-// excludes `**/*.test.ts`; vitest never enables `typecheck`), so the
+// a compile-time conditional-type pin in this package was a no-op until #5286 (tsconfig
+// excluded `**/*.test.ts`; vitest never enables `typecheck`), so the
 // load-bearing pin is the program below, with anti-vacuity guards — the
 // #4737 `ActionLocation` retirement's machinery, pointed at absence instead of
 // ownership. Sabotage-verified in the PR: resurrecting the declaration in

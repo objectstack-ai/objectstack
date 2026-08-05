@@ -41,9 +41,12 @@ describe('NotificationChannelSchema', () => {
 // #4610 in this very file, and as #4767/#4783).
 //
 // WHY THIS PIN IS A COMPILER-API TEST. #4642 established that a conditional
-// type over `typeof import(...)` in this package is a NO-OP — `tsconfig.json`
-// excludes `**/*.test.ts` and vitest never enables `typecheck`, so nothing ever
-// evaluates it. The `NotificationConfig` pin #4610 left here was exactly that
+// type over `typeof import(...)` in this package was a NO-OP until #5286 — `tsconfig.json`
+// excluded `**/*.test.ts` and vitest never enables `typecheck`, so nothing ever
+// evaluated it. (#5286's sibling `tsconfig.test.json` now does; the
+// compiler-API test stays load-bearing because it resolves EVERY public entry,
+// which a same-module conditional cannot.) The `NotificationConfig` pin #4610
+// left here was exactly that
 // shape; it is folded into the load-bearing test below rather than left as a
 // gate that cannot fail. Sabotage-verified in the PR: S1 re-declares a removed
 // const in notification.zod.ts, S2 re-exports it from another entry under the

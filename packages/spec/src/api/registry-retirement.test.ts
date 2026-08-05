@@ -28,8 +28,8 @@
  *
  * A removed export cannot be imported by name — that would not compile, so the
  * pin has to ask the namespace object instead. `#4642` established that a
- * compile-time conditional-type pin is a no-op in this package (tsconfig
- * excludes `**\/*.test.ts`, and vitest never enables `typecheck`), so the
+ * compile-time conditional-type pin was a no-op until #5286 in this package (tsconfig
+ * excluded `**\/*.test.ts`, and vitest never enables `typecheck`), so the
  * load-bearing check must be a runtime one, with anti-vacuity guards.
  */
 

@@ -99,9 +99,13 @@ describe('StrictObjectTranslation', () => {
 
   it('should report TS error when a field is missing', () => {
     type T = StrictObjectTranslation<typeof SimpleObject>;
-    // @ts-expect-error — missing 'email' field
     const _invalid: T = {
       label: 'Test',
+      // The directive sits on the OFFENDING property, not on the declaration:
+      // TS2741 ("Property 'email' is missing") is reported at `fields`, so a
+      // directive three lines up suppressed nothing and was itself unused
+      // (TS2578). Invisible until #5286 put this file in front of tsc.
+      // @ts-expect-error — missing 'email' field
       fields: {
         name: { label: 'Name' },
       },
@@ -125,13 +129,15 @@ describe('StrictObjectTranslation', () => {
 
   it('should report TS error when an option is missing', () => {
     type T = StrictObjectTranslation<typeof ObjectWithSelect>;
-    // @ts-expect-error — missing 'closed' option
     const _invalid: T = {
       label: 'Test',
       fields: {
         title: { label: 'Title' },
         status: {
           label: 'Status',
+          // Same mispositioning as above: the missing-option error lands on
+          // `options`, not on the declaration line (#5286).
+          // @ts-expect-error — missing 'closed' option
           options: { open: 'Open' },
         },
         priority: {

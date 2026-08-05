@@ -213,9 +213,9 @@ describe('Dashboard presentation sub-schemas', () => {
 // ============================================================================
 //
 // RUNTIME assertions, deliberately. #4642 established that a compile-time pin in
-// `packages/spec` is a no-op: `tsconfig.json` excludes `**/*.test.ts` and
+// `packages/spec` was a no-op until #5286: `tsconfig.json` excluded `**/*.test.ts` and
 // `vitest.config.ts` never enables `typecheck`, so an `Assert< Equal< … > >`
-// here would be dead text. The tombstone's `tsc` channel is proved by the build
+// here was dead text until #5286. The tombstone's `tsc` channel is proved by the build
 // of the packages that author dashboards, not by this file.
 //
 // The pair below is the whole contract of this retirement: the widget embed
@@ -283,7 +283,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
 // ============================================================================
 //
 // RUNTIME assertions for the same reason the #4876 block above gives: a
-// compile-time pin in `packages/spec` is dead text (#4642). The tombstone's
+// compile-time pin in `packages/spec` was dead text until #5286 (#4642). The tombstone's
 // `tsc` channel is proved by the build of the packages that author dashboards.
 //
 // Two affordances, one block, because they were retired as one change:

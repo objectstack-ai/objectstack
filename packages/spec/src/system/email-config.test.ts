@@ -10,12 +10,13 @@
 // provider the runtime had been serving since. Declared ≠ implemented, with
 // the spec on the *lagging* side.
 //
-// These assertions are RUNTIME `safeParse` checks on purpose. `packages/spec`
-// excludes `**/*.test.ts` from its `tsconfig.json`, so `tsc --noEmit` never
-// reads this file (#5286) and any `Assert< Equal< … > >`-style type-level
-// witness written here would be a phantom check that passes because nothing
-// type-checks it. What the enum *accepts* is observable at runtime; that is
-// what we pin.
+// These assertions are RUNTIME `safeParse` checks on purpose. When they were
+// written `packages/spec` excluded `**/*.test.ts` from its `tsconfig.json`, so
+// `tsc --noEmit` never read this file and any `Assert< Equal< … > >`-style
+// type-level witness here would have been a phantom check that passes because
+// nothing type-checks it. #5286 closed that (the sibling `tsconfig.test.json`
+// compiles the test layer), but these stay runtime checks on their own merit:
+// what the enum *accepts* is observable at runtime, and that is what we pin.
 //
 // The set equality below is deliberately a literal. It is the spec-side half
 // of a two-sided pin: `spec-provider-parity.contract.test.ts` in

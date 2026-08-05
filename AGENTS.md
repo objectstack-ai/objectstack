@@ -34,7 +34,23 @@ that graduates deletes its ledger entry in the same PR.
 `typecheck` script advertises — a green gate over source nothing read, which is the
 #4311 defect itself. The ratchet's `TESTS_COVERED` invariant fails on any new exclusion;
 the packages that already had one carry a measured `TEST_DEBT` entry and graduate by
-dropping the exclusion.
+dropping the exclusion — or, when the build config must keep the exclusion (ci.yml gates
+that no test file reaches the published artifact), by adding a **sibling
+`tsconfig.test.json` and naming it in the `typecheck` script**, which is what
+`packages/spec` does since #5286. The sibling may carry its own *module* semantics to
+match how vitest executes the files (`module: esnext`, `moduleResolution: bundler`) —
+never its own *strictness*: `strict` and friends are inherited, untouched.
+
+**A `@ts-expect-error` in a file no tsc program compiles is a phantom check** — the
+`PINS_CHECKED` invariant of the same ratchet, repo-wide. `@ts-expect-error` is the
+"tsc is the best sweeper" channel the spec-property-retirement playbook leans on: the
+directive is meant to go red the day a removed key comes back. Outside a program it
+evaluates never, and *deleting the directive leaves every gate just as green* — which is
+how spec's 17 retirement pins across 5 files were found (#5286). Before writing one,
+check the file is compiled. `packages/spec` additionally holds its test-layer residue in
+a per-file, exactly-measured, shrink-only ledger (`packages/spec/test-typecheck-debt.json`,
+`pnpm --filter @objectstack/spec gen:test-typecheck-debt`): a file not listed there may
+have no type errors at all.
 
 One trap worth knowing before you read any of these counts: under `moduleResolution:
 NodeNext` a relative import missing its `.js` extension does not resolve, every symbol it

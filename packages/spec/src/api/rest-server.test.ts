@@ -693,8 +693,8 @@ describe('[#4579] `RestServerConfig.openApi31` retirement', () => {
   });
 });
 
-// #4642 established that a compile-time conditional-type pin in this package is
-// a no-op (tsconfig excludes `**/*.test.ts`; vitest never enables `typecheck`),
+// #4642 established that a compile-time conditional-type pin in this package was
+// a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables `typecheck`),
 // so the load-bearing pin is the compiler-API test below, with anti-vacuity
 // guards (a resolution failure would otherwise make every assertion pass
 // vacuously); sabotage-verified in the PR (re-adding an export turns it red).
