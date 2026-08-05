@@ -1010,6 +1010,14 @@ connector grant 只能传递调用会话自身持有的,CCR 平台注入的 gith
   禁用工具侧改模型):Routine **继承环境默认模型**,环境默认变了它跟着变;
   要硬钉同样走 Routines UI。
 
+**跨 fire 的长流程照旧可行,因为它们的状态本来就在 GitHub 上。**「串行接力」
+(step 7)一棒就是一整圈、棒间还夹一次 PM 复核,必然跨多个 fire;能跨得过去的
+原因是接力的交接物全是 GitHub 上的读数 —— draft/ready 状态、`auto-merge` 是否
+挂上、以及「预期红停放」那份**签名级**预期红清单写在 PR body 里。座位 Routine
+因此对长流程只有一条额外要求:**接力/停放的每一项都必须落成 GitHub 上可读的
+文本,⛔ 不许把「下一棒该干什么」留在会话记忆里** —— 下一轮 fire 没有会话记忆
+可读,它只能重建。这与「从 labels 重建状态」是同一条纪律的两半。
+
 ### 6. Collect
 
 **Subagent mode:** wait for the background task notifications — do not poll,
@@ -1054,6 +1062,12 @@ the absence of a report as success.
 从 GitHub 就能收到** —— 这是座位 Routine 唯一的跨轮收集通道。跨轮未收的
 dispatch 由下一轮按同一判据处置(~2h 无报告即 `blocked`),`delete_trigger` 的
 清理也顺延到收到报告的那一轮。
+
+上面那三条**停摆纠偏**在 fire 内照常适用,但要注意它们的恢复动作是
+`SendMessage` —— 那需要一个**还活着的对面**。fire 结束后没有可唤醒的 subagent,
+停摆与「会话已销毁」在 GitHub 上是同一个读数(既无报告也无 PR)。所以座位
+Routine 的取舍是:凡验证管线可能超过一个 fire 的活,**一开始就走 `mode:cloud`**,
+把恢复权交给下一轮的 GitHub 读数,而不是赌它能在本轮内被唤醒。
 
 ### 7. Review each report
 
