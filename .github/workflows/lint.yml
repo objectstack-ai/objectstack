@@ -301,6 +301,27 @@ jobs:
       - name: Node-version drift guard
         run: pnpm check:node-version
 
+      # Workflow status-function guard (#5343, from #4900 and #4928). GitHub
+      # wraps any `if:` that names no status function in an IMPLICIT success().
+      # So a job-level condition written to read an upstream job's OUTPUT VALUE
+      # silently also carries a status decision nobody wrote, and the two facts
+      # "the upstream job DIED" and "the upstream job said don't run" arrive as
+      # the same skip — which every checks list renders as green. #4900 found a
+      # release-integrity guard that stopped guarding exactly when the job before
+      # it failed; #4928 found seven ci.yml gates that turned themselves off
+      # whenever something upstream broke. Both were caught by hand, months
+      # apart, and the rule is statically decidable — so it is a gate now.
+      # Job-level `if:` reading `needs.*.outputs.*` only: step-level conditions
+      # and `needs.*.result` are deliberately out of scope (see the script
+      # header). Real YAML parse, not a grep over `if:` lines — a grep cannot
+      # distinguish a malformed workflow from a clean one and cannot see the
+      # folded `if: >-` two of these workflows already use. Runs its own
+      # --self-test first: the detector can break while every workflow is fine,
+      # and a scan that quietly stops matching would report OK while reading
+      # nothing (#4690's family).
+      - name: Workflow status-function guard
+        run: pnpm check:workflow-status-functions
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build

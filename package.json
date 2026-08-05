@@ -53,6 +53,7 @@
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:release-body": "node scripts/release-github-releases.mjs --self-test",
     "check:node-version": "node scripts/check-node-version.mjs",
+    "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
     "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
@@ -78,7 +79,8 @@
     "tsup": "^8.5.1",
     "tsx": "^4.23.1",
     "turbo": "^2.10.7",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=22.0.0"

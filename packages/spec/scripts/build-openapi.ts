@@ -7,6 +7,7 @@ import { z } from 'zod';
 // Dynamic imports from spec source
 import * as API from '../src/api';
 import * as Data from '../src/data';
+import { assertRefsResolve, assertNoDegradedSchemas } from './lib/openapi-self-consistency';
 
 const OUT_DIR = path.resolve(__dirname, '../json-schema');
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
@@ -237,7 +238,8 @@ function generateDiscoveryPaths(basePath: string): Record<string, OpenApiPath> {
 
 function generateComponentSchemas(): Record<string, Record<string, unknown>> {
   const schemas: Record<string, Record<string, unknown>> = {};
-  
+  const degraded: string[] = [];
+
   // Map of contract schema names to their Zod schemas
   const contractSchemas: Record<string, z.ZodType> = {
     CreateRequest: (API as any).CreateRequestSchema,
@@ -252,14 +254,28 @@ function generateComponentSchemas(): Record<string, Record<string, unknown>> {
   };
 
   for (const [name, schema] of Object.entries(contractSchemas)) {
-    if (schema && typeof schema === 'object' && '_zod' in schema) {
-      try {
-        schemas[name] = z.toJSONSchema(schema as z.ZodType, { target: 'draft-2020-12' });
-      } catch {
-        schemas[name] = { type: 'object', description: `${name} (schema too complex for auto-generation)` };
-      }
+    // `typeof` must admit BOTH 'object' and 'function': every contract schema
+    // here is wrapped in `lazySchema()`, whose Proxy target is
+    // `function lazyZod() {}`, so `typeof schema === 'function'`. Demanding
+    // 'object' short-circuited all nine and published an empty
+    // `components.schemas` behind six dangling `$ref`s (#5168). The `_zod`
+    // half of the guard is Proxy-safe as written — `lazySchema` maintains a
+    // `_zod` facade precisely so `toJSONSchema` can traverse it.
+    const isZodLike =
+      !!schema && (typeof schema === 'object' || typeof schema === 'function') && '_zod' in schema;
+    if (!isZodLike) continue; // reported by assertNoDegradedSchemas below
+
+    try {
+      schemas[name] = z.toJSONSchema(schema as z.ZodType, { target: 'draft-2020-12' });
+    } catch {
+      degraded.push(name);
     }
   }
+
+  // Declared = enforced: the table above is a literal list of the contract's
+  // nine schemas, so a name that produced nothing is a defect, never an
+  // optional input. Failing here is what makes the #5168 shape unrepeatable.
+  assertNoDegradedSchemas(Object.keys(contractSchemas), schemas, degraded);
 
   return schemas;
 }
@@ -315,6 +331,15 @@ const openapi: Record<string, unknown> = {
     { bearerAuth: [] },
   ],
 };
+
+// ─── Self-consistency gate (#5168) ───────────────────────────────────
+//
+// Runs BEFORE the write, so a document whose `$ref`s do not resolve is never
+// emitted at all. `gen:openapi` has no staleness gate (`check:generated`
+// reports it as one of the two ungated generators), so this is the only thing
+// standing between a silently-broken collector and the published
+// `GET /api/v1/openapi.json`. Throwing exits non-zero and fails the build.
+assertRefsResolve(openapi);
 
 // Write output
 if (!fs.existsSync(OUT_DIR)) {
