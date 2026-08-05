@@ -14,7 +14,7 @@ import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
-import { describeFlowBindError } from './flow-bind-diagnostics.js';
+import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -759,10 +759,10 @@ export class AutomationServicePlugin implements Plugin {
                     // message: a ZodError's `.message` is a multi-line JSON dump
                     // whose first line is `[`, and the boot diagnostic buffer keeps
                     // only the line carrying the level prefix. See
-                    // ./flow-bind-diagnostics.ts.
+                    // ./thrown-cause-diagnostics.ts.
                     ctx.logger.warn('[Automation] failed to register flow', {
                         flow: def.name,
-                        ...describeFlowBindError(e),
+                        ...describeThrownForLog(e),
                     });
                 }
             }
@@ -770,7 +770,7 @@ export class AutomationServicePlugin implements Plugin {
                 ctx.logger.info(`[Automation] Pulled ${registered} flow(s) from ObjectQL registry`);
             }
         } catch (err) {
-            ctx.logger.warn('[Automation] flow pull from ObjectQL registry failed', describeFlowBindError(err));
+            ctx.logger.warn('[Automation] flow pull from ObjectQL registry failed', describeThrownForLog(err));
         }
 
         // ── ADR-0097: materialize provider-bound declarative connector instances ──
@@ -1036,9 +1036,33 @@ export class AutomationServicePlugin implements Plugin {
         }
 
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
-        const fail = (msg: string): void => {
-            if (opts.fatal) throw new Error(msg);
-            ctx.logger.error(msg);
+        //
+        // #5575 — `msg` MUST be a single-line, self-contained sentence, and an
+        // underlying failure MUST arrive as `cause` rather than interpolated into
+        // it. The two paths then render the same cause for their own audience:
+        //
+        //   • fatal (boot): appended to the thrown message. A throw is not a log
+        //     record — the kernel's failure channel prints it verbatim — so a
+        //     multi-line `ZodError` dump survives intact and stays readable.
+        //   • soft (reload): handed to the logger's `meta` as structured fields
+        //     (`issues[]` / `error`), never to the message. A newline in a log
+        //     message splits one record across physical lines of which only the
+        //     first carries `<ts> ERROR`, and every line-oriented consumer
+        //     downstream (file sink, shipper, `grep`) then mis-reads the rest.
+        //     See ./thrown-cause-diagnostics.ts for the full mechanism, including
+        //     which consumers `error` (stderr) actually reaches.
+        //
+        // A `fail(msg)` with no cause logs exactly what it always did: `cause`
+        // is only described when it is present, so the causeless reports (dup
+        // name, §4 conflict, unknown provider) gain no `"error":"undefined"`.
+        const fail = (msg: string, cause?: unknown): void => {
+            if (opts.fatal) {
+                throw new Error(cause === undefined ? msg : `${msg} cause: ${thrownMessageText(cause)}`);
+            }
+            // Third argument, per the `Logger` contract's `error(message, error?,
+            // meta?)`. NOT the second: passing the raw error there ships its whole
+            // stack and (for a ZodError) the multi-line dump on every record.
+            ctx.logger.error(msg, undefined, cause === undefined ? undefined : describeThrownForLog(cause));
         };
 
         // Build the desired set: enabled provider-bound instances, keyed by name.
@@ -1119,7 +1143,16 @@ export class AutomationServicePlugin implements Plugin {
             try {
                 auth = await this.resolveInstanceAuth(entry.auth, resolver, name, provider);
             } catch (err) {
-                fail((err as Error).message);
+                // #5575 — the old `fail((err as Error).message)` handed a FOREIGN
+                // message straight to the log message. `resolveInstanceAuth`'s own
+                // throw is single-line, but the resolver is host-supplied
+                // (`AutomationServicePluginOptions.credentialResolver` — a secrets
+                // service, or anything that validates with Zod), so what lands here
+                // is not ours to assume anything about.
+                fail(
+                    `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
+                    err,
+                );
                 continue;
             }
 
@@ -1155,9 +1188,14 @@ export class AutomationServicePlugin implements Plugin {
                     });
                     continue;
                 }
+                // #5575 — a provider factory is third-party code ADR-0097 invites
+                // people to write, and the first one that validates its
+                // `providerConfig` with Zod throws a message whose first line is
+                // `[`. The cause goes to `meta` on the soft path, and is appended
+                // to the thrown message on the fatal one.
                 fail(
-                    `[Automation] failed to materialize connector instance '${name}' via provider '${provider}': ` +
-                        `${(err as Error).message} (ADR-0097).`,
+                    `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
+                    err,
                 );
                 continue;
             }
@@ -1407,10 +1445,10 @@ export class AutomationServicePlugin implements Plugin {
             raw = await protocol.getMetaItems({ type: 'flow' });
         } catch (err) {
             // #5048 — structured `meta`, not string interpolation (same reason as
-            // the register seams below; see ./flow-bind-diagnostics.ts).
+            // the register seams below; see ./thrown-cause-diagnostics.ts).
             ctx.logger.warn(
                 "[Automation] flow read from protocol failed: getMetaItems('flow')",
-                describeFlowBindError(err),
+                describeThrownForLog(err),
             );
             return null;
         }
@@ -1466,10 +1504,10 @@ export class AutomationServicePlugin implements Plugin {
                 this.engine.registerFlow(def.name, def as never);
                 resynced++;
             } catch (err) {
-                // #5048 — see ./flow-bind-diagnostics.ts.
+                // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] flow re-sync: failed to register flow', {
                     flow: def.name,
-                    ...describeFlowBindError(err),
+                    ...describeThrownForLog(err),
                 });
             }
         }
@@ -1512,10 +1550,10 @@ export class AutomationServicePlugin implements Plugin {
                 this.syncedFlowNames.add(def.name);
                 bound++;
             } catch (err) {
-                // #5048 — see ./flow-bind-diagnostics.ts.
+                // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] cold-boot flow bind: failed to register flow', {
                     flow: def.name,
-                    ...describeFlowBindError(err),
+                    ...describeThrownForLog(err),
                 });
             }
         }

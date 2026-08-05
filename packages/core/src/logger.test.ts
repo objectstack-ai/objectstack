@@ -222,4 +222,80 @@ describe('ObjectLogger', () => {
             expect(fileLine).toMatch(/INFO file message/);
         });
     });
+
+    // ── the contract's `meta` slot on error/fatal (#5575) ───────────────────
+    //
+    // `Logger.error(message, error?: Error, meta?)` declares THREE parameters.
+    // `ObjectLogger` dispatches by shape so a meta object may also ride in the
+    // `error` slot — but until #5575 the `error === undefined` branch never read
+    // the third argument at all, so the contract-shaped
+    // `logger.error(msg, undefined, { … })` rendered a bare message and dropped
+    // every fact. ~15 call sites in `metadata`/`metadata-protocol`/`client`/
+    // `core/security` write exactly that shape, and both sibling `Logger`
+    // implementations (`ConsoleLogger`/`JsonLogger`) honour it — the drop was
+    // this class's alone.
+    describe('error/fatal honour the contract meta slot (#5575)', () => {
+        const stderrChunks: string[] = [];
+        let restore: () => void;
+
+        beforeEach(() => {
+            stderrChunks.length = 0;
+            const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((c: string | Uint8Array) => {
+                stderrChunks.push(String(c));
+                return true;
+            }) as never);
+            restore = () => spy.mockRestore();
+        });
+        afterEach(() => restore());
+
+        /** The single JSON record written by `fn`. */
+        const recordOf = (fn: (log: ObjectLogger) => void): Record<string, unknown> => {
+            const log = createLogger({ level: 'error', format: 'json' });
+            fn(log);
+            const lines = stderrChunks.join('').split('\n').filter(Boolean);
+            expect(lines, 'one call must write exactly one physical line').toHaveLength(1);
+            return JSON.parse(lines[0]) as Record<string, unknown>;
+        };
+
+        it('delivers `meta` from the THIRD slot when the error slot is undefined', () => {
+            const record = recordOf((log) =>
+                log.error('reconcile failed', undefined, {
+                    issues: [{ code: 'unrecognized_keys', unrecognized: ['visibleIf'] }],
+                }),
+            );
+            expect(record.msg).toBe('reconcile failed');
+            // Pre-#5575 this whole field was absent: the record was `{msg}` only.
+            expect(record.issues).toEqual([{ code: 'unrecognized_keys', unrecognized: ['visibleIf'] }]);
+        });
+
+        it('still accepts a meta object in the error slot (the tolerated shape)', () => {
+            const record = recordOf((log) => log.error('reconcile failed', { connector: 'billing' }));
+            expect(record.connector).toBe('billing');
+        });
+
+        it('merges both slots, with the later `meta` winning a collision', () => {
+            const record = recordOf((log) =>
+                log.error('both', { connector: 'billing', stage: 'auth' }, { stage: 'materialize' }),
+            );
+            expect(record.connector).toBe('billing');
+            expect(record.stage).toBe('materialize');
+        });
+
+        it('keeps rendering an Error in the error slot alongside third-slot meta', () => {
+            const record = recordOf((log) => log.error('boom', new Error('upstream down'), { connector: 'billing' }));
+            expect(record.connector).toBe('billing');
+            expect((record.error as { message?: string }).message).toBe('upstream down');
+        });
+
+        it('writes no context at all when neither slot is given', () => {
+            const record = recordOf((log) => log.error('bare'));
+            expect(Object.keys(record).sort()).toEqual(['level', 'msg', 'time']);
+        });
+
+        it('applies the same three shapes to fatal', () => {
+            const record = recordOf((log) => log.fatal('fatal meta', undefined, { connector: 'billing' }));
+            expect(record.level).toBe('fatal');
+            expect(record.connector).toBe('billing');
+        });
+    });
 });

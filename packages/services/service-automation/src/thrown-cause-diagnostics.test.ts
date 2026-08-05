@@ -23,6 +23,13 @@
 // occupies ONE physical line with the offending key name still in it (asserted
 // on real rendered output — which is also what catches `ObjectLogger`'s
 // substring redactor eating a field called `keys`).
+//
+// Scope note (#5575): the boot-buffer half of the mechanism above is specific to
+// these `warn` seams — `ObjectLogger` routes `warn` to stdout, which is what
+// `serve`'s boot-quiet window wraps. The connector reconcile seam reports at
+// `error` (stderr, never buffered) and is pinned in ./connector-fail-cause.test.ts
+// against the consumers it actually has. The helper this file exercises is shared
+// by both, hence its name.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { LiteKernel, ObjectLogger, createLogger } from '@objectstack/core';
@@ -30,10 +37,10 @@ import { FlowSchema } from '@objectstack/spec/automation';
 import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
 import {
-    describeFlowBindError,
+    describeThrownForLog,
     formatIssuePath,
-    MAX_LOGGED_FLOW_BIND_ISSUES,
-} from './flow-bind-diagnostics.js';
+    MAX_LOGGED_CAUSE_ISSUES,
+} from './thrown-cause-diagnostics.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -275,7 +282,7 @@ describe('the rendered warning is ONE line that still names the key (#5048)', ()
         const lines = captureStdout((log) => {
             log.warn('[Automation] cold-boot flow bind: failed to register flow', {
                 flow: 'campaign_enrollment',
-                ...describeFlowBindError(thrown),
+                ...describeThrownForLog(thrown),
             });
         });
 
@@ -291,7 +298,7 @@ describe('the rendered warning is ONE line that still names the key (#5048)', ()
     });
 
     it('forwarding Zod issues VERBATIM would be redacted — this is why they are re-shaped', () => {
-        // Evidence for the `unrecognized` naming in flow-bind-diagnostics.ts:
+        // Evidence for the `unrecognized` naming in thrown-cause-diagnostics.ts:
         // ObjectLogger redacts recursively by SUBSTRING, and its default list
         // includes `key`, which `keys` contains. A `{ issues: err.issues }` meta
         // therefore ships `"keys":"***REDACTED***"` — losing the one fact the
@@ -311,7 +318,7 @@ describe('the rendered warning is ONE line that still names the key (#5048)', ()
         const lines = captureStdout((log) => {
             log.warn('[Automation] flow re-sync: failed to register flow', {
                 flow: 'f',
-                ...describeFlowBindError(new Error('line one\nline two\nline three')),
+                ...describeThrownForLog(new Error('line one\nline two\nline three')),
             });
         });
         expect(lines).toHaveLength(1);
@@ -322,7 +329,7 @@ describe('the rendered warning is ONE line that still names the key (#5048)', ()
 
 // ── the helper ─────────────────────────────────────────────────────────────
 
-describe('describeFlowBindError / formatIssuePath', () => {
+describe('describeThrownForLog / formatIssuePath', () => {
     it('formats paths with array indices, and names the root explicitly', () => {
         expect(formatIssuePath([])).toBe('(root)');
         expect(formatIssuePath(undefined)).toBe('(root)');
@@ -333,34 +340,34 @@ describe('describeFlowBindError / formatIssuePath', () => {
 
     it('reports `issues` for a ZodError-shaped throw and `error` for anything else', () => {
         const zodish = { issues: [{ code: 'invalid_type', path: ['version'], message: 'expected number' }] };
-        expect(describeFlowBindError(zodish)).toEqual({
+        expect(describeThrownForLog(zodish)).toEqual({
             issues: [{ code: 'invalid_type', path: 'version', message: 'expected number' }],
         });
 
-        expect(describeFlowBindError(new Error('boom'))).toEqual({ error: 'boom' });
-        expect(describeFlowBindError('a bare string')).toEqual({ error: 'a bare string' });
-        expect(describeFlowBindError(undefined)).toEqual({ error: 'undefined' });
+        expect(describeThrownForLog(new Error('boom'))).toEqual({ error: 'boom' });
+        expect(describeThrownForLog('a bare string')).toEqual({ error: 'a bare string' });
+        expect(describeThrownForLog(undefined)).toEqual({ error: 'undefined' });
     });
 
     it('caps the issue list and DECLARES the cap instead of truncating silently', () => {
         const many = {
-            issues: Array.from({ length: MAX_LOGGED_FLOW_BIND_ISSUES + 7 }, (_, i) => ({
+            issues: Array.from({ length: MAX_LOGGED_CAUSE_ISSUES + 7 }, (_, i) => ({
                 code: 'unrecognized_keys',
                 keys: [`k${i}`],
                 path: ['nodes', i],
                 message: `Unrecognized key: "k${i}"`,
             })),
         };
-        const meta = describeFlowBindError(many);
-        expect(meta.issues).toHaveLength(MAX_LOGGED_FLOW_BIND_ISSUES);
-        expect(meta.issueCount).toBe(MAX_LOGGED_FLOW_BIND_ISSUES + 7);
+        const meta = describeThrownForLog(many);
+        expect(meta.issues).toHaveLength(MAX_LOGGED_CAUSE_ISSUES);
+        expect(meta.issueCount).toBe(MAX_LOGGED_CAUSE_ISSUES + 7);
         // Under the cap the count is omitted — no noise when nothing was dropped.
-        expect(describeFlowBindError({ issues: many.issues.slice(0, 3) }).issueCount).toBeUndefined();
+        expect(describeThrownForLog({ issues: many.issues.slice(0, 3) }).issueCount).toBeUndefined();
     });
 
     it('an empty issues array is still a validation rejection, not an `error` string', () => {
         // A ZodError with zero issues should not fall through to the string
         // branch and re-render as `"error":"[]"` — the shape decides.
-        expect(describeFlowBindError({ issues: [], message: '[]' })).toEqual({ issues: [] });
+        expect(describeThrownForLog({ issues: [], message: '[]' })).toEqual({ issues: [] });
     });
 });
