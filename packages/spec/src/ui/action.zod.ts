@@ -566,7 +566,10 @@ const actionObject = () => strictObject({
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
-    body: 'bodyExtra', payload: 'bodyExtra',
+    // #5013 — `body` is DECLARED on this schema (the `script` action's L1/L2
+    // hook body), so an alias filed under it could never run; `payload` is the
+    // live spelling that still needs pointing at `bodyExtra`.
+    payload: 'bodyExtra',
     llm: 'ai', tool: 'ai',
     dialog: 'resultDialog', result: 'resultDialog',
     refresh: 'refreshAfter', reload: 'refreshAfter',
