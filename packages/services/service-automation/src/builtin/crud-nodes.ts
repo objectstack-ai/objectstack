@@ -361,6 +361,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
                         filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to update (e.g. id → {recordId}).' },
                         fields: { type: 'object', additionalProperties: true, title: 'Field values', description: 'Field values to write.' },
+                        // #5393 — the author's bulk DECLARATION. Off (default)
+                        // the engine accepts only a write that names one row by
+                        // scalar id; a predicate update is refused rather than
+                        // silently narrowed or silently widened.
+                        multi: {
+                            type: 'boolean', title: 'Update every matching record',
+                            description: 'Declare bulk intent: update EVERY record the filter matches. Off (default) means the filter must name one record by id — a predicate update without this is refused by the data engine.',
+                        },
                     },
                     required: ['objectName'],
                 },
@@ -400,6 +408,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     const dropped: DroppedFieldsEvent[] = [];
                     const result = await data.update(objectName, fields, {
                         where: filter,
+                        // #5393 — the author's declared bulk intent, forwarded
+                        // to the engine's own word for it. Stated on EVERY call
+                        // rather than spread in when true: `multi: false` is the
+                        // half of the contract that makes the engine refuse a
+                        // predicate update, and a reader of this call should see
+                        // which half was asked for without inferring it from an
+                        // absent key.
+                        multi: cfg.multi === true,
                         context: dataCtx,
                         onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
                     });
@@ -437,6 +453,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     properties: {
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
                         filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to delete.' },
+                        // #5393 — see update_record. Highest-stakes declaration
+                        // the flow language has: without it a predicate delete
+                        // is refused by the engine, with it every matched row
+                        // goes, and `multi` + no filter is the whole object.
+                        multi: {
+                            type: 'boolean', title: 'Delete every matching record',
+                            description: 'Declare bulk intent: delete EVERY record the filter matches. Off (default) means the filter must name one record by id — a predicate delete without this is refused by the data engine.',
+                        },
                     },
                     required: ['objectName'],
                 },
@@ -464,7 +488,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
                 const dataCtx = resolveRunDataContext(context);
                 try {
-                    const result = await data.delete(objectName, { where: filter, context: dataCtx });
+                    // #5393 — `multi` is the author's declaration, forwarded to
+                    // the engine's own word for it (see update_record above).
+                    const result = await data.delete(objectName, { where: filter, multi: cfg.multi === true, context: dataCtx });
                     return {
                         success: true,
                         output: { result, object: objectName },

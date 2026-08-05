@@ -175,57 +175,57 @@
       "file": "packages/services/service-automation/src/builtin/crud-config-aliases.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/builtin/crud-filter-guard.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR. One extra note for whoever pins it: several of its #3810 fixtures assert success on a PREDICATE delete, which the real engine refuses — since #5393 that is expressible, so those fixtures gain `multi: true` rather than being deleted.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/builtin/crud-runas.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/fault-edge-guard-containment.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/plugin-suspended-run-wiring.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/record-lookup-expand.integration.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "@objectstack/service-automation does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
+      "why": "MEASURED (#5393): the devDependency this entry used to cite as the blocker now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when the sibling `builtin/crud-bulk-intent.test.ts` was pinned. It is not cyclic: objectql's transitive dependency closure (12 packages) does not contain service-automation, and `turbo run build --filter=@objectstack/service-automation --dry` (turbo 2.10.7) resolved the graph without complaint. So what is left here is a one-line pin, deferred only because #5393's PR is a spec/executor change and flipping an unmeasured suite red belongs in its own PR.",
+      "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
       "unguarded": 1,
       "kind": "DEBT",
-      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove — but @objectstack/service-automation does not depend on @objectstack/objectql, so replacing the copy with the producer's predicate needs a devDependency change.",
-      "closes": "add @objectstack/objectql to devDependencies, then replace the mirrored `if` with assertEngineDeleteDispatch(options)"
+      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove. MEASURED (#5393): the devDependency that used to block replacing the copy now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when `builtin/crud-bulk-intent.test.ts` was pinned, and the graph is acyclic (see the sibling entries). What is left is replacing the mirrored `if` with the producer's predicate.",
+      "closes": "replace the mirrored `if` with assertEngineDeleteDispatch(options) — the devDependency is already declared"
     },
     {
       "file": "packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts",

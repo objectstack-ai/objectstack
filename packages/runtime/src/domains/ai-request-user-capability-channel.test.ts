@@ -95,7 +95,11 @@ describe('#4705 — /ai/* req.user carries the capability channel', () => {
         // `manage_metadata` / `studio.access` / `setup.access` there).
         const { user, result } = await dispatchToolExecute({
             userId: 'usr_admin',
-            userEmail: 'admin@objectos.ai',
+            // [#5372] Was `userEmail:` — a spelling `ExecutionContextSchema`
+            // does not declare and nothing ever assigned, matching the equally
+            // undeclared key `domains/ai.ts` used to read. The declared field
+            // is `email`; the fixture states a real ExecutionContext now.
+            email: 'admin@objectos.ai',
             positions: ['platform_admin'],
             permissions: ['admin_full_access', 'ai_seat'],
             systemPermissions: ['manage_users', 'manage_metadata', 'studio.access', 'setup.access'],
@@ -183,7 +187,7 @@ function makeFakeServer() {
     };
 }
 
-function makeCtx(fakeServer: any, aiRoutes: any[], onRequest: (req: any) => void) {
+function makeCtx(fakeServer: any, aiRoutes: any[], onRequest: (req: any) => void, session?: any) {
     const kernel: any = {
         getService: () => undefined,
         getServiceAsync: async () => undefined,
@@ -196,7 +200,7 @@ function makeCtx(fakeServer: any, aiRoutes: any[], onRequest: (req: any) => void
     };
     const authService: any = {
         api: {
-            getSession: async () => ({
+            getSession: async () => session ?? ({
                 user: { id: 'usr_admin', name: 'Admin', email: 'admin@objectos.ai' },
                 session: { activeOrganizationId: 'org_1' },
             }),
@@ -235,6 +239,40 @@ describe('#4705 — the concrete-mount producer agrees on the shape', () => {
         // shape as the dispatch path, so a consumer needs no `?? []`.
         expect(seen.user.permissions).toEqual([]);
         expect(seen.user.systemPermissions).toEqual([]);
+        // [#5372] …and the SAME key set, including the identity keys. This
+        // producer reads the session's own `user.name` (better-auth's
+        // projection of `sys_user.name`), so it needs no lookup of its own —
+        // but it must answer under both spellings, like every other path.
+        expect(seen.user.name).toBe('Admin');
+        expect(seen.user.displayName).toBe('Admin');
+        expect(Object.keys(seen.user).sort()).toEqual([
+            'displayName', 'email', 'id', 'isPlatformAdmin', 'name', 'organizationId',
+            'permissions', 'positions', 'roles', 'systemPermissions', 'userId',
+        ]);
+    });
+
+    it('[#5372] a session with no display name falls back to the id, not the email', async () => {
+        // The biconditional the dispatch paths hold to: `name === id` means
+        // "no display name", on every producer. The address stays reachable
+        // under its own key — it is not a stand-in for a name.
+        const { server, handlers } = makeFakeServer();
+        let seen: any;
+        const ctx = makeCtx(
+            server,
+            [{ method: 'POST', path: '/ai/tools/:toolName/execute', description: 'x', auth: true }],
+            (req) => { seen = req; },
+            { user: { id: 'usr_admin', email: 'admin@objectos.ai' }, session: {} },
+        );
+        const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+        await plugin.start?.(ctx);
+
+        const res = { status() { return res; }, header() { return res; }, json() { return res; } } as any;
+        await handlers[`POST ${TOOL_ROUTE}`](
+            { headers: {}, body: {}, params: { toolName: 'create_object' }, query: {} }, res,
+        );
+
+        expect(seen.user.name).toBe('usr_admin');
+        expect(seen.user.email).toBe('admin@objectos.ai');
     });
 
     it('mounts the /ai/* dispatch wildcard BEFORE the concrete AI routes', async () => {

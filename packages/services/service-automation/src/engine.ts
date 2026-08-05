@@ -128,6 +128,32 @@ interface ConfigSchemaNode {
  * did-you-mean and the declared set; an entry here adds the *mechanism* the
  * author was reaching for.
  */
+/**
+ * The bulk-intent spellings, shared by `update_record` and `delete_record`
+ * (#5393) — the same curation `builtin-node-config.zod.ts` carries at the
+ * execute-time parse, copied here because this is the FIRST door an author
+ * hits (registration, at boot) and #4001's finding is that detection
+ * generalizes for free while prose does not.
+ *
+ * All four were measured against a real `safeParse` while #5225 was diagnosed,
+ * back when no spelling of bulk intent — `multi` included — existed on either
+ * node. Edit distance reaches `multi` from none of them.
+ */
+const BULK_INTENT_GUIDANCE: Record<string, string> = {
+    bulk: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the concept ' +
+        'keeps one name from node config to driver call (#5393). Without it the write must name one row by ' +
+        'scalar `id`; a predicate write is refused by the engine rather than silently widened.',
+    all: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the concept ' +
+        'keeps one name from node config to driver call (#5393). Without it the write must name one row by ' +
+        'scalar `id`; a predicate write is refused by the engine rather than silently widened.',
+    multiple: 'Bulk intent is `multi: true` — the data engine\'s own word for it (`options.multi`), so the ' +
+        'concept keeps one name from node config to driver call (#5393). Without it the write must name one row ' +
+        'by scalar `id`; a predicate write is refused by the engine rather than silently widened.',
+    options: 'This is the NODE config, not the data engine\'s options bag — declare `multi: true` at the top ' +
+        'level of `config`, never `options: { multi: true }`. Translating that declaration into `options.multi` ' +
+        'on the engine call is the executor\'s job (#5393).',
+};
+
 const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
     create_record: {
         fieldValues:
@@ -139,7 +165,9 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
         fieldValues:
             'The write map is `fields` — `fieldValues` was an AI-authoring dialect that never had a ' +
             'runtime reader (#2419, rejected by design).',
+        ...BULK_INTENT_GUIDANCE,
     },
+    delete_record: BULK_INTENT_GUIDANCE,
     screen: {
         visibleIf:
             'The visibility predicate is `visibleWhen` (bare CEL, re-evaluated client-side as the ' +

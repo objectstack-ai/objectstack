@@ -19,6 +19,7 @@ import {
     type SecurityHeadersOptions,
 } from './security/index.js';
 import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
+import { buildActorUser } from './security/actor-user.js';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,
@@ -1518,16 +1519,24 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     // `dispatcher.dispatch()` EARLIER in this same `start()`, so
                     // the ExecutionContext-backed path is the one that answers a
                     // real `/api/v1/ai/...` request.
-                    return {
-                        userId,
+                    //
+                    // [#5372] Built by the shared producer so the two AI-route
+                    // `req.user` producers agree on the key set by
+                    // CONSTRUCTION rather than by two literals being kept in
+                    // sync by hand — that is exactly how the three dispatch
+                    // paths drifted. The display name is the session's own
+                    // `user.name` (better-auth's projection of `sys_user.name`,
+                    // the same authority the ExecutionContext-backed producer
+                    // reads), so no extra lookup happens here. Its former
+                    // `?? user.email` middle arm is gone: `name === id` now
+                    // means "no display name" on EVERY path, and the address
+                    // is still served under its own `email` key.
+                    return buildActorUser({
                         id: userId,
-                        displayName: sessionData?.user?.name ?? sessionData?.user?.email ?? userId,
+                        displayName: sessionData?.user?.name,
                         email: sessionData?.user?.email,
-                        positions: [],
-                        permissions: [],
-                        systemPermissions: [],
                         organizationId: sessionData?.session?.activeOrganizationId,
-                    };
+                    });
                 } catch {
                     return undefined;
                 }
