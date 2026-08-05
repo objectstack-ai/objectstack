@@ -96,16 +96,33 @@ function buildRoute(analyticsProvider?: any) {
 /**
  * A REAL `AnalyticsService` on the ObjectQL aggregate path.
  *
- * `executeAggregate` returns a fixed bucket, so a query that gets far enough to
- * touch data succeeds — which is what makes the refusal cases meaningful: they
- * fail on the FILTER, on a route that demonstrably answers 200 otherwise.
+ * `executeAggregate` evaluates the engine-side filter it receives over one
+ * fixed bucket, so a query that gets far enough to touch data succeeds — which
+ * is what makes the refusal cases meaningful: they fail on the FILTER, on a
+ * route that demonstrably answers 200 otherwise. It is filter-AWARE (not a
+ * constant) so the #5322 identity cases are load-bearing too: the zero-row
+ * constant — `{$not: {}}`, the spelling `filterNodeToCondition` emits for
+ * FALSE — must come back as 200 with NO rows, distinguishable from both a 400
+ * and from an ignored filter.
  */
 function realAnalytics(): AnalyticsService {
   const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+  const bucket = { stage: 'won', revenue: 100 };
+  const matches = (cond: Record<string, unknown>): boolean =>
+    Object.entries(cond).every(([key, value]) => {
+      if (key === '$and') return (value as Record<string, unknown>[]).every(matches);
+      if (key === '$or') return (value as Record<string, unknown>[]).some(matches);
+      if (key === '$not') return !matches(value as Record<string, unknown>);
+      if (value !== null && typeof value === 'object' && '$eq' in (value as object)) {
+        return (bucket as Record<string, unknown>)[key] === (value as { $eq: unknown }).$eq;
+      }
+      return (bucket as Record<string, unknown>)[key] === value;
+    });
   return new AnalyticsService({
     logger: silent,
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
-    executeAggregate: async () => [{ stage: 'won', revenue: 100 }],
+    executeAggregate: async (_object: string, options: { filter?: Record<string, unknown> }) =>
+      matches(options?.filter ?? {}) ? [{ ...bucket }] : [],
     isRegisteredObject: () => true,
   });
 }
@@ -163,9 +180,14 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       message: /needs a two-element \[min, max\] array/,
     },
     {
-      name: 'an empty $or',
-      runtimeFilter: { $or: [] },
-      message: /"\$or" requires a non-empty array/,
+      // FLIPPED with the #5322 ruling (2026-08-04): this entry was `{$or: []}`
+      // pinning the "requires a non-empty array" refusal. The empty array is
+      // now the OR identity — FALSE, zero rows, asserted in the #5322 block
+      // below — so the refusal that survives at the same guard site is the
+      // non-array spelling, same envelope.
+      name: 'an $or that is not an array',
+      runtimeFilter: { $or: 'won' },
+      message: /"\$or" requires an array of filter objects/,
     },
     {
       name: 'an $or branch that is not a filter object',
@@ -191,6 +213,57 @@ describe('[#5352] POST /analytics/dataset/query — a filter refusal reaches the
       expect(res.statusCode).toBe(400);
       expect(res.body.code).toBe('INVALID_FILTER');
       expect(String(res.body.message)).toMatch(c.message);
+    });
+  }
+});
+
+describe('[#5322] empty combinators are boolean identities at the REST face — evaluated, not refused', () => {
+  // Until the 2026-08-04 #5322 ruling, `{$or: []}` sat in REFUSALS above and
+  // this route answered it 400 ("requires a non-empty array"). The ruling took
+  // the identity reduction the five FILTER_LOGIC_CASES backends already gave:
+  // these four shapes are ANSWERS now, so each asserts its 200 AND its row
+  // semantics — the row count is what separates the two identities from each
+  // other and from a filter that was silently dropped.
+  const IDENTITIES: Array<{ name: string; runtimeFilter: unknown; rows: unknown[] }> = [
+    {
+      // FALSE — the OR identity. Zero rows is the fail-closed direction: a
+      // disjunct list that looped to zero items hides the data, it does not
+      // chart the whole dataset (#5134).
+      name: 'an empty $or → the zero-row constant',
+      runtimeFilter: { $or: [] },
+      rows: [],
+    },
+    {
+      // TRUE — the AND identity: a conjunction of zero conditions constrains
+      // nothing, so the bucket comes back.
+      name: 'an empty $and → no constraint',
+      runtimeFilter: { $and: [] },
+      rows: [{ stage: 'won', revenue: 100 }],
+    },
+    {
+      // NOT TRUE ≡ FALSE (#5325's square, crossing this seam).
+      name: 'a $not of {} → the zero-row constant',
+      runtimeFilter: { $not: {} },
+      rows: [],
+    },
+    {
+      // A `{}` disjunct is TRUE and ABSORBS the $or: every row, NOT the
+      // narrowed `stage = lost` branch (which would return zero rows here —
+      // the bucket is stage 'won' — so absorption and narrowing are
+      // distinguishable in this fixture).
+      name: 'a {} disjunct absorbs its $or',
+      runtimeFilter: { $or: [{ stage: 'lost' }, {}] },
+      rows: [{ stage: 'won', revenue: 100 }],
+    },
+  ];
+
+  for (const c of IDENTITIES) {
+    it(`${c.name} → 200, rows ${JSON.stringify(c.rows.length)}`, async () => {
+      const route = buildRoute(async () => realAnalytics());
+      const res = await post(route, { dataset, selection: { ...selection, runtimeFilter: c.runtimeFilter } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.code).toBeUndefined();
+      expect(res.body.rows).toEqual(c.rows);
     });
   }
 });
