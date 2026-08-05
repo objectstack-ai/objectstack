@@ -44,6 +44,11 @@
 //        -> 404 Object 'showcase_account' is not registered
 //   500 `Failed to delete customization overlay: connect ECONNREFUSED ...`
 //        -> 400 with the driver text STILL verbatim (terminal fallback)
+//           [#5489] that terminal fallback is now a sanitised 500, so this
+//           third row's LEAK is closed at the source. The other two rows are
+//           untouched — they are mis-classifications by the text heuristics,
+//           not by the fallback — and the reason this fix stays in the branch
+//           itself (keep the producer's declared status) is unchanged.
 //
 // So it re-labels a server fault as a client mistake, re-labels a capability
 // refusal as a missing object, and — for any 5xx whose wording matches no

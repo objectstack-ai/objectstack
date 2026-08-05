@@ -14,6 +14,7 @@ import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
+import { describeFlowBindError } from './flow-bind-diagnostics.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -754,16 +755,22 @@ export class AutomationServicePlugin implements Plugin {
                     this.syncedFlowNames.add(def.name);
                     registered++;
                 } catch (e) {
-                    const msg = e instanceof Error ? e.message : String(e);
-                    ctx.logger.warn(`[Automation] failed to register flow ${def.name}: ${msg}`);
+                    // #5048 — the facts go in `meta`, never interpolated into the
+                    // message: a ZodError's `.message` is a multi-line JSON dump
+                    // whose first line is `[`, and the boot diagnostic buffer keeps
+                    // only the line carrying the level prefix. See
+                    // ./flow-bind-diagnostics.ts.
+                    ctx.logger.warn('[Automation] failed to register flow', {
+                        flow: def.name,
+                        ...describeFlowBindError(e),
+                    });
                 }
             }
             if (registered > 0) {
                 ctx.logger.info(`[Automation] Pulled ${registered} flow(s) from ObjectQL registry`);
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            ctx.logger.warn(`[Automation] flow pull from ObjectQL registry failed: ${msg}`);
+            ctx.logger.warn('[Automation] flow pull from ObjectQL registry failed', describeFlowBindError(err));
         }
 
         // ── ADR-0097: materialize provider-bound declarative connector instances ──
@@ -1399,8 +1406,11 @@ export class AutomationServicePlugin implements Plugin {
         try {
             raw = await protocol.getMetaItems({ type: 'flow' });
         } catch (err) {
+            // #5048 — structured `meta`, not string interpolation (same reason as
+            // the register seams below; see ./flow-bind-diagnostics.ts).
             ctx.logger.warn(
-                `[Automation] flow read from protocol failed: getMetaItems('flow'): ${(err as Error).message}`,
+                "[Automation] flow read from protocol failed: getMetaItems('flow')",
+                describeFlowBindError(err),
             );
             return null;
         }
@@ -1456,9 +1466,11 @@ export class AutomationServicePlugin implements Plugin {
                 this.engine.registerFlow(def.name, def as never);
                 resynced++;
             } catch (err) {
-                ctx.logger.warn(
-                    `[Automation] flow re-sync: failed to register ${def.name}: ${(err as Error).message}`,
-                );
+                // #5048 — see ./flow-bind-diagnostics.ts.
+                ctx.logger.warn('[Automation] flow re-sync: failed to register flow', {
+                    flow: def.name,
+                    ...describeFlowBindError(err),
+                });
             }
         }
 
@@ -1500,9 +1512,11 @@ export class AutomationServicePlugin implements Plugin {
                 this.syncedFlowNames.add(def.name);
                 bound++;
             } catch (err) {
-                ctx.logger.warn(
-                    `[Automation] cold-boot flow bind: failed to register ${def.name}: ${(err as Error).message}`,
-                );
+                // #5048 — see ./flow-bind-diagnostics.ts.
+                ctx.logger.warn('[Automation] cold-boot flow bind: failed to register flow', {
+                    flow: def.name,
+                    ...describeFlowBindError(err),
+                });
             }
         }
         if (bound > 0) {
