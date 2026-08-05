@@ -118,8 +118,18 @@ export function flowNodeLabel(node: AnyRec, index: number): string {
   return strName(node.label) ?? strName(node.id) ?? `#${index}`;
 }
 
-/** `config` minus the region slots, or `undefined` when there is no config. */
-function stripRegions(config: unknown): AnyRec | undefined {
+/**
+ * `config` minus the region slots, or `undefined` when there is no config.
+ *
+ * Copy-on-write: a config with no region key comes back by reference.
+ *
+ * Exported since #5383 because {@link WalkedFlowNode.localConfig} is not the only
+ * consumer that needs this view. `lint-flow-patterns.ts` walks graphs rather than
+ * nodes (it needs each region's `edges` too, which this walk does not carry), but
+ * its recursive config scans hit the identical double-count trap described above —
+ * so it reads the same region-stripped view, from this one definition.
+ */
+export function stripRegions(config: unknown): AnyRec | undefined {
   if (!isRec(config)) return undefined;
   let out: AnyRec | undefined;
   for (const key of Object.keys(config)) {
