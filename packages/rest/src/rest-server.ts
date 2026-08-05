@@ -4,7 +4,7 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
@@ -401,6 +401,12 @@ const CLIENT_MESSAGE_MAX = 500;
  * `isSqlLeak` before reaching here. Same shape as the drivers' own
  * `safeShapePreview` (`packages/plugins/driver-sql`), which previews rather
  * than erases.
+ *
+ * [#5437] That last paragraph turned out to be the other branch's bug report:
+ * `resolveErrorResponse` was applying this same bound to 5xx messages, where
+ * "short" meant "shipped verbatim" and driver errors are short. Its half of the
+ * passthrough is now 4xx-only, so this helper is reached only by messages
+ * written for the caller. Both call sites are therefore 4xx today.
  */
 function truncateClientMessage(message: string): string {
     return message.length < CLIENT_MESSAGE_MAX
@@ -812,8 +818,41 @@ export function mapDataError(error: any, object?: string): { status: number; bod
  * uniformly across CRUD, batch, metadata, UI and discovery routes.
  */
 function sendError(res: any, error: any, object?: string): void {
-    const { status, body } = resolveErrorResponse(error, object);
-    res.status(status).json(body);
+    const resolved = resolveErrorResponse(error, object);
+    // [#5437] The client no longer reads a 5xx's own words; the operator must.
+    logWithheldServerFault(error, resolved);
+    res.status(resolved.status).json(resolved.body);
+}
+
+/**
+ * [#5437] Log the ORIGINAL error whenever a server fault's own message was
+ * withheld from the response body.
+ *
+ * This is the other half of "the client does not read it, the log keeps it".
+ * Sanitising a 5xx is only free of cost while the withheld text is still
+ * somewhere an operator can find it — otherwise tightening the boundary would
+ * trade a leak for a blind spot, and the `sys_metadata` persistence failure
+ * this issue was raised on is exactly the fault an operator must be able to
+ * diagnose (the in-memory registry has already diverged from the database).
+ *
+ * `sendError` had no logging at all, so its 5xx band went from "the client can
+ * read the driver error" straight to "nobody can" without this. The routes that
+ * exit through `handleRouteError` already print the whole error object for a
+ * genuine fault — this fires only in the gap that predicate leaves: 502/503,
+ * which `isExpectedDataStatus` classifies as normal lifecycle outcomes and
+ * therefore does not log, and whose message this boundary now drops too.
+ *
+ * No-ops when nothing was withheld (the resolved body still carries the error's
+ * own message), so an untouched passthrough does not gain a log line.
+ */
+function logWithheldServerFault(
+    error: any,
+    resolved: { status: number; body: Record<string, unknown> },
+): void {
+    if (resolved.status < 500) return;
+    const original = typeof error?.message === 'string' ? error.message : '';
+    if (!original || resolved.body?.error === original) return;
+    logError('[REST] 5xx message withheld from client; original error:', error);
 }
 
 /**
@@ -831,26 +870,72 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
     if (passThroughStatus) {
-        // [#5423] Same bound as `mapDataError`'s 4xx passthrough, same cure —
-        // truncate rather than replace — but applied only to the 4xx half.
+        // [#5437] A declared 5xx never ships its own message text.
         //
-        // This branch's range is 400-599, wider than `mapDataError`'s, and the
-        // 4xx/5xx split is the one distinction the repo already draws here:
-        // `mapDataError`'s sibling branch is "deliberately limited to 4xx: 5xx
-        // messages keep going through the sanitizing heuristics ... so
-        // internal/SQL details never reach the client verbatim". A 4xx message
-        // is addressed TO the caller and is the remedy; a 5xx message is a
-        // server fault's log diagnostic that happens to be reachable here. So
-        // 5xx keeps the wholesale replacement byte-for-byte — #5423 is about
-        // rejections a client is meant to read, and widening 5xx leniency is
-        // not in its scope.
+        // Until now this branch's range was 400-599 while `mapDataError`'s
+        // sibling branch stopped at 4xx *on purpose* — "5xx messages keep going
+        // through the sanitizing heuristics below so internal/SQL details never
+        // reach the client verbatim". Two opposite verdicts on one question,
+        // and every route that reports through `sendError` (metadata, UI,
+        // discovery, batch) got the permissive one: a declared 500 shorter than
+        // `CLIENT_MESSAGE_MAX` was returned word for word, past `isSqlLeak`,
+        // past `looksLikeInternalErrorLeak`, past `Internal data error`.
+        //
+        // That is not dormant code. `metadata-protocol` interpolates the raw
+        // driver error into two client-facing 500s — `Failed to persist
+        // customization overlay to sys_metadata: ${dbError.message}` and
+        // `Failed to delete customization overlay: ${err.message}` — and a real
+        // driver line (`SQLITE_ERROR: no such table: sys_metadata`, `relation
+        // "sys_metadata" does not exist`, a unique-constraint payload naming
+        // columns) is nowhere near 500 characters, so it arrived intact. Length
+        // was never a proxy for leakage; on this side of the bound it failed
+        // OPEN.
+        //
+        // The cure is structural rather than another predicate: in the 5xx band
+        // the message is dropped unconditionally, so there is no phrasing a
+        // producer can pick — deliberately or by accident — that gets driver
+        // text past this boundary. A keyword gate would only move the question
+        // to "does the heuristic know this dialect", which is the failure mode
+        // that produced this bug.
+        //
+        // Sanitising HERE rather than by falling through to `mapDataError` is
+        // the point: `mapDataError` derives a status from the message TEXT, so
+        // handing it a declared 5xx re-labels the fault as something else
+        // entirely — the two overlay 500s come back as `404 OBJECT_NOT_FOUND`
+        // ("no such table" trips the unknown-object heuristic) and the atomic
+        // batch's `501 NOT_IMPLEMENTED` as `404 Object '<name>' is not
+        // registered`, both of which then read as *expected* statuses and stop
+        // being logged at all. Worse, a 5xx whose text matches no heuristic
+        // falls out of `mapDataError`'s terminal `{ status: 400, error: raw }`
+        // — still verbatim, now wearing a client-error status. So: keep the
+        // status the producer declared, keep the machine-readable `code` (a
+        // SCREAMING_SNAKE constant is not a leak, and it is what a client keys
+        // on), drop the prose.
+        //
+        // Accepted cost, recorded so it is not rediscovered as a bug: a
+        // self-authored 500 body — `OVERLAY_PERSISTENCE_FAILED`'s "In-memory
+        // registry was updated but will be lost on restart", the atomic
+        // batch's "retry without options.atomic" — reaches the client as the
+        // generic sentence plus its `code`. The full text still reaches the
+        // server log (see `logWithheldServerFault`), which is the side of the
+        // boundary that sentence was written for. Producers that owe a caller
+        // an actionable 5xx sentence should say it without interpolating the
+        // driver's — tracked separately.
+        if (error.status >= 500) {
+            return {
+                status: error.status,
+                body: {
+                    error: INTERNAL_ERROR_MESSAGE,
+                    ...(error.code ? { code: error.code } : {}),
+                },
+            };
+        }
+        // [#5423] 4xx keeps the bound as a TRUNCATION, not a replacement: a 4xx
+        // message is addressed TO the caller and is the remedy. Unchanged by
+        // #5437 — see {@link truncateClientMessage}.
         const safeMsg = typeof error.message !== 'string'
             ? 'Request failed'
-            : error.status < 500
-                ? truncateClientMessage(error.message)
-                : error.message.length < CLIENT_MESSAGE_MAX
-                    ? error.message
-                    : 'Request failed';
+            : truncateClientMessage(error.message);
         return {
             status: error.status,
             body: {
@@ -936,7 +1021,13 @@ function isExpectedRouteError(status: number, body: Record<string, unknown> | un
 function logUnexpectedRouteError(error: any, resolved: { status: number; body: Record<string, unknown> }): void {
     if (!isExpectedRouteError(resolved.status, resolved.body)) {
         logError('[REST] Unhandled error:', error);
+        return;
     }
+    // [#5437] An "expected" status can still have had its message withheld —
+    // 502/503 are lifecycle outcomes this predicate deliberately keeps quiet,
+    // but a declared one no longer ships its own text either. One line, never
+    // two: a genuine fault already printed the whole error above.
+    logWithheldServerFault(error, resolved);
 }
 
 /**
