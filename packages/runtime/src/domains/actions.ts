@@ -48,6 +48,9 @@
  *   did it return?           200, `data` = handler return value
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailureDetails } from '../validation-failure.js';
@@ -96,6 +99,40 @@ export function createActionsDomain(deps: DomainHandlerDeps): DomainRoute {
  * above is a script-BODY property only.
  */
 export async function handleActionsRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    // [#5519] ANONYMOUS BASELINE — first, before anything dispatches.
+    //
+    // ADR-0056 D2 / #3963 made "anonymous access is always denied" a platform
+    // promise, and `/data`, `/meta`, `/ai` and `/security` each honour it with
+    // this one shared decision. `/actions` did not, and it is the surface where
+    // the omission costs most: a `script` action's body runs with
+    // `buildActionExecutionContext` forcing `isSystem: true`, so an
+    // unauthenticated POST bought an RLS/FLS-bypassing SYSTEM write. The only
+    // gate ahead of it was ADR-0066 D4's `actionPermissionError`, which returns
+    // `null` — allow — for every action that declares no `requiredPermissions`,
+    // i.e. for the overwhelming majority of authored actions.
+    //
+    // Deliberately the FIRST statement, ahead of the 405: an anonymous caller
+    // learns the auth baseline and nothing about the route's shape, exactly as
+    // `/data` answers. The finer-grained gates below are unchanged and still
+    // run for everyone who clears this one — this adds a floor, it does not
+    // replace `requiredPermissions`.
+    //
+    // Who still passes: any resolved `userId` (a session, an API key, an OAuth
+    // principal — `resolveExecutionContext` writes them all), and any internal
+    // `isSystem` context. `isSystem` is never settable from the wire; internal
+    // callers (flow `call action` nodes, the MCP `run_action` bridge, the
+    // declarative endpoint executor) do not route through this HTTP handler at
+    // all — they reach `action-execution.ts` / the automation service directly,
+    // so this gate cannot see them.
+    {
+        const gateEc: any = _context?.executionContext;
+        if (shouldDenyAnonymous({ userId: gateEc?.userId, isSystem: gateEc?.isSystem, method })) {
+            return {
+                handled: true,
+                response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+            };
+        }
+    }
     if (method.toUpperCase() !== 'POST') {
         return { handled: true, response: deps.error('Method not allowed', 405) };
     }

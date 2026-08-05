@@ -8,6 +8,7 @@
 // all read.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import type { StepLogEntry, NodeExecutor, RunRecord } from './engine.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
@@ -407,21 +408,43 @@ describe('node executors report what they touched', () => {
         const data: any = {
             async find() { return []; },
             async findOne() { return null; },
-            async delete() { return false; },
+            // #5197 — the double's delete opens with the PRODUCER's own dispatch
+            // decision, so a sweep this fixture accepts is one `ObjectQL.delete`
+            // accepts. It used to answer `false` to anything, which is how the
+            // shape below stayed green here while #5225's real purge flow died
+            // on it every run.
+            async delete(_object: string, options: any) {
+                assertEngineDeleteDispatch(options);
+                return 0; // driver.deleteMany contract: Promise<number> — nothing matched
+            },
         };
         const engine = new AutomationEngine(logger);
         registerCrudNodes(engine, { logger, getService: (n: string) => (n === 'data' ? data : undefined) } as never);
         engine.registerFlow('f', flowOf(
             [
                 { id: 'start', type: 'start', label: 'S' },
-                { id: 'd', type: 'delete_record', label: 'D', config: { objectName: 'deal', filter: { stale: true } } },
+                // `multi: true` is what makes a PREDICATE delete reach the driver
+                // at all (#5393); without it the engine refuses the call, which
+                // `builtin/crud-bulk-intent.test.ts` pins on the executor side.
+                // Here the subject is the counter, so the sweep declares intent
+                // and the driver reports that it matched nothing.
+                { id: 'd', type: 'delete_record', label: 'D', config: { objectName: 'deal', filter: { stale: true }, multi: true } },
                 { id: 'end', type: 'end', label: 'E' },
             ],
             [{ id: 'e1', source: 'start', target: 'd' }, { id: 'e2', source: 'd', target: 'end' }],
         ) as never);
 
         const res = await engine.execute('f', { event: 'schedule' } as AutomationContext);
+        // `acted: 0` alone does NOT say the sweep deleted nothing — it is equally
+        // what a REFUSED delete leaves behind, so the counter has to be read
+        // together with the outcome or the case passes for the empty reason
+        // (measured: with the fake pinned and `multi` dropped, the run fails and
+        // this assertion alone still went green).
+        expect(res.success).toBe(true);
         expect(res.summary!.acted).toBe(0);
+        expect(res.summary!.nodes.find((n) => n.nodeId === 'd')).toMatchObject({
+            nodeType: 'delete_record', runs: 1, failures: 0, acted: 0,
+        });
     });
 
     it('notify counts DELIVERED notifications as acted — a nudge sweep acts by notifying', async () => {

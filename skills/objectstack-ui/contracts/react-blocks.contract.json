@@ -315,10 +315,10 @@
         },
         {
           "name": "drillDown",
-          "type": "{ enabled?: boolean; filter?: Record<string, unknown>; title?: string; target?: 'drawer' | 'dialog'; columns?: string[]; maxRows?: number }",
+          "type": "{ enabled?: boolean; filter?: Record<string, unknown>; title?: string; target?: 'drawer' | 'dialog' | 'navigate'; columns?: string[]; maxRows?: number }",
           "kind": "binding",
           "required": false,
-          "description": "Click a segment to open the underlying records, filtered by the clicked category, in a drawer (or 'dialog'). Present = on; {} is enough. `filter`/`title` support ${event.*} interpolation; omit `filter` to derive it from aggregate.groupBy. Declared by ChartDrillDownSchema — NOT a dashboard widget key (a dataset-bound widget drills through the semantic layer instead), and not ReportSchema.drilldown (that is lowercase, boolean, report-only)."
+          "description": "Click a segment to open the underlying records, filtered by the clicked category, in a drawer (or 'dialog', or 'navigate' to open the object's full list page instead — that arm needs host drill navigation and falls back to the drawer without it). Present = on; {} is enough. `filter`/`title` support ${event.*} interpolation; omit `filter` to derive it from aggregate.groupBy. Declared by ChartDrillDownSchema — NOT a dashboard widget key (a dataset-bound widget drills through the semantic layer instead), and not ReportSchema.drilldown (that is lowercase, boolean, report-only)."
         },
         {
           "name": "filter",

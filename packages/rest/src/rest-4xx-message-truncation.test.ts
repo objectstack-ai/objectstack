@@ -147,6 +147,17 @@ describe('mapDataError: short 4xx messages are byte-for-byte unchanged (#5423)',
             Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 '.repeat(20)), { status: 502 }),
         );
         expect(r.status).not.toBe(502);
+        // [#5489] `not.toBe(502)` was true of the OLD landing too, and that
+        // landing was `400` with every byte of the ECONNREFUSED text — host and
+        // port included — on the wire. The negative assertion could not tell
+        // the two apart, so what it actually lands on is pinned here: this
+        // declared 5xx now leaves `mapDataError` through the terminal
+        // `UNCLASSIFIED_FAULT`, sanitised and in the server band. (The declared
+        // 502 is still not preserved on this direct-call path — that is
+        // `resolveErrorResponse`'s branch, and out of #5489's scope.)
+        expect(r.status).toBe(500);
+        expect(r.body.code).toBe('INTERNAL_ERROR');
+        expect(String(r.body.error)).not.toContain('10.0.0.5');
     });
 });
 

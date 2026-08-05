@@ -168,8 +168,8 @@ const result = ModelCapabilitySchema.parse(data);
 | **id** | `string` | ✅ | Unique template identifier |
 | **name** | `string` | ✅ | Template name (snake_case) |
 | **label** | `string` | ✅ | Display name |
-| **system** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}`} interpolation |
-| **user** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}`} interpolation |
+| **system** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | System prompt — supports `{{var}}` interpolation |
+| **user** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | User prompt template — supports `{{var}}` interpolation |
 | **assistant** | `string` | optional | Assistant message prefix |
 | **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; defaultValue?: any; … }[]` | optional | Template variables |
 | **modelId** | `string` | optional | Recommended model ID |

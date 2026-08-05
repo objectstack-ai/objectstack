@@ -16,11 +16,12 @@
  *
  * The same table is driven server-free by
  * `mongodb-filter-logic-translation.test.ts`, which is the half that always
- * runs. This one skips when the mongod binary cannot be fetched (the
- * `createTestMongod` convention every suite in this package uses — a blocked or
- * hanging download costs a skipped suite, not a stalled test job). **A skip is
- * not a pass**: on a machine without the binary, the translation suite is the
- * whole proof, which is exactly why it carries the priority half.
+ * runs. This one is OPT-IN since #5517: it needs the mongod binary, whose
+ * concurrent download turned green runs into `exit 1`, so `createTestMongod`
+ * skips it unless `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1` (and still skips,
+ * rather than stalling, when an opted-in download is blocked or hanging).
+ * **A skip is not a pass**: by default the translation suite is the whole proof,
+ * which is exactly why it carries the priority half.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

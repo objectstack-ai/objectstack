@@ -103,7 +103,7 @@ const result = FlowSchema.parse(data);
 | **position** | `{ x: number; y: number }` | optional |  |
 | **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
 | **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required: boolean; description?: string }>` | optional | Input parameter schema for this node |
-| **outputSchema** | `any` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}`}) regardless of any declaration. |
+| **outputSchema** | `any` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. |
 | **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string; timeoutMs?: any; … }` | optional | Configuration for wait node event resumption |
 | **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
 

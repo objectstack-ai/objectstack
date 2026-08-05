@@ -9,6 +9,9 @@
  * "actions"/"connectors" would shadow them.
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
@@ -122,6 +125,36 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
  */
 export async function handleAutomationRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
+    // [#5519] ANONYMOUS BASELINE — the same floor `/data`, `/meta`, `/ai` and
+    // `/security` stand on (ADR-0056 D2 → #3963: "anonymous access is now
+    // always denied"). `/automation` had none, and the whole domain is a write
+    // surface: `POST /:name/trigger` starts a flow run, `POST /` and `PUT
+    // /:name` register a flow definition, `DELETE /:name` unregisters one, and
+    // `GET /` enumerates every flow the deployment has. All four were reachable
+    // unauthenticated — verified against a real showcase boot, where an
+    // anonymous `DELETE /automation/showcase_inquiry_janitor` answered 200
+    // `{deleted: true}` and an anonymous trigger returned a live `runId`.
+    //
+    // Gated for the WHOLE domain rather than per-route, and ahead of the
+    // service-availability probe below: one floor cannot drift route by route,
+    // and an anonymous caller should not learn from a 501-vs-401 whether this
+    // deployment mounts automation at all.
+    //
+    // ⚠️ This is the HTTP seam only. `buildAutomationContext` above is exported
+    // and also used by the declarative endpoint executor (#5040 E5), which runs
+    // in the transport's fallback seam and never enters this handler — a
+    // metadata-declared `type: 'flow'` endpoint keeps its own policy chain and
+    // is untouched here. Internal engine triggers (record-change, schedule)
+    // never speak HTTP at all.
+    {
+        const ec: any = (context as any)?.executionContext;
+        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method })) {
+            return {
+                handled: true,
+                response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+            };
+        }
+    }
     const automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of

@@ -467,6 +467,12 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * tail (attribution, issue numbers) may be cut. Keep the actionable part —
  * operator, field, path, what arrived, what the spec declares — at the FRONT.
  *
+ * [#5489] The "without a status it reached the client verbatim" half is now
+ * history: that terminal branch answers a sanitised 500 (`INTERNAL_ERROR`).
+ * Declaring `status` + `code` at the throw site is therefore the ONLY way a
+ * refusal's words reach the caller at all — which is the contract-first
+ * arrangement #4436 wanted, no longer relying on a fallback that leaked.
+ *
  * The `[sql-driver]` prefix these messages used to carry is GONE from the text:
  * it is driver-internal wording, and shipping it to clients is exactly what the
  * #3867 sanitiser exists to stop. The operator/field/vocabulary detail — the
@@ -6272,6 +6278,16 @@ export class SqlDriver implements IDataDriver {
    * character (MySQL/Postgres do, but the explicit clause is correct for all
    * three). `shape` positions the wildcard: `contains` → `%v%`, `starts` → `v%`,
    * `ends` → `%v`.
+   *
+   * **Second implementation, deliberately** (#5567):
+   * `packages/services/service-analytics/src/like-pattern.ts` carries the same
+   * transform — same escaped character class, same three shapes, same bound
+   * `ESCAPE` — because `service-analytics` depends on no driver and this is a
+   * private method taking a knex builder, so there is nothing for it to import.
+   * That file's header explains the choice; it is held to THIS expression, character
+   * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
+   * A third hand-copy is the thing to refuse: import from one of the two, or add
+   * a consumer to that test.
    */
   private applyLike(
     builder: any,

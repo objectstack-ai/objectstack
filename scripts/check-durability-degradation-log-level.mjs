@@ -28,13 +28,25 @@
  * ## What it checks (deliberately narrow — see "Why a vocabulary")
  *
  * For every `try`/`catch` whose `try` block calls a **durability-critical**
- * operation from the declared vocabulary below, the `catch` must either
+ * operation from the declared vocabulary below, the `catch` must do one of
+ * three things:
  *
  *   - rethrow (the failure propagates — the loudest option), or
- *   - log at `error` (or `fatal`).
+ *   - log at `error` (or `fatal`), or
+ *   - hand the failure to the CALLER on every path — an error envelope, or a
+ *     per-item outcome report — through the declared failure-propagation
+ *     vocabulary (#5241, see `FAILURE_PROPAGATION_CALLEES` below).
  *
  * A `catch` that logs `warn`/`info`/`debug`, or swallows silently, is a
  * violation: the write did not happen, and nothing above will ever hear so.
+ *
+ * The third answer is not a loophole and is not "reviewed exception" —
+ * the NAME is declared here and the STRUCTURE is proved by the checker. It
+ * exists because the rule's own judgment question ("does the system still look
+ * normal from the outside?") answers NO when the caller was told, and because
+ * without it the only ways to satisfy the gate at such a site were to baseline
+ * correct code or to bolt on a `logger.error` that fires on every rejected
+ * request — the mirror-image failure AGENTS.md names.
  *
  * ## Why a vocabulary, and not "detect persistence"
  *
@@ -151,6 +163,131 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
     [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
+    ],
+]);
+
+/**
+ * Declared FAILURE-PROPAGATION vocabulary (#5241).
+ *
+ * ## The blind spot this closes
+ *
+ * The rule above has three legal answers, not two. A `catch` may rethrow, or
+ * log loudly — or it may **hand the failure to the caller**, which is the
+ * loudest answer of all: the caller is told, in its own response, that the
+ * write did not land. AGENTS.md's judgment question ("does the system still
+ * look normal from the outside while something it claims is persisted has not
+ * landed?") answers NO for that shape, so it is not a degradation at all.
+ *
+ * Until #5241 the gate could not express it. Adding `saveMetaItem` to the
+ * vocabulary in #4754 surfaced four seams, and THREE of them were this shape:
+ * `meta.ts`'s PUT handler answering `errorFromThrown(e, 400)`, and
+ * `protocol.ts`'s two batch operations writing the failure into the per-item
+ * outcome report that IS their contract. All three had to be parked in
+ * `durability-degradation.baseline.json` — entries for correct code, in a
+ * shrink-only ledger that says every line is debt. Worse, the cheapest way to
+ * satisfy the gate at `meta.ts` was to bolt on a `logger.error`, and the common
+ * case on that path is an author submitting an off-spec body: one durability
+ * `error` per bad keystroke, which is the exact mirror-image failure AGENTS.md
+ * warns about ("trains everyone to skim `error`") and the reason #4420's `warn`
+ * went unread. A gate whose cheapest satisfaction is harmful has the wrong
+ * shape.
+ *
+ * ## Declared, not guessed — and still structurally verified
+ *
+ * Same philosophy as `DURABILITY_CRITICAL_CALLEES`: the names are DECLARED
+ * here, never inferred from spelling. `/report|failed|error/`-style matching is
+ * the heuristic this file rejects on the other side of the rule, and it is no
+ * more acceptable on this side — a name-shaped guess would let a genuinely
+ * swallowing catch buy its way out by calling something that sounds like a
+ * reporter.
+ *
+ * But a declaration alone would just be a baseline entry under a friendlier
+ * name (the "reviewed exception" direction #5241 explicitly rejected). So the
+ * declaration only supplies the NAME; the checker still proves the STRUCTURE:
+ *
+ *   > every path out of the `catch` must deliver the failure.
+ *
+ * A catch that answers an error envelope on one branch and a normal value on
+ * another is still a violation. So is one that delivers on a branch and falls
+ * off the end on the other. So is one whose delivery sits inside a callback
+ * that runs later. See `catchDeliversFailure()` — the analysis is deliberately
+ * conservative and reports "cannot prove" as "does not deliver", so an
+ * unmodelled shape is judged, never excused.
+ *
+ * ## Two kinds, because they deliver differently
+ *
+ *   - `via: 'return'` — the call BUILDS the answer; the value is the delivery,
+ *     so it only counts inside a `return`. `const env = errorFromThrown(e)`
+ *     followed by a `warn` delivers nothing.
+ *   - `via: 'effect'` — the call IS the delivery (it writes the failure into a
+ *     report the caller receives), so a bare expression statement counts.
+ *
+ * `sendError` (`@objectstack/types`) is the obvious next `via: 'return'`
+ * entry — it is a real repo-wide convention — but no durability-critical seam
+ * exits through it today, and a declared entry nothing consumes is the
+ * "declared ≠ enforced" shape this repo keeps paying to remove. It gets
+ * declared by the PR that first needs it.
+ */
+const FAILURE_PROPAGATION_CALLEES = new Map([
+    [
+        'errorFromThrown',
+        {
+            via: 'return',
+            why:
+                'Builds the HTTP error envelope FROM the caught error, preserving its own `.status` plus the '
+                + 'structured spec-validation `issues` (packages/runtime/src/http-dispatcher.ts). The caller that '
+                + 'asked for the write is told, field-anchored, that it did not happen.',
+        },
+    ],
+]);
+
+/**
+ * Declared failure-propagation vocabulary, scoped to ONE function.
+ *
+ * The second shape #5241 names — a batch operation whose CONTRACT is a
+ * structured per-item outcome report, delivering each failure by writing it
+ * into that report — cannot use the global list above, because its delivery
+ * runs through names that are only meaningful locally: `record(...)`,
+ * `failed.push(...)`. Declaring `record` or `push` repo-wide would be the
+ * spelling-heuristic this file rejects.
+ *
+ * So the declaration is scoped to the enclosing function. The key is
+ * `<file>::<enclosing function name>` — NOT a line (line numbers churn on every
+ * unrelated edit) and NOT a whole file (`protocol.ts` is nine thousand lines
+ * and `saveMetaItem` is the most durability-critical callee in the repo; a
+ * file-wide licence there is a blind spot big enough to hide the next #4669).
+ *
+ * This is a VOCABULARY entry, not a baseline entry, and the difference is
+ * mechanical rather than editorial: it supplies a name, and `catchDeliversFailure()`
+ * still has to prove every path out of the catch reaches it. A new swallowing
+ * catch in the same function is still flagged; a catch that stops calling the
+ * declared sink is still flagged. Entries are checked for staleness (an entry
+ * that excuses nothing must be deleted) for the same reason the baseline is
+ * shrink-only.
+ */
+const FAILURE_PROPAGATION_SITES = new Map([
+    [
+        'packages/metadata-protocol/src/protocol.ts::migrateStoredMetadata',
+        {
+            callees: [['record', 'effect']],
+            why:
+                "`record()` is this function's per-item outcome recorder: it appends the row to `report.items` "
+                + "and increments the matching counter, so `record({ outcome: 'failed', reason })` in the catch "
+                + 'increments `report.failed` and itemises WHICH row did not land, with why. The report IS the '
+                + "operation's contract — strictly louder than a log line, and the caller cannot miss it (#5241, "
+                + 'entered the baseline in #4754).',
+        },
+    ],
+    [
+        'packages/metadata-protocol/src/protocol.ts::duplicatePackage',
+        {
+            callees: [['failed.push', 'effect']],
+            why:
+                '`failed[]` is half of this function\'s returned envelope: pushing to it flips the aggregate '
+                + '`success` to false, populates `failedCount`, and returns the offending `{ type, name, error }` '
+                + 'to the caller. The copy reports, per item, that the write did not land (#5241, entered the '
+                + 'baseline in #4754).',
+        },
     ],
 ]);
 
@@ -271,6 +408,169 @@ function loggerLevel(node) {
 }
 
 /**
+ * Does this call expression match a declared propagation name?
+ *
+ * Two spellings, both exact — never a pattern:
+ *   - bare `errorFromThrown` matches `errorFromThrown(...)` AND
+ *     `deps.errorFromThrown(...)` (the method name is what carries the meaning,
+ *     exactly as `calleeName()` already resolves it for the critical side);
+ *   - dotted `failed.push` matches `failed.push(...)` and nothing else — the
+ *     receiver is load-bearing, because `push` alone means nothing.
+ */
+function matchesPropagationName(node, declaredName) {
+    if (!ts.isCallExpression(node)) return false;
+    const dot = declaredName.indexOf('.');
+    if (dot === -1) return calleeName(node) === declaredName;
+    const receiverName = declaredName.slice(0, dot);
+    const methodName = declaredName.slice(dot + 1);
+    const expr = node.expression;
+    if (!ts.isPropertyAccessExpression(expr) || !ts.isIdentifier(expr.name)) return false;
+    if (expr.name.text !== methodName) return false;
+    const receiver = expr.expression;
+    return ts.isIdentifier(receiver) && receiver.text === receiverName;
+}
+
+/**
+ * The innermost NAMED function-like ancestor of `node` — the granularity of a
+ * `FAILURE_PROPAGATION_SITES` key. Returns `undefined` inside an anonymous
+ * callback, which simply means no site declaration can be written for that
+ * catch (it must rethrow, be loud, or use the global vocabulary).
+ */
+function enclosingFunctionName(node) {
+    for (let n = node.parent; n; n = n.parent) {
+        if (ts.isFunctionDeclaration(n) && n.name) return n.name.text;
+        if (ts.isMethodDeclaration(n) && ts.isIdentifier(n.name)) return n.name.text;
+        if (
+            (ts.isArrowFunction(n) || ts.isFunctionExpression(n)) &&
+            n.parent &&
+            ts.isVariableDeclaration(n.parent) &&
+            ts.isIdentifier(n.parent.name)
+        ) {
+            return n.parent.name.text;
+        }
+        if (ts.isFunctionExpression(n) && n.name) return n.name.text;
+    }
+    return undefined;
+}
+
+/**
+ * Does `node`'s SAME-TICK subtree contain a declared propagation call of one of
+ * the accepted kinds? Returns the matched declaration, so the caller can record
+ * which site entry was actually load-bearing.
+ *
+ * Same-tick on purpose: a delivery inside a callback registered by the catch
+ * runs later and does not answer THIS failure — the same reason the `try` side
+ * refuses to descend into `runsLater` bodies.
+ */
+function findPropagationCall(node, declared, acceptedKinds) {
+    let hit;
+    walkSameTickInclusive(node, (child) => {
+        if (hit) return;
+        for (const d of declared) {
+            if (!acceptedKinds.has(d.via)) continue;
+            if (matchesPropagationName(child, d.name)) {
+                hit = d;
+                return;
+            }
+        }
+    });
+    return hit;
+}
+
+/**
+ * Does EVERY path out of this `catch` deliver the failure?
+ *
+ * This is the half of #5241 that keeps the new vocabulary from blinding the
+ * gate. A declared name is necessary and NOT sufficient: the catch must have no
+ * path that leaves without delivering — no early `return` of a normal value, no
+ * `break`/`continue` before the report is written, no falling off the end.
+ *
+ * Modelled structurally over the shapes the repo actually uses (sequence,
+ * block, `if`/`else`, `throw`, `return`, `break`/`continue`). Anything else is
+ * handled by the conservative fallback: it can only carry a delivery FORWARD,
+ * never invent one, and any exit it contains that has not already delivered
+ * counts as an escape. "Cannot prove" therefore reads as "does not deliver",
+ * which judges the seam instead of excusing it — the safe direction for a gate.
+ *
+ * `delivered` = every path that FALLS THROUGH past this construct has delivered
+ *               (vacuously true when nothing falls through).
+ * `escaped`   = some path LEAVES the catch (return/break/continue) without
+ *               having delivered.
+ * `terminates`= no path falls through past this construct.
+ */
+function catchDeliversFailure(block, declared) {
+    if (declared.length === 0) return undefined;
+    const returnKinds = new Set(['return', 'effect']);
+    const effectKinds = new Set(['effect']);
+    let evidence;
+
+    const note = (hit) => {
+        if (hit && !evidence) evidence = hit;
+        return !!hit;
+    };
+
+    const analyzeList = (statements, deliveredIn) => {
+        let delivered = deliveredIn;
+        let escaped = false;
+        for (const stmt of statements) {
+            const r = analyzeStmt(stmt, delivered);
+            escaped = escaped || r.escaped;
+            delivered = r.delivered;
+            if (r.terminates) return { delivered: true, escaped, terminates: true };
+        }
+        return { delivered, escaped, terminates: false };
+    };
+
+    const analyzeStmt = (stmt, delivered) => {
+        if (ts.isThrowStatement(stmt)) {
+            // A rethrow IS delivery — the loudest kind.
+            return { delivered: true, escaped: false, terminates: true };
+        }
+        if (ts.isReturnStatement(stmt)) {
+            const ok = delivered || note(findPropagationCall(stmt, declared, returnKinds));
+            return { delivered: true, escaped: !ok, terminates: true };
+        }
+        if (ts.isBreakStatement(stmt) || ts.isContinueStatement(stmt)) {
+            return { delivered: true, escaped: !delivered, terminates: true };
+        }
+        if (ts.isExpressionStatement(stmt)) {
+            const ok = delivered || note(findPropagationCall(stmt, declared, effectKinds));
+            return { delivered: ok, escaped: false, terminates: false };
+        }
+        if (ts.isBlock(stmt)) return analyzeList(stmt.statements, delivered);
+        if (ts.isIfStatement(stmt)) {
+            const t = analyzeStmt(stmt.thenStatement, delivered);
+            const e = stmt.elseStatement
+                ? analyzeStmt(stmt.elseStatement, delivered)
+                : { delivered, escaped: false, terminates: false };
+            const terminates = t.terminates && e.terminates;
+            const fallThrough =
+                terminates ? true
+                : t.terminates ? e.delivered
+                : e.terminates ? t.delivered
+                : t.delivered && e.delivered;
+            return { delivered: fallThrough, escaped: t.escaped || e.escaped, terminates };
+        }
+        // Conservative fallback for every shape not modelled above (loops,
+        // `switch`, nested `try`, labelled statements). It never invents a
+        // delivery; it only asks whether some exit inside it escapes undelivered.
+        let escaped = false;
+        walkSameTick(stmt, (child) => {
+            if (ts.isReturnStatement(child)) {
+                if (!delivered && !note(findPropagationCall(child, declared, returnKinds))) escaped = true;
+            } else if (ts.isBreakStatement(child) || ts.isContinueStatement(child)) {
+                if (!delivered) escaped = true;
+            }
+        });
+        return { delivered, escaped, terminates: false };
+    };
+
+    const r = analyzeList(block.statements, false);
+    if (!r.delivered || r.escaped || !evidence) return undefined;
+    return evidence;
+}
+
+/**
  * Index every named function-like body in the file, so a `catch` that delegates
  * to a helper can be judged by what the helper does.
  *
@@ -299,9 +599,31 @@ function indexFunctionBodies(sf) {
     return byName;
 }
 
-function analyzeSourceFile(sf, relPath, findings, seams) {
+function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
+    const propagationSites = options.propagationSites ?? FAILURE_PROPAGATION_SITES;
+    const usedPropagationSites = options.usedPropagationSites;
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
+
+    const globalPropagation = [...FAILURE_PROPAGATION_CALLEES].map(([name, d]) => ({
+        name,
+        via: d.via,
+        why: d.why,
+        site: undefined,
+    }));
+
+    /** The propagation names in scope for a catch: global + this function's. */
+    const declaredPropagationFor = (tryNode) => {
+        const fnName = enclosingFunctionName(tryNode);
+        if (!fnName) return globalPropagation;
+        const key = `${relPath}::${fnName}`;
+        const entry = propagationSites.get(key);
+        if (!entry) return globalPropagation;
+        return [
+            ...globalPropagation,
+            ...entry.callees.map(([name, via]) => ({ name, via, why: entry.why, site: key })),
+        ];
+    };
 
     /**
      * Collect the log levels a catch reaches, following same-file helper calls
@@ -445,6 +767,13 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
         // Only an UNCONDITIONAL rethrow excuses the seam — see catchRecovers().
         const propagatesAlways = rethrows && !catchRecovers(node.catchClause.block);
 
+        // 3. …or does it hand the failure to the caller on EVERY path? (#5241)
+        const delivery = catchDeliversFailure(
+            node.catchClause.block,
+            declaredPropagationFor(node),
+        );
+        if (delivery?.site && usedPropagationSites) usedPropagationSites.add(delivery.site);
+
         const loud = levels.filter((l) => LOUD_LEVELS.has(l.level));
         const quiet = levels.filter((l) => QUIET_LEVELS.has(l.level));
 
@@ -455,12 +784,14 @@ function analyzeSourceFile(sf, relPath, findings, seams) {
             catchLine: lineOf(node.catchClause),
             rethrows: propagatesAlways,
             partialRethrow: rethrows && !propagatesAlways,
+            propagates: delivery ? `${delivery.name}()${delivery.site ? ' (site-declared)' : ''}` : undefined,
+            propagatesWhy: delivery?.why,
             loud: loud.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
             quiet: quiet.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
         };
         seams.push(seam);
 
-        if (propagatesAlways || loud.length > 0) return;
+        if (propagatesAlways || delivery || loud.length > 0) return;
 
         findings.push({
             ...seam,
@@ -484,12 +815,15 @@ function run({ list = false } = {}) {
     const files = collectSourceFiles(packagesDir);
     const findings = [];
     const seams = [];
+    const usedPropagationSites = new Set();
 
     for (const file of files) {
         const text = readFileSync(file, 'utf8');
         if (!text.includes('catch')) continue;
         const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-        analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), findings, seams);
+        analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
+            usedPropagationSites,
+        });
     }
 
     if (list) {
@@ -497,7 +831,9 @@ function run({ list = false } = {}) {
         for (const s of seams) {
             const verdict = s.rethrows
                 ? 'rethrows'
-                : s.partialRethrow && s.loud.length > 0
+                : s.propagates
+                  ? `propagates to caller via ${s.propagates}`
+                  : s.partialRethrow && s.loud.length > 0
                   ? `recovers on one branch, loud (${s.loud.join(', ')})`
                   : s.loud.length > 0
                   ? `loud (${s.loud.join(', ')})`
@@ -505,6 +841,10 @@ function run({ list = false } = {}) {
                     ? `QUIET (${s.quiet.join(', ')})`
                     : 'SILENT';
             console.log(`  ${s.file}:${s.catchLine}  guards ${s.callee}()@${s.calleeLine}  → ${verdict}`);
+            // A propagating seam is EXCUSED, so the census must show the reason
+            // it was excused — otherwise reviewing the vocabulary means reading
+            // the script instead of the report it prints.
+            if (s.propagates && s.propagatesWhy) console.log(`      why: ${s.propagatesWhy}`);
         }
         console.log('');
     }
@@ -542,9 +882,29 @@ function run({ list = false } = {}) {
                 `    found   : ${v.kind === 'quiet-log' ? `catch logs ${v.quiet.join(', ')} and does not rethrow` : 'catch swallows the failure with no log at all'}`,
             );
             console.error(
-                `    fix     : log at \`error\` naming the CONSEQUENCE and the FIX (see packages/services/service-automation/src/plugin.ts start(), #4460), or rethrow.\n`,
+                `    fix     : log at \`error\` naming the CONSEQUENCE and the FIX (see packages/services/service-automation/src/plugin.ts start(), #4460), or rethrow.\n` +
+                `    OR      : if this catch already HANDS THE FAILURE TO THE CALLER on every path (an error envelope, a per-item outcome report), do NOT bolt on a log — declare how it delivers, in FAILURE_PROPAGATION_CALLEES or FAILURE_PROPAGATION_SITES in this script (#5241). Adding a redundant \`logger.error\` to a path whose common case is a rejected request is the mirror-image failure AGENTS.md warns about.\n`,
             );
         }
+    }
+
+    const staleSites = [...FAILURE_PROPAGATION_SITES.keys()].filter(
+        (k) => !usedPropagationSites.has(k),
+    );
+    if (staleSites.length > 0) {
+        failed = true;
+        console.error(
+            `\n✗ ${staleSites.length} stale entr(ies) in FAILURE_PROPAGATION_SITES — the declaration excuses nothing, so delete it (a vocabulary entry that matches no seam is a licence waiting for the next catch that lands in that function):\n`,
+        );
+        for (const k of staleSites) {
+            console.error(`  ${k}`);
+            const why = FAILURE_PROPAGATION_SITES.get(k)?.why;
+            if (why) console.error(`    it was declared because: ${why}`);
+        }
+        console.error(
+            '  If the function was RENAMED, update the key. If the catch no longer delivers the\n' +
+            '  failure that way, the seam is a real degradation again and must be fixed, not re-keyed.\n',
+        );
     }
 
     if (stale.length > 0) {
@@ -557,8 +917,10 @@ function run({ list = false } = {}) {
     }
 
     if (!failed) {
+        const propagating = seams.filter((s) => s.propagates).length;
         console.log(
-            `✓ durability-degradation log levels: ${seams.length} durability-critical catch seam(s), all loud or rethrowing` +
+            `✓ durability-degradation log levels: ${seams.length} durability-critical catch seam(s), all loud, rethrowing or propagating to the caller` +
+                (propagating > 0 ? ` (${propagating} propagating, declared)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
                 '.',
         );
@@ -796,6 +1158,245 @@ function selfTest() {
                 } }`,
             expectViolation: true,
         },
+
+        // ── #5241: the declared failure-propagation vocabulary ───────────────
+        // The gate's third legal answer. Every case below pins BOTH halves of
+        // it: the name must be DECLARED (never guessed from spelling), and the
+        // structure must be PROVED (every path out of the catch delivers). Drop
+        // either half and the gate goes blind in one of two directions — a
+        // spelling heuristic excuses swallows, a bare declaration is a baseline
+        // entry wearing a vocabulary's name.
+        {
+            // The `meta.ts` PUT handler: `saveMetaItem` IS the request's primary
+            // operation, and the catch answers the caller a 4xx/422 carrying the
+            // structured spec-validation `issues`. Nothing looks normal
+            // afterwards, so it is not a degradation and must not need a log.
+            name: 'passes: catch answers the caller an error envelope on every path (#5241)',
+            code: `
+                class P { async f(deps: any, protocol: any, type: string, name: string, body: any) {
+                    try {
+                        const result = await protocol.saveMetaItem({ type, name, item: body });
+                        return { handled: true, response: deps.success(result) };
+                    } catch (e: any) {
+                        return { handled: true, response: deps.errorFromThrown(e, 400) };
+                    }
+                } }`,
+            expectViolation: false,
+        },
+        {
+            // The negative that keeps the vocabulary honest: one branch answers
+            // the failure, the other answers success. The caller on THAT path is
+            // told the save worked when it did not — the #4632 loss exactly.
+            name: 'flags: envelope on one branch, a normal value on the other (partial propagation)',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any) {
+                    try { await protocol.saveMetaItem(body); }
+                    catch (e: any) {
+                        if (e?.status === 422) return { handled: true, response: deps.errorFromThrown(e, 400) };
+                        return { handled: true, response: deps.success({ ok: true }) };
+                    }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: envelope on one branch, falls off the end on the other',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any) {
+                    try { await protocol.saveMetaItem(body); }
+                    catch (e: any) {
+                        if (e?.status === 422) return { handled: true, response: deps.errorFromThrown(e, 400) };
+                    }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            // `via: 'return'` is why this is caught: for an envelope BUILDER the
+            // value is the delivery, so building one and then dropping it
+            // delivers nothing. A "does the catch mention errorFromThrown"
+            // check would wave this through.
+            name: 'flags: an error envelope BUILT but never returned',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any) {
+                    try { await protocol.saveMetaItem(body); }
+                    catch (e: any) {
+                        const envelope = deps.errorFromThrown(e, 400);
+                        deps.logger.warn('save failed', envelope);
+                    }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            // The second shape #5241 names: a batch whose CONTRACT is a per-item
+            // outcome report. `record` means nothing repo-wide, so it is
+            // declared for ONE function — and the structure is still proved.
+            name: 'passes: site-declared per-item outcome report (#5241 second shape)',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); record({ outcome: 'rewritten' }); }
+                        catch (e: any) { record({ outcome: 'failed', reason: e?.message }); }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: false,
+            expectSitesUsed: ['t.ts::migrateStoredMetadata'],
+        },
+        {
+            // Same code, no declaration: still a violation. This is the whole
+            // "declared, not guessed" half — the checker must never infer that
+            // something called `record` reports a failure.
+            name: 'flags: the same report shape with NO site declaration (declared, not guessed)',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); record({ outcome: 'rewritten' }); }
+                        catch (e: any) { record({ outcome: 'failed', reason: e?.message }); }
+                    }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            // Function granularity is load-bearing: `protocol.ts` is nine
+            // thousand lines and a file-wide licence for `saveMetaItem` would
+            // hide the next real swallow.
+            name: 'flags: a site declaration for a DIFFERENT function does not license this one',
+            code: `
+                class P { async duplicatePackage(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { record({ outcome: 'failed', reason: e?.message }); }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: true,
+        },
+        {
+            name: 'passes: site-declared DOTTED sink (failed.push) — the receiver is what carries the meaning',
+            code: `
+                class P { async duplicatePackage(rows: any[]) {
+                    const failed: any[] = [];
+                    const copied: any[] = [];
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); copied.push(row); }
+                        catch (e: any) { failed.push({ type: row.type, name: row.name, error: e?.message }); }
+                    }
+                    return { success: failed.length === 0, copied, failed };
+                } }`,
+            sites: [['t.ts::duplicatePackage', { callees: [['failed.push', 'effect']] }]],
+            expectViolation: false,
+            expectSitesUsed: ['t.ts::duplicatePackage'],
+        },
+        {
+            name: 'flags: a DIFFERENT array than the declared sink does not deliver',
+            code: `
+                class P { async duplicatePackage(rows: any[]) {
+                    const failed: any[] = [];
+                    const skipped: any[] = [];
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { skipped.push({ name: row.name }); }
+                    }
+                    return { success: failed.length === 0, failed };
+                } }`,
+            sites: [['t.ts::duplicatePackage', { callees: [['failed.push', 'effect']] }]],
+            expectViolation: true,
+        },
+        {
+            name: 'flags: the declared report is written on only ONE branch',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { if (e?.fatal) { record({ outcome: 'failed' }); } }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: true,
+        },
+        {
+            name: 'passes: report written, then `continue` — the loop moves on AFTER delivering',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { record({ outcome: 'failed', reason: e?.message }); continue; }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: false,
+        },
+        {
+            name: 'flags: `continue` BEFORE the declared report leaves a path undelivered',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { if (e?.transient) continue; record({ outcome: 'failed' }); }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: true,
+        },
+        {
+            // Same reason the `try` side refuses to descend into `runsLater`
+            // bodies: a delivery scheduled for later does not answer THIS
+            // failure, and the caller has already been told the write is done.
+            name: 'flags: the delivery sits in a callback that runs LATER',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any, queue: any) {
+                    try { await protocol.saveMetaItem(body); }
+                    catch (e: any) { queue.push(() => deps.errorFromThrown(e, 400)); }
+                } }`,
+            expectViolation: true,
+        },
+        {
+            name: 'passes: BOTH branches of an if/else answer the caller an envelope',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any) {
+                    try { await protocol.saveMetaItem(body); return { handled: true, response: deps.success(null) }; }
+                    catch (e: any) {
+                        if (e?.status === 422) { return { handled: true, response: deps.errorFromThrown(e, 422) }; }
+                        else { return { handled: true, response: deps.errorFromThrown(e, 500) }; }
+                    }
+                } }`,
+            expectViolation: false,
+        },
+        {
+            // Documents the conservative fallback: a shape the analysis does not
+            // model can carry a delivery forward but never invent one, so
+            // "cannot prove" reads as "does not deliver" and the seam is judged.
+            // The safe direction — the opposite one would excuse swallows.
+            name: 'flags: a delivery the analysis cannot prove reaches every path (conservative fallback)',
+            code: `
+                class P { async migrateStoredMetadata(rows: any[], report: any) {
+                    const record = (entry: any) => { report.items.push(entry); };
+                    for (const row of rows) {
+                        try { await this.saveMetaItem(row); }
+                        catch (e: any) { for (const issue of e?.issues ?? []) { record({ outcome: 'failed', issue }); } }
+                    }
+                } }`,
+            sites: [['t.ts::migrateStoredMetadata', { callees: [['record', 'effect']] }]],
+            expectViolation: true,
+        },
+        {
+            // A propagating catch is still a SEAM — it is reported by `--list`
+            // and it must not vanish from the census. #4754's whole precision
+            // problem started with seams the gate could see but not classify.
+            name: 'passes: a propagating catch is still counted as a seam (not made invisible)',
+            code: `
+                class P { async f(deps: any, protocol: any, body: any) {
+                    try { await protocol.saveMetaItem(body); }
+                    catch (e: any) { return { handled: true, response: deps.errorFromThrown(e, 400) }; }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
     ];
 
     let failures = 0;
@@ -803,19 +1404,37 @@ function selfTest() {
         const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
-        analyzeSourceFile(sf, 't.ts', findings, seams);
+        const usedPropagationSites = new Set();
+        analyzeSourceFile(sf, 't.ts', findings, seams, {
+            // A case may declare its OWN site vocabulary, so the fixtures can
+            // exercise `FAILURE_PROPAGATION_SITES` without depending on the real
+            // repo paths (which would rot the moment a function is renamed).
+            ...(c.sites ? { propagationSites: new Map(c.sites) } : {}),
+            usedPropagationSites,
+        });
         const got = findings.length > 0;
         // `expectCount` pins HOW MANY seams a case reports, not just whether it
         // reports one. Nesting cases need it: "still flags" is satisfied both by
         // the correct single finding and by the duplicate-per-nesting-level bug
         // it replaced, so a boolean cannot tell those two apart (#4754).
         const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
-        if (got !== c.expectViolation || countMismatch) {
+        const seamMismatch = c.expectSeams !== undefined && seams.length !== c.expectSeams;
+        // `expectSitesUsed` pins the bookkeeping the STALENESS check runs on: a
+        // site declaration that excuses nothing must be reported and deleted, so
+        // "was this entry load-bearing?" has to be recorded accurately (#5241).
+        const usedList = [...usedPropagationSites].sort();
+        const sitesMismatch =
+            c.expectSitesUsed !== undefined &&
+            JSON.stringify(usedList) !== JSON.stringify([...c.expectSitesUsed].sort());
+        if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch) {
             failures++;
             console.error(
                 `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
                     (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
-                    `, got violation=${got} count=${findings.length}`,
+                    (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
+                    (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(c.expectSitesUsed)}` : '') +
+                    `, got violation=${got} count=${findings.length} seams=${seams.length}` +
+                    (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(usedList)}` : ''),
             );
         } else {
             console.log(`  ✓ ${c.name}`);

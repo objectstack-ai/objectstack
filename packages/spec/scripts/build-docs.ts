@@ -26,6 +26,7 @@ import {
   resolveImports,
   type CategorySurface,
 } from './lib/docs-import-surface';
+import { escapeMdxDescription } from './lib/escape-mdx';
 import { anchorFor, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import { schemaNameFromExportKey } from './lib/schema-name';
@@ -257,47 +258,8 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
   // Add schema heading
   md += `## ${schemaName}\n\n`;
   
-  // Escape MDX-unsafe characters in description text. MDX parses `{` as a JS
-  // expression and `<` as JSX, so any raw `{token}` / `<title>` inside a Zod
-  // `.describe()` string breaks the docs build. Wrap such fragments in inline
-  // code so they render literally.
-  //
-  // Single pass with backtick tracking: fragments already inside an inline-code
-  // span are left untouched. A naive two-pass replace double-wraps nested cases
-  // like `{<id>}` into `` `{`<id>`}` `` — the inner backticks close the span
-  // early and leak `<id>` as raw JSX (MDX: "Expected a closing tag for `<id>`").
-  //
-  // A matched `{…}` / `<…>` pair is wrapped in an inline-code span so it renders
-  // literally. A *lone* `<` or `{` with no closing partner (e.g. a SemVer range
-  // `">=4.0 <5"`, or prose like `count < 5`) can't be wrapped, so it is replaced
-  // with its HTML entity — otherwise MDX reads the `<` as the start of a JSX tag
-  // and the build dies ("Unexpected character `5` before name").
-  const escapeMdxDescription = (raw: string): string => {
-    let out = '';
-    let inCode = false;
-    for (let i = 0; i < raw.length; i++) {
-      const ch = raw[i];
-      if (ch === '`') {
-        inCode = !inCode;
-        out += ch;
-        continue;
-      }
-      if (!inCode && (ch === '{' || ch === '<')) {
-        const close = ch === '{' ? '}' : '>';
-        const end = raw.indexOf(close, i + 1);
-        if (end !== -1) {
-          out += '`' + raw.slice(i, end + 1) + '`';
-          i = end;
-          continue;
-        }
-        // Unmatched: escape so MDX doesn't treat it as a JSX/expression opener.
-        out += ch === '<' ? '&lt;' : '&#123;';
-        continue;
-      }
-      out += ch;
-    }
-    return out;
-  };
+  // Description text is made MDX-safe by `lib/escape-mdx.ts` — extracted so the
+  // escaping can be pinned directly instead of by grepping emitted `.mdx`.
 
   // Add description with better formatting
   if (mainDef.description) {

@@ -89,6 +89,23 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'] },
+  // #5519 — the two DISPATCHER-mounted execution surfaces. `@objectstack/rest`
+  // gated `/data` and `/meta`; these routes are mounted by a SECOND
+  // registration path (dispatcher-plugin.ts, straight onto the host
+  // IHttpServer) and inherited none of it, so the "#2567 uniform posture"
+  // claim above was false on them until PR #5569. The proof artifact was
+  // silent too — #5570 is the evidence half, and these two rows are what make
+  // the gate's removal fail CI instead of review.
+  { id: 'anonymous-deny-actions', summary: 'anonymous-deny on the business-action dispatch surface (#2567 surface 2 / #5519)', state: 'enforced',
+    enforcement: 'runtime/domains/actions.ts handleActionsRequest — shouldDenyAnonymous as the handler\'s FIRST statement, ahead of the ADR-0066 D4 requiredPermissions gate and the ADR-0104 param contract; those keep their semantics and simply run after the auth baseline, so an anonymous caller never reaches action dispatch and never learns the route\'s shape',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    covers: ['actions:domains/actions.ts:anonymous-gate'],
+    note: 'A `type: \'script\'` action body runs `isSystem: true` (elevated), so an ungated POST was an anonymous privilege-escalating WRITE, not merely an information leak — #5519 measured `POST /actions/showcase_task/showcase_mark_done/:id` answering 200 with the update applied. Internal dispatch is unaffected: this handler is a pure HTTP seam (the MCP `run_action` bridge enters through action-execution.invokeBusinessAction, declarative endpoints through the transport fallback seam with their own `authRequired` gate), so `authRequired: false` public endpoints stay public.' },
+  { id: 'anonymous-deny-automation', summary: 'anonymous-deny on the automation/flow surface (#2567 surface 3 / #5519)', state: 'enforced',
+    enforcement: 'runtime/domains/automation.ts handleAutomationRequest — shouldDenyAnonymous DOMAIN-WIDE at the top, and deliberately BEFORE the isServiceServeable probe so the 401/501 difference cannot be used to fingerprint whether a deployment mounts automation',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    covers: ['automation:domains/automation.ts:anonymous-gate'],
+    note: 'Ungated, an anonymous caller could start real flow runs (`POST /:name/trigger`), read the full flow inventory (`GET /automation`), and DEREGISTER a registered flow (`DELETE /:name` → `{deleted:true}`) — the destructive one, which #5519 did not originally record. Gating the DOMAIN rather than each route is what keeps a newly added automation route from arriving ungated. Engine-internal triggers (record-change, schedule) never speak HTTP and are untouched.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

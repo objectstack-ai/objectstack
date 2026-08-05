@@ -12,6 +12,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
@@ -24,6 +25,31 @@ import {
 /** Scalar analytics operators → their SQL spelling (display SQL only). */
 const SCALAR_SQL_OPS: Record<string, string> = {
   equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
+};
+
+/**
+ * The LIKE family: SQL spelling + where each one puts the wildcard.
+ *
+ * Deliberately the same pair of tables `NativeSQLStrategy.buildFilterClause`
+ * carries (`opMap` / `likeShape`), because this file renders a description of
+ * the statement THAT compiler produces. Keeping them as one table here is the
+ * point of #5333: `startsWith` / `endsWith` were in neither the branch above nor
+ * `SCALAR_SQL_OPS`, so they fell to the unmapped exit and the predicate vanished
+ * from the echo while the query it documents ran `LIKE 'w%'`.
+ *
+ * [#5567] The pattern comes from the shared `likePattern`, which ESCAPES the
+ * comparand, and the renderer binds an explicit `ESCAPE` alongside it. That is
+ * not cosmetic for an echo: the execution this file describes goes through the
+ * engine to `driver-sql`, whose `applyLike` has always escaped and bound
+ * `ESCAPE`. Rendering the raw comparand meant the echoed statement was WIDER
+ * than the query it claims to reproduce whenever the comparand carried a `_` or
+ * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
+ */
+const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape }> = {
+  contains: { sql: 'LIKE', shape: 'contains' },
+  notContains: { sql: 'NOT LIKE', shape: 'contains' },
+  startsWith: { sql: 'LIKE', shape: 'starts' },
+  endsWith: { sql: 'LIKE', shape: 'ends' },
 };
 
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
@@ -607,8 +633,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * Mirrors `NativeSQLStrategy.buildFilterClause`'s operator vocabulary so the
    * two previews read alike, but binds through `coerceFilterValueForObjectQL`:
    * the comparand shown is the one THIS path actually hands the engine (a real
-   * boolean, not SQL's 1/0). Returns null for an operator/value combination
-   * that carries no predicate, matching `execute()`, which drops it too.
+   * boolean, not SQL's 1/0).
+   *
+   * `null` means "this leaf carries no predicate" — a value-less scalar leaf,
+   * which `execute()` and `NativeSQLStrategy` drop too. It does NOT mean "I could
+   * not render that operator": #5333 was exactly that conflation, and an
+   * unrenderable operator now THROWS (see the exit below).
    */
   private buildFilterClauseSql(
     col: string,
@@ -628,13 +658,50 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return `${col} ${operator === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
     }
 
-    if (operator === 'contains' || operator === 'notContains') {
-      params.push(`%${values[0]}%`);
-      return `${col} ${operator === 'contains' ? 'LIKE' : 'NOT LIKE'} $${params.length}`;
+    // The LIKE family binds its PATTERN, which is text by construction, so it
+    // skips `coerceFilterValueForObjectQL` — same reason `NativeSQLStrategy`
+    // keeps the un-normalised column reference for these: a prefix/suffix/
+    // substring match reads the column as stored.
+    const like = LIKE_SQL_OPS[operator];
+    if (like) {
+      // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
+      // `driver-sql`'s `applyLike` binds for the same operator — so an author
+      // who copies this statement out runs the predicate that ran.
+      params.push(likePattern(like.shape, values[0]));
+      const patternRef = `$${params.length}`;
+      params.push(LIKE_ESCAPE_CHAR);
+      return `${col} ${like.sql} ${patternRef} ESCAPE $${params.length}`;
     }
 
     const op = SCALAR_SQL_OPS[operator];
-    if (!op) return null;
+    if (!op) {
+      // [#5333] THROW rather than `return null`. `renderFilterNodeSql` reads a
+      // `null` as "this node constrains nothing", so the old exit deleted the
+      // predicate from the echoed statement — and a rendering WIDER than
+      // execution is the failure this whole render block exists to prevent
+      // (#3601 / #3602 / #3650): the author runs it to reproduce a result, gets
+      // more rows, and concludes the filter never applied.
+      //
+      // It can throw because the vocabulary upstream is CLOSED: `fieldLeaves`
+      // in `filter-normalizer.ts` is the only producer of leaf nodes, and it
+      // refuses an operator outside `MONGO_TO_CUBE_OP` with `INVALID_FILTER` /
+      // 400 before a leaf exists. So no caller-authored filter can land here —
+      // an arrival means the normalizer's table gained an entry this renderer
+      // has no arm for, which is our bug, not the caller's, and the one answer
+      // that must never be given for it is a silently wider query. Same call
+      // `convertFilter`'s `default:` arm made when it stopped reading an
+      // unmapped operator as equality (#4128). Deliberately NOT
+      // `invalidFilterError`'s 400 envelope: this is drift between two of our
+      // own tables, not a caller-shaped mistake.
+      throw new Error(
+        `[analytics] ObjectQLStrategy cannot render display SQL for filter operator ` +
+        `"${operator}" (on "${col}"). The analytics operator vocabulary is closed — ` +
+        `filter-normalizer.ts refuses anything it cannot map — so this means a new ` +
+        `operator reached the normalizer without an arm here. Add one rather than ` +
+        `dropping the predicate: an echo without it describes a WIDER query than the ` +
+        `one that ran (#5333).`,
+      );
+    }
     params.push(coerceFilterValueForObjectQL(values[0]));
     return `${col} ${op} $${params.length}`;
   }
@@ -962,7 +1029,30 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       case 'gte': return { $gte: v0 };
       case 'lt': return { $lt: v0 };
       case 'lte': return { $lte: v0 };
-      case 'contains': return { $regex: values[0] };
+      // [#5557] `contains` was `{ $regex: values[0] }` — the comparand dropped
+      // VERBATIM into a regex position while its three siblings below already
+      // passed as canonical spec operators. Three things were wrong with that,
+      // and none of them waits on #4706's ruling about what `$regex` should
+      // mean:
+      //
+      //   1. `$regex` is not in `filter.zod.ts`'s `FILTER_OPERATORS`, so this
+      //      was a PRODUCER emitting an operator the contract does not declare
+      //      (Prime Directive #12 — fix the producer, not the consumers).
+      //   2. `compileScopedFilterToSql` in this very package is a
+      //      `FilterCondition` consumer and fails closed on `$regex`, so one
+      //      filter tree no longer travelled between two consumers of the same
+      //      contract sitting in the same directory.
+      //   3. On a backend that reads `$regex` as a real regex — driver-memory's
+      //      `memory-matcher.ts` does, deliberately, for plugin-auth's adapter
+      //      — an unescaped comparand changes what the author asked for:
+      //      `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
+      //      the `catch { return false }` answered zero rows in silence.
+      //      `driver-sql` meanwhile compiles `$regex` to a substring LIKE, so
+      //      the same widget returned different row sets per driver.
+      //
+      // `MONGO_TO_CUBE_OP` maps `$contains` → `contains` and nothing else does,
+      // so returning `$contains` here is the round trip of the author's own key.
+      case 'contains': return { $contains: values[0] };
       // `notContains` had no arm and fell to the `default` below, which returns
       // a BARE VALUE — i.e. `{field: 'x'}`, an equality. "does not contain x"
       // was compiled as "equals x". These three pass through as the canonical

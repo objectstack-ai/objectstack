@@ -17,6 +17,105 @@ function waitTimerJobName(runId: string, nodeId: string): string {
 }
 
 /**
+ * The `error` line {@link makeWaitTimerJobHandler} owes on the one outcome where
+ * the wake-up fires and the pause survives it (#5529) — and the same level
+ * {@link RearmLogger} requires for the re-arm path's degradations (#4632),
+ * which is why that one extends this.
+ */
+interface WaitTimerLogger {
+  error(msg: string, ...args: unknown[]): void;
+}
+
+/**
+ * The one-shot wake-up job's handler. One declaration, shared by the arming path
+ * and the cold-boot re-arm ({@link rearmSuspendedWaitTimers}) for the same
+ * reason {@link waitTimerJobName} is one declaration: both sites schedule the
+ * same job and must settle it the same way.
+ *
+ * The job disarms **itself** after its single shot — right for every outcome but
+ * one. `engine.resume()` reports failure by RETURNING a code rather than
+ * throwing (`AutomationResult.code`), so "this shot consumed the pause" and
+ * "this shot missed" are indistinguishable unless the code is read. The bare
+ * `finally` this replaces read nothing and cancelled both (#5529):
+ *
+ *  - **`STORE_UNAVAILABLE`** — the durable suspended-run store could not be
+ *    READ, so the pause was **not** consumed: the run is still parked at its
+ *    wait node and its row is still there. #4420 draws exactly this line — an
+ *    unreachable store must never read as "no such run" — and cancelling here
+ *    retires the only thing that was ever going to wake this run. So: keep the
+ *    job, and say so at `error`. A run left parked while the process reports a
+ *    healthy timer is the durability degradation AGENTS.md's log-level rule is
+ *    about (#4632), and this path was previously silent — the result was
+ *    discarded by the callback without so much as a `warn`.
+ *  - **everything else** — cancel, exactly as before. Success consumed the
+ *    pause; `RESUME_IN_PROGRESS` means a concurrent resume is consuming it (and
+ *    #5512's `onSuspensionReleased` drops this job when it does); a machine-state
+ *    failure (`RUN_NOT_FOUND`, a flow/node that no longer exists) means there is
+ *    no pause left for this job to serve; and a *thrown* error is not a store
+ *    outage, so it does not buy an exemption either.
+ *
+ * **Keeping the job armed is not self-healing** — measured, not assumed: a
+ * `once` schedule is a single `setTimeout` in `IntervalJobAdapter` (which
+ * `DbJobAdapter` delegates all timer mechanics to), so it never re-fires on its
+ * own. What survival buys is the two things `cancel` destroys. `sys_job` keeps
+ * an `active` row carrying the deadline — true here, the run really is still
+ * waiting — instead of flipping to `active: false`, which would read as "this
+ * wake-up is done" while the run hangs. And the registration stays in the
+ * adapter, so `IJobService.trigger(jobName)` re-fires this very wake-up once the
+ * store is back, with **no restart**; after a cancel, `trigger` throws "not
+ * found" and the only remaining path is the next boot's overdue re-arm pass.
+ * Both remedies are named in the log line for that reason.
+ *
+ * Reachability differs by site, and the honest note is that they are not equal.
+ * `resumeInternal` reads the durable store only on a hot-cache miss, and a run
+ * that paused in *this* process is cached for as long as the suspension lives —
+ * so the **re-arm** callback (a fresh process, empty cache) is where
+ * `STORE_UNAVAILABLE` is genuinely reachable today, while the arming callback's
+ * branch is latent by construction. It is shared anyway rather than special-cased:
+ * a second spelling of "settle the one-shot" is exactly the drift #5512 collapsed.
+ */
+function makeWaitTimerJobHandler(
+  engine: Pick<AutomationEngine, 'resume'>,
+  job: IJobService,
+  runId: string,
+  jobName: string,
+  logger: WaitTimerLogger,
+): () => Promise<void> {
+  return async () => {
+    // Set only on the one outcome that must NOT disarm the job. A thrown
+    // `resume` leaves it false, so the `finally` still cancels.
+    let keepArmed = false;
+    try {
+      const result = await engine.resume(runId);
+      if (result?.code === 'STORE_UNAVAILABLE') {
+        keepArmed = true;
+        logger.error(
+          `[wait] timer wake-up '${jobName}' fired but could NOT resume run '${runId}': the durable suspended-run store was ` +
+            `unreachable, so the pause was never consumed — the run is STILL parked at its wait node, now past its deadline, ` +
+            `and this one-shot has already had its single shot, so nothing will wake it on its own. The job is left ARMED on ` +
+            `purpose (its 'sys_job' row stays active) so the stuck run stays visible and the wake-up re-firable: once the ` +
+            `store is reachable, re-fire it with the job service's trigger('${jobName}'), or resume the run directly via ` +
+            `resume('${runId}') — a process restart also picks it up as overdue. Cause: ${result.error ?? 'store unavailable'}`,
+        );
+      }
+    } finally {
+      if (!keepArmed) {
+        // One-shot: drop the job so it never re-fires. Kept alongside the
+        // `onSuspensionReleased` teardown because the two answer different
+        // questions: that one fires when the RUN leaves the node, this one when
+        // the JOB has had its single shot *and* that shot settled the pause one
+        // way or the other. Both are `cancel`, which is idempotent.
+        try {
+          await job.cancel?.(jobName);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  };
+}
+
+/**
  * `wait` built-in node — a durable pause (ADR-0019 suspend/resume), the timer /
  * signal sibling of the human-input `screen` and `approval` nodes.
  *
@@ -35,7 +134,11 @@ function waitTimerJobName(runId: string, nodeId: string): string {
  *
  * Whatever wakes the run, the one-shot job is dropped when the pause ends — see
  * `onSuspensionReleased` below (#5512). A timer wait cut short by an external
- * `resume` used to leave its wake-up armed for the full duration.
+ * `resume` used to leave its wake-up armed for the full duration. The timer's own
+ * callback settles its job separately and on a different question ("has this job
+ * had its shot, and did that shot settle the pause?") — see
+ * {@link makeWaitTimerJobHandler}, which keeps the job armed on the one outcome
+ * that fires without consuming the pause (#5529).
  *
  * Reads its own run id from the `$runId` variable the engine injects at start
  * (same mechanism the approval node uses to map external state back to the run).
@@ -96,24 +199,11 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
         if (job && runId != null && at) {
           const jobName = waitTimerJobName(String(runId), node.id);
           try {
-            await job.schedule(jobName, { type: 'once', at }, async () => {
-              try {
-                await engine.resume(String(runId));
-              } finally {
-                // One-shot: drop the job so it never re-fires. Kept alongside
-                // the `onSuspensionReleased` teardown below because the two
-                // answer different questions: that one fires when the RUN
-                // leaves the node, this one when the JOB has had its single
-                // shot — including the shots that did not consume a pause (the
-                // store was unreachable, another resume was already in
-                // flight). Both are `cancel`, which is idempotent.
-                try {
-                  await job.cancel?.(jobName);
-                } catch {
-                  /* best-effort */
-                }
-              }
-            });
+            await job.schedule(
+              jobName,
+              { type: 'once', at },
+              makeWaitTimerJobHandler(engine, job, String(runId), jobName, ctx.logger),
+            );
             return { success: true, suspend: true, correlation: jobName, output };
           } catch (err) {
             ctx.logger.warn(
@@ -170,17 +260,20 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
   ctx.logger.info('[Wait Node] 1 built-in node executor registered');
 }
 
-/** Minimal logger surface for {@link rearmSuspendedWaitTimers}. */
-interface RearmLogger {
+/**
+ * Minimal logger surface for {@link rearmSuspendedWaitTimers}.
+ *
+ * `error` comes from {@link WaitTimerLogger} and is required, not optional
+ * (#4632): every degradation on the re-arm path leaves a run
+ * persisted-but-unreachable, which is a durability degradation and must be
+ * reported at `error`; a logger that cannot carry that level could not satisfy
+ * the contract this function owes its caller. The jobs this pass re-arms carry
+ * the same obligation into their own callbacks (#5529), which is the other half
+ * of why the shape is shared.
+ */
+interface RearmLogger extends WaitTimerLogger {
   info(msg: string, ...args: unknown[]): void;
   warn(msg: string, ...args: unknown[]): void;
-  /**
-   * #4632 — required, not optional. Every degradation on the re-arm path leaves
-   * a run persisted-but-unreachable, which is a durability degradation and must
-   * be reported at `error`; a logger that cannot carry that level could not
-   * satisfy the contract this function owes its caller.
-   */
-  error(msg: string, ...args: unknown[]): void;
 }
 
 /**
@@ -268,17 +361,14 @@ export async function rearmSuspendedWaitTimers(
 
     const jobName = waitTimerJobName(run.runId, run.nodeId);
     try {
-      await job.schedule(jobName, { type: 'once', at: wakeAt }, async () => {
-        try {
-          await engine.resume(run.runId);
-        } finally {
-          try {
-            await job.cancel?.(jobName);
-          } catch {
-            /* best-effort */
-          }
-        }
-      });
+      await job.schedule(
+        jobName,
+        { type: 'once', at: wakeAt },
+        // Same settle-the-one-shot rule as the arming path, and the site where
+        // `STORE_UNAVAILABLE` is actually reachable: this process's hot cache is
+        // empty, so the resume reads the durable store (#5529).
+        makeWaitTimerJobHandler(engine, job, run.runId, jobName, logger),
+      );
       rearmed++;
     } catch (err) {
       // #4632 — the run is persisted and waiting, but its wake-up job was never
