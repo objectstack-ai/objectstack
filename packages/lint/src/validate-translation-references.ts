@@ -218,6 +218,18 @@ function emptyFacts(): ObjectFacts {
  *     at the record root. A record-level lookup alone resolves to nothing on
  *     the canonical shape, which silently drops the whole record — a rule that
  *     then reports every view key the app ships.
+ *
+ * A third thing was learned later, from the showcase (#5415): the container's
+ * DEFAULT form (`form`) is a section anchor too. It is not one of the
+ * `formViews.*` entries and it is not the record's own `sections` either, so
+ * for two protocol versions its named sections contributed NOTHING — and a
+ * bundle that correctly translated one of them was reported as keyed to a
+ * section "nothing declares", with a hint advising the author to delete a
+ * translation that renders. `ObjectForm` reads that form and resolves its
+ * headings through the same `sectionLabel(object, section.name, …)` convention
+ * as any named form view, so every anchor below feeds ONE collector: the list
+ * of anchors is now a list of call sites, not four copies of a loop that can
+ * drift apart one at a time.
  */
 function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
   const recordObject = viewObjectName(view);
@@ -226,6 +238,22 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
 
   const addView = (objectName: string | undefined, name: string | undefined) => {
     if (objectName && name) factsFor(objectName).views.add(name);
+  };
+
+  /**
+   * Register the `_sections` names one form-ish container declares.
+   *
+   * Form sections carry an OPTIONAL `name` that exists purely for the
+   * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
+   * lookup"). A section without one cannot be translated at all, so it
+   * contributes nothing here.
+   */
+  const addSections = (container: AnyRec, binding: string | undefined) => {
+    if (!binding) return;
+    for (const section of asArray(container.sections)) {
+      const sectionName = strName(section.name);
+      if (sectionName) factsFor(binding).sections.add(sectionName);
+    }
   };
 
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
@@ -240,27 +268,19 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
       const binding = bindingOf(sub) ?? listBinding;
       addView(binding, subKey);
       addView(binding, strName(sub.name));
-
-      // Form sections carry an OPTIONAL `name` that exists purely for the
-      // `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for
-      // i18n lookup"). A section without one cannot be translated at all, so
-      // it contributes nothing here.
-      if (binding) {
-        for (const section of asArray(sub.sections)) {
-          const sectionName = strName(section.name);
-          if (sectionName) factsFor(binding).sections.add(sectionName);
-        }
-      }
+      addSections(sub, binding);
     }
   }
 
-  const sectionBinding = recordObject ?? listBinding;
-  if (sectionBinding) {
-    for (const section of asArray(view.sections)) {
-      const sectionName = strName(section.name);
-      if (sectionName) factsFor(sectionBinding).sections.add(sectionName);
-    }
-  }
+  // The container's default form — the one `defineView({ form: … })` declares
+  // and `ObjectForm` renders when no named form view is asked for. Bound the
+  // way the CLI i18n walker's `viewObjectName` resolves `view.form.data.object`
+  // (#5415), so the two agree on which object the headings belong to.
+  // Deliberately sections only: the default form has no map key, and whether it
+  // contributes a `_views` name is the neighbouring question #5164 owns.
+  if (isRec(view.form)) addSections(view.form, bindingOf(view.form) ?? listBinding);
+
+  addSections(view, recordObject ?? listBinding);
 }
 
 /** The object a view (or one of its containers) binds to, across the shapes it is authored in. */

@@ -6,6 +6,10 @@ import {
   TRANSLATION_TARGET_UNKNOWN,
   TRANSLATION_OPTION_KEY_UNKNOWN,
 } from './validate-translation-references.js';
+// Real shipped metadata — see the `#5415` describe block for why this is
+// imported rather than reduced by hand.
+import { Contact } from '../../../examples/app-showcase/src/data/objects/contact.object.js';
+import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contact.view.js';
 
 /** A stack shaped like the HotCRM lead surface: fields, options, a view, an action. */
 const leadStack = (translations: unknown[]) => ({
@@ -532,4 +536,134 @@ describe('validateTranslationReferences — section anchors', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].hint).toContain('declares no named section at all');
   });
+
+  // #5415. `collectViewRecord` walked `['listViews', 'formViews']` and the
+  // record's own `sections`; the CONTAINER's default form — `defineView({ form:
+  // … })`, the one `ObjectForm` renders when no named form view is asked for —
+  // was in neither, so its named sections contributed nothing and a correct
+  // translation of a heading that DOES render was reported as an unknown
+  // target.
+  it('resolves a section named on the container default `form`', () => {
+    const stack = {
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      views: [
+        {
+          list: { type: 'grid', name: 'all_leads', data: { provider: 'object', object: 'crm_lead' } },
+          form: {
+            type: 'simple',
+            data: { provider: 'object', object: 'crm_lead' },
+            sections: [{ name: 'contact_info', label: 'Contact Info' }],
+          },
+        },
+      ],
+      translations: [
+        { en: { objects: { crm_lead: { label: 'Lead', _sections: { contact_info: { label: 'Contact' } } } } } },
+      ],
+    };
+    expect(validateTranslationReferences(stack)).toEqual([]);
+  });
+
+  it('binds the default `form` by its OWN data, not by the list beside it', () => {
+    // Two objects in one record: the list shows leads, the form edits contacts.
+    // The section belongs to whatever `form.data.object` says — the same
+    // resolution the CLI i18n walker's `viewObjectName` performs.
+    //
+    // Both directions are asserted in ONE stack on purpose. "crm_lead is still
+    // reported" alone would pass just as well if the default form contributed
+    // NOTHING (the pre-#5415 behaviour) — it is the `crm_contact` half, which
+    // resolves only once the form is collected under its own binding, that
+    // makes the pair falsifiable.
+    const stack = (objectName: string) => ({
+      objects: [
+        { name: 'crm_lead', fields: { name: { type: 'text' } } },
+        { name: 'crm_contact', fields: { name: { type: 'text' } } },
+      ],
+      views: [
+        {
+          list: { type: 'grid', name: 'all_leads', data: { provider: 'object', object: 'crm_lead' } },
+          form: {
+            type: 'simple',
+            data: { provider: 'object', object: 'crm_contact' },
+            sections: [{ name: 'contact_info', label: 'Contact Info' }],
+          },
+        },
+      ],
+      translations: [
+        { en: { objects: { [objectName]: { label: 'X', _sections: { contact_info: { label: 'Contact' } } } } } },
+      ],
+    });
+
+    expect(validateTranslationReferences(stack('crm_contact'))).toEqual([]);
+
+    const findings = validateTranslationReferences(stack('crm_lead'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._sections.contact_info');
+  });
+});
+
+/**
+ * #5415, pinned against the metadata the repo actually ships.
+ *
+ * `examples/app-showcase` is imported here rather than reduced by hand on
+ * purpose: the defect was an anchor MISSING from a list, and a hand-written
+ * fixture can only pin the anchors whoever wrote it remembered. The showcase
+ * contact surface is the exact shape that exposed it —
+ *
+ *   - the object declares `field.group` and NO `fieldGroups[]`, so the object
+ *     side contributes no section anchor at all;
+ *   - the container's default `form` names all four sections;
+ *   - `formViews.create` names none of its own (a sparse create override with
+ *     one unnamed section) — which is what keeps the "still reports a real
+ *     unknown" control below honest.
+ *
+ * So every `_sections` key this surface legitimately carries comes from
+ * `view.form.sections[].name`, and nothing else.
+ */
+describe('validateTranslationReferences — the showcase contact surface (#5415)', () => {
+  const showcaseContactStack = (translations: unknown[]) => ({
+    objects: [Contact],
+    views: [ContactViews],
+    translations,
+  });
+
+  const sectionBundle = (sections: Record<string, unknown>) => [
+    { 'zh-CN': { objects: { showcase_contact: { _sections: sections } } } },
+  ];
+
+  it('accepts every section the default form names', () => {
+    // `ObjectForm` renders these four headings and resolves each through
+    // `sectionLabel(object, section.name, …)` — translating them is correct.
+    const findings = validateTranslationReferences(
+      showcaseContactStack(
+        sectionBundle({
+          contact: { label: '联系方式' },
+          work: { label: '工作' },
+          status: { label: '状态' },
+          notes: { label: '备注' },
+        }),
+      ),
+    );
+    expect(findings).toEqual([]);
+  }, 60_000);
+
+  it('still reports a section name nothing declares, and names the real ones', () => {
+    // The over-widening control: `contract` is a typo of `contact`, and
+    // `who_is_this` is the LABEL of `formViews.create`'s unnamed section — an
+    // unnamed section is not translatable, so neither key may resolve.
+    const findings = validateTranslationReferences(
+      showcaseContactStack(sectionBundle({ contract: { label: '合同' }, who_is_this: { label: '这是谁' } })),
+    );
+    expect(findings).toHaveLength(2);
+    expect(findings.map((f) => f.rule)).toEqual([TRANSLATION_TARGET_UNKNOWN, TRANSLATION_TARGET_UNKNOWN]);
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.showcase_contact._sections.contract',
+      'translations[0]["zh-CN"].objects.showcase_contact._sections.who_is_this',
+    ]);
+    // The hint now enumerates the anchors the object really has, instead of
+    // claiming it "declares no named section at all".
+    for (const finding of findings) {
+      expect(finding.hint).toContain('Declared sections: contact, notes, status, work');
+      expect(finding.hint).not.toContain('declares no named section at all');
+    }
+  }, 60_000);
 });
