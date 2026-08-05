@@ -37,6 +37,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+// [#4550, from #4434] The REAL engine's delete-dispatch predicate. A fake whose
+// `delete` is looser than the implementation it stands in for turns a green
+// suite into no suite at all; importing the producer's decision (rather than
+// mirroring it) is what makes that impossible. `@objectstack/objectql` is
+// already a `dependencies` entry of `@objectstack/runtime`, so no manifest
+// change is needed to reach it.
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
@@ -81,7 +88,14 @@ function fallbackHarness(store = rows()) {
             return store.get(id);
         },
         delete: async (_o: string, opts: any) => {
-            const id = String(opts?.where?.id);
+            // [#4550, from #4434] Open on the producer's own dispatch predicate,
+            // so this double cannot accept a call the real `ObjectQL.delete`
+            // refuses. It also earns its keep here: the assertion is what proves
+            // `callData`'s fallback issues a SCALAR by-id delete — the shape a
+            // running engine executes — rather than a predicate-shaped one that
+            // would 500 in production while this suite stayed green.
+            const dispatch = assertEngineDeleteDispatch(opts);
+            const id = String((dispatch as { kind: 'by-id'; id: string | number | bigint }).id);
             deleted.push(id);
             return store.delete(id);
         },
@@ -109,7 +123,13 @@ function protocolHarness(store = rows()) {
             store.set(id, { ...store.get(id), ...data });
             return store.get(id);
         },
-        delete: async (_o: string, opts: any) => store.delete(String(opts?.where?.id)),
+        // [#4550] Same pinning as the fallback harness above — this engine sits
+        // under the REAL protocol implementation, so its `delete` is reached by
+        // `deleteData`'s own by-id call and must be held to the same contract.
+        delete: async (_o: string, opts: any) => {
+            const dispatch = assertEngineDeleteDispatch(opts);
+            return store.delete(String((dispatch as { kind: 'by-id'; id: string | number | bigint }).id));
+        },
     };
     const services: Record<string, any> = {
         metadata: { getObject: async () => ({ name: 'task', fields: {} }) },
