@@ -254,5 +254,17 @@ describe('the gate runs before serve does ANY boot work', () => {
     // The misattribution that made this issue expensive to diagnose is gone:
     // no warning blames a plugin for an environment-variable typo.
     expect(stderr).not.toContain('AuthPlugin failed to load');
-  });
+    // 60s, not the 5s default: unlike the ten message-only cases above, this one
+    // imports and runs the REAL serve command in-process — the whole serve
+    // module graph plus a port-availability probe. On a lightly-loaded PR shard
+    // that costs a moment; on the merge queue's full-suite runner, sharing a
+    // shard with the serve e2e tests (vitest reported import 94.8s / tests 282s
+    // for that shard), it blew the 5s default and this case timed out — queue
+    // run 30971902650, which is what took the PR out of the queue. Same posture
+    // as the existing `}, 60_000)` cases in this package
+    // (`utils/sqlite-occupancy.test.ts`, `utils/schema-migrate.deferred-ddl.
+    // integration.test.ts`) and as #4856's package-level `testTimeout`.
+    // Superficially the #4796 5000ms signature, but a different cause: that
+    // family was the spec template suite, already fixed.
+  }, 60_000);
 });
