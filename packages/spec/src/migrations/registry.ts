@@ -955,7 +955,33 @@ const step17: MigrationStep = {
     + '`ui/offline.zod.ts` and is now published by nobody. `ConnectorConflictResolution` '
     + '(`@objectstack/spec/integration`, connector sync) and `ConflictResolutionStrategy` '
     + '(`@objectstack/spec/api`, route merge policy) are different concepts under their own '
-    + 'names and are untouched.',
+    + 'names and are untouched.\n\n'
+    + 'The last enforce-or-remove entry of this step is on the RUNTIME context rather than on '
+    + 'anything authorable: `HookContext.session.roles` (#5050). It was declared in '
+    + '`data/hook.zod.ts`, read by exactly two consumers — the approvals record lock and the '
+    + 'delegation write guard, each opening with `session.roles?.includes(\'admin\')` — and '
+    + 'produced by nobody on the hook path: ObjectQL\'s `buildSession()` writes the session '
+    + 'field by field (`userId`, `organizationId`, `accessToken`, `isSystem`, `actor`, the skip '
+    + 'flags) and has no `roles` write, here or in `cloud`, whose hook consumers read '
+    + '`hookContext?.session?.userId` and nothing else (an ACTION body\'s `ctx.session` is a '
+    + 'different untyped object that does carry one, tracked apart). So both branches were dead '
+    + 'on every real '
+    + 'engine path: an authorization decision in shape only, and — worse for a reader — a SECOND '
+    + 'admin dialect competing with the one ADR-0095 D3 sanctions. #4839 (PR #5049) deleted the '
+    + 'two readers on the maintainer\'s ruling; this step removes the declaration that outlived '
+    + 'them, which is what ADR-0049 asks for once a key has neither end. Nothing observable '
+    + 'changes: a key nobody wrote and nothing read cannot alter a single decision. It is '
+    + 'tombstoned rather than deleted because `HookContextSchema` is deliberately NOT `.strict()` '
+    + '(strictness there would make an engine-internal enrichment a breaking change for anyone '
+    + 'parsing a context they were handed, as `provenance` was in #3712), so a plain delete would '
+    + 'strip the key in silence — the #3733 / ADR-0104 failure this whole pass exists to end. '
+    + 'There is NO conversion and no source rewrite: a HookContext is built per operation by the '
+    + 'engine and never stored, so no `sys_metadata` row, example or template can carry the key '
+    + '— the `openApi31` / `activationEvents` shape, one semantic TODO for hook authors. The '
+    + 'live vocabulary is untouched and deliberately elsewhere: gate on `session.userId` / '
+    + '`session.isSystem` in the hook, and judge PRIVILEGE through the security service, which '
+    + 'reads capability grants (`permissions`), placements (`positions`) and the derived posture '
+    + 'off the execution context.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1807,6 +1833,43 @@ const step17: MigrationStep = {
         + 'action was ever parsed from metadata and no iframe route ever read an embed config. '
         + 'Public form sharing is unaffected — `FormView.sharing` still gates the anonymous '
         + 'endpoints on `allowAnonymous` + `publicLink`.',
+    },
+    {
+      id: 'hook-context-session-roles-retired',
+      surface: 'data.hookContext.session.roles',
+      replacement:
+        '(removed — gate on `session.userId` / `session.isSystem`; for PRIVILEGE ask the '
+        + 'security service, which reads `permissions` / `positions` / posture off the '
+        + 'execution context, ADR-0095 D3)',
+      reason:
+        'Declared on the runtime hook context, read by exactly two consumers, produced by '
+        + 'nobody. The two readers were the approvals record lock and the delegation write '
+        + 'guard, each opening with `session.roles?.includes(\'admin\')`; ObjectQL\'s '
+        + '`buildSession()` builds the session field by field and has never written `roles`, '
+        + 'and nothing else feeds a HookContext in objectstack, cloud or objectui (cloud\'s hook '
+        + 'consumers read `hookContext?.session?.userId`; objectui\'s `roles` are the '
+        + '`/auth/me` user payload, a different surface; an ACTION body\'s `ctx.session` is a '
+        + 'different untyped object that does carry `roles`, tracked apart and unaffected). '
+        + 'Both branches were therefore dead on '
+        + 'every real engine path — an authorization decision in shape only, and a second admin '
+        + 'dialect competing with the one ADR-0090 D3 / ADR-0095 D3 sanction. #4839 (PR #5049) '
+        + 'removed the readers; this removes the declaration, per ADR-0049 enforce-or-remove. '
+        + 'This is a RUNTIME context, not stored metadata: the engine builds a HookContext per '
+        + 'operation and nothing persists one, so no `sys_metadata` row, example or template '
+        + 'can carry the key and there is no source for the D2 chain to rewrite — the '
+        + '`openApi31` (#4579) / `activationEvents` (#4657) shape, one semantic TODO rather '
+        + 'than a stack conversion. The key IS tombstoned (`HookContextSchema` is deliberately '
+        + 'not `.strict()` — a plain delete would strip it silently, #3733 / ADR-0104), so a '
+        + 'consumer that parses a context it was handed still meets the prescription. '
+        + 'ADR-0049, #5050.',
+      acceptanceCriteria:
+        'No hook reads `ctx.session.roles`; caller gating uses `ctx.session.userId` / '
+        + '`ctx.session.isSystem`, and privilege comes from the security service '
+        + '(`permissions` / `positions` / posture). Constructing a HookContext session with '
+        + '`roles` fails `tsc` (the input type is `never`) and fails `HookContextSchema.parse` '
+        + 'with the retirement prescription instead of being silently stripped. Nothing '
+        + 'regresses at runtime: the key had no producer, so no decision anywhere ever saw a '
+        + 'value in it.',
     },
   ],
 };
