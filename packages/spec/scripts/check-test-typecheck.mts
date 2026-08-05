@@ -66,7 +66,6 @@ const PROJECT = ((): string => {
 })();
 const LEDGER_PATH = path.join(SPEC, 'test-typecheck-debt.json');
 const LEDGER_NAME = 'test-typecheck-debt.json';
-const SELF = 'scripts/check-test-typecheck.mts';
 const ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 const UPDATE_COMMAND = 'pnpm --filter @objectstack/spec gen:test-typecheck-debt';
 

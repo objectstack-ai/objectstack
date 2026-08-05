@@ -280,7 +280,7 @@ const PHANTOM_PIN_DEBT = {
   'packages/client/src/client.test.ts':
     'tsconfig.json excludes `**/*.test.ts` and the package has no sibling test config; also in TEST_DEBT (15 files / 19 errors). Onboarding it is #5449, not #5286 -- the two directives here pin retired client options.',
   'packages/metadata-core/test/types.test.ts':
-    'Outside the program for a different reason, and one no exclusion names: `include` is `["src/**/*"]` while this file lives in a sibling `test/` tree, so TESTS_COVERED never saw it either (its testFiles count is 0). Repair is to widen `include` or add a test config; measured separately from #5286, which scoped itself to packages/spec.',
+    'Outside the program for a different reason, and one no exclusion names: `include` is `["src/**/*"]` while this file lives in a sibling `test/` tree, so TESTS_COVERED never saw it either (its testFiles count is 0). Repair is to widen `include` or add a test config; tracked by #5476, not by #5286 (which scoped itself to packages/spec).',
 };
 
 /**

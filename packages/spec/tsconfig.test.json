@@ -1,3 +1,26 @@
+// The TEST-layer type-check program (#5286). `tsconfig.json` above stays as it
+// is: it is the BUILD config, and its `**/*.test.ts` exclusion has a reason —
+// ci.yml gates that no test file reaches the published artifact. This sibling
+// puts the excluded layer back in front of tsc, and `package.json`'s
+// `typecheck` script names it (`check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY. The tests are written and executed as ESM by
+//     vitest (esbuild/vite), while `spec` has no `"type": "module"`, so the
+//     build config's NodeNext compiles them as CJS and reports 108 errors about
+//     the CHECK rather than the code (TS2835 dynamic-import extensions, TS1470
+//     `import.meta`, TS2307, TS2550). Matching vitest is fidelity.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noImplicitReturns`
+//     and the rest are inherited from the root config. Nothing about this file
+//     may loosen a type rule; if a test does not compile, that is the finding.
+//
+// `include` deliberately stops at `src`, matching the build config's root.
+// `scripts/` holds nine more test files vitest runs and is in no tsconfig at
+// all — a second, differently-shaped hole (measured at 16 files / 33 errors,
+// mostly config-tier TS5097/TS2593 plus a real TS2339 pile in build-schemas.ts)
+// that wants its own change rather than a rider on this one. None of those
+// files carries a `@ts-expect-error`, so no pin is hiding there.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
