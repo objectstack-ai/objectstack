@@ -397,7 +397,10 @@ export const FieldSchema = lazySchema(() => strictObject({
     relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
     onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
     formula: 'expression', calculation: 'expression', compute: 'expression',
-    rollup: 'summaryOperations', rollUp: 'summaryOperations', summary: 'summaryOperations', aggregate: 'summaryOperations',
+    // `rollup` alone covers `rollUp` / `roll_up` / `Roll-Up` — `aliasProbe`
+    // folds case and separators, so a second spelling was never reachable
+    // (#5481).
+    rollup: 'summaryOperations', summary: 'summaryOperations', aggregate: 'summaryOperations',
     length: 'maxLength', size: 'maxLength',
     decimals: 'scale', decimalPlaces: 'scale', digits: 'precision',
     isReadonly: 'readonly', disabled: 'readonly',

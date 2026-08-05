@@ -138,8 +138,9 @@ export const WebhookSchema = lazySchema(() => strictObject({
     // `active` (`mapWebhookToRow` in plugin-webhooks does the remap). An admin
     // or agent reading a row back and re-authoring it from those column names
     // is the concrete path here, and neither word is within edit distance.
+    // The column spelling alone covers `objectName` too — `aliasProbe` folds
+    // case and separators, so both spellings share one probe (#5481).
     object_name: 'object',
-    objectName: 'object',
     active: 'isActive',
     enabled: 'isActive',
     // The trigger list, named as the neighbouring surfaces name it.

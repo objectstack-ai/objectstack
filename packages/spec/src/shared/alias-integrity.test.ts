@@ -54,8 +54,24 @@
  * - Tables reaching `strictUnknownKeyError` directly, which carry a transcribed
  *   `knownKeys` array instead of a shape — measured clean, pinned shrink-only
  *   below, extension tracked as #5483.
- * - Two alias keys in one table colliding under the suggester's own
- *   `aliasProbe` normalisation, where the later entry silently wins (#5481).
+ *
+ * ## The third claim (#5481)
+ *
+ * The two claims above are about a table and its *schema*. The third is about a
+ * table and *itself*: `strictUnknownKeyError` indexes the alias table by
+ * `aliasProbe(key)`, so two keys in one table that normalise identically
+ * collapse — **the later one silently wins**. That is not a stylistic
+ * redundancy. `these snap settings` listed `grid: 'gridSize'` and, at the end
+ * of the same table, `grid_: 'showGrid'`; the probe strips `_`, so `grid: 24`
+ * was answered *"Did you mean `grid` → `showGrid`?"* and `showGrid` is a
+ * boolean — a second rejection, ledger finding 7's exact shape, from a table
+ * whose author had written the correct mapping one line earlier.
+ *
+ * The other three instances on `main` pointed both keys at the same target, so
+ * the overwrite changed nothing and nobody could trip on them — which is the
+ * general lesson rather than an exemption: since the probe already folds case
+ * and separators, a second spelling of one probe is **never** reachable. It is
+ * dead either way; it is only sometimes also a defect.
  */
 
 import fs from 'node:fs';
@@ -65,6 +81,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it, expect, beforeAll } from 'vitest';
 import ts from 'typescript';
 
+import { aliasProbe } from './alias-probe';
 import { acceptsNothing, strictObjectDeclarations, type StrictObjectDeclaration } from './strict-object';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -375,6 +392,33 @@ describe('alias integrity — every table is a true claim about its schema', () 
       }
     }
     expect(broken.sort()).toEqual([]);
+  });
+
+  it('no two alias keys in one table collapse onto the same probe (#5481)', () => {
+    // The table is indexed by `aliasProbe(key)`, so a colliding pair does not
+    // produce two entries — it produces one, decided by source order, with the
+    // earlier key gone before any author can reach it. Judged with the REAL
+    // probe (imported, not transcribed): a gate carrying its own copy of the
+    // expression would keep passing if the normalisation ever widened.
+    const collisions: string[] = [];
+    for (const s of SURFACES) {
+      const byProbe = new Map<string, string[]>();
+      for (const key of Object.keys(s.options.aliases ?? {})) {
+        byProbe.set(aliasProbe(key), [...(byProbe.get(aliasProbe(key)) ?? []), key]);
+      }
+      for (const [probe, keys] of byProbe) {
+        if (keys.length < 2) continue;
+        // Name the winner explicitly. When the targets differ this is the whole
+        // defect (`grid` lost `gridSize` to `showGrid`); when they agree the
+        // entry is merely dead, and the fix is the same — keep one spelling.
+        const written = keys.map((k) => `\`${k}\` -> \`${s.options.aliases?.[k]}\``).join(', ');
+        collisions.push(
+          `${entry(s, keys[0], s.options.aliases?.[keys[0]] ?? '?')} — ${keys.length} keys share the probe \`${probe}\`: ${written}`
+          + ` — only \`${s.options.aliases?.[keys[keys.length - 1]]}\` survives`,
+        );
+      }
+    }
+    expect(collisions.sort()).toEqual([]);
   });
 
   it('no guidance key is itself a declared key (the same dead entry, other channel)', () => {

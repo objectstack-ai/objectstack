@@ -217,6 +217,28 @@ describe('FlowBuilderConfigSchema', () => {
     expect(config.nodeDescriptors).toHaveLength(1);
     expect(config.undoLimit).toBe(100);
   });
+
+  it('answers `snap.grid` with `gridSize`, and the advice actually parses (#5481)', () => {
+    // A `grid_: 'showGrid'` entry used to sit after `grid: 'gridSize'` in this
+    // table; `aliasProbe` strips `_`, so the two shared one index and the later
+    // one won. An author writing `grid: 24` — the pixel pitch — was pointed at
+    // `showGrid`, a boolean, and rejected a second time for taking the advice.
+    const rejected = FlowBuilderConfigSchema.safeParse({ snap: { grid: 24 } });
+    expect(rejected.success).toBe(false);
+    const message = rejected.error!.issues[0].message;
+    expect(message).toContain('`grid` → `gridSize`');
+    expect(message).not.toContain('showGrid');
+
+    // The half that makes it a fix rather than a reworded rejection: doing what
+    // the message says has to work.
+    const followed = FlowBuilderConfigSchema.safeParse({ snap: { gridSize: 24 } });
+    expect(followed.success).toBe(true);
+    expect(followed.data!.snap.gridSize).toBe(24);
+
+    // `visible` still carries the show/hide intent `grid_` was reaching for.
+    const visible = FlowBuilderConfigSchema.safeParse({ snap: { visible: false } });
+    expect(visible.error!.issues[0].message).toContain('`visible` → `showGrid`');
+  });
 });
 
 // ---------------------------------------------------------------------------

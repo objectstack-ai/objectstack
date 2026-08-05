@@ -209,7 +209,8 @@ export const ChartSeriesSchema = lazySchema(() => strictObject(
       stackId: 'stack', stackGroup: 'stack', group: 'stack',
       axis: 'yAxis', yAxisId: 'yAxis', side: 'yAxis',
       role: 'variant',
-      strokeDasharray: 'dashArray', strokeDashArray: 'dashArray', dashed: 'dashArray',
+      // Recharts' own casing alone covers `strokeDashArray` — one probe (#5481).
+      strokeDasharray: 'dashArray', dashed: 'dashArray',
       alpha: 'opacity', fillOpacity: 'opacity', strokeOpacity: 'opacity',
       colour: 'color', fill: 'color', stroke: 'color',
     },

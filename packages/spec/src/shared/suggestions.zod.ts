@@ -3,6 +3,8 @@
 import type { z } from 'zod';
 import { FieldType } from '../data/field.zod';
 
+import { aliasProbe } from './alias-probe';
+
 /**
  * "Did you mean?" Suggestion Utilities
  *
@@ -216,9 +218,6 @@ export function formatSuggestion(suggestions: string[]): string {
   return `Did you mean one of: ${suggestions.map((s) => `'${s}'`).join(', ')}?`;
 }
 
-/** `reference_to` / `referenceTo` / `Reference-To` all collapse onto one probe. */
-const aliasProbe = (key: string): string => key.toLowerCase().replace(/[_\-\s]/g, '');
-
 /** Options for {@link strictUnknownKeyError}. */
 export interface StrictUnknownKeyErrorOptions {
   /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
@@ -273,6 +272,14 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
   const { surface, knownKeys, guidance = {}, history } = options;
   const aliases: Record<string, string> = {};
   for (const [key, canonical] of Object.entries(options.aliases ?? {})) {
+    // Two keys in ONE table that share a probe collapse here, later silently
+    // winning — which pointed `snap.grid` at the boolean `showGrid` instead of
+    // `gridSize` until #5481. Nothing can be recovered at this point (the
+    // colliding key is already gone), so the defect is caught where it is
+    // authored: `alias-integrity.test.ts` rejects any table with two keys
+    // sharing an `aliasProbe`. Since the probe already eats case and
+    // separators, such a pair is redundant even when both point at the same
+    // target — one entry always covered both spellings.
     aliases[aliasProbe(key)] = canonical;
   }
   return (issue) => {

@@ -57,6 +57,22 @@ describe('strictObject', () => {
     expect(r.error!.issues[0].message).toContain('`visibleWhen` → `visible`');
   });
 
+  it('ONE alias entry already covers every case/separator spelling of itself (#5481)', () => {
+    // The fact that makes a second spelling of the same probe not merely
+    // redundant but unreachable: the table is indexed by `aliasProbe`, which
+    // folds case, `_`, `-` and spaces. Three tables on `main` carried a second
+    // spelling (`rollup`/`rollUp`, `object_name`/`objectName`,
+    // `strokeDasharray`/`strokeDashArray`) that could never have fired — the
+    // later one simply overwrote the earlier at the same index. Deleting them
+    // is behaviour-preserving, and this is the assertion that says so.
+    for (const spelling of ['visible_when', 'VISIBLE-WHEN', 'Visible When', 'visiblewhen']) {
+      const r = WidgetSchema.safeParse({ name: 'x', [spelling]: true });
+      expect(r.success, `${spelling} should be rejected`).toBe(false);
+      expect(r.error!.issues[0].message, `${spelling} should still reach the alias`)
+        .toContain(`\`${spelling}\` → \`visible\``);
+    }
+  });
+
   it('still honours a tombstone, and suppresses the rename for it', () => {
     const r = WidgetSchema.safeParse({ name: 'x', span: 2 });
     const msg = r.error!.issues[0].message;

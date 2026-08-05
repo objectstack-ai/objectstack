@@ -241,7 +241,13 @@ export const FlowBuilderConfigSchema = lazySchema(() => strictObject({
   snap: strictObject({
     surface: 'these snap settings',
     history: FLOW_BUILDER_HISTORY,
-    aliases: { active: 'enabled', on: 'enabled', grid: 'gridSize', size: 'gridSize', step: 'gridSize', visible: 'showGrid', grid_: 'showGrid' },
+    // `grid` points at `gridSize`, NOT at `showGrid`: an author writing `grid`
+    // on a snap config is reaching for the pixel pitch, and `visible` already
+    // carries the show/hide intent. A `grid_: 'showGrid'` entry used to sit at
+    // the end of this table and, because `aliasProbe` strips `_`, overwrote
+    // `grid` — so `grid: 24` was answered "Did you mean `grid` → `showGrid`?"
+    // and `showGrid` is a boolean, rejecting 24 a second time (#5481).
+    aliases: { active: 'enabled', on: 'enabled', grid: 'gridSize', size: 'gridSize', step: 'gridSize', visible: 'showGrid' },
   }, {
     enabled: z.boolean().default(true).describe('Enable snap-to-grid'),
     gridSize: z.number().int().min(1).default(16).describe('Snap grid size in pixels'),
