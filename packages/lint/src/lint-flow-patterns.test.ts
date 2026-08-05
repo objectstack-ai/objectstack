@@ -742,3 +742,256 @@ describe('flow-inert-node-condition (#4414)', () => {
     expect(lintFlowPatterns(conditionNodeFlow('acme_custom_step', { condition: 'a == b' }))).toHaveLength(0);
   });
 });
+
+/**
+ * #5383 — the rule family used to read `flow.nodes` / `flow.edges` FLAT, so every
+ * rule in it was blind to anything authored inside an ADR-0031 container.
+ *
+ * Measured in a real app (HotCRM): 8 `decision` nodes carried the inert singular
+ * `config.condition` that `flow-inert-node-condition` exists to catch, all 8
+ * inside a `loop` body, and `pnpm lint` reported none. The identical key on a
+ * TOP-LEVEL decision in the same repo fired immediately — same key, same node
+ * type, only the nesting depth differed. There was no loop-body fixture anywhere
+ * in this file, which is consistent with the gap going unnoticed for that long.
+ *
+ * Every case below pins the nested finding against its top-level twin, so a
+ * future flattening of the walk fails here instead of going quiet again.
+ */
+
+/** A scheduled sweep: `loop` over leads, with `body` holding the per-item graph. */
+function loopBodyFlow(body: { nodes: unknown[]; edges: unknown[] }) {
+  return {
+    flows: [{
+      name: 'campaign_enrollment',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+        {
+          id: 'loop_leads', type: 'loop', label: 'Loop Leads',
+          config: { collection: '{vars.leads}', itemVar: 'lead', body },
+        },
+        { id: 'end', type: 'end' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'loop_leads' },
+        { id: 'e2', source: 'loop_leads', target: 'end' },
+      ],
+    }],
+  };
+}
+
+describe('#5383 — flow-inert-node-condition descends into a loop body', () => {
+  // The shipped shape, reduced: a per-item gate inside a sweep, whose predicate
+  // was written on the node instead of its out-edges.
+  const nested = () => loopBodyFlow({
+    nodes: [
+      { id: 'check_not_enrolled', type: 'decision', config: { condition: 'lead.enrolled == false' } },
+      { id: 'enroll', type: 'create_record', config: { objectName: 'campaign_member' } },
+    ],
+    edges: [{ id: 'b1', source: 'check_not_enrolled', target: 'enroll' }],
+  });
+
+  it('flags it, scoped to the region so the message still names exactly one node', () => {
+    const fnds = lintFlowPatterns(nested());
+    // Exactly one finding overall: no collateral from the descent, and no second
+    // copy reported against the enclosing `loop`.
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_INERT_NODE_CONDITION);
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body · node 'check_not_enrolled' (decision)",
+    );
+    expect(fnds[0].message).toContain('nothing reads it');
+    // The decision-specific hint still applies one level down.
+    expect(fnds[0].hint).toContain('isDefault');
+    expect(fnds[0].severity).toBeUndefined();
+  });
+
+  it('still reports the TOP-LEVEL twin with no region breadcrumb (the A/B)', () => {
+    const fnds = lintFlowPatterns({
+      flows: [{
+        name: 'campaign_enrollment',
+        runAs: 'system',
+        nodes: [
+          { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+          { id: 'check_not_enrolled', type: 'decision', config: { condition: 'lead.enrolled == false' } },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'check_not_enrolled' }],
+      }],
+    });
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe("flow 'campaign_enrollment' · node 'check_not_enrolled' (decision)");
+    expect(fnds[0].where).not.toContain('loop');
+  });
+
+  it('descends a loop nested inside a loop — same depth semantics as the engine', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [{
+        id: 'loop_touchpoints', type: 'loop',
+        config: {
+          collection: '{lead.touchpoints}', itemVar: 'tp',
+          body: {
+            nodes: [{ id: 'check_recent', type: 'decision', config: { condition: 'tp.age_days < 7' } }],
+            edges: [],
+          },
+        },
+      }],
+      edges: [],
+    })).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body → loop 'loop_touchpoints' body · " +
+      "node 'check_recent' (decision)",
+    );
+  });
+
+  it('descends a parallel branch too — the scope names the branch index', () => {
+    const fnds = lintFlowPatterns({
+      flows: [{
+        name: 'fan_out',
+        runAs: 'system',
+        nodes: [
+          { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+          {
+            id: 'fan', type: 'parallel',
+            config: {
+              branches: [
+                { name: 'owner', nodes: [{ id: 'gate', type: 'decision', config: { condition: 'a == b' } }], edges: [] },
+                { name: 'watchers', nodes: [{ id: 'ping', type: 'notify', config: { title: 'Hi {record.name}' } }], edges: [] },
+              ],
+            },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'fan' }],
+      }],
+    }).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe("flow 'fan_out' · parallel 'fan' branch 0 · node 'gate' (decision)");
+  });
+});
+
+/**
+ * #5383 — the branch-routing family reasons about a node together with its
+ * OUT-EDGES, so the walk has to hand each region its own `edges` array. These
+ * cases are unreachable from the top-level edge list by construction: nothing at
+ * the top level has `gate` or `push` as a source, so a walk that descended into
+ * region NODES while still reading top-level EDGES would see zero out-edges and
+ * skip every one of them.
+ */
+describe('#5383 — the branch-routing family reads the region’s own edges', () => {
+  it('flags a nested edge that is both the default and conditional (GATING)', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [
+        { id: 'gate', type: 'decision' },
+        { id: 'nudge', type: 'notify', config: { title: 'Nudge {lead.name}' } },
+        { id: 'skip', type: 'end' },
+      ],
+      edges: [
+        { id: 'b1', source: 'gate', target: 'nudge', condition: 'lead.score > 50' },
+        { id: 'b2', source: 'gate', target: 'skip', isDefault: true, condition: 'lead.score <= 50' },
+      ],
+    }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_DEFAULT_EDGE_WITH_CONDITION);
+    // The severity asymmetry the issue called out: a build-stopping rule that
+    // could not see a contradiction authored one level down.
+    expect(fnds[0].severity).toBe('error');
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body · edge 'gate' → 'skip'",
+    );
+    expect(fnds[0].message).toContain('contradictory');
+  });
+
+  it('flags a nested unconditional out-edge alongside a guarded sibling', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [
+        { id: 'gate', type: 'decision' },
+        { id: 'nudge', type: 'notify', config: { title: 'Nudge {lead.name}' } },
+        { id: 'log', type: 'create_record', config: { objectName: 'touch_log' } },
+      ],
+      edges: [
+        { id: 'b1', source: 'gate', target: 'nudge', condition: 'lead.score > 50' },
+        { id: 'b2', source: 'gate', target: 'log' },
+      ],
+    })).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe("flow 'campaign_enrollment' · loop 'loop_leads' body · decision 'gate'");
+    expect(fnds[0].message).toContain("'log'");
+  });
+
+  it('flags a nested error-labelled edge left at the default type', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [
+        { id: 'push', type: 'http', config: { url: 'https://example.test/hook' } },
+        { id: 'handle', type: 'create_record', config: { objectName: 'sync_error' } },
+      ],
+      edges: [{ id: 'b1', source: 'push', target: 'handle', label: 'error' }],
+    })).filter((f) => f.rule === FLOW_ERROR_LABEL_NOT_FAULT);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body · edge 'push' → 'handle'",
+    );
+  });
+
+  it('does NOT merge two regions into one bag — a shared node id is not a fan-out', () => {
+    // `gate` exists in BOTH branches, each with exactly ONE default out-edge.
+    // Node ids are unique per graph, not per flow, so flattening every region
+    // into one node bag + one edge bag would see two `isDefault` edges out of
+    // "gate" and raise flow-multiple-default-edges — a finding neither region
+    // contains. Pairing each region with its own edges is what keeps this quiet.
+    const branch = (cond: string) => ({
+      nodes: [
+        { id: 'gate', type: 'decision' },
+        { id: 'x', type: 'end' },
+        { id: 'y', type: 'end' },
+      ],
+      edges: [
+        { id: 'g1', source: 'gate', target: 'x', condition: cond },
+        { id: 'g2', source: 'gate', target: 'y', isDefault: true },
+      ],
+    });
+    const fnds = lintFlowPatterns({
+      flows: [{
+        name: 'twin_regions',
+        runAs: 'system',
+        nodes: [
+          { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+          {
+            id: 'fan', type: 'parallel',
+            config: {
+              branches: [
+                { name: 'a', ...branch('lead.score > 50') },
+                { name: 'b', ...branch('lead.score > 90') },
+              ],
+            },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'fan' }],
+      }],
+    });
+    expect(fnds.filter((f) => f.rule === FLOW_MULTIPLE_DEFAULT_EDGES)).toHaveLength(0);
+    expect(fnds).toHaveLength(0);
+  });
+});
+
+describe('#5383 — a recursive config scan does not double-report the container', () => {
+  it('moves a nested double-brace finding onto the node carrying it, still exactly once', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{lead.name}}' } }],
+      edges: [],
+    }));
+    // Exactly one. The `loop`'s own config physically CONTAINS `body`, and
+    // `collectTemplateStrings` is recursive, so descending without stripping the
+    // region slots would report this a SECOND time against 'loop_leads'.
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].rule).toBe(FLOW_DOUBLE_BRACE_INTERP);
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body · node 'send_reminder' (notify)",
+    );
+    // Before #5383 the COUNT was already 1 here — the string was found by
+    // recursing through the container's config and attributed to the `loop`.
+    // That is the `validate-flow-template-paths` failure mode (#4380): visible,
+    // but judged against a node that does not carry the string. So for this rule
+    // the fix is re-attribution, not new visibility.
+    expect(fnds[0].where).not.toContain("node 'loop_leads'");
+  });
+});

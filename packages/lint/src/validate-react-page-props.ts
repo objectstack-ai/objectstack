@@ -39,6 +39,7 @@ import {
   REACT_BLOCKS,
   RECORD_CONTEXT_BLOCK_TAGS,
   REACT_RECORD_BLOCK_ALTERNATIVES,
+  ChartAggregateSchema,
   ChartDrillDownSchema,
   chartAggregateResultKeys,
   isRecordContextBlockType,
@@ -298,7 +299,189 @@ function checkChartDrillDown(
   }
 }
 
-const CHART_FUNCTIONS = ['count', 'sum', 'avg', 'min', 'max'] as const;
+/**
+ * `<ObjectChart aggregate={{…}}>` against `ChartAggregateSchema` (#5020).
+ *
+ * The second half of what #5022 started one prop over. This rule used to
+ * RE-DERIVE the aggregate's declaration: a local `CHART_FUNCTIONS` copy of the
+ * function vocabulary and a hand-written twin of the schema's count/field
+ * refinement. Two implementations of one contract that could drift apart
+ * independently, and — because unknown-key handling is a property of a PARSE,
+ * not of a list of `if`s — a gate that never checked for unknown keys at all.
+ * `groupby` for `groupBy` sailed straight through it, the aggregate degraded to
+ * ungrouped, and the chart drew axes and a single point with `build`/`validate`
+ * fully green (#4001's original failure mode, on the react tier). Parsing makes
+ * the schema the single source: the vocabulary, the refinement message and every
+ * key's type arrive from `packages/spec` with nothing restated here.
+ *
+ * ## What this does NOT yet close, and why the pin test says so out loud
+ *
+ * ⚠️ `ChartAggregateSchema` is still a STRIP-posture `z.object()` (and
+ * `ChartGroupBySchema`'s object arm with it), so an unknown key is *silently
+ * dropped by the parse* rather than reported. Wiring the parse is a
+ * precondition for closing that, not the closing itself: `.strict()` is a
+ * property of a parse, and until this commit there was no parse to make strict.
+ * The spec-side tightening is **#5583**, and
+ * `validate-react-page-props.test.ts` pins today's tolerance explicitly so this
+ * gate cannot be mistaken for one that already rejects `groupby` — a gate that
+ * READS like it closes a hole while leaving it open is the #4583 shape this
+ * campaign keeps paying for.
+ *
+ * ## Severity is not uniform, and the split is measured
+ *
+ * Everything the schema, the published react-blocks type and objectui's
+ * renderer agree on gates at `error` (declared = enforced): `function` present
+ * and in the enum, `field` a string, `aggregate` an object, and a non-`count`
+ * function carrying a `field`. **An absent `groupBy` is a `warning`**, alone
+ * among them: the schema and `react-blocks.ts` both declare it required, but the
+ * renderer HONOURS its absence (`ObjectChart.tsx`: `schema.aggregate?.groupBy ||
+ * schema.xAxisKey`) and this protocol's own `chartAggregateCategoryKey` documents
+ * the ungrouped single-row result. Gating on it would break a working authoring
+ * shape to enforce a declaration the platform does not itself keep; whether the
+ * schema loosens or the renderer tightens is the product question on #5583.
+ */
+function checkChartAggregate(
+  raw: unknown,
+  push: (severity: ReactPropSeverity, rule: string, message: string, hint: string) => void,
+): void {
+  if (raw === undefined || raw === NOT_STATIC) return;
+  if (!isRec(raw)) {
+    push(
+      'error',
+      REACT_CHART_AGGREGATE_INVALID,
+      `aggregate must be a configuration object, not ${Array.isArray(raw) ? 'an array' : typeof raw}.`,
+      'Write aggregate={{ function: "count", groupBy: "<field>" }} — or bind data={…} instead to chart precomputed rows.',
+    );
+    return;
+  }
+
+  // Absence is judged on the INPUT, not on the issue shape: zod reports a
+  // missing `groupBy` as an `invalid_union` indistinguishable at a glance from a
+  // wrongly-typed one, and the two get different severities here.
+  const groupByAbsent = raw.groupBy === undefined;
+  if (groupByAbsent) {
+    push(
+      'warning',
+      REACT_CHART_AGGREGATE_INVALID,
+      'aggregate.groupBy is not set, so the aggregate returns ONE ungrouped row and the chart plots a single point.',
+      'Add aggregate.groupBy (a field name, or { field, dateGranularity } to bucket dates) to give the chart a category axis. ' +
+        'Deliberate single-value charts are tolerated at warning level for now: ChartAggregateSchema declares groupBy required while ObjectChart honours its absence by falling back to xAxisKey — objectstack#5583 decides which of the two moves.',
+    );
+  }
+
+  const parsed = ChartAggregateSchema.safeParse(raw);
+  if (parsed.success) return;
+  for (const issue of parsed.error.issues) {
+    // Already reported above, at warning severity and with the renderer's
+    // fallback explained — the raw union rejection would only repeat it as an
+    // error and re-gate what this rule deliberately does not gate.
+    if (groupByAbsent && issue.path[0] === 'groupBy') continue;
+    const at = issue.path.length ? `aggregate.${issue.path.join('.')}` : 'aggregate';
+    push(
+      'error',
+      REACT_CHART_AGGREGATE_INVALID,
+      `${at}: ${describeIssue(issue, raw)}`,
+      'The aggregate is declared by ChartAggregateSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
+    );
+  }
+}
+
+/**
+ * One rejected value's issue, rendered so an author can act on it.
+ *
+ * Two things zod 4 does not do for us, both measured against this schema rather
+ * than assumed:
+ *
+ * 1. **Union arms collapse.** A union's arm failures never reach
+ *    `error.issues` — the whole union is reported as ONE `invalid_union` whose
+ *    own `message` is the bare string `"Invalid input"`, with the named arm
+ *    messages tucked inside `issue.errors` (one array per arm). Reporting it
+ *    verbatim would tell an author only that *something* about `groupBy` is
+ *    wrong, which is precisely the class of unhelpful diagnostic this gate
+ *    exists to replace. `aggregate.groupBy` is a union
+ *    (`ChartGroupBySchema` — bare field name or `{ field, dateGranularity?,
+ *    alias? }`), so this is the common path, and it matters more after #5583:
+ *    an `unrecognized_keys` raised inside the object arm collapses exactly the
+ *    same way, so the unpacking is what will carry the strict rejection's
+ *    named surface + rename suggestion to the author.
+ * 2. **The offending value is dropped.** `Invalid option: expected one of
+ *    "count"|"sum"|…` never echoes what was actually written, and the
+ *    hand-rolled check it replaces did (`aggregate.function "median" is not an
+ *    aggregation…`). It is recovered from the INPUT by path — generic, and no
+ *    contract knowledge restated here to do it.
+ */
+function describeIssue(issue: LintZodIssue, root: unknown, depth = 0): string {
+  const value = depth === 0 ? valueAtPath(root, issue.path) : undefined;
+  // Suppressed in the two cases where it would only repeat what the message
+  // already says: a `custom` refinement names the missing key itself, and zod's
+  // `invalid_type` text ends in `received <type>` of its own accord. What is
+  // left is where the value genuinely is missing from the diagnostic — the enum
+  // rejections and the collapsed `invalid_union` (whose message is just
+  // "Invalid input").
+  const seen =
+    depth > 0 || issue.code === 'custom' || issue.message.includes('received ')
+      ? ''
+      : value === undefined
+        ? ' (nothing is set there)'
+        : ` (received ${preview(value)})`;
+
+  // Deliberately NOT `Array.isArray(issue.errors)`: that narrows a
+  // `ReadonlyArray<…>` to `any[]` and silently drops the element type, which is
+  // the TS7006 trap AGENTS.md names — the arms below would then be `any`.
+  const armIssues = issue.code === 'invalid_union' ? issue.errors : undefined;
+  if (!armIssues || armIssues.length === 0) {
+    return `${issue.message}${seen}`;
+  }
+
+  const arms = armIssues
+    .map((arm) =>
+      arm
+        .map((inner) => {
+          const where = inner.path.length ? `${inner.path.join('.')} — ` : '';
+          return `${where}${describeIssue(inner, root, depth + 1)}`;
+        })
+        .join('; '),
+    )
+    .filter((text) => text.length > 0);
+  if (arms.length === 0) return `${issue.message}${seen}`;
+  return (
+    `${issue.message}${seen} — no accepted form matched: ` +
+    arms.map((text, i) => `(${i + 1}) ${text}`).join(' ')
+  );
+}
+
+/**
+ * The subset of a zod issue this file reads. Declared structurally rather than
+ * imported as `z.core.$ZodIssue` so `packages/lint` keeps its single spec
+ * dependency and does not take a direct zod one for two field reads.
+ */
+interface LintZodIssue {
+  readonly code: string;
+  readonly message: string;
+  readonly path: ReadonlyArray<PropertyKey>;
+  /** Present on `invalid_union` only: the arms' own issues, one array each. */
+  readonly errors?: ReadonlyArray<ReadonlyArray<LintZodIssue>>;
+}
+
+const valueAtPath = (root: unknown, path: ReadonlyArray<PropertyKey>): unknown => {
+  let cur: unknown = root;
+  for (const key of path) {
+    if (!isRec(cur) && !Array.isArray(cur)) return undefined;
+    cur = (cur as Record<PropertyKey, unknown>)[key];
+  }
+  return cur;
+};
+
+/** The author's own value, short enough to sit inside a diagnostic. */
+const preview = (value: unknown): string => {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+};
 
 const isRec = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -328,15 +511,14 @@ function checkObjectChart(
   // independent of how the chart is bound: an inline `data={…}` chart drills
   // just as an aggregate-bound one does.
   //
-  // This is the one rule in this file that does not restate its schema's
-  // vocabulary in local constants. `CHART_FUNCTIONS` above is the alternative,
-  // and the strictness ledger's `chart.zod.ts` row already names it as the
-  // weakness: a gate that re-derives the rules cannot inherit the schema's
-  // unknown-key handling, so `groupby` sails through it. Parsing inherits all
-  // of it for free — the surface name, the near-key guidance, the `target`
-  // union — which is why #5022 declared the shape as Zod rather than as
-  // another list here. #5435 is the dividend: widening `target` to admit
-  // `'navigate'` moved this gate with it, with nothing to edit in this file.
+  // This was the FIRST rule in this file to parse its schema instead of
+  // restating the vocabulary in local constants; `aggregate` next door was the
+  // counter-example the strictness ledger's `chart.zod.ts` row named — a gate
+  // that re-derives the rules cannot inherit the schema's unknown-key handling,
+  // so `groupby` sailed through it — and #5020 converted it the same way.
+  // Parsing inherits all of it for free: the surface name, the near-key
+  // guidance, the `target` union. #5435 is the dividend — widening `target` to
+  // admit `'navigate'` moved this gate with it, with nothing to edit here.
   checkChartDrillDown(values.get('drillDown'), push);
 
   // Inline `data` wins over the aggregate query: the columns then come from
@@ -344,30 +526,22 @@ function checkObjectChart(
   if (values.has('data')) return;
 
   const aggregate = values.get('aggregate');
+
+  // 1. The aggregate declaration itself — checked by PARSING the schema, not by
+  //    re-deriving it (#5020). Runs before the early returns below so a
+  //    non-object `aggregate` is reported rather than silently skipped.
+  checkChartAggregate(aggregate, push);
+
   if (aggregate === undefined || aggregate === NOT_STATIC) return;
   if (!isRec(aggregate)) return;
 
+  // The reads below are NOT a second judgement of the declaration: they feed the
+  // two questions only this rule can answer — whether the names exist on the
+  // bound object, and whether the axes name the columns the aggregate returns.
   const fn = strOf(aggregate.function);
   const field = strOf(aggregate.field);
   const groupBy = aggregate.groupBy;
   const groupByField = strOf(groupBy) ?? (isRec(groupBy) ? strOf(groupBy.field) : undefined);
-
-  // 1. The aggregate declaration itself.
-  if (fn && !(CHART_FUNCTIONS as readonly string[]).includes(fn)) {
-    push(
-      'error',
-      REACT_CHART_AGGREGATE_INVALID,
-      `aggregate.function "${fn}" is not an aggregation this chart can run.`,
-      `Use one of: ${CHART_FUNCTIONS.join(', ')}.`,
-    );
-  } else if (fn && fn !== 'count' && !field) {
-    push(
-      'error',
-      REACT_CHART_AGGREGATE_INVALID,
-      `aggregate.function "${fn}" has no "field" to aggregate.`,
-      'Add aggregate.field, or use function "count" (the only one that may omit it).',
-    );
-  }
 
   // 2. `field` / `groupBy` are RAW field names on the bound object.
   const objectName = strOf(values.get('objectName'));

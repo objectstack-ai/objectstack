@@ -29,11 +29,11 @@ Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 11 |
+| authorable — the ruling's forced scope | 13 |
 | unresolved — needs a per-schema verdict | 33 |
 | wire / open — out of forced scope | 106 |
 | no door — no carrier, ADR-0049 territory | 14 |
-| no gate — carrier live, no parse | 31 |
+| no gate — carrier live, no parse | 29 |
 
 ## Posture, per triaged directory
 
@@ -169,11 +169,11 @@ over it is here.
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 2 |
+| authorable — the ruling's forced scope | 4 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 2 |
 | no door — no carrier, ADR-0049 territory | 14 |
-| no gate — carrier live, no parse | 31 |
+| no gate — carrier live, no parse | 29 |
 
 ### `data/` — open
 

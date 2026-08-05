@@ -76,6 +76,24 @@ jobs:
       - name: Slot-lookup ratchet
         run: pnpm check:slot-lookup
 
+      # Engine query-options erasure ratchet (#4918). The slot-lookup rule above
+      # protects the service LOOKUP; this one protects what you pass to the
+      # service you looked up. `IDataEngine.find/findOne/count/aggregate` declare
+      # their options as `EngineQueryOptions` & co., and for an internal caller
+      # `tsc` is the ONLY channel enforcing them — the protocol's ingress
+      # normalizer never sees a direct engine call, and the options schemas are
+      # not `.strict()`, so an unknown key is silently DROPPED. #4674 is the
+      # bill: two queries sorted by `direction` instead of `order`, both with a
+      # `limit`, so both returned the OLDEST rows — audit history that never
+      # showed recent changes, and a search that truncated away fresh records.
+      # #4720 restored those two sites and #4721 closed the external callers;
+      # this stops the shape regrowing internally. Same ratchet mechanism as
+      # slot-lookup for the non-test residual, plus one aggregate decrease-only
+      # number for test code (a test whose subject IS off-contract engine input
+      # must be able to build it). Runs its own --self-test first.
+      - name: Engine query-options erasure ratchet
+        run: pnpm check:query-options-erasure
+
       # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
       # tracked TEXT file for a raw ASCII control byte — 0x00-0x08, 0x0b, 0x0c,
       # 0x0e-0x1f and 0x7f, i.e. everything except tab/LF/CR. Two distinct

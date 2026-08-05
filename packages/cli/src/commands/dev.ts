@@ -182,8 +182,16 @@ export default class Dev extends Command {
       // ── --fresh: ephemeral OS_HOME under the OS tempdir ─────────────
       // Creates a unique scratch dir that owns ALL persistent state for
       // this run: the SQLite DB (via OS_HOME → <home>/data/...), the
-      // storage-service uploads root (OS_STORAGE_ROOT), and any other
+      // storage-service uploads root (OS_STORAGE_LOCAL_ROOT), and any other
       // state plugins keyed off OS_HOME. Auto-deleted on exit.
+      //
+      // The uploads root MUST be published under the name the settings
+      // service derives for it — `envKeyOf('storage','local_root')` (#4968).
+      // Under the CLI's old private spelling (`OS_STORAGE_ROOT`) the settings
+      // side saw no env value, fell back to the manifest default, and swapped
+      // the adapter to `./.objectstack/data/uploads` at kernel:ready — so
+      // `--fresh` uploads landed in the PROJECT CWD and outlived the run,
+      // which is the opposite of what this block promises.
       let freshHome: string | undefined;
       let freshDbUrl: string | undefined;
       let freshStorageRoot: string | undefined;
@@ -245,7 +253,7 @@ export default class Dev extends Command {
         ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
         ...(seedAdmin && flags['admin-password'] ? { OS_SEED_ADMIN_PASSWORD: flags['admin-password'] } : {}),
         ...(freshHome ? { OS_HOME: freshHome } : {}),
-        ...(freshStorageRoot ? { OS_STORAGE_ROOT: freshStorageRoot } : {}),
+        ...(freshStorageRoot ? { OS_STORAGE_LOCAL_ROOT: freshStorageRoot } : {}),
         ...(effectiveDb ? { OS_DATABASE_URL: effectiveDb } : {}),
         ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
