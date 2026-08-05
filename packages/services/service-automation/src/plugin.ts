@@ -1184,7 +1184,18 @@ export class AutomationServicePlugin implements Plugin {
                         provider,
                         signature,
                         hasLive: existing !== undefined,
+                        // #5636 — `reason` and `cause` are the SAME failure rendered
+                        // for two audiences, and both are needed. `reason` is the
+                        // husk's operator-facing text: it becomes `degradedReason`
+                        // in `GET /connectors` and the `connector_action` refusal,
+                        // where the provider's own wording (newlines included) is
+                        // read by a human, not a line-oriented parser. `cause` is
+                        // the thrown value itself, so the LOG record can render it
+                        // as structured `meta` instead of interpolating it into a
+                        // message. Passing only the flattened string here is what
+                        // forced the interpolation this issue removes.
                         reason: (err as Error).message,
+                        cause: err,
                     });
                     continue;
                 }
@@ -1242,6 +1253,19 @@ export class AutomationServicePlugin implements Plugin {
      * and a `connector_action` dispatch fails with the reason, rather than the
      * instance silently missing. A config edit (signature change) resets the
      * backoff — it is a different upstream/config now.
+     *
+     * #5636 — both log records here report a FOREIGN failure, so neither may
+     * interpolate it into its message; the cause travels in the logger's `meta`
+     * instead. See ./thrown-cause-diagnostics.ts for the mechanism, and note
+     * that this path's `warn` reaches a downstream #5575's `error` seams do not:
+     * a cold-boot degrade (`materializeDeclaredConnectors(ctx, { fatal: true })`
+     * degrades rather than throwing when the upstream is unreachable) happens
+     * inside `serve`'s boot-quiet window, which wraps `process.stdout.write`
+     * only — so a `warn` there is buffered by `BootLogCapture`, which keeps a
+     * physical line ONLY when `classifyBootLogLine` finds a level head on it.
+     * Measured on a 13-line interpolated ZodError dump: 1 line retained (the
+     * head line, ending at Zod's `[`) and 12 dropped outright. That is cloud#971
+     * in its original form, not merely a hard-to-parse record.
      */
     private degradeConnectorInstance(
         engine: AutomationEngine,
@@ -1252,7 +1276,13 @@ export class AutomationServicePlugin implements Plugin {
             provider: string;
             signature: string;
             hasLive: boolean;
+            /**
+             * Operator-facing text for the husk (`degradedReason`) — the
+             * provider's own message, kept verbatim for human readers.
+             */
             reason: string;
+            /** The thrown value, for the log record's structured `meta` (#5636). */
+            cause: unknown;
         },
     ): void {
         const prior = this.degradedInstances.get(info.name);
@@ -1269,17 +1299,29 @@ export class AutomationServicePlugin implements Plugin {
             } catch (err) {
                 // Can't even register the husk (e.g. the entry's def no longer
                 // parses) — the retry bookkeeping above still drives recovery.
+                //
+                // #5636 — the catch comment names the expected failure as a parse
+                // rejection, i.e. exactly the multi-line `ZodError.message` this
+                // must not interpolate. `warn`'s SECOND argument is `meta` (the
+                // `Logger` contract has no `Error` slot below `error`), so the
+                // cause goes there.
                 ctx.logger.warn(
-                    `[Automation] could not register degraded husk for '${info.name}': ${(err as Error).message}`,
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        `connector registry until a retry succeeds (#3017).`,
+                    describeThrownForLog(err),
                 );
             }
         }
+        // Third argument, per `error(message, error?, meta?)` — NOT the second,
+        // which would ship the thrown value's stack on every retry (#5575).
         ctx.logger.error(
             `[Automation] connector instance '${info.name}' (provider '${info.provider}') upstream unavailable — ` +
                 (info.hasLive
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
-                `; retrying with backoff, attempt ${attempts} (#3017): ${info.reason}`,
+                `; retrying with backoff, attempt ${attempts} (#3017).`,
+            undefined,
+            describeThrownForLog(info.cause),
         );
     }
 
