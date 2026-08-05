@@ -4,23 +4,33 @@
  * The filter refusals this driver raises, in ONE place — and, since #5324/#5328,
  * the ONE walk that decides which shapes are refused at all.
  *
- * Both of this package's filter surfaces refuse the same shapes with the same
- * wire envelope: the live query path (`memory-driver.ts` → mingo) and the
+ * All THREE of this package's filter surfaces refuse the same shapes with the
+ * same wire envelope: the live query path (`memory-driver.ts` → mingo), the
  * reference matcher (`memory-matcher.ts`, the record-at-a-time evaluator the
- * conformance suites hold against `driver-sql` and `@objectstack/formula`). They
- * were two independent code paths with two independent notions of what a filter
- * may be, which is exactly how #5240's divergence survived unnoticed in-package.
+ * conformance suites hold against `driver-sql` and `@objectstack/formula`), and
+ * since #5345 the analytics/cube face (`memory-analytics.ts`). They were
+ * independent code paths with independent notions of what a filter may be, which
+ * is exactly how #5240's divergence survived unnoticed in-package.
  *
- * #5240 gave the two faces one refusal by writing the same check twice. That was
- * still two implementations of one rule, and the shapes #5324/#5328 measured
- * proved how far apart two such implementations drift: given a malformed
- * `$between` the live path answered "no rows" while the matcher answered "EVERY
- * row" — opposite answers, inside one package, to one filter. So the rule now
- * lives in exactly one function, {@link assertFilterConditionShape}, and both
- * faces call it before they evaluate anything.
+ * #5240 gave the first two faces one refusal by writing the same check twice.
+ * That was still two implementations of one rule, and the shapes #5324/#5328
+ * measured proved how far apart two such implementations drift: given a
+ * malformed `$between` the live path answered "no rows" while the matcher
+ * answered "EVERY row" — opposite answers, inside one package, to one filter. So
+ * the rule now lives in exactly one function, {@link assertFilterConditionShape},
+ * and every face calls it before it evaluates anything.
+ *
+ * [#5345] The faces are not equally capable, and pretending they were is what
+ * kept the third one out. `memory-analytics` lowers a `where` into a cube-style
+ * `{member, operator, values}` list, and that pipeline expresses neither `$or`
+ * nor `$not` nor five of the declared field operators. Its answer used to be a
+ * `continue`. So the walk now takes the calling face's {@link
+ * FilterFaceCapabilities} — what that face can COMPILE — and refuses what it
+ * cannot, in the same envelope, from the same place. A face declares its
+ * vocabulary; it does not get to drop what falls outside it.
  */
 
-import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -164,6 +174,108 @@ export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
 
 /** The vocabulary as it appears in a refusal message, in declaration order. */
 const SUPPORTED_FIELD_OPERATOR_LIST = [...SUPPORTED_FIELD_OPERATORS].join(', ');
+
+/**
+ * [#5345] What ONE evaluation face can COMPILE — the narrower vocabulary a
+ * particular surface enforces on top of the package-wide one above.
+ *
+ * The distinction this type draws is the whole of #5345. Two different things
+ * can be wrong with `{ amount: { $sounds_like: 3 } }` and
+ * `{ amount: { $between: [1, 3] } }` on the analytics face:
+ *
+ * - the first names an operator the **Filter Protocol** does not declare — it is
+ *   wrong everywhere, and {@link unknownFieldOperatorError} says so;
+ * - the second is a declared operator this **face** cannot lower into its cube
+ *   pipeline. It is a perfectly good filter that `find()` runs today.
+ *
+ * Before #5345 the second class was answered with `continue`, silently, on the
+ * analytics face only. A face that declares its vocabulary here gets the second
+ * class refused for it, by the same walk, in the same envelope — and, crucially,
+ * cannot answer it any other way, because the walk runs before the face's
+ * lowering code is reached.
+ *
+ * Derive the sets from the face's own lowering table rather than hand-listing
+ * them (see `MONGO_TO_CUBE_OPERATOR` in `memory-analytics.ts`): a hand-written
+ * copy agrees with the compiler on the day it is typed and never again, which is
+ * the note already sitting over {@link SUPPORTED_FIELD_OPERATORS}.
+ */
+export interface FilterFaceCapabilities {
+  /** How the face names itself in a refusal, e.g. `"the analytics (cube) face"`. */
+  readonly face: string;
+  /** The field operators this face lowers. A subset of {@link SUPPORTED_FIELD_OPERATORS}. */
+  readonly fieldOperators: ReadonlySet<string>;
+  /** The logical combinators this face lowers. A subset of `LOGICAL_OPERATORS`. */
+  readonly combinators: ReadonlySet<string>;
+}
+
+/**
+ * [#5345] The default: the whole vocabulary this driver's query path and
+ * reference matcher evaluate. Passing no capabilities means "this face compiles
+ * everything the driver does", which is true of both of them and keeps every
+ * pre-#5345 call site behaving byte-for-byte as before.
+ */
+export const DRIVER_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.freeze({
+  face: 'this driver',
+  fieldOperators: SUPPORTED_FIELD_OPERATORS,
+  combinators: new Set<string>(LOGICAL_OPERATORS),
+});
+
+/**
+ * [#5345] A DECLARED field operator that this face cannot lower.
+ *
+ * Distinct from {@link unknownFieldOperatorError} on purpose: that one means
+ * "the Filter Protocol has no such operator", this one means "the protocol has
+ * it, `find()` runs it, and this surface cannot". Collapsing them would tell a
+ * dashboard author their `$between` is a typo.
+ *
+ * The tail is the #3948 rule stated in the direction that matters here. A
+ * dropped predicate does not narrow a query, it WIDENS it: the aggregate is
+ * computed over rows the author excluded, and a chart drawn over them looks
+ * exactly like a working chart. This is ADR-0078 / #4286's call on `objectql`'s
+ * `having`, which was refused rather than skipped for the identical reason.
+ */
+export function uncompilableFieldOperatorError(
+  op: string,
+  field: string,
+  path: string,
+  capabilities: FilterFaceCapabilities,
+): Error {
+  const supported = [...capabilities.fieldOperators].join(', ') || '(none)';
+  return unsupportedFilterError(
+    `Filter operator "${op}" on field "${field}" at ${path} is declared by the Filter Protocol ` +
+      `but cannot be compiled by ${capabilities.face}. Supported operators on this surface: ` +
+      `${supported}. It is refused rather than dropped: a predicate that compiles to nothing does ` +
+      `not narrow the query, it WIDENS it — the aggregate is then computed over rows the filter ` +
+      `excluded, and a chart drawn over them looks like a working chart (#3948, #4286/ADR-0078, ` +
+      `#5345). Rewrite the predicate with a supported operator, or run it through find().`,
+  );
+}
+
+/**
+ * [#5345] A DECLARED logical combinator that this face cannot lower.
+ *
+ * Named separately from {@link unknownLogicalOperatorError} for the same reason
+ * as the field-operator pair above, and it is the sharper half of #5345: a
+ * dropped `$or` discards a whole branch of the filter, and `$not` is precisely
+ * what `cel-to-filter.ts` compiles a CEL `!expr` RLS read scope into. Dropping
+ * that one does not make a number inaccurate — it puts rows the caller has no
+ * permission to read into the aggregate.
+ */
+export function uncompilableCombinatorError(
+  key: string,
+  path: string,
+  capabilities: FilterFaceCapabilities,
+): Error {
+  const supported = [...capabilities.combinators].join(', ') || '(none)';
+  return unsupportedFilterError(
+    `Filter combinator "${key}" at ${path} is declared by the Filter Protocol but cannot be ` +
+      `compiled by ${capabilities.face}. Supported combinators on this surface: ${supported}. ` +
+      `It is refused rather than ignored: dropping a combinator discards a whole branch of the ` +
+      `filter and WIDENS the result set, and "$not" is what compileCelToFilter emits for a CEL ` +
+      `"!expr" RLS read scope — a dropped one is an over-permissive read, not an inaccurate ` +
+      `number (#3948, #5345).`,
+  );
+}
 
 /** A short type name for an operand a filter refusal has to describe. */
 function describeFilterOperand(value: unknown): string {
@@ -383,27 +495,46 @@ export function filterNodeExpectedError(value: unknown, path: string): Error {
  * - the MEMBER types of a `$between` array — `driver-sql` checks its arity and
  *   nothing else (#5041 measured the member case and deliberately left it);
  * - a stringified comparand for the `LIKE` family — same, and fail-closed.
+ *
+ * ## What `capabilities` adds (#5345)
+ *
+ * Shape is universal; CAPABILITY is per-face. `capabilities` narrows what this
+ * particular caller can lower — see {@link FilterFaceCapabilities} — and the
+ * walk refuses the difference. It defaults to
+ * {@link DRIVER_FILTER_CAPABILITIES}, i.e. everything, so the query path and the
+ * matcher are unaffected.
+ *
+ * The capability check is made BEFORE the shape checks at the same key, and
+ * deliberately: on a face that cannot compile `$or` at all, reporting that its
+ * operand should have been an array would send the author to fix the wrong
+ * thing, then refuse the corrected filter anyway.
  */
-export function assertFilterConditionShape(node: unknown, path: string): void {
+export function assertFilterConditionShape(
+  node: unknown,
+  path: string,
+  capabilities: FilterFaceCapabilities = DRIVER_FILTER_CAPABILITIES,
+): void {
   if (!isFilterNode(node)) return;
   for (const [key, value] of Object.entries(node)) {
     const here = `${path}.${key}`;
     if (key === '$and' || key === '$or') {
+      if (!capabilities.combinators.has(key)) throw uncompilableCombinatorError(key, here, capabilities);
       if (!Array.isArray(value)) throw filterNodeListExpectedError(key, value, here);
       value.forEach((child, index) => {
         const childPath = `${here}[${index}]`;
         if (!isFilterNode(child)) throw filterNodeExpectedError(child, childPath);
-        assertFilterConditionShape(child, childPath);
+        assertFilterConditionShape(child, childPath, capabilities);
       });
       continue;
     }
     if (key === '$not') {
+      if (!capabilities.combinators.has(key)) throw uncompilableCombinatorError(key, here, capabilities);
       if (!isFilterNode(value)) throw filterNodeExpectedError(value, here);
-      assertFilterConditionShape(value, here);
+      assertFilterConditionShape(value, here, capabilities);
       continue;
     }
     if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
-    assertFieldConstraintShape(key, value, here);
+    assertFieldConstraintShape(key, value, here, capabilities);
   }
 }
 
@@ -418,7 +549,12 @@ export function assertFilterConditionShape(node: unknown, path: string): void {
  * is: the two faces silently disagreed about it (the matcher ignored the
  * non-`$` key, mingo did not).
  */
-function assertFieldConstraintShape(field: string, spec: unknown, path: string): void {
+function assertFieldConstraintShape(
+  field: string,
+  spec: unknown,
+  path: string,
+  capabilities: FilterFaceCapabilities,
+): void {
   if (!isFilterNode(spec)) return;
   // [#5240] The zero-operator constraint keeps its own predicate rather than an
   // inlined `keys.length === 0`, so the reasoning for what does and does not
@@ -429,6 +565,13 @@ function assertFieldConstraintShape(field: string, spec: unknown, path: string):
   if (!keys.some((key) => key.startsWith('$'))) return;
   for (const op of keys) {
     if (!SUPPORTED_FIELD_OPERATORS.has(op)) throw unknownFieldOperatorError(op, field, path);
+    // [#5345] Declared, but not by THIS face. Checked before the comparand-shape
+    // rules below so a `$between` a face cannot compile is reported as
+    // unsupported-here rather than as a malformed range the face would refuse
+    // even once corrected.
+    if (!capabilities.fieldOperators.has(op)) {
+      throw uncompilableFieldOperatorError(op, field, path, capabilities);
+    }
     if (op === '$between' && !isBetweenComparand(spec[op])) {
       throw malformedBetweenError(field, spec[op], `${path}.$between`);
     }

@@ -4,6 +4,63 @@ import type { IAnalyticsService, AnalyticsResult, CubeMeta } from '@objectstack/
 import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
+import {
+  assertFilterConditionShape,
+  uncompilableCombinatorError,
+  uncompilableFieldOperatorError,
+  type FilterFaceCapabilities,
+} from './filter-refusal.js';
+
+/**
+ * [#5345] The Filter Protocol operators this face can LOWER into a cube-style
+ * `{member, operator, values}` entry — and, because
+ * {@link ANALYTICS_FILTER_CAPABILITIES} is derived from its keys, the complete
+ * statement of what the face accepts.
+ *
+ * That derivation is the point. This table used to be a `switch` with
+ * `default: return null`, and the caller answered `null` with `continue` — so
+ * the vocabulary was declared nowhere and enforced nowhere, and the five
+ * declared operators missing from it (`$between`, `$startsWith`, `$endsWith`,
+ * `$null`, `$regex`) vanished out of any `where` that carried them. Keeping the
+ * gate's vocabulary and the compiler's table as one object makes adding a row
+ * here the only way to widen what this face accepts, and makes forgetting to
+ * add one a loud refusal rather than a wrong number.
+ *
+ * A row here means the face ATTEMPTS the operator, not that the predicate it
+ * builds is correct — `$notContains` lowers to a bare mingo `{$not: 'x'}` that
+ * constrains nothing (#5374), and the comparand round-trip through `string[]`
+ * loses booleans and `null` (#5373). Both are out of #5345's scope (which ruled
+ * on operators with NO mapping) and are filed rather than fixed here; do not
+ * read this list as eleven operators known to work.
+ */
+const MONGO_TO_CUBE_OPERATOR: Readonly<Record<string, string>> = Object.freeze({
+  $eq: 'equals',
+  $ne: 'notEquals',
+  $gt: 'gt',
+  $gte: 'gte',
+  $lt: 'lt',
+  $lte: 'lte',
+  $in: 'in',
+  $nin: 'notIn',
+  $contains: 'contains',
+  $notContains: 'notContains',
+  $exists: 'set',
+});
+
+/**
+ * [#5345] What the analytics (cube) face compiles, for the shared filter walk.
+ *
+ * `$and` is the one combinator: {@link MemoryAnalyticsService.flattenFilterCondition}
+ * folds its branches into the same implicit-AND list the top level already is.
+ * `$or` and `$not` have no expression in a flat `{member, operator, values}`
+ * pipeline at all — which is why they were being skipped, and why refusing is
+ * the answer here rather than a lowering nobody can write.
+ */
+export const ANALYTICS_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.freeze({
+  face: "driver-memory's analytics (cube) face",
+  fieldOperators: new Set<string>(Object.keys(MONGO_TO_CUBE_OPERATOR)),
+  combinators: new Set<string>(['$and']),
+});
 
 /**
  * Configuration for MemoryAnalyticsService
@@ -68,12 +125,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const pipeline: Record<string, any>[] = [];
 
     // Stage 1: $match for filters
-    // Filters can arrive in two shapes (per spec/data/analytics.zod.ts):
-    //   - Array of { member, operator, values } (cube-style, legacy)
-    //   - FilterCondition (MongoDB-style — canonical spec shape, used by
-    //     dashboard widget metadata directly).
-    // Normalize both into the cube-style array before processing so the
-    // existing pipeline logic stays untouched.
+    // `AnalyticsQuery.where` is a FilterCondition (MongoDB-style — the canonical
+    // spec shape, used by dashboard widget metadata directly). It is lowered
+    // into the cube-style `{member, operator, values}` list this pipeline
+    // consumes, and anything this face cannot lower is refused there rather than
+    // dropped (#5345).
     const normalizedFilters = this.normalizeFilters(query);
     if (normalizedFilters.length > 0) {
       const matchStage: Record<string, any> = {};
@@ -383,21 +439,31 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   // ===================================
 
   /**
-   * Normalize filters into a cube-style array regardless of input shape.
+   * Normalize a query's `where` into the cube-style array the pipeline consumes.
    *
-   * Accepts:
-   *   - undefined / null → []
-   *   - cube-style array `[{member, operator, values}]` → returned as-is
-   *   - MongoDB FilterCondition object (per spec/data/filter.zod.ts):
-   *       * implicit equality:  `{is_active: true}`
-   *       * operator wrapper:   `{stage: {$nin: [...]}}`
-   *       * mixed:              `{stage: 'won', amount: {$gte: 100}}`
-   *     → flattened into one cube-style entry per (field, operator) pair
+   * Accepts a MongoDB-style `FilterCondition` (per spec/data/filter.zod.ts) —
+   * the canonical `AnalyticsQuery.where` shape, and the only one the schema
+   * declares:
+   *   - implicit equality:  `{is_active: true}`
+   *   - operator wrapper:   `{stage: {$nin: [...]}}`
+   *   - mixed:              `{stage: 'won', amount: {$gte: 100}}`
+   *   - `$and`:             folded into the same implicit-AND list
+   * → flattened into one cube-style entry per (field, operator) pair.
    *
-   * Logical combinators (`$and`, `$or`, `$not`) are not yet expanded into
-   * the cube pipeline; for current dashboard widget metadata the implicit
-   * top-level AND of fields is sufficient. `$and` clauses are flattened
-   * into the same AND list.
+   * [#5345] Everything outside {@link ANALYTICS_FILTER_CAPABILITIES} is REFUSED
+   * with `INVALID_FILTER` / 400, by the same walk the query path and the
+   * reference matcher use. It used to be dropped, and the direction of that drop
+   * is what made it a defect rather than a limitation: fewer predicates means
+   * MORE rows, so a widget filtered on `{$or: [...]}` aggregated the whole table
+   * and looked like a working widget. `$not` made it a permission bug on top —
+   * `cel-to-filter.ts` compiles a CEL `!expr` RLS read scope into exactly that
+   * shape, so dropping it put unreadable rows into the numbers.
+   *
+   * The gate runs HERE, before a single key is lowered, for the reason
+   * `assertFilterConditionShape` documents at length: a refusal raised partway
+   * through a lowering fires or does not fire depending on key order and on
+   * which sibling branch was walked first. Both public entry points (`query()`
+   * and `generateSql()`) go through this method, so both refuse identically.
    */
   private normalizeFilters(query: unknown): Array<{ member: string; operator: string; values: string[] }> {
     if (!query || typeof query !== 'object') return [];
@@ -406,7 +472,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const where = (query as { where?: unknown }).where;
 
     if (where && typeof where === 'object' && !Array.isArray(where)) {
-      this.flattenFilterCondition(where as Record<string, unknown>, out);
+      assertFilterConditionShape(where, 'where', ANALYTICS_FILTER_CAPABILITIES);
+      this.flattenFilterCondition(where as Record<string, unknown>, out, 'where');
     }
 
     return out;
@@ -415,22 +482,28 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   private flattenFilterCondition(
     cond: Record<string, unknown>,
     out: Array<{ member: string; operator: string; values: string[] }>,
+    path: string,
   ): void {
     for (const [key, raw] of Object.entries(cond)) {
+      const here = `${path}.${key}`;
       if (raw == null) continue;
 
-      // Logical combinators
-      if (key === '$and' && Array.isArray(raw)) {
-        for (const sub of raw) {
-          if (sub && typeof sub === 'object') {
-            this.flattenFilterCondition(sub as Record<string, unknown>, out);
-          }
+      // Logical combinators. `$and` folds into the same implicit-AND list; the
+      // gate above has already proven it is an array of filter nodes.
+      if (key === '$and') {
+        for (const sub of raw as unknown[]) {
+          this.flattenFilterCondition(sub as Record<string, unknown>, out, here);
         }
         continue;
       }
-      // $or / $not are not yet supported in the cube pipeline; ignore so
-      // a partial query still runs rather than failing entirely.
-      if (key === '$or' || key === '$not') continue;
+      // [#5345] Unreachable via normalizeFilters — the gate refuses these for
+      // this face before the lowering starts. Kept as a throw rather than left
+      // implicit so that the `continue` which caused #5345 cannot come back, and
+      // so a future caller that lowers a condition without gating it first fails
+      // loudly instead of silently widening the result set.
+      if (key === '$or' || key === '$not') {
+        throw uncompilableCombinatorError(key, here, ANALYTICS_FILTER_CAPABILITIES);
+      }
 
       // Operator wrapper: { field: { $op: value, ... } }
       if (typeof raw === 'object' && !Array.isArray(raw) && !(raw instanceof Date)) {
@@ -438,8 +511,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         const opEntries = Object.keys(wrapper).filter(k => k.startsWith('$'));
         if (opEntries.length > 0) {
           for (const opKey of opEntries) {
-            const cubeOp = this.mongoOperatorToCubeOperator(opKey);
-            if (!cubeOp) continue;
+            const cubeOp = this.mongoOperatorToCubeOperator(opKey, key, `${here}.${opKey}`);
             const v = wrapper[opKey];
             const values = Array.isArray(v)
               ? v.map(x => this.stringifyForCube(x))
@@ -451,7 +523,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         // Otherwise treat as nested relation (e.g. {profile: {verified: true}}).
         // Flatten with dot-prefixed keys.
         for (const [nestedKey, nestedVal] of Object.entries(wrapper)) {
-          this.flattenFilterCondition({ [`${key}.${nestedKey}`]: nestedVal }, out);
+          this.flattenFilterCondition({ [`${key}.${nestedKey}`]: nestedVal }, out, here);
         }
         continue;
       }
@@ -469,24 +541,20 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Map MongoDB-style `$op` keys (from FilterCondition) to the cube-style
-   * operator names accepted by `convertOperatorToMongo` / `operatorToSql`.
+   * Lower a Filter Protocol `$op` key to the cube-style operator name
+   * `convertOperatorToMongo` / `operatorToSql` accept.
+   *
+   * [#5345] An operator with no row in {@link MONGO_TO_CUBE_OPERATOR} is
+   * REFUSED, not skipped. The gate in `normalizeFilters` refuses the same set
+   * one step earlier, so for a top-level or `$and`-nested constraint this throw
+   * is unreachable — but the nested-relation branch above re-enters this
+   * function with a synthesised `{'a.b': spec}` node the gate never saw, and
+   * that is a real path to an unmapped operator. It used to `continue`.
    */
-  private mongoOperatorToCubeOperator(op: string): string | null {
-    switch (op) {
-      case '$eq': return 'equals';
-      case '$ne': return 'notEquals';
-      case '$gt': return 'gt';
-      case '$gte': return 'gte';
-      case '$lt': return 'lt';
-      case '$lte': return 'lte';
-      case '$in': return 'in';
-      case '$nin': return 'notIn';
-      case '$contains': return 'contains';
-      case '$notContains': return 'notContains';
-      case '$exists': return 'set';
-      default: return null;
-    }
+  private mongoOperatorToCubeOperator(op: string, field: string, path: string): string {
+    const cubeOp = MONGO_TO_CUBE_OPERATOR[op];
+    if (!cubeOp) throw uncompilableFieldOperatorError(op, field, path, ANALYTICS_FILTER_CAPABILITIES);
+    return cubeOp;
   }
 
   /**
