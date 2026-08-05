@@ -468,6 +468,7 @@ export {
   FLOW_DEFAULT_EDGE_WITH_CONDITION,
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
+  FLOW_MULTI_WRITE_UNFILTERED,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
