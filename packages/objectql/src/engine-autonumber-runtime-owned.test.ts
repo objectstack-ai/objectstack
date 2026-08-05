@@ -313,7 +313,7 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
       data: { account_number: 'ACC-888888' },
     });
     expect(res.record.account_number).toBe('ACC-0001');
-    const readback = await rig.engine.findOne('an_account', { where: { id } } as any);
+    const readback = await rig.engine.findOne('an_account', { where: { id } });
     expect(readback.account_number).toBe('ACC-0001');
   });
 
@@ -352,7 +352,7 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
     const payload = rig.updatedPayloads.at(-1) ?? {};
     expect('account_number' in payload).toBe(false);
     expect(payload.name).toBe('bulk'); // the legitimate half of the same write landed
-    const rows = await rig.engine.find('an_account', {} as any);
+    const rows = await rig.engine.find('an_account', {});
     expect(rows.map((r: any) => r.name)).toEqual(['bulk', 'bulk']); // both rows were rewritten
     expect(rows.map((r: any) => r.account_number).sort()).toEqual(['ACC-0001', 'ACC-0002']);
   });
