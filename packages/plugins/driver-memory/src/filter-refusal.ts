@@ -259,6 +259,28 @@ export function malformedBetweenError(field: string, value: unknown, path: strin
   );
 }
 
+/**
+ * [#5324] `$options` without the `$regex` it modifies.
+ *
+ * `$options` is in {@link SUPPORTED_FIELD_OPERATORS} as a MODIFIER, not a
+ * predicate — it carries the regex flags (`memory-matcher` reads it as
+ * `new RegExp(target, condition.$options)`, and objectql's `having` skips it for
+ * the same reason). On its own it is not a filter at all, and the two faces
+ * proved it: mingo raised `unknown query operator $options` — uncoded, the very
+ * escape #5324 is about — while the matcher ignored it and matched EVERY row.
+ * Allowlisting the key without requiring its partner would have left exactly one
+ * operator still leaking out of the envelope.
+ */
+export function danglingRegexOptionsError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$options" on field "${field}" at ${path} has no "$regex" to modify. "$options" ` +
+      `carries the flags of a regex predicate (e.g. { "${field}": { "$regex": "abc", "$options": "i" } }); ` +
+      `it is not a predicate on its own. It is refused rather than ignored because the two ` +
+      `evaluation paths answered it differently — one raised an uncoded engine error, the other ` +
+      `matched every row (#5324).`,
+  );
+}
+
 /** [#5324] `$and`/`$or` take a list of nodes; anything else is refused. */
 export function filterNodeListExpectedError(key: string, value: unknown, path: string): Error {
   return unsupportedFilterError(
@@ -365,6 +387,9 @@ function assertFieldConstraintShape(field: string, spec: unknown, path: string):
       throw malformedBetweenError(field, spec[op], `${path}.$between`);
     }
   }
+  // `$options` is the one entry in the vocabulary that is a modifier rather than
+  // a predicate, so it is the one that needs a companion.
+  if (keys.includes('$options') && !keys.includes('$regex')) throw danglingRegexOptionsError(field, path);
 }
 
 /**

@@ -153,6 +153,22 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     });
   }
 
+  it('refuses "$options" with no "$regex" to modify, on both faces', async () => {
+    // The one entry in the vocabulary that is a MODIFIER rather than a
+    // predicate, and therefore the one that could be allowlisted into a fresh
+    // leak: measured before this arm existed, `{ stage: { $options: 'i' } }`
+    // still escaped as an uncoded `unknown query operator $options` on the live
+    // path while the matcher ignored it and matched EVERY row — #5324's exact
+    // shape, surviving for a single operator.
+    const where = { stage: { $options: 'i' } };
+
+    const live = await liveRefusal(where);
+    expectEnvelope(live);
+    expect(live.message).toContain('has no "$regex" to modify');
+
+    expect(matcherRefusal(where).message).toBe(live.message);
+  });
+
   it('names the position, so a refusal deep in a scope tree is actionable', async () => {
     const err = await liveRefusal({ $or: [{ owner: 'u1' }, { $and: [{ stage: { $sounds_like: 'won' } }] }] });
     expectEnvelope(err);
