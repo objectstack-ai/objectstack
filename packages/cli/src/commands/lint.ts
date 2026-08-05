@@ -278,42 +278,92 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
 
   // Bare-named UI/automation types that share the generic registry namespace.
   // Data-driven so a new bare-named type is one line.
-  const PREFIXED_TYPES: Array<{ key: string; label: string }> = [
+  //
+  // `registryKey` maps an item to the key it ACTUALLY occupies at runtime, so
+  // the dedup asks "do these two collapse onto one key?" rather than "do they
+  // spell the same bare name?". For every type here the two questions coincide
+  // — except `actions`, whose engine key is composite (see below).
+  const PREFIXED_TYPES: Array<{
+    key: string;
+    label: string;
+    registryKey?: (item: any, name: string) => string;
+  }> = [
     { key: 'apps', label: 'App' },
     { key: 'pages', label: 'Page' },
     { key: 'dashboards', label: 'Dashboard' },
     { key: 'flows', label: 'Flow' },
-    { key: 'actions', label: 'Action' },
+    // An action's engine registration key is `<objectName>:<name>`, NOT the
+    // bare name: `ObjectQLPlugin.actionObjectKey` (and the runtime's
+    // `standaloneActionObjectName`, kept in lockstep with it) resolve the
+    // object half to `objectName`, falling back to the canonical object-less
+    // key `'global'` (#3913). So one package legitimately declaring
+    // `log_call` on each of five objects occupies five distinct keys and
+    // nothing shadows anything — deduping those on the bare name produced 12
+    // fixed false positives per `objectstack lint` run on HotCRM, growing
+    // linearly with the object count (#5510), and "just rename one" would have
+    // broken the shared i18n keys that shape depends on (#592).
+    //
+    // `'global'` rather than an inert sentinel like `''` is deliberate: it is
+    // the literal the engine really registers under, so an action declared on
+    // an object actually NAMED `global` and an object-less action of the same
+    // name collide for real — and are reported, as they must be.
+    //
+    // Only `objectName` is read. `object`/`entity` are rejected outright by
+    // `ActionSchema`'s strict shape with a rename prescription, so they never
+    // reach a spec-valid config and a `??` chain here would only fossilize a
+    // spelling the contract already refuses (Prime Directive #12).
+    {
+      key: 'actions',
+      label: 'Action',
+      registryKey: (item, name) =>
+        `${typeof item?.objectName === 'string' && item.objectName ? item.objectName : 'global'}:${name}`,
+    },
     { key: 'reports', label: 'Report' },
     { key: 'datasets', label: 'Dataset' },
   ];
 
-  for (const { key, label } of PREFIXED_TYPES) {
+  for (const { key, label, registryKey } of PREFIXED_TYPES) {
     const items: any[] = Array.isArray(config[key]) ? config[key] : [];
-    // First occurrence of each name → its index, so a later duplicate can point
-    // back at the original declaration.
+    // First occurrence of each registry key → its index, so a later duplicate
+    // can point back at the original declaration.
     const firstSeen = new Map<string, number>();
     for (let i = 0; i < items.length; i++) {
       const name = items[i]?.name;
       if (typeof name !== 'string' || !name) continue;
-      const original = firstSeen.get(name);
+      const dedupKey = registryKey ? registryKey(items[i], name) : name;
+      const original = firstSeen.get(dedupKey);
       if (original === undefined) {
-        firstSeen.set(name, i);
+        firstSeen.set(dedupKey, i);
         continue;
       }
-      // Genuine intra-package duplicate: two items of the same (type, name)
-      // declared in this package's config. They collapse onto one registry key
-      // and shadow each other. Renaming one with the package namespace prefix
-      // (`crm_home`) is the simplest fix; any distinct name works.
+      // Genuine intra-package duplicate: two items landing on ONE registry key
+      // in this package's config. They shadow each other. Renaming one with the
+      // package namespace prefix (`crm_home`) is the simplest fix; any distinct
+      // name works.
       const suggestion = ns && !name.startsWith(`${ns}_`) ? `${ns}_${name}` : undefined;
+      // An action has a second, usually better remedy than renaming: the two
+      // declarations collide only because they agree on `objectName` (or both
+      // omit it and fall to `global`), so pointing one at the object it really
+      // belongs to separates them while keeping the shared name — the exact
+      // move the bare-name dedup used to punish.
+      const remedy =
+        key === 'actions'
+          ? `give one a distinct \`objectName\` (same-named actions on DIFFERENT objects ` +
+            `never collide) or rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`
+          : `rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`;
+      const collapseText =
+        key === 'actions'
+          ? `Two actions sharing one \`objectName\` (or both object-less) collapse onto ` +
+            `the same \`objectName:name\` engine key and shadow each other`
+          : `Two items of the same type sharing a bare name within one package ` +
+            `shadow each other on the registry key`;
       issues.push({
         severity: 'warning',
         rule: 'naming/namespace-prefix',
         message:
           `${label} "${name}" is declared more than once in this package ` +
-          `(also at ${key}[${original}].name). Two items of the same type sharing ` +
-          `a bare name within one package shadow each other on the registry key ` +
-          `(ADR-0048 §3.4) — rename one${suggestion ? `, e.g. "${suggestion}"` : ''}. ` +
+          `(also at ${key}[${original}].name). ${collapseText} ` +
+          `(ADR-0048 §3.4) — ${remedy}. ` +
           `Distinct packages may reuse the same name freely; the namespace prefix ` +
           `is an optional convention, not a collision-avoidance requirement.`,
         path: `${key}[${i}].name`,
