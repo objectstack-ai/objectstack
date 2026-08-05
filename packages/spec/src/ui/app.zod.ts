@@ -647,13 +647,13 @@ const AREA_ORDER_RETIRED =
  * 17.0.0 (#4651, ADR-0049).
  *
  * These were not ordinary dead keys. They were **fail-open capability gates**:
- * the authoritative server-side filter (`filterAppForUser`,
- * `packages/rest/src/rest-server.ts`) reads the app's `requiredPermissions` and
- * then walks ONLY `item.navigation` — it returns early when that tree is
- * absent and never touches `item.areas` at all — while the client renders every
- * area in the switcher. So an author who wrote `requiredPermissions:
- * ['sales.admin']` on an area got a clean parse, a stored value, and an area
- * visible to everyone.
+ * at the time of the retirement the authoritative server-side filter
+ * (`filterAppForUser`, `packages/rest/src/rest-server.ts`) read the app's
+ * `requiredPermissions` and then walked ONLY `item.navigation` — it returned
+ * early when that tree was absent and never touched `item.areas` at all — while
+ * the client rendered every area in the switcher. So an author who wrote
+ * `requiredPermissions: ['sales.admin']` on an area got a clean parse, a stored
+ * value, and an area visible to everyone.
  *
  * What made them read alive is that the SAME key names are genuinely enforced
  * one level up and one level down: app-level `requiredPermissions` drops the
@@ -668,6 +668,17 @@ const AREA_ORDER_RETIRED =
  * remove its items everywhere? does the server bind `user` for area CEL?), and
  * a retirement PR must not invent an authorization mechanism. Removing a gate
  * that never gated is strictly safer than shipping a major with it in place.
+ *
+ * SINCE #4722 the paragraph above is history on one point, and the prescription
+ * below states the current fact: `filterAppForUser` now runs the same
+ * `filterNav` over every `areas[].navigation`, so an ITEM's
+ * `requiredPermissions` / `requiresService` is enforced server-side in both
+ * trees and a gated entry never ships in the `/meta` body. That closed the
+ * shell-only boundary these prescriptions used to warn about; it did NOT revive
+ * the area-LEVEL keys, which stay retired. `visible` (CEL) and `requiresObject`
+ * remain client-side only at every level — server-side CEL needs a bound `user`
+ * context the read layer does not have. Mirrored in `liveness/app.json`
+ * (`areas.navigation`) and pinned in `packages/rest/src/rest.test.ts`.
  */
 const AREA_VISIBLE_RETIRED =
   '`areas[].visible` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — nothing ever '
@@ -675,9 +686,12 @@ const AREA_VISIBLE_RETIRED =
   + 'gate that fails open, which is worse than no gate at all. Delete the key and gate the '
   + 'items INSIDE the area — a navigation ITEM\'s `visible` takes the same CEL expression and '
   + 'IS evaluated per item by the shell. For a gate the SERVER enforces, use '
-  + '`requiredPermissions`: on the app itself, or on items of the app\'s top-level '
-  + '`navigation` tree. Run `os migrate meta --from 16` to rewrite existing sources '
-  + 'automatically.';
+  + '`requiredPermissions` instead: on the app itself, or on the ITEMS of either navigation '
+  + 'tree — the app\'s top-level `navigation` AND every `areas[].navigation`, both stripped '
+  + 'server-side since #4722. The distinction survives at every level: `visible` is CEL '
+  + 'evaluated in the browser, so it hides an entry that has already been sent, while '
+  + '`requiredPermissions` stops that entry from being served at all. Run '
+  + '`os migrate meta --from 16` to rewrite existing sources automatically.';
 
 const AREA_REQUIRED_PERMISSIONS_RETIRED =
   '`areas[].requiredPermissions` was removed in @objectstack/spec 17.0.0 (#4651, ADR-0049) — '
@@ -686,10 +700,13 @@ const AREA_REQUIRED_PERMISSIONS_RETIRED =
   + 'gate to a layer that is actually enforced. `requiredPermissions` on the APP is checked '
   + 'server-side (the app is dropped from /meta entirely for a caller who lacks them), and '
   + '`requiredPermissions` / `requiresService` on a navigation ITEM are stripped server-side '
-  + 'from the app\'s top-level `navigation` tree and re-checked in the shell. Items nested '
-  + 'under `areas[]` are gated in the shell only — the server does not walk `areas` — so '
-  + 'anything that must never reach the browser belongs in the top-level tree, or in its own '
-  + 'app. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+  + 'in BOTH trees — the app\'s top-level `navigation` AND every `areas[].navigation`, through '
+  + 'the same filter since #4722 — then re-checked in the shell, so an item gated inside an '
+  + 'area never reaches the browser either. That enforces the items INSIDE an area; the '
+  + 'area-level key is not revived. Still evaluated client-side ONLY, at every level: '
+  + '`visible` (CEL) and `requiresObject` — so anything that must never reach the browser '
+  + 'goes in `requiredPermissions`, never in `visible`. Run `os migrate meta --from 16` to '
+  + 'rewrite existing sources automatically.';
 
 /**
  * Navigation Area Schema

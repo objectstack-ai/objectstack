@@ -80,25 +80,24 @@ const STATE_MACHINE_STRIP_HISTORY =
  * A union: the string form names a registered action, the object form
  * parameterises one. Only the OBJECT branch has keys to be strict about.
  *
- * ⚠️ **The rejection is quieter here than on a plain shape, and that is a zod
- * property, not a curation gap.** A failing branch does not raise its own
- * issue to the top: the union raises ONE `invalid_union` issue whose
- * `message` is the literal string `"Invalid input"`, with each branch's real
- * issues nested one level down in `issue.errors[]`. Measured, both ways —
- * `TransitionSchema` (a plain `strictObject`) renders its full prescription
- * through `formatZodError`, while this schema renders `✗ (root): Invalid
- * input` for the same class of mistake, with the prescription intact in the
- * payload underneath. The nested message survives everywhere the issues are
- * carried structurally (`ZodError.message`, the REST error body); it is the
- * flatten-to-one-line consumers that drop it, and `formatZodError` is one —
- * filed as a finding rather than fixed here, since teaching that shared
- * formatter to descend changes CLI output for every union in the repo.
+ * ⚠️ **The rejection is shaped differently here than on a plain shape, and
+ * that is a zod property, not a curation gap.** A failing branch does not
+ * raise its own issue to the top: the union raises ONE `invalid_union` issue
+ * whose `message` is the literal string `"Invalid input"`, with each branch's
+ * real issues nested one level down in `issue.errors[]`. That payload survives
+ * everywhere the issues are carried structurally (`ZodError.message`, the REST
+ * error body); until #4971 the flatten-to-one-line consumers dropped it, and
+ * `formatZodError` — what `defineStack` throws through — was one, so this
+ * schema rendered a bare `✗ (root): Invalid input` where `TransitionSchema` (a plain
+ * `strictObject`) rendered its full prescription. `formatZodError` now expands
+ * the union's most informative branch, so both render the prescription; what
+ * remains union-shaped is the extra `Invalid input` line above it.
  *
- * Strictness still earns its place: the alternative is not a better message,
- * it is `params` misspelled as `args` **accepted in silence**, with the
- * action running unparameterised. Rejection beats that even at "Invalid
- * input". Both facts are pinned in `state-machine.test.ts` so neither the
- * quietness nor the underlying prose can regress unnoticed.
+ * Strictness earned its place even before that fix: the alternative was never
+ * a better message, it is `params` misspelled as `args` **accepted in
+ * silence**, with the action running unparameterised. Rejection beat that even
+ * at "Invalid input". Both facts are pinned in `state-machine.test.ts` so
+ * neither the union's shape nor the underlying prose can regress unnoticed.
  */
 export const ActionRefSchema = lazySchema(() => z.union([
   z.string().describe('Action Name'),

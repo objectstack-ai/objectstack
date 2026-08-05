@@ -226,41 +226,155 @@ export function normalizeFilterOperator(op: unknown): string {
   return VIEW_FILTER_OPERATOR_ALIASES[op] ?? VIEW_FILTER_OPERATOR_ALIASES[op.toLowerCase()] ?? op;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Write-time console decorations (#5074) — the mirror of `stripReadDecorations`
+// ───────────────────────────────────────────────────────────────────────────
+//
+// `stripReadDecorations` (`kernel/metadata-read-decorations.ts`) exists because
+// the READ path stamps keys onto a served document that were never part of it,
+// so a served body is not a valid input to the schema that produced it. The
+// console's row builders create the same problem from the other side, and this
+// is that function's write-path twin.
+//
+// The producer is a React list key, not a protocol decision: the filter builder
+// (`components/src/custom/filter-builder.tsx:228`, re-stamped on read-back at
+// `plugin-view/src/config/view-config-utils.ts:146`/`:160`) and the sort builder
+// (`components/src/custom/sort-builder.tsx:68`/`:94`) both stamp
+// `id: crypto.randomUUID()` on every row they render. `saveMetaItem` validates
+// the PUT body and persists the AUTHORED body verbatim, so those ids reach the
+// wire and the store.
+//
+// ⚠️ Why a `.strip()` on the wire member cannot do this job — the #4001 批 18 /
+// #5114 finding, and the reason this vocabulary exists at all: **`.strip()` does
+// not recurse, any more than `.strict()` does.** Re-opening a union member
+// re-opens its TOP level; every nested block is still reached through it at that
+// block's own posture. `filter[]` and `sort[]` are nested blocks, so a top-level
+// reopen leaves them 422ing the platform's own writes. Removing the decoration
+// BEFORE validation is what makes the wire opening recursive-effective, and it
+// is the only one of the two routes that does not require the authoring surface
+// to declare a UI artifact (批 18 Q1: declaring `id` teaches an AI author to
+// emit a UUID for a filter rule — a `??` fallback wearing a schema).
+//
+// Deliberately NOT solved by a second parallel schema tree: a hand-maintained
+// wire twin of every carrier of `ViewFilterRuleSchema` is a second copy of the
+// truth (PD#12's fork), and it rots silently the first time someone adds a new
+// carrier. One declared vocabulary, applied at the wire door, covers every
+// carrier that exists today and every one added later.
+
+/** Keys the console stamps onto builder ROWS, which are therefore never authored. */
+export const VIEW_CONSOLE_ROW_DECORATIONS = ['id'] as const;
+
+/**
+ * Keys whose array value holds console builder rows. Both are written by a
+ * row-per-entry widget that needs a stable React key; neither element shape
+ * declares `id`, on any surface, by design.
+ */
+const VIEW_DECORATED_ROW_CARRIERS: readonly string[] = ['filter', 'sort'];
+
+/** Depth guard — a view body is a bounded document, not a general graph. */
+const VIEW_DECORATION_MAX_DEPTH = 12;
+
+/** The prescription an authored `id` gets on a row shape. Shared by both sites. */
+const VIEW_CONSOLE_ROW_ID_GUIDANCE =
+  '`id` is a console row key (the filter/sort builders stamp a `crypto.randomUUID()` '
+  + 'per row for React) — it is not part of the authoring contract, and the write path '
+  + 'removes it before validating. Delete it from authored metadata.';
+
+function stripRowDecorations(value: unknown, isRow: boolean, depth: number): unknown {
+  if (depth > VIEW_DECORATION_MAX_DEPTH || !value || typeof value !== 'object') return value;
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((el) => {
+      const out = stripRowDecorations(el, isRow, depth + 1);
+      if (out !== el) changed = true;
+      return out;
+    });
+    return changed ? next : value;
+  }
+
+  const dict = value as Record<string, unknown>;
+  let next: Record<string, unknown> | undefined;
+
+  if (isRow) {
+    for (const k of VIEW_CONSOLE_ROW_DECORATIONS) {
+      if (k in dict) {
+        next ??= { ...dict };
+        delete next[k];
+      }
+    }
+  }
+
+  for (const [k, v] of Object.entries(next ?? dict)) {
+    const out = stripRowDecorations(v, VIEW_DECORATED_ROW_CARRIERS.includes(k), depth + 1);
+    if (out !== v) {
+      next ??= { ...dict };
+      next[k] = out;
+    }
+  }
+
+  return next ?? value;
+}
+
+/**
+ * Remove {@link VIEW_CONSOLE_ROW_DECORATIONS} from the builder rows of a `view`
+ * body, at every depth they occur — `filter[]` / `sort[]` under a flattened
+ * overlay, under a ViewItem's `config`, under `userFilters.tabs[]`, under
+ * `tabs[]`, and under any carrier added later.
+ *
+ * A **silent** removal, for the same reason `stripReadDecorations` is silent:
+ * this is our own UI's decoration riding on a document that is otherwise exactly
+ * what the author meant, so rejecting it would be hostile. It runs on the WIRE
+ * door only ({@link ViewMetadataSchema}) — {@link defineViewItem} and the other
+ * authoring doors keep rejecting the key by name, which is the whole point of
+ * the split.
+ *
+ * Nothing is lost at rest: `saveMetaItem` persists the ORIGINAL body, so the
+ * console still reads its own ids back.
+ *
+ * Returns the SAME reference when there is nothing to strip, so the common path
+ * allocates nothing. Non-object inputs pass through — the schema owns those.
+ */
+export function stripViewConsoleDecorations(body: unknown): unknown {
+  return stripRowDecorations(body, false, 0);
+}
+
 /**
  * View Filter Rule Schema
  * Standardized filter condition used in list views, tabs, and page-level filters.
  * Uses a declarative array-of-objects format: [{ field, operator, value }].
  *
- * ⚠️ [#5114] Deliberately still STRIP — an earlier wave closed this shape, and
- * that closure is REVERTED here because it 422'd a live console path.
+ * ⚠️ [#5074] CLOSED — this is the authoring shape, and it rejects the console's
+ * row `id`. #5114 had reopened it as a provisional hotfix, explicitly pending
+ * this split; that hotfix is now retired rather than left standing.
  *
- * **Wire-contaminated.** The filter builder objectui renders stamps
- * `id: crypto.randomUUID()` on every row it creates
+ * **Why the reopen was needed, and why it no longer is.** The filter builder
+ * objectui renders stamps `id: crypto.randomUUID()` on every row it creates
  * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
  * filter is read back into the builder —
  * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
  * validates the PUT body and then persists the AUTHORED body verbatim, so that
- * `id` is on the wire and in the store. Closed, this shape turned every filter
- * write carrying one into a 422 — measured on all three paths, including the
- * flattened personalization overlay that is the body the console actually PUTs.
+ * `id` is on the wire and in the store. Closed *without* a wire route, this
+ * shape turned every filter write carrying one into a 422 — measured on all
+ * three paths, including the flattened personalization overlay that is the body
+ * the console actually PUTs.
  *
- * The mechanism is the part worth carrying to the next block, and it is NOT what
- * the `ViewMetadataSchema` union's own comment implies: that union re-opens its
- * flattened members with `.strip()` so Studio's round-trip aux keys ride along —
- * but **`.strip()` does not recurse**, any more than `.strict()` does. It
- * re-opens the TOP level only, so a nested block closed here is still reached
- * through that member and a console-stamped key inside it becomes a 422
- * regardless of the member's posture. Same finding as `ListView.sort` at #4001
- * 批 18 (#5070), one block over.
+ * The mechanism is the part worth carrying, and it is why a top-level reopen
+ * could never have rescued this block: **`.strip()` does not recurse**, any more
+ * than `.strict()` does. `ViewMetadataSchema` re-opens its wire members' TOP
+ * level only, so a nested block closed here is still reached through those
+ * members at full strictness. Same finding as `ListView.sort` at #4001 批 18
+ * (#5070), one block over.
  *
- * `id` was NOT declared to make the rejection go away. It is a React list key,
- * not protocol: declaring it would put a UI artifact on the authorable surface
- * and tell an AI author to generate a UUID for a filter rule — a `??` fallback
- * wearing a schema. The real close is #5074's authoring/wire split applied to
- * this block (an authoring variant that rejects `id`, a wire variant that
- * tolerates it, and a re-opening that can REACH a nested block); #5074's scope
- * addendum names this site. Until then the shape stays open rather than
- * half-closed against the platform's own writes.
+ * `id` is still NOT declared here. It is a React list key, not protocol:
+ * declaring it would put a UI artifact on the authorable surface and tell an AI
+ * author to generate a UUID for a filter rule — a `??` fallback wearing a
+ * schema. Instead the WIRE door removes it before validating, via the declared
+ * {@link VIEW_CONSOLE_ROW_DECORATIONS} vocabulary and
+ * {@link stripViewConsoleDecorations} — the write-path mirror of
+ * `stripReadDecorations`, and the piece that makes the wire opening
+ * recursive-effective where a `.strip()` cannot reach. So the authoring surface
+ * stays exactly three keys and the console's own writes still parse.
  *
  * Recorded in three places: this JSDoc, `view-filter-rule-wire-id.test.ts`, and
  * the `ui/` row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
@@ -274,7 +388,13 @@ export function normalizeFilterOperator(op: unknown): string {
  * ]
  * ```
  */
-export const ViewFilterRuleSchema = lazySchema(() => z.object({
+export const ViewFilterRuleSchema = lazySchema(() => strictObject({
+  surface: 'this filter rule',
+  history: VIEW_HISTORY,
+  guidance: {
+    id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
+  },
+}, {
   /** Field name to filter on */
   field: z.string().describe('Field name to filter on'),
   /**
@@ -971,37 +1091,44 @@ export const ListViewSchema = lazySchema(() => strictObject({
    * go through its own deprecation cycle; do not drop it here.
    */
   /**
-   * ⚠️ [#4001 批 18] Deliberately still STRIP — reverted after the closed
-   * version broke a live console path, which is the finding rather than a
-   * setback.
+   * ⚠️ [#5074] CLOSED — the entry is the authoring shape and rejects the
+   * console's row `id`. 批 18 closed it, hit a live 422, and reverted (#5070);
+   * that revert was explicitly provisional pending this split.
    *
-   * This batch closed it (with `direction → order`, the #4721 alias for the
-   * identical tuple — `{ field, direction: 'desc' }` parsed to
-   * `{ field, order: 'asc' }`, a silently REVERSED sort). The full suite then
-   * failed one case: `view-metadata-schema.test.ts` pins
-   * `sort: [{ id, field, order }]` as *"the exact shape normalizeViewMetadata
-   * persists on a console column-sort PUT"*, and `id` is a UI row identity
-   * objectui stamps per row (`components/src/custom/sort-builder.tsx:68`,
-   * `:94` — `crypto.randomUUID()`), persisted verbatim because `saveMetaItem`
-   * stores the original body.
+   * The close carries `direction → order`, the #4721 alias for the identical
+   * tuple: `{ field, direction: 'desc' }` used to parse to `{ field, order:
+   * 'asc' }` — a silently REVERSED sort, which is the reason closing this entry
+   * was worth doing at all.
    *
-   * The mechanism is worth stating, because it governs every nested block in
-   * this file and is NOT what the union's comment implies: `ViewMetadataSchema`
-   * rescues Studio's round-trip keys with `.strip()` on its flattened members —
-   * but **`.strip()` does not recurse** any more than `.strict()` does. It
-   * re-opens the TOP level only, so a nested block closed here is still reached
-   * through that member and a console-stamped key inside it becomes a 422.
+   * What made the first attempt a regression: `view-metadata-schema.test.ts`
+   * pins `sort: [{ id, field, order }]` as *"the exact shape
+   * normalizeViewMetadata persists on a console column-sort PUT"*, and `id` is
+   * a UI row identity objectui stamps per row
+   * (`components/src/custom/sort-builder.tsx:68`, `:94` —
+   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stores the
+   * original body. **`.strip()` on a wire member could not rescue it** — it
+   * re-opens the TOP level only, and this is a nested block reached through that
+   * member. See {@link stripViewConsoleDecorations}, which removes the
+   * decoration on the wire door instead, at every depth.
    *
-   * `id` was NOT declared to make the rejection go away. It is a React list key,
-   * not protocol: declaring it would put a UI artifact on the authorable surface
-   * and tell an AI author to generate one. The real end state is the same
-   * authoring/wire split filed as #5074, applied one level down — until then
-   * this shape stays open rather than half-closed against the platform's own
-   * writes.
+   * `id` is still NOT declared: it is a React list key, and declaring it would
+   * put a UI artifact on the authorable surface and teach an AI author to emit
+   * one (批 18 Q1, two-axis rejection on record).
    */
   sort: z.union([
     z.string(), //Legacy "field desc"
-    z.array(z.object({
+    z.array(strictObject({
+      surface: 'this sort entry',
+      history: VIEW_HISTORY,
+      aliases: {
+        // #4721: the same tuple under a different word. Edit distance cannot
+        // reach it, and getting it wrong reverses the sort silently.
+        direction: 'order',
+      },
+      guidance: {
+        id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
+      },
+    }, {
       field: z.string(),
       order: z.enum(['asc', 'desc'])
     }))
@@ -1945,50 +2072,116 @@ function viewItemBaseShape() {
  * ```
  */
 /**
- * [#4001 批 18] Both arms stay STRIP — measured `wire`, not unfinished work.
+ * One arm of the ViewItem discriminated union, as a raw shape.
  *
- * This shape looks purely authorable ({@link defineViewItem} parses it, and
- * objectui's create form validates its build output against it), which is why
- * the ledger carried it as `authorable (p)`. It is also the FIRST member of
- * {@link ViewMetadataSchema}, the schema `saveMetaItem` validates every
- * persisted `view` body against — and that second role is a wire role.
+ * Both postures below are built from THIS function, so the authoring gate and
+ * the wire member cannot drift into two transcriptions of one contract (#2231's
+ * derive-by-reference; the fork PD#12 exists to prevent). The two differ in
+ * exactly two ways, both visible at the call site: the unknown-key posture, and
+ * the round-trip keys the wire arm additionally declares.
+ */
+function viewItemArmShape<K extends 'list' | 'form'>(viewKind: K, config: z.ZodTypeAny) {
+  return {
+    viewKind: z.literal(viewKind),
+    config,
+    ...viewItemBaseShape(),
+  };
+}
+
+/** The authoring surface `defineViewItem` and Studio's create form are judged by. */
+const VIEW_ITEM_SURFACE = {
+  surface: 'this view item',
+  history: VIEW_HISTORY,
+  guidance: {
+    // The failure this close exists for (#5074): one letter, and the author got
+    // a ViewItem with NO view configuration that parsed clean.
+    confg: 'Did you mean `config`? A ViewItem carries its whole view definition under `config`.',
+    // Wire keys, named so the rejection tells an author where they belong
+    // instead of leaving them to guess.
+    isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
+    sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
+  },
+} as const;
+
+/**
+ * [#5074] The AUTHORING gate — strict. Split from the wire member it used to be.
  *
- * Traced end to end rather than inferred. objectui's "pin this view" control
- * calls `dataSource.updateView(object, id, { isPinned })`
+ * Until #5074 one schema wore two contracts. It is what {@link defineViewItem}
+ * parses and what objectui's view-create form validates `createBuildBody`'s
+ * output against (`app-shell/src/views/metadata-admin/view-create-body.test.ts`)
+ * — an authoring door that genuinely wants strict. It was ALSO the first member
+ * of {@link ViewMetadataSchema}, the union `saveMetaItem` validates every
+ * persisted `view` body against — a wire role that genuinely needs Studio's
+ * round-trip keys through.
+ *
+ * Traced end to end rather than inferred, and the trace is why the split was
+ * necessary rather than cosmetic. objectui's "pin this view" control calls
+ * `dataSource.updateView(object, id, { isPinned })`
  * (`app-shell/src/views/ObjectView.tsx:882`), and `updateView`
  * (`data-objectstack/src/index.ts:2801`) GETs the stored item and PUTs
  * `{ ...current, ...partial }`. For a standalone ViewItem record `current`
- * carries `viewKind` AND `config`, so the merged body matches THIS member —
- * the flattened-overlay members are excluded by their `config: z.undefined()`
- * guard — and it arrives carrying `isPinned`, which this shape does not
- * declare. Today it is stripped from the discarded parse result and the save
- * succeeds. Closed, pinning a saved view would 422.
+ * carries `viewKind` AND `config`, so the merged body matches member 1 — the
+ * flattened-overlay members are excluded by their `config: z.undefined()` guard
+ * — and it arrives carrying `isPinned`, which the authoring shape does not
+ * declare. That body is now judged by {@link ViewItemWireSchema} instead.
  *
- * That is the same "auxiliary Studio round-trip keys ride along" contract the
- * two flattened members are explicitly `.strip()` for, reaching one member
- * further than the block comment below realised. It is finding 16's
- * `.extend()`/union trap in its most expensive form: the strictness of a union
- * member is decided by a consumer none of this file's authoring doors mention.
- *
- * ⚠️ Closing this needs a DESIGN decision, not a posture flip: the authoring
- * door (`defineViewItem`, Studio's create form) genuinely wants strict, and the
- * metadata door genuinely needs the aux keys through. Splitting them — a strict
- * authoring schema plus a `.strip()`-reopened wire member, exactly how
- * `ListViewSchema` / `FormViewSchema` are already handled below — is one shape;
- * leaving one lenient schema is another. Filed rather than guessed.
+ * What closing this buys, in the words of the ruling that ordered it:
+ * `defineViewItem({ name, object, viewKind, confg: {…} })` — one letter wrong —
+ * used to strip the typo and hand back a ViewItem with **no view configuration
+ * at all**, parsed clean. That is #1535's `workflows: [...]` replayed on the
+ * surface with the highest author density in the file.
  */
 export const ViewItemSchema = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
+    strictObject(VIEW_ITEM_SURFACE, viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.'))),
+    strictObject(VIEW_ITEM_SURFACE, viewItemArmShape('form', FormViewSchema.describe('Form view configuration.'))),
+  ]),
+);
+
+/**
+ * Auxiliary Studio round-trip keys, given an explicit DECLARED home on the wire
+ * variant (#5074) instead of living implicitly on "the member nobody closed".
+ *
+ * These are per-user switcher state the console writes through the `view`
+ * metadata API and reads back; `saveMetaItem` persists the body verbatim, so
+ * they are on the wire and in the store. They are deliberately declared HERE and
+ * not on {@link ViewItemSchema}: an author who writes `isPinned` in a `*.view.ts`
+ * gets a named rejection pointing at `order`, while the console's own PUT parses.
+ */
+function viewItemWireFields() {
+  return {
+    isPinned: z.boolean().optional()
+      .describe('Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored).'),
+    sortOrder: z.number().int().optional()
+      .describe('Studio round-trip: position within the switcher (per-user state, written by the console — not authored).'),
+  };
+}
+
+/**
+ * [#5074] The WIRE variant of {@link ViewItemSchema} — member 1 of
+ * {@link ViewMetadataSchema}, re-opened with `.strip()`.
+ *
+ * Exactly the pattern the two flattened members below already use
+ * (`ListViewSchema.extend(flattenedViewOverlayFields()).strip()`), reached one
+ * member further. `z.discriminatedUnion` cannot be `.extend()`ed, so the two
+ * postures share {@link viewItemArmShape} rather than a `.extend()` chain —
+ * derive-by-reference either way, one shape, two doors.
+ *
+ * `.strip()` covers the TOP level only. Nested console decorations
+ * (`config.filter[].id`, `config.sort[].id`) are handled by
+ * {@link stripViewConsoleDecorations} on the wire door — see that function for
+ * why a recursive strip is the piece a posture flip cannot provide.
+ */
+export const ViewItemWireSchema = lazySchema(() =>
+  z.discriminatedUnion('viewKind', [
     z.object({
-      viewKind: z.literal('list'),
-      config: ListViewSchema.describe('List-family view configuration.'),
-      ...viewItemBaseShape(),
-    }),
+      ...viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.')),
+      ...viewItemWireFields(),
+    }).strip(),
     z.object({
-      viewKind: z.literal('form'),
-      config: FormViewSchema.describe('Form view configuration.'),
-      ...viewItemBaseShape(),
-    }),
+      ...viewItemArmShape('form', FormViewSchema.describe('Form view configuration.')),
+      ...viewItemWireFields(),
+    }).strip(),
   ]),
 );
 
@@ -2044,20 +2237,30 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // Auxiliary Studio round-trip keys (`isPinned`, `sortOrder`, …) ride along on
 // the shapes Studio actually round-trips, matching the "persist the payload
 // verbatim" contract in `saveMetaItem` (it validates but stores the original
-// item). ⚠️ [#4001 批 18] The line that used to stand here said "all four
-// members strip-parse (no `.strict()`)". That was true when it was written and
-// is now false in one direction and load-bearing in the other — measured:
+// item). ⚠️ [#5074] The line that used to stand here said "all four members
+// strip-parse (no `.strict()`)". It was true when written, then half-false and
+// half-load-bearing (批 18 measured it), and is now replaced by the split. As
+// it stands, measured:
 //
+//   • member 1 is `ViewItemWireSchema` — the `.strip()` WIRE variant of
+//     `ViewItemSchema`. The authoring schema of the same shape is strict and
+//     lives at its own name; this is the body `updateView` PUTs for a
+//     standalone ViewItem record, and `isPinned`/`sortOrder` are DECLARED on it
+//     rather than surviving because nobody closed the member.
 //   • member 2 (the container) IS strict. `ViewSchema` was closed by an earlier
 //     batch, so `{ list: …, isPinned: true }` 422s. Not a regression: nothing
 //     sends it. `updateView` unwraps a container to its inner list config
 //     (`if (current?.list) current = current.list`) before merging, so a
 //     container body never reaches this union carrying an aux key.
-//   • members 1, 3 and 4 must keep stripping, and only 3 and 4 say so in code.
-//     Member 1 is the one `updateView` hits for a standalone ViewItem record —
-//     see the note on `ViewItemSchema`.
+//   • members 3 and 4 are the flattened overlays, `.strip()` and saying so.
 //
-// Anyone closing a member here must re-run that trace, not re-read this comment.
+// ⚠️ All three `.strip()`s re-open the TOP level ONLY — `.strip()` no more
+// recurses than `.strict()` does. The nested console decorations
+// (`filter[].id`, `sort[].id`) are removed by `stripViewConsoleDecorations`
+// BEFORE the union runs, which is what makes the wire opening
+// recursive-effective and what let `ViewFilterRuleSchema` / `ListView.sort`
+// close for authoring. Anyone closing a member here must re-run that trace,
+// not re-read this comment.
 
 /**
  * Optional identity + structural-guard fields layered onto the two "flattened
@@ -2114,13 +2317,23 @@ function containerHasAView(v: unknown): boolean {
  * instead of stripping them to `{}` (#3095).
  *
  * `z.toJSONSchema()` emits this as an `anyOf` of the four members, which the
- * `/api/v1/meta/types/view` endpoint serves to Studio's SchemaForm.
+ * `/api/v1/meta/types/view` endpoint serves to Studio's SchemaForm. That still
+ * holds through the #5074 `z.preprocess` wrapper — a pipe converts to its
+ * output side, so the top level is still an `anyOf` of four. Pinned in
+ * `view-metadata-schema.test.ts` and `view-authoring-wire-split.test.ts`,
+ * because the endpoint is what feeds every generated view form.
+ *
+ * [#5074] The `z.preprocess` is the WIRE door's decoration strip — see
+ * {@link stripViewConsoleDecorations}. It runs once, ahead of every member, so
+ * the openness this union needs reaches nested blocks that a member-level
+ * `.strip()` can never reach.
  */
 export const ViewMetadataSchema = lazySchema(() =>
-  z.union([
-    // 2. Standalone ViewItem record — nested config validated genuinely.
-    ViewItemSchema,
-    // 1. Non-empty defineView container.
+  z.preprocess(stripViewConsoleDecorations, z.union([
+    // 1. Standalone ViewItem record — nested config validated genuinely, and
+    //    the WIRE variant, so Studio's round-trip keys have a declared home.
+    ViewItemWireSchema,
+    // 2. Non-empty defineView container.
     ViewSchema.refine(containerHasAView, {
       message:
         'A view container must define at least one of `list`, `form`, `listViews`, or `formViews`.',
@@ -2139,7 +2352,7 @@ export const ViewMetadataSchema = lazySchema(() =>
     //    schema must strip back, or an upstream field addition becomes a crash.
     ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
     FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
-  ]),
+  ])),
 );
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -2408,6 +2621,8 @@ export function defineForm(
 
 export type View = z.infer<typeof ViewSchema>;
 export type ViewItem = z.infer<typeof ViewItemSchema>;
+/** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
+export type ViewItemWire = z.infer<typeof ViewItemWireSchema>;
 /** Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095). */
 export type ViewMetadata = z.infer<typeof ViewMetadataSchema>;
 export type ViewScope = z.infer<typeof ViewScopeSchema>;

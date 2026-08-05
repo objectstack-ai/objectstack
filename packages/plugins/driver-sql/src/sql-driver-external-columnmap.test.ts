@@ -13,6 +13,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 // Remote table with deliberately non-matching column names.
@@ -89,8 +90,8 @@ describe('SqlDriver external columnMap (ADR-0015 §18)', () => {
       // object form: region -> region_code
       const eu = await d.find('cm_customer', { where: { region: 'EU' } });
       expect(eu.map((r: any) => r.name).sort()).toEqual(['Borealis', 'Cyan']);
-      // array criterion: value -> ltv
-      const big = await d.find('cm_customer', { where: [['value', '>', 200]] });
+      // authored array criterion, lowered the declared way (#5158): value -> ltv
+      const big = await d.find('cm_customer', { where: parseFilterAST([['value', '>', 200]]) as any });
       expect(big.map((r: any) => r.name).sort()).toEqual(['Aurora', 'Borealis']);
       // mongo operator: value $gte
       const gte = await d.find('cm_customer', { where: { value: { $gte: 312 } } });

@@ -171,9 +171,12 @@ export type SyncStrategy = z.infer<typeof SyncStrategySchema>;
  * Renamed from `ConflictResolution` (#4738, ADR-0112 D9a — the C9/C12
  * prefixing lineage): that bare name was published by three entry points for
  * three different declarations (#4411 trap). The connector-sync strategy takes
- * the domain prefix; the bare `ConflictResolution` now belongs solely to
- * `@objectstack/spec/ui` (offline client/server sync — a different concept
- * with a disjoint vocabulary, and the only side with cross-repo consumers).
+ * the domain prefix; the bare `ConflictResolution` went to
+ * `@objectstack/spec/ui` (offline client/server sync — a different concept with
+ * a disjoint vocabulary). #4988 then retired `ui/offline.zod.ts` whole under
+ * ADR-0049, so the bare name is now published by nobody. This name STAYS as it
+ * is: it is the connector vocabulary's real name, and un-renaming it to reclaim
+ * a freed word would be a second breaking change for no gain.
  * The enum VALUES here are unchanged — authored `syncConfig.conflictResolution`
  * metadata parses byte-for-byte the same. Note `@objectstack/spec/api` also
  * exports `ConflictResolutionStrategy` (route conflicts) — a fourth, distinct

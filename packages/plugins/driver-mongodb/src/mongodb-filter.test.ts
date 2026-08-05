@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { translateFilter } from './mongodb-filter.js';
 
 describe('MongoDB Filter Translator', () => {
@@ -70,11 +71,15 @@ describe('MongoDB Filter Translator', () => {
       });
     });
 
-    it('array-style `<=` takes the same rule', () => {
-      expect(translateFilter([['created_at', '<=', '2026-07-28']])).toEqual({
+    it('the authored array `<=` takes the same rule, once lowered (#5158)', () => {
+      // `translateFilter` no longer compiles the array spelling; the authored
+      // shape reaches it through `parseFilterAST`, which is what both doors do.
+      expect(translateFilter(parseFilterAST([['created_at', '<=', '2026-07-28']]))).toEqual({
         created_at: { $lt: '2026-07-29' },
       });
-      expect(translateFilter([['created_at', '<=', '2026-07-28T12:00:00.000Z']])).toEqual({
+      expect(
+        translateFilter(parseFilterAST([['created_at', '<=', '2026-07-28T12:00:00.000Z']])),
+      ).toEqual({
         created_at: { $lte: '2026-07-28T12:00:00.000Z' },
       });
     });
@@ -171,49 +176,63 @@ describe('MongoDB Filter Translator', () => {
     });
   });
 
-  describe('legacy array-style filters', () => {
-    it('translates single comparison tuple', () => {
-      expect(translateFilter(['name', '=', 'Alice'])).toEqual({ name: 'Alice' });
+  describe('the array dialect is refused, not compiled (#5158)', () => {
+    /**
+     * `translateFilter` used to carry a second compiler for the array
+     * spelling, including an INFIX join (`[condA, 'or', condB]`) no schema
+     * declared and `parseFilterAST` cannot express. `FilterArray` is
+     * input-only authoring sugar (spec `data/filter.zod.ts`, #5285); both
+     * doors into the runtime lower it before a driver is reached, so a second
+     * implementation here is the ADR-0053 D-A1 divergence — the same one
+     * cloud's `RemoteTransport.buildWhereSQL` closed from its side (cloud#1075).
+     *
+     * The authored shapes are unchanged and still land on the same filter
+     * document; they simply travel `parseFilterAST` to get here, which is what
+     * the left column below asserts.
+     */
+    it.each([
+      ['single comparison tuple', ['name', '=', 'Alice'], { name: 'Alice' }],
+      ['!= operator', ['status', '!=', 'deleted'], { status: { $ne: 'deleted' } }],
+      ['>', ['age', '>', 18], { age: { $gt: 18 } }],
+      ['>=', ['age', '>=', 18], { age: { $gte: 18 } }],
+      ['<', ['age', '<', 65], { age: { $lt: 65 } }],
+      ['<=', ['score', '<=', 100], { score: { $lte: 100 } }],
+      ['in', ['status', 'in', ['active', 'pending']], { status: { $in: ['active', 'pending'] } }],
+      ['contains', ['name', 'contains', 'test'], { name: { $regex: 'test', $options: 'i' } }],
+      ['implicit AND list', [['name', '=', 'Alice'], ['age', '>', 18]],
+        { $and: [{ name: 'Alice' }, { age: { $gt: 18 } }] }],
+      // PREFIX is the declared spelling of a logical join. The infix form this
+      // module used to accept has no lowering at all — pinned as a refusal
+      // below rather than translated.
+      ['prefix OR group', ['or', ['role', '=', 'admin'], ['role', '=', 'manager']],
+        { $or: [{ role: 'admin' }, { role: 'manager' }] }],
+    ])('the authored %s still lands on the same filter document, via parseFilterAST', (
+      _label, authored, expected,
+    ) => {
+      expect(translateFilter(parseFilterAST(authored))).toEqual(expected);
     });
 
-    it('translates != operator', () => {
-      expect(translateFilter(['status', '!=', 'deleted'])).toEqual({ status: { $ne: 'deleted' } });
+    it.each([
+      ['comparison tuple', ['name', '=', 'Alice']],
+      ['condition list', [['name', '=', 'Alice'], ['age', '>', 18]]],
+      ['infix join (the undeclared dialect)', [['role', '=', 'admin'], 'or', ['role', '=', 'manager']]],
+    ])('refuses a raw array %s', (_label, where) => {
+      expect(() => translateFilter(where)).toThrow(/A filter ARRAY reached the driver/);
     });
 
-    it('translates comparison operators', () => {
-      expect(translateFilter(['age', '>', 18])).toEqual({ age: { $gt: 18 } });
-      expect(translateFilter(['age', '>=', 18])).toEqual({ age: { $gte: 18 } });
-      expect(translateFilter(['age', '<', 65])).toEqual({ age: { $lt: 65 } });
-      expect(translateFilter(['score', '<=', 100])).toEqual({ score: { $lte: 100 } });
+    it('an empty array is still "no filter", not a refusal', () => {
+      expect(translateFilter([])).toEqual({});
     });
 
-    it('translates in/nin operators', () => {
-      expect(translateFilter(['status', 'in', ['active', 'pending']])).toEqual({
-        status: { $in: ['active', 'pending'] },
+    it('the `createdAt` -> `created_at` alias went with the dialect', () => {
+      // It only ever existed on the array path (`mapFieldName`, called solely
+      // from the deleted `translateComparison`); the object path never applied
+      // it. A consumer-side alias is debt by AGENTS.md PD #12, so it is not
+      // re-added here — `created_at` is the declared field name.
+      expect(translateFilter({ createdAt: { $gt: '2024-01-01' } })).toEqual({
+        createdAt: { $gt: '2024-01-01' },
       });
-    });
-
-    it('translates contains operator', () => {
-      const result = translateFilter(['name', 'contains', 'test']);
-      expect(result).toEqual({ name: { $regex: 'test', $options: 'i' } });
-    });
-
-    it('translates multiple conditions with AND', () => {
-      const result = translateFilter([['name', '=', 'Alice'], ['age', '>', 18]]);
-      expect(result).toEqual({
-        $and: [{ name: 'Alice' }, { age: { $gt: 18 } }],
-      });
-    });
-
-    it('translates conditions with OR connector', () => {
-      const result = translateFilter([['role', '=', 'admin'], 'or', ['role', '=', 'manager']]);
-      expect(result).toEqual({
-        $or: [{ role: 'admin' }, { role: 'manager' }],
-      });
-    });
-
-    it('maps createdAt to created_at', () => {
-      expect(translateFilter(['createdAt', '>', '2024-01-01'])).toEqual({
+      expect(translateFilter(parseFilterAST([['created_at', '>', '2024-01-01']]))).toEqual({
         created_at: { $gt: '2024-01-01' },
       });
     });

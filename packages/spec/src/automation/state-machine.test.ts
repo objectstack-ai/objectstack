@@ -282,20 +282,30 @@ describe('[#4001] ActionRef / GuardRef — strict inside a union', () => {
   });
 
   // Anti-vacuity for the claim above: a PLAIN strictObject in this same file
-  // does surface its prose through the same formatter, so the union's
-  // `Invalid input` is a property of the union and not of the curation. If
-  // this control ever goes quiet too, the diagnosis changes completely.
-  it('CONTROL — a non-union shape renders its full prescription through formatZodError', () => {
+  // surfaces its prose through the same formatter, so anything the union
+  // renders differently is a property of the union and not of the curation.
+  //
+  // ⚠️ THIS PIN WAS FLIPPED BY #4971, exactly as 批 10 predicted it would be.
+  // It used to assert the second half was flattened away — `formatZodError`
+  // mapped `error.issues` and never descended into `invalid_union.errors`, so
+  // the curated rejection stopped at `✗ (root): Invalid input` on the CLI path
+  // while the REST body and `ZodError.message` carried it fine. The formatter
+  // now expands the union's most informative branch, and the two halves say
+  // the same thing again. What is still union-shaped is the extra `Invalid
+  // input` line above the prescription: zod raises one issue for the union,
+  // and that line is what says "no branch matched".
+  it('CONTROL — union and non-union shapes both render their prescription through formatZodError', () => {
     const plain = TransitionSchema.safeParse({ target: 't', guard: 'isX' });
     expect(formatZodError(plain.error!)).toContain('`guard` → `cond`');
 
     const union = ActionRefSchema.safeParse({ type: 'log', args: { a: 1 } });
-    // Same formatter, same class of mistake, flattened to nothing usable.
-    // `formatZodError` maps `error.issues` and never descends into
-    // `invalid_union.errors` — filed as a finding, deliberately not fixed in a
-    // spec-strictness PR (it would change CLI output for every union).
-    expect(formatZodError(union.error!)).toContain('Invalid input');
-    expect(formatZodError(union.error!)).not.toContain('this action reference');
+    const formatted = formatZodError(union.error!);
+    expect(formatted).toContain('Invalid input');
+    expect(formatted).toContain('this action reference');
+    expect(formatted).toContain('`args`');
+    // The string branch's "expected string, received object" is not a
+    // prescription and is not printed — see #4971's branch selection.
+    expect(formatted).not.toContain('expected string');
   });
 });
 

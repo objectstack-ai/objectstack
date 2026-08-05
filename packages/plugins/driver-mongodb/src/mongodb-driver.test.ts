@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { MongoDBDriver } from './mongodb-driver.js';
 import { createTestMongod } from './test-mongod.js';
 
@@ -421,9 +422,32 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
       expect(results.length).toBe(2);
     });
 
-    it('should filter with legacy array style', async () => {
+    // ── RETIRED PIN (#5158, maintainer ruling C) ──────────────────────
+    //
+    // This slot held `should filter with legacy array style`, which asserted
+    // that this driver COMPILES `where: [['age','>=',30], ['role','=','user']]`.
+    // That is the dialect itself, and the dialect is what ruling C deletes:
+    // `FilterArray` is INPUT-ONLY authoring sugar (spec `data/filter.zod.ts`,
+    // #5285), lowered through `parseFilterAST` at the engine and protocol doors
+    // before any driver is reached. A second compiler here is the ADR-0053
+    // D-A1 divergence — the same one cloud's `RemoteTransport.buildWhereSQL`
+    // closed from its side (cloud#1075).
+    //
+    // Same treatment as `driver-sql`'s two compile-asserting cases in
+    // `sql-driver-filter-no-silent-drop.test.ts`: the dialect case becomes a
+    // REFUSAL pin, plus a counterpart proving the identical authored shape
+    // still compiles — and returns the same rows — once lowered. Retiring the
+    // old assertion is the point of the change, not a casualty of it.
+
+    it('refuses a raw array `where` — the dialect is gone (#5158)', async () => {
+      await expect(
+        driver.find('user', { where: [['age', '>=', 30], ['role', '=', 'user']] as any }),
+      ).rejects.toThrow(/A filter ARRAY reached the driver/);
+    });
+
+    it('the same authored shape still returns the same rows, once lowered (#5158)', async () => {
       const results = await driver.find('user', {
-        where: [['age', '>=', 30], ['role', '=', 'user']] as any,
+        where: parseFilterAST([['age', '>=', 30], ['role', '=', 'user']]) as any,
       });
       expect(results.length).toBe(2);
     });

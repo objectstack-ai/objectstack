@@ -283,8 +283,17 @@ describe('[#5239] translateFilter reduces empty combinators to their boolean ide
       });
     });
 
-    it('the legacy array dialect is untouched', () => {
-      expect(translateFilter([['stage', '=', 'won']])).toEqual({ stage: 'won' });
+    it('an ARRAY where is outside the reduction entirely (#5158/#5329)', () => {
+      // This pin used to hold the legacy array dialect steady; #5329 deleted
+      // that dialect on main and refuses a non-empty array at the door, so the
+      // reduction never sees one (the refusal itself is pinned in
+      // `mongodb-filter.test.ts`). What is still THIS file's to pin: `[]` means
+      // the ABSENT filter — match-all `{}` — not the `$or: []` zero-row
+      // identity. Absence of a filter and an empty disjunction are different
+      // facts, and only the second one is #5239's.
+      expect(() => translateFilter([['stage', '=', 'won']])).toThrow(
+        /A filter ARRAY reached the driver/,
+      );
       expect(translateFilter([])).toEqual(MATCH_ALL);
     });
   });

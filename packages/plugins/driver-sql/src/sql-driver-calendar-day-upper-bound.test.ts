@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { parseFilterAST } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
@@ -137,14 +138,22 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_old']);
   });
 
-  it('applies to the array (`[field, op, value]`) where spelling too', async () => {
+  it('applies to the authored array spelling, lowered the declared way (#5158)', async () => {
+    // The array form used to be compiled by the driver itself. It is now
+    // input-only sugar lowered at the engine/protocol doors through
+    // `parseFilterAST`, so this asserts the same authored filter still reaches
+    // the same rows — via the one route that exists. Note the INFIX join
+    // (`[condA, 'and', condB]`) has no lowering at all and is refused at the
+    // door; the declared spelling of "both bounds" is the prefix group.
     const found = await driver.find('task', {
-      where: [['created_at', '<=', '2026-07-28'], 'and', ['created_at', '>=', '2026-04-29']],
+      where: parseFilterAST(
+        ['and', ['created_at', '<=', '2026-07-28'], ['created_at', '>=', '2026-04-29']],
+      ) as any,
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
 
     const between = await driver.find('task', {
-      where: [['created_at', 'between', ['2026-04-29', '2026-07-28']]],
+      where: parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]]) as any,
     } as any);
     expect(ids(between)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });

@@ -227,20 +227,60 @@ describe('registered metadata types', () => {
  * ## `view` is the end state, not the last item of debt
  *
  * 24 of 25 are closed and the 25th will not be, for a reason worth stating so
- * nobody "finishes the job" by force. The registered `view` schema is a UNION of
- * three runtime shapes, and the third — the flattened overlay — is deliberately
- * `.strip()`: it carries Studio's auxiliary round-trip keys (`isPinned`,
- * `sortOrder`, …) that `saveMetaItem` persists verbatim, so closing it would 422
- * a shape the platform itself writes. A union is only as closed as its most open
+ * nobody "finishes the job" by force. The registered `view` schema is a UNION
+ * over the runtime shapes a `view` body really takes, and THREE of its four
+ * members are deliberately `.strip()`:
+ *
+ *   • member 1, `ViewItemWireSchema` — the wire variant of `ViewItemSchema`;
+ *   • members 3 and 4, the flattened personalization overlays.
+ *
+ * All three carry Studio's auxiliary round-trip keys (`isPinned`, `sortOrder`,
+ * …) that `saveMetaItem` persists verbatim, so closing any of them would 422 a
+ * shape the platform itself writes. A union is only as closed as its most open
  * member, so `view` reads `strip` and always will.
  *
+ * ⚠️ [#5074] This paragraph used to name the flattened overlay as "the one
+ * deliberately open member" and say nothing about member 1 — which was ALSO
+ * open, and open by accident rather than by decision. That gap was #5074's
+ * finding: member 1 was the shape `updateView` PUTs a pin through, so it had a
+ * wire contract nobody had written down. It now has a name, a declared home for
+ * the aux keys, and a strict authoring twin (`ViewItemSchema`). Do not shorten
+ * this back to "the overlay".
+ *
  * What DID close is everything an author writes: `ViewSchema` (the container),
- * `ListViewSchema`, `FormViewSchema`, and the ~28 config shapes under them. The
- * open member is a wire shape wearing the same type name — which is exactly the
- * distinction the ledger's classification rule exists to draw, arriving here as
- * the campaign's final answer rather than as an exception to it.
+ * `ViewItemSchema`, `ListViewSchema`, `FormViewSchema`, and the ~28 config
+ * shapes under them. The open members are wire shapes, now wearing their own
+ * names — which is exactly the distinction the ledger's classification rule
+ * exists to draw, arriving here as the campaign's final answer rather than as an
+ * exception to it.
+ *
+ * ## `api` arrives (2026-08-04, #5271) with the SAME distinction, not a new one
+ *
+ * `api` joined the registry after the campaign ended, and it lands on this list
+ * for `view`'s reason wearing different clothes: `ApiEndpointSchema` is not only
+ * an authoring surface — it is what STORED rows are parsed with, by
+ * `buildEndpointIndex` (`packages/metadata/src/endpoint-matcher.ts`) and by
+ * `MetadataManager.publishPackage`'s `gateApiItemsForPublish`. A stored row
+ * carries the metadata layer's own bookkeeping (`packageId`, `state` — written
+ * by `register` / `publishPackage`, and read back by `publishPackage`'s package
+ * filter), which is not endpoint vocabulary.
+ *
+ * This was MEASURED, not assumed. Closing the shape with `strictObject` turns
+ * every stored row into `unrecognized_keys: ['packageId', 'state']`: the
+ * load-time backstop then excludes the endpoint (its route answers 404) and the
+ * publish gate reports a schema error in place of the ADR-0121 D6 verdict it
+ * exists to give — 10 tests in `packages/metadata` go red, which is what
+ * surfaced it. So the debt is real and it is NOT in this vocabulary: the fix is
+ * to separate the stored envelope from the body at the metadata layer, filed
+ * separately, after which `api` comes off this list. Teaching `ApiEndpointSchema`
+ * two bookkeeping keys to buy strictness would make the authoring contract
+ * describe the storage layer, which is the trade this campaign refuses.
+ *
+ * So: `view` is the end state; `api` is tracked debt with a named owner. Both
+ * are here for the same underlying reason — one type name serving both an
+ * authored document and a wire row.
  */
-const STILL_STRIP = new Set<string>(['view']);
+const STILL_STRIP = new Set<string>(['view', 'api']);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -311,7 +351,15 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
     // ADR-0088 retirement), taking an already-closed schema with it. The
     // campaign's closure ratio is unchanged — one fewer registered type, not
     // one fewer closed one.
+    //
+    // 24 → 25 on 2026-08-04: `api` JOINED the registry (#5271, part of #5206),
+    // the first new registered kind since the campaign ended. It declares the
+    // protection envelope (so `UNDECLARED_ENVELOPE` stays empty) but goes onto
+    // STILL_STRIP — measured, see that list's note: the same schema parses
+    // stored rows carrying `packageId` / `state`, so closing it breaks the
+    // load-time backstop and the publish gate. Closed count is therefore
+    // unchanged at 23 while the registered total moves to 25.
     expect(closed.length).toBe(23);
-    expect(types.length).toBe(24);
+    expect(types.length).toBe(25);
   });
 });

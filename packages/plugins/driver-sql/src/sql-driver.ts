@@ -10,7 +10,6 @@
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
-import { canonicalAstOperator } from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
@@ -469,6 +468,38 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#5158] A `FilterArray` reached the driver unlowered.
+ *
+ * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
+ * — and `FilterArray` is INPUT-ONLY authoring sugar the spec declares separately
+ * (`spec/data/filter.zod.ts`, #5285). Both doors into the runtime lower it
+ * through `parseFilterAST` before any driver is reached: the protocol face
+ * (`metadata-protocol`, since #4121) and the engine (`ObjectQL`, ruling C).
+ *
+ * Until ruling C this driver carried a SECOND filter compiler for the array
+ * spelling — one that also accepted an INFIX join form (`[condA, 'or', condB]`)
+ * no schema ever declared and `parseFilterAST` cannot express. Two compilers
+ * for one query is the ADR-0053 D-A1 divergence, and it had already produced a
+ * live product fork: cloud's `RemoteTransport.buildWhereSQL` refuses the exact
+ * input this method used to compile (cloud#1075), with zero tests on either
+ * side of the split. Deleting the dialect converges them.
+ *
+ * The message names the lowering, not the SQL builder, because the fix is
+ * always at the caller: lower the value (or go through the engine, which does).
+ */
+function filterArrayReachedDriverError(filters: unknown[]): Error {
+  return unsupportedFilterError(
+    `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
+    `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
+    `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
+    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+    `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
+    `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
+    `all: write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -516,10 +547,13 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
 }
 
 /**
- * [#5041] Operators whose comparand is a single bound VALUE, in both spellings
- * this driver accepts — the Filter Protocol `$`-form read by
- * {@link SqlDriver.applyFilterCondition} and the canonicalised infix form read
- * by {@link SqlDriver.applyAstComparison}.
+ * [#5041] Operators whose comparand is a single bound VALUE, in the Filter
+ * Protocol `$`-form read by {@link SqlDriver.applyFilterCondition} — the one
+ * spelling this driver still compiles. It also listed the canonicalised infix
+ * form, read by an `applyAstComparison` emitter deleted with the array dialect
+ * in #5158; the infix spellings stay in the set because
+ * {@link assertCompilableComparand} is called with an already-canonicalised
+ * operator on the reduction path.
  *
  * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
  * ABSENT: an array is their legitimate comparand, and they compile through
@@ -671,6 +705,133 @@ function assertFilterNode(value: unknown, path: string): asserts value is Record
   );
 }
 
+/**
+ * [#5240] `{ field: {} }` — a field constrained by ZERO operators.
+ *
+ * One declared shape, three answers across this repo: THIS driver refused it at
+ * the top level (the #5041 comparand gate) while DROPPING it inside
+ * `$and`/`$or`/`$not` — where a predicate that emits nothing means "matches
+ * every row" — and `driver-memory` / `@objectstack/formula` both answered
+ * "matches nothing". So `{ $or: [ { a: {} }, { b: 2 } ] }` returned a different
+ * row set per backend, and this driver contradicted ITSELF depending on whether
+ * the same constraint sat at the top level or one combinator deep.
+ *
+ * Ruled on #5240: refuse it everywhere, in the ADR-0112 envelope every sibling
+ * filter refusal here speaks. Not TRUE and not FALSE — because the shape is
+ * almost always an authoring accident (a filter builder that recorded a field
+ * and no operator, or generated metadata that lost its operator), and both
+ * silent readings answer it with a row count the author never asked for. The
+ * same reasoning #5041 applied one position over: a filter that cannot be given
+ * one meaning is refused at the producer, loudly, at authoring time.
+ */
+function emptyFieldConstraintError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
+      `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
+      `comparand (e.g. { "${field}": "value" }). It is refused rather than ignored because the ` +
+      `backends disagreed on what it means — this driver dropped it inside $and/$or/$not (matching ` +
+      `EVERY row) while refusing it at the top level, and driver-memory / @objectstack/formula ` +
+      `answered "matches nothing". #5240.`,
+  );
+}
+
+/** [#5240] Is this field spec the zero-operator constraint refused above? */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  return isFilterNode(spec) && Object.keys(spec).length === 0;
+}
+
+/**
+ * [#5348] A `$`-prefixed key in a NODE position that is not a declared
+ * combinator.
+ *
+ * `FilterConditionSchema` declares exactly three (`LOGICAL_OPERATORS`: `$and`,
+ * `$or`, `$not`); every other key of a node is a FIELD NAME. This driver's
+ * emitter is written on that assumption and nothing checked it, so `$where`,
+ * `$nor`, `$expr` and friends fell through to the field arms and were compiled
+ * as COLUMNS — `remoteColumn(table, '$where', …)`. On SQLite a double-quoted
+ * name that resolves to no column degrades to a string literal, so the query
+ * compiled, ran, and returned ZERO ROWS:
+ *
+ * ```
+ * WHERE {"$where":"return true"}   → SELECT … WHERE "$where" = 'return true'  → []
+ * WHERE {"$nor":[{"stage":"won"}]} → (its array value missed the object arm)  → []
+ * ```
+ *
+ * Measured on better-sqlite3 in #5348. Other dialects reject the unknown
+ * identifier instead — a different symptom, the same cause, and neither is an
+ * answer to the filter that was asked.
+ *
+ * The refusal is this driver's FIELD-LEVEL posture (#3948 / #4436) finally
+ * reaching the node position: `{ stage: { $sounds_like: 'x' } }` has answered
+ * `INVALID_FILTER` / 400 for two releases while `{ $sounds_like: 'x' }` one
+ * level up answered "no rows". One driver, two positions, two answers — the
+ * same internal contradiction #5240 closed for `{ field: {} }`.
+ *
+ * The wording is `driver-memory`'s `unknownLogicalOperatorError`, verbatim
+ * through the vocabulary sentence, because #3948 made the backends AGREE that
+ * an uncompilable filter is a refusal and #5240 made one condition speak one
+ * wording. Only the closing clause differs: it names what THIS driver used to
+ * do with the key.
+ */
+function unknownLogicalOperatorError(key: string, path: string): Error {
+  return unsupportedFilterError(
+    `Unsupported filter combinator "${key}" at ${path}. A filter node's $-prefixed keys are the ` +
+      `declared logical operators $and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every ` +
+      `other key is a field name. It is refused rather than compiled as a COLUMN of that name, ` +
+      `which is what this driver used to do — producing a predicate that matched no row and ` +
+      `reported nothing, so a caller could not tell "no rows matched" from "the filter never ` +
+      `compiled" (#5348).`,
+  );
+}
+
+/**
+ * [#5347] `$null` whose comparand is not a boolean.
+ *
+ * `FieldOperatorsSchema` declares `$null: z.boolean()`, and nothing between an
+ * authored `where` and this driver validates against it — so a non-boolean
+ * really does arrive here. Every backend then read it, and they did NOT agree;
+ * measured in #5347 against one row with `stage: 'won'` and one with
+ * `stage: null`, on `{ stage: { $null: 'yes' } }`:
+ *
+ * | backend | compiled to | rows |
+ * |---|---|---|
+ * | driver-sql / driver-sqlite-wasm / Turso local | `IS NULL` (anything but `false`) | the NULL row |
+ * | driver-memory live path (mingo), driver-mongodb | `IS NOT NULL` (anything but `true`) | the valued row |
+ * | driver-memory reference matcher | nothing at all — the constraint vanished | BOTH rows |
+ *
+ * Three readings of one declared operator, and two of them are each other's
+ * exact complement. The cause is a pair of default branches hung on opposite
+ * sides: this driver's emitter asked `opValue === false`, the JS drivers asked
+ * `val === true`. Neither is a rule anyone wrote down; both are what a
+ * two-branch conditional does with a third value.
+ *
+ * Ruled on #5347: REFUSED, in every position, on every backend — the same
+ * disposition #5240 gave `{ field: {} }` and for the same reason. `$null: 0`
+ * read as IS NULL (this driver's rule) is almost certainly not what the author
+ * meant, `$null: 0` read as IS NOT NULL (the JS rule) is no better, and the
+ * string `"false"` — which an AI-authored or JSON-round-tripped scope produces
+ * readily — is truthy, so it lands on the opposite side from the `false` it was
+ * written to mean. There is no reading of a non-boolean here that is not a
+ * guess about the author's intent, so the driver stops guessing.
+ *
+ * `$exists` carries the identical `=== false` identity read one arm below and
+ * is deliberately NOT touched here: it diverges too, but on its own axis (what
+ * "exists" means for a null-valued key is #5299's open question), and #5347
+ * ruled on `$null`. Filed separately rather than settled as a rider.
+ */
+function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
+      `than coerced because the backends read a non-boolean in OPPOSITE directions — this driver ` +
+      `compiled IS NULL (anything but false), driver-memory's query path and driver-mongodb ` +
+      `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
+      `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
+      `the false it was written to mean (#5347).`,
+  );
+}
+
 /** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
 function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
   if (Array.isArray(value)) return;
@@ -743,15 +904,58 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
   }
 
-  // A field key always contributes a predicate. Note this stays `'clause'` even
-  // for `{ field: {} }` (a field constrained by zero operators), which compiles
-  // to no SQL today. That shape is a SEPARATE divergence tracked in #5240 —
-  // `matchesFilter` and `driver-memory` both answer FALSE for it, this driver's
-  // combinator path answers TRUE, and its own top-level `applyFilters` path
-  // refuses it outright via `assertCompilableComparand` — and picking the winner
-  // is a semantic ruling, not this change's call. Classifying it as `'clause'`
-  // rather than `'true'` is precisely what keeps the identity reduction from
-  // silently ruling on it: the shape compiles exactly as it did before.
+  // [#5348] Everything still `$`-prefixed at this point is an UNDECLARED
+  // combinator — the three declared ones each returned above. Refused here and
+  // not in the emitter for exactly the reason the two lines below are here, and
+  // the reason #5327 gave for `{ field: {} }`: this walk is exhaustive and does
+  // not short-circuit, while the emitter is skipped wholesale by a boolean
+  // identity. `{ $or: [ {}, { $where: '…' } ] }` reduces to TRUE on its first
+  // disjunct, so an emitter-side gate would refuse the `$where` or ignore it
+  // depending on its SIBLINGS — "a gate conditional on evaluation order", which
+  // this function's own doc comment warns against.
+  //
+  // It must also come BEFORE the field arms below, because that is precisely
+  // what those arms did wrong: they accepted `$where` as a field name.
+  if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
+
+  // [#5240] `{ field: {} }` is refused HERE — on the validating walk, beside
+  // `assertFilterNode` / `assertFilterNodeList` — rather than in the emitter
+  // below, for the same reason those two sit here: the walk is exhaustive and
+  // does NOT short-circuit, so the refusal cannot be skipped by an identity that
+  // resolves the enclosing node first. Gating it in the compile branch instead
+  // would let `{ $or: [ { a: {} }, {} ] }` slip through untouched — the `{}`
+  // disjunct reduces the whole `$or` to TRUE, the emitter returns before it ever
+  // reaches `{ a: {} }`, and the shape would be refused or ignored depending on
+  // its SIBLINGS. That is the "gate conditional on evaluation order" this
+  // function's own doc comment warns against.
+  //
+  // Note what is deliberately NOT changed: the VERDICT. A field key still
+  // contributes `'clause'`, exactly as #5134 classified it. This adds a refusal,
+  // it does not reclassify a surviving shape, so every filter that compiled
+  // before compiles byte-identically now.
+  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+
+  // [#5347] `$null`'s comparand is a boolean by declaration. Checked on this
+  // walk rather than in the emitter's `$null` arm for the same
+  // evaluation-order reason, and checked on the RAW value so the message names
+  // the shape the caller sent rather than whatever `coerceFilterValue` made of
+  // it. Only `$null` is inspected: the surrounding operator vocabulary is the
+  // emitter's `default: throw` to enforce, and widening this walk into a second
+  // vocabulary gate is how two lists drift apart (#3948).
+  // `hasOwnProperty` rather than `'$null' in value` so an inherited key can
+  // never trip the gate, and rather than `Object.hasOwn` because this package
+  // targets es2020. `{ $null: undefined }` still counts: the key is own and
+  // enumerable, and `undefined` is exactly one of the comparands the issue
+  // measured a divergence on.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$null') &&
+    typeof value.$null !== 'boolean'
+  ) {
+    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+  }
+
+  // A field key always contributes a predicate.
   return 'clause';
 }
 
@@ -783,9 +987,28 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // `$eq: null` IS the null predicate; any other comparand is a value test.
     case '$eq': return value === null;
     case '$ne': return value !== null;
-    // The emitter reads `$null`/`$exists` by identity against `false`, so the
-    // guard must read them the same way or the two can disagree.
-    case '$null': return value !== false;
+    // [#5347] `$null` is now TOTAL over its declared domain: `reduceFilterKey`
+    // refuses a non-boolean comparand before this table is ever consulted, so
+    // the only values that reach here are `true` and `false`. The arm was
+    // `value !== false` — a lenient read written to mirror the emitter's own
+    // `opValue === false` identity test, because at the time BOTH had to agree
+    // about a third value that could arrive. Neither does any more, so the arm
+    // says what it means: a NULL column satisfies `$null` exactly when the
+    // caller asked for null.
+    //
+    // Tightened rather than left alone deliberately. `value !== false` and
+    // `value === true` are equivalent only while the refusal upstream holds; the
+    // lenient spelling would keep compiling if that gate were ever moved or
+    // removed, and would silently resume answering for shapes nobody ruled on.
+    // The strict spelling cannot — it is the same "declared = enforced" reflex
+    // the refusal itself is.
+    case '$null': return value === true;
+    // `$exists` keeps its lenient identity read: unlike `$null` it has NO
+    // comparand gate (#5347 ruled on `$null` only), so a non-boolean still
+    // reaches this table, and the guard must keep answering it the same way the
+    // emitter's `opValue === false` arm does or the two can disagree about a
+    // row. Tightening this one without the matching refusal would be the
+    // divergence, not the fix — filed separately.
     case '$exists': return value === false;
     // Negative-polarity set/substring tests: "not among" / "does not contain"
     // hold vacuously for a value that is absent.
@@ -829,10 +1052,13 @@ function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
   if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
-  // `{ field: {} }` compiles to no SQL at all. Guarding it would turn a shape
-  // that emits nothing into a live `IS NULL` predicate — i.e. would RULE on
-  // #5240 from here. Left exactly as it compiles today.
-  if (entries.length === 0) return 'none';
+  // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
+  // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
+  // emits nothing into a live `IS NULL` predicate, i.e. would RULE on #5240 from
+  // here" — is GONE, together with the ambiguity it was protecting. #5240 ruled
+  // the shape REFUSED, and `reduceFilterKey` raises that refusal while validating
+  // the tree, which `applyFilterCondition` does BEFORE its `$not` branch calls
+  // this rewrite. So an empty spec can no longer reach this function at all.
   let total = true;
   let nullSatisfies = true;
   for (const [op, value] of entries) {
@@ -5948,9 +6174,30 @@ export class SqlDriver implements IDataDriver {
 
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
+
+    // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
+    // declares `QueryASTSchema.where: FilterConditionSchema` — but this method
+    // used to carry a SECOND compiler for the array spelling, including an
+    // INFIX dialect (`[condA, 'or', condB]`) that no schema ever declared and
+    // that `parseFilterAST` cannot express. `FilterArray` is now declared as
+    // INPUT-ONLY authoring sugar (`spec/data/filter.zod.ts`, #5285) and BOTH
+    // doors into the runtime lower it before a driver is reached: the protocol
+    // face (`metadata-protocol`) and the engine (`ObjectQL.find`/`findOne`/
+    // `count`/`aggregate`/`update`/`delete`). So an array here is a bug in the
+    // caller, not a dialect to compile — and refusing it is what converges this
+    // driver with cloud's `RemoteTransport.buildWhereSQL`, which has refused
+    // the same input since cloud#1075. That fork had zero tests on either side.
+    if (Array.isArray(filters)) {
+      // `[]` keeps its meaning — "no filter", not a failed filter. Unchanged
+      // from every previous version of this method, and the same reading
+      // `parseFilterAST([])` gives it.
+      if (filters.length === 0) return;
+      throw filterArrayReachedDriverError(filters);
+    }
+
     const table = this.coercionKey(builder);
 
-    if (!Array.isArray(filters) && typeof filters === 'object') {
+    if (typeof filters === 'object') {
       const hasMongoOperators = Object.keys(filters).some(
         (k) =>
           k.startsWith('$') ||
@@ -5967,6 +6214,13 @@ export class SqlDriver implements IDataDriver {
       for (const [key, value] of Object.entries(filters)) {
         if (['limit', 'offset', 'fields', 'orderBy'].includes(key)) continue;
         const column = this.remoteColumn(table, key, key);
+        // #5240 — `{ field: {} }` reaches this loop when NO key of the filter
+        // carries an operator; the combinator path refuses it on the reduction
+        // walk. Refused here with the SAME message so one condition has one
+        // wording wherever the author wrote it — this position used to answer
+        // with #5041's generic "cannot be bound as a SQL parameter", which
+        // describes a comparand and not a constraint with no operator at all.
+        if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, `filter.${key}`);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         assertCompilableComparand(column, '=', value);
@@ -5978,83 +6232,12 @@ export class SqlDriver implements IDataDriver {
       return;
     }
 
-    if (!Array.isArray(filters) || filters.length === 0) return;
-
-    let nextJoin: 'and' | 'or' = 'and';
-
-    for (const item of filters) {
-      if (typeof item === 'string') {
-        const lower = item.toLowerCase();
-        if (lower === 'or') { nextJoin = 'or'; continue; }
-        if (lower === 'and') { nextJoin = 'and'; continue; }
-        // Anything else is not a join keyword, and the only way a bare string
-        // reaches here is a comparison triple that `isFilterAST()` refused —
-        // its operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()`
-        // never converted it and the raw array arrived as `where`. Skipping it
-        // (the old behaviour) emitted NO predicate at all: the caller asked to
-        // filter and silently got every row. Fail loudly instead. #3948.
-        throw unsupportedFilterError(
-          `Unrecognized filter operator "${item}" in a comparison triple. ` +
-            `A filter array is either a logical node (["and"|"or", …]) or nested ` +
-            `conditions ([[field, op, value], …]); a bare [field, op, value] only ` +
-            `reaches the driver when its operator is outside @objectstack/spec ` +
-            `VALID_AST_OPERATORS, which leaves the filter unparsed. ` +
-            `Filter was: ${JSON.stringify(filters)}`,
-        );
-      }
-
-      if (Array.isArray(item)) {
-        const [fieldRaw, op, value] = item;
-        const isCriterion = typeof fieldRaw === 'string' && typeof op === 'string';
-
-        if (isCriterion) {
-          const localField = this.mapSortField(fieldRaw);
-          const field = this.remoteColumn(table, fieldRaw, localField);
-          const opLower = String(op).toLowerCase();
-          const columnExpr = this.filterColumnExpr(table, localField, field);
-          // Calendar-day upper bounds (#3777) — same translation the
-          // Mongo-operator path applies, for the array (`[field, op, value]`)
-          // spelling of the identical comparison.
-          const dayRange = opLower === 'between'
-            ? this.calendarDayBetweenRewrite(table, localField, value) : null;
-          if (dayRange) {
-            (builder as any)[nextJoin === 'or' ? 'orWhere' : 'where']((qb: any) => {
-              if (columnExpr) {
-                this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
-                this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
-              } else {
-                qb.where(field, '>=', dayRange.lower).andWhere(field, '<', dayRange.upper);
-              }
-            });
-          } else {
-            const rewrite = this.calendarDayUpperBoundRewrite(table, localField, opLower, value);
-            const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, value);
-            this.applyAstComparison(
-              builder, nextJoin, field, rewrite?.op ?? op, value, coerced,
-              columnExpr,
-            );
-          }
-        } else {
-          const method = nextJoin === 'or' ? 'orWhere' : 'where';
-          (builder as any)[method]((qb: any) => {
-            this.applyFilters(qb, item);
-          });
-        }
-
-        nextJoin = 'and';
-        continue;
-      }
-
-      // Neither a join keyword nor a condition. Previously fell out of both
-      // branches and was dropped, so a malformed element silently narrowed
-      // nothing. Same reasoning as above: an unapplied filter must not look
-      // like a satisfied one. #3948.
-      throw unsupportedFilterError(
-        `Unrecognized filter element of type "${item === null ? 'null' : typeof item}" — ` +
-          `expected a logical keyword ("and"/"or") or a condition array. ` +
-          `Filter was: ${JSON.stringify(filters)}`,
-      );
-    }
+    // A truthy non-object, non-array `where` (`'active'`, `42`) emits no
+    // predicate. Pre-existing behaviour on a shape only a cast can produce —
+    // the protocol face rejects it (`unusableFilterError`) and `FilterCondition`
+    // does not describe it. Untouched here on purpose: #5158 is about the ARRAY
+    // dialect, and widening the refusal is a separate change with its own
+    // blast radius.
   }
 
   /**
@@ -6094,139 +6277,6 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Apply one comparison node from the array-format (`[field, op, value]`)
-   * `where` to the Knex builder, honouring the operator whitelist from
-   * `@objectstack/spec` (`VALID_AST_OPERATORS`) plus the alias spellings the
-   * ObjectUI client emits (`isnull` / `isnotnull` / `is_empty`, …).
-   *
-   * Why this is NOT a thin `builder.where(field, op, value)` passthrough
-   * (issue #2704): an unrecognised operator used to be forwarded to Knex
-   * verbatim. Knex then either rejected it with a 400 (`is_empty` →
-   * "operator not permitted", blanking the whole grid) or — when the comparand
-   * was `null` — silently compiled a clause that matched EVERY row
-   * (`isnull` / `is`). On a permission- or assignment-scoped list view that
-   * silent full-table scan is a data leak, strictly worse than an error. So
-   * null predicates compile to a real `IS NULL` / `IS NOT NULL` (unified with
-   * the `{field, equals, null}` path), and any operator off the whitelist
-   * throws instead of ever reaching Knex.
-   *
-   * `columnExpr` (from {@link filterColumnExpr}) is the storage-normalised form
-   * of `field` — non-null only for a SQLite `Field.datetime`, where comparing the
-   * raw column would compare against whichever of the two stored forms the writer
-   * happened to produce (#3912). It is optional so the protected signature stays
-   * source-compatible for subclasses; omitting it just keeps the raw column.
-   */
-  protected applyAstComparison(
-    builder: any,
-    join: 'and' | 'or',
-    field: string,
-    op: string,
-    rawValue: unknown,
-    coerced: unknown,
-    columnExpr?: { sql: string; bindings: any[] } | null,
-  ): void {
-    const where = join === 'or' ? 'orWhere' : 'where';
-    const whereNull = join === 'or' ? 'orWhereNull' : 'whereNull';
-    const whereNotNull = join === 'or' ? 'orWhereNotNull' : 'whereNotNull';
-    // Fold every accepted spelling of one comparison onto a single infix form so
-    // the switch below has one case per comparison rather than one per spelling.
-    // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
-    // `after` for the same thing; growing a private alias list here is how this
-    // driver and driver-memory drifted apart. #3948.
-    const opLower = canonicalAstOperator(String(op));
-
-    // #5041 — the array (`[field, op, value]`) spelling reaches Knex through a
-    // different emitter than the Filter Protocol one, and measured identically:
-    // `[['amount', 'gt', { $field: 'budget' }]]` also threw a bare TypeError.
-    // One filter condition gets one answer however it was spelled, so the same
-    // gate runs here, on the RAW value (pre-coercion).
-    assertCompilableComparand(field, opLower, rawValue);
-
-    // Value comparisons on a mixed-storage column read it through the CASE; every
-    // other operator (null predicates, the LIKE family, a malformed `between`)
-    // declines and falls through to the ordinary handling below.
-    if (columnExpr && this.applyNormalizedComparison(builder, join, columnExpr, opLower, coerced)) return;
-
-    switch (opLower) {
-      // Equality — 2-arg form so Knex renders `IS NULL` for a null comparand,
-      // keeping the `{field, equals, null}` path working.
-      case '=':
-      case '==':
-        builder[where](field, coerced);
-        return;
-      case '!=':
-      case '<>':
-        // `<> NULL` matches nothing; a null comparand means "has any value".
-        if (coerced == null) builder[whereNotNull](field);
-        else builder[where](field, '<>', coerced);
-        return;
-      case '>':
-      case '>=':
-      case '<':
-      case '<=':
-      case 'like':
-      case 'ilike':
-        builder[where](field, opLower, coerced);
-        return;
-      case 'in':
-        builder[join === 'or' ? 'orWhereIn' : 'whereIn'](field, coerced as any[]);
-        return;
-      case 'nin':
-      case 'not_in':
-      case 'notin':
-        builder[join === 'or' ? 'orWhereNotIn' : 'whereNotIn'](field, coerced as any[]);
-        return;
-      case 'between': {
-        const arr = Array.isArray(coerced) ? coerced : [];
-        if (arr.length !== 2) {
-          throw unsupportedFilterError(`Operator "between" on field "${field}" requires a [min, max] value array.`);
-        }
-        builder[join === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
-        return;
-      }
-      case 'contains':
-        this.applyLike(builder, where, field, rawValue, 'contains');
-        return;
-      case 'notcontains':
-      case 'not_contains':
-        this.applyLike(builder, where, field, rawValue, 'contains', true);
-        return;
-      case 'startswith':
-      case 'starts_with':
-        this.applyLike(builder, where, field, rawValue, 'starts');
-        return;
-      case 'endswith':
-      case 'ends_with':
-        this.applyLike(builder, where, field, rawValue, 'ends');
-        return;
-      // Null / empty predicates — value-independent, unified with `equals`+null.
-      case 'is_null':
-      case 'isnull':
-      case 'is_empty':
-      case 'isempty':
-      case 'empty':
-        builder[whereNull](field);
-        return;
-      case 'is_not_null':
-      case 'isnotnull':
-      case 'is_not_empty':
-      case 'isnotempty':
-      case 'not_empty':
-      case 'notempty':
-      case 'is_set':
-      case 'set':
-        builder[whereNotNull](field);
-        return;
-      default:
-        throw unsupportedFilterError(
-          `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
-            `=, !=, <, <=, >, >=, in, nin, between, contains, not_contains, starts_with, ends_with, ` +
-            `is_null, is_not_null (see @objectstack/spec VALID_AST_OPERATORS).`,
-        );
-    }
-  }
-
-  /**
    * Compiles a Filter Protocol condition onto `builder`.
    *
    * `logicalOp` controls only how this condition attaches to `builder`
@@ -6258,6 +6308,14 @@ export class SqlDriver implements IDataDriver {
    * `'false'` members of a `$or` are dropped as their identities, and a node
    * that reduces to `'false'` never reaches the loop at all. So Knex is never
    * again in a position to silently discard a group.
+   *
+   * # Zero-operator field constraints (#5240)
+   *
+   * `{ field: {} }` is REFUSED by that same reduction walk, in every position.
+   * It used to be this method's last remaining way to emit nothing for a key
+   * that looked like a predicate — so it read as TRUE here while the top-level
+   * `applyFilters` path refused it and the two JS backends answered FALSE. One
+   * declared shape, three answers; see {@link emptyFieldConstraintError}.
    *
    * # NULL-safe negation (#5146)
    *
@@ -6447,6 +6505,13 @@ export class SqlDriver implements IDataDriver {
             // (spec `parseFilterAST` maps those to `$null`). Previously this fell
             // to the equality default and compiled `field = true`, silently
             // returning the wrong rows (issue #2704).
+            //
+            // [#5347] `opValue` is a boolean here — `reduceFilterKey` refused
+            // anything else while validating the tree, which happens before this
+            // emitter runs. The `=== false` test is therefore an exhaustive
+            // two-way choice, not the "anything but false is IS NULL" rule it
+            // used to be; that rule was this driver's half of a three-way split
+            // across the backends. See {@link nonBooleanNullComparandError}.
             case '$null':
               (builder as any)[opValue === false
                 ? (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')

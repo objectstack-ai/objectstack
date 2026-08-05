@@ -1033,3 +1033,130 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     expect(emits.find((e) => e.topic === 'collab.assignment')).toBeUndefined();
   });
 });
+
+/**
+ * #5226 — a lost audit row is a DURABILITY degradation, so it is reported at
+ * `error`, not `warn`.
+ *
+ * The `warn` this replaces is the exact #4420 shape one table over: the audited
+ * write itself succeeds and returns 200, its row is on disk, and every counter
+ * reads clean — only the compliance ledger entry that records WHO did it never
+ * landed, and nothing retries it. By AGENTS.md's one question ("does the system
+ * still look normal from the outside, while something it claims is persisted
+ * has not actually landed?") that is `error`, and `pnpm check:durability-log-level`
+ * now holds the level there (`persistAuditTrailRow` is in its vocabulary).
+ *
+ * The failure these tests inject is the real one from the #5226 repro: on a
+ * `os dev --fresh` stack, ADR-0057 §3.6 routes `sys_audit_log` to the dedicated
+ * `telemetry` datasource, so an audited write running inside a transaction on
+ * the PRIMARY datasource reaches a connection where that table does not exist.
+ * 50 of 52 audit inserts in that boot succeeded; the 2 that ran inside a
+ * transaction raised exactly this SqliteError.
+ */
+describe('audit writers — a lost audit row is reported at error (#5226)', () => {
+  interface LogLine { level: string; message: string; meta?: any }
+
+  /** Engine whose `sys_audit_log` insert always fails, capturing every log line. */
+  function makeFailingEngine(failWith = 'no such table: sys_audit_log') {
+    const hooks = new Map<string, Array<(ctx: any) => any>>();
+    const logs: LogLine[] = [];
+    const sudoApi = {
+      object(name: string) {
+        return {
+          async create(_row: Record<string, any>) {
+            if (name === 'sys_audit_log') throw new Error(failWith);
+            return { id: 'generated-id' };
+          },
+        };
+      },
+    };
+    const api = { sudo: () => sudoApi };
+    const engine = {
+      getSchema(name: string) {
+        const fields = (SINGLE_TENANT as Record<string, string[]>)[name];
+        if (!fields) return undefined;
+        return { name, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])) };
+      },
+      registerHook(event: string, fn: (ctx: any) => any) {
+        const list = hooks.get(event) ?? [];
+        list.push(fn);
+        hooks.set(event, list);
+      },
+      unregisterHooksByPackage() { /* no-op */ },
+      logger: {
+        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
+        debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
+        info() { /* unused */ },
+      },
+    };
+    async function fire(event: string, ctx: any) {
+      for (const fn of hooks.get(event) ?? []) await fn({ ...ctx, event, api });
+    }
+    return { engine, fire, logs };
+  }
+
+  const aWrite = (id: string) => ({
+    object: 'crm_lead',
+    input: { id },
+    result: { id, name: 'Acme' },
+    session: { tenantId: 'org-1', userId: 'user-1' },
+  });
+
+  it('logs at error — never warn — when the audit row cannot be written', async () => {
+    const { engine, fire, logs } = makeFailingEngine();
+    installAuditWriters(engine as any);
+
+    await fire('afterInsert', aWrite('l-1'));
+
+    // The whole point of the change: this used to be the ONLY line, at `warn`.
+    expect(logs.filter((l) => l.level === 'warn')).toEqual([]);
+    const errors = logs.filter((l) => l.level === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].meta).toMatchObject({ object: 'crm_lead', action: 'create' });
+  });
+
+  it('names both the CONSEQUENCE and the FIX in the first line it prints', async () => {
+    const { engine, fire, logs } = makeFailingEngine();
+    installAuditWriters(engine as any);
+
+    await fire('afterInsert', aWrite('l-1'));
+
+    const msg = logs.find((l) => l.level === 'error')!.message;
+    // Consequence: the audited write SUCCEEDED, so nothing looks broken, while
+    // the ledger entry is missing and nothing retries it.
+    expect(msg).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(msg).toMatch(/SUCCEEDED/);
+    expect(msg).toMatch(/nothing retries it/);
+    // Fix: where the table actually lives, and the opt-out that collapses the split.
+    expect(msg).toMatch(/telemetry/);
+    expect(msg).toMatch(/OS_TELEMETRY_DB=0/);
+  });
+
+  it('says it ONCE, not once per failed write (AGENTS.md)', async () => {
+    const { engine, fire, logs } = makeFailingEngine();
+    installAuditWriters(engine as any);
+
+    // An audit write runs on EVERY mutation, so a systemic cause would emit one
+    // `error` per write and train everyone to skim the channel — the reflex
+    // that made #4420's warn unreadable in the first place.
+    for (const id of ['l-1', 'l-2', 'l-3', 'l-4', 'l-5']) {
+      await fire('afterInsert', aWrite(id));
+    }
+
+    expect(logs.filter((l) => l.level === 'error')).toHaveLength(1);
+    // The rest stay recoverable at a higher log level rather than vanishing.
+    expect(logs.filter((l) => l.level === 'debug')).toHaveLength(4);
+    expect(logs.filter((l) => l.level === 'warn')).toEqual([]);
+  });
+
+  it('never lets a logging failure break the audited write', async () => {
+    const { engine, fire } = makeFailingEngine();
+    // A logger that throws must not turn a swallowed audit failure into a
+    // user-facing 500 — the audited write already succeeded.
+    (engine as any).logger = { error() { throw new Error('logger exploded'); } };
+    installAuditWriters(engine as any);
+
+    await expect(fire('afterInsert', aWrite('l-1'))).resolves.toBeUndefined();
+  });
+});

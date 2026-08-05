@@ -318,11 +318,30 @@ describe('publishPackageDrafts — the ADR-0121 endpoint publish gate (#5206 ste
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        // `api` has no entry in BUILTIN_METADATA_TYPE_SCHEMAS (that half is
-        // #5271, the spec lane), so the direct-write path stores arbitrary JSON
-        // verbatim. Parsing is the gate's precondition: an unparseable
-        // declaration cannot be judged and could never be served either.
-        await saveApiDraft(protocol, 'garbage', { name: 'garbage', totally: 'not an endpoint' });
+        // [#5271] This comment used to read "`api` has no entry in
+        // BUILTIN_METADATA_TYPE_SCHEMAS (that half is #5271, the spec lane), so
+        // the direct-write path stores arbitrary JSON verbatim" — and it minted
+        // the garbage draft through `saveMetaItem`. That half has now landed:
+        // `api` resolves `ApiEndpointSchema`, so this body is refused with a
+        // 422 at the EARLIEST door and the draft can no longer be created at
+        // all. That is the "一处修,两面得" outcome #5206 asked for, and it is
+        // asserted on the spec lane's side (packages/objectql
+        // /src/protocol-meta.test.ts, "refuses a spec-INVALID `api` item").
+        //
+        // The `ENDPOINT_SCHEMA` branch this case pins is therefore no longer
+        // reachable from the Studio write path — it is exactly what the module
+        // header calls it, a BACKSTOP, for a row that reached the store some
+        // other way: a direct `metadata.register()`, a migration, or a row
+        // written before #5271. Deleting the case would leave a live branch
+        // with no test; re-spelling the body would only re-test the 422. So the
+        // fixture PLANTS such a row instead of minting one — it saves a valid
+        // draft through the real write path (so every bookkeeping column is
+        // byte-for-byte what production writes) and then corrupts only the
+        // stored body, which is the one thing the earlier door cannot police.
+        await saveApiDraft(protocol, 'garbage', validEndpoint({ name: 'garbage' }));
+        const planted = Array.from(rows.values()).find((r) => r.name === 'garbage' && r.state === 'draft');
+        expect(planted, 'the valid draft must exist before it is corrupted').toBeDefined();
+        planted!.metadata = JSON.stringify({ name: 'garbage', totally: 'not an endpoint' });
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(res).toMatchObject({ success: false, publishedCount: 0 });

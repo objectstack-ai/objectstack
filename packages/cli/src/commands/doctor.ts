@@ -10,6 +10,15 @@ import { printHeader, printSuccess, printWarning, printError, printStep, printIn
 import { loadConfig, configExists } from '../utils/config.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
 import { validateWidgetBindings } from '@objectstack/lint';
+import {
+  resolveTenancyPosture,
+  collectGlobalUniques,
+  unconfirmedGlobalUniques,
+  describeGlobalUniqueFinding,
+  postureGatesGlobalUniques,
+  GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION,
+  type GlobalUniqueFinding,
+} from '@objectstack/types';
 
 interface HealthCheckResult {
   name: string;
@@ -229,6 +238,76 @@ export function findUnusedObjects(config: any): string[] {
     }
   }
   return unused;
+}
+
+// ─── ADR-0120 D5e — `isolated`-posture unique-scope advisory ────────
+
+/**
+ * The ADVISORY half of ADR-0120 D5e.
+ *
+ * The hard gate lives at the install seam, where the two things it needs are
+ * both present: the app being installed, and an installer who can answer. It
+ * structurally cannot reach two populations, and this is where those are
+ * reported instead:
+ *
+ * 1. **Installs that predate the gate** — a ledger entry with no attestation.
+ * 2. **Environments whose posture changed after install** — nothing was
+ *    installed under `isolated`, so nothing was ever asked.
+ *
+ * Plus the case with no install seam at all: an app declared in this project's
+ * own `objectstack.config.ts`, which is code, not a marketplace install.
+ *
+ * ⛔ This is `os doctor` / `os migrate plan`, deliberately — NOT a boot-time
+ * warning. A startup diagnostic here would fire on every boot of every affected
+ * deployment forever, which is the #4884 false-alarm class the ADR names by
+ * number. A command someone runs on purpose is the right frequency for a
+ * finding whose resolution is a human/agent decision.
+ */
+interface UniqueScopeAdvisory {
+  /** Where the finding came from — a config-declared app, or a ledger entry. */
+  source: string;
+  finding: GlobalUniqueFinding;
+}
+
+/** Read the installed-package ledger without going through HTTP. Best-effort:
+ *  a runtime that never installed anything simply has no directory. */
+async function readInstalledPackageEntries(cwd: string): Promise<any[]> {
+  try {
+    // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still
+    // run in a checkout where the optional package is not resolvable.
+    const mod: any = await import('@objectstack/cloud-connection');
+    const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
+    if (!fs.existsSync(dir)) return [];
+    return new mod.LocalManifestSource(dir).list();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Collect every unanswered installation-wide unique this environment would run
+ * under `isolated`. Returns an empty list under every other posture: there
+ * `'global'` is the correct, unambiguous meaning (`single` = one customer;
+ * `group` = the installation IS the customer company).
+ */
+async function findUnscopedGlobalUniques(cwd: string, config: any): Promise<UniqueScopeAdvisory[]> {
+  const posture = resolveTenancyPosture();
+  if (!postureGatesGlobalUniques(posture)) return [];
+
+  const out: UniqueScopeAdvisory[] = [];
+  for (const finding of collectGlobalUniques(config?.objects)) {
+    out.push({ source: 'this project’s metadata', finding });
+  }
+  for (const entry of await readInstalledPackageEntries(cwd)) {
+    const findings = collectGlobalUniques(entry?.manifest?.objects);
+    // Subtract what the install ceremony already answered for — an attested
+    // install must not be re-reported, or the advisory becomes the recurring
+    // nag the gate exists to avoid.
+    for (const finding of unconfirmedGlobalUniques(findings, entry?.globalUniqueAttestation, posture)) {
+      out.push({ source: `installed package '${entry?.manifestId ?? entry?.packageId}'`, finding });
+    }
+  }
+  return out;
 }
 
 // ─── Filesystem Checks ──────────────────────────────────────────────
@@ -599,6 +678,24 @@ export default class Doctor extends Command {
             }
           } else {
             printSuccess('Object usage          All objects are referenced');
+          }
+        }
+
+        // ADR-0120 D5e advisory — installation-wide uniques under `isolated`.
+        // Runs whenever a config loaded, whether or not it declares objects:
+        // the ledger half reports installed packages this project never
+        // declared.
+        if (postureGatesGlobalUniques(resolveTenancyPosture())) {
+          printStep("Checking unique scopes against the 'isolated' tenancy posture...");
+          const scopeFindings = await findUnscopedGlobalUniques(cwd, config);
+          if (scopeFindings.length > 0) {
+            hasWarnings = true;
+            for (const { source, finding } of scopeFindings) {
+              printWarning(`Unique scope         ${describeGlobalUniqueFinding(finding)} (${source})`);
+            }
+            console.log(chalk.dim(`      → ${GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION}`));
+          } else {
+            printSuccess("Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment");
           }
         }
 
