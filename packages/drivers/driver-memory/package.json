@@ -1,8 +1,8 @@
 {
-  "name": "@objectstack/driver-sql",
+  "name": "@objectstack/driver-memory",
   "version": "17.0.0-rc.2",
   "license": "Apache-2.0",
-  "description": "SQL Driver for ObjectStack - Supports PostgreSQL, MySQL, SQLite via Knex",
+  "description": "In-Memory Driver for ObjectStack (Reference Implementation)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -20,50 +20,26 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "@objectstack/types": "workspace:*",
-    "knex": "^3.3.0",
-    "nanoid": "^6.0.0"
-  },
-  "optionalDependencies": {
-    "better-sqlite3": "^13.0.2"
-  },
-  "peerDependencies": {
-    "mysql2": "^3.0.0",
-    "pg": "^8.0.0",
-    "tedious": "^18.0.0"
-  },
-  "peerDependenciesMeta": {
-    "mysql2": {
-      "optional": true
-    },
-    "pg": {
-      "optional": true
-    },
-    "tedious": {
-      "optional": true
-    }
+    "mingo": "^7.2.2"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "better-sqlite3": "^13.0.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
   "keywords": [
     "objectstack",
     "driver",
-    "sql",
-    "postgres",
-    "mysql",
-    "sqlite"
+    "in-memory",
+    "testing",
+    "mock"
   ],
   "author": "ObjectStack",
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
-    "directory": "packages/plugins/driver-sql"
+    "directory": "packages/drivers/driver-memory"
   },
   "homepage": "https://objectstack.ai/docs",
   "bugs": "https://github.com/objectstack-ai/objectstack/issues",

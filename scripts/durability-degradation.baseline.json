@@ -11,48 +11,23 @@
     "unrelated edit and a line-keyed ledger would go stale constantly. The cost is that an",
     "entry licenses the WHOLE file for that callee: a genuinely new silent swallow of the",
     "same callee in an already-listed file would be excused. Read the entry's `sites` list",
-    "as the set it was reviewed against, and re-review when that file grows a new one."
+    "as the set it was reviewed against, and re-review when that file grows a new one.",
+    "",
+    "CURRENTLY EMPTY — the intended steady state, not a dormant file. The two entries #4754",
+    "added were never debt: they described CORRECT code (a `/meta` PUT that answers the",
+    "caller a 4xx/422 error envelope, and two batch operations that write each failure into",
+    "the per-item outcome report that IS their contract). The gate simply had no way to say",
+    "'the failure was handed to the caller', so correct code had to be parked in a ledger",
+    "whose header calls every line debt — and the cheapest way out was to bolt a durability",
+    "`error` onto a path whose common case is a rejected request, which is exactly the",
+    "mirror-image failure AGENTS.md warns about. #5241 fixed the GATE instead: it now carries",
+    "a declared failure-propagation vocabulary (FAILURE_PROPAGATION_CALLEES, plus the",
+    "function-scoped FAILURE_PROPAGATION_SITES) and proves structurally that every path out",
+    "of the catch delivers the failure. Both entries went stale and were deleted.",
+    "",
+    "So: an entry here means a REAL degradation that is not yet fixed. If a red seam turns",
+    "out to hand its failure to the caller instead, it does not belong in this file — declare",
+    "HOW it delivers, in the checker's vocabulary, and let the checker verify the shape."
   ],
-  "entries": [
-    {
-      "file": "packages/runtime/src/domains/meta.ts",
-      "callee": "saveMetaItem",
-      "sites": ["PUT /metadata/:type/:name — catch → deps.errorFromThrown(e, 400)"],
-      "reason": [
-        "Not a degradation: `saveMetaItem` IS this request's primary operation, and the catch",
-        "hands the failure straight back to the caller as a real 4xx/422 error envelope",
-        "(errorFromThrown preserves the protocol's own `.status` plus the structured",
-        "spec-validation `issues`). Nothing continues on a reduced path and nothing looks",
-        "normal afterwards — the Studio that asked for the save is told, field-anchored, that",
-        "it did not happen. AGENTS.md's judgment question ('does the system still look normal",
-        "while something it claims is persisted has not landed?') answers NO here.",
-        "Raising it to `error` would be the mirror-image failure AGENTS.md warns about: the",
-        "common case on this path is an author submitting an off-spec body, so it would emit a",
-        "durability `error` per bad keystroke and train everyone to skim `error` — which is",
-        "what made the #4420 `warn` unreadable in the first place."
-      ],
-      "closes": "#5241 — teach the checker a DECLARED failure-propagation vocabulary (a catch whose every path returns an error envelope propagates the failure and is not a degradation), then delete this entry. Until then the gate cannot tell 'reported to the caller' from 'swallowed'.",
-      "added": "2026-08-04 (#4754, the PR that added `saveMetaItem` to DURABILITY_CRITICAL_CALLEES)"
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "callee": "saveMetaItem",
-      "sites": [
-        "migrateStoredItems() apply pass — catch → record({ outcome: 'failed', reason }), which increments report.failed and itemises the row",
-        "duplicate/copy into target package — catch → failed.push({ type, name, error }), which flips the returned `success` to false and populates failedCount/failed[]"
-      ],
-      "reason": [
-        "Not a degradation: both are batch operations whose CONTRACT is a per-item outcome",
-        "report, and both catches write the failure into that report rather than dropping it.",
-        "The first increments a `failed` counter and itemises the row with its reason; the",
-        "second flips the aggregate `success` to false and returns the failed item in",
-        "`failed[]`. This is strictly louder than a log line — it is the `error` + counter",
-        "shape #4669 itself adopted, delivered as structured data the caller cannot miss.",
-        "The system does not look normal afterwards: the response says, per item, that the",
-        "write did not land."
-      ],
-      "closes": "#5241 — same declared failure-propagation vocabulary (structured per-item outcome reports are the second shape it must cover), then delete this entry.",
-      "added": "2026-08-04 (#4754, the PR that added `saveMetaItem` to DURABILITY_CRITICAL_CALLEES)"
-    }
-  ]
+  "entries": []
 }

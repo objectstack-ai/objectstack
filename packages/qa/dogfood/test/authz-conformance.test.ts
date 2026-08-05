@@ -46,6 +46,25 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     re: /async\s+(handleMetadata)\s*\(/g,
     key: (m) => `meta:http-dispatcher.ts:${m[1]}`,
   },
+  // ── #5519 — the two dispatcher-mounted execution surfaces ──────────────
+  // These are GATE pins, in the shape the MCP rows below already use: the key
+  // exists only while the domain handler still consults `shouldDenyAnonymous`.
+  // Delete the gate (the #5519 regression, in either domain) and the key
+  // vanishes → the covering row goes STALE → red CI. `/actions` and
+  // `/automation` are mounted by dispatcher-plugin.ts, a separate registration
+  // path from the `@objectstack/rest` one that gates `/data` and `/meta`, which
+  // is exactly why they diverged unnoticed.
+  {
+    file: 'packages/runtime/src/domains/actions.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'actions:domains/actions.ts:anonymous-gate',
+  },
+  {
+    file: 'packages/runtime/src/domains/automation.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'automation:domains/automation.ts:anonymous-gate',
+  },
+
   // Raw-hono standard /data routes — genuinely pattern-based: ANY new
   // `rawApp.<verb>(`${prefix}/data...`)` → a new key → CI fails until a row covers it.
   {
@@ -149,6 +168,13 @@ const HIGH_RISK = [
   // entry point rather than gating it, so there is nothing left to mark
   // high-risk there)
   'anonymous-deny-meta',
+  // #5519 — the dispatcher-mounted execution surfaces. `/actions` reaches a
+  // `script` body that runs `isSystem: true` elevated and `/automation` starts,
+  // lists and deregisters flows, so both guard the same object data as REST
+  // `/data` through sibling entry points. Proven end-to-end by the same
+  // surfaces proof (#5570).
+  'anonymous-deny-actions',
+  'anonymous-deny-automation',
   // #2948/#3003 — write-integrity face: without the strip, `readonly: true`
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.
@@ -244,5 +270,23 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
       opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== stdio))),
     );
     expect(problems.some((p) => /STALE covers/.test(p) && p.includes(stdio))).toBe(true);
+  });
+
+  // ── #5519 — the dispatcher execution-surface gates bite too ────────────
+  it('(h) deleting either /actions or /automation anonymous gate → STALE covers failure (#5519)', () => {
+    for (const gate of [
+      'actions:domains/actions.ts:anonymous-gate',
+      'automation:domains/automation.ts:anonymous-gate',
+    ]) {
+      // Baseline sanity: the gate is in source TODAY. If this ever goes false
+      // the surface has regressed to its pre-#5569 state, which is the whole
+      // point of the pin.
+      expect(discoverAnonymousDenySurfaces().has(gate), `${gate} must be in source`).toBe(true);
+      const problems = checkLedger(
+        AUTHZ_CONFORMANCE,
+        opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== gate))),
+      );
+      expect(problems.some((p) => /STALE covers/.test(p) && p.includes(gate))).toBe(true);
+    }
   });
 });

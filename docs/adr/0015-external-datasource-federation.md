@@ -386,7 +386,7 @@ if (datasource.schemaMode !== 'managed') {
 }
 ```
 
-**Concretely** — `packages/plugins/driver-sql/src/sql-driver.ts:1064`
+**Concretely** — `packages/drivers/driver-sql/src/sql-driver.ts:1064`
 and `:1084` (current `createTable` / `alterTable` call sites) gain a
 guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
@@ -862,7 +862,7 @@ The ADR is considered "delivered" when:
 - `packages/spec/src/data/external-lookup.zod.ts`
 - `packages/spec/src/automation/sync.zod.ts`
 - `packages/spec/src/contracts/schema-diff-service.ts`
-- `packages/plugins/driver-sql/src/sql-driver.ts` (introspectSchema, createTable, alterTable)
+- `packages/drivers/driver-sql/src/sql-driver.ts` (introspectSchema, createTable, alterTable)
 - `packages/services/service-ai/src/tools/query-data.tool.ts`
 - `packages/services/service-ai/src/schema-retriever.ts`
 
@@ -953,7 +953,7 @@ external-binding mechanism.
 
 ### Tests
 
-`packages/plugins/driver-sql/src/sql-driver-external-remote-name.test.ts` (read /
+`packages/drivers/driver-sql/src/sql-driver-external-remote-name.test.ts` (read /
 filter / coercion against a differently-named remote table, no DDL leakage) and an
 added case in `sql-driver-ddl-gate.test.ts` (`registerExternalObject` is DDL-free).
 File-based better-sqlite3 tests require Node ≥ 25 (ABI 141) in this repo.

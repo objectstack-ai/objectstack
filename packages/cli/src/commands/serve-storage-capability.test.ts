@@ -25,8 +25,9 @@
  * write it are now told, by `lintUnknownAuthoringKeys`.
  */
 
-import { describe, it, expect } from 'vitest';
-import { resolveStorageCapabilityArg } from './serve.js';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { _resetEnvDeprecationWarnings } from '@objectstack/types';
+import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from './serve.js';
 
 describe('resolveStorageCapabilityArg', () => {
   it('builds options StorageServicePlugin actually reads', () => {
@@ -45,7 +46,10 @@ describe('resolveStorageCapabilityArg', () => {
     expect(options).not.toHaveProperty('root');
   });
 
-  it('honours OS_STORAGE_ROOT, which the old shape discarded', () => {
+  // Renamed from "honours OS_STORAGE_ROOT" (#4968): this case never read env,
+  // it passes the root as an argument. Naming it after a variable it does not
+  // touch is how the env channel went unexamined while the shape looked pinned.
+  it('honours an explicit root, which the old shape discarded', () => {
     const { options, localRoot } = resolveStorageCapabilityArg('/srv/uploads');
     expect(options).toEqual({ adapter: 'local', local: { rootDir: '/srv/uploads' } });
     expect(localRoot).toBe('/srv/uploads');
@@ -76,4 +80,108 @@ describe('resolveStorageCapabilityArg', () => {
     expect(resolveStorageCapabilityArg.length).toBe(1);
   });
 
+});
+
+/**
+ * #4968 — the env CHANNEL, which #4096 left split.
+ *
+ * #4096 pinned the option shape and the tests above went green, but the value
+ * still could not reach the settings service: the CLI wrote `OS_STORAGE_ROOT`
+ * and the settings service reads `envKeyOf('storage','local_root')` =
+ * `OS_STORAGE_LOCAL_ROOT`, which nothing in the repo ever set. So settings saw
+ * only the manifest's schema default and swapped the adapter at `kernel:ready`
+ * — `OS_STORAGE_ROOT` took effect for exactly one value (the one equal to that
+ * default) and `dev --fresh` wrote uploads into the project cwd.
+ *
+ * The stamp assertion is the load-bearing one. Returning the legacy value is
+ * only half the migration; if the canonical name is not also SET, a deployment
+ * on the old spelling keeps the original bug in full, silently.
+ */
+describe('resolveStorageLocalRootEnv (#4968)', () => {
+  const CANONICAL = 'OS_STORAGE_LOCAL_ROOT';
+  const LEGACY = 'OS_STORAGE_ROOT';
+  const originalCanonical = process.env[CANONICAL];
+  const originalLegacy = process.env[LEGACY];
+
+  afterEach(() => {
+    if (originalCanonical === undefined) delete process.env[CANONICAL];
+    else process.env[CANONICAL] = originalCanonical;
+    if (originalLegacy === undefined) delete process.env[LEGACY];
+    else process.env[LEGACY] = originalLegacy;
+    _resetEnvDeprecationWarnings();
+    vi.restoreAllMocks();
+  });
+
+  it('reads the canonical name the settings service derives, quietly', () => {
+    delete process.env[LEGACY];
+    process.env[CANONICAL] = '/srv/uploads';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(resolveStorageLocalRootEnv()).toBe('/srv/uploads');
+    expect(warn).not.toHaveBeenCalled();
+    // The whole point: this is the name `envKeyOf('storage','local_root')`
+    // produces, so the settings service resolves source:'env' at this value.
+    expect(process.env[CANONICAL]).toBe('/srv/uploads');
+  });
+
+  it('still reads the legacy name AND stamps it onto the canonical one', () => {
+    delete process.env[CANONICAL];
+    process.env[LEGACY] = '/srv/legacy-uploads';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(resolveStorageLocalRootEnv()).toBe('/srv/legacy-uploads');
+    // Without this line a legacy deployment keeps the exact defect #4968
+    // describes: adapter built at /srv/legacy-uploads, settings still on its
+    // schema default, adapter swapped away at kernel:ready.
+    expect(process.env[CANONICAL]).toBe('/srv/legacy-uploads');
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = String(warn.mock.calls[0][0]);
+    expect(msg).toContain(LEGACY);
+    expect(msg).toContain(CANONICAL);
+    expect(msg).toContain('deprecated');
+  });
+
+  it('feeds the capability arg from the legacy name end to end', () => {
+    delete process.env[CANONICAL];
+    process.env[LEGACY] = '/srv/legacy-uploads';
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { options, localRoot } = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
+    expect(options).toEqual({ adapter: 'local', local: { rootDir: '/srv/legacy-uploads' } });
+    expect(localRoot).toBe('/srv/legacy-uploads');
+    // Constructor side and settings side now name the same directory, which is
+    // what makes `needsStorageSwap` answer false instead of swapping + warning.
+    expect(process.env[CANONICAL]).toBe(localRoot);
+  });
+
+  it('lets the canonical name win when both are set, without warning', () => {
+    process.env[CANONICAL] = '/srv/canonical';
+    process.env[LEGACY] = '/srv/legacy';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(resolveStorageLocalRootEnv()).toBe('/srv/canonical');
+    expect(process.env[CANONICAL]).toBe('/srv/canonical');
+    // The stamp must never overwrite an explicitly-set canonical value, and the
+    // legacy variable is left exactly as the operator wrote it.
+    expect(process.env[LEGACY]).toBe('/srv/legacy');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('sets nothing when neither name is set, so the default still applies', () => {
+    delete process.env[CANONICAL];
+    delete process.env[LEGACY];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(resolveStorageLocalRootEnv()).toBeUndefined();
+    // Must NOT stamp a default: an env-locked value would show up in Setup as
+    // locked-by-env and take the root out of the admin's hands for no reason.
+    expect(process.env[CANONICAL]).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+
+    // Unset falls through to the resolver default, which equals the manifest
+    // default — this is exactly why plain `pnpm dev` never showed the bug.
+    expect(resolveStorageCapabilityArg(resolveStorageLocalRootEnv()).localRoot)
+      .toBe('.objectstack/data/uploads');
+  });
 });

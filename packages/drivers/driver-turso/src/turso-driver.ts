@@ -1,0 +1,915 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * Turso/libSQL Driver for ObjectStack
+ *
+ * Dual-transport architecture supporting:
+ * - **Local mode:** file-based or in-memory SQLite via SqlDriver (Knex + better-sqlite3)
+ * - **Replica mode:** local SQLite + embedded replica sync via @libsql/client
+ * - **Remote mode:** pure remote queries via @libsql/client (HTTP/WebSocket)
+ *
+ * In local/replica mode, all CRUD, schema, query, filter, and introspection
+ * logic is inherited from SqlDriver. In remote mode, TursoDriver delegates
+ * all operations to RemoteTransport which uses @libsql/client directly.
+ *
+ * The transport mode is auto-detected from the URL:
+ * - `file:` or `:memory:` → local
+ * - `file:` or `:memory:` + `syncUrl` → replica
+ * - `libsql://`, `https://`, `http://`, `wss://` or `ws://` (no syncUrl) → remote
+ *   (`http://` / `ws://` = plaintext, for self-hosted / local-dev endpoints)
+ */
+
+import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
+import type { Client } from '@libsql/client';
+import { RemoteTransport } from './remote-transport.js';
+
+// ── Transport Mode ───────────────────────────────────────────────────────────
+
+/**
+ * Transport mode for TursoDriver.
+ *
+ * - `local`: File-based or in-memory SQLite via Knex + better-sqlite3
+ * - `replica`: Local SQLite + embedded replica sync from remote Turso
+ * - `remote`: Pure remote queries via @libsql/client (no local DB)
+ */
+export type TursoTransportMode = 'local' | 'replica' | 'remote';
+
+// ── Configuration Types ──────────────────────────────────────────────────────
+
+/**
+ * Turso driver configuration.
+ *
+ * Supports the following connection modes:
+ * 1. **Local (Embedded):** `url: 'file:./data/local.db'`
+ * 2. **In-memory (Ephemeral):** `url: ':memory:'`
+ * 3. **Embedded Replica (Hybrid):** `url` (local file or `:memory:`) +
+ *    `syncUrl` (remote `libsql://` / `https://` Turso endpoint)
+ * 4. **Remote (Cloud):** `url: 'libsql://...'` — pure remote queries
+ *    via @libsql/client, no local SQLite needed
+ *
+ * In local/replica modes, the primary query engine runs against a local
+ * SQLite database (via SqlDriver / Knex + better-sqlite3). In remote mode,
+ * all operations use @libsql/client SDK (HTTP/WebSocket) directly.
+ *
+ * Transport mode is auto-detected from the URL, or can be forced via `mode`.
+ */
+export interface TursoDriverConfig {
+  /**
+   * Database URL.
+   *
+   * - `file:./data/local.db` → local mode
+   * - `:memory:` → local mode (ephemeral)
+   * - `libsql://my-db.turso.io` → remote mode (cloud-only)
+   * - `https://my-db.turso.io` → remote mode (cloud-only)
+   */
+  url: string;
+
+  /** JWT auth token for the remote Turso database */
+  authToken?: string;
+
+  /**
+   * AES-256 encryption key for the local database file.
+   * Only effective in local/replica modes.
+   */
+  encryptionKey?: string;
+
+  /**
+   * Maximum concurrent requests to the remote database.
+   * Effective in replica and remote modes.
+   * Default: 20
+   */
+  concurrency?: number;
+
+  /** Remote sync URL for embedded replica mode (`libsql://` or `https://`) */
+  syncUrl?: string;
+
+  /** Sync configuration for embedded replica mode (requires `syncUrl`) */
+  sync?: {
+    /** Periodic sync interval in seconds (0 = manual only). Default: 60 */
+    intervalSeconds?: number;
+    /** Sync immediately on connect. Default: true */
+    onConnect?: boolean;
+  };
+
+  /**
+   * Operation timeout in milliseconds for remote operations.
+   * Effective in replica and remote modes.
+   */
+  timeout?: number;
+
+  /**
+   * Force a specific transport mode. If not provided, mode is auto-detected
+   * from the URL:
+   *
+   * - `file:` or `:memory:` without syncUrl → `'local'`
+   * - `file:` or `:memory:` with syncUrl → `'replica'`
+   * - `libsql://` / `https://` / `http://` / `wss://` / `ws://` without syncUrl → `'remote'`
+   */
+  mode?: TursoTransportMode;
+
+  /**
+   * Pre-configured @libsql/client instance. When provided, TursoDriver uses
+   * this client directly instead of creating its own. Useful for custom
+   * caching, connection pooling, or testing.
+   *
+   * Only effective in remote and replica modes.
+   */
+  client?: Client;
+}
+
+// ── Turso Driver ─────────────────────────────────────────────────────────────
+
+/**
+ * Turso/libSQL Driver for ObjectStack.
+ *
+ * Dual-transport architecture:
+ *
+ * - **Local/Replica modes:** Extends SqlDriver (Knex + better-sqlite3) for
+ *   all CRUD, schema, filtering, aggregation — zero duplicated logic.
+ * - **Remote mode:** Delegates all operations to RemoteTransport which
+ *   uses @libsql/client SDK directly (HTTP/WebSocket). No local SQLite needed.
+ *
+ * Transport mode is auto-detected from the URL or forced via `config.mode`.
+ *
+ * @example Local mode
+ * ```typescript
+ * const driver = new TursoDriver({ url: 'file:./data/app.db' });
+ * await driver.connect();
+ * ```
+ *
+ * @example In-memory mode (testing)
+ * ```typescript
+ * const driver = new TursoDriver({ url: ':memory:' });
+ * await driver.connect();
+ * ```
+ *
+ * @example Embedded replica mode
+ * ```typescript
+ * const driver = new TursoDriver({
+ *   url: 'file:./data/replica.db',
+ *   syncUrl: 'libsql://my-db-orgname.turso.io',
+ *   authToken: process.env.TURSO_AUTH_TOKEN,
+ *   sync: { intervalSeconds: 60, onConnect: true },
+ * });
+ * await driver.connect();
+ * ```
+ *
+ * @example Remote mode (cloud-only)
+ * ```typescript
+ * const driver = new TursoDriver({
+ *   url: 'libsql://my-db-orgname.turso.io',
+ *   authToken: process.env.TURSO_AUTH_TOKEN,
+ * });
+ * await driver.connect();
+ * ```
+ */
+export class TursoDriver extends SqlDriver {
+  // IDataDriver metadata
+  public override readonly name: string = 'com.objectstack.driver.turso';
+  public override readonly version: string = '1.0.0';
+
+  public override get supports() {
+    // Inherit the SqlDriver capability baseline (incl. autonumber via the
+    // shared `_objectstack_sequences` mechanism, and any future flags) and
+    // override only where Turso/libSQL genuinely differs. Spreading the base
+    // keeps this in lock-step with `DriverCapabilities` so a new base flag can
+    // never make this override an incomplete type again.
+    //
+    // Only bits the engine actually READS belong here. `savepoints` /
+    // `queryCTE` / `fullTextSearch` / `jsonQuery` / `connectionPooling` used to
+    // be declared true/false right below — accurate statements about libSQL
+    // that nothing ever consumed, and objectstack#4634 (ADR-0049
+    // enforce-or-remove) retired them from `DriverCapabilities` along with 26
+    // other zero-reader bits. Do not re-add a bit here to "document" an engine
+    // feature: a capability flag is a promise the engine dispatches on, and one
+    // nobody reads is a claim that can silently go false. Documentation goes in
+    // prose; a real dispatch point goes in the spec first.
+    return {
+      ...super.supports,
+
+      // Turso/libSQL batches DDL over one round-trip — see `syncSchemasBatch`.
+      // The engine ANDs this bit with that method's presence, which is why the
+      // bit is load-bearing rather than inferable: this class inherits the
+      // method shape from SqlDriver, whose transport genuinely cannot batch.
+      batchSchemaSync: true,
+
+      // Remote transport does NOT do native date bucketing. SqlDriver's
+      // `aggregate` — which emits `date_trunc`/`strftime` for structured
+      // `{ field, dateGranularity }` groupBy items — is only reached in
+      // local/replica mode; remote mode delegates `aggregate` to
+      // `RemoteTransport.aggregate`, which accepts only string group-by
+      // identifiers and has no bucketing. Inheriting SqlDriver's
+      // `queryDateGranularity` in remote mode is therefore a FALSE capability:
+      // the analytics engine (NativeSQLStrategy declines granularity →
+      // ObjectQLStrategy → engine.aggregate) trusts `supports.queryDateGranularity`
+      // and pushes the structured groupBy down to `RemoteTransport.aggregate`,
+      // which stringifies the object to "[object Object]" and rejects it
+      // (500 ANALYTICS_QUERY_FAILED — a whole dashboard widget stuck loading).
+      // Advertise no native granularity in remote mode so the engine falls back
+      // to `find()` (works remotely) + in-memory `bucketDateValue()` bucketing,
+      // which the contract guarantees is always correct. See
+      // @objectstack/spec `driver.zod.ts` (`queryDateGranularity`: "missing keys
+      // fall back to in-memory bucketing") and objectql `engine.ts` aggregate
+      // dispatch. Local/replica keep native bucketing via SqlDriver.
+      // (Empty record — not `undefined` — to stay assignable to SqlDriver's
+      // inferred `Record<string, boolean>` supports type; every granularity is
+      // absent, so all fall back.)
+      ...(this.transportMode === 'remote'
+        ? { queryDateGranularity: {} as Record<string, boolean> }
+        : {}),
+    };
+  }
+
+  private tursoConfig: TursoDriverConfig;
+  private libsqlClient: Client | null = null;
+  private syncIntervalId: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * The resolved transport mode for this driver instance.
+   * Set during construction based on URL and config.
+   */
+  public readonly transportMode: TursoTransportMode;
+
+  /**
+   * Remote transport delegate — only initialized in remote mode.
+   */
+  private remoteTransport: RemoteTransport | null = null;
+
+  constructor(config: TursoDriverConfig) {
+    const mode = TursoDriver.detectMode(config);
+    const knexConfig = TursoDriver.toKnexConfig(config, mode);
+    super(knexConfig);
+    this.tursoConfig = config;
+    this.transportMode = mode;
+
+    if (mode === 'remote') {
+      this.remoteTransport = new RemoteTransport();
+
+      // The COLUMN half of the temporal seam (ADR-0053 D-A1). `toRemoteFilter`
+      // below puts the comparand into storage form via `temporalFilterValue`;
+      // its inherited companion `temporalFilterColumnSql` says how the column
+      // must be READ so the two are in the same form, and its own contract
+      // calls coercing the value "necessary but NOT sufficient — a caller that
+      // binds `temporalFilterValue` must wrap its column with this too, or it
+      // keeps half the bug". Handing the transport the rule (not a copy of it)
+      // is what keeps a single dialect-aware implementation.
+      this.remoteTransport.setFilterColumnSql((object, field, columnSql) =>
+        this.temporalFilterColumnSql(object, field, columnSql),
+      );
+
+      // Register a lazy-connect factory so the transport can self-heal when
+      // connect() was never called, failed on first attempt, or the client
+      // was lost (e.g. serverless cold-start, transient network error).
+      this.remoteTransport.setConnectFactory(async () => {
+        if (this.tursoConfig.client) {
+          this.libsqlClient = this.tursoConfig.client;
+        } else {
+          const { createClient } = await import('@libsql/client');
+          this.libsqlClient = createClient({
+            url: this.tursoConfig.url,
+            authToken: this.tursoConfig.authToken,
+            concurrency: this.tursoConfig.concurrency,
+          });
+        }
+        return this.libsqlClient;
+      });
+    }
+  }
+
+  /**
+   * Detect the transport mode from the URL and config.
+   */
+  static detectMode(config: TursoDriverConfig): TursoTransportMode {
+    // Explicit mode override
+    if (config.mode) return config.mode;
+
+    const url = config.url;
+
+    // Local modes: file: or :memory:
+    if (url === ':memory:' || url.startsWith('file:')) {
+      return config.syncUrl ? 'replica' : 'local';
+    }
+
+    // Remote URL (libsql://, https://, http://, wss://, ws://).
+    // `http://` and `ws://` are plaintext transports used against a
+    // self-hosted / local-dev Turso-compatible endpoint (e.g. an ObjectBase
+    // gateway with no TLS termination, or sqld on localhost). @libsql/client
+    // natively accepts these schemes; they MUST be classified as remote so
+    // queries go over the wire — otherwise the URL falls through to the
+    // local-SQLite fallback below and silently writes to an ephemeral
+    // in-memory DB (data never reaches the remote, lost on every restart).
+    if (
+      url.startsWith('libsql://') ||
+      url.startsWith('https://') ||
+      url.startsWith('http://') ||
+      url.startsWith('wss://') ||
+      url.startsWith('ws://')
+    ) {
+      // When both url and syncUrl are remote, @libsql/client operates in
+      // embedded replica mode with an in-memory local cache. The remote URL
+      // serves as the primary database and syncUrl configures the sync target.
+      if (config.syncUrl) return 'replica';
+      return 'remote';
+    }
+
+    // Fallback: treat as local
+    return 'local';
+  }
+
+  /**
+   * Convert TursoDriverConfig to a Knex-compatible SqlDriverConfig.
+   * Extracts the file path from the URL for local/embedded modes.
+   * In remote mode, uses a dummy :memory: config (Knex is not used).
+   */
+  private static toKnexConfig(config: TursoDriverConfig, mode: TursoTransportMode): SqlDriverConfig {
+    // Remote mode: All CRUD/schema operations delegate to RemoteTransport
+    // (via @libsql/client). Knex is never used for queries, but the SqlDriver
+    // base class constructor requires a valid config. We provide a minimal
+    // :memory: config that initializes Knex without side effects.
+    if (mode === 'remote') {
+      return {
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      };
+    }
+
+    if (config.url === ':memory:') {
+      return {
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      };
+    }
+
+    if (config.url.startsWith('file:')) {
+      return {
+        client: 'better-sqlite3',
+        connection: { filename: config.url.replace(/^file:/, '') },
+        useNullAsDefault: true,
+      };
+    }
+
+    // Remote URL with syncUrl (replica mode) — use :memory: as local backend
+    return {
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    };
+  }
+
+  /**
+   * Check if this driver instance is in remote mode.
+   */
+  get isRemote(): boolean {
+    return this.transportMode === 'remote';
+  }
+
+  /**
+   * Get the Turso-specific configuration.
+   */
+  getTursoConfig(): Readonly<TursoDriverConfig> {
+    return this.tursoConfig;
+  }
+
+  // ===================================
+  // Lifecycle (Turso-specific overrides)
+  // ===================================
+
+  /**
+   * Connect the driver.
+   *
+   * **Local/Replica modes:**
+   * 1. Initializes the Knex/better-sqlite3 connection (via SqlDriver.connect)
+   * 2. If syncUrl is configured, creates a @libsql/client for sync operations
+   * 3. Triggers initial sync if configured
+   * 4. Starts periodic sync interval if configured
+   *
+   * **Remote mode:**
+   * 1. Creates a @libsql/client for remote queries
+   * 2. Skips Knex initialization (not needed)
+   */
+  override async connect(): Promise<void> {
+    if (this.isRemote) {
+      // Remote mode: initialize @libsql/client only
+      if (this.tursoConfig.client) {
+        this.libsqlClient = this.tursoConfig.client;
+      } else {
+        const { createClient } = await import('@libsql/client');
+        this.libsqlClient = createClient({
+          url: this.tursoConfig.url,
+          authToken: this.tursoConfig.authToken,
+          concurrency: this.tursoConfig.concurrency,
+        });
+      }
+      this.remoteTransport!.setClient(this.libsqlClient);
+      return;
+    }
+
+    // Local/Replica mode: initialize Knex first
+    await super.connect();
+
+    // Initialize libSQL client for embedded replica sync
+    if (this.tursoConfig.syncUrl) {
+      if (this.tursoConfig.client) {
+        this.libsqlClient = this.tursoConfig.client;
+      } else {
+        const { createClient } = await import('@libsql/client');
+        this.libsqlClient = createClient({
+          url: this.tursoConfig.url,
+          authToken: this.tursoConfig.authToken,
+          encryptionKey: this.tursoConfig.encryptionKey,
+          syncUrl: this.tursoConfig.syncUrl,
+          concurrency: this.tursoConfig.concurrency,
+        });
+      }
+
+      // Sync on connect if configured (default: true)
+      if (this.tursoConfig.sync?.onConnect !== false) {
+        await this.sync();
+      }
+
+      // Start periodic sync if configured
+      const interval = this.tursoConfig.sync?.intervalSeconds;
+      if (interval && interval > 0) {
+        this.syncIntervalId = setInterval(() => {
+          this.sync().catch(() => {
+            /* background sync failure is non-fatal */
+          });
+        }, interval * 1000);
+      }
+    }
+  }
+
+  /**
+   * Disconnect the driver, clean up sync intervals, and close libSQL client.
+   */
+  override async disconnect(): Promise<void> {
+    if (this.syncIntervalId) {
+      clearInterval(this.syncIntervalId);
+      this.syncIntervalId = null;
+    }
+
+    if (this.isRemote) {
+      // Remote mode: only clean up remoteTransport / libsqlClient
+      if (this.remoteTransport) {
+        this.remoteTransport.close();
+      }
+      this.libsqlClient = null;
+      return;
+    }
+
+    // Local/Replica mode: clean up libSQL client then Knex
+    if (this.libsqlClient) {
+      this.libsqlClient.close();
+      this.libsqlClient = null;
+    }
+
+    await super.disconnect();
+  }
+
+  /**
+   * Check connection health.
+   */
+  override async checkHealth(): Promise<boolean> {
+    if (this.isRemote) {
+      return this.remoteTransport!.checkHealth();
+    }
+    return super.checkHealth();
+  }
+
+  // ===================================
+  // CRUD (remote mode overrides)
+  // ===================================
+
+  override async find(object: string, query: any, options?: any): Promise<any[]> {
+    if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteQuery(object, query)));
+    return super.find(object, query, options);
+  }
+
+  override async findOne(object: string, query: any, options?: any): Promise<any> {
+    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteQuery(object, query)));
+    return super.findOne(object, query, options);
+  }
+
+  // `findStream` was retired from `IDataDriver` in spec 17.0.0
+  // (objectstack#4484): a required method with no caller anywhere, whose SQL and
+  // memory implementations awaited `find()` for the whole result set before
+  // yielding — the opposite of the memory guarantee it was declared for. This
+  // override went with the base method; page `find()` with `limit`/`offset`.
+
+  override async create(object: string, data: Record<string, any>, options?: any): Promise<any> {
+    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
+    return super.create(object, data, options);
+  }
+
+  override async update(object: string, id: string | number, data: Record<string, any>, options?: any): Promise<any> {
+    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
+    return super.update(object, id, data, options);
+  }
+
+  override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: any): Promise<Record<string, any>> {
+    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+    return super.upsert(object, data, conflictKeys, options);
+  }
+
+  override async delete(object: string, id: string | number, options?: any): Promise<boolean> {
+    if (this.isRemote) return this.remoteTransport!.delete(object, id);
+    return super.delete(object, id, options);
+  }
+
+  override async count(object: string, query?: any, options?: any): Promise<number> {
+    if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
+    return super.count(object, query, options);
+  }
+
+  override async aggregate(object: string, query: any, options?: any): Promise<any> {
+    if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
+    return super.aggregate(object, query, options);
+  }
+
+  // ===================================
+  // Remote read-coercion helpers
+  // ===================================
+  //
+  // The remote transport (`@libsql/client`) returns raw SQLite column values —
+  // booleans as 0/1, JSON as text, dates as raw strings — because it has no
+  // field-type metadata. Local/replica mode routes reads through
+  // `SqlDriver.formatOutput()`, which coerces those back to their declared
+  // types. These helpers run the SAME `formatOutput()` on remote rows so both
+  // transports agree on what a value *is*; without them a CEL guard like
+  // `field != true` sees `1 != true` (always true) on cloud/Turso but not
+  // locally — the exact divergence behind the case_escalation incident.
+
+  // ===================================
+  // Remote temporal seam (ADR-0053 D-A1, #937)
+  // ===================================
+  //
+  // `formatOutput` above closed the READ half of the transport asymmetry. The
+  // WRITE and FILTER halves were still open: `RemoteTransport` builds its own
+  // SQL (`buildWhereSQL`, `serializeValue`) and never touches the SqlDriver
+  // seam, which is exactly the surface ADR-0053 D-A1 legislates about —
+  //
+  //   any surface that binds a filter comparand into raw SQL MUST coerce
+  //   through the driver's dialect-aware temporal coercion, never re-derive a
+  //   type from the value's textual shape
+  //
+  // — and measurement matched the prediction: a bare-day `$lte` dropped the
+  // whole final day (framework#3777's shape, worse than pre-fix local because
+  // even the midnight row went), `$between` fell through `buildWhereSQL`'s
+  // `default:` arm into an equality against a JSON-stringified array and
+  // matched NOTHING, and a `Field.date` written as a `Date` was serialised to
+  // full ISO while a REST write of the same day stored `YYYY-MM-DD`, so one
+  // column held two forms (framework#1874 / D-E1 all over again).
+  //
+  // The fix is not to grow `buildWhereSQL` a matching set of operator arms —
+  // that is the second implementation D-A1 exists to prevent. It is to put the
+  // payload and the comparands into the driver's storage form BEFORE they
+  // reach the transport, reusing the inherited members. `RemoteTransport` stays
+  // the dumb SQL builder it is documented to be.
+
+  /**
+   * Put a write payload into the storage form the filter path reads against —
+   * the write half `RemoteTransport` skipped by never reaching
+   * `SqlDriver.create`.
+   *
+   * This is `formatInput`, the same function local mode applies, so the two
+   * transports cannot disagree about what a written value becomes. Remote mode
+   * runs on libsql (SQLite), and the base config is `better-sqlite3`, so every
+   * dialect branch inside it resolves the way local mode's does.
+   *
+   * The write-column map is deliberately NOT applied: a managed object is its
+   * own physical table here (see `registerRemoteFieldMetadata`), so the mapping
+   * is a no-op, and the transport addresses columns by object-field name.
+   */
+  private toRemoteWriteForms<T>(object: string, data: T): T {
+    if (!data || typeof data !== 'object') return data;
+    return this.formatInput(object, data) as T;
+  }
+
+  /**
+   * Compile a filter into the storage forms and operator shapes the remote
+   * transport can bind correctly.
+   *
+   * Three things happen here, and the ORDER of the last two is load-bearing
+   * (ADR-0053 D-E3): the calendar-day widening is a *calendar* operation and
+   * must run on the bare-day STRING, with only the resulting bound converted to
+   * storage form. Converting first would hand `nextUtcCalendarDay` an instant,
+   * which it correctly refuses to widen — silently narrowing a whole-day window
+   * back to a midnight one.
+   */
+  private toRemoteFilter(object: string, where: unknown): unknown {
+    if (where == null || typeof where !== 'object') return where;
+    if (Array.isArray(where)) return where.map((w) => this.toRemoteFilter(object, w));
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(where as Record<string, unknown>)) {
+      if ((key === '$and' || key === '$or') && Array.isArray(val)) {
+        out[key] = val.map((sub) => this.toRemoteFilter(object, sub));
+        continue;
+      }
+      // `$not` carries ONE nested filter condition, so it recurses like the two
+      // array combinators rather than passing through as an opaque `$`-key
+      // (#1076). Skipping it left every condition INSIDE a negation on the raw
+      // path, i.e. short of the seam this method IS: `$between` was never
+      // lowered (so `{ $not: { amount: { $between: […] } } }` reached a
+      // transport that correctly refuses un-lowered `$between`, naming a step
+      // that had in fact been skipped), and a bare `YYYY-MM-DD` upper bound was
+      // never widened to the whole calendar day (framework#3777) — which under
+      // a negation hands BACK exactly the rows the day was meant to cover.
+      // Comparand storage form and the operator lowerings apply at every depth
+      // a condition can appear at, so the recursion has to reach all of them.
+      if (key === '$not') {
+        out[key] = this.toRemoteFilter(object, val);
+        continue;
+      }
+      out[key] = key.startsWith('$') ? val : this.toRemoteFieldSpec(object, key, val);
+    }
+    return out;
+  }
+
+  /** One field's comparand(s), in storage form and with `$between` lowered. */
+  private toRemoteFieldSpec(object: string, field: string, spec: unknown): unknown {
+    if (spec == null) return spec;
+    // A bare scalar / `Date` is implicit equality; a bare array is not a valid
+    // field spec for this transport, so it is left for `buildWhereSQL` to
+    // handle exactly as before.
+    if (typeof spec !== 'object' || spec instanceof Date) {
+      return this.temporalFilterValue(object, field, spec);
+    }
+    if (Array.isArray(spec)) return spec;
+
+    const out: Record<string, unknown> = {};
+    for (const [op, raw] of Object.entries(spec as Record<string, unknown>)) {
+      switch (op) {
+        case '$between': {
+          // Lowered to its two bounds rather than given an operator of its own
+          // (framework#4081): the upper-bound arm below already carries the
+          // whole-day calendar rule, so a range's max inherits it by
+          // construction instead of via a second implementation.
+          if (!Array.isArray(raw) || raw.length !== 2) {
+            throw new Error(
+              `[TursoDriver] $between on '${object}.${field}' needs exactly two bounds, got ` +
+                `${JSON.stringify(raw)}. Refusing rather than widening the query silently.`,
+            );
+          }
+          out.$gte = this.temporalFilterValue(object, field, raw[0]);
+          Object.assign(out, this.toRemoteUpperBound(object, field, '$lte', raw[1]));
+          break;
+        }
+        case '$lte':
+          Object.assign(out, this.toRemoteUpperBound(object, field, op, raw));
+          break;
+        case '$in':
+        case '$nin':
+          out[op] = Array.isArray(raw)
+            ? raw.map((v) => this.temporalFilterValue(object, field, v))
+            : raw;
+          break;
+        // Text predicates and existence checks take no temporal comparand.
+        // (`$regex` is the better-auth adapter's spelling of a substring search
+        // — a comparand the temporal coercion must likewise keep its hands off.)
+        case '$contains':
+        case '$notContains':
+        case '$startsWith':
+        case '$endsWith':
+        case '$regex':
+        case '$null':
+        case '$exists':
+          out[op] = raw;
+          break;
+        default:
+          out[op] = this.temporalFilterValue(object, field, raw);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * An inclusive upper bound, compiled half-open when the comparand is a bare
+   * calendar day on a `datetime` column (ADR-0053 D-D1, framework#3777).
+   *
+   * `calendarDayUpperBoundRewrite` is the inherited authority for that rule and
+   * already scopes itself to `datetime`, so `date`/`time` columns compile
+   * byte-identically to before.
+   */
+  private toRemoteUpperBound(
+    object: string,
+    field: string,
+    op: string,
+    raw: unknown,
+  ): Record<string, unknown> {
+    const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
+    if (rewritten) return { [rewritten.op]: rewritten.value };
+    return { [op]: this.temporalFilterValue(object, field, raw) };
+  }
+
+  /** A query with its `where` compiled through {@link toRemoteFilter}. */
+  private toRemoteQuery(object: string, query: any): any {
+    if (!query || typeof query !== 'object' || query.where == null) return query;
+    return { ...query, where: this.toRemoteFilter(object, query.where) };
+  }
+
+  /** Apply the inherited read-coercion to a single remote row (in place). */
+  private formatRemoteRow<T>(object: string, row: T): T {
+    if (row && typeof row === 'object') this.formatOutput(object, row as any);
+    return row;
+  }
+
+  /** Apply read-coercion to every remote row (in place). */
+  private formatRemoteRows<T extends any[]>(object: string, rows: T): T {
+    if (Array.isArray(rows)) for (const row of rows) this.formatRemoteRow(object, row);
+    return rows;
+  }
+
+  /**
+   * Populate the read-coercion registries (boolean/json/date/numeric/…) for a
+   * managed object in REMOTE mode WITHOUT running any DDL. `SqlDriver.initObjects`
+   * normally does this, but TursoDriver's remote path routes DDL through
+   * `RemoteTransport` and never reaches it, leaving the registries empty so
+   * `formatOutput()` had nothing to coerce. Reuse the base `registerExternalObject`,
+   * whose sole documented job is exactly this — it classifies fields with the
+   * canonical logic, so the two can never drift. A managed object is its own
+   * physical table, so the default `remoteName === name` mapping is a no-op for
+   * the RemoteTransport SQL (which addresses tables by object name directly).
+   */
+  private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any> }): void {
+    try {
+      this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: (obj as any).tenancy });
+    } catch {
+      /* metadata registration is best-effort; never block schema sync on it */
+    }
+  }
+
+  // ===================================
+  // Bulk Operations (remote mode overrides)
+  // ===================================
+
+  override async bulkCreate(object: string, data: any[], options?: any): Promise<any> {
+    if (this.isRemote) {
+      const formatted = Array.isArray(data) ? data.map((d) => this.toRemoteWriteForms(object, d)) : data;
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted));
+    }
+    return super.bulkCreate(object, data, options);
+  }
+
+  override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: any): Promise<Record<string, any>[]> {
+    if (this.isRemote) {
+      const formatted = Array.isArray(updates)
+        ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
+        : updates;
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted));
+    }
+    return super.bulkUpdate(object, updates, options);
+  }
+
+  override async bulkDelete(object: string, ids: Array<string | number>, options?: any): Promise<void> {
+    if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids);
+    return super.bulkDelete(object, ids, options);
+  }
+
+  override async updateMany(object: string, query: any, data: any, options?: any): Promise<number> {
+    if (this.isRemote) {
+      return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
+    }
+    return super.updateMany(object, query, data, options);
+  }
+
+  override async deleteMany(object: string, query: any, options?: any): Promise<number> {
+    if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
+    return super.deleteMany(object, query, options);
+  }
+
+  // ===================================
+  // Raw Execution (remote mode override)
+  // ===================================
+
+  override async execute(command: any, params?: any[], options?: any): Promise<any> {
+    if (this.isRemote) return this.remoteTransport!.execute(command, params);
+    return super.execute(command, params, options);
+  }
+
+  // ===================================
+  // Transactions (remote mode overrides)
+  // ===================================
+
+  override async beginTransaction(): Promise<any> {
+    if (this.isRemote) return this.remoteTransport!.beginTransaction();
+    return super.beginTransaction();
+  }
+
+  override async commit(transaction: unknown): Promise<void> {
+    if (this.isRemote) return this.remoteTransport!.commit(transaction);
+    return super.commit(transaction);
+  }
+
+  override async rollback(transaction: unknown): Promise<void> {
+    if (this.isRemote) return this.remoteTransport!.rollback(transaction);
+    return super.rollback(transaction);
+  }
+
+  // ===================================
+  // Schema Management (remote mode overrides)
+  // ===================================
+
+  override async syncSchema(object: string, schema: unknown, options?: any): Promise<void> {
+    if (this.isRemote) {
+      await this.remoteTransport!.syncSchema(object, schema);
+      // See initObjects(): populate the read-coercion registries for remote mode.
+      // Key strictly by `object` (what find()/formatOutput look up) — never let a
+      // stray `schema.name` shadow it.
+      this.registerRemoteFieldMetadata({ ...(schema as Record<string, any>), name: object });
+      return;
+    }
+    return super.syncSchema(object, schema, options);
+  }
+
+  /**
+   * Provision (CREATE/ALTER) physical tables for the given object definitions.
+   *
+   * In **remote** mode the base `SqlDriver.initObjects()` cannot be used because
+   * it relies on Knex (`better-sqlite3`) to introspect and emit DDL — that
+   * native binding is unavailable in serverless environments such as Vercel
+   * Lambdas. Instead we route DDL through `RemoteTransport.syncSchemasBatch()`,
+   * which uses `@libsql/client.batch()` against the Turso endpoint directly.
+   *
+   * In local / replica modes the existing Knex-based path remains in effect.
+   */
+  override async initObjects(
+    objects: Array<{ name: string; fields?: Record<string, any> }>,
+  ): Promise<void> {
+    if (this.isRemote) {
+      if (objects.length === 0) return;
+      await this.remoteTransport!.syncSchemasBatch(
+        objects.map((obj) => ({ object: obj.name, schema: obj })),
+      );
+      // Remote DDL bypasses SqlDriver.initObjects, which is what normally
+      // populates the boolean/json/date/numeric read-coercion registries.
+      // Register the field-type metadata explicitly (no DDL) so remote reads
+      // run the same formatOutput() coercion as local/replica mode — otherwise
+      // a boolean reads back as raw 0/1, JSON as a string, dates as raw text.
+      // (Root cause of the 2026-07-06 case_escalation `1 != true` incident.)
+      for (const obj of objects) this.registerRemoteFieldMetadata(obj);
+      return;
+    }
+    return super.initObjects(objects);
+  }
+
+  /**
+   * Batch-synchronize multiple schemas in a single round-trip.
+   *
+   * In remote mode, delegates to `RemoteTransport.syncSchemasBatch()` which
+   * uses `client.batch()` to submit all DDL as one network call.
+   * In local/replica mode, falls back to sequential `syncSchema()` calls
+   * (Knex + better-sqlite3 is already local, so batching has no benefit).
+   */
+  async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: any): Promise<void> {
+    if (this.isRemote) {
+      return this.remoteTransport!.syncSchemasBatch(schemas);
+    }
+    // Local/replica fallback: sequential sync (already fast with local SQLite)
+    for (const { object, schema } of schemas) {
+      await super.syncSchema(object, schema, options);
+    }
+  }
+
+  override async dropTable(object: string, options?: any): Promise<void> {
+    if (this.isRemote) return this.remoteTransport!.dropTable(object);
+    return super.dropTable(object, options);
+  }
+
+  // ===================================
+  // Turso-specific: Embedded Replica Sync
+  // ===================================
+
+  /**
+   * Trigger manual sync of the embedded replica with the remote primary.
+   * No-op if no syncUrl is configured or libSQL client is not initialized.
+   */
+  async sync(): Promise<void> {
+    if (this.libsqlClient && this.tursoConfig.syncUrl) {
+      await this.libsqlClient.sync();
+    }
+  }
+
+  /**
+   * Check if embedded replica sync is configured and active.
+   */
+  isSyncEnabled(): boolean {
+    return !!this.tursoConfig.syncUrl && this.libsqlClient !== null;
+  }
+
+  /**
+   * Get the underlying @libsql/client instance (if available).
+   * Available in both remote and replica modes after connect().
+   */
+  getLibsqlClient(): Client | null {
+    return this.libsqlClient;
+  }
+
+  /**
+   * Get the RemoteTransport instance (only available in remote mode).
+   */
+  getRemoteTransport(): RemoteTransport | null {
+    return this.remoteTransport;
+  }
+}

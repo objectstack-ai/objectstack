@@ -43,9 +43,65 @@
  * shape is a daily SCHEDULE trigger + a range query. We flag the equality form
  * specifically (range operators `>=`/`<=` are not flagged — they're the building
  * block of the correct pattern), keeping false positives near zero.
+ *
+ * ## Every graph in the flow, not just the top-level one (#5383)
+ *
+ * These rules used to read `flow.nodes` / `flow.edges` flat, so every one of
+ * them was blind to anything authored inside an ADR-0031 container: a `loop`
+ * body, a `parallel` branch, a `try_catch` try/catch. That is not a corner —
+ * a per-item gate inside a sweep is the standard shape for a scheduled flow, and
+ * it is exactly where the rules were needed. Measured in a real app (HotCRM):
+ * 8 `decision` nodes carried the inert singular `config.condition` that
+ * {@link FLOW_INERT_NODE_CONDITION} exists to catch, all 8 inside a `loop` body,
+ * and `pnpm lint` reported none of them. The identical key on a TOP-LEVEL
+ * decision in the same repo fired immediately — same key, same node type, only
+ * the nesting depth differed. The blind spot also explains its own survival: the
+ * gate visibly worked where it could see, so the top-level copies got cleaned up
+ * and the nested ones read as approved.
+ *
+ * The fix is to iterate {@link collectFlowGraphs} — the same traversal the
+ * engine's registration pass uses (`validateNodeConfigKeys`,
+ * `validateFlowExpressions`) and that `validate-expressions.ts` already uses on
+ * the author side — and to prefix each finding's `where` with
+ * {@link FlowGraph.scope}, so a message still points at exactly one node
+ * (`flow 'x' · loop 'sweep' body · node 'y' (decision)`).
+ *
+ * Two things about that walk are load-bearing here, not incidental:
+ *
+ *  - **nodes and edges stay PAIRED per region.** A region is a self-contained
+ *    sub-graph: its edges join its own nodes, and no top-level edge reaches into
+ *    it. Flattening every region into one node bag plus one edge bag would break
+ *    the branch-routing family in both directions — a nested `decision`'s
+ *    out-edges would be absent from the top-level edge list, so it would read as
+ *    having none and be skipped outright (`outs.length === 0`), while two nodes
+ *    in *different* regions sharing an id (ids are unique per graph, not per
+ *    flow) would have their out-edges merged into one phantom fan-out. Each
+ *    graph is therefore scanned against its own `edges`.
+ *  - **a container's own config is read region-STRIPPED for the recursive
+ *    scans.** {@link collectTemplateStrings} walks a node's config to its string
+ *    leaves, and a container's config physically CONTAINS every descendant's.
+ *    Before this change that produced a *mis-attributed* finding rather than a
+ *    missing one: a `{{ }}` inside a loop body was reported against the `loop`
+ *    node, the same failure mode `validate-flow-template-paths` had (#4380) —
+ *    visible, but judged against the wrong node. Descending without stripping
+ *    would have turned that into a DOUBLE report (once at the container, once at
+ *    the node). Stripping the region slots moves each such finding onto the node
+ *    that actually carries the string, and the count stays 1.
+ *
+ * Deliberately still flow-level, i.e. read off the top-level nodes only: the
+ * start-node trigger rules (a trigger is a property of the flow, and a region
+ * has an entry node, not a `start`) and {@link FLOW_RUNAS_UNSCOPED}, whose
+ * data-node search is left alone here on purpose — widening a build-GATING rule
+ * is its own change with its own blast radius, filed separately.
  */
 
-import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
+import {
+  APPROVAL_NODE_TYPE,
+  APPROVAL_REVISE_NODE_TYPE,
+  collectFlowGraphs,
+} from '@objectstack/spec/automation';
+import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
+import { stripRegions } from './flow-walk.js';
 
 export interface FlowLintFinding {
   where: string;
@@ -323,7 +379,7 @@ function edgeLabelOf(e: AnyRec): string {
  * See {@link ERROR_LABELS} for why this is a footgun and what is excluded.
  */
 function scanErrorLabelledEdges(
-  flowName: string,
+  at: string,
   nodes: AnyRec[],
   edges: AnyRec[],
   findings: FlowLintFinding[],
@@ -343,7 +399,7 @@ function scanErrorLabelledEdges(
     if (BRANCH_LABEL_NODE_TYPES.has(typeById.get(src) ?? '')) continue;
 
     findings.push({
-      where: `flow '${flowName}' · edge '${src}' → '${String(e.target)}'`,
+      where: `${at} · edge '${src}' → '${String(e.target)}'`,
       message:
         `edge is labelled '${String(e.label)}' but its type is '${String(e.type ?? 'default')}', not 'fault' — ` +
         `so it is an ORDINARY out-edge. Unconditional out-edges all run in parallel, so '${String(e.target)}' ` +
@@ -398,7 +454,7 @@ function scanErrorLabelledEdges(
  * this rule existed still reaches run time.
  */
 function scanBranchRouting(
-  flowName: string,
+  at: string,
   nodes: AnyRec[],
   edges: AnyRec[],
   findings: FlowLintFinding[],
@@ -418,7 +474,7 @@ function scanBranchRouting(
     for (const e of outs) {
       if (e.isDefault === true && e.condition) {
         findings.push({
-          where: `flow '${flowName}' · edge '${src}' → '${String(e.target)}'`,
+          where: `${at} · edge '${src}' → '${String(e.target)}'`,
           message:
             `edge sets \`isDefault: true\` AND a \`condition\` — contradictory. \`isDefault\` means ` +
             `"take this edge when NO sibling condition matched"; a condition makes it an ordinary ` +
@@ -436,7 +492,7 @@ function scanBranchRouting(
     const defaults = outs.filter((e) => e.isDefault === true && !e.condition);
     if (defaults.length > 1) {
       findings.push({
-        where: `flow '${flowName}' · node '${src}'`,
+        where: `${at} · node '${src}'`,
         message:
           `${defaults.length} out-edges are marked \`isDefault: true\` (${defaults
             .map((e) => `'${String(e.target)}'`)
@@ -470,7 +526,7 @@ function scanBranchRouting(
     const cfg = (node.config ?? {}) as AnyRec;
     if (cfg.condition == null || conditionSource(cfg.condition).trim() === '') continue;
     findings.push({
-      where: `flow '${flowName}' · node '${String(node.id)}' (${nodeType})`,
+      where: `${at} · node '${String(node.id)}' (${nodeType})`,
       message:
         `\`config.condition\` is set but nothing reads it — the key is the trigger gate on a \`start\` ` +
         `node and is ignored on every other node type, so this predicate never gates anything. ` +
@@ -508,7 +564,7 @@ function scanBranchRouting(
     const unclaimed = [...declaredLabels].filter((l) => !edgeLabels.has(l));
     if (unclaimed.length > 0) {
       findings.push({
-        where: `flow '${flowName}' · decision '${nid}'`,
+        where: `${at} · decision '${nid}'`,
         message:
           `declares branch label(s) ${unclaimed.map((l) => `'${l}'`).join(', ')} that no out-edge ` +
           `carries — out-edge labels are [${[...edgeLabels].map((l) => `'${l}'`).join(', ') || 'none'}]. ` +
@@ -534,7 +590,7 @@ function scanBranchRouting(
     );
     if (ungated.length > 0) {
       findings.push({
-        where: `flow '${flowName}' · decision '${nid}'`,
+        where: `${at} · decision '${nid}'`,
         message:
           `has guarded out-edge(s) alongside unconditional one(s) ` +
           `(${ungated.map((e) => `'${String(e.target)}'`).join(', ')}) — an unconditional out-edge is ` +
@@ -551,7 +607,7 @@ function scanBranchRouting(
 }
 
 function scanApprovalReviseLoops(
-  flowName: string,
+  at: string,
   nodes: AnyRec[],
   edges: AnyRec[],
   findings: FlowLintFinding[],
@@ -580,7 +636,7 @@ function scanApprovalReviseLoops(
       .map((e) => (typeof e.target === 'string' ? e.target : ''))
       .filter((t) => t && nodeIds.has(t));
     if (reviseTargets.length === 0) continue; // only approvals that declare a revise branch
-    const where = `flow '${flowName}' \u00b7 approval '${aid}'`;
+    const where = `${at} \u00b7 approval '${aid}'`;
 
     // #3823 / amended ADR-0044 \u2014 the revise window must be the service-owned
     // pause. `error`, under this module's stated bar ("the runtime refuses"):
@@ -671,8 +727,10 @@ function scanApprovalReviseLoops(
 }
 
 /**
- * Lint every flow's start node for known authoring anti-patterns. Returns a
- * (possibly empty) list of advisory findings — never throws, never fails a build.
+ * Lint every flow for known authoring anti-patterns — its own graph AND every
+ * nested ADR-0031 region (#5383). Returns a (possibly empty) list of findings;
+ * never throws. A finding marked `severity: 'error'` fails the build, and since
+ * #5383 it can be raised by a node inside a `loop` body too.
  */
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
@@ -737,70 +795,98 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       }
     }
 
-    // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
-    //     node values use SINGLE braces; double-brace `{{ }}` and bare `$ref.x`
-    //     are carried over from the formula template dialect / other platforms.
-    for (const node of nodes) {
-      const nodeWhere = `flow '${flowName}' · node '${node.id}' (${node.type})`;
+    // (b)–(e) #5383 — every graph in the flow, not just the top-level one: its
+    //     own `nodes`/`edges` plus each nested ADR-0031 region, each scanned
+    //     against ITS OWN edge list. `scope` is empty for the flow's own graph,
+    //     so `at` is byte-identical to the old prefix there and only a nested
+    //     finding gains the region breadcrumb. See the module header for why the
+    //     per-region pairing and the region-strip below are load-bearing.
+    for (const graph of collectFlowGraphs({
+      // A cast, not a parse. `FlowNodeSchema.config` is an open `z.record`, so a
+      // region's contents arrive as raw authored records even in a parsed stack —
+      // a nested edge `condition` may still be a bare string where a top-level
+      // one is an Expression envelope. Every rule below reads both
+      // (`conditionSource`), and the walk itself only touches `type` / `config`.
+      // The already-guarded arrays are passed rather than `flow` itself so a
+      // non-array `nodes` still cannot throw: this function promises it never does.
+      nodes: nodes as unknown as FlowNodeParsed[],
+      edges: edges as unknown as FlowEdgeParsed[],
+    })) {
+      const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
+      const graphNodes = graph.nodes as unknown as AnyRec[];
+      const graphEdges = graph.edges as unknown as AnyRec[];
 
-      // (a2) #1874 — date-EQUALITY (`==`/`$eq`/`$in`) against a time value in a
-      //      query filter. A scheduled flow that filters this way silently matches
-      //      nothing; the robust shape is a `$gte`/`$lt` day window.
-      const cfg = (node.config ?? {}) as AnyRec;
-      if (cfg.filter) scanFilterForDateEquality(cfg.filter, `${nodeWhere} filter`, findings);
+      // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
+      //     node values use SINGLE braces; double-brace `{{ }}` and bare `$ref.x`
+      //     are carried over from the formula template dialect / other platforms.
+      for (const node of graphNodes) {
+        const nodeWhere = `${at} · node '${node.id}' (${node.type})`;
 
-      // (a3) #1870 — a node-config key naming a non-existent capability (there is
-      //      no aggregate node) is silently ignored at runtime, so the node
-      //      computes nothing. Point the author at the data-layer equivalent.
-      for (const key of Object.keys(cfg)) {
-        if (PHANTOM_AGG_KEYS.has(key)) {
-          findings.push({
-            where: nodeWhere,
-            message:
-              `node config has \`${key}\` — the automation engine has no aggregate node, so \`${key}\` is ` +
-              `silently ignored and this node computes nothing at runtime.`,
-            hint:
-              `Aggregation belongs in the data layer: use \`Field.summary\` for a cross-object rollup ` +
-              `(sum/count of children), or \`Field.formula\` for a per-record computed value. (#1870)`,
-            rule: FLOW_PHANTOM_AGGREGATION,
-          });
+        // (a2) #1874 — date-EQUALITY (`==`/`$eq`/`$in`) against a time value in a
+        //      query filter. A scheduled flow that filters this way silently matches
+        //      nothing; the robust shape is a `$gte`/`$lt` day window.
+        const cfg = (node.config ?? {}) as AnyRec;
+        if (cfg.filter) scanFilterForDateEquality(cfg.filter, `${nodeWhere} filter`, findings);
+
+        // (a3) #1870 — a node-config key naming a non-existent capability (there is
+        //      no aggregate node) is silently ignored at runtime, so the node
+        //      computes nothing. Point the author at the data-layer equivalent.
+        for (const key of Object.keys(cfg)) {
+          if (PHANTOM_AGG_KEYS.has(key)) {
+            findings.push({
+              where: nodeWhere,
+              message:
+                `node config has \`${key}\` — the automation engine has no aggregate node, so \`${key}\` is ` +
+                `silently ignored and this node computes nothing at runtime.`,
+              hint:
+                `Aggregation belongs in the data layer: use \`Field.summary\` for a cross-object rollup ` +
+                `(sum/count of children), or \`Field.formula\` for a per-record computed value. (#1870)`,
+              rule: FLOW_PHANTOM_AGGREGATION,
+            });
+          }
+        }
+
+        // Region-STRIPPED: this scan is recursive and a container's config
+        // physically contains every descendant's, which the walk above already
+        // visits in its own right. Without the strip a `{{ }}` in a loop body
+        // would be reported twice — once here against the `loop`, once against the
+        // node that carries it. With it, the count stays 1 and the finding lands
+        // on the right node (before #5383 it landed only on the container).
+        const strings: string[] = [];
+        collectTemplateStrings(stripRegions(node.config), undefined, strings);
+        for (const str of strings) {
+          if (DOUBLE_BRACE.test(str)) {
+            findings.push({
+              where: nodeWhere,
+              message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — flow node values use SINGLE braces.`,
+              hint: `Use \`{var}\` (e.g. \`{record.title}\`). Double-brace \`{{ }}\` is the formula/template-field dialect, not flow node values. (#1315)`,
+              rule: FLOW_DOUBLE_BRACE_INTERP,
+            });
+          }
+          if (BARE_DOLLAR_REF.test(str)) {
+            findings.push({
+              where: nodeWhere,
+              message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT interpolated.`,
+              hint: `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user). (#1315)`,
+              rule: FLOW_BARE_DOLLAR_REF,
+            });
+          }
         }
       }
 
-      const strings: string[] = [];
-      collectTemplateStrings(node.config, undefined, strings);
-      for (const str of strings) {
-        if (DOUBLE_BRACE.test(str)) {
-          findings.push({
-            where: nodeWhere,
-            message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — flow node values use SINGLE braces.`,
-            hint: `Use \`{var}\` (e.g. \`{record.title}\`). Double-brace \`{{ }}\` is the formula/template-field dialect, not flow node values. (#1315)`,
-            rule: FLOW_DOUBLE_BRACE_INTERP,
-          });
-        }
-        if (BARE_DOLLAR_REF.test(str)) {
-          findings.push({
-            where: nodeWhere,
-            message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT interpolated.`,
-            hint: `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user). (#1315)`,
-            rule: FLOW_BARE_DOLLAR_REF,
-          });
-        }
-      }
+      // (c) ADR-0044 — approval send-back-for-revision loop footguns.
+      scanApprovalReviseLoops(at, graphNodes, graphEdges, findings);
+
+      // (d) #3863 — an edge labelled like an error path but typed 'default' is an
+      //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
+      //     with the real path, and never on a failure.
+      scanErrorLabelledEdges(at, graphNodes, graphEdges, findings);
+
+      // (e) #4414 — a decision that declares a branch it cannot route: an
+      //     unclaimable branch label, an unconditional sibling that runs anyway,
+      //     or a self-contradictory / duplicated `isDefault` marker.
+      scanBranchRouting(at, graphNodes, graphEdges, findings);
     }
-
-    // (c) ADR-0044 — approval send-back-for-revision loop footguns.
-    scanApprovalReviseLoops(flowName, nodes, edges, findings);
-
-    // (d) #3863 — an edge labelled like an error path but typed 'default' is an
-    //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
-    //     with the real path, and never on a failure.
-    scanErrorLabelledEdges(flowName, nodes, edges, findings);
-
-    // (e) #4414 — a decision that declares a branch it cannot route: an
-    //     unclaimable branch label, an unconditional sibling that runs anyway,
-    //     or a self-contradictory / duplicated `isDefault` marker.
-    scanBranchRouting(flowName, nodes, edges, findings);
   }
   return findings;
 }

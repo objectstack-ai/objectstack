@@ -52,10 +52,13 @@ Drivers can be selected in two ways:
 | _(unset, dev mode)_ | SQLite (native, falling back to WASM, then in-memory) | `@objectstack/driver-sql` / `-sqlite-wasm` / `-memory` |
 
 <Callout type="info">
-Turso / libSQL (`libsql://`, `*.turso.io`) is **not** supported by the
-open-source framework. The CLI recognizes these URLs (mapping them to a
-`turso` driver kind), but no bundled driver implements it — so they never
-actually connect to Turso.
+Turso / libSQL (`libsql://`, `*.turso.io`) is **not** inferred from a URL.
+`@objectstack/driver-turso` does live in this repo (`packages/drivers/driver-turso`)
+and you can register it yourself — a datasource with `driver: 'turso'` and
+`config: { url, authToken }` — but the CLI's URL → driver resolver does not
+construct it. A `libsql://` URL therefore fails loudly at boot rather than
+silently degrading to SQLite. Whether the inference table should construct it
+is tracked in issue #5602.
 </Callout>
 
 ## Supported Drivers

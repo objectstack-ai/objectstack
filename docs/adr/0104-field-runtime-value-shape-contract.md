@@ -35,7 +35,7 @@ hand-duplicated re-derivations** in every consumer:
   (lines 37–57, including a copy of `MULTI_CAPABLE_TYPES`) and is the only
   place the intended storage shape per type is even written down (header
   comment, lines 6–31).
-- `packages/plugins/driver-sql/src/sql-driver.ts` — `JSON_COLUMN_TYPES`
+- `packages/drivers/driver-sql/src/sql-driver.ts` — `JSON_COLUMN_TYPES`
   (line 59) and `NUMERIC_SCALAR_TYPES` (line 81) drive DDL and (de)serialization;
   the file itself warns these must be kept in sync by hand because drift
   already caused a binder crash.

@@ -247,19 +247,51 @@ export class ObjectLogger implements Logger {
     }
 
     error(message: string, errorOrMeta?: Error | Record<string, any>, meta?: Record<string, any>): void {
-        if (errorOrMeta instanceof Error) {
-            this.write('error', message, meta, errorOrMeta);
-        } else {
-            this.write('error', message, errorOrMeta);
-        }
+        this.writeErrorLike('error', message, errorOrMeta, meta);
     }
 
     fatal(message: string, errorOrMeta?: Error | Record<string, any>, meta?: Record<string, any>): void {
+        this.writeErrorLike('fatal', message, errorOrMeta, meta);
+    }
+
+    /**
+     * `error`/`fatal` dispatch — the two levels whose contract has an `Error`
+     * slot in front of `meta`.
+     *
+     * The `Logger` contract declares `error(message, error?: Error, meta?)`, and
+     * `ObjectLogger` additionally tolerates a **meta object** in the `error`
+     * slot because many in-repo call sites write `logger.error(msg, { … })`.
+     * That tolerance is fine; dropping a parameter the contract *declares* is
+     * not, and that is what the previous dispatch did:
+     *
+     *     if (errorOrMeta instanceof Error) this.write(level, message, meta, errorOrMeta);
+     *     else                             this.write(level, message, errorOrMeta);
+     *
+     * With `error === undefined` the `else` branch passed `undefined` as the
+     * meta and **never read the third argument**, so every contract-shaped
+     * `logger.error(msg, undefined, { … })` call rendered a bare message with
+     * its diagnostics silently gone — ~15 such call sites across `metadata`,
+     * `metadata-protocol`, `client` and `core/security`, plus the connector
+     * reconcile seam that found this (#5575). The contract's two sibling
+     * implementations (`ConsoleLogger`/`JsonLogger` in `@objectstack/observability`)
+     * both honour the slot, so the contract was right and this class was the
+     * outlier — declared ≠ enforced, Prime Directive #10.
+     *
+     * All three shapes are now honoured. When both slots carry meta, `meta`
+     * (the later, more specific argument) wins on a key collision.
+     */
+    private writeErrorLike(
+        level: 'error' | 'fatal',
+        message: string,
+        errorOrMeta?: Error | Record<string, any>,
+        meta?: Record<string, any>,
+    ): void {
         if (errorOrMeta instanceof Error) {
-            this.write('fatal', message, meta, errorOrMeta);
-        } else {
-            this.write('fatal', message, errorOrMeta);
+            this.write(level, message, meta, errorOrMeta);
+            return;
         }
+        const merged = errorOrMeta && meta ? { ...errorOrMeta, ...meta } : (errorOrMeta ?? meta);
+        this.write(level, message, merged);
     }
 
     log(message: string, ...args: any[]): void {

@@ -113,25 +113,60 @@
  * still described the old emitter would have negated an always-false conjunction
  * and answered `{$not: {stage: {$eq: null}}}` with every row.
  *
- * # A STRING comparand keeps its spelling (#5528, partial)
+ * # A comparand keeps its own TYPE — there is no round trip any more (#5526)
  *
- * #5332 is about the ENCODER ({@link stringifyForCube}); the same round trip has
- * a DECODER — {@link recoverNumber}, behind {@link coerceFilterValueForSql} and
- * {@link coerceFilterValueForObjectQL} — and it was guessing "this is a number"
- * from the string's shape alone. So `{code: {$eq: '007'}}` bound the integer `7`
- * and `{price: {$eq: '1.50'}}` bound `1.5`, on both consumers: against a TEXT
- * column that is zero rows on SQLite and a type error on Postgres, reported to
- * the author as "no data" (#5526's measured table).
+ * A leaf's `values` used to be `string[]`, so every comparand was encoded to a
+ * string on the way in (`stringifyForCube`) and GUESSED back into a type on the
+ * way out (`recoverNumber`, behind `coerceFilterValueForSql` /
+ * `coerceFilterValueForObjectQL`). An encoding whose alphabet is "all strings"
+ * and whose decoder is "does this string look like a number/boolean/null" has no
+ * escape, so author strings COLLIDED with the tokens the encoder wrote for other
+ * types. Measured on `main` (#5526's table), for `{code: {$eq: v}}`:
  *
- * Recovery is now limited to a number's own canonical spelling
- * (`String(Number(s)) === s`), which is exactly what a real number comparand
- * produces on the way out — so `7` → `'7'` → `7` still works, while a string
- * that `Number()` would rewrite is kept as the author wrote it.
+ *   | author's `v` | bound (SQL)    | bound (engine) |
+ *   |---|---|---|
+ *   | `'007'`  | `7` (#5528: fixed)  | `7` (#5528: fixed)  |
+ *   | `'1.50'` | `1.5` (#5528: fixed)| `1.5` (#5528: fixed)|
+ *   | `'null'` | real `NULL`         | real `null`         |
+ *   | `'true'` | `1`                 | `true`              |
  *
- * This is a STOPGAP, and named as one: `values: string[]` still has no escape,
- * so the author strings `'null'` / `'true'` / `'false'` still collide with the
- * tokens the encoder writes for the real values. Fixing the round trip itself —
- * tagged values, or an `unknown[]` internal representation — is #5526.
+ * Every row of that table is one defect: a TEXT column storing the author's
+ * spelling stops matching. `'007'` on SQLite compares an integer against a TEXT
+ * column and is never equal; on Postgres `text = integer` is a type error. The
+ * `'null'` row is worse than empty — a comparison against real NULL is UNKNOWN
+ * for every row, so the widget can never draw anything. Zero-padded strings,
+ * `'true'`/`'false'` as enum-ish codes and `'null'` as a literal label are all
+ * ordinary business shapes (order numbers, SKUs, postcodes, dialling codes).
+ *
+ * #5528 narrowed the number half of the decoder (canonical spelling only) as a
+ * STOPGAP and said so; this is the ruled fix. `values` is now `unknown[]`: the
+ * comparand the author wrote travels through the tree untouched, and no
+ * stringification happens at all except where a boundary genuinely demands it:
+ *
+ *   - {@link toSqlBindValue} — the ONLY survivor, and it is one-way (a value →
+ *     its SQL bind form), never a decoder. It exists because a SQL driver cannot
+ *     bind every JS type: better-sqlite3 refuses a `boolean`, a `Date` and a
+ *     plain object. Nothing about it inspects a string.
+ *   - the LIKE family, whose comparand `filter.zod.ts` declares a `string`
+ *     (`$contains: z.string()`), so `like-pattern.ts` stringifies at the emitter
+ *     — the same `String(value)` `driver-sql`'s `applyLike` applies, which is
+ *     what keeps one `$contains` meaning one thing on both faces.
+ *
+ * The ObjectQL path needs NO conversion at all now: the engine compares against
+ * the stored runtime type, and the value it receives is the author's own.
+ *
+ * Two shapes changed reading as a consequence, both toward fail-closed and both
+ * pinned in `filter-value-type-fidelity.test.ts`:
+ *
+ *   - `{name: {$contains: null}}` compiled to `LIKE '%%'` — matching EVERY
+ *     non-NULL row — because `stringifyForCube(null)` was `''`. It is now
+ *     `LIKE '%null%'`, which is what `driver-sql` has always compiled it to.
+ *   - `{amount: {$gt: null}}` compiled to `amount > ''`, a real comparison
+ *     against the empty string. It now binds NULL, so the predicate is UNKNOWN
+ *     and the widget draws nothing — the honest answer for an unordered
+ *     comparand, and the one `driver-memory` / `formula` give. (#5332 named this
+ *     comparand position as covered by no ruling and left the `''` placeholder
+ *     alone; deleting the encoder decides it by construction.)
  *
  * # A `where` ARRAY is lowered here, not dropped (#5334)
  *
@@ -174,8 +209,10 @@
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
  * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
- * deliberately does not carry (NULL handling, boolean identities), and
- * `filter-array-lowering.test.ts` for the array door (#5334).
+ * deliberately does not carry (NULL handling, boolean identities),
+ * `filter-array-lowering.test.ts` for the array door (#5334), and
+ * `filter-value-type-fidelity.test.ts` for what each comparand TYPE binds on both
+ * consumers (#5526, carrying #5528's cases forward as end-to-end assertions).
  */
 
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
@@ -184,7 +221,8 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 export interface NormalizedAnalyticsFilter {
   member: string;
   operator: string;
-  values: string[];
+  /** The author's comparands, at their own types — see {@link NormalizedFilterNode}. */
+  values: unknown[];
 }
 
 // ── [#5334 / #5352] The refusal envelope ─────────────────────────────────────
@@ -240,32 +278,27 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
 };
 
 /**
- * Stringify a filter value as the internal pipeline requires `values: string[]`.
+ * The comparand a leaf carries: the author's value, at the author's type.
  *
- * Booleans serialize as the tokens `'true'`/`'false'` (NOT `'1'`/`'0'`) so the
- * boolean identity survives the string roundtrip: the consuming strategies can
- * recover a real boolean for the ObjectQL engine (which compares against the
- * stored boolean type) while still binding `1`/`0` for SQL. Stringifying to
- * `'1'`/`'0'` was indistinguishable from a numeric 1/0 and made every boolean
- * equality filter / boolean group-by compare a number against a boolean — and
- * never match.
+ * [#5526] This function is what used to be `stringifyForCube`, and the whole of
+ * its former body is gone: `values` is `unknown[]`, so a comparand needs no
+ * encoding and there is nothing for a decoder downstream to guess at. What
+ * remains is one normalisation, and it is not a type conversion:
  *
- * The `v == null → ''` arm is NOT a spelling of "is null": `values` is
- * `string[]`, which has no null, so every leaf that MEANS null is emitted as
- * `notSet` / `set` with EMPTY `values` and never calls this function — the
- * `raw === null` branch, `$null` / `$exists`, and since #5332 a `null` comparand
- * of `$eq` / `$ne`, which used to arrive here and become `= ''`. What still
- * reaches this arm is a comparand position no ruling covers (`$gt: null`,
- * `$in: [null]`), where `''` is a placeholder rather than an answer; #5332 scoped
- * itself to the two spellings `filter.zod.ts` gives a null MEANING and left this
- * arm untouched.
+ * `undefined` becomes `null`. JSON has no `undefined`, so no authored
+ * `FilterCondition` can carry one — `{$eq: undefined}` is a key the author did
+ * not mean to write (#5332's reading, unchanged here) — while a `values` entry
+ * that IS `undefined` is a bind error on better-sqlite3 rather than a predicate.
+ * `null` is the fail-closed reading: the comparison is UNKNOWN, so the widget
+ * draws nothing instead of drawing rows chosen by an accident.
+ *
+ * Note what this does NOT do: `{$eq: undefined}` still compiles to an `equals`
+ * leaf, not to `notSet`. Only `=== null` is the null PREDICATE (#5332's identity
+ * test, which this module reads at the operator branch, above this function),
+ * and widening it to `== null` here would re-decide that ruling sideways.
  */
-function stringifyForCube(v: unknown): string {
-  if (v == null) return '';
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (v instanceof Date) return v.toISOString();
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
+function comparand(v: unknown): unknown {
+  return v === undefined ? null : v;
 }
 
 /**
@@ -286,9 +319,19 @@ function stringifyForCube(v: unknown): string {
  * emitting nothing, which every compiler reads as "no constraint", i.e. the
  * opposite. TRUE keeps its existing spelling (`null` = no constraint, the AND
  * identity); FALSE needs a node because it must survive into the WHERE clause.
+ *
+ * [#5526] A leaf's `values` is `unknown[]`, not `string[]`. The author's
+ * comparand travels at its own type: a number stays a number, a boolean a
+ * boolean, and — the defect this fixed — a STRING stays the string the author
+ * typed, so `'007'` is never the integer `7` and `'null'` is never real NULL.
+ * The compilers of this tree convert only where their own boundary forces it
+ * ({@link toSqlBindValue} for a SQL parameter, `like-pattern.ts` for the LIKE
+ * family, whose comparand the spec declares a `string`); the ObjectQL engine path
+ * converts nothing, because the engine compares against the stored runtime type
+ * and the value it is handed is the author's own. See the module header.
  */
 export type NormalizedFilterNode =
-  | { kind: 'leaf'; member: string; operator: string; values: string[] }
+  | { kind: 'leaf'; member: string; operator: string; values: unknown[] }
   | { kind: 'const'; value: boolean }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
@@ -347,7 +390,7 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  */
 function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
   const out: NormalizedFilterNode[] = [];
-  const leaf = (operator: string, values: string[]): void => {
+  const leaf = (operator: string, values: unknown[]): void => {
     out.push({ kind: 'leaf', member: key, operator, values });
   };
 
@@ -403,8 +446,8 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
               `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
             );
           }
-          leaf('gte', [stringifyForCube(v[0])]);
-          leaf('lte', [stringifyForCube(v[1])]);
+          leaf('gte', [comparand(v[0])]);
+          leaf('lte', [comparand(v[1])]);
           continue;
         }
 
@@ -442,8 +485,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // Identity against `null`, matching `read-scope-sql` and `driver-sql`:
         // `null` is what an authored `FilterCondition` can carry (JSON has no
         // `undefined`, and `$eq: undefined` is a key the author did not mean to
-        // write). `stringifyForCube`'s wider `v == null` test is untouched — it
-        // still serves the comparand positions this branch does not claim.
+        // write). [#5526] `comparand`'s `undefined` → `null` normalisation
+        // deliberately does NOT widen this test to `== null`: it makes the VALUE
+        // bindable, while this branch decides what the operator MEANS, and the
+        // meaning is #5332's to change, not a side effect of deleting an encoder.
         if ((opKey === '$eq' || opKey === '$ne') && wrapper[opKey] === null) {
           leaf(opKey === '$eq' ? 'notSet' : 'set', []);
           continue;
@@ -479,7 +524,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           );
         }
         const v = wrapper[opKey];
-        leaf(cubeOp, Array.isArray(v) ? v.map(stringifyForCube) : [stringifyForCube(v)]);
+        leaf(cubeOp, Array.isArray(v) ? v.map(comparand) : [comparand(v)]);
       }
       return out;
     }
@@ -495,8 +540,8 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
   // explicit `{$in: []}` spelling is — see the note at that branch.
   if (Array.isArray(raw)) {
     if (raw.length === 0) out.push({ kind: 'const', value: false });
-    else leaf('in', raw.map(stringifyForCube));
-  } else leaf('equals', [stringifyForCube(raw)]);
+    else leaf('in', raw.map(comparand));
+  } else leaf('equals', [comparand(raw)]);
   return out;
 }
 
@@ -935,95 +980,42 @@ export function collectFilterLeaves(
 }
 
 /**
- * Recover a finite number from a token that is a number's OWN canonical
- * spelling — `String(Number(s)) === s` — else undefined.
+ * [#5526] Put one comparand into a form a SQL driver can BIND. One-way, and the
+ * only stringification left in this module's value path.
  *
- * This is the decoder half of the `values: string[]` round trip
- * {@link stringifyForCube} encodes into, and it is a LAST RESORT by design:
- * ADR-0053 D-A2 demoted textual type re-derivation behind the driver-backed
- * `coerceTemporalFilterValue` hook, leaving this function only the
- * boolean/number recovery for non-temporal columns. Guessing a type from a
- * string's shape can only ever be a guess, so the narrower the guess, the fewer
- * author values it can overwrite.
+ * This replaces `coerceFilterValueForSql` / `coerceFilterValueForObjectQL`, and
+ * the difference is the whole of #5526: those two were DECODERS — they received a
+ * string and guessed which type it had been before `stringifyForCube` flattened
+ * it, so `'007'` became `7`, `'null'` became real NULL and `'true'` became `1`,
+ * whatever the author meant. Nothing here inspects a string. A `string` comparand
+ * is returned untouched, always, because a `string` is already bindable; only the
+ * JS types a driver CANNOT bind are converted, each to the one form SQL has for
+ * it:
  *
- * # Why canonical form, not "looks numeric" (#5528, route C of #5526)
+ *   - `boolean` → `1` / `0`. better-sqlite3 refuses a JS boolean outright
+ *     ("can only bind numbers, strings, bigints, buffers, and null"), and `1`/`0`
+ *     is how every dialect these strategies target spells a bit. The ObjectQL
+ *     path deliberately does NOT do this — the engine compares against the
+ *     STORED boolean, where `1` never matches `true` (the regression
+ *     `objectql-strategy-boolean-filter.test.ts` guards).
+ *   - `Date` → canonical UTC ISO text. A comparand on a temporal column has
+ *     normally been through `StrategyContext.coerceTemporalFilterValue` (the
+ *     driver's own storage convention, ADR-0053 D-A2) before it gets here; this
+ *     arm is the fallback for the hookless / non-temporal case, where an
+ *     unbindable object would otherwise reach the driver.
+ *   - any other object / array → JSON text. Not a meaningful comparison on any
+ *     column, but the shape `filter.zod.ts` cannot exclude, and a driver-level
+ *     bind error tells the author nothing about their filter.
  *
- * The test used to be the SHAPE alone (`/^-?\d+(\.\d+)?$/`), which cannot tell
- * a number that was stringified on the way out from a string the author wrote.
- * `'007'` came back as `7` and `'1.50'` as `1.5` — on BOTH consumers (the SQL
- * bind in `native-sql-strategy` and the engine comparand in
- * `objectql-strategy`) — so a widget filtered `{code: {$eq: '007'}}` compared an
- * INTEGER against a TEXT column: zero rows on SQLite (cross-type compare is
- * never equal), a type error on Postgres. Silent, and drawn as "no data".
- *
- * Zero-padded and trailing-zero strings are ordinary business shapes — order
- * numbers, work orders, SKUs, dialling codes, postcodes, `'1.50'` prices — not
- * constructed edge cases (#5526's measured table).
- *
- * The canonical-form test separates the two cases without needing a type:
- *
- *   - a comparand that REALLY was a number arrives as `String(n)` by
- *     construction, so it round-trips exactly and is still recovered
- *     (`7` → `'7'` → `7`, `1.5` → `'1.5'` → `1.5`, `-3` → `'-3'` → `-3`);
- *   - a string that survived `Number()` with information LOST — a leading zero,
- *     a trailing zero, `'-0'`, more digits than a double can hold — cannot have
- *     come from a number, so it is the author's string and stays one.
- *
- * The shape regex is kept AHEAD of the round-trip test so this change can only
- * ever NARROW what is recovered: `'1e3'`, `'1e+21'`, `'+7'`, `' 7'`, `'0x10'`,
- * `'Infinity'` and `'NaN'` were strings before and are strings still, even
- * though some of them are canonical `String(Number(…))` output.
- *
- * ⛔ **Not fixed here, on purpose.** `'null'` / `'true'` / `'false'` still
- * collide with the tokens {@link stringifyForCube} writes for the real `null`
- * and booleans, so those three author strings still decode to non-strings. That
- * collision is not a bad `if` — it is the `string[]` encoding having no escape,
- * i.e. the root cause #5526 exists to rule on (tagged encoding, or an
- * `unknown[]` internal representation). This function only stops the shapes that
- * are unambiguously lossy from being downgraded; it does not make the round trip
- * lossless.
+ * `number`, `bigint`, `null` and `string` pass through — `null` included, and
+ * that is deliberate: `col > NULL` is UNKNOWN, so the widget draws nothing. It is
+ * the honest answer for an unordered comparand and the one the JS backends give;
+ * the `''` this used to bind was a real comparison against the empty string,
+ * which on a text column silently matched rows (see the module header).
  */
-function recoverNumber(s: string): number | undefined {
-  if (!/^-?\d+(\.\d+)?$/.test(s)) return undefined;
-  const n = Number(s);
-  if (!Number.isFinite(n)) return undefined;
-  // The round-trip test: only a string that IS `n`'s canonical spelling carries
-  // no writing `Number()` threw away, so only that string can be read as `n`.
-  if (String(n) !== s) return undefined;
-  return n;
-}
-
-/**
- * Coerce a stringified filter value back into a runtime type for SQL
- * parameter binding. Better-sqlite3 (and most drivers) cannot bind a JS
- * boolean, so booleans are recovered as `1`/`0` integers; numbers are
- * recovered as numbers — avoiding string-vs-number mismatches against typed
- * columns.
- *
- * "Numbers" means only a number's own canonical spelling — see
- * {@link recoverNumber} for why `'007'` and `'1.50'` bind as TEXT (#5528).
- */
-export function coerceFilterValueForSql(s: string): unknown {
-  if (s === 'true') return 1;
-  if (s === 'false') return 0;
-  if (s === 'null') return null;
-  return recoverNumber(s) ?? s;
-}
-
-/**
- * Coerce a stringified filter value back into a runtime type for the ObjectQL
- * aggregate engine. Unlike the SQL path, the engine compares against the
- * *stored* runtime type, so a boolean field holds a real `true`/`false` — bind
- * the boolean itself, NOT `1`/`0`, or the equality never matches.
- *
- * The number recovery is the SAME canonical-form test the SQL path uses
- * ({@link recoverNumber}): the two consumers differ in how they spell a boolean,
- * never in which strings they consider numbers, so `{code: {$eq: '007'}}` binds
- * the string `'007'` on both paths (#5528).
- */
-export function coerceFilterValueForObjectQL(s: string): unknown {
-  if (s === 'true') return true;
-  if (s === 'false') return false;
-  if (s === 'null') return null;
-  return recoverNumber(s) ?? s;
+export function toSqlBindValue(v: unknown): unknown {
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  if (v instanceof Date) return v.toISOString();
+  if (v !== null && typeof v === 'object') return JSON.stringify(v);
+  return v;
 }

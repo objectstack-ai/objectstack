@@ -101,35 +101,15 @@ export class NodeMetadataManager extends MetadataManager {
     const fileName = parts[parts.length - 1];
     const name = path.basename(fileName, path.extname(fileName));
 
-    let data: any = undefined;
-    if (eventType !== 'deleted') {
-      try {
-        data = await this.load(type, name, { useCache: false });
-      } catch (error) {
-        this.logger.error('Failed to load changed file', undefined, {
-          filePath,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return;
-      }
-    }
-
-    const event: MetadataWatchEvent = {
-      type: eventType,
-      metadataType: type,
-      name,
-      path: filePath,
-      data,
-      timestamp: new Date().toISOString(),
-    };
-
-    // [#5218] Invalidate BEFORE announcing. A file event is a *foreign write*
-    // in the precise sense {@link MetadataManager.invalidateForForeignWrite}
-    // means: it did not come through this manager's write API, so — unlike
-    // `register()` / `unregister()` — nothing has refreshed the caches on its
-    // behalf. `load()` above is a pure read (it delegates to `loadDiagnosed`,
-    // which only walks the loaders), so before this call the handler left both
-    // `listCache` and `registry` holding the pre-change state.
+    // [#5218] Invalidate BEFORE announcing — and, since #5228, before reading
+    // too, so that the read's verdict can never decide whether the caches are
+    // dropped. A file event is a *foreign write* in the precise sense
+    // {@link MetadataManager.invalidateForForeignWrite} means: it did not come
+    // through this manager's write API, so — unlike `register()` /
+    // `unregister()` — nothing has refreshed the caches on its behalf. The
+    // read below is pure (it only walks the loaders and writes neither cache),
+    // so before this call the handler left both `listCache` and `registry`
+    // holding the pre-change state.
     //
     // Without it, editing `rootDir/view/x.json` left the two read surfaces
     // contradicting each other for up to LIST_CACHE_TTL_MS (30s): `get()` saw
@@ -153,6 +133,59 @@ export class NodeMetadataManager extends MetadataManager {
     // and dropping the list cache alone would leave that stale copy answering
     // forever. Deleted, never pre-filled from `data`, per the helper's contract.
     this.invalidateForForeignWrite(type, name);
+
+    // [#5228] `loadDiagnosed`, not `load` — and the difference is the whole
+    // point of this branch. `load()` is `(await loadDiagnosed(...)).data`, and
+    // `loadDiagnosed` (ADR-0110 D3) ABSORBS a loader throw: it records the
+    // message in `errors[]` and answers `{ data: null, degraded: true }`.
+    // `FilesystemLoader.load()` does throw on an unreadable / unparseable
+    // file, but that throw dies inside `loadDiagnosed`, so the `try/catch`
+    // this handler used to wrap `load()` in was unreachable for exactly the
+    // failure it was written to catch. The handler announced `data: null`
+    // instead, and its `logger.error` never printed once.
+    //
+    // `data: null` is the wire-shape of "this metadata legitimately holds
+    // nothing" — so a file the loader could not read was announced as a file
+    // the author had emptied. Those are the two facts ADR-0110 D3 exists to
+    // keep apart (a miss and an outage mean opposite things), and this call
+    // site was using the variant that throws the distinction away.
+    //
+    // So: split on `degraded`. An outage takes the road the dead `catch` meant
+    // to take — log loudly, announce nothing. A clean miss (`data: null`, no
+    // loader threw: the file is gone or legitimately empty) keeps its existing
+    // semantics and is announced as before.
+    //
+    // Note what deliberately does NOT move with the early return: the
+    // invalidation above. An unreadable file is still a real change to the
+    // stored set — `loadMany` skips it, so `list()` genuinely answers
+    // differently than it did — and #5218's contract is that a file event
+    // always ages out the caches. That is also what keeps the `api` endpoint
+    // index correct on this path without a broadcast: `invalidateListCache`
+    // is the index's first invalidation seam (#5089), so suppressing the
+    // `subscribe('api', …)` seam costs nothing.
+    let data: unknown = undefined;
+    if (eventType !== 'deleted') {
+      const read = await this.loadDiagnosed(type, name, { useCache: false });
+      if (read.degraded) {
+        this.logger.error('Failed to load changed file', undefined, {
+          filePath,
+          metadataType: type,
+          name,
+          errors: read.errors,
+        });
+        return;
+      }
+      data = read.data;
+    }
+
+    const event: MetadataWatchEvent = {
+      type: eventType,
+      metadataType: type,
+      name,
+      path: filePath,
+      data,
+      timestamp: new Date().toISOString(),
+    };
 
     this.notifyWatchers(type, event);
   }

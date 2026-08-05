@@ -1,0 +1,73 @@
+{
+  "name": "@objectstack/driver-turso",
+  "version": "17.0.0-rc.2",
+  "license": "Apache-2.0",
+  "description": "Turso/libSQL Driver for ObjectStack — Edge-first SQLite with embedded replicas",
+  "keywords": [
+    "objectstack",
+    "driver",
+    "turso",
+    "libsql",
+    "sqlite",
+    "edge",
+    "serverless",
+    "embedded-replica"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts",
+    "dev": "tsc -w",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.3",
+    "@objectstack/core": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "nanoid": "^6.0.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "better-sqlite3": "^13.0.2"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@objectstack/verify": "workspace:*",
+    "@types/node": "^26.1.2",
+    "better-sqlite3": "^13.0.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/drivers/driver-turso"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

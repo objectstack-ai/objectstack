@@ -61,7 +61,7 @@
  * ## Relationship to `driver-sql`'s `applyLike`
  *
  * This is deliberately the same transform `SqlDriver.applyLike`
- * (`packages/plugins/driver-sql/src/sql-driver.ts`) applies — same escaped
+ * (`packages/drivers/driver-sql/src/sql-driver.ts`) applies — same escaped
  * character class, same three wildcard shapes, same bound `ESCAPE` — and its
  * TSDoc points back here. It is a SECOND implementation on purpose, not an
  * oversight:

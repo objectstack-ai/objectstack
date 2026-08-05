@@ -12,7 +12,7 @@ const TEST_FILE_PATH = path.join(TEST_DATA_DIR, 'test-db.json');
  * The shorthand forms (`persistence: 'file'` / `'auto'`) deliberately take the
  * adapter's DEFAULT path, which is `.objectstack/data/memory-driver.json`
  * *relative to the CWD* — so without this the suite wrote that file into
- * `packages/plugins/driver-memory/` and the next run loaded it back. A unit
+ * `packages/drivers/driver-memory/` and the next run loaded it back. A unit
  * test must not have write side effects on the package directory (#4065).
  */
 async function inScratchCwd(fn: () => Promise<void>): Promise<void> {

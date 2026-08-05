@@ -28,7 +28,7 @@ already exists and is reused:
 
 | Already present (reused) | Location |
 |:--|:--|
-| Driver `introspectSchema()` (dialect-aware) | `packages/plugins/driver-sql/src/sql-driver.ts` |
+| Driver `introspectSchema()` (dialect-aware) | `packages/drivers/driver-sql/src/sql-driver.ts` |
 | Per-object datasource routing | `packages/objectql/src/engine.ts`, `Object.datasource` |
 | `kernel:ready` hook pattern for plugins | `packages/runtime/src/*-plugin.ts` |
 | Metadata type registry | `packages/spec/src/kernel/metadata-plugin.zod.ts` (`DEFAULT_METADATA_TYPE_REGISTRY`) |
@@ -86,7 +86,7 @@ behaviour).
      `ExternalSchemaModeViolationError`, each with a stable `code`.
    - `SchemaDiffEntry` type + pure `renderDiffMessage()` (P2/P3 consume it).
 
-4. **DDL gate — `packages/plugins/driver-sql/src/sql-driver.ts`**
+4. **DDL gate — `packages/drivers/driver-sql/src/sql-driver.ts`**
    - `SqlDriverConfig` gains an optional `schemaMode` (stripped before Knex).
    - `assertSchemaMutable()` choke-point throws
      `ExternalSchemaModeViolationError` when `schemaMode !== 'managed'`;

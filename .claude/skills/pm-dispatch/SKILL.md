@@ -392,7 +392,7 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:engine-core` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
-| `domain:drivers` | `packages/plugins/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
+| `domain:drivers` | `packages/drivers/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`packages/vscode-objectstack`、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
@@ -837,6 +837,11 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - If the issue underspecifies a decision that changes the public contract
   (spec schema, API shape, naming), STOP and return status "needs_decision"
   with your open questions — do not guess.
+- Any NEW fake engine your tests introduce must open its `delete()` with
+  `assertEngineDeleteDispatch(options)` from `@objectstack/objectql`, never a
+  hand-mirrored `if (!where?.id && !multi)` — `check:engine-double-contract`
+  went red on four dev agents' new tests in two days (#5173 / #5191 / #5192 /
+  #5584), one CI lap each. Copy a pinned fake, don't write the guard.
 Return ONLY the JSON report defined in your agent definition.
 ```
 

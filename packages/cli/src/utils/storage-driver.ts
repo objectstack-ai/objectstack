@@ -37,11 +37,12 @@
 export type SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
 
 /**
- * Thrown by {@link resolveStorageDefinition} when a driver kind is *recognized* but the
- * open-core CLI cannot construct it — currently `turso`/libSQL, which ships in the
- * ObjectStack cloud / enterprise distribution (`@objectstack/driver-turso`, an
- * extension of SqlDriver over `@libsql/client`), composed by the cloud runtime's
- * own kernel factory, not by open-core's auto driver-registration.
+ * Thrown by {@link resolveStorageDefinition} when a driver kind is *recognized* but this
+ * resolver does not construct it — currently `turso`/libSQL (`@objectstack/driver-turso`,
+ * an extension of SqlDriver over `@libsql/client`). Since #4645 that package lives in
+ * this repo (`packages/drivers/driver-turso`), but the CLI still does not build it from
+ * a URL: it is registered explicitly in a stack config, or composed by a host's own
+ * kernel factory. Whether URL inference should construct it is #5602.
  *
  * The whole point of surfacing this as a *typed* error is so `serve.ts` can fail
  * LOUDLY (fatal) instead of letting the selection fall through to the SQLite
@@ -70,8 +71,8 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (/^postgres(ql)?:\/\//i.test(u)) return 'postgres';
   if (/^mysql2?:\/\//i.test(u)) return 'mysql';
   // libSQL / Turso URLs are DELIBERATELY still classified as `turso` (not left
-  // unrecognized). Open-core can't construct that driver, but classifying it
-  // lets resolveStorageDefinition fail LOUDLY with a clear cloud/EE message — if we
+  // unrecognized). This resolver does not construct that driver, but classifying it
+  // lets resolveStorageDefinition fail LOUDLY with an actionable message — if we
   // returned '' here instead, a `libsql://` URL would fall through to the SQLite
   // default and silently ignore the remote connection (the very bug we're fixing).
   if (/^libsql:\/\//i.test(u)) return 'turso';
@@ -145,9 +146,12 @@ export interface StorageDefinitionResolution {
  * unknown/absent driver registers no datasource, so the missing driver surfaces
  * loudly downstream — the pre-#3826 behavior).
  *
- * Throws {@link UnsupportedDriverError} for `turso`/libSQL — a cloud/EE driver
- * open-core cannot build. serve.ts surfaces that as a fatal, actionable boot
- * error so the selection never silently degrades to SQLite.
+ * Throws {@link UnsupportedDriverError} for `turso`/libSQL — recognized as a kind
+ * but not one this resolver constructs. (#4645 moved `@objectstack/driver-turso`
+ * into this repo at `packages/drivers/driver-turso`; wiring it into URL inference
+ * is a separate decision — #5602 — so the loud refusal stands unchanged.)
+ * serve.ts surfaces that as a fatal, actionable boot error so the selection never
+ * silently degrades to SQLite.
  */
 export function resolveStorageDefinition(
   driverType: string,
@@ -232,12 +236,12 @@ export function resolveStorageDefinition(
   if (driverType === 'turso' || driverType === 'libsql') {
     throw new UnsupportedDriverError(
       'turso',
-      'The `turso`/libSQL driver ships with the ObjectStack cloud / enterprise '
-        + 'distribution (@objectstack/driver-turso), not the open-core CLI. To use '
-        + "it, register it explicitly in your stack config (a datasource with driver: "
-        + "'turso' and config { url, authToken }, with @objectstack/driver-turso "
-        + 'installed), or run under the cloud distribution. Otherwise select an '
-        + 'open-core driver via OS_DATABASE_DRIVER / OS_DATABASE_URL: '
+      'The `turso`/libSQL driver (@objectstack/driver-turso) is not one the CLI '
+        + 'constructs from a URL — it is not bundled into the CLI\'s driver '
+        + 'resolver. To use it, register it explicitly in your stack config (a '
+        + "datasource with driver: 'turso' and config { url, authToken }, with "
+        + '@objectstack/driver-turso installed). Otherwise select a CLI-resolvable '
+        + 'driver via OS_DATABASE_DRIVER / OS_DATABASE_URL: '
         + 'sqlite | postgres | mysql | mongodb | memory.',
     );
   }

@@ -4,7 +4,7 @@
   "props": {
     "name": {
       "status": "live",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts",
       "note": "table name; objectql registry key."
     },
     "label": {
@@ -77,7 +77,7 @@
     },
     "indexes": {
       "status": "live",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1181",
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1181",
       "note": "DDL."
     },
     "validations": {
@@ -143,11 +143,11 @@
       "children": {
         "enabled": {
           "status": "live",
-          "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1081"
+          "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1081"
         },
         "tenantField": {
           "status": "live",
-          "evidence": "packages/plugins/driver-sql/src/sql-driver.ts",
+          "evidence": "packages/drivers/driver-sql/src/sql-driver.ts",
           "note": "row-level tenant scoping (org-scoping plugin path) reads tenancy.tenantField — audit called it inert; corrected. strategy/crossTenantAccess were REMOVED after spec 15.0 (#2763): zero consumers; tenancy block is now .strict() with tombstone guidance."
         }
       }

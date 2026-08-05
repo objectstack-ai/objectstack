@@ -97,15 +97,18 @@ export default class Dev extends Command {
     }),
 
     // ── Ephemeral / fresh-environment helpers ────────────────────────
-    // `--fresh` creates an isolated tempdir for OS_HOME / DB / uploads
-    // so every run starts from a clean slate. Combine with `--seed-admin`
+    // `--fresh` creates an isolated tempdir for OS_HOME / DB / uploads, so
+    // every run starts from a clean slate for the OS_HOME-keyed state the
+    // CLI itself places (see the block in `run()` for the exact covered
+    // surface, and for what an app-declared relative path escapes — #5594).
+    // Combine with `--seed-admin`
     // (default-on when --fresh) to also provision a logged-in admin
     // account, so backend debugging never blocks on first-run wizards.
     // The seeded admin uses FIXED, well-known credentials by default
     // (admin@objectos.ai / admin123) so tooling never has to guess them —
     // override with --admin-email / --admin-password when needed.
     fresh: Flags.boolean({
-      description: 'Start with an ephemeral OS_HOME under the OS tempdir (clean DB, uploads, storage); auto-deletes on exit. Implies --seed-admin (admin@objectos.ai / admin123) unless --no-seed-admin is given.',
+      description: 'Start with an ephemeral OS_HOME under the OS tempdir — clean DB, uploads root and other OS_HOME-keyed state for this run, auto-deleted on exit. State an app reaches by its own cwd-relative path (e.g. a datasource `filename: .objectstack/...`) is NOT covered and survives exit. Implies --seed-admin (admin@objectos.ai / admin123) unless --no-seed-admin is given.',
       default: false,
     }),
     'seed-admin': Flags.boolean({
@@ -180,10 +183,37 @@ export default class Dev extends Command {
       const environmentId = flags['environment-id'] ?? process.env.OS_ENVIRONMENT_ID ?? 'env_local';
 
       // ── --fresh: ephemeral OS_HOME under the OS tempdir ─────────────
-      // Creates a unique scratch dir that owns ALL persistent state for
-      // this run: the SQLite DB (via OS_HOME → <home>/data/...), the
-      // storage-service uploads root (OS_STORAGE_ROOT), and any other
-      // state plugins keyed off OS_HOME. Auto-deleted on exit.
+      // Creates a unique scratch dir that owns the state this command can
+      // actually place, and nothing more. What it covers, exactly:
+      //   - the dev SQLite DB the CLI resolves for the run
+      //     (OS_HOME → <home>/data/dev.db, published as OS_DATABASE_URL),
+      //   - the storage-service uploads root, published on the settings
+      //     service's own env name OS_STORAGE_LOCAL_ROOT (#4968),
+      //   - any other state a plugin keys off OS_HOME.
+      // In one sentence: framework-owned, OS_HOME-keyed state plus the env
+      // channels this block publishes below. Auto-deleted on exit.
+      //
+      // NOT covered — state reached by an app-declared RELATIVE path (#5594).
+      // Such a path is resolved by its own consumer against the process cwd,
+      // which `--fresh` does not move, so it is written into the project tree
+      // and survives exit. The live specimen is deliberate authoring, not a
+      // bug: examples/app-showcase's `showcase-external` datasource declares
+      // `filename: '.objectstack/data/showcase_external.db'` and says in its
+      // own comment that the path resolves against the project cwd — so a
+      // `--fresh` run of the showcase leaves that file (+ -wal/-shm) behind.
+      // Re-anchoring app-declared relative paths on OS_HOME would be a
+      // behaviour change resting on an open contract question ("relative to
+      // cwd" vs "relative to this run's home"); it is deliberately NOT taken
+      // here, and this comment states the covered surface instead of an
+      // unqualified promise a reader would rely on for isolation.
+      //
+      // The uploads root MUST be published under the name the settings
+      // service derives for it — `envKeyOf('storage','local_root')` (#4968).
+      // Under the CLI's old private spelling (`OS_STORAGE_ROOT`) the settings
+      // side saw no env value, fell back to the manifest default, and swapped
+      // the adapter to `./.objectstack/data/uploads` at kernel:ready — so
+      // `--fresh` uploads landed in the PROJECT CWD and outlived the run,
+      // which is the opposite of what this block promises.
       let freshHome: string | undefined;
       let freshDbUrl: string | undefined;
       let freshStorageRoot: string | undefined;
@@ -245,7 +275,7 @@ export default class Dev extends Command {
         ...(seedAdmin && flags['admin-email'] ? { OS_SEED_ADMIN_EMAIL: flags['admin-email'] } : {}),
         ...(seedAdmin && flags['admin-password'] ? { OS_SEED_ADMIN_PASSWORD: flags['admin-password'] } : {}),
         ...(freshHome ? { OS_HOME: freshHome } : {}),
-        ...(freshStorageRoot ? { OS_STORAGE_ROOT: freshStorageRoot } : {}),
+        ...(freshStorageRoot ? { OS_STORAGE_LOCAL_ROOT: freshStorageRoot } : {}),
         ...(effectiveDb ? { OS_DATABASE_URL: effectiveDb } : {}),
         ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),

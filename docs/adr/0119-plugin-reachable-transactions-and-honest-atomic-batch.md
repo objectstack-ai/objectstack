@@ -28,7 +28,10 @@ So this ADR does not pick one of the three. It separates what the four consumers
 
 `ObjectQL.transaction()` (`packages/objectql/src/engine.ts:4934-4973`) opens a driver transaction and runs the callback inside an `AsyncLocalStorage` store; `buildDriverOptions` (`:1257-1275`) lifts that ambient handle onto **every** driver call. The consequence is precisely the hard part the issue budgets for: a hook body, a validation predicate, an FK-resolution read, or any nested `engine.*` call issued during a transactional write automatically binds to that transaction's connection. ADR-0034 exists because *not* doing this deadlocked SQLite's single-connection pool — the failure was found, fixed, and pinned.
 
-The issue's second premise is also stale in this repo: it cites `driver-turso` primitives at `turso-driver.ts:764-776` and `remote-transport.ts:430-443` as evidence the capability exists but is unsurfaced. There is no Turso driver here — only `docs/design/driver-turso.md` (Status: Proposal). The in-repo drivers need no surfacing work either: `beginTransaction` / `commit` / `rollback` are **required** members of `IDataDriver` (`packages/spec/src/contracts/data-driver.ts:221-235`), implemented by driver-sql (`sql-driver.ts:2214+`), driver-memory (`:595+`), and driver-mongodb (`:545+`).
+The issue's second premise is also stale in this repo: it cites `driver-turso` primitives at `turso-driver.ts:764-776` and `remote-transport.ts:430-443` as evidence the capability exists but is unsurfaced. There is no Turso driver here — only `docs/design/driver-turso.md` (Status: Proposal). The in-repo drivers need no surfacing work either:
+
+> **Editorial note (2026-08-05, #4645):** the sentence above was true when this ADR was written. `@objectstack/driver-turso` has since been migrated back into this repo at `packages/drivers/driver-turso`. The *decision* recorded here is unaffected — Turso extends `SqlDriver` and inherits the same `beginTransaction` / `commit` / `rollback` members the argument turns on, so it needs no surfacing work either.
+ `beginTransaction` / `commit` / `rollback` are **required** members of `IDataDriver` (`packages/spec/src/contracts/data-driver.ts:221-235`), implemented by driver-sql (`sql-driver.ts:2214+`), driver-memory (`:595+`), and driver-mongodb (`:545+`).
 
 ### The gap that is real: declared reach
 

@@ -10,12 +10,12 @@
     "fields": {
       "status": "live",
       "verifiedAt": "2026-07-31",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1353-1354 (select projection); driver-memory projectFields; objectql formula projection + known-field filters (closed end-to-end in the #4196 verification)"
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1353-1354 (select projection); driver-memory projectFields; objectql formula projection + known-field filters (closed end-to-end in the #4196 verification)"
     },
     "where": {
       "status": "live",
       "verifiedAt": "2026-07-31",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1330-1331 (applyFilters); every driver's find() applies it"
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1330-1331 (applyFilters); every driver's find() applies it"
     },
     "search": {
       "status": "live",
@@ -32,17 +32,17 @@
     "orderBy": {
       "status": "live",
       "verifiedAt": "2026-07-31",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1335-1342; every driver's find() sorts by it"
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1335-1342; every driver's find() sorts by it"
     },
     "limit": {
       "status": "live",
       "verifiedAt": "2026-07-31",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1345"
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1345"
     },
     "offset": {
       "status": "live",
       "verifiedAt": "2026-07-31",
-      "evidence": "packages/plugins/driver-sql/src/sql-driver.ts:1344"
+      "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1344"
     },
     "top": {
       "status": "live",
