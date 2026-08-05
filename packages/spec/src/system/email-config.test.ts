@@ -104,3 +104,85 @@ describe('EmailServiceConfigSchema', () => {
     if (parsed.success) expect(parsed.data.provider).toBe('log');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5307 — the same defect as #5104, on three other keys.
+//
+// `resolveEmailCapabilityArg` reads `queueDelivery` / `appName` /
+// `defaultTemplateContext` off `config.email` and has done since #5160 and
+// before; the schema declared none of them. An author annotating
+// `objectstack.config.ts` with `EmailServiceConfig` got a type error for a
+// value the runtime honours.
+//
+// HOW THESE ASSERT, AND WHY NOT `success`. This object strips unknown keys, so
+// `safeParse({ queueDelivery: true }).success` was already `true` before the
+// fix — the key was simply thrown away. `success` is therefore a phantom
+// check here: the fact under test is that the key is a real AUTHORING SURFACE,
+// which on a strip object is observable as "it SURVIVES the parse". Every
+// assertion below reads `parsed.data`, so each one is green after the
+// declaration and red on a revert of it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('EmailServiceConfigSchema — keys the CLI reads (#5307)', () => {
+  it('carries queueDelivery through the parse, not into the bin', () => {
+    for (const queueDelivery of [true, false]) {
+      const parsed = EmailServiceConfigSchema.safeParse({ queueDelivery });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.queueDelivery, String(queueDelivery)).toBe(queueDelivery);
+    }
+  });
+
+  it('types queueDelivery as the boolean flag the CLI resolves it to', () => {
+    // `OS_EMAIL_QUEUE_ENABLED` is parsed into a boolean before it reaches the
+    // plugin, and the config half must not be the one place a string arrives.
+    expect(EmailServiceConfigSchema.safeParse({ queueDelivery: 'true' }).success).toBe(false);
+  });
+
+  it('carries appName through the parse', () => {
+    const parsed = EmailServiceConfigSchema.safeParse({ appName: 'Acme CRM' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.appName).toBe('Acme CRM');
+  });
+
+  it('carries defaultTemplateContext through the parse, values untouched', () => {
+    // Free-form by design: the CLI spreads this object into the plugin's
+    // render context unchanged, so declaring a closed vocabulary here would
+    // invent a constraint the reader does not have.
+    const context = { supportEmail: 'help@acme.test', year: 2026, brand: { url: 'https://acme.test' } };
+    const parsed = EmailServiceConfigSchema.safeParse({ defaultTemplateContext: context });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.defaultTemplateContext).toEqual(context);
+  });
+
+  it('accepts the three together with the keys that were already declared', () => {
+    const parsed = EmailServiceConfigSchema.safeParse({
+      provider: 'smtp',
+      options: { host: 'smtp.acme.test' },
+      retries: 3,
+      queueDelivery: true,
+      appName: 'Acme CRM',
+      defaultTemplateContext: { supportEmail: 'help@acme.test' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toMatchObject({
+        queueDelivery: true,
+        appName: 'Acme CRM',
+        defaultTemplateContext: { supportEmail: 'help@acme.test' },
+      });
+    }
+  });
+
+  it('leaves all three absent when unwritten — no defaults invented', () => {
+    // The runtime's defaults (inline delivery, appName 'ObjectStack') are
+    // resolved in `resolveEmailCapabilityArg` against env and the top-level
+    // config. A `.default()` here would fabricate a second answer that wins
+    // over neither and confuses both.
+    const parsed = EmailServiceConfigSchema.safeParse({});
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).not.toHaveProperty('queueDelivery');
+      expect(parsed.data).not.toHaveProperty('appName');
+      expect(parsed.data).not.toHaveProperty('defaultTemplateContext');
+    }
+  });
+});

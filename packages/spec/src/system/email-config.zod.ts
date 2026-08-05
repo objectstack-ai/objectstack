@@ -16,6 +16,17 @@ import { lazySchema } from '../shared/lazy-schema';
  *   2. `OS_EMAIL_*` environment variables (override per setting)
  *   3. Default → provider='log' (LogTransport, no real send)
  *
+ * `appName` is the one key whose env layer is not `OS_EMAIL_*` — it is
+ * `OS_APP_NAME`, because the same product name names the whole deployment,
+ * not just its mail.
+ *
+ * Every key here is one `resolveEmailCapabilityArg` reads (the single reader
+ * of `config.email`); the schema is the operator-facing contract for that
+ * function, so a key the runtime honours and this object omits is a type
+ * error on a config that boots fine — the declared ≠ implemented gap of
+ * #5104 (provider='smtp') and #5307 (queueDelivery / appName /
+ * defaultTemplateContext), both times with the spec on the lagging side.
+ *
  * SMTP delivery is built in (ADR-0012): select it with provider='smtp'
  * and supply the connection through `options` (host / port / secure /
  * user / password) or the matching OS_EMAIL_SMTP_HOST / _PORT /
@@ -92,6 +103,34 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
   persist: z.boolean().optional().describe('Persist to sys_email (default true)'),
 
   /**
+   * Deliver through the durable `sys_job_queue` path instead of inline
+   * (#5160). Default false — `send()` calls the transport in-process and
+   * returns when it has answered.
+   *
+   * When true, `send()` persists the `sys_email` row, publishes an
+   * `email.send.async` job referencing it and returns `status: 'queued'`
+   * immediately; a worker delivers that row and finalizes it in place, so a
+   * delivery survives a restart. `OS_EMAIL_QUEUE_ENABLED` overrides this per
+   * environment (`1`/`true`/`yes`/`on` ⇒ on, anything else ⇒ off).
+   *
+   * Two things it does NOT do. It adds no second retry knob: `retries`
+   * becomes the queue's attempt budget (`retries + 1` attempts, exponential
+   * backoff, then DLQ) instead of driving an in-process loop. And it is not
+   * a preference — declaring it here is a deployment declaration, so a boot
+   * with no durable `queue` service (or with `persist: false`, which leaves
+   * a queued job no row to deliver) FAILS on `kernel:ready` rather than
+   * silently delivering inline. The Settings → Mail toggle is the opposite
+   * trade: it degrades to inline and says so, because one save must not stop
+   * the mail.
+   */
+  queueDelivery: z.boolean().optional()
+    .describe(
+      'Deliver through the durable sys_job_queue instead of inline (or OS_EMAIL_QUEUE_ENABLED env). '
+      + 'Default false. Reuses `retries` as the queue attempt budget; requires a queue service '
+      + 'and sys_email persistence, else the boot fails',
+    ),
+
+  /**
    * Provider-specific extras. Free-form object the selected transport
    * consumes; the keys each provider reads are:
    *
@@ -107,6 +146,52 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
     .describe(
       'Provider-specific extras. smtp: host (required) / port / secure / user / password, '
       + 'mirroring OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER / _PASSWORD. postmark: messageStream',
+    ),
+
+  /**
+   * Product name templates render as `{{appName}}`, and the one piece of
+   * template context this schema names explicitly because the runtime also
+   * derives a *from-address* out of it.
+   *
+   * Resolved as `OS_APP_NAME` env → this key → the top-level `appName` of
+   * `objectstack.config.ts` → `'ObjectStack'`. It is seeded into
+   * `defaultTemplateContext` as `appName`, so setting it here is exactly
+   * `defaultTemplateContext: { appName: … }` with the env layer in front.
+   *
+   * When no `defaultFrom` resolves from any source, the resolved app name
+   * also becomes the placeholder sender — `Acme CRM` ⇒
+   * `Acme CRM <no-reply@acme-crm.local>` — which only ever leaves the box
+   * through a real transport, so configure `defaultFrom` before selecting
+   * one.
+   */
+  appName: z.string().optional()
+    .describe(
+      'Product name for template rendering ({{appName}}) — OS_APP_NAME env wins, then this, then '
+      + 'the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply '
+      + 'sender when no defaultFrom is configured',
+    ),
+
+  /**
+   * Render context merged into every `sendTemplate()` call, under the
+   * per-call `data`. Free-form on purpose: the CLI passes this object
+   * through to `EmailServicePlugin` unchanged and the template engine
+   * resolves whatever names a template happens to reference, so there is no
+   * closed vocabulary here to declare — put the values your own templates
+   * interpolate (support address, brand URL, footer text …).
+   *
+   * `appName` is always present: it is computed first and this object is
+   * spread OVER it, so an `appName` written here wins over `OS_APP_NAME`
+   * and over the `appName` key above. That is the one place the header's
+   * "env overrides per setting" does not hold, measured rather than
+   * intended — whether it should is filed as #5448. Until it is settled,
+   * prefer `appName` (or the env var) for that one value and keep this map
+   * for everything else.
+   */
+  defaultTemplateContext: z.record(z.string(), z.unknown()).optional()
+    .describe(
+      'Free-form render context merged into every sendTemplate() call, under the per-call data. '
+      + 'Passed through unchanged. An appName written here overrides both the appName key and '
+      + 'OS_APP_NAME',
     ),
 }));
 export type EmailServiceConfig = z.infer<typeof EmailServiceConfigSchema>;

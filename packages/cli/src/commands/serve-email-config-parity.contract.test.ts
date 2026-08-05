@@ -1,0 +1,172 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// `EmailServiceConfigSchema` (spec) ↔ the keys `resolveEmailCapabilityArg`
+// actually reads off `config.email` — #5307.
+//
+// `config.email` has exactly ONE reader in the whole repo (this file's
+// neighbour, `serve.ts`), and `EmailServiceConfigSchema` is the operator-facing
+// contract for it. Nothing held the two together, so the schema fell behind the
+// reader twice in one family:
+//
+//   - #5104 — `provider: 'smtp'` shipped in #5087 and the enum still stopped at
+//     postmark, so annotating `objectstack.config.ts` with `EmailServiceConfig`
+//     made a working config a type error.
+//   - #5307 — `queueDelivery` (the #5160 durable-queue switch), `appName` and
+//     `defaultTemplateContext` were read here and declared nowhere. Same shape,
+//     three more keys, and the generated reference docs told authors the keys
+//     did not exist.
+//
+// Both were found by hand, with a grep. This file is that grep, mechanised, so
+// the third one fails a build instead of waiting for someone to run it:
+// a key added to the reader without a declaration is red here the day it lands.
+//
+// It is a CROSS-PACKAGE assertion for the reason the provider-parity test in
+// `@objectstack/plugin-email` gives: two mirrored literals can always be
+// "fixed" by editing the other literal. `@objectstack/spec` is a real
+// dependency of this package, and the comparison is test-only — no runtime edge
+// is added.
+//
+// This package's `tsconfig.json` includes `src` (tests and all), so the
+// compile-time witness below is real: `pnpm --filter @objectstack/cli
+// typecheck` fails on a config the schema cannot express, before any test runs.
+// The spec-side companion (`packages/spec/src/system/email-config.test.ts`) has
+// to be runtime-only — that package excludes `**/*.test.ts` from its tsconfig
+// (#5286).
+
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { EmailServiceConfigSchema } from '@objectstack/spec/system';
+import type { EmailServiceConfig } from '@objectstack/spec/system';
+import { resolveEmailCapabilityArg } from './serve.js';
+
+const SERVE_SOURCE = readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'serve.ts'),
+  'utf8',
+);
+
+/**
+ * Every `config.email` key the resolver reads, straight from its source — the
+ * issue's own repro command:
+ *
+ *   grep -oE "cfgEmail\.[a-zA-Z]+" packages/cli/src/commands/serve.ts | sort -u
+ *
+ * `cfgEmail` is the resolver's parameter name for `config.email`, and every
+ * read of it in that function is a dot access (no destructuring, no computed
+ * keys), which is what makes a source scan an exact measure rather than an
+ * approximation. Should that ever stop being true, this comment is the place
+ * the next reader learns the scan has to change with it.
+ */
+function keysReadFromConfigEmail(): string[] {
+  const reads = SERVE_SOURCE.match(/cfgEmail\.[A-Za-z_$][\w$]*/g) ?? [];
+  return [...new Set(reads.map((r) => r.slice('cfgEmail.'.length)))].sort();
+}
+
+/** Every key the authoring contract declares. */
+function keysDeclaredBySchema(): string[] {
+  return Object.keys(EmailServiceConfigSchema.shape).sort();
+}
+
+/**
+ * `persist` is declared and NOT read — the mirror image of #5307, filed
+ * separately (#5447) and deliberately untouched here.
+ *
+ * The plugin option it names is live (`EmailServicePlugin` builds no
+ * `EmailPersistence` when `persist === false`), but nothing carries
+ * `config.email.persist` to the plugin: `resolveEmailCapabilityArg` never
+ * reads the key, and it is the only reader `config.email` has. So the schema
+ * advertises an authoring surface with no carrier — ADR-0049 enforce-or-remove
+ * territory, whose two answers (wire it in the resolver, or retire the key)
+ * are a contract decision, not a drive-by.
+ *
+ * It is listed rather than silently excused: when #5447 is settled this array
+ * empties and the assertion below tightens to plain set equality.
+ */
+const DECLARED_BUT_UNREAD = ['persist'] as const;
+
+describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
+  it('declares every config.email key the resolver reads (#5307)', () => {
+    const declared = new Set(keysDeclaredBySchema());
+    const undeclared = keysReadFromConfigEmail().filter((k) => !declared.has(k));
+    // Red before #5307 with ['appName', 'defaultTemplateContext', 'queueDelivery'].
+    expect(undeclared).toEqual([]);
+  });
+
+  it('reads every key it declares, but for the filed exemption (#5447)', () => {
+    const read = new Set(keysReadFromConfigEmail());
+    const unread = keysDeclaredBySchema().filter((k) => !read.has(k));
+    expect(unread).toEqual([...DECLARED_BUT_UNREAD]);
+  });
+
+  it('pins the measured key set so a rename is a conscious edit', () => {
+    expect(keysDeclaredBySchema()).toEqual([
+      'apiKey',
+      'appName',
+      'defaultFrom',
+      'defaultTemplateContext',
+      'options',
+      'persist',
+      'provider',
+      'queueDelivery',
+      'retries',
+    ]);
+  });
+});
+
+/**
+ * Compile-time half — the author-facing symptom #5307 is written about. Every
+ * value here is one the runtime has honoured since #5160; before the
+ * declaration each of the last three was a type error on a config that booted
+ * and worked.
+ */
+const AUTHORED_CONFIG: EmailServiceConfig = {
+  provider: 'smtp',
+  options: { host: 'smtp.acme.test', port: 465, secure: true },
+  defaultFrom: { name: 'Acme CRM', address: 'no-reply@acme.test' },
+  retries: 3,
+  queueDelivery: true,
+  appName: 'Acme CRM',
+  defaultTemplateContext: { supportEmail: 'help@acme.test' },
+};
+
+describe('a config the schema accepts reaches the plugin intact', () => {
+  it('carries the three keys from parse() through to the plugin options', () => {
+    // Name equality is not enough: the schema could declare `queueDelivery`
+    // with a shape the resolver ignores. So parse an authored config with the
+    // real schema and feed the RESULT to the real reader.
+    const parsed = EmailServiceConfigSchema.parse(AUTHORED_CONFIG);
+    const { options } = resolveEmailCapabilityArg(parsed as Record<string, any>, {});
+
+    expect(options).toMatchObject({
+      provider: 'smtp',
+      queueDelivery: true,
+      defaultTemplateContext: { appName: 'Acme CRM', supportEmail: 'help@acme.test' },
+    });
+  });
+
+  it('lets appName name the deployment for templates and the placeholder sender', () => {
+    const parsed = EmailServiceConfigSchema.parse({ appName: 'Acme CRM' });
+    const { options } = resolveEmailCapabilityArg(parsed as Record<string, any>, {});
+
+    expect(options.defaultTemplateContext).toMatchObject({ appName: 'Acme CRM' });
+    expect(options.defaultFrom).toEqual({ name: 'Acme CRM', address: 'no-reply@acme-crm.local' });
+  });
+
+  it('spreads defaultTemplateContext OVER the resolved appName, as documented', () => {
+    // Not the precedence the header TSDoc's "env overrides per setting" line
+    // would predict — `OS_APP_NAME` loses to an `appName` written inside
+    // `defaultTemplateContext`. Measured, documented in the schema, and filed
+    // as #5448; pinned here so a change to it is deliberate rather than
+    // discovered by an operator whose branded mail says the wrong name.
+    const parsed = EmailServiceConfigSchema.parse({
+      appName: 'From The Key',
+      defaultTemplateContext: { appName: 'From The Context' },
+    });
+    const { options } = resolveEmailCapabilityArg(parsed as Record<string, any>, {
+      OS_APP_NAME: 'From The Env',
+    });
+
+    expect(options.defaultTemplateContext).toMatchObject({ appName: 'From The Context' });
+  });
+});
