@@ -30,7 +30,10 @@ import { strictObject } from '../shared/strict-object';
 //      `root-graph`. Controls in the same run: `PageSchema` /
 //      `DashboardSchema` / `ReportSchema` / `WebhookSchema` /
 //      `StateMachineSchema` resolve; 批 13's measured no-door shapes
-//      (`TouchTargetConfigSchema`, `GestureConfigSchema`) do not.
+//      (`TouchTargetConfigSchema`, `GestureConfigSchema`) did not. (Those two
+//      negative controls are gone as of #4988, which retired the five no-door
+//      interaction modules outright; a re-run needs a fresh negative control —
+//      an inline `z.object({ a: z.string() })` is the cheapest one.)
 //   3. PARSE — `getMetadataTypeSchema('dashboard' | 'report')` is what
 //      `MetadataManager.validate`, `GET /api/v1/meta` and the Studio form all
 //      go through, so a chart key is judged on the stored-metadata path.

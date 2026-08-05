@@ -27,12 +27,19 @@ import { describe, it, expect } from 'vitest';
 //     (ADR-0112 D9a prefixing, RENAMED_DEFS carry). `DataSyncConfig` stays
 //     integration-owned under its bare name — it is on the live parse path
 //     (`ConnectorSchema.syncConfig`).
-//   - ui keeps the bare `ConflictResolution(Schema)` UNTOUCHED: a distinct
-//     concept (offline client/server sync) and the only side with cross-repo
-//     consumers (objectui useOffline.ts + types re-export + a parity ratchet
-//     that pins "must stay a spec export"). Renaming the ui side would replay
-//     the objectui#3235 downstream breakage — that "tidy-up" is the wrong-case
-//     this pin exists to catch.
+//   - ui kept the bare `ConflictResolution(Schema)` UNTOUCHED at #4738: a
+//     distinct concept (offline client/server sync) and the only side with
+//     cross-repo consumers. Renaming the ui side would have replayed the
+//     objectui#3235 downstream breakage — that "tidy-up" is the wrong-case this
+//     pin exists to catch.
+//
+//     ⚠️ #4988 SUPERSEDED that half. `ui/offline.zod.ts` was retired whole
+//     under ADR-0049 enforce-or-remove — it had no carrier key in the protocol,
+//     no `.parse()` in any of the three repos, and objectui's references were
+//     type re-exports and parity ratchets rather than runtime consumers. So the
+//     bare name is now published by NOBODY, and sections 3 and 5 below were
+//     rewritten to pin that instead. The #4738 rename stands: freeing a word is
+//     not a reason to rename the connector vocabulary back.
 //   - `@objectstack/spec/api`'s `ConflictResolutionStrategy` (route conflicts)
 //     is a FOURTH relative under a different name; it is outside the baseline
 //     and must not be touched by any of this.
@@ -141,18 +148,31 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
       }
     }
 
-    // 3. The bare `ConflictResolution(Schema)` now has exactly ONE owner: ./ui,
-    //    declared in ui/offline.zod.ts. Not just "same declaration everywhere"
-    //    — NO other entry may export the bare name at all. A re-export from
-    //    ./integration or ./automation would share the declaration (green to
-    //    the dual-source gate) while telling connector authors the offline
-    //    client/server vocabulary is a connector sync strategy — the C14
-    //    lesson: a re-export can lie about the domain even when the symbol is
-    //    honest.
+    // 3. The bare `ConflictResolution(Schema)` is now published by NOBODY.
+    //
+    //    ⚠️ REWRITTEN AT #4988, and the direction of this assertion INVERTED.
+    //    When this file was written the bare name had exactly one owner —
+    //    `./ui`, declared in `ui/offline.zod.ts` — and that ownership is why
+    //    #4738 renamed the connector side instead of the ui side. #4988 then
+    //    retired `ui/offline.zod.ts` whole (ADR-0049 enforce-or-remove: no
+    //    carrier key, no parse, in any of the three repos), so the word is
+    //    FREE rather than re-homed.
+    //
+    //    Left as it was, this assertion would have gone red for the right
+    //    reason and been "fixed" the wrong way — by pointing it at whichever
+    //    entry still had a `ConflictResolution` — which is exactly the domain
+    //    lie the C14 lesson names. The invariant that actually survives its
+    //    owner is: no domain may quietly adopt a freed bare name. #4738's
+    //    rename is NOT undone by the retirement (`ConnectorConflictResolution`
+    //    is the connector vocabulary's real name now, pinned in 2 above; giving
+    //    it back the bare word would be a second breaking change to gain
+    //    nothing), and nothing else may claim it either.
     for (const name of ['ConflictResolution', 'ConflictResolutionSchema']) {
       const holders = holdersOf(name);
-      expect(holders.map((h) => h.sub), `${name} must be owned by ./ui alone`).toEqual(['./ui']);
-      expect(holders[0].origin).toMatch(/^src\/ui\/offline\.zod\.ts:\d+$/);
+      expect(
+        holders.map((h) => `${h.sub} (${h.origin})`),
+        `${name} was retired with ui/offline.zod.ts at #4988 — no entry may re-adopt the bare name`,
+      ).toEqual([]);
     }
 
     // 4. `DataSyncConfig(Schema)` likewise: ./integration alone, declared in
@@ -165,16 +185,20 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     }
 
     // 5. The fourth relative is untouched: `ConflictResolutionStrategy` (route
-    //    conflict handling) still exists on ./api under its own distinct name,
-    //    and is a DIFFERENT declaration from ui's ConflictResolution. objectui's
-    //    parity ratchet (offline-nav-performance-spec-parity.test.ts) pins the
-    //    same pair from the consumer side.
+    //    conflict handling) still exists on ./api under its own distinct name.
+    //
+    //    ⚠️ Also rewritten at #4988. The old form proved distinctness by
+    //    comparing this declaration's origin against ui's `ConflictResolution`
+    //    origin — and with that owner retired, `holdersOf(…)[0]` throws before
+    //    any assertion runs. The surviving, stronger statement is that this
+    //    relative kept its OWN name and stayed in `api/`: the retirement freed
+    //    a word, and the nearest neighbour is the most likely shape to drift
+    //    into it.
     const strategyHolders = holdersOf('ConflictResolutionStrategy');
     expect(strategyHolders.length, './api must still export ConflictResolutionStrategy').toBeGreaterThan(0);
     expect(strategyHolders.map((h) => h.sub)).toContain('./api');
-    const uiOrigin = holdersOf('ConflictResolution')[0].origin;
     for (const h of strategyHolders) {
-      expect(h.origin, 'ConflictResolutionStrategy must not collapse into the ui declaration').not.toBe(uiOrigin);
+      expect(h.origin, 'ConflictResolutionStrategy must stay declared under src/api/').toMatch(/^src\/api\//);
     }
   });
 
@@ -199,12 +223,15 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     expect(() => integration.ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
     expect(() => integration.ConnectorConflictResolutionSchema.parse('merge')).toThrow();
 
-    // ui side — untouched, and still the offline client/server vocabulary.
-    expect('ConflictResolutionSchema' in ui).toBe(true);
-    expect(() => ui.ConflictResolutionSchema.parse('client_wins')).not.toThrow();
-    expect(() => ui.ConflictResolutionSchema.parse('last_write_wins')).not.toThrow();
-    expect(() => ui.ConflictResolutionSchema.parse('target_wins')).toThrow();
-    expect(() => ui.ConflictResolutionSchema.parse('source_wins')).toThrow();
+    // ui side — RETIRED at #4988 with `ui/offline.zod.ts`. The runtime half of
+    // section 3: the bare name is absent from all three namespaces rather than
+    // having moved to one of them.
+    for (const [label, ns] of [['ui', ui], ['integration', integration], ['automation', automation]] as const) {
+      expect('ConflictResolutionSchema' in ns, `${label} must not export ConflictResolutionSchema`).toBe(false);
+    }
+    // Anti-vacuity: the ui namespace we just probed is real and non-trivial —
+    // otherwise a broken import would satisfy the three absences above.
+    expect('ThemeSchema' in ui).toBe(true);
   });
 
   it('still parses authored connector syncConfig through the renamed enum — the live path', async () => {
