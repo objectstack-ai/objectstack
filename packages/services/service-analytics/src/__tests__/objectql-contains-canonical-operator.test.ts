@@ -64,7 +64,10 @@ import { compileScopedFilterToSql } from '../read-scope-sql.js';
  *   swallows the SyntaxError answers "no rows" for a filter that has a match.
  * - `off 50 (+) today` — the DECOY for the literal reading: it differs from the
  *   row above by exactly the `%`, so a face that treats `%` as a wildcard picks
- *   it up too.
+ *   it up too. On the regex face below `%` is already a literal, so the decoy
+ *   earns its place through the EXACT row set (`toEqual(['3'])`) rather than a
+ *   wildcard assertion. The faces that do read `%` as a wildcard are the three
+ *   analytics SQL compilers, and that is #5567, not this file.
  */
 const FIXTURE = [
   { id: '1', stage: 'a.b' },
@@ -310,9 +313,10 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
 
     it('and returns the same row the regex-evaluating face returns', async () => {
       // `a.b` only: `.` is a literal in both a substring match and in LIKE, so
-      // the two faces are comparable on it. `50% (+)` is NOT used here — LIKE
-      // metacharacter escaping on this compiler is its own defect (filed
-      // separately) and asserting it from this file would pin someone else's bug.
+      // the two faces are comparable on it. `50% (+)` is NOT used here — this
+      // compiler interpolates the comparand into a LIKE pattern without escaping
+      // `%` / `_`, which is its own defect (#5567, filed while measuring this
+      // one) and asserting it from this file would pin someone else's bug.
       const filter = await engineFilter({ stage: { $contains: 'a.b' } });
       const { sql, params } = compileScopedFilterToSql(filter as FilterCondition, 'deal');
       const stmt = db.prepare(`SELECT "id" FROM "deal" AS "deal" WHERE ${sql}`);
