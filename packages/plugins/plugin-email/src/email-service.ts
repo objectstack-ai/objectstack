@@ -583,6 +583,18 @@ export class EmailService implements IEmailService {
     // Reserve the row id BEFORE persistence.insert so the drain hook
     // (which fires synchronously inside that insert) sees it as managed
     // and skips it — `send()` owns this row's delivery.
+    //
+    // `EmailPersistence` is a PUBLIC interface and its `insert` may answer with
+    // an id of its own (a database-assigned primary key, an external delivery
+    // system's receipt id). That id is reserved too — and it has to be released
+    // by the same `finally`, which is why it is held in a variable declared
+    // OUT here rather than recomputed from `persistedId` inside the try (#5169).
+    // Reserving without releasing would leave `isServiceManaged(persistedId)`
+    // permanently true: one leaked string per message for the life of the
+    // process, and — worse than the memory — a standing "this row belongs to a
+    // live send()" assertion that the drain hook and the boot outbox sweep both
+    // trust and nothing ever re-checks.
+    let extraManagedId: string | undefined;
     this.managedRowIds.add(id);
     try {
       let persistedId: string | undefined;
@@ -590,7 +602,10 @@ export class EmailService implements IEmailService {
         try {
           const res = await this.options.persistence.insert(baseRow);
           persistedId = typeof res === 'string' ? res : res?.id ?? id;
-          if (persistedId !== id) this.managedRowIds.add(persistedId);
+          if (persistedId !== id) {
+            this.managedRowIds.add(persistedId);
+            extraManagedId = persistedId;
+          }
         } catch (err: any) {
           this.options.logger?.warn('EmailService: sys_email persist failed (non-fatal)', { error: err?.message });
         }
@@ -625,7 +640,16 @@ export class EmailService implements IEmailService {
       // reclaimed afterwards, which is why the keys travel with the delivery.
       return await this.deliverNormalized(rowId, normalized, undefined, storageKeys);
     } finally {
+      // Release EXACTLY what was reserved above — both ids, and only here.
+      // Here and not earlier: the reservation has to outlive the whole body,
+      // because in inline mode the delivery (and the `sent`/`failed` update of
+      // this very row) happens inside the try, and a sweep that ran mid-flight
+      // must still see the row as `send()`'s. Once this returns, ownership is
+      // over in both modes: inline delivery is finished, and a queued row is
+      // the worker's — with the row committed at `queued`, re-checkable, which
+      // is what makes the boot sweep a backstop rather than a double-send.
       this.managedRowIds.delete(id);
+      if (extraManagedId !== undefined) this.managedRowIds.delete(extraManagedId);
     }
   }
 

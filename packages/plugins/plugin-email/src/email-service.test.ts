@@ -165,6 +165,35 @@ describe('EmailService', () => {
     expect(svc.isServiceManaged(insertedId!)).toBe(false); // cleared after send
   });
 
+  it('releases an insert-ASSIGNED row id from the managed set too (#5169)', async () => {
+    // `EmailPersistence` is public and its `insert` may answer with an id of
+    // its own — a database-assigned primary key, an external delivery system's
+    // receipt id. `send()` reserves that id as managed as well; the bug was
+    // that it never released it, so `isServiceManaged(persistedId)` stayed true
+    // forever: one leaked entry per message, and a "belongs to a live send()"
+    // assertion the drain hook and the boot sweep trust but nobody re-checks.
+    let managedDuringDelivery: boolean | undefined;
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    let svc!: EmailService;
+    const persistence: EmailPersistence = {
+      // Ignores the minted id and hands back the row's real (DB) key.
+      async insert() { return { id: 'db-pk-7' }; },
+      async update(id) {
+        // The `sent` finalize runs INSIDE send(), i.e. while this row is still
+        // send()'s to deliver — the window the managed flag exists to protect
+        // must NOT shrink to make the release possible.
+        managedDuringDelivery = svc.isServiceManaged(String(id));
+      },
+    };
+    svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
+
+    const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
+
+    expect(res).toMatchObject({ id: 'db-pk-7', status: 'sent' });
+    expect(managedDuringDelivery).toBe(true);              // window kept
+    expect(svc.isServiceManaged('db-pk-7')).toBe(false);   // released, not leaked
+  });
+
   it('deliverPersistedRow delivers an existing row WITHOUT inserting a new one', async () => {
     const transport = { send: vi.fn(async () => ({ messageId: '<drained@x>' })) };
     const { p, rows } = makePersistence();

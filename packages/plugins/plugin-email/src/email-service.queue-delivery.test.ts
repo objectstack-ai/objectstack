@@ -189,6 +189,30 @@ describe('EmailService — queue delivery on', () => {
     expect(svc.isServiceManaged(res.id)).toBe(false);
   });
 
+  it('releases an insert-assigned id once the job is published (#5169)', async () => {
+    // Queue mode returns EARLY (right after the publish), so the release of an
+    // insert-assigned id happens on that path too — and it must, because the
+    // row is now the worker's: the boot outbox sweep decides whether to requeue
+    // it by asking `isServiceManaged`, and a permanently-true answer would make
+    // a stranded row unsweepable forever.
+    const queue = makeQueue();
+    const transport = { send: vi.fn(async () => ({ messageId: '<x>' })) };
+    const persistence: EmailPersistence = {
+      async insert() { return { id: 'db-pk-9' }; },
+      async update() { /* noop */ },
+    };
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence, queueDelivery: wiring(queue),
+    });
+
+    const res = await svc.send(MSG);
+
+    // The job references the PERSISTED id, and that id is no longer managed.
+    expect(res).toMatchObject({ id: 'db-pk-9', status: 'queued' });
+    expect(queue.published[0].data).toEqual({ rowId: 'db-pk-9' });
+    expect(svc.isServiceManaged('db-pk-9')).toBe(false);
+  });
+
   it('sendInline() bypasses the queue — the mail/test path', async () => {
     const transport = { send: vi.fn(async () => ({ messageId: '<live@x>' })) };
     const queue = makeQueue();
