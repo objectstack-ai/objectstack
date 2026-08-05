@@ -296,7 +296,25 @@ export {
 export type {
   RuleCompilabilityFinding,
   RuleCompilabilitySeverity,
+  WalkedValidationRule,
 } from './validate-rule-compilability.js';
+
+// #5178 — the residual half #5029's `ajv-formats` registration does not close.
+// Under `strict: false` an UNRECOGNISED format name is logged once and the
+// keyword is DROPPED, so `format: 'emial'` leaves the rule declared, running on
+// every write, and enforcing nothing — with the record ACCEPTED. Judged here
+// against the names that ajv instance really has registered, beside the compile
+// above rather than inside it, so the runtime/gate compile parity is untouched.
+export {
+  validateRuleSchemaFormats,
+  nearestRegisteredFormat,
+  MAX_SCHEMA_WALK_DEPTH,
+  VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT,
+} from './validate-rule-schema-formats.js';
+export type {
+  RuleSchemaFormatFinding,
+  RuleSchemaFormatSeverity,
+} from './validate-rule-schema-formats.js';
 
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';

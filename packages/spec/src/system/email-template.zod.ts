@@ -46,7 +46,20 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   surface: 'this email template',
   history:
     'Until #4001 closed this shape these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
-  aliases: { title: 'subject', content: 'body', html: 'body', text: 'body', from: 'fromAddress', sender: 'fromAddress' },
+  // #5013 — five of these pointed at `body` and `fromAddress`, neither of which
+  // this schema declares: every one of them prescribed a second rejection. The
+  // real slots are the two bodies and the per-template From override.
+  //
+  // `content` goes to `bodyHtml` rather than `bodyText` deliberately: `bodyHtml`
+  // is the REQUIRED body and accepts any string, and the service derives the
+  // plain-text alternative from it when `bodyText` is omitted — so the rename
+  // produces a template that actually renders whether the author's content was
+  // markup or prose, which is the property a prescription has to have.
+  aliases: {
+    title: 'subject',
+    content: 'bodyHtml', html: 'bodyHtml', text: 'bodyText',
+    from: 'fromOverride', sender: 'fromOverride',
+  },
 }, {
   /**
    * Stable identifier; used as the `template` key in

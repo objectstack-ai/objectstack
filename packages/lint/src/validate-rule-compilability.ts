@@ -62,10 +62,21 @@
  *
  * What this gate deliberately does NOT judge is a MISSPELLED format name.
  * `format: 'emial'` compiles in both environments — under `strict: false` ajv
- * logs one line and drops the keyword — so refusing it here would be the gate
- * inventing a verdict the runtime does not share, the mirror image of the
- * `strict: true` mistake above. #5029 pins that behaviour rather than changing
- * it; closing it is an authoring-time decision of its own.
+ * logs one line and drops the keyword — so refusing it *on the compile's
+ * verdict* would be this gate inventing an outcome the runtime does not share,
+ * the mirror image of the `strict: true` mistake above. #5029 pinned that, and
+ * the pin still stands: `validateRuleCompilability` publishes a typo'd format.
+ *
+ * #5178 closed the residual gap the other way — with a SEPARATE judgement laid
+ * beside this compile rather than folded into it. `validate-rule-schema-formats.ts`
+ * walks the same schemas for `format` NAMES and refuses any name the
+ * `ajv-formats` registry does not carry. It never compiles anything, so the
+ * parity above is untouched: the two rules answer two different questions about
+ * one artifact ("does ajv accept this?" and "will this keyword do anything?"),
+ * and it reaches the registry through {@link registeredFormatNames} — this
+ * file's own instance — so "registered" cannot come to mean two things in one
+ * publish. Both rules walk one traversal, {@link walkObjectValidationRules},
+ * for the same reason.
  *
  * ### One ajv instance per schema, on purpose
  *
@@ -181,7 +192,16 @@ function asArray(v: unknown): AnyRec[] {
  * rather than imported as a value so no import statement can accidentally become
  * eager — see the lazy-load note at the top.
  */
-type AjvLike = { compile: (schema: unknown) => unknown };
+type AjvLike = {
+  compile: (schema: unknown) => unknown;
+  /**
+   * ajv's own format registry — `readonly formats` on the `Ajv` class, the map
+   * `addFormat` writes into and the `format` keyword reads back out. Declared
+   * here because #5178's gate enumerates the registered names from it rather
+   * than hardcoding a list that would silently stop tracking the plugin.
+   */
+  formats: Record<string, unknown>;
+};
 type AjvCtor = new (options?: AjvOptions) => AjvLike;
 /** `ajv-formats`' plugin entry — mutates the instance it is handed (#5029). */
 type AddFormats = (ajv: AjvLike) => unknown;
@@ -269,6 +289,39 @@ function createRuntimeAjv(): AjvLike {
   return instance;
 }
 
+/**
+ * Every `format` name the runtime's environment actually has registered, sorted
+ * (#5178).
+ *
+ * Read out of a live {@link createRuntimeAjv} instance rather than written down
+ * as a list. A hardcoded vocabulary would be a THIRD opinion — after the
+ * runtime's registration and this gate's mirror of it — and the only one nobody
+ * updates: the day `ajv-formats` adds a name, a list here starts refusing a
+ * format the write path enforces, which is the "gate turns working metadata
+ * red" failure this whole file is written against. Enumerating means the gate
+ * follows the plugin across an upgrade with no edit at all, and the `fast` /
+ * default mode question answers itself (both modes register the same NAMES;
+ * only the implementations differ — and if that ever stops being true, the
+ * instance still knows and a list still would not).
+ *
+ * Throws rather than degrading if the registry comes back empty: an empty set
+ * would make this gate refuse EVERY format in the stack, so failing loudly with
+ * the cause named beats a run that reports the whole codebase as misspelled.
+ */
+export function registeredFormatNames(): readonly string[] {
+  const names = Object.keys(createRuntimeAjv().formats).sort();
+  if (names.length === 0) {
+    throw new Error(
+      `@objectstack/lint: the runtime-parity ajv instance has no \`format\` registered. "ajv-formats" ` +
+        `loaded but added nothing, so the set of legitimate format names is unknown — refusing to judge ` +
+        `format names against an empty vocabulary, which would report every \`format\` in the stack as ` +
+        `misspelled. Check that the installed "ajv-formats" is the real package and matches the version ` +
+        `@objectstack/lint declares.`,
+    );
+  }
+  return names;
+}
+
 /** The message a thrown compile error contributes, verbatim. */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -315,14 +368,33 @@ function flattenRules(
   return out;
 }
 
+/** One authored validation rule, located for a finding. */
+export interface WalkedValidationRule {
+  /** The rule record itself — a top-level entry, or a `conditional` branch. */
+  rule: AnyRec;
+  /** The declaring object's `name`, or `(unnamed object)`. */
+  objectName: string;
+  /** The nesting-aware rule name as prose: `'outer' → 'inner'`. */
+  label: string;
+  /** Human-readable location: `object 'account' · validation 'outer' → 'inner'`. */
+  where: string;
+  /** Config path of the rule: `objects.account.validations.outer.then.inner`. */
+  basePath: string;
+}
+
 /**
- * Reject every object validation rule whose static artifact — a `format` rule's
- * `regex`, a `json_schema` rule's `schema` — the runtime's own compiler cannot
- * compile. Pure `(stack) => Finding[]`; never throws.
+ * Every object validation rule an author declared, `conditional` branches
+ * flattened in, each carrying the location strings a finding needs.
+ *
+ * Exported because #5178's format-NAME gate judges exactly this set. A second
+ * walker there would be a second opinion about which rules EXIST — the same
+ * drift this file refuses for the compile verdict itself, one question over —
+ * and it would drift silently, because a rule the two walkers disagree about is
+ * simply one that no finding ever mentions.
  */
-export function validateRuleCompilability(stack: unknown): RuleCompilabilityFinding[] {
-  const findings: RuleCompilabilityFinding[] = [];
-  if (!isRec(stack)) return findings;
+export function walkObjectValidationRules(stack: unknown): WalkedValidationRule[] {
+  const walked: WalkedValidationRule[] = [];
+  if (!isRec(stack)) return walked;
 
   for (const obj of asArray(stack.objects)) {
     const objectName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
@@ -334,57 +406,75 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
 
     for (const authored of asArray(validations)) {
       for (const { rule, label, path } of flattenRules(authored, '', '')) {
-        const where = `object '${objectName}' · validation ${label}`;
-        const basePath = `objects.${objectName}.validations.${path}`;
+        walked.push({
+          rule,
+          objectName,
+          label,
+          where: `object '${objectName}' · validation ${label}`,
+          basePath: `objects.${objectName}.validations.${path}`,
+        });
+      }
+    }
+  }
 
-        if (rule.type === 'format' && typeof rule.regex === 'string' && rule.regex !== '') {
-          try {
-            // The exact call `checkFormat` makes — no flags, same constructor.
-            new RegExp(rule.regex);
-          } catch (err) {
-            findings.push({
-              severity: 'error',
-              rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
-              where,
-              path: `${basePath}.regex`,
-              message:
-                `\`format\` validation ${label} on object '${objectName}' declares a \`regex\` that does not ` +
-                `compile: ${errorText(err)}. The write path builds it with \`new RegExp(rule.regex)\` and ` +
-                `SKIPS the rule when that throws (rule-validator.ts \`checkFormat\`), so the rule is declared, ` +
-                `listed in the metadata, and enforces nothing on any record.`,
-              hint:
-                `Fix the pattern so \`new RegExp('${rule.regex}')\` compiles — a literal \`(\`, \`[\` or \`\\\` ` +
-                `must be escaped (\`\\\\(\`, \`\\\\[\`, \`\\\\\\\\\`), and the source is a STRING, so a backslash ` +
-                `is written twice in TypeScript ('^\\\\d{2}-\\\\d{7}$'). Or drop \`regex\` and use a named ` +
-                `\`format\` ('email' | 'url' | 'phone' | 'json').`,
-            });
-          }
-        }
+  return walked;
+}
 
-        if (rule.type === 'json_schema' && isRec(rule.schema)) {
-          try {
-            // A fresh instance per schema — see "One ajv instance per schema".
-            createRuntimeAjv().compile(rule.schema);
-          } catch (err) {
-            findings.push({
-              severity: 'error',
-              rule: VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
-              where,
-              path: `${basePath}.schema`,
-              message:
-                `\`json_schema\` validation ${label} on object '${objectName}' declares a \`schema\` ajv cannot ` +
-                `compile: ${errorText(err)}. The write path compiles it with the same ajv ` +
-                `(\`new Ajv({ allErrors: true, strict: false })\` + \`ajv-formats\`) and SKIPS the rule when that throws ` +
-                `(rule-validator.ts \`checkJsonSchema\`), so the rule is declared and enforces nothing on any ` +
-                `record.`,
-              hint:
-                `Correct the schema so ajv compiles it — the message above names the offending keyword. ` +
-                `\`type\` must be one of null|boolean|object|array|number|string|integer (or an array of ` +
-                `those), \`required\` an array of strings, and every \`$ref\` must resolve. Vendor keywords ` +
-                `are fine (the runtime runs \`strict: false\`); a MALFORMED standard keyword is not.`,
-            });
-          }
-        }
+/**
+ * Reject every object validation rule whose static artifact — a `format` rule's
+ * `regex`, a `json_schema` rule's `schema` — the runtime's own compiler cannot
+ * compile. Pure `(stack) => Finding[]`; never throws.
+ */
+export function validateRuleCompilability(stack: unknown): RuleCompilabilityFinding[] {
+  const findings: RuleCompilabilityFinding[] = [];
+
+  for (const { rule, objectName, label, where, basePath } of walkObjectValidationRules(stack)) {
+    if (rule.type === 'format' && typeof rule.regex === 'string' && rule.regex !== '') {
+      try {
+        // The exact call `checkFormat` makes — no flags, same constructor.
+        new RegExp(rule.regex);
+      } catch (err) {
+        findings.push({
+          severity: 'error',
+          rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
+          where,
+          path: `${basePath}.regex`,
+          message:
+            `\`format\` validation ${label} on object '${objectName}' declares a \`regex\` that does not ` +
+            `compile: ${errorText(err)}. The write path builds it with \`new RegExp(rule.regex)\` and ` +
+            `SKIPS the rule when that throws (rule-validator.ts \`checkFormat\`), so the rule is declared, ` +
+            `listed in the metadata, and enforces nothing on any record.`,
+          hint:
+            `Fix the pattern so \`new RegExp('${rule.regex}')\` compiles — a literal \`(\`, \`[\` or \`\\\` ` +
+            `must be escaped (\`\\\\(\`, \`\\\\[\`, \`\\\\\\\\\`), and the source is a STRING, so a backslash ` +
+            `is written twice in TypeScript ('^\\\\d{2}-\\\\d{7}$'). Or drop \`regex\` and use a named ` +
+            `\`format\` ('email' | 'url' | 'phone' | 'json').`,
+        });
+      }
+    }
+
+    if (rule.type === 'json_schema' && isRec(rule.schema)) {
+      try {
+        // A fresh instance per schema — see "One ajv instance per schema".
+        createRuntimeAjv().compile(rule.schema);
+      } catch (err) {
+        findings.push({
+          severity: 'error',
+          rule: VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
+          where,
+          path: `${basePath}.schema`,
+          message:
+            `\`json_schema\` validation ${label} on object '${objectName}' declares a \`schema\` ajv cannot ` +
+            `compile: ${errorText(err)}. The write path compiles it with the same ajv ` +
+            `(\`new Ajv({ allErrors: true, strict: false })\` + \`ajv-formats\`) and SKIPS the rule when that throws ` +
+            `(rule-validator.ts \`checkJsonSchema\`), so the rule is declared and enforces nothing on any ` +
+            `record.`,
+          hint:
+            `Correct the schema so ajv compiles it — the message above names the offending keyword. ` +
+            `\`type\` must be one of null|boolean|object|array|number|string|integer (or an array of ` +
+            `those), \`required\` an array of strings, and every \`$ref\` must resolve. Vendor keywords ` +
+            `are fine (the runtime runs \`strict: false\`); a MALFORMED standard keyword is not.`,
+        });
       }
     }
   }
