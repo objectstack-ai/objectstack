@@ -7,12 +7,16 @@
  * Implements a subset of the ObjectStack Filter Protocol (MongoDB-compatible)
  * for evaluating conditions against in-memory JavaScript objects.
  *
- * It answers a boolean for every filter it accepts; the one shape it REFUSES
- * (throwing `INVALID_FILTER` instead of answering) is `{ field: {} }` — see
- * `filter-refusal.ts` and the ruling on #5240.
+ * It answers a boolean for every filter it accepts. What it REFUSES — throwing
+ * `INVALID_FILTER` / 400 instead of answering — is decided by
+ * `assertFilterConditionShape` in `filter-refusal.ts`, the same gate
+ * `InMemoryDriver.find` runs, so this face and the live query path cannot
+ * disagree about which filters are evaluable: `{ field: {} }` (#5240), an
+ * operator outside the declared vocabulary (#5324), and a `$between` whose
+ * comparand is not `[min, max]` (#5328).
  */
 
-import { emptyFieldConstraintError, isEmptyFieldConstraint } from './filter-refusal.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 type RecordType = Record<string, any>;
 
@@ -27,30 +31,14 @@ export function match(record: RecordType, filter: any): boolean {
     // short-circuits (`every`/`some`, and the loop returns on its first failing
     // key) — a refusal raised mid-evaluation would fire or not fire depending on
     // the RECORD being tested. Evaluation below is untouched.
-    assertFilterShape(filter, 'filter');
+    //
+    // [#5324/#5328] The walk itself now lives in `filter-refusal.ts` and is the
+    // SAME function `InMemoryDriver.find` runs before handing a filter to mingo.
+    // It used to be a copy that refused one shape; a copy is how this face and
+    // the live one came to answer a malformed `$between` with EVERY row and NO
+    // row respectively.
+    assertFilterConditionShape(filter, 'filter');
     return evaluate(record, filter);
-}
-
-/**
- * [#5240] Walk the whole condition tree and refuse any zero-operator field
- * constraint. Every other malformed shape keeps whatever this matcher does with
- * it today — this walk adds exactly one refusal.
- */
-function assertFilterShape(node: unknown, path: string): void {
-    if (node == null || typeof node !== 'object' || Array.isArray(node)) return;
-    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
-        const here = `${path}.${key}`;
-        if (key === '$and' || key === '$or') {
-            if (Array.isArray(val)) val.forEach((child, i) => assertFilterShape(child, `${here}[${i}]`));
-            continue;
-        }
-        if (key === '$not') {
-            assertFilterShape(val, here);
-            continue;
-        }
-        if (key.startsWith('$')) continue;
-        if (isEmptyFieldConstraint(val)) throw emptyFieldConstraintError(key, here);
-    }
 }
 
 function evaluate(record: RecordType, filter: any): boolean {
@@ -167,7 +155,12 @@ function checkCondition(value: any, condition: any): boolean {
                 if (!(value <= target)) return false; 
                 break;
             case '$between':
-                // target should be [min, max]
+                // [#5328] `target` is a two-element array — the shape gate refused
+                // anything else before evaluation started. The `Array.isArray`
+                // guard stays as the totality floor for a direct call, but it is
+                // no longer this face's ANSWER to a malformed range: it used to
+                // skip the comparison entirely, which meant "matches EVERY row"
+                // — the opposite of what the live query path silently answered.
                 if (Array.isArray(target) && (value < target[0] || value > target[1])) return false;
                 break;
 
@@ -210,8 +203,15 @@ function checkCondition(value: any, condition: any): boolean {
                 } catch (e) { return false; }
                 break;
 
-            default: 
-                // Unknown operator, ignore or fail. Ignoring safe for optional features.
+            default:
+                // [#5324] Unreachable through `match`: the shape gate refuses an
+                // operator this driver does not evaluate, with the same
+                // `INVALID_FILTER` / 400 the live query path raises. This arm
+                // read "Unknown operator, ignore or fail. Ignoring safe for
+                // optional features." — and ignoring a constraint WIDENS the
+                // result set, which on a read scope is a permission bypass, not
+                // a degraded optional feature (#3948, and objectql's `having`
+                // says the same thing over its own vocabulary).
                 break;
         }
     }

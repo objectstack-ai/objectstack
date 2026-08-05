@@ -62,6 +62,16 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
    */
   const findAuthored = (where: unknown) => find(parseFilterAST(where));
 
+  /** The refusal itself, so its ADR-0112 envelope can be asserted (#5324). */
+  const refusalOf = async (run: () => Promise<unknown>): Promise<Error & { code?: string; status?: number }> => {
+    try {
+      await run();
+    } catch (e) {
+      return e as Error & { code?: string; status?: number };
+    }
+    throw new Error('expected the driver to refuse this filter, but it resolved');
+  };
+
   it('reads a non-empty operator set from the spec', () => {
     // Guards every assertion below from passing vacuously.
     expect(VALID_AST_OPERATORS.size).toBeGreaterThan(0);
@@ -106,26 +116,29 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
     // `isFilterAST` and refuses the authored array a layer earlier. #3948's
     // condition holds either way: it THROWS, never a match-everything.
     //
-    // What it does NOT yet do on this path is speak the ADR-0112 envelope —
-    // the object path hands an unknown `$op` straight to mingo, which raises a
-    // bare `MingoError` with no `code`/`status`. That gap is the general form
-    // of #5324 (same `normalizeFilterCondition` passthrough, `$not` being the
-    // instance filed there) and is NOT a #5158 regression: the array path that
-    // used to carry the envelope for this input is what #5158 deleted, and the
-    // object path has always answered this way.
-    await expect(findAuthored([['name', 'sounds_like', 'alpha']])).rejects.toThrow();
+    // [#5324] And it now throws in the ADR-0112 envelope. This assertion was
+    // relaxed to a bare `.rejects.toThrow()` while the object path handed an
+    // unknown `$op` straight to mingo, whose `MingoError` carries no `code` and
+    // no `status` — served as a 500-shaped body for a client mistake. Tightened
+    // back here, which is the assertion the relaxed one was a placeholder for.
+    const err = await refusalOf(() => findAuthored([['name', 'sounds_like', 'alpha']]));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('$sounds_like');
   });
 
-  it('a malformed between emits no predicate on this backend — the #5328 divergence', async () => {
-    // driver-sql THROWS on `{ score: { $between: 5 } }`; this driver's
-    // `normalizeFilterCondition` skips the arm entirely and the field
-    // normalises to `{}`, which mingo evaluates as "matches nothing". Two
-    // backends, one filter, two answers — filed as #5328, not fixed here.
+  it('refuses a malformed between instead of emitting no predicate — #5328', async () => {
+    // driver-sql THROWS on `{ score: { $between: 5 } }`; this driver used to
+    // skip the arm entirely, leaving the field normalised to `{}` which mingo
+    // evaluates as "matches nothing". One filter, two backends, two answers.
     //
-    // Pinned as-is so the divergence is visible rather than folklore. It is
-    // pre-existing: the loud refusal this test used to observe belonged to the
-    // ARRAY path, which #5158 deleted; the object path never had one.
-    await expect(findAuthored([['score', 'between', 5]])).resolves.toEqual([]);
+    // This assertion was pinned at `resolves.toEqual([])` to keep the
+    // divergence visible rather than folklore, with a note pointing at #5328.
+    // #5328 is fixed, so it is pinned at the answer instead.
+    const err = await refusalOf(() => findAuthored([['score', 'between', 5]]));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('[min, max]');
   });
 
   it('still honours a well-formed logical node', async () => {
