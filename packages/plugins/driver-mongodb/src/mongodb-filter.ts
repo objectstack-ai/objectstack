@@ -39,7 +39,7 @@ import {
  * ADR-0112 envelope (`400 INVALID_FILTER`) every sibling filter refusal speaks.
  */
 function filterArrayReachedDriverError(filters: unknown[]): Error {
-  const err = new Error(
+  return unsupportedFilterError(
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
     `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
     `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
@@ -47,10 +47,78 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
-  ) as Error & { code?: string; status?: number };
+  );
+}
+
+/**
+ * [#4436 / #5240] A filter this driver cannot evaluate, in the ADR-0112
+ * envelope every sibling filter refusal across the backends speaks.
+ *
+ * Extracted from {@link filterArrayReachedDriverError}, which built the same
+ * `INVALID_FILTER` / 400 error inline — it was this package's only refusal
+ * carrying a wire identity, so there was nothing to share it with until #5347
+ * added a second. It is deliberately the SAME envelope as `driver-sql`'s and
+ * `driver-memory`'s `unsupportedFilterError`, not a third: #3948 made the
+ * backends agree that an uncompilable filter is a refusal, and a suite that
+ * swaps one driver for another must see one `400 INVALID_FILTER`, not a coded
+ * refusal on three backends and a bare `{ error }` on the fourth.
+ *
+ * Note what this does NOT do: the `default:` arm of {@link translateFieldOperators}
+ * still throws a bare `Error` with a `[mongodb]` prefix, outside this envelope.
+ * That is #5346's, filed and measured separately — converting it here would be
+ * an unrelated behaviour change riding on #5347.
+ */
+function unsupportedFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#5347] `$null` whose comparand is not a boolean.
+ *
+ * The leading sentence is `driver-sql`'s, verbatim — one condition, one wording
+ * (#5240) — and the tail records the measurement that made the refusal the
+ * ruling: on one row with `stage: 'won'` and one with `stage: null`,
+ * `{ stage: { $null: 'yes' } }` returned the NULL row on driver-sql /
+ * driver-sqlite-wasm / Turso local, the VALUED row here and on driver-memory's
+ * query path, and BOTH rows through driver-memory's reference matcher. Three
+ * readings of one declared operator, none of them anyone's decision — just what
+ * a two-branch conditional does with a third value.
+ */
+function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
+      `than coerced because the backends read a non-boolean in OPPOSITE directions — driver-sql ` +
+      `compiled IS NULL (anything but false), this driver and driver-memory's query path ` +
+      `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
+      `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
+      `the false it was written to mean (#5347).`,
+  );
+}
+
+/** A short type name for an operand a filter refusal has to describe. */
+function describeFilterOperand(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  const kind = typeof value;
+  if (kind !== 'object') return kind;
+  const ctor = (value as { constructor?: { name?: string } }).constructor;
+  return ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+}
+
+/** A short, non-throwing rendering of an offending value for a message. */
+function safeShapePreview(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== 'string') return typeof value;
+    return json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    return typeof value;
+  }
 }
 
 /**
@@ -82,7 +150,7 @@ export function translateFilter(
 
   if (typeof where !== 'object') return {};
 
-  return translateCondition(where as Record<string, unknown>, temporalKind);
+  return translateCondition(where as Record<string, unknown>, temporalKind, 'filter');
 }
 
 /**
@@ -91,6 +159,10 @@ export function translateFilter(
 function translateCondition(
   condition: Record<string, unknown>,
   temporalKind?: TemporalFieldKindResolver,
+  // [#5347] Where in the filter tree this node sits, so a refusal can name the
+  // position it refused — the same `filter.$or[0].stage` spelling driver-sql
+  // and driver-memory print.
+  path = 'filter',
 ): Filter<any> {
   const mongoFilter: Record<string, unknown> = {};
   const andClauses: Filter<any>[] = [];
@@ -100,7 +172,7 @@ function translateCondition(
       case '$and':
         if (Array.isArray(value)) {
           andClauses.push({
-            $and: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
+            $and: value.map((sub, i) => translateCondition(sub as Record<string, unknown>, temporalKind, `${path}.$and[${i}]`)),
           });
         }
         break;
@@ -108,14 +180,14 @@ function translateCondition(
       case '$or':
         if (Array.isArray(value)) {
           andClauses.push({
-            $or: value.map((sub) => translateCondition(sub as Record<string, unknown>, temporalKind)),
+            $or: value.map((sub, i) => translateCondition(sub as Record<string, unknown>, temporalKind, `${path}.$or[${i}]`)),
           });
         }
         break;
 
       case '$not':
         if (value && typeof value === 'object') {
-          const inner = translateCondition(value as Record<string, unknown>, temporalKind);
+          const inner = translateCondition(value as Record<string, unknown>, temporalKind, `${path}.$not`);
           // MongoDB $not applies per-field; for top-level negation use $nor
           andClauses.push({ $nor: [inner] });
         }
@@ -130,7 +202,7 @@ function translateCondition(
           const objValue = value as Record<string, unknown>;
           const hasOps = Object.keys(objValue).some((k) => k.startsWith('$'));
           if (hasOps) {
-            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key));
+            mongoFilter[key] = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
           } else {
             // Nested object — treat as exact match
             mongoFilter[key] = value;
@@ -172,6 +244,10 @@ function translateFieldOperators(
   // (ADR-0053 D-C1) left the two out of step and the call site stopped
   // compiling. One definition means the next temporal type is added once.
   kind?: TemporalFieldKind,
+  // [#5347] Carried only so a refusal can name the field and the position it
+  // refused, the way `driver-sql` and `driver-memory` do.
+  field = '<field>',
+  path = 'filter',
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const store = (v: unknown) => coerceTemporalValue(v, kind);
@@ -238,7 +314,17 @@ function translateFieldOperators(
         break;
 
       // Null check
+      //
+      // [#5347] The arm used to be a two-branch `if/else` on `value === true`,
+      // so EVERY non-boolean comparand fell to the `else` and translated to
+      // `$ne: null` — IS NOT NULL. `driver-sql` hung its default on the
+      // opposite side (`opValue === false` → IS NULL) and `driver-memory`'s
+      // reference matcher on neither (the constraint vanished), so one declared
+      // operator had three readings across four backends. Ruled REFUSED on
+      // #5347: `FieldOperatorsSchema` declares `$null: z.boolean()`, and there
+      // is no reading of a non-boolean here that is not a guess at intent.
       case '$null':
+        if (typeof value !== 'boolean') throw nonBooleanNullComparandError(field, value, `${path}.$null`);
         if (value === true) {
           result.$eq = null;
         } else {
