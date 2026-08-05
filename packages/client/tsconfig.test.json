@@ -24,14 +24,16 @@
 //     Nothing here may loosen a type rule; if a test does not compile, that is
 //     the finding.
 //
-// `include` deliberately stops at `src`, matching the build config's root, and
-// none of the files it leaves out carries a `@ts-expect-error`, so no pin is
-// hiding there. `tests/integration/` — the suite `vitest.integration.config.ts`
-// runs against a live server — is in no tsconfig at all: a second,
-// differently-shaped hole (1 file / 3 errors, one of them a real API drift, the
-// suite reading a `client.discovery` property `ObjectStackClient` does not
-// have) that wants its own change rather than a rider on this one. Filed as
-// #5544.
+// `include` covers BOTH test roots this package has. `src/**/*` is the layer
+// the build config excludes; `tests/**/*` is `tests/integration/`, the suite
+// `vitest.integration.config.ts` runs against a live server and the regular
+// `vitest.config.ts` excludes. Until #5544 it was named by no `include` and no
+// `exclude` anywhere — the #5476 shape, outside every program rather than
+// inside an excluded region — so neither vitest's regular run nor tsc ever read
+// it, and it had drifted onto a `client.discovery` property `ObjectStackClient`
+// does not have. Compiling it does NOT run it: the vitest split is unchanged,
+// the suite still needs a server. tsc reading a file is the cheaper of the two
+// gates and the only one that works without one.
 //
 // The per-file ledger beside this config (`test-typecheck-debt.json`) is small
 // on purpose. Under the repaired config the whole test layer came to 13 errors;
@@ -57,6 +59,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]
 }
