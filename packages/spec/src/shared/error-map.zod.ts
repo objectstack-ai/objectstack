@@ -133,19 +133,173 @@ interface ZodIssueMinimal {
   path: PropertyKey[];
   message: string;
   code?: string;
+  /**
+   * Only on `invalid_union`: one issue list **per union branch**, with each
+   * branch's paths RELATIVE to the union issue's own path. Zod raises a single
+   * `invalid_union` issue whose own `message` is the literal `"Invalid input"`,
+   * so everything a failing branch has to say lives down here.
+   */
+  errors?: readonly (readonly ZodIssueMinimal[])[];
+}
+
+/** One indent step of a formatted issue line. */
+const ISSUE_INDENT = '  ';
+
+/**
+ * How many levels of nested `invalid_union` are expanded below a top-level
+ * issue. Unions nest (a union member that is itself a union — `StateMachine →
+ * on.GO → actions[0]` is two levels in this repo today), and each level can
+ * render several branches, so the expansion is bounded rather than left to the
+ * shape of whatever the author typed.
+ */
+const UNION_EXPANSION_DEPTH_LIMIT = 3;
+
+/** How many equally-informative branches are rendered at one level. */
+const UNION_BRANCH_RENDER_LIMIT = 3;
+
+/**
+ * True when a branch only complains that the value is the wrong *kind* at the
+ * branch root — `expected string, received object` for the string member of
+ * `z.union([z.string(), SomeObject])`.
+ *
+ * Such a branch carries no prescription: the author never intended it, and
+ * printing it is the "N branches, N times the noise" failure that made
+ * `view.zod.ts`'s `submitBehavior` reach for `discriminatedUnion`. An empty
+ * branch (the `invalid_union` "matched multiple" variant carries `errors: []`)
+ * counts as uninformative too — `every` on an empty list is `true`.
+ */
+function isKindMismatchOnly(issues: readonly ZodIssueMinimal[]): boolean {
+  return issues.every(
+    (issue) =>
+      issue.path.length === 0 &&
+      (issue.code === 'invalid_type' || issue.code === 'invalid_value'),
+  );
+}
+
+/** True when a branch carries the #4001 campaign's unknown-key prescription. */
+function carriesUnknownKey(issues: readonly ZodIssueMinimal[]): boolean {
+  return issues.some((issue) => issue.code === 'unrecognized_keys');
 }
 
 /**
- * Format a single Zod issue into a human-readable line.
+ * Pick the branch(es) of a failed union whose issues actually explain the
+ * failure.
+ *
+ * Ranking, in order:
+ *
+ * 1. **Kind-mismatch-only branches are dropped entirely** (see
+ *    {@link isKindMismatchOnly}). If *every* branch is one — a plain
+ *    `z.union([z.string(), z.number()])` handed an object — nothing is
+ *    selected and the union renders exactly as it always has.
+ * 2. **Fewest issues wins.** The branch the author was closest to hitting
+ *    complains least: given `z.union([A, B, C])` of strict objects and one
+ *    mistyped key, the intended member reports *only* that key while the other
+ *    two also report a wrong discriminator and their own missing requireds. So
+ *    "fewest" is what keeps a single unknown key from being reported once per
+ *    branch.
+ * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
+ *    where the curated prose lives.
+ * 4. Declaration order breaks what remains, so the output is deterministic.
+ *
+ * Branches that tie at the top are *all* rendered (capped): when two shapes
+ * explain the failure equally well, privileging the first one by accident of
+ * declaration order would be a lie about which shape was expected.
+ */
+function selectUnionBranches(
+  branches: readonly (readonly ZodIssueMinimal[])[],
+): { selected: readonly (readonly ZodIssueMinimal[])[]; omitted: number } {
+  const informative = branches
+    .map((issues, index) => ({ issues, index }))
+    .filter((branch) => !isKindMismatchOnly(branch.issues));
+
+  if (informative.length === 0) return { selected: [], omitted: 0 };
+
+  const rank = (branch: { issues: readonly ZodIssueMinimal[] }): [number, number] => [
+    branch.issues.length,
+    carriesUnknownKey(branch.issues) ? 0 : 1,
+  ];
+
+  const sorted = [...informative].sort((a, b) => {
+    const [aCount, aKeys] = rank(a);
+    const [bCount, bKeys] = rank(b);
+    return aCount - bCount || aKeys - bKeys || a.index - b.index;
+  });
+
+  const [bestCount, bestKeys] = rank(sorted[0]!);
+  const tied = sorted.filter((branch) => {
+    const [count, keys] = rank(branch);
+    return count === bestCount && keys === bestKeys;
+  });
+
+  return {
+    selected: tied.slice(0, UNION_BRANCH_RENDER_LIMIT).map((branch) => branch.issues),
+    omitted: Math.max(0, tied.length - UNION_BRANCH_RENDER_LIMIT),
+  };
+}
+
+/** Render a path array the way the CLI has always rendered it. */
+function renderPath(path: PropertyKey[]): string {
+  return path.length > 0 ? path.join('.') : '(root)';
+}
+
+/**
+ * Render one issue and — for `invalid_union` — the selected branches beneath
+ * it, one indent level deeper, with paths resolved against the union's own.
+ *
+ * `seen` de-duplicates leaf lines *within one top-level issue*: two branches
+ * that reject the same key with the same words say it once. Union lines
+ * themselves are never de-duplicated, since two same-path `"Invalid input"`
+ * lines can head genuinely different sub-trees.
+ */
+function renderIssue(
+  issue: ZodIssueMinimal,
+  parentPath: PropertyKey[],
+  depth: number,
+  seen: Set<string>,
+): string[] {
+  const path = [...parentPath, ...issue.path];
+  const rendered = renderPath(path);
+  const branches = issue.code === 'invalid_union' ? (issue.errors ?? []) : [];
+  const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+
+  if (!expandable) {
+    const key = JSON.stringify([depth, rendered, issue.message]);
+    if (seen.has(key)) return [];
+    seen.add(key);
+  }
+
+  const lines = [`${ISSUE_INDENT.repeat(depth + 1)}✗ ${rendered}: ${issue.message}`];
+  if (!expandable) return lines;
+
+  const { selected, omitted } = selectUnionBranches(branches);
+  for (const branch of selected) {
+    for (const nested of branch) {
+      lines.push(...renderIssue(nested, path, depth + 1, seen));
+    }
+  }
+  if (selected.length > 0 && omitted > 0) {
+    lines.push(
+      `${ISSUE_INDENT.repeat(depth + 2)}… and ${omitted} more branch${omitted === 1 ? '' : 'es'} rejected this value`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * Format a single Zod issue into human-readable line(s).
+ *
+ * One line for an ordinary issue. For an `invalid_union`, the union's own line
+ * (zod's literal `"Invalid input"`) is followed by the branch issues that
+ * explain the rejection, indented one level and carrying absolute paths —
+ * without this, every rejection behind a union arrives at the author as
+ * `✗ (root): Invalid input` with the prescription stranded in the payload
+ * (#4971). Branch selection is described on {@link selectUnionBranches}.
  *
  * @param issue - A single Zod issue
- * @returns Formatted string with path and message
+ * @returns Formatted string; multi-line when a union is expanded
  */
 export function formatZodIssue(issue: ZodIssueMinimal): string {
-  const path = issue.path.length > 0
-    ? issue.path.join('.')
-    : '(root)';
-  return `  ✗ ${path}: ${issue.message}`;
+  return renderIssue(issue, [], 0, new Set<string>()).join('\n');
 }
 
 /**
@@ -176,6 +330,18 @@ export function formatZodIssue(issue: ZodIssueMinimal): string {
  *   ✗ objects[0].fields.status.type: Invalid field type 'dropdown'. Did you mean 'select'?
  *   ✗ views[0].object: Invalid identifier 'MyTasks'. Must be lowercase snake_case.
  * ```
+ *
+ * A rejection behind a `z.union` is expanded one level deeper, so the branch's
+ * message reaches the author instead of zod's bare `"Invalid input"` (#4971):
+ * ```
+ * Validation failed (1 issue):
+ *
+ *   ✗ states.s.on.GO.actions.0: Invalid input
+ *     ✗ states.s.on.GO.actions.0: Unrecognized key(s) on this action reference: `args`. …
+ * ```
+ * The issue **count** stays the count of `error.issues` — the union is one
+ * issue no matter how many lines explain it, which keeps this header agreeing
+ * with the structural consumers (REST error bodies, `ZodError.message`).
  */
 export function formatZodError(error: z.ZodError, label?: string): string {
   const count = error.issues.length;

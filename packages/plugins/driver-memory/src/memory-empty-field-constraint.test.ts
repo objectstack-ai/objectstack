@@ -74,6 +74,9 @@ describe('[#5240] InMemoryDriver (live mingo path) refuses a zero-operator field
     return rows.map((r: any) => String(r.id)).sort();
   };
 
+  /** The same filter through the OTHER face, so an answer can be compared. */
+  const matchedIds = (filter: unknown): string[] => ROWS.filter((r) => match(r, filter)).map((r) => r.id);
+
   const refusalOf = async (where: unknown): Promise<WireBearingError> => {
     try {
       await ids(where);
@@ -116,14 +119,17 @@ describe('[#5240] InMemoryDriver (live mingo path) refuses a zero-operator field
 
     it('a $-key whose value is an empty object is NOT treated as a field constraint', async () => {
       // `{ $not: {} }` is the #5134 identity (NOT TRUE ≡ FALSE), not this shape,
-      // so the #5240 gate must not claim it. On this path it still fails — but
-      // for a pre-existing and entirely separate reason: the live query path
-      // hands `$not` straight to mingo, which has no document-level `$not` at
-      // all (measured while verifying this issue's premise; filed as #5324).
-      // Pinned as the CURRENT truth, so #5324's fix is the thing that changes
-      // it and this suite is not silently asserting a behaviour nobody has.
-      await expect(ids({ $not: {} })).rejects.toThrow(/unknown top level operator/);
-      await expect(ids({ $not: {} })).rejects.not.toThrow(/zero operators/);
+      // so the #5240 gate must not claim it.
+      //
+      // [#5324] This assertion used to pin a FAILURE — `unknown top level
+      // operator: $not`, mingo's uncoded error, because the live query path
+      // handed a document-level `$not` straight to a MongoDB engine that has no
+      // such operator. Now that the path compiles `$not` to `$nor`, the identity
+      // is the answer it was always supposed to be, and it agrees with
+      // driver-sql (#5134: NOT of a TRUE group is FALSE → the FALSE constant)
+      // and with this package's own matcher.
+      expect(await ids({ $not: {} })).toEqual([]);
+      expect(matchedIds({ $not: {} })).toEqual([]);
     });
   });
 });

@@ -7,9 +7,14 @@ import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
 import {
-  emptyFieldConstraintError,
+  assertFilterConditionShape,
   filterArrayReachedDriverError,
-  isEmptyFieldConstraint,
+  filterNodeExpectedError,
+  filterNodeListExpectedError,
+  malformedBetweenError,
+  nonBooleanNullComparandError,
+  unknownFieldOperatorError,
+  unknownLogicalOperatorError,
   unsupportedFilterError,
 } from './filter-refusal.js';
 import {
@@ -720,6 +725,12 @@ export class InMemoryDriver implements IDataDriver {
         return { [op]: conditions };
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
+      // [#5324/#5328] Shape first, then translate — the SAME gate the reference
+      // matcher runs (`filter-refusal.ts`), so the two faces cannot answer one
+      // filter differently again. It must run before `normalizeFilterCondition`
+      // and not inside it: the translator recurses per key and would therefore
+      // refuse or not refuse depending on where in the tree it gave up.
+      assertFilterConditionShape(filters, 'filter');
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
       return this.normalizeFilterCondition(filters, object);
     }
@@ -795,10 +806,11 @@ export class InMemoryDriver implements IDataDriver {
               : { $gte: store(value[0]), $lte: store(value[1]) },
           };
         }
-        throw unsupportedFilterError(
-          `"between" on field "${field}" needs a two-element array, got ` +
-            `${JSON.stringify(value)}. Returning no predicate would silently match every record.`,
-        );
+        // [#5328] One condition, one wording — the same refusal the
+        // FilterCondition `$between` arm raises. They used to differ, which is
+        // how a caller reading two messages could believe they had hit two
+        // different problems.
+        throw malformedBetweenError(field, value, `filter.${field}.between`);
       default:
         // Was `return null`, which the caller dropped — so an operator this
         // driver cannot express narrowed nothing instead of erroring. driver-sql
@@ -815,6 +827,15 @@ export class InMemoryDriver implements IDataDriver {
    * Normalize a FilterCondition object by converting non-standard $-prefixed
    * operators ($contains, $notContains, $startsWith, $endsWith, $between, $null)
    * to Mingo-compatible equivalents ($regex, $gte/$lte, null checks).
+   *
+   * [#5324/#5328] TRANSLATION ONLY. Every shape decision — the operator
+   * vocabulary, `$between`'s arity, what may sit in a node position — was made
+   * by `assertFilterConditionShape` before this ran, on the whole tree at once.
+   * The refusals still written here are the totality floor a translator owes
+   * itself (`driver-sql` keeps its emitter's `default: throw` beside
+   * `reduceFilterNode` for the same reason): unreachable through
+   * `convertToMongoQuery`, and the honest answer if this method is ever called
+   * from somewhere new.
    */
   private normalizeFilterCondition(filter: Record<string, any>, object?: string, path = 'filter'): Record<string, any> {
     const result: Record<string, any> = {};
@@ -823,37 +844,48 @@ export class InMemoryDriver implements IDataDriver {
     for (const key of Object.keys(filter)) {
       const value = filter[key];
       const here = `${path}.${key}`;
-      // [#5240] `{ field: {} }` is refused in EVERY position, before mingo sees
-      // it. Left alone it normalises to `{ field: {} }`, which mingo reads as
-      // "the field deep-equals the empty document" — a filter that matches
-      // nothing in ordinary data and is therefore indistinguishable, from the
-      // outside, from the FALSE the reference matcher answered. Neither is what
-      // the author meant, and driver-sql read the same shape as TRUE inside a
-      // combinator. Refused rather than reinterpreted; see the ruling on #5240.
-      if (isEmptyFieldConstraint(value) && !key.startsWith('$')) {
-        throw emptyFieldConstraintError(key, here);
-      }
       // Recurse into logical operators
       if (key === '$and' || key === '$or') {
-        result[key] = Array.isArray(value)
-          ? value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`))
-          : value;
+        if (!Array.isArray(value)) throw filterNodeListExpectedError(key, value, here);
+        result[key] = value.map((child: any, i: number) => this.normalizeFilterCondition(child, object, `${here}[${i}]`));
         continue;
       }
       if (key === '$not') {
-        result[key] = value && typeof value === 'object'
-          ? this.normalizeFilterCondition(value, object, here)
-          : value;
+        // [#5324] The whole point of the issue. `$not` is a declared combinator
+        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `memory-matcher`
+        // evaluates it, and `cel-to-filter` EMITS it — a CEL `!expr` in an RLS
+        // read scope lowers to `{ $not: {…} }`. Passing it through unchanged
+        // meant mingo received a document-level `$not`, which MongoDB does not
+        // have: `unknown top level operator: $not`, uncoded, on every query
+        // carrying a negated scope.
+        //
+        // `$nor` with one operand IS the document-level negation in MongoDB, and
+        // is what `driver-mongodb` rewrites to for the identical reason (#4405).
+        // It is also NULL-safe by construction, which is the semantics #5146
+        // ruled canonical: a row whose field is null or missing does not satisfy
+        // the inner condition, so `$nor` admits it — the same answer this
+        // package's matcher and `@objectstack/formula` give, and the one
+        // driver-sql was rewritten to match.
+        //
+        // At most one `$not` per node (it is one object key), so this never
+        // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
+        // the shape gate refuses undeclared combinators.
+        if (!value || typeof value !== 'object') throw filterNodeExpectedError(value, here);
+        result.$nor = [this.normalizeFilterCondition(value, object, here)];
         continue;
       }
-      // Skip $-prefixed keys that aren't field names (already handled or unknown)
-      if (key.startsWith('$')) {
-        result[key] = value;
-        continue;
-      }
+      if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
-        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key));
+        // A field spec with no `$` keys is a nested-object COMPARAND, not an
+        // operator map — mingo compares it structurally, `driver-mongodb` says
+        // so explicitly, and the matcher deep-equals it. Handing it to the
+        // operator translator would read its field names as operators.
+        if (!Object.keys(value).some((k) => k.startsWith('$'))) {
+          result[key] = value;
+          continue;
+        }
+        const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
         // Handle multiple regex conditions on the same field (e.g. $startsWith + $endsWith)
         if (normalized._multiRegex) {
           const regexConditions: Record<string, any>[] = normalized._multiRegex;
@@ -892,8 +924,11 @@ export class InMemoryDriver implements IDataDriver {
    * Convert non-standard field operators to Mingo-compatible format.
    * When multiple regex-producing operators appear on the same field
    * (e.g. $startsWith + $endsWith), they are combined via $and.
+   *
+   * `field` and `path` are carried only so a refusal can name the position it
+   * refused — the vocabulary itself is enforced one level up (#5324).
    */
-  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind): Record<string, any> {
+  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind, field = '<field>', path = 'filter'): Record<string, any> {
     const store = (v: any) => coerceTemporalValue(v, kind);
     const result: Record<string, any> = {};
     const regexConditions: Record<string, any>[] = [];
@@ -913,15 +948,20 @@ export class InMemoryDriver implements IDataDriver {
         case '$endsWith':
           regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`, 'i') });
           break;
-        case '$between':
-          if (Array.isArray(val) && val.length === 2) {
-            result.$gte = store(val[0]);
-            // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
-            const betweenNextDay = nextUtcCalendarDay(val[1]);
-            if (betweenNextDay != null) result.$lt = store(betweenNextDay);
-            else result.$lte = store(val[1]);
-          }
+        case '$between': {
+          // [#5328] The arm used to be CONDITIONAL — a comparand that was not a
+          // two-element array skipped it and wrote nothing, so the field
+          // normalised to `{}` and mingo read that as "matches no row". The
+          // range simply vanished, and no one was told. The shape gate refuses
+          // it now; this throw is the totality floor.
+          if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
+          result.$gte = store(val[0]);
+          // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+          const betweenNextDay = nextUtcCalendarDay(val[1]);
+          if (betweenNextDay != null) result.$lt = store(betweenNextDay);
+          else result.$lte = store(val[1]);
           break;
+        }
         case '$lte': {
           // A bare-day upper bound means "through that whole day" (#4042; the
           // driver-sql twin is #3777). Order-equivalent to `<=` for plain
@@ -934,6 +974,16 @@ export class InMemoryDriver implements IDataDriver {
         case '$null':
           // $null: true → field is null, $null: false → field is not null
           // Use $eq/$ne null for Mingo compatibility
+          //
+          // [#5347] The arm used to be a two-branch `if/else` on `val === true`,
+          // so EVERY non-boolean comparand fell to the `else` and compiled
+          // `$ne: null` — IS NOT NULL. `driver-sql` hung its default on the
+          // opposite side (`opValue === false` → IS NULL) and the reference
+          // matcher on neither (the constraint vanished), so one declared
+          // operator had three readings. The shape gate refuses a non-boolean
+          // now; this throw is the totality floor, the same one `$between`
+          // keeps beside it.
+          if (typeof val !== 'boolean') throw nonBooleanNullComparandError(field, val, `${path}.$null`);
           if (val === true) {
             result.$eq = null;
           } else {
@@ -946,9 +996,19 @@ export class InMemoryDriver implements IDataDriver {
         case '$in': case '$nin':
           result[op] = store(val);
           break;
-        default:
+        // Evaluated by mingo under the same name. `$exists` is a presence
+        // predicate, `$regex`/`$options` a pattern and its flags — none of them
+        // is a comparand, so none takes the field's storage form (#4047).
+        case '$exists': case '$regex': case '$options':
           result[op] = val;
           break;
+        default:
+          // [#5324] Was `result[op] = val` — a GENERIC passthrough that handed
+          // every unrecognised `$op` to mingo, which answered with a bare
+          // `MingoError` (no `code`, no `status`) and so escaped the ADR-0112
+          // envelope as a 500-shaped body. The vocabulary gate refuses these
+          // before translation; this throw is the totality floor.
+          throw unknownFieldOperatorError(op, field, path);
       }
     }
 

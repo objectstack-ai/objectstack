@@ -131,14 +131,51 @@ describe('buildEndpointIndex', () => {
     expect(index.get('GET /api/v1/apps/showcase/tasks')!.authRequired).toBe(false);
   });
 
-  it('strips storage annotations (_lock / packageId) rather than choking on them', () => {
+  // [#5271] REPLACED, not re-spelled. This case used to read "strips storage
+  // annotations (_lock / packageId) rather than choking on them" and asserted
+  // `not.toHaveProperty('_lock')` over a fixture spelling `_lock: { managed:
+  // true }` — a shape ADR-0010 never defined (`_lock` is the 4-state enum
+  // none / no-overlay / no-delete / full). Both halves stopped being right when
+  // `api` became a registered kind (#5271, part of #5206):
+  //
+  //  • `ApiEndpointSchema` now declares `...MetadataProtectionFields`, because
+  //    every registered kind must — the loader stamps the envelope and an
+  //    undeclared one is DROPPED on every parse, losing protection metadata on
+  //    round-trip. So the old assertion pinned exactly the defect that spread
+  //    fixes, and it would have kept passing for the wrong reason.
+  //  • The invented `_lock` object is now a VALUE error rather than an unknown
+  //    key, so the endpoint would be excluded from the index entirely — the
+  //    fixture's own premise ("does not choke") silently inverted.
+  //
+  // What remains true, and is what this case now pins: a stored row carries
+  // BOTH the ADR-0010 envelope (declared ⇒ survives) and the metadata layer's
+  // own bookkeeping (`packageId` / `state`, written by `MetadataManager` and
+  // NOT endpoint vocabulary ⇒ stripped). That split is the measured reason
+  // `api` sits on the #4001 campaign's STILL_STRIP list: closing this shape
+  // would make every stored row unparseable here.
+  it('keeps the ADR-0010 envelope and strips the metadata layer’s bookkeeping', () => {
     const index = buildEndpointIndex(
-      [{ ...endpoint(), _lock: { managed: true }, _packageId: 'pkg_showcase' }],
+      [{
+        ...endpoint(),
+        // ADR-0010 envelope — declared by the schema, so it round-trips.
+        _lock: 'no-overlay',
+        _packageId: 'pkg_showcase',
+        _provenance: 'package',
+        // Metadata-layer bookkeeping — not endpoint vocabulary, so stripped.
+        packageId: 'com.objectstack.showcase',
+        state: 'active',
+      }],
       makeLogger(),
     );
-    const hit = index.get('GET /api/v1/apps/showcase/tasks')!;
-    expect(hit).toBeDefined();
-    expect(hit as Record<string, unknown>).not.toHaveProperty('_lock');
+
+    const hit = index.get('GET /api/v1/apps/showcase/tasks');
+    expect(hit, 'a stored row with storage annotations must still index').toBeDefined();
+
+    const body = hit as unknown as Record<string, unknown>;
+    expect(body._packageId).toBe('pkg_showcase');
+    expect(body._lock).toBe('no-overlay');
+    expect(body).not.toHaveProperty('packageId');
+    expect(body).not.toHaveProperty('state');
   });
 });
 

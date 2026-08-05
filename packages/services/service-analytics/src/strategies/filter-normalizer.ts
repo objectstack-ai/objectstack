@@ -94,18 +94,87 @@
  * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
  * so it buys portability for one redundant conjunct.
  *
+ * # A `where` ARRAY is lowered here, not dropped (#5334)
+ *
+ * `FilterArray` — `['stage', '=', 'won']`, `['and', […], […]]`, `[[…], […]]` —
+ * is INPUT-ONLY authoring sugar (`spec/data/filter.zod.ts`, #5285), and #5158's
+ * ruling C says every door into the runtime LOWERS it through the one
+ * `parseFilterAST` sink before anything downstream sees a filter. #5329 closed
+ * the engine's six entry points that way and deleted the four drivers' array
+ * dialects. Analytics is the FIFTH door: it compiles `where` itself — to SQL
+ * (`NativeSQLStrategy`) or to a `FilterCondition` for the engine
+ * (`ObjectQLStrategy`) — so nothing upstream lowers for it.
+ *
+ * Until #5334 this function answered an array with `return null`: the WHOLE
+ * `where` disappeared, no error, no trace, and the widget charted the entire
+ * dataset — the #3650 / #4128 silent-widening class again, reached through the
+ * array spelling. {@link normalizeAnalyticsFilterTree} now gives the same three
+ * answers the engine door gives, so one query means one thing on every path.
+ *
+ * # Every refusal here is a 400, and SAYS so (#5352)
+ *
+ * All of the above only helps the author if the refusal REACHES them. Each
+ * refusal in this module is a caller-shaped mistake — a misspelled operator, a
+ * `$between` with one bound, a `{}` where an operator belongs — and ADR-0112's
+ * rule is that such an error carries its own machine-readable semantics
+ * (`code` + `status`) rather than leaving each consumer to guess from the
+ * message text. Until #5352 only the #5334 array refusals did; the other seven
+ * were bare `throw new Error(…)`, so `/analytics/dataset/query` had nothing to
+ * read and answered `500 ANALYTICS_QUERY_FAILED` — "the platform is broken" for
+ * what is a typo in a widget's filter, counted as a 5xx by ops alerting. The
+ * same mistake on `find()` has answered `400 INVALID_FILTER` since #3948.
+ *
+ * So {@link invalidFilterError} is now the ONLY way this module refuses, and
+ * `rest-server.ts`'s analytics catch reads that envelope before anything else.
+ * #5352 changed the SHAPE of these errors and nothing about WHICH inputs are
+ * refused — the refusal set is pinned input-by-input in
+ * `filter-refusal-envelope.test.ts` precisely so that stays true.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
- * the in-memory matcher, `formula` and `read-scope-sql` are already held to, and
+ * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
- * deliberately does not carry (NULL handling, boolean identities).
+ * deliberately does not carry (NULL handling, boolean identities), and
+ * `filter-array-lowering.test.ts` for the array door (#5334).
  */
+
+import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 
 export interface NormalizedAnalyticsFilter {
   member: string;
   operator: string;
   values: string[];
+}
+
+// ── [#5334 / #5352] The refusal envelope ─────────────────────────────────────
+
+/**
+ * [#5334, generalised by #5352] A filter refusal in the ADR-0112 envelope every
+ * sibling filter refusal in the repo speaks — `INVALID_FILTER` / 400.
+ *
+ * The twin of `driver-sql`'s and `driver-memory`'s `unsupportedFilterError`.
+ * A caller that writes a filter this module cannot compile has made a
+ * 400-class mistake, and a coded refusal is what lets the `/analytics` face
+ * answer it as one instead of as an opaque 500.
+ *
+ * ⛔ **The only way this module refuses.** #5334 introduced it for the two
+ * array-door refusals while the other seven sites stayed bare `Error`s, and a
+ * half-enveloped module is indistinguishable from an unenveloped one at the
+ * REST boundary: `error.code` was `undefined` for the operator typo that is by
+ * far the commonest of the nine, so the whole family landed as
+ * `500 ANALYTICS_QUERY_FAILED` (#5352). A new refusal added to this file must
+ * be thrown through here; a bare `throw new Error` is the defect returning.
+ *
+ * It carries no `#5352`-specific wording on purpose — the envelope is the
+ * contract, the message stays whatever the refusing site says.
+ */
+function invalidFilterError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
 }
 
 /**
@@ -249,7 +318,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     // accident — a filter builder that recorded a field and never its operator),
     // and a loud refusal is the answer the rest of the repo already gives.
     if (Object.keys(wrapper).length === 0) {
-      throw new Error(
+      throw invalidFilterError(
         `[analytics] "${key}" carries a field constraint with zero operators ({}). ` +
         `Refusing rather than reading it as "every row" or "no row" — #5240 ruled this ` +
         `shape refused on every backend.`,
@@ -280,7 +349,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
             // branch exists to prevent, and it is indistinguishable from a
             // legitimately wide query. Same stance driver-memory took for the
             // same shape (#3948).
-            throw new Error(
+            throw invalidFilterError(
               `[analytics] "$between" on "${key}" needs a two-element [min, max] array, got ` +
               `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
             );
@@ -325,7 +394,7 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           // the emitted SQL. That failure mode is #3650's, and skipping
           // unmapped operators is how `$between` reproduced it (#4128).
           // driver-memory made the same call for the same reason in #3948.
-          throw new Error(
+          throw invalidFilterError(
             `[analytics] Unsupported filter operator "${opKey}" on "${key}". ` +
             `Supported: ${Object.keys(MONGO_TO_CUBE_OP).join(', ')}, $between, $null, $exists, ` +
             `and the $and/$or/$not combinators. ` +
@@ -373,7 +442,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
 
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(raw)) {
-        throw new Error(
+        throw invalidFilterError(
           `[analytics] "${key}" requires an array of filter objects, got ${JSON.stringify(raw)}. ` +
           `Dropping it would silently widen the query to rows the filter excludes.`,
         );
@@ -404,7 +473,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
         // query to every row. Neither is a defensible reading of garbage input —
         // `read-scope-sql.ts` refuses the same shape.
         if (!isFilterObject(sub)) {
-          throw new Error(
+          throw invalidFilterError(
             `[analytics] "${key}" branches must be filter objects, got ${JSON.stringify(sub)}. ` +
             `Skipping it would silently change which rows the filter admits.`,
           );
@@ -430,7 +499,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
       if (!isFilterObject(raw)) {
         // Same call as the branch elements above: a `$not` of garbage used to
         // vanish, which turns "exclude these rows" into "exclude nothing".
-        throw new Error(
+        throw invalidFilterError(
           `[analytics] "$not" requires a filter object, got ${JSON.stringify(raw)}. ` +
           `Dropping it would silently widen the query to rows the filter excludes.`,
         );
@@ -448,7 +517,7 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
     }
 
     if (key.startsWith('$')) {
-      throw new Error(
+      throw invalidFilterError(
         `[analytics] Unsupported top-level filter operator "${key}". ` +
         `Dropping it would silently widen the query to rows the filter excludes.`,
       );
@@ -664,16 +733,89 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
   return out;
 }
 
+// ── [#5334] The FilterArray door ─────────────────────────────────────────────
+
 /**
- * Normalize an analytics query's `where` (FilterCondition) into the tree the
- * strategies compile. `null` when the query carries no `where`.
+ * [#5334] A `where` array this door cannot lower.
+ *
+ * Deliberately the same refusal the other doors give, in the same envelope:
+ * `driver-sql` / `driver-memory` / `driver-mongodb`'s
+ * `filterArrayReachedDriverError` (#5158/#5329) and the engine's own
+ * `lowerWhereFilterArray`. The INFIX join form (`[condA, 'or', condB]`) is the
+ * shape that makes this branch load-bearing — no schema declares it,
+ * `FilterArraySchema` excludes it and `parseFilterAST` has no lowering for it,
+ * so it can only be refused; silently dropping it returns the UNFILTERED
+ * dataset, which is what this whole module exists to prevent.
+ */
+function filterArrayNotLowerableError(where: unknown[]): Error {
+  return invalidFilterError(
+    `[analytics] received a 'where' array that is not a filter: ${JSON.stringify(where)}. ` +
+    `A filter array is a comparison [field, operator, value], a logical node ` +
+    `["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY sugar (spec ` +
+    `'FilterArray'), lowered to a FilterCondition by @objectstack/spec parseFilterAST() at ` +
+    `every door, this one included (#5158/#5334). This value cannot be lowered, and an ` +
+    `unapplied filter would have charted the UNFILTERED dataset. Recognised operators: ` +
+    `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
+    `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
+ * Normalize an analytics query's `where` into the tree the strategies compile.
+ * `null` when the query carries no `where` — i.e. no constraint.
+ *
+ * `where` is declared a `FilterCondition` (`AnalyticsQuerySchema`), and the
+ * object form is the whole of the contract downstream. An ARRAY nevertheless
+ * arrives — it is the `FilterArray` authoring sugar four published contracts
+ * teach, and analytics is a door into the runtime like any other — so it is
+ * LOWERED here (#5334, on #5158's ruling C), giving the same three answers
+ * `ObjectQL`'s six entry points give since #5329:
+ *
+ * 1. `[]` — "no filter", not a failed filter: `null`, the same reading every
+ *    layer gives it (the engine door DELETES the key; `parseFilterAST([])` is
+ *    `undefined`). No predicate is emitted and no error is raised.
+ * 2. A well-formed `FilterArray` — lowered through `parseFilterAST` and
+ *    compiled by {@link buildNode}, so the author gets the SAME rows either
+ *    spelling produces. `isFilterAST` gates first so the operator vocabulary is
+ *    checked before `parseFilterAST`'s lenient `$${op}` fallback can turn a
+ *    misspelling into a `$sounds_like` condition nothing executes.
+ * 3. Anything else array-shaped — REFUSED, loudly. Before #5334 all three of
+ *    these arrivals answered the same way: `return null`, which for (2) and (3)
+ *    means the predicate VANISHED and the chart was drawn over every row.
+ *
+ * Lowering rather than refusing outright is what keeps ONE dashboard's
+ * metadata meaning one thing: the same `where` on a plain `find()` already
+ * lowers at the engine door (#5329), so refusing it here would have forked the
+ * product by which face read the metadata.
  */
 export function normalizeAnalyticsFilterTree(
   query: { where?: unknown } | unknown,
 ): NormalizedFilterNode | null {
   if (!query || typeof query !== 'object') return null;
   const where = (query as { where?: unknown }).where;
-  if (!where || typeof where !== 'object' || Array.isArray(where)) return null;
+  if (!where || typeof where !== 'object') return null;
+
+  if (Array.isArray(where)) {
+    // (1) `[]` is "no filter", not a failed filter.
+    if (where.length === 0) return null;
+    // (3) Not a shape `parseFilterAST` can express.
+    if (!isFilterAST(where)) throw filterArrayNotLowerableError(where);
+    // (2) The declared path.
+    const condition = parseFilterAST(where);
+    if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+      // Unreachable by construction — `isFilterAST` accepted the shape, so
+      // `parseFilterAST` has a lowering for it. Loud rather than silent for the
+      // same reason the engine door is: the failure mode of the two spec
+      // functions disagreeing is a dropped predicate, i.e. every row.
+      throw invalidFilterError(
+        `[analytics] filter array ${JSON.stringify(where)} passed isFilterAST() but ` +
+        `parseFilterAST() lowered it to ${JSON.stringify(condition)}. Refusing rather than ` +
+        `charting the dataset unfiltered (#5158/#5334).`,
+      );
+    }
+    return buildNode(condition as Record<string, unknown>);
+  }
+
   return buildNode(where as Record<string, unknown>);
 }
 

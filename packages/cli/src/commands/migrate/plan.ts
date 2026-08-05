@@ -21,6 +21,13 @@ import {
 } from '../../utils/schema-migrate.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import {
+  resolveTenancyPosture,
+  collectGlobalUniques,
+  describeGlobalUniqueFinding,
+  postureGatesGlobalUniques,
+  GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION,
+} from '@objectstack/types';
 
 /**
  * `os migrate plan` — dry-run diff of metadata vs the physical database,
@@ -88,6 +95,16 @@ export default class MigratePlan extends Command {
       const drift = await stack.driver.detectManagedDrift();
       const pending = stack.pendingSchemaWork;
 
+      // [ADR-0120 D5e, advisory form] Installation-wide uniques on app objects
+      // are a decision point under the `isolated` posture — organizations there
+      // are separate CUSTOMERS. The HARD gate runs at app install; this covers
+      // the two populations it cannot reach (installs predating the gate, and
+      // environments whose posture changed after install). Never fatal: a plan
+      // writes nothing, and this reports a metadata decision, not drift.
+      const uniqueScopeAdvisory = postureGatesGlobalUniques(resolveTenancyPosture())
+        ? collectGlobalUniques(stack.allObjects())
+        : [];
+
       if (flags.json) {
         await emitJson({
           database: stack.dbLabel,
@@ -95,12 +112,40 @@ export default class MigratePlan extends Command {
           total: drift.length,
           changes: drift,
           pending,
+          ...(uniqueScopeAdvisory.length > 0
+            ? {
+                uniqueScopeAdvisory: {
+                  posture: resolveTenancyPosture(),
+                  adr: 'ADR-0120 D5e',
+                  findings: uniqueScopeAdvisory.map((f) => ({
+                    id: f.id,
+                    object: f.object,
+                    kind: f.kind,
+                    ...(f.name ? { name: f.name } : {}),
+                    columns: f.columns,
+                    spelling: f.spelling,
+                  })),
+                },
+              }
+            : {}),
           ...(occupancy.status === 'busy'
             ? { occupancy: { status: 'busy', signal: occupancy.signal, detail: occupancy.detail } }
             : {}),
           duration: timer.elapsed(),
         });
         return;
+      }
+
+      if (uniqueScopeAdvisory.length > 0) {
+        printWarning(
+          `${uniqueScopeAdvisory.length} installation-wide unique constraint(s) on app objects, in an ` +
+          "'isolated'-posture environment (ADR-0120 D5e):",
+        );
+        for (const finding of uniqueScopeAdvisory) {
+          console.log(chalk.dim(`      • ${describeGlobalUniqueFinding(finding)}`));
+        }
+        console.log(chalk.dim(`      → ${GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION}`));
+        console.log('');
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);

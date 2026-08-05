@@ -1372,16 +1372,23 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // ───────────────────────────────────────────────────────────────
         // Regression: plugin-registered types (no static registry entry)
         //
-        // `theme`, `api`, `connector`, `data`, `mapping`, `policy`,
-        // `sharing_rule`, `webhook`, `analytics_cube`, `package` are
-        // registered by plugins at runtime — not in
-        // DEFAULT_METADATA_TYPE_REGISTRY. `getMetaTypes()` synthesises
+        // `theme`, `connector`, `data`, `policy`, `sharing_rule`, `webhook`,
+        // `analytics_cube`, `package` are registered by plugins at runtime —
+        // not in DEFAULT_METADATA_TYPE_REGISTRY. `getMetaTypes()` synthesises
         // descriptors with `allowRuntimeCreate: true` for them so the
         // admin UI advertises them as writable. The write gate must
         // agree, otherwise users see "writable" types 403 on save.
         //
         // Before fix: gate keyed off the static registry only, rejecting
         // these 10+ types with not_creatable / 403.
+        //
+        // [#5271] `api` LEFT this list — it now has a static registry entry.
+        // Its specimen was REPLACED rather than re-spelled: leaving it here
+        // would have kept the assertion green through the *other* branch of
+        // `isRuntimeCreateAllowed` (statically registered with
+        // `allowRuntimeCreate: true`) while the test claimed to prove the
+        // "no static entry" fall-through. `theme` and `webhook` still exercise
+        // that branch; `api`'s own behaviour is pinned in the test below.
         // ───────────────────────────────────────────────────────────────
 
         it('accepts brand-new plugin-registered type (no static registry entry)', async () => {
@@ -1393,12 +1400,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: { name: 'my_theme', label: 'Test', tokens: {} },
                 organizationId: 'org_alpha',
             });
-            const apiResult = await scoped.saveMetaItem({
-                type: 'api',
-                name: 'my_api',
-                item: { name: 'my_api', path: '/x', method: 'GET' },
-                organizationId: 'org_alpha',
-            });
             const webhookResult = await scoped.saveMetaItem({
                 type: 'webhook',
                 name: 'my_webhook',
@@ -1407,8 +1408,61 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
 
             expect(themeResult.success).toBe(true);
-            expect(apiResult.success).toBe(true);
             expect(webhookResult.success).toBe(true);
+        });
+
+        // ───────────────────────────────────────────────────────────────
+        // [#5271, part of #5206] `api` — the write door is UNCHANGED, the
+        // shape check is new.
+        //
+        // Before this change the type had no registry entry, so both write
+        // gates took their "no static entry ⇒ synthesised allowRuntimeCreate"
+        // fall-through and `resolveOverlaySchema('api', …)` returned
+        // `undefined` — `PUT /api/v1/meta/api/:name` stored ANY JSON and
+        // answered 200. The registry entry keeps the AUTHORIZATION verdict
+        // byte-identical (`allowRuntimeCreate: true`) and adds the 422 the
+        // rest of the kinds already had. Both halves are asserted, because
+        // a change that quietly closed the door would also make the first
+        // assertion below fail — which is the point of pinning it.
+        // ───────────────────────────────────────────────────────────────
+
+        it('accepts a spec-valid `api` item (write door unchanged by the registry entry)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'api',
+                name: 'my_api',
+                item: {
+                    name: 'my_api',
+                    path: '/api/v1/apps/alpha/tasks',
+                    method: 'GET',
+                    type: 'object_operation',
+                    target: 'alpha_task',
+                    objectParams: { object: 'alpha_task', operation: 'find' },
+                },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a spec-INVALID `api` item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // The exact body the old "plugin-registered types" case used to
+            // save with `success: true`: no `type`, no `target`, so it could
+            // never be executed by anything. It is now named and refused.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'api',
+                    name: 'my_api',
+                    item: { name: 'my_api', path: '/x', method: 'GET' },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
         });
 
         it('artifact-backed view (allowOrgOverride:true) still overlays cleanly', async () => {

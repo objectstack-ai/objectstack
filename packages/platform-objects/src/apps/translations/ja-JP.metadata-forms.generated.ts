@@ -1320,6 +1320,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   external_catalog: {
     label: "外部カタログ"
   },
+  api: {
+    label: "API Endpoint",
+    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+  },
   translation: {
     label: "翻訳"
   },

@@ -10,7 +10,7 @@ description: Define data integrity rules — formula conditions, uniqueness, for
 <Callout type="info">
 Three patterns that look like validation rules are deliberately **not** rule types, because each needs I/O or is a client-side concern. Use the layer that already does each one correctly:
 
-- **Uniqueness** → a unique index (`ObjectSchema.indexes`, `{ fields, unique: true }`, with `partial` for a scoped constraint) or field-level `unique: true`. A SELECT-then-INSERT rule is inherently racy (TOCTOU); a DB unique constraint is not.
+- **Uniqueness** → a unique index (`ObjectSchema.indexes`, `{ fields, unique: 'organization' | 'global' }` — state the scope, [ADR-0120](/docs/data-modeling/indexing); `partial` for a scoped constraint) or field-level `unique`. A SELECT-then-INSERT rule is inherently racy (TOCTOU); a DB unique constraint is not.
 - **Async / remote validation** → a client-form concern, and an SSRF/latency hazard on the server write path. Keep it in the form layer, or enforce the invariant with a `unique` index / lifecycle hook.
 - **Custom handler** → a `beforeInsert` / `beforeUpdate` lifecycle hook, the supported extension point for arbitrary validation code.
 - **Delete-time guards** → a `beforeDelete` lifecycle hook. Validation rules run only on insert/update (a delete carries no record payload to validate), so there is no `'delete'` validation event — block or gate deletions from a `beforeDelete` hook.
@@ -127,11 +127,11 @@ There is **no** `uniqueness` validation type. A SELECT-then-INSERT rule is inher
 
 ```typescript
 // Field-level uniqueness
-email: Field.email({ label: 'Contact Email', unique: true }),
+email: Field.email({ label: 'Contact Email', unique: 'organization' }),
 
 // Composite / scoped uniqueness via ObjectSchema.indexes
 indexes: [
-  { fields: ['code', 'organization'], unique: true },
+  { fields: ['code'], unique: 'organization' },
   // `partial` expresses a scoped/conditional constraint
 ]
 ```
@@ -332,7 +332,7 @@ validations: [
 ]
 
 // Order-number uniqueness is enforced with an index, not a validation rule:
-// indexes: [{ fields: ['order_number'], unique: true }]
+// indexes: [{ fields: ['order_number'], unique: 'global' }]
 ```
 
 ## CEL Functions and Operators

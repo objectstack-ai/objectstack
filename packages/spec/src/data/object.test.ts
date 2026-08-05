@@ -892,6 +892,34 @@ describe('ObjectSchema.create()', () => {
       expect(message).toContain('#1535');
     });
 
+    // #4990 note 1 asked whether this file's own `suggestKey` shares the
+    // camelCase weakness that `findClosestMatches` had. It does NOT: it already
+    // lowercases BOTH sides (`editDistance(unknown.toLowerCase(),
+    // key.toLowerCase())`), so a declared key's capitals were never charged to
+    // the author here. Pinning it means the two suggesters cannot drift apart
+    // again — this is the property #4990 fixed in the other one.
+    it('suggestKey judges a typo identically in either case (#4990 note 1)', () => {
+      const bullet = (key: string): string => {
+        try {
+          ObjectSchema.create({
+            name: 'demo',
+            fields: {},
+            [key]: 1,
+          } as Record<string, unknown> as Parameters<typeof ObjectSchema.create>[0]);
+        } catch (e) {
+          return ((e as Error).message.split('\n').find((l) => l.trim().startsWith('•')) ?? '').trim();
+        }
+        throw new Error(`expected ObjectSchema.create to reject \`${key}\``);
+      };
+      // A camelCase key the fallback CAN reach, and its all-lowercase twin:
+      // both must land on the same canonical key.
+      expect(bullet('nameFeild')).toContain('did you mean `nameField`');
+      expect(bullet('namefeild')).toContain('did you mean `nameField`');
+      // And one it cannot reach — the verdict must again not depend on case.
+      expect(bullet('primaryFeild')).not.toContain('did you mean');
+      expect(bullet('primaryfeild')).not.toContain('did you mean');
+    });
+
     // Tombstones: a RETIRED key's rejection must carry the upgrade
     // prescription — the compile/validation error is the one channel every
     // upgrading consumer (human or agent) is guaranteed to hit.

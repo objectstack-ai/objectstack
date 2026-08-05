@@ -1320,6 +1320,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   external_catalog: {
     label: "External Catalog"
   },
+  api: {
+    label: "API Endpoint",
+    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+  },
   translation: {
     label: "Translation"
   },
