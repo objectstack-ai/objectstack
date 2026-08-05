@@ -80,6 +80,17 @@ build/test runs OOM it.** Binding rules:
    applied to every process. Record the PID of what you start and operate
    on that PID only (`kill $PID`, liveness via `kill -0 $PID` — a
    `pgrep -f` pattern can match your own watcher and never terminate).
+6. **Run the whole pipeline in the FOREGROUND — never park verification on a
+   background watcher and stop.** Build and test are steps of this task: run
+   them blocking, read the real output, continue. ⛔ Never return mid-task
+   reasoning that "a background watcher will wake me" — a completion
+   notification is itself the statement that no live subtask remains, so that
+   wake-up **never arrives** and the task sits stalled until the PM pulls it
+   back by hand (four agents, 6 stalls, ~1.5–2 h lost in one night). A
+   completion message reading "build still in progress" or "I'll resume
+   when…" is not a report; it is the stall. The one long wait that IS
+   legitimate is `flock` queueing on the shared lock in rule 1 — that one
+   blocks by design, so waiting it out is the rule, not a stall.
 
 **Toolchain traps — each of these cost at least one agent a false-red lap:**
 

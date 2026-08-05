@@ -779,6 +779,44 @@ the issue's files today, and tell the dev to verify against `origin/main`
 rather than any working tree (Operational notes 4) — the dev's worktree is cut
 from `origin/main` once and never refreshes itself.
 
+**In-flight overlap needs intercepting too — same-day churn only covers the
+dispatch instant.** The paragraph above handles "main moved before takeoff";
+main lands ~18 merges a day, so it moves **after** takeoff just as often.
+#5322's agent launched at 23:17Z and #5335 merged at 00:0xZ — the same two
+compilers, two of the same four cells. The PM's routine check read `git log
+origin/main`, spotted the overlap and sent an immediate SendMessage warning; the
+agent narrowed its scope twice and dropped its own design in favour of a minimal
+diff replayed inside the other PR's structure. Rule: **every round, when you
+read `git log origin/main`, intersect each newly-landed PR against every
+in-flight dispatch's declared file surface** — on any intersection warn at once,
+with four instructions:「合 main 后重跑测试矩阵、读对方 diff 重划边界、只补它没覆盖
+的部分、**被完全覆盖就停下回报,⛔ 不要硬造 diff**」. One round late is one rework.
+
+This is Operational notes 8's sister paragraph: notes 8 is the PM re-checking
+main **by symptom before enqueuing its own** shared-infrastructure fix; this one
+is the PM re-checking it **on behalf of someone else's in-flight agent**. Same
+fact that main keeps moving, two different victims — and only the PM can see the
+second one, because the flying agent has no view of `origin/main` moving under it.
+
+**A ruling that flips public semantics ships with a whole-repo pin sweep — say so
+in the dispatch prompt.** When a maintainer ruling changes a public semantic
+(#5322 reclassified the empty combinator from *refused* to the **boolean identity
+element**), pins of the old position live **outside** the package being changed:
+the consumer layers each hold a copy — REST envelope tests, objectql, runtime.
+#5365's first lap flipped only the service-analytics layer and the copy in
+`packages/rest/src/analytics-filter-refusal-envelope.test.ts` went red in CI
+(`expected 200 to be 400`); a second lap cleared it. Two lines belong in the
+prompt:
+
+- **Flip them all in one pass**:「grep 错误码 / 错误消息(如 `INVALID_FILTER`)
+  **全仓扫描**同语义 pin,一轮翻完,不要只改本包」;
+- **A flipped pin must keep bearing load**: assert the **substance** of the new
+  semantics (the reduced row count, the translated message, the status code) —
+  not "old assertion deleted". Refusal assertions for shapes that are *genuinely*
+  invalid stay **verbatim**: the guarded surface may never shrink. The two lines
+  are one rule — drop the second and "flip the whole repo" degrades into "delete
+  the whole repo's assertions", which is green and worthless.
+
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
 is the PM's sample; the dev's verification is the real thing, so the prompt
@@ -867,6 +905,30 @@ to `mode:subagent`). Per issue:
 do not fabricate a pending agent's result. A dev that dies or returns
 malformed output counts as `status: "blocked"` with its raw output attached.
 
+**A stalled subagent is this half's most common failure, and it never
+self-heals.** When a dev stops mid-task reasoning that "a background watcher will
+wake me", **that watcher never fires** — a completion notification is itself the
+statement that no live subtask remains. Four agents stalled 6 times across the
+2026-08-04/05 night, every one recovered by hand, ~1.5–2 h lost. Three rules:
+
+- **State the execution posture in the dispatch/relay prompt** for any long
+  verification pipeline:「**前台(阻塞)同步执行全部步骤,中途不停止、不把构建/
+  测试挂到后台等唤醒**」.
+- **A completion notification carrying a MID-TASK state IS the stall signal** —
+  "build still in progress", "I'll resume when…". SendMessage it back
+  immediately with that posture line attached; ⛔ do not wait out any silence
+  threshold (the cloud-mode ~2 h below): a threshold is for *no* answer, not for
+  an answer that says the agent stopped.
+- **A third stall means unreliable** — re-dispatch a fresh agent onto that
+  branch under "Handing off an interrupted dev" below (worktree already exists,
+  read every existing commit first, re-run the verification in full, claim and
+  assignee untouched).
+
+The **producer-side** half of this rule lives in `.claude/agents/os-dev.md`'s
+resource discipline — fixing it at the producer beats patching it at the PM
+(Prime Directive #12's instinct, applied to agent protocol); these three are the
+backstop, not the primary fix.
+
 **Cloud mode:** there is no direct return channel — collect through GitHub.
 Arm a `send_later` check-in (~15 min); on each wake, sweep the dispatched
 issues for `<!-- os-dev-report -->` comments and linked PRs, then re-arm
@@ -887,6 +949,13 @@ against the report's own claims:
 - Test evidence in the report shows the actual commands and passing output,
   not a bare "tests pass".
 - The diff plausibly satisfies the issue's acceptance criteria.
+- **A ruling-implementation PR: were the old position's pins flipped repo-wide?**
+  Fetch the changed-file list, then grep the consumer layers (REST envelope
+  tests, objectql, runtime) for the ruling's error code / message and confirm no
+  copy of the old position survives — **and** that refusal assertions for
+  genuinely invalid shapes are still there (step 5's two lines). #5365 slipped
+  through exactly this review layer and was caught by CI instead: CI does catch
+  it, at the price of one extra lap.
 - **Did the dev verify the issue's premise?** The report's
   `premise_still_valid` field makes the answer explicit — a `false` there
   reopens triage rather than failing review. A report that falsifies the
@@ -960,7 +1029,8 @@ content/docs/references/**
 
 1. `git merge origin/main`(⛔ 禁 rebase / force-push,AGENTS.md §3)
 2. `git checkout origin/main -- <上述生成物>`
-3. **整体重新生成**(⛔ 绝不做文本合并)
+3. **先 commit 掉这次 merge,再整体重新生成**(⛔ 绝不做文本合并;⛔ 也绝不在 MERGE
+   状态下跑 `gen:schema` —— 那会静默倒退锚点,见下一段与 #5370)
 4. 断言**所有兄弟单的条目都还在** —— #4878 落地时是四条 step17 条目并存
 
 一个比「条目还在」更硬的旁证:去查**上一单的实现体**是否完好(#4878 合并后核
@@ -968,11 +1038,75 @@ content/docs/references/**
 实现体才是被吞的重灾区。驱动本身另有缺陷(把绝对路径写死进最后跑过 `pnpm install`
 的那个 worktree),见 #4868。
 
+**锚点(`authorable-surface.base.json`)的断言措辞 —— 写错会教唆 dev 手改锚点。**
+#5304 把 #4650 删除闸门的基线固化成树内锚点之后,接力模板曾用**错误断言**
+「baseRev == merge-base」派发,后棒实测证伪并纠正。正确措辞(2026-08-05 夜后八棒全部
+沿用,零误报):
+
+> 断言 `pnpm --filter @objectstack/spec check:authorable-surface` **绿**即可。锚点
+> authenticity 的定义是两件事:`baseRev` 是 `origin/main` 的**祖先**,且它记录的 keys
+> 与**该 commit** 的 `authorable-surface.json` 逐行一致(`verifyCommittedSurfaceBase`
+> 就查这两条)。`baseRev` **允许滞后** —— `gen:schema` 只在 keys 真的漂移时才重写它
+> (在 `main` 上 merge base 就是 HEAD,该文件**必然**落后自己的 surface 一个 PR),
+> 滞后只打一行 `ℹ️`,不是错误。⛔ 禁止为了凑「相等」手改锚点文件 —— 那正是 #4650
+> 堵住的攻击本身;⛔ 不得要求 `baseRev == merge-base`,那个等式不是任何门的判据。
+
+配套两个新陷阱(都已立单,派发词**引用**即可,⛔ 不要在接力单里顺手实现它们):
+
+- **#5370:merge 未 commit 就跑 `gen:schema`,会把锚点静默倒退回旧 merge-base。**
+  MERGE 状态下 HEAD 仍是合并前的分支 tip,`resolveSurfaceBase()` 解出的是分支的**旧**
+  分叉点;倒退后的锚点**依然 authentic**(旧 rev 也是 origin/main 的祖先、keys 也对得
+  上),于是**全部门放行**,一次已合并的锚点推进被静默撤销。这就是四步序里「先 commit
+  merge,再整体重生成」的由来。
+- **#5371:`gen:schema` 的 `rmSync` 顺手抹掉 `gen:openapi` 的产物。** 之后跑
+  `@objectstack/rest` 会拿到 5 条 `expected 503 to be 200` 的**假红**(`openapi.json`
+  被清场,不是 rest 坏了)。派发词里直接给解法:`pnpm --filter @objectstack/spec
+  gen:openapi` 补回,或重跑一次完整 spec build。
+
 **B. 跟到 MERGED 为止,不是跟到「已入队」为止。** 「auto-merge 已挂上」不是终点,
 维护者对此有过明确纠正。每轮同时读**队列分支**与 `origin/main`(Operational notes
 1);红了先分签名,再在「原样重投 / 推新提交 / 重新诊断」三者里选(notes 2 与 5)。
 落地之后**再核一次落地判据本身** —— 队列的合并同样走 os-regen 驱动,A 里那个静默
 吞并在队列合并这一步一样能发生。
+
+**依赖前棒才能转绿的 PR:draft 停放 + 一份精确的预期红清单。** 串行链里后棒常常先行
+实现(#5365 的四条进一致性表依赖 #5323 的 mongodb 归约才成立)。这种 PR **停在
+draft**,PR body 写两样东西:**精确的预期红清单**(逐条列失败测试名 + 报错签名)与
+**解除条件**(「依赖 PR #N 合入」)。每个 CI-failure webhook 到达时**与该清单比对**
+—— 签名匹配则静默跳过,**出现新签名才是真问题**:#5365 的 REST 层红
+(`expected 200 to be 400`)正是靠这个比对被一眼认成新问题,而不是被当成已知的等待态
+忽略过去。依赖合入后走「最后一轮同步 → 红清零 → 转 ready → 入队」。
+
+这是 Operational notes 2「先认签名,再决定重投」在**故意红**上的对偶:notes 2 管的是
+flaky 的偶然红,这一条管的是自己设计出来的红 —— 两者的失效方式完全相同,**把一个没
+预料到的签名当成预料之中的**。所以清单必须写到签名级别,「几条测试会红」不够用。
+
+#### 串行接力 —— 同碰生成物的多个 PR,一次只放行一个
+
+第 3 步的 batch 模型假设**同批 file-disjoint 并行**;当「多个已实现的 PR 全碰
+`packages/spec` 生成物」时该假设不成立,唯一可行形态是**串行接力**:一次只放行一个,
+每合并一个就向下一棒发接力指令。2026-08-04/05 夜 spec 车道以这个形态连落 10 个 PR
+(#5304 → #5306 → #5308 → #5318 → #5319 → #5321 → #5314 → #5312 → #5323 → #5365),
+下面三条是那一夜靠现场即兴、事后固化的纪律。
+
+**1. 每一棒都是一整圈,`auto-merge` 由 PM 挂、dev 永不碰。** 单棒循环:merge main +
+上面 A 的四步重建 + 全套验证 + 兄弟单断言复核 → **PM 复核回报** → 转 ready → 挂
+auto-merge / 入队。ready 与 auto-merge 的顺序不可反 —— 转回 draft 会同时掉 auto-merge
+与队列成员资格(Operational notes 1),而接力循环里**每一棒都要重走这一次**,不是整条
+链只走一次。ACCEPT 那一条只写了单 PR 的流程;链上每一棒逐棒照它执行。
+
+**2. 相邻两棒同碰一个文件时,交接的是语义,不是文本。** 前棒在回报里写明它对共享文件
+改动的**性质**(改名 / 提取变量 / 增补断言,**而非纯追加**),PM **原样转告**下一棒,
+并要求「两个 PR 的意图**叠加**,⛔ 禁止机械取一边」。实例:#5318 与 #5319 同动
+`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`,#5319 逐行号核过
+#5318 新增的十项元素、并实测两者的交互 —— 没有 #5319 的 preprocess 修复,#5318 的新
+断言在 view 上是空转的。取一边会「各自绿、合起来错」,即 AGENTS.md §10「clean merge
+不等于 working merge」落在同一份测试文件上的形态。
+
+**3. 两棒散文互锁,分工由 PM 指派。** 允许前棒给后棒留占位交接(「本段由 #N 在其同步轮
+翻正 / 删除」):#5323 的族 1 段落 ↔ #5365、#5335 的「#5322 is its own ruling」pin 块
+都是这个形状。PM 必须在**两侧**的接力指令里写明谁动、谁不动 —— 否则要么两边都动
+(冲突),要么两边都不动(留下一段过期散文),而这两种结果**在 CI 上都是绿的**。
 
 ### 8. Escalate uncertainties to the maintainer
 
