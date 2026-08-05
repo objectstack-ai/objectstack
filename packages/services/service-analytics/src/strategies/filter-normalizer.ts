@@ -68,6 +68,12 @@
  * `objectql-strategy.filterNodeToCondition` and its display-SQL twin
  * `renderFilterNodeSql`.
  *
+ * The EMPTY combinators complete the same boolean algebra (#5322 ruling):
+ * `{$and: []}` is TRUE and `{$or: []}` is FALSE — this module used to refuse
+ * both fail-closed while the five `FILTER_LOGIC_CASES` backends reduced them;
+ * see the note inside {@link buildNode}'s combinator branch for the history
+ * and the reasoning the ruling adopted.
+ *
  * # `$not` is NULL-safe (#5146)
  *
  * SQL is three-valued and a `WHERE` keeps only TRUE, so a bare `NOT (col = ?)`
@@ -354,9 +360,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
  * Every entry of one object ANDs with its siblings, at every depth — the rule
  * `filter-logic-conformance.ts` exists to hold each backend to (#3774). The
  * combinator handling deliberately mirrors `read-scope-sql.ts`'s
- * `compileNode`, including its fail-closed empty-array rejection AND (since
- * #5325) its treatment of the two boolean identities, so the two SQL-producing
- * paths in this package cannot drift apart about what a filter MEANS.
+ * `compileNode` — the `{}`/`{$not: {}}` identities since #5325, and the EMPTY
+ * `$and`/`$or` identities since the #5322 ruling (see the note at the
+ * `length === 0` branch) — so the two SQL-producing paths in this package
+ * cannot drift apart about what a filter MEANS.
  */
 function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   const children: NormalizedFilterNode[] = [];
@@ -365,12 +372,30 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
     if (raw === undefined) continue;
 
     if (key === '$and' || key === '$or') {
-      if (!Array.isArray(raw) || raw.length === 0) {
+      if (!Array.isArray(raw)) {
         throw new Error(
-          `[analytics] "${key}" requires a non-empty array. An empty combinator has no ` +
-          `defensible reading — dropping it widens the query, and treating it as "match ` +
-          `nothing" silently empties a chart.`,
+          `[analytics] "${key}" requires an array of filter objects, got ${JSON.stringify(raw)}. ` +
+          `Dropping it would silently widen the query to rows the filter excludes.`,
         );
+      }
+      if (raw.length === 0) {
+        // Boolean identity (#5322 ruling, 2026-08-04): the empty `$and` is the
+        // AND identity — TRUE, no constraint — and the empty `$or` is the OR
+        // identity — FALSE, zero rows. Until that ruling this function REFUSED
+        // both; its error message argued, verbatim, that "An empty combinator
+        // has no defensible reading — dropping it widens the query, and
+        // treating it as 'match nothing' silently empties a chart" — while the
+        // five FILTER_LOGIC_CASES backends already reduced them. The ruling
+        // took the reduction: only a reduction can evaluate a NESTED tree (a
+        // rejection must first reduce to judge `$and: []` as the third branch
+        // of a `$or`, which concedes the point), and `{$or: []}` = zero rows
+        // is fail-closed where it matters — a disjunct list that loops to zero
+        // items hides every row instead of widening (#5134). Loud
+        // AUTHORING-time rejection of the literal spellings is #5330's scope.
+        // Note the guard above did NOT loosen: a non-array `$and`/`$or` still
+        // throws, as do non-object branches below.
+        if (key === '$or') children.push(falseNode());
+        continue;
       }
       const branches = raw.map((sub) => {
         // A non-object element is refused rather than skipped: skipping it

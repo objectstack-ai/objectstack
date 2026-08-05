@@ -2,9 +2,10 @@
 
 /**
  * [#5322] Empty combinators reduce to their boolean identities in the
- * analytics filter normalizer — `{$and: []}` = TRUE, `{$or: []}` = FALSE, a
- * `{}` branch is a TRUE disjunct that absorbs its `$or`, `{$not: {}}` = FALSE
- * — matching the five `FILTER_LOGIC_CASES` backends row for row.
+ * analytics filter normalizer — `{$and: []}` = TRUE, `{$or: []}` = FALSE —
+ * matching the five `FILTER_LOGIC_CASES` backends row for row. Together with
+ * the `{}` / `{$not: {}}` identities #5325 already gave this module, the
+ * boolean algebra over the combinators is now complete.
  *
  * # The history this file flips
  *
@@ -28,18 +29,20 @@
  *
  * # What deliberately did NOT loosen
  *
- * Non-array `$and`/`$or`, non-object branches, and non-object `$not`
- * operands still throw. Reduction makes `null` ("no constraint") a
- * meaningful verdict, so silently mapping junk to it would let a malformed
- * disjunct ABSORB its `$or` and widen the query — the exact failure mode the
- * old error message feared, reachable only through the lenient path.
+ * Non-array `$and`/`$or` still throws (this file), as do non-object branches
+ * and non-object `$not` operands (pinned in
+ * `filter-normalizer-not-null-safe.test.ts`): reduction makes `null` ("no
+ * constraint") a meaningful verdict, so silently mapping junk to it would let
+ * a malformed disjunct ABSORB its `$or` and widen the query — the exact
+ * failure mode the old error message feared, reachable only through the
+ * lenient path.
  *
- * Row-level conformance for the four shapes lives in the shared table
- * (`filter-logic-conformance.ts`), which `native-sql-filter-logic-
- * conformance.test.ts` and `read-scope-sql-conformance.test.ts` execute
- * against a real SQLite engine. This file pins the TREE the normalizer
- * produces and the seam where the ObjectQL engine path receives the FALSE
- * constant.
+ * Row-level conformance for the four ruled shapes lives in the shared table
+ * (`filter-logic-conformance.ts`), executed against a real SQLite engine by
+ * `native-sql-filter-logic-conformance.test.ts` and
+ * `read-scope-sql-conformance.test.ts`. This file pins the TREE the
+ * normalizer produces and the seam where the ObjectQL engine path receives
+ * the boolean constant.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -53,76 +56,42 @@ import { AnalyticsService } from '../analytics-service.js';
 
 const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where });
 
+const FALSE_NODE = { kind: 'const', value: false };
+const TRUE_NODE = { kind: 'const', value: true };
+
 describe('[#5322] buildNode reduces empty combinators to boolean identities', () => {
   it('`{$and: []}` is TRUE — no constraint', () => {
     expect(tree({ $and: [] })).toBeNull();
   });
 
   it('`{$or: []}` is FALSE — the zero-row constant', () => {
-    expect(tree({ $or: [] })).toEqual({ kind: 'false' });
+    expect(tree({ $or: [] })).toEqual(FALSE_NODE);
   });
 
-  it('a `{}` branch is a TRUE disjunct and absorbs its `$or`', () => {
-    // Collapsing to the surviving branches instead would narrow the filter to
-    // `a = x` — the #5297 seam, in the normalizer.
-    expect(tree({ $or: [{ a: 'x' }, {}] })).toBeNull();
-    expect(tree({ $or: [{}, { a: 'x' }] })).toBeNull();
+  it('`$not` negates the REDUCED operand, in both directions', () => {
+    expect(tree({ $not: { $and: [] } })).toEqual(FALSE_NODE); // NOT TRUE ≡ FALSE
+    expect(tree({ $not: { $or: [] } })).toEqual(TRUE_NODE); //  NOT FALSE ≡ TRUE
   });
 
-  it('`{$not: {}}` is FALSE — NOT TRUE', () => {
-    expect(tree({ $not: {} })).toEqual({ kind: 'false' });
-  });
-
-  it('the whole tree reduces: constants never survive below the root', () => {
-    // A FALSE conjunct falsifies its $and…
-    expect(tree({ $and: [{ a: 'x' }, { $or: [] }] })).toEqual({ kind: 'false' });
-    // …and with it the sibling keys of the node that carries it.
-    expect(tree({ a: 'x', $or: [] })).toEqual({ kind: 'false' });
-    // A FALSE disjunct drops out of its $or (the OR identity)…
-    expect(tree({ $or: [{ $or: [] }, { a: 'x' }] })).toEqual({
-      kind: 'leaf',
-      member: 'a',
-      operator: 'equals',
-      values: ['x'],
-    });
-    // …and a $or with nothing left is FALSE.
-    expect(tree({ $or: [{ $or: [] }] })).toEqual({ kind: 'false' });
-    // $not negates the REDUCED operand, in both directions.
-    expect(tree({ $not: { $or: [] } })).toBeNull(); //           NOT FALSE ≡ TRUE
-    expect(tree({ $not: { $and: [] } })).toEqual({ kind: 'false' }); // NOT TRUE ≡ FALSE
-    expect(tree({ $not: { $not: {} } })).toBeNull(); //          NOT (NOT TRUE) ≡ TRUE
-    // Two levels down, the identity still folds away cleanly.
-    expect(tree({ $or: [{ b: 'y' }, { $and: [{ a: 'x' }, { $or: [] }] }] })).toEqual({
-      kind: 'leaf',
-      member: 'b',
-      operator: 'equals',
-      values: ['y'],
-    });
+  it('an empty-combinator branch carries its identity into the enclosing combinator', () => {
+    // A `{$and: []}` disjunct is TRUE and ABSORBS the whole `$or` — collapsing
+    // to the surviving branches instead is the narrowing #5325 fixed for the
+    // literal `{}` disjunct.
+    expect(tree({ $or: [{ a: 'x' }, { $and: [] }] })).toBeNull();
+    // A `{$or: []}` conjunct is FALSE; the compiled conjunction carries the
+    // constant (row-set: zero rows — pinned via SQL in the conformance suite).
+    expect(JSON.stringify(tree({ $and: [{ a: 'x' }, { $or: [] }] }))).toContain('"value":false');
+    expect(JSON.stringify(tree({ a: 'x', $or: [] }))).toContain('"value":false');
   });
 
   it('the FALSE constant touches no member', () => {
     expect(collectFilterLeaves(tree({ $or: [] }))).toEqual([]);
-    expect(collectFilterLeaves(tree({ $not: {} }))).toEqual([]);
+    expect(collectFilterLeaves(tree({ $and: [{ $or: [] }] }))).toEqual([]);
   });
 
   it('non-array `$and`/`$or` still throws — #5322 loosened only the EMPTY array', () => {
     expect(() => tree({ $and: 'x' })).toThrow(/requires an array/);
     expect(() => tree({ $or: { a: 1 } })).toThrow(/requires an array/);
-  });
-
-  it('a non-object branch throws instead of being dropped or read as TRUE', () => {
-    // Dropped, it silently rewrites the combinator; read as TRUE, it absorbs
-    // the $or and widens. Both are the loud-refusal class (#3948 / #5239).
-    expect(() => tree({ $or: [{ a: 'x' }, 'junk'] })).toThrow(/branch must be a filter object/);
-    expect(() => tree({ $or: [null] })).toThrow(/branch must be a filter object/);
-    expect(() => tree({ $and: ['junk'] })).toThrow(/branch must be a filter object/);
-    expect(() => tree({ $and: [['a', 'x']] })).toThrow(/branch must be a filter object/);
-  });
-
-  it('a non-object `$not` operand throws instead of vanishing', () => {
-    expect(() => tree({ $not: null })).toThrow(/requires a filter object operand/);
-    expect(() => tree({ $not: 'x' })).toThrow(/requires a filter object operand/);
-    expect(() => tree({ $not: [] })).toThrow(/requires a filter object operand/);
   });
 });
 
@@ -143,15 +112,18 @@ const ROWS: Array<{ severity: string }> = [
 ];
 
 /**
- * Stand-in for `engine.aggregate`, mirroring how a driver receives the filter:
- * `{$or: []}` (at any conjunction depth) matches nothing — the #5134 identity
- * every driver implements — and an absent/empty filter matches everything.
+ * Stand-in for `engine.aggregate`, mirroring how a driver receives the
+ * filter: `{$not: {}}` — the spelling `filterNodeToCondition` uses for the
+ * FALSE constant, because `formula` and `driver-memory` already pin it as the
+ * zero-row filter (#5134) — matches nothing, and an absent/empty filter
+ * matches everything.
  */
 function makeEngine(captured: Array<{ filter?: Record<string, unknown> }>) {
   const matches = (row: Record<string, unknown>, cond: Record<string, unknown>): boolean =>
     Object.entries(cond).every(([key, value]) => {
       if (key === '$and') return (value as Record<string, unknown>[]).every((c) => matches(row, c));
       if (key === '$or') return (value as Record<string, unknown>[]).some((c) => matches(row, c));
+      if (key === '$not') return !matches(row, value as Record<string, unknown>);
       return row[key] === value;
     });
   return async (
@@ -165,7 +137,7 @@ function makeEngine(captured: Array<{ filter?: Record<string, unknown> }>) {
 }
 
 describe('[#5322] the ObjectQL path hands the engine the constant, not silence', () => {
-  it('`{$or: []}` arrives as a real zero-row conjunct and counts zero rows', async () => {
+  it('`{$or: []}` arrives as the zero-row `{$not: {}}` and counts zero rows', async () => {
     const captured: Array<{ filter?: Record<string, unknown> }> = [];
     const svc = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -177,26 +149,10 @@ describe('[#5322] the ObjectQL path hands the engine the constant, not silence',
       runtimeFilter: { $or: [] },
     });
 
-    // The constant reached the engine as the canonical `{$or: []}` spelling —
-    // NOT as an absent filter, which every driver reads as "every row".
+    // The constant reached the engine as a real zero-row condition — NOT as an
+    // absent filter, which every driver reads as "every row".
     expect(captured).toHaveLength(1);
-    expect(JSON.stringify(captured[0].filter)).toContain('"$or":[]');
-    expect(result.rows).toEqual([{ incident_count: 0 }]);
-  });
-
-  it('`{$not: {}}` reduces to the same zero-row constant', async () => {
-    const captured: Array<{ filter?: Record<string, unknown> }> = [];
-    const svc = new AnalyticsService({
-      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
-      executeAggregate: makeEngine(captured),
-    });
-
-    const result = await svc.queryDataset!(dataset, {
-      measures: ['incident_count'],
-      runtimeFilter: { $not: {} },
-    });
-
-    expect(JSON.stringify(captured[0].filter)).toContain('"$or":[]');
+    expect(JSON.stringify(captured[0].filter)).toContain('"$not":{}');
     expect(result.rows).toEqual([{ incident_count: 0 }]);
   });
 
@@ -216,7 +172,7 @@ describe('[#5322] the ObjectQL path hands the engine the constant, not silence',
     expect(result.rows).toEqual([{ incident_count: 3 }]);
   });
 
-  it('a `{}` disjunct absorbs its `$or` instead of narrowing to the other branch', async () => {
+  it('a `{$and: []}` disjunct absorbs its `$or` instead of narrowing to the other branch', async () => {
     const captured: Array<{ filter?: Record<string, unknown> }> = [];
     const svc = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -225,10 +181,10 @@ describe('[#5322] the ObjectQL path hands the engine the constant, not silence',
 
     const result = await svc.queryDataset!(dataset, {
       measures: ['incident_count'],
-      runtimeFilter: { $or: [{ severity: 'high' }, {}] },
+      runtimeFilter: { $or: [{ severity: 'high' }, { $and: [] }] },
     });
 
-    // Narrowing to `severity = high` would count 2 — the #5297 seam.
+    // Narrowing to `severity = high` would count 2 — the #5297/#5325 seam.
     expect(JSON.stringify(captured[0].filter ?? {})).not.toContain('severity');
     expect(result.rows).toEqual([{ incident_count: 3 }]);
   });

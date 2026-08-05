@@ -526,16 +526,29 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
   // ── Nothing that failed closed stopped failing closed ─────────────────────
 
   describe('the fail-closed guarantees survive the rewrite', () => {
-    it('an empty `$and` / `$or` still THROWS — #5322 is its own ruling', async () => {
-      // The empty-combinator square is decided separately (#5322). This change
-      // must not quietly turn either of them into a boolean identity on the way
-      // past, so both stay pinned on the THROWING side, inside a `$not` as well
-      // as outside.
-      await expect(ids({ $and: [] })).rejects.toThrowError(/non-empty array/);
-      await expect(ids({ $or: [] })).rejects.toThrowError(/non-empty array/);
-      await expect(ids({ $not: { $and: [] } })).rejects.toThrowError(/non-empty array/);
-      await expect(ids({ $not: { $or: [] } })).rejects.toThrowError(/non-empty array/);
-      await expect(ids({ $or: [{ stage: 'won' }, { $and: [] }] })).rejects.toThrowError(/non-empty array/);
+    it('an empty `$and` / `$or` reduces to its boolean identity, inside a `$not` as well as outside (#5322)', async () => {
+      // FLIPPED pin. When this file was written the empty-combinator square was
+      // still an open ruling, so all five shapes were pinned on the THROWING
+      // side (`toThrowError(/non-empty array/)`). The 2026-08-04 #5322 ruling
+      // took the boolean identities, and the pins flipped with it: `{$and: []}`
+      // is TRUE, `{$or: []}` is FALSE, and — the half that survives from the
+      // old pin's intent — the `$not` negates the REDUCED operand rather than
+      // quietly changing the answer on the way past.
+      await expect(ids({ $and: [] })).resolves.toEqual(ALL); //  TRUE — the AND identity
+      await expect(ids({ $or: [] })).resolves.toEqual([]); //    FALSE — the OR identity
+      await expect(ids({ $not: { $and: [] } })).resolves.toEqual([]); //  NOT TRUE ≡ FALSE
+      await expect(ids({ $not: { $or: [] } })).resolves.toEqual(ALL); // NOT FALSE ≡ TRUE
+      // A `{$and: []}` disjunct is a TRUE branch and ABSORBS its `$or` —
+      // exactly as the literal `{}` disjunct does two blocks up.
+      await expect(ids({ $or: [{ stage: 'won' }, { $and: [] }] })).resolves.toEqual(ALL);
+      // The other direction: a `{$or: []}` disjunct is FALSE, the OR identity —
+      // the disjunction collapses to its real branch, NULL-safety intact.
+      await expect(ids({ $not: { $or: [{ stage: 'won' }, { $or: [] }] } })).resolves.toEqual(['2', '3', '4']);
+    });
+
+    it('a non-array `$and` / `$or` still THROWS — #5322 loosened only the EMPTY array', async () => {
+      await expect(ids({ $and: 'x' })).rejects.toThrowError(/requires an array/);
+      await expect(ids({ $or: { stage: 'won' } })).rejects.toThrowError(/requires an array/);
     });
 
     it('an unknown operator inside a `$not` still THROWS rather than being guarded', async () => {
