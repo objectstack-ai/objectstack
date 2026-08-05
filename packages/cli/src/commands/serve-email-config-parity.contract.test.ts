@@ -69,21 +69,32 @@ function keysDeclaredBySchema(): string[] {
 }
 
 /**
- * `persist` is declared and NOT read — the mirror image of #5307, filed
- * separately (#5447) and deliberately untouched here.
+ * No exemptions: both directions below are plain set equality.
  *
- * The plugin option it names is live (`EmailServicePlugin` builds no
- * `EmailPersistence` when `persist === false`), but nothing carries
- * `config.email.persist` to the plugin: `resolveEmailCapabilityArg` never
- * reads the key, and it is the only reader `config.email` has. So the schema
- * advertises an authoring surface with no carrier — ADR-0049 enforce-or-remove
- * territory, whose two answers (wire it in the resolver, or retire the key)
- * are a contract decision, not a drive-by.
+ * There was one, and its history is the reason this paragraph stays. `persist`
+ * was declared and NOT read — the mirror image of #5307 — so this file shipped
+ * it as the single registered `DECLARED_BUT_UNREAD` entry, filed as #5447
+ * rather than silently excused. The plugin option it names was already live
+ * (`EmailServicePlugin` builds no `EmailPersistence` when `persist === false`),
+ * but nothing carried `config.email.persist` to the plugin, and
+ * `resolveEmailCapabilityArg` is the only reader `config.email` has. So the
+ * schema advertised an authoring surface with no carrier: a deployment that
+ * wrote `email: { persist: false }` to keep bodies out of the database
+ * type-checked, parsed, read as configured, and went on writing every subject,
+ * body and recipient to `sys_email`.
  *
- * It is listed rather than silently excused: when #5447 is settled this array
- * empties and the assertion below tightens to plain set equality.
+ * ADR-0049 enforce-or-remove, answered "enforce" by PR #5470 (`cd2efe62a`):
+ * the resolver reads the key, behind a tri-state `OS_EMAIL_PERSIST_ENABLED`
+ * env layer, with the default still ON. That is what the exemption was waiting
+ * for, so the promise it carried is kept here.
+ *
+ * The array is DELETED rather than left standing empty. An empty registry is
+ * an invitation — the next declared-but-unread key gets appended to it instead
+ * of argued about, which is exactly the silent excusing the entry existed to
+ * prevent. With it gone, a key declared and not read is red the day it lands,
+ * and re-introducing an exemption means re-introducing the mechanism, in a
+ * diff someone has to justify.
  */
-const DECLARED_BUT_UNREAD = ['persist'] as const;
 
 describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
   it('declares every config.email key the resolver reads (#5307)', () => {
@@ -93,10 +104,12 @@ describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
     expect(undeclared).toEqual([]);
   });
 
-  it('reads every key it declares, but for the filed exemption (#5447)', () => {
+  it('reads every key it declares — no exemptions since #5447 landed (PR #5470)', () => {
     const read = new Set(keysReadFromConfigEmail());
     const unread = keysDeclaredBySchema().filter((k) => !read.has(k));
-    expect(unread).toEqual([...DECLARED_BUT_UNREAD]);
+    // Red before PR #5470 with ['persist']. With this at [] and the assertion
+    // above also at [], the declared set and the read set are equal.
+    expect(unread).toEqual([]);
   });
 
   it('pins the measured key set so a rename is a conscious edit', () => {

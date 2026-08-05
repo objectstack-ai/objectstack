@@ -5,8 +5,8 @@
 spec: `EmailServiceConfigSchema` 补齐 CLI 实读的 `queueDelivery` / `appName` / `defaultTemplateContext`
 
 `config.email` 在全仓只有一个读者 —— `packages/cli/src/commands/serve.ts` 的
-`resolveEmailCapabilityArg`。它读八个键,`EmailServiceConfigSchema` 只声明其中五个,
-差集三个已经被运行时消费多时:
+`resolveEmailCapabilityArg`。本次改动时它读八个键,`EmailServiceConfigSchema` 只声明
+其中五个,差集三个已经被运行时消费多时:
 
 - `queueDelivery` —— #5160 落地的耐久队列投递开关(env 侧 `OS_EMAIL_QUEUE_ENABLED`)
 - `appName` —— 模板 `{{appName}}` 的产品名,兼作无 `defaultFrom` 时的兜底发件人来源
