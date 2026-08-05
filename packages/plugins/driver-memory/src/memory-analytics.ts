@@ -26,15 +26,22 @@ import {
  * here the only way to widen what this face accepts, and makes forgetting to
  * add one a loud refusal rather than a wrong number.
  *
- * A row here means the face ATTEMPTS the operator, not that the predicate it
- * builds is correct — `$notContains` lowers to a bare mingo `{$not: 'x'}` that
- * constrains nothing (#5374). That one is out of #5345's scope (which ruled on
- * operators with NO mapping) and is filed rather than fixed here; do not read
- * this list as eleven operators known to work. The comparand half of that
- * caveat is closed: #5373 removed the `string[]` round-trip that lost booleans
- * and `null` (see {@link NormalizedCubeFilter}).
+ * A row here used to mean only that the face ATTEMPTS the operator, not that the
+ * predicate it builds is correct. Both halves of that caveat are now closed:
+ * #5373 removed the `string[]` comparand round-trip that lost booleans and
+ * `null` (see {@link NormalizedCubeFilter}), and #5374 replaced the
+ * operator-name→operator-name mapping — under which `notContains` compiled to a
+ * bare mingo `{$not: 'x'}` that constrains nothing — with
+ * {@link CUBE_OPERATOR_TO_MONGO_PREDICATE}, which builds the whole predicate.
+ *
+ * The literal `as const` is load-bearing, not style: it makes
+ * {@link CubeOperator} the exact union of this table's values, and that union is
+ * the key type of the predicate table. Adding a row here without teaching the
+ * compiler how to build its predicate is therefore a TYPE ERROR rather than a
+ * wrong number — which is the whole point of #5345 keeping the gate's vocabulary
+ * and the compiler's table as one statement.
  */
-const MONGO_TO_CUBE_OPERATOR: Readonly<Record<string, string>> = Object.freeze({
+const MONGO_TO_CUBE_OPERATOR = Object.freeze({
   $eq: 'equals',
   $ne: 'notEquals',
   $gt: 'gt',
@@ -46,7 +53,14 @@ const MONGO_TO_CUBE_OPERATOR: Readonly<Record<string, string>> = Object.freeze({
   $contains: 'contains',
   $notContains: 'notContains',
   $exists: 'set',
-});
+} as const);
+
+/**
+ * [#5374] The cube-style operator names this face lowers into — exactly the
+ * values of {@link MONGO_TO_CUBE_OPERATOR}, derived rather than restated so the
+ * two cannot drift.
+ */
+type CubeOperator = (typeof MONGO_TO_CUBE_OPERATOR)[keyof typeof MONGO_TO_CUBE_OPERATOR];
 
 /**
  * [#5345] What the analytics (cube) face compiles, for the shared filter walk.
@@ -99,7 +113,7 @@ export const ANALYTICS_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.free
  */
 interface NormalizedCubeFilter {
   member: string;
-  operator: string;
+  operator: CubeOperator;
   /**
    * The comparands, as authored. Temporal values are put into the field's
    * storage form at the exits ({@link MemoryAnalyticsService.comparandsFor}),
@@ -107,6 +121,117 @@ interface NormalizedCubeFilter {
    */
   values: unknown[];
 }
+
+/**
+ * [#5374] What one lowered entry gives its predicate builder.
+ *
+ * Two comparand lists, not one, because the driver's own translation makes the
+ * same split and for the same reason (#4047, `normalizeFieldOperators`): a
+ * VALUE COMPARISON must be put into the field's storage form or mingo's
+ * cross-type comparison drops every row, while an operand that is not a
+ * comparand — a `$exists` flag, a `$regex` pattern — must NOT be, because
+ * "storage form" is meaningless for it and applying it corrupts the operand.
+ *
+ * That was not hypothetical here. This face ran every operand through the
+ * comparand conversion, so on a declared `datetime` column
+ * `{made_at: {$contains: '2026-01-01T00:00:00Z'}}` had its PATTERN rewritten to
+ * canonical `'2026-01-01T00:00:00.000Z'` and then matched the row, where
+ * `find()` — which never rewrites a pattern — matched nothing.
+ */
+interface MongoPredicateInput {
+  /** Comparands in the field's storage form (#4047). For value comparisons. */
+  readonly comparands: readonly unknown[];
+  /** The operands as authored. For operands that are not comparands. */
+  readonly raw: readonly unknown[];
+  /**
+   * A comparand as a case-insensitive literal-substring pattern, built by the
+   * DRIVER's own rule (`filterSubstringPattern`) rather than re-derived here.
+   */
+  readonly substring: (value: unknown) => RegExp;
+}
+
+type MongoPredicateBuilder = (input: MongoPredicateInput) => Record<string, unknown>;
+
+/**
+ * [#5374] How each cube operator becomes a mingo field predicate — the whole
+ * `{$op: …}` object, not the name of an operator.
+ *
+ * # Why the shape changed
+ *
+ * This was `convertOperatorToMongo(operator): string`, a name→name map, and the
+ * call site filled the name in as `matchStage[field] = {[name]: comparand}`.
+ * That shape can express "compare this field to this value" and NOTHING else,
+ * so the two entries that need to WRAP their comparand were forced through it
+ * anyway:
+ *
+ *   - `notContains` → `'$not'` became `{name: {$not: 'et'}}`. mingo's `$not`
+ *     takes a regex or an operator expression; given a bare scalar it
+ *     constrains nothing, so the predicate was emitted, looked present in the
+ *     pipeline, and passed the whole table (#5374: 3 rows where `find()`
+ *     returns 2). A predicate that is emitted and inert is indistinguishable
+ *     from a correct one at the author's end, and widens in the #3948
+ *     direction.
+ *   - `contains` → `'$regex'` became `{name: {$regex: 'a.p'}}` — the right
+ *     operator, but the comparand went in raw, so it was neither escaped nor
+ *     case-folded and meant something other than what `find()` means by it.
+ *
+ * A builder can say `{$not: {$regex: …}}`, so the class of "this operator needs
+ * a structure and the table can only hold a name" is gone rather than this one
+ * instance of it. `$in`/`$nin`/`$lte`/`$exists`, which the call site had grown
+ * an `if` chain for, are ordinary rows here for the same reason.
+ *
+ * # Why it is a `Record<CubeOperator, …>`
+ *
+ * Because the missing-entry case had a `|| '$eq'` fallback, and a misspelled or
+ * unmapped operator silently became an EQUALITY comparison — the exact
+ * silent-wrong-answer shape #5345, #5373 and this issue have each been closing.
+ * After #5345 that fallback was unreachable (`mongoOperatorToCubeOperator`
+ * refuses anything not in {@link MONGO_TO_CUBE_OPERATOR}, and both exits consume
+ * only `normalizeFilters` output), but only until someone widened the vocabulary
+ * — which #5345 deliberately made a ONE-LINE edit to that table. Keying this
+ * table by {@link CubeOperator} makes that edit fail to compile until the
+ * predicate exists, so the fallback is not merely unreachable, it is
+ * unnecessary: the totality is proven, not defended.
+ *
+ * Two entries were deleted rather than kept. `'notSet': '$exists'` and
+ * `'inDateRange': '$gte'` were both unreachable (nothing lowers to either name)
+ * and both wrong if they ever had been: the first inverts — the call site would
+ * have compiled `notSet` to `{$exists: true}` — and the second answers a
+ * two-ended range with a one-ended `>=`, which its own comment conceded ("Will
+ * need special handling") and which nothing implemented. Dead code that is
+ * ALSO wrong is a trap primed for whoever widens the vocabulary next; the type
+ * error they now get instead says so at the only moment it helps.
+ */
+const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredicateBuilder>> = Object.freeze({
+  equals: ({ comparands }) => ({ $eq: comparands[0] }),
+  notEquals: ({ comparands }) => ({ $ne: comparands[0] }),
+  gt: ({ comparands }) => ({ $gt: comparands[0] }),
+  gte: ({ comparands }) => ({ $gte: comparands[0] }),
+  lt: ({ comparands }) => ({ $lt: comparands[0] }),
+  // A bare-day `lte` bound means "through that whole day" (#4042; the SQL twin
+  // is #3777): compile half-open so timestamp values on the final day stay in.
+  // Order-equivalent to `$lte` for plain `YYYY-MM-DD` values.
+  lte: ({ comparands }) => {
+    const nextDay = nextUtcCalendarDay(comparands[0]);
+    return nextDay != null ? { $lt: nextDay } : { $lte: comparands[0] };
+  },
+  // The list operators take the WHOLE list. An empty one is a real predicate —
+  // `$in: []` selects nothing, `$nin: []` selects everything — and saying so
+  // here is what retires the call site's `values.length > 0` guard, under which
+  // `{code: {$in: []}}` emitted no predicate at all and answered with the whole
+  // table while `find()` answered with none of it.
+  in: ({ comparands }) => ({ $in: [...comparands] }),
+  notIn: ({ comparands }) => ({ $nin: [...comparands] }),
+  // A pattern, not a comparand: `raw`, and the driver's own substring rule.
+  contains: ({ raw, substring }) => ({ $regex: substring(raw[0]) }),
+  // The fix this issue is about. `{$not: <scalar>}` constrains nothing; the
+  // negation has to wrap a pattern, which is exactly what the live query path
+  // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`).
+  notContains: ({ raw, substring }) => ({ $not: { $regex: substring(raw[0]) } }),
+  // A presence flag, not a comparand. The `raw.length === 0` arm keeps the old
+  // call site's reading of a valueless `set` ("does it exist" → true).
+  set: ({ raw }) => ({ $exists: raw.length > 0 ? Boolean(raw[0]) : true }),
+});
 
 /**
  * Configuration for MemoryAnalyticsService
@@ -180,34 +305,22 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     if (normalizedFilters.length > 0) {
       const matchStage: Record<string, any> = {};
       for (const filter of normalizedFilters) {
-        const mongoOp = this.convertOperatorToMongo(filter.operator);
         const fieldPath = this.resolveFieldPath(cube, filter.member);
-
-        if (filter.values && filter.values.length > 0) {
-          // [#5373] The comparands as authored, in the storage form of the field
-          // they are compared against. There is no type recovery step any more,
-          // because there is no longer a stringification to recover FROM: a
-          // boolean reaches mingo as a boolean and `null` as `null`, so a
-          // predicate over `is_active` or `closed_at` selects the same rows
-          // `find()` selects instead of none / all of them.
-          const coerced = this.comparandsFor(cube, filter.member, filter.values);
-          if (mongoOp === '$in') {
-            matchStage[fieldPath] = { $in: coerced };
-          } else if (mongoOp === '$nin') {
-            matchStage[fieldPath] = { $nin: coerced };
-          } else if (mongoOp === '$lte') {
-            // A bare-day `lte` bound means "through that whole day" (#4042;
-            // the SQL twin is #3777): compile half-open so timestamp values on
-            // the final day stay in. Order-equivalent to `$lte` for plain
-            // `YYYY-MM-DD` values.
-            const nextDay = nextUtcCalendarDay(coerced[0]);
-            matchStage[fieldPath] = nextDay != null ? { $lt: nextDay } : { $lte: coerced[0] };
-          } else {
-            matchStage[fieldPath] = { [mongoOp]: coerced[0] };
-          }
-        } else if (mongoOp === '$exists') {
-          matchStage[fieldPath] = { $exists: filter.operator === 'set' };
-        }
+        // [#5374] The operator decides the WHOLE predicate, not just its name —
+        // so `notContains` can say `{$not: {$regex: …}}` instead of being forced
+        // into `{$not: <comparand>}`, which mingo reads as no constraint at all.
+        //
+        // [#5373] `comparands` are the values as authored, in the storage form
+        // of the field they are compared against. There is no type recovery step
+        // any more, because there is no longer a stringification to recover
+        // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
+        // predicate over `is_active` or `closed_at` selects the same rows
+        // `find()` selects instead of none / all of them.
+        matchStage[fieldPath] = this.mongoPredicateBuilder(filter.operator)({
+          comparands: this.comparandsFor(cube, filter.member, filter.values),
+          raw: filter.values,
+          substring: (value) => this.driver.filterSubstringPattern(value),
+        });
       }
       if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
@@ -624,8 +737,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * function with a synthesised `{'a.b': spec}` node the gate never saw, and
    * that is a real path to an unmapped operator. It used to `continue`.
    */
-  private mongoOperatorToCubeOperator(op: string, field: string, path: string): string {
-    const cubeOp = MONGO_TO_CUBE_OPERATOR[op];
+  private mongoOperatorToCubeOperator(op: string, field: string, path: string): CubeOperator {
+    const cubeOp = (MONGO_TO_CUBE_OPERATOR as Record<string, CubeOperator | undefined>)[op];
     if (!cubeOp) throw uncompilableFieldOperatorError(op, field, path, ANALYTICS_FILTER_CAPABILITIES);
     return cubeOp;
   }
@@ -776,23 +889,27 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     }
   }
 
-  private convertOperatorToMongo(operator: string): string {
-    const opMap: Record<string, string> = {
-      'equals': '$eq',
-      'notEquals': '$ne',
-      'contains': '$regex',
-      'notContains': '$not',
-      'gt': '$gt',
-      'gte': '$gte',
-      'lt': '$lt',
-      'lte': '$lte',
-      'in': '$in',
-      'notIn': '$nin',
-      'set': '$exists',
-      'notSet': '$exists',
-      'inDateRange': '$gte', // Will need special handling
-    };
-    return opMap[operator] || '$eq';
+  /**
+   * [#5374] The mingo predicate builder for one lowered operator.
+   *
+   * Total by construction: {@link CUBE_OPERATOR_TO_MONGO_PREDICATE} is keyed by
+   * {@link CubeOperator}, and `filter.operator` IS a `CubeOperator`, so the
+   * lookup cannot miss without a type error somewhere first. The throw is the
+   * totality floor that keeps the old `|| '$eq'` from coming back — the two
+   * tables drifting must fail loudly, never compile a filter into an equality
+   * comparison nobody wrote. It is not a user-input path: everything the author
+   * can get wrong was already refused by {@link ANALYTICS_FILTER_CAPABILITIES}.
+   */
+  private mongoPredicateBuilder(operator: CubeOperator): MongoPredicateBuilder {
+    const build = (CUBE_OPERATOR_TO_MONGO_PREDICATE as Record<string, MongoPredicateBuilder | undefined>)[operator];
+    if (!build) {
+      throw new Error(
+        `[driver-memory] analytics face: no mingo predicate for cube operator '${operator}'. ` +
+        `MONGO_TO_CUBE_OPERATOR and CUBE_OPERATOR_TO_MONGO_PREDICATE have drifted — ` +
+        `add the missing builder rather than letting the operator compile to something else.`,
+      );
+    }
+    return build;
   }
 
   private operatorToSql(operator: string): string {

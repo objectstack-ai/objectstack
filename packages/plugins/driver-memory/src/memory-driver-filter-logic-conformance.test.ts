@@ -72,6 +72,23 @@
  * table exists at all: the thing being defended is "this package's filter faces
  * agree", and a divergence introduced on either axis has to fail in the place
  * someone looks when they change a lowering.
+ *
+ * # The OPERATOR axis (#5374)
+ *
+ * A third axis, and the third time this face was measured on one it had never
+ * been measured on. Shape was covered, comparand TYPE was covered, and what an
+ * operator MEANS once it has been mapped was not — so `$notContains`, which the
+ * face declares and the gate admits, compiled to a bare mingo `{$not: 'et'}`
+ * that constrains nothing and answered with the whole table, for as long as it
+ * had existed. Same amplifying direction as the other two, arrived at from a
+ * third place: #5345 was an operator with NO mapping, #5373 was the comparand
+ * ENCODING, this is an operator whose mapping pointed at the wrong target.
+ *
+ * The last section holds the same invariant over that axis, and closes it for
+ * the whole vocabulary rather than for the one operator: EVERY operator the face
+ * declares is driven through both paths and must agree, so an operator added to
+ * `ANALYTICS_FILTER_CAPABILITIES` without a working lowering fails here instead
+ * of shipping a quietly wrong number.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -79,7 +96,7 @@ import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { MemoryAnalyticsService } from './memory-analytics.js';
+import { MemoryAnalyticsService, ANALYTICS_FILTER_CAPABILITIES } from './memory-analytics.js';
 import { match } from './memory-matcher.js';
 
 const TABLE = 'conformance';
@@ -470,5 +487,207 @@ describe('[#5373] the generateSql exit emits literals that mean the same thing',
   it('a Date comparand is emitted as quoted canonical UTC text', async () => {
     expect(await whereClause({ made_at: new Date('2026-01-01T00:00:00Z') } as FilterCondition))
       .toBe("made_at = '2026-01-01T00:00:00.000Z'");
+  });
+});
+
+/**
+ * [#5374] The same invariant again, over what an operator MEANS.
+ *
+ * The fixture is the one the issue measured on — three rows whose `name` is
+ * `alpha` / `beta` / `gamma`, of which only `beta` contains `et` — so the first
+ * case below IS the issue's acceptance criterion, on its own numbers.
+ *
+ * Every case is asserted against `find()` first and the analytics face second,
+ * for the reason the #5373 block gives: the live path is the reference, so an
+ * expectation that is simply wrong is reported as a wrong expectation instead of
+ * being blamed on the face under test.
+ */
+const OPERATOR_CASES: Array<[name: string, where: FilterCondition, expected: string[]]> = [
+  // ── The issue, on its own measurement ──────────────────────────────────────
+  // `notContains` mapped to `'$not'` and the call site filled it in as
+  // `{name: {$not: 'et'}}`. mingo's `$not` takes a regex or an operator
+  // expression; a bare scalar constrains nothing, so this answered 3 where
+  // `find()` answers 2 — a predicate emitted, visible in the pipeline, and inert.
+  ['$notContains excludes the rows that contain the comparand', { name: { $notContains: 'et' } } as FilterCondition, ['1', '3']],
+  // The tell that separates "inert" from "merely wrong": a comparand every row
+  // contains must exclude every row. Under the bare `$not` this was the whole
+  // table, which is also what a correct `$notContains` returns for case 3 below
+  // — so without this case the defect hides behind an accidentally-right answer.
+  ['a $notContains that matches every row selects none of them', { name: { $notContains: 'a' } } as FilterCondition, []],
+  ['a $notContains that matches no row selects all of them', { name: { $notContains: 'zzz' } } as FilterCondition, ['1', '2', '3']],
+  // `contains` and `notContains` have to partition the table between them. They
+  // could not while one was a real `$regex` and the other was inert.
+  ['$contains selects exactly what $notContains excludes', { name: { $contains: 'et' } } as FilterCondition, ['2']],
+
+  // ── The comparand is a LITERAL, not a pattern ──────────────────────────────
+  // `contains` was mapped correctly to `$regex` but handed the comparand raw, so
+  // regex metacharacters were live: `a.p` matched `alpha` through `.`, where the
+  // live path escapes and matched nothing. Fixing `notContains` without fixing
+  // this would have made the two non-complementary in a new way — `alpha` would
+  // be in BOTH answers.
+  ['$contains treats a metacharacter as a literal', { name: { $contains: 'a.p' } } as FilterCondition, []],
+  ['$notContains treats a metacharacter as a literal', { name: { $notContains: 'a.p' } } as FilterCondition, ['1', '2', '3']],
+
+  // ── Case folding, borrowed rather than re-derived ──────────────────────────
+  // The live path matches `/…/i`; this face built a case-SENSITIVE regex, so one
+  // `where` meant two different things depending on which face read it (#5240).
+  ['$contains is case-insensitive, as the live path is', { name: { $contains: 'ALPHA' } } as FilterCondition, ['1']],
+  ['$notContains is case-insensitive, as the live path is', { name: { $notContains: 'ALPHA' } } as FilterCondition, ['2', '3']],
+  ['$contains matches a mixed-case comparand', { name: { $contains: 'Bet' } } as FilterCondition, ['2']],
+
+  // ── A pattern is not a comparand (#4047) ───────────────────────────────────
+  // Every operand used to go through the storage-form conversion, so on a
+  // declared `datetime` column the PATTERN itself was rewritten into canonical
+  // form and then matched — `find()`, which never rewrites a pattern, matched
+  // nothing. The two-list `MongoPredicateInput` split is what stops this.
+  ['$contains does not rewrite its pattern into a datetime storage form', { made_at: { $contains: '2026-01-01T00:00:00Z' } } as FilterCondition, []],
+  ['$notContains does not rewrite its pattern either', { made_at: { $notContains: '2026-01-01T00:00:00Z' } } as FilterCondition, ['1', '2', '3']],
+
+  // A column holding nulls: the negation must not resurrect the rows it cannot
+  // test, which is the other way a `$not` goes wrong.
+  ['$notContains over a column holding nulls', { closed_at: { $notContains: '2026' } } as FilterCondition, ['1', '3']],
+  ['$contains over a column holding nulls', { closed_at: { $contains: '2026' } } as FilterCondition, ['2']],
+
+  // ── An empty list is a predicate ───────────────────────────────────────────
+  // The call site guarded the whole lowering with `values.length > 0`, so an
+  // empty `$in` emitted NO predicate and the query widened to the whole table
+  // while `find()` returned nothing — the #3948 direction again, reached through
+  // the operator table's inability to say "this operator takes the whole list".
+  ['an empty $in selects nothing', { code: { $in: [] } } as FilterCondition, []],
+  ['an empty $nin selects everything', { code: { $nin: [] } } as FilterCondition, ['1', '2', '3']],
+  ['an empty implicit-equality list selects nothing', { code: [] } as unknown as FilterCondition, []],
+  ['a non-empty $in still selects its members', { code: { $in: ['100'] } } as FilterCondition, ['1', '3']],
+];
+
+/**
+ * One probe per operator the face DECLARES — the "declared = enforced" half.
+ *
+ * The case table above is chosen by a human who knew where the bug was, which is
+ * exactly why it cannot be the whole test: #5374 existed because nobody thought
+ * to look at `$notContains`. This map is keyed by the face's own declared
+ * vocabulary and the test below fails if a key is missing, so widening
+ * `ANALYTICS_FILTER_CAPABILITIES` without proving the new operator agrees with
+ * `find()` is no longer possible to do quietly.
+ *
+ * Every probe must EXCLUDE at least one row. A probe that selects the whole
+ * table agrees with `find()` for free and would certify an inert predicate —
+ * which is the precise shape of the bug this section exists for.
+ */
+const DECLARED_OPERATOR_PROBES: Record<string, FilterCondition> = {
+  $eq: { code: { $eq: '100' } } as FilterCondition,
+  $ne: { code: { $ne: '100' } } as FilterCondition,
+  $gt: { qty: { $gt: 100 } } as FilterCondition,
+  $gte: { qty: { $gte: 200 } } as FilterCondition,
+  $lt: { qty: { $lt: 200 } } as FilterCondition,
+  $lte: { qty: { $lte: 100 } } as FilterCondition,
+  $in: { code: { $in: ['100'] } } as FilterCondition,
+  $nin: { code: { $nin: ['100'] } } as FilterCondition,
+  $contains: { name: { $contains: 'et' } } as FilterCondition,
+  $notContains: { name: { $notContains: 'et' } } as FilterCondition,
+  $exists: { closed_at: { $exists: false } } as FilterCondition,
+};
+
+describe('[#5374] operator semantics — the analytics face against the live query path', () => {
+  let driver: InMemoryDriver;
+  let service: MemoryAnalyticsService;
+
+  beforeAll(async () => {
+    driver = new InMemoryDriver({ persistence: false });
+    await driver.connect();
+    await driver.syncSchema(COMPARAND_TABLE, { fields: { ...COMPARAND_FIELDS } } as never);
+    for (const row of COMPARAND_ROWS) await driver.create(COMPARAND_TABLE, { ...row });
+    service = new MemoryAnalyticsService({ driver, cubes: [COMPARAND_CUBE] });
+  });
+
+  const sorted = (ids: string[]): string[] => [...ids].sort((x, y) => x.localeCompare(y));
+
+  const findIds = async (where: FilterCondition): Promise<string[]> => {
+    const rows = await driver.find(COMPARAND_TABLE, { object: COMPARAND_TABLE, fields: ['id'], where });
+    return sorted((rows as Array<Record<string, unknown>>).map((r) => String(r.id)));
+  };
+
+  const analyticsIds = async (where: FilterCondition): Promise<string[]> => {
+    const result = await service.query({
+      cube: COMPARAND_TABLE,
+      measures: [`${COMPARAND_TABLE}.count`],
+      dimensions: [`${COMPARAND_TABLE}.id`],
+      where,
+    });
+    return sorted((result.rows as Array<Record<string, unknown>>).map((r) => String(r[`${COMPARAND_TABLE}.id`])));
+  };
+
+  it('the fixture really is the three rows the issue measured', async () => {
+    expect(await findIds({})).toEqual(['1', '2', '3']);
+    expect(await analyticsIds({})).toEqual(['1', '2', '3']);
+    // Only `beta` contains `et` — the property the issue's numbers rest on.
+    expect(COMPARAND_ROWS.filter((r) => String(r.name).includes('et')).map((r) => r.id)).toEqual(['2']);
+  });
+
+  for (const [name, where, expected] of OPERATOR_CASES) {
+    it(name, async () => {
+      expect(await findIds(where), `${name}: the LIVE path disagrees with the expectation`).toEqual(sorted(expected));
+      expect(
+        await analyticsIds(where),
+        `${name}: the analytics face answered a different row set than find() — the #5240 divergence`,
+      ).toEqual(sorted(expected));
+    });
+  }
+
+  /**
+   * `contains` and `notContains` partition the table, stated as a predicate over
+   * every comparand rather than case by case. An inert `$notContains` fails this
+   * for every comparand at once; a `notContains` fixed WITHOUT fixing
+   * `contains`'s escaping and case folding fails it on the last two.
+   */
+  it('$contains and $notContains partition the table for every comparand', async () => {
+    for (const needle of ['et', 'a', 'zzz', 'ALPHA', 'a.p', 'Bet']) {
+      const inside = await analyticsIds({ name: { $contains: needle } } as FilterCondition);
+      const outside = await analyticsIds({ name: { $notContains: needle } } as FilterCondition);
+      expect(sorted([...inside, ...outside]), `'${needle}': the two halves are not a partition`).toEqual(['1', '2', '3']);
+      expect(inside.filter((id) => outside.includes(id)), `'${needle}': a row is in both halves`).toEqual([]);
+    }
+  });
+
+  /**
+   * The vocabulary, end to end. This is the assertion that would have caught
+   * #5374 on the day `notContains` was mapped to `$not`.
+   */
+  it('every operator this face DECLARES compiles to a predicate that agrees with find()', async () => {
+    const declared = [...ANALYTICS_FILTER_CAPABILITIES.fieldOperators].sort();
+    expect(
+      Object.keys(DECLARED_OPERATOR_PROBES).sort(),
+      'the face declares an operator with no probe here (or a probe survives an operator that was removed) — ' +
+        'widening the vocabulary means proving the new operator agrees with find()',
+    ).toEqual(declared);
+
+    for (const op of declared) {
+      const where = DECLARED_OPERATOR_PROBES[op];
+      const live = await findIds(where);
+      expect(
+        live.length,
+        `${op}: the probe selects the whole table, so "the faces agree" would prove nothing — pick a discriminating one`,
+      ).toBeLessThan(COMPARAND_ROWS.length);
+      expect(await analyticsIds(where), `${op}: the analytics face does not agree with find()`).toEqual(live);
+    }
+  });
+
+  /**
+   * The pipeline itself, once. The row-set assertions above are what matters,
+   * but they cannot distinguish "the predicate is right" from "the predicate is
+   * absent and the rows happen to line up", and the emitted `$match` is the
+   * artifact the issue actually diagnosed.
+   */
+  it('the emitted $match wraps the negation around a pattern instead of a bare scalar', async () => {
+    const { sql } = await service.query({
+      cube: COMPARAND_TABLE,
+      measures: [`${COMPARAND_TABLE}.count`],
+      where: { name: { $notContains: 'et' } } as FilterCondition,
+    });
+    const matchStage = /\/\* Stage 1: \$match \*\/ (.*)/.exec(sql ?? '')?.[1] ?? '';
+    // `JSON.stringify` renders a RegExp as `{}`, so assert on the STRUCTURE the
+    // pipeline carries rather than on that rendering.
+    expect(matchStage).not.toBe('{"name":{"$not":"et"}}');
+    expect(matchStage).toContain('"$not"');
+    expect(matchStage).toContain('"$regex"');
   });
 });

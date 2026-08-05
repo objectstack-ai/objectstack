@@ -1234,6 +1234,33 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
+   * [#5374] The pattern a `$contains` / `$notContains` comparand becomes — the
+   * substring rule itself, for the analytics (cube) face.
+   *
+   * Same reasoning as {@link filterComparandStorageForm} one method up, on the
+   * other half of what a `contains` predicate needs. This driver's rule is
+   * `escapeRegex` + the `i` flag ({@link normalizeFieldOperators}): the comparand
+   * is a LITERAL substring, matched case-insensitively. The analytics face has to
+   * build a `$regex` too, and every byte of that rule it re-derives is a way for
+   * the two faces to answer one `where` differently — which is what happened
+   * before this method existed. That face emitted a bare `{$regex: value}`:
+   *   - unescaped, so `{name: {$contains: 'a.p'}}` matched `alpha` through the
+   *     regex `.`, where `find()` matched nothing; and
+   *   - case-SENSITIVE, so `{name: {$contains: 'ALPHA'}}` matched nothing where
+   *     `find()` matched the row.
+   *
+   * Returning the built `RegExp` rather than a source string is deliberate: a
+   * string leaves the flags for the caller to re-choose, which is the half that
+   * drifted.
+   *
+   * Deliberately narrow — one comparand in, one pattern out, no filter semantics
+   * — so it exposes the convention without exposing the filter pipeline.
+   */
+  filterSubstringPattern(value: unknown): RegExp {
+    return new RegExp(this.escapeRegex(value as string), 'i');
+  }
+
+  /**
    * Put every declared temporal field of a record into its storage form — the
    * write half of the convention the filter path reads against. Returns the
    * input unchanged (same reference) when nothing needed converting, so the
