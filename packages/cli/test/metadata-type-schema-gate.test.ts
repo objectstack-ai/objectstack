@@ -22,8 +22,11 @@
  * because they fail independently:
  *
  *   A. the CLI parses through the registry's schemas — one undeclared key, the
- *      same verdict from both gates, for every registered metadata type, with
- *      the three structurally-different carriers named and placed;
+ *      same verdict from both gates, for every registered metadata type. Three
+ *      carriers are structurally different and are asserted at their real
+ *      positions; one type (`api`) has a schema #4001 has not closed yet, so
+ *      there the claim is AGREEMENT plus "the author is still told", with the
+ *      gap filed rather than papered over (#5384);
  *   B. the commands GATE on that parse — the issue's undeclared-key repro and
  *      the #4001 batch-13 `responsiveStyles.large` → `.lg` negative control,
  *      run through the real binary: non-zero exit, prescription in the output,
@@ -42,7 +45,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, lintUnknownAuthoringKeys, formatUnknownAuthoringKey } from '@objectstack/spec';
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
@@ -98,6 +101,27 @@ const STRUCTURAL_EXCEPTIONS: Readonly<Record<string, string>> = {
   view: 'the registry schema is the #3095 union over all three persisted view shapes (wire ViewItem, '
     + 'defineView container, flattened personalization overlay); the stack authors the container '
     + 'member, `ViewSchema`.',
+};
+
+/**
+ * Registered types whose SCHEMA is not closed yet, so "both gates reject" is
+ * not the claim to make — "both gates agree, and the author is still told" is.
+ *
+ * `api` is the live one. #5312 registered the type and the stack authors it at
+ * `apis:` (ADR-0121; note the neighbouring singular `api:` block, which is
+ * server-facing REST config, not metadata), but `ApiEndpointSchema` is still a
+ * plain `z.object` — the #4001 campaign has not reached it, and the strictness
+ * ledger still files all of `api/` as wire. An undeclared key on an endpoint
+ * is therefore DROPPED on both the write path and here, identically. Filed as
+ * #5384 (sub-issue of #4001) rather than papered over.
+ *
+ * What is asserted instead: the CLI is no looser than the write path, and the
+ * #3786 pre-parse layer still names the key, so the author is not left with
+ * silence. When #5384 closes the shape, the agreement assertions below go red
+ * — that is the ratchet working; move the row into `GATED_AT` then.
+ */
+const NOT_YET_CLOSED: Readonly<Record<string, { collection: string; tracking: string }>> = {
+  api: { collection: 'apis', tracking: '#5384 (sub-issue of #4001)' },
 };
 
 /** Every `unrecognized_keys` issue naming `INJECTED_KEY`, with its path. */
@@ -171,13 +195,18 @@ describe('the CLI parses metadata through the registry schemas (#5000)', () => {
     // A newly registered type with no classification fails here rather than
     // quietly acquiring no CLI-side gate — the generalized form of #5000's
     // worry, which was about exactly one type nobody had checked.
-    const classified = new Set([...Object.keys(GATED_AT), ...Object.keys(STRUCTURAL_EXCEPTIONS)]);
+    const classified = new Set([
+      ...Object.keys(GATED_AT),
+      ...Object.keys(STRUCTURAL_EXCEPTIONS),
+      ...Object.keys(NOT_YET_CLOSED),
+    ]);
     const registered = listMetadataTypeSchemaTypes();
     const unclassified = registered.filter((t) => !classified.has(t));
     expect(
       unclassified,
-      'a registered metadata type is neither carried at the stack root by its own schema nor listed as a '
-        + 'structural exception — decide which it is, so `os validate` cannot silently stop gating it',
+      'a registered metadata type is in none of the three tables — decide which it is (gated, structurally '
+        + 'different, or a schema #4001 has not closed yet), so `os validate` cannot silently stop gating it. '
+        + 'This is the row `api` needed when #5312 registered it mid-flight.',
     ).toEqual([]);
     // And the reverse: a table row for a type nobody registers any more is a
     // guard describing a surface that no longer exists.
@@ -257,6 +286,37 @@ describe('the CLI parses metadata through the registry schemas (#5000)', () => {
         }),
       ),
     ).toContain('views.0');
+  });
+
+  it('is no looser than the write path on a type #4001 has not closed, and still names the key', () => {
+    for (const [type, { collection, tracking }] of Object.entries(NOT_YET_CLOSED)) {
+      const registry = getMetadataTypeSchema(type);
+      expect(registry, `no registered schema for '${type}'`).toBeDefined();
+
+      // Agreement, both directions. If the registry schema closes (that is
+      // what `tracking` is for), the first expectation flips and this row
+      // moves into GATED_AT — a deliberate step, not a surprise.
+      expect(
+        undeclaredKeyRejections(registry!.safeParse({ [INJECTED_KEY]: 1 })),
+        `${type}'s schema now rejects undeclared keys (${tracking} closed it?) — move it into GATED_AT`,
+      ).toEqual([]);
+      expect(
+        undeclaredKeyRejections(
+          ObjectStackDefinitionSchema.safeParse({ manifest: MANIFEST, [collection]: [{ [INJECTED_KEY]: 1 }] }),
+        ),
+        `the CLI rejects on '${collection}' while the write path accepts — a divergence in the other direction`,
+      ).toEqual([]);
+
+      // Not rejected is not the same as not reported: the #3786 pre-parse diff
+      // is what stands between the author and silence while the shape is open.
+      const reported = lintUnknownAuthoringKeys({ manifest: MANIFEST, [collection]: [
+        { name: 'gate_endpoint', path: '/api/v1/apps/gate_probe/things', method: 'GET', type: 'proxy', target: 'https://example.test', [INJECTED_KEY]: 1 },
+      ] } as Record<string, unknown>).map(formatUnknownAuthoringKey);
+      expect(
+        reported.join('\n'),
+        `an undeclared key on a '${type}' item is neither rejected nor reported — that is silent metadata loss`,
+      ).toContain(INJECTED_KEY);
+    }
   });
 });
 
