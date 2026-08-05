@@ -6,6 +6,7 @@ import { RestServerConfig } from '@objectstack/spec/api';
 import { registerPackageRoutes } from './package-routes.js';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 import type { PackageService } from '@objectstack/service-package';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 
 export interface RestApiPluginConfig {
@@ -236,6 +237,21 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
+            // [#5224] Metadata service resolver — the endpoint matcher behind
+            // `IMetadataService.matchEndpoint`. The two machine-readable
+            // endpoint faces (`GET /meta/api`, `GET /openapi.json`) ask it
+            // whether a declared route is actually served before announcing it,
+            // so neither can publish an endpoint that answers 404. Returns
+            // undefined when no `metadata` service is registered; the faces
+            // then say so loudly rather than inventing a verdict.
+            const metadataServiceProvider = async (
+                _environmentId?: string,
+            ): Promise<IMetadataService | undefined> => {
+                try {
+                    return ctx.getService<IMetadataService>('metadata');
+                } catch { return undefined; }
+            };
+
             // Security service resolver — used by the ADR-0090 D5/D9
             // /security/suggested-bindings routes and the D6 /security/explain
             // route (plugin-security). Returns undefined when plugin-security
@@ -264,7 +280,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 try { return ctx.getService<any>(name) != null; } catch { return false; }
             };
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver);
+                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

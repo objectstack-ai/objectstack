@@ -3040,6 +3040,18 @@ function envBooleanFlag(raw: string | undefined): boolean | undefined {
  * function's own, per setting: env > `config.email.persist` > the plugin
  * default (persist ON) — so a config and an env that say nothing leave the
  * option absent and the plugin's default untouched.
+ *
+ * The template context's `appName` follows the same env-wins rule as every
+ * other setting here (#5448): `OS_APP_NAME` > `config.email.appName` >
+ * `config.email.defaultTemplateContext.appName` > top-level `config.appName` >
+ * `'ObjectStack'`. It used to be the file's one exception — the whole
+ * `defaultTemplateContext` was spread OVER the resolved value, so a config that
+ * spelled `defaultTemplateContext: { appName: … }` made `OS_APP_NAME` inert and
+ * the per-environment override an operator has for a repo-pinned config did
+ * nothing, silently, in the mail body AND in the `no-reply@<slug>.local`
+ * fallback sender derived from it. Every OTHER key of `defaultTemplateContext`
+ * is unchanged: it has no env or dedicated-config carrier, so the author's
+ * context is still spread through wholesale.
  */
 export function resolveEmailCapabilityArg(
   cfgEmail: Record<string, any> = {},
@@ -3075,9 +3087,30 @@ export function resolveEmailCapabilityArg(
   // audit trail. Absent from BOTH sources means the key is left out of the
   // constructor options entirely, so the plugin's own default decides.
   const persist = envBooleanFlag(env.OS_EMAIL_PERSIST_ENABLED) ?? cfgEmail.persist;
+  // `appName` is resolved AFTER the context spread, not before it (#5448).
+  // The other keys of `defaultTemplateContext` are still spread wholesale and
+  // are the only source for themselves; `appName` alone has dedicated carriers
+  // above it, and this file's stated contract — "env overrides per setting" —
+  // has to hold for it like it does for apiKey / defaultFrom / retries /
+  // queueDelivery / persist / SMTP. Spreading the context over the resolved
+  // value inverted exactly that one key: an author who wrote
+  // `defaultTemplateContext: { appName: 'Acme Dev' }` made `OS_APP_NAME`
+  // silently inert, so the one lever an operator has for a repo-pinned config
+  // deployed to several environments did nothing — and since the fallback
+  // sender is slugged from this value, the wrong name reached the envelope as
+  // well as the body.
+  //
+  // `defaultTemplateContext.appName` stays IN the chain rather than losing to
+  // the two dedicated sources and vanishing: dropping it would demote every
+  // config that spells only the context form straight to 'ObjectStack',
+  // trading one silently wrong value for a worse one. Order: env >
+  // `config.email.appName` > `config.email.defaultTemplateContext.appName` >
+  // top-level `config.appName` > 'ObjectStack'.
+  const cfgTemplateContext = cfgEmail.defaultTemplateContext || {};
   const defaultTemplateContext = {
-    appName: env.OS_APP_NAME || cfgEmail.appName || configAppName || 'ObjectStack',
-    ...(cfgEmail.defaultTemplateContext || {}),
+    ...cfgTemplateContext,
+    appName: env.OS_APP_NAME || cfgEmail.appName || cfgTemplateContext.appName
+      || configAppName || 'ObjectStack',
   };
   // Provide a sensible fallback `from` so templates can render even before
   // operators configure SMTP/SaaS. The log transport simply prints to stdout;

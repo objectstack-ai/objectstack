@@ -20,6 +20,12 @@
 //     i.e. it must be listed here even though its own weight would not justify
 //     it.
 //
+// #5178 added a second consumer of both — `validate-rule-schema-formats.ts`,
+// which asks that same ajv environment which `format` names it registered. It
+// is LAZIER than the compile gate on purpose: the registered set is only needed
+// once a schema actually names a `format`, so a `json_schema` rule that names
+// none pays nothing, which is the case pinned below.
+//
 // "A react page" was the whole story when this file was written; it is not any
 // more, and the cases below say which trigger they are pinning. Keep them
 // named that way — a test called "until a react page is validated" that also
@@ -117,6 +123,12 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       mod.validateRuleCompilability(ruleStack({ type: 'format', name: 'f', field: 'payload', regex: '([', message: 'm' }));
       if (loaded('ajv')) fail('the rule-compilability gate must not load ajv to judge a format rule');
       if (loaded('ajv-formats')) fail('the rule-compilability gate must not load ajv-formats to judge a format rule');
+      // #5178 — and the format-NAME gate asks for the registered set only when
+      // a schema actually names a format, so this one costs nothing either.
+      mod.validateRuleSchemaFormats(
+        ruleStack({ type: 'json_schema', name: 'j0', field: 'payload', schema: { type: 'object' }, message: 'm' }),
+      );
+      if (loaded('ajv')) fail('the format-name gate must not load ajv for a schema that names no format (#5178)');
       const schemaFindings = mod.validateRuleCompilability(
         ruleStack({ type: 'json_schema', name: 'j', field: 'payload', schema: { type: 'not-a-type' }, message: 'm' }),
       );
@@ -124,6 +136,18 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       if (!loaded('ajv-formats')) fail('ajv-formats was not loaded by a json_schema validation-rule check (#5029 parity)');
       if (!schemaFindings.some((f) => f.rule === 'validation-rule-json-schema-uncompilable')) {
         fail('rule-compilability gate produced no finding');
+      }
+      const formatNameFindings = mod.validateRuleSchemaFormats(
+        ruleStack({
+          type: 'json_schema',
+          name: 'jf',
+          field: 'payload',
+          schema: { type: 'object', properties: { e: { type: 'string', format: 'emial' } } },
+          message: 'm',
+        }),
+      );
+      if (!formatNameFindings.some((f) => f.rule === 'validation-rule-json-schema-unknown-format')) {
+        fail('format-name gate produced no finding (#5178)');
       }
       console.log('OK');
     };
@@ -162,6 +186,7 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       validateHookBodyWrites,
       validateActionBodyWrites,
       validateRuleCompilability,
+      validateRuleSchemaFormats,
     } = await import('./index.js');
 
     // Stacks without a react-source page never touch either dep.
@@ -198,6 +223,15 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
       ).map((f) => f.rule),
     ).toEqual(['validation-rule-regex-uncompilable']);
 
+    // #5178 — nor does the format-NAME gate on a `json_schema` rule that names
+    // no `format`: it needs the registered vocabulary only when there is a name
+    // to judge, so the vocabulary is fetched last, not first.
+    expect(
+      validateRuleSchemaFormats(
+        ruleStack({ type: 'json_schema', name: 'j0', field: 'payload', schema: { type: 'object' }, message: 'm' }),
+      ),
+    ).toEqual([]);
+
     for (const dep of LAZY_DEPS) {
       expect(depLoaded(req.cache, dep), `${dep} loaded before any react-source or L2-body validation`).toBe(false);
     }
@@ -211,6 +245,20 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     expect(depLoaded(req.cache, 'ajv')).toBe(true);
     expect(depLoaded(req.cache, 'ajv-formats')).toBe(true);
     expect(schemaFindings.map((f) => f.rule)).toEqual(['validation-rule-json-schema-uncompilable']);
+
+    // …and the format-name gate, once a schema does name one, reaches the same
+    // already-loaded environment and still produces its finding (#5178).
+    expect(
+      validateRuleSchemaFormats(
+        ruleStack({
+          type: 'json_schema',
+          name: 'jf',
+          field: 'payload',
+          schema: { type: 'object', properties: { e: { type: 'string', format: 'emial' } } },
+          message: 'm',
+        }),
+      ).map((f) => f.rule),
+    ).toEqual(['validation-rule-json-schema-unknown-format']);
 
     // The first react page with source pays the cost of exactly its own gate's
     // dep — and the gates still work.

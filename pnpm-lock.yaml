@@ -1824,6 +1824,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/metadata':
+        specifier: workspace:*
+        version: link:../metadata
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../metadata-protocol
@@ -1978,6 +1981,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

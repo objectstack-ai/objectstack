@@ -158,6 +158,7 @@ const result = CreateRecordConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to delete from |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to delete |
+| **multi** | `boolean` | optional | Declare bulk intent: delete every row the filter matches (default false — a predicate delete without it is refused by the engine) |
 
 
 ---
@@ -240,6 +241,7 @@ const result = CreateRecordConfigSchema.parse(data);
 | **objectName** | `string` | ✅ | Object to update |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update |
 | **fields** | `Record<string, any>` | optional | Field values to write |
+| **multi** | `boolean` | optional | Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine) |
 
 
 ---
