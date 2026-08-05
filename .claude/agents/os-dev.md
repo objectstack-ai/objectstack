@@ -113,6 +113,14 @@ build/test runs OOM it.** Binding rules:
    exactly when 7.28.0's own advisories landed (#5032, the live specimen of
    #4961's warning; brace-expansion did the same at 5.0.8). Put the upper
    bound at the major boundary and move only the replacement target.
+5. **A new fake engine's `delete()` opens with
+   `assertEngineDeleteDispatch(options)`** from `@objectstack/objectql` — never a
+   hand-mirrored `if (!where?.id && !multi)`, which has exactly the hole
+   `check:engine-double-contract` names (#5173's copy passed
+   `where: { id: { $in: […] } }`). That gate went red on four dev agents' new
+   tests in two days (#5173 / #5191 / #5192 / #5584), one CI lap each — copy one
+   of the pinned fakes the gate lists on a green run instead
+   (`service-automation/src/builtin/crud-bulk-intent.test.ts` is the fullest).
 
 Definition of done, in order:
 
