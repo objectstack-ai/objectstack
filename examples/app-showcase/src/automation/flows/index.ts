@@ -1385,8 +1385,9 @@ export const InboundTaskWebhookFlow = defineFlow({
  * ReassignWizardFlow · get + delete: here). A janitor flow: fetch the
  * already-closed inquiries (records mode), gate on whether any exist, delete
  * by the same filter, and report. Config keys follow the executor contract
- * exactly — `objectName` + `filter` (Prime Directive #12: no
- * `object`/`filters` aliases). `runAs: 'system'` because a janitor acts
+ * exactly — `objectName` + `filter` + the declared bulk intent `multi`
+ * (Prime Directive #12: no `object`/`filters` aliases). `runAs: 'system'`
+ * because a janitor acts
  * across owners; autolaunched with no record trigger — invoke it on demand
  * (API/subflow) rather than on every write.
  */
@@ -1421,7 +1422,21 @@ export const InquiryPurgeFlow = defineFlow({
       id: 'purge',
       type: 'delete_record',
       label: 'Delete them',
-      config: { objectName: 'showcase_inquiry', filter: { status: 'closed' } },
+      // `multi: true` is what makes this a PREDICATE delete — and without it the
+      // node had never deleted anything: the data engine accepts a delete only
+      // when `filter` names one row by scalar `id`, so every run of this flow
+      // failed here with `Delete requires an ID or options.multi=true` and
+      // reported `acted: 0` (#5225, found by the #5112 boot probes). No bulk
+      // spelling existed on this node's config at all until #5393/PR #5485
+      // declared one; the engine's refusal was the contract working, not a bug
+      // to route around — which is why the fix is this declaration and not a
+      // get→loop→delete-by-id rewrite (PD #5).
+      //
+      // ⚠️ `filter` is NOT optional decoration here: `multi: true` with an
+      // absent or empty `filter` is a declared WHOLE-OBJECT delete. This node is
+      // the reference for "bulk intent, bounded by a predicate" — the shape the
+      // #5482 lint rule must leave at zero warnings.
+      config: { objectName: 'showcase_inquiry', filter: { status: 'closed' }, multi: true },
     },
     {
       id: 'report',
