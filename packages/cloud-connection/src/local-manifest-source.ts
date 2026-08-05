@@ -88,6 +88,50 @@ export interface SkippedManifestEntry {
 }
 
 /**
+ * What {@link LocalManifestSource.read} hands back for ONE manifest id — the
+ * entry if it parsed, and the reason if it did not (#5426).
+ *
+ * `read()` used to answer `null` to two different questions at once: "this
+ * manifest was never installed" and "it was installed, but its ledger file
+ * cannot be read". The comment on it (`null when absent or unreadable`) says
+ * the merge was deliberate; the consequence was not. Two HTTP handlers check
+ * `has()` first — so absence is already ruled out — and then had nothing left
+ * to say but `500 Failed to read manifest cache.`: a sentence that points at
+ * itself, while `Unexpected end of JSON input` / `EACCES` / `EISDIR` — the one
+ * fact that names the fix — was discarded in an un-bound `catch`.
+ *
+ * The two facts are now distinguishable **structurally**, not by convention:
+ *
+ *   | On disk                         | `entry` | `failure`             |
+ *   |---------------------------------|---------|-----------------------|
+ *   | no file for this manifest id    | `null`  | absent                |
+ *   | a file that will not parse/read | `null`  | `{ file, cause }`     |
+ *   | a file that parsed              | entry   | absent                |
+ *
+ * A caller that legitimately treats both nulls alike keeps doing so by reading
+ * `.entry` — the install path's ADR-0120 D5e gate does exactly that on purpose
+ * (a corrupt entry means "no attestation on record", so the one-time ceremony
+ * is asked again rather than skipped: the fail-safe direction). What changed is
+ * that conflating them is now a decision a caller makes in the open, instead of
+ * the only thing this method let it do.
+ */
+export interface InstalledManifestLookup {
+    /** The parsed entry, or `null` when there is none to hand back. */
+    entry: InstalledManifestEntry | null;
+    /**
+     * Present ONLY when a ledger file exists for this manifest id and could not
+     * be turned into an entry. Absent for a clean read AND for a genuine
+     * absence — `failure === undefined` with `entry === null` means "not
+     * installed", which is the distinction the old `null` erased.
+     *
+     * Shares {@link SkippedManifestEntry} with `list()` deliberately: it is the
+     * same fact about the same file, and a consumer that reports both (`os
+     * doctor`-style) should not need two shapes to say one thing.
+     */
+    failure?: SkippedManifestEntry;
+}
+
+/**
  * What {@link LocalManifestSource.list} hands back — what it READ, and what it
  * could NOT (#5413).
  *
@@ -164,14 +208,29 @@ export class LocalManifestSource {
         return { entries, skipped };
     }
 
-    /** Read one entry; null when absent or unreadable. */
-    read(manifestId: string): InstalledManifestEntry | null {
-        const file = this.fileFor(manifestId);
-        if (!existsSync(file)) return null;
+    /**
+     * Read one entry — and, when there is none, say WHICH of the two reasons
+     * applies (#5426).
+     *
+     * See {@link InstalledManifestLookup} for the table. In short: absent →
+     * `{ entry: null }`; unreadable → `{ entry: null, failure: { file, cause } }`
+     * with the thrown object carried as-is, never re-wrapped and never
+     * stringified into a sentence this class invented.
+     *
+     * ⚠️ Deliberately NOT total in the other direction: this method does not
+     * validate the parsed value's SHAPE. A file holding well-formed JSON that
+     * is not an installed-package entry parses, and is handed back — same as
+     * before. Schema-checking the ledger is a separate contract decision
+     * (which schema, what a rejection means at boot) and is not made here.
+     */
+    read(manifestId: string): InstalledManifestLookup {
+        const name = safeFilename(manifestId);
+        const file = join(this.dir, name);
+        if (!existsSync(file)) return { entry: null };
         try {
-            return JSON.parse(readFileSync(file, 'utf8'));
-        } catch {
-            return null;
+            return { entry: JSON.parse(readFileSync(file, 'utf8')) };
+        } catch (cause) {
+            return { entry: null, failure: { file: name, cause } };
         }
     }
 

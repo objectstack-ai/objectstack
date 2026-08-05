@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
@@ -167,7 +167,7 @@ describe("ADR-0120 D5e — install into an 'isolated' environment", () => {
 
         expect(register).not.toHaveBeenCalled();
         expect(syncSchemas).not.toHaveBeenCalled();
-        expect(new LocalManifestSource(dir).read('com.acme.mrp')).toBeNull();
+        expect(new LocalManifestSource(dir).read('com.acme.mrp').entry).toBeNull();
     });
 
     it('confirming records the attestation in the install manifest and installs', async () => {
@@ -178,7 +178,7 @@ describe("ADR-0120 D5e — install into an 'isolated' environment", () => {
 
         expect(res.payload.success).toBe(true);
         expect(register).toHaveBeenCalled();
-        const entry = new LocalManifestSource(dir).read('com.acme.mrp')!;
+        const entry = new LocalManifestSource(dir).read('com.acme.mrp').entry!;
         expect(entry.globalUniqueAttestation).toMatchObject({
             posture: 'isolated',
             confirmed: EXPECTED_IDS.slice().sort(),
@@ -199,8 +199,37 @@ describe("ADR-0120 D5e — install into an 'isolated' environment", () => {
         const res = await second.install(makeC({ manifest: APP_WITH_GLOBAL_UNIQUES }));
 
         expect(res.payload.success).toBe(true);
-        expect(new LocalManifestSource(dir).read('com.acme.mrp')!.globalUniqueAttestation!.confirmed)
+        expect(new LocalManifestSource(dir).read('com.acme.mrp').entry!.globalUniqueAttestation!.confirmed)
             .toEqual(EXPECTED_IDS.slice().sort());
+    });
+
+    it('ASKS AGAIN when the attestation record is corrupt — fail-safe, not fail-open', async () => {
+        // #5426 — the direction pin. `read()` now separates "never installed"
+        // from "installed but unreadable"; this call site deliberately keeps
+        // treating them alike (`.entry`), and this test says WHICH way that
+        // conflation must fall.
+        //
+        // ⚠️ REVERSE-VERIFICATION, stated honestly: reverting #5426 does NOT
+        // turn this red. The old `read()` returned a bare `null` for a corrupt
+        // file, so the gate already re-asked — the behaviour is unchanged and
+        // that is the point (the wiring is semantically equivalent). What this
+        // pins is the FUTURE: now that a corrupt entry is distinguishable, the
+        // tempting "we know it was installed, treat it as attested" reading is
+        // one line away, and it would skip a one-time ceremony over a file
+        // nobody could read. Repeating the ceremony costs a prompt; skipping it
+        // can expose one customer's value to another (ADR-0120 S10/S14).
+        process.env.OS_TENANCY_POSTURE = 'isolated';
+        const first = await mountInstall(dir);
+        await first.install(makeC({ manifest: APP_WITH_GLOBAL_UNIQUES, confirmGlobalUniques: true }));
+        // Truncate the attested entry in place — the issue's repro.
+        writeFileSync(join(dir, 'com.acme.mrp.json'), '{"manifestId":"com.acme.mrp","globalUniqu', 'utf8');
+
+        const second = await mountInstall(dir);
+        const res = await second.install(makeC({ manifest: APP_WITH_GLOBAL_UNIQUES }));
+
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('UNIQUE_SCOPE_CONFIRMATION_REQUIRED');
+        expect(res.payload.error.details.findings.map((f: any) => f.id)).toEqual(EXPECTED_IDS);
     });
 
     it('asks about a NEW constraint an upgrade introduces, and only that one', async () => {
@@ -236,7 +265,7 @@ describe("ADR-0120 D5e — install into an 'isolated' environment", () => {
 
         expect(res.status).toBe(409);
         expect(res.payload.error.details.findings.map((f: any) => f.id)).toEqual(['material:index:external_id']);
-        expect(new LocalManifestSource(dir).read('com.acme.mrp')).toBeNull();
+        expect(new LocalManifestSource(dir).read('com.acme.mrp').entry).toBeNull();
     });
 
     it('an app whose uniques are all per-organization installs without ceremony', async () => {
@@ -256,7 +285,7 @@ describe("ADR-0120 D5e — install into an 'isolated' environment", () => {
         }));
 
         expect(res.payload.success).toBe(true);
-        expect(new LocalManifestSource(dir).read('com.acme.clean')!.globalUniqueAttestation).toBeUndefined();
+        expect(new LocalManifestSource(dir).read('com.acme.clean').entry!.globalUniqueAttestation).toBeUndefined();
     });
 });
 
@@ -272,7 +301,7 @@ describe('ADR-0120 D5e — the gate is posture-scoped', () => {
             const res = await install(makeC({ manifest: APP_WITH_GLOBAL_UNIQUES }));
 
             expect(res.payload.success).toBe(true);
-            expect(new LocalManifestSource(dir).read('com.acme.mrp')!.globalUniqueAttestation).toBeUndefined();
+            expect(new LocalManifestSource(dir).read('com.acme.mrp').entry!.globalUniqueAttestation).toBeUndefined();
         });
     }
 
@@ -304,7 +333,7 @@ describe('ADR-0120 D5e — the gate is posture-scoped', () => {
         const second = await mountInstall(dir);
         await second.install(makeC({ manifest: APP_WITH_GLOBAL_UNIQUES }));
 
-        expect(new LocalManifestSource(dir).read('com.acme.mrp')!.globalUniqueAttestation)
+        expect(new LocalManifestSource(dir).read('com.acme.mrp').entry!.globalUniqueAttestation)
             .toMatchObject({ posture: 'isolated', confirmed: EXPECTED_IDS.slice().sort() });
     });
 });

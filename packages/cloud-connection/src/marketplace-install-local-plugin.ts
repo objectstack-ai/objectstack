@@ -70,6 +70,19 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
+/**
+ * A ledger read failure in the thrower's own words (#5413 / #5426).
+ *
+ * The `cause` travels from `LocalManifestSource` unwrapped precisely so it can
+ * be quoted here rather than replaced by a summary. `.message` first because
+ * that is the operational sentence (`EACCES: permission denied, open '…'`);
+ * `.name` only when a thrower left the message empty, which is still better
+ * than the empty string.
+ */
+function describeLedgerCause(cause: unknown): string {
+    return cause instanceof Error ? (cause.message || cause.name) : String(cause);
+}
+
 /** Best-effort manifest id from a registry package entry (shape varies). */
 function manifestIdOf(p: any): string | undefined {
     return p?.manifest?.id ?? p?.id ?? p?.manifest?.name ?? undefined;
@@ -583,7 +596,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     to the ledger: a stopped install must leave the runtime exactly as
         //     it found it, so the installer can rewrite the metadata and retry
         //     without an uninstall in between.
-        const previousEntry = this.ledger.read(manifestId);
+        //
+        //     #5426 — `.entry` alone, on purpose. A ledger file that will not
+        //     parse is treated here exactly as "no previous attestation", so a
+        //     corrupt entry makes the gate ASK AGAIN rather than skip: the
+        //     fail-safe direction (worst case, a one-time ceremony is repeated;
+        //     the case that must never happen — an installation-wide unique
+        //     going unconfirmed because its record was unreadable — cannot).
+        //     Conflating the two nulls is the right call at THIS call site; it
+        //     is now made here, in the open, instead of by the ledger for
+        //     everyone.
+        const previousEntry = this.ledger.read(manifestId).entry;
         const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -926,9 +949,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!this.ledger.has(manifestId)) {
             return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
-        const entry: InstalledEntry | null = this.ledger.read(manifestId);
+        // #5426 — `has()` above already answered "is it installed", so reaching
+        // this with no entry means the file is THERE and unreadable. The reason
+        // travels to the operator instead of dying in a `catch`.
+        const { entry, failure } = this.ledger.read(manifestId);
         if (!entry) {
-            return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: 'Failed to read manifest cache.' } }, 500);
+            return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'reseed sample data');
         }
 
         const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c });
@@ -1006,9 +1032,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!this.ledger.has(manifestId)) {
             return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
-        const entry: InstalledEntry | null = this.ledger.read(manifestId);
+        // #5426 — same shape as reseed: `has()` said the file is there, so a
+        // missing entry here is an unreadable one, and the operator gets the
+        // reason rather than a sentence that points at itself.
+        const { entry, failure } = this.ledger.read(manifestId);
         if (!entry) {
-            return c.json({ success: false, error: { code: 'MARKETPLACE_STORAGE_FAILED', message: 'Failed to read manifest cache.' } }, 500);
+            return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'purge sample data');
         }
 
         const datasets = Array.isArray(entry.manifest?.data)
@@ -1330,11 +1359,64 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private warnSkippedLedgerEntries = (ctx: PluginContext, skipped: SkippedManifestEntry[], what: string): void => {
         for (const { file, cause } of skipped) {
-            const reason = cause instanceof Error ? (cause.message || cause.name) : String(cause);
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] unreadable ledger entry ${file} — ${what} `
-                + `(repair or remove ${join(this.storageDir, file)}): ${reason}`,
+                + `(repair or remove ${join(this.storageDir, file)}): ${describeLedgerCause(cause)}`,
             );
         }
+    };
+
+    /**
+     * The 500 for "`has()` said the entry is there, `read()` could not turn it
+     * into one" — with the reason attached (#5426).
+     *
+     * Shared by reseed and purge because they hit the identical wall, and both
+     * used to answer `Failed to read manifest cache.`: a sentence whose only
+     * content is that the thing it just did failed. The operator was left with
+     * nothing to act on — not the file, not whether it was truncated, locked or
+     * a directory — while the object that said all three had been dropped in an
+     * un-bound `catch` one layer down.
+     *
+     * Deliberate choices here:
+     * - **`code` is unchanged** (`MARKETPLACE_STORAGE_FAILED`). This is the same
+     *   failure it always was; only its explanation is new. A client branching
+     *   on the code keeps working — the fix must not cost a wire break.
+     * - **The cause is quoted, not paraphrased** (#5390 house style). `EACCES`,
+     *   `EISDIR` and `Unexpected end of JSON input` are three different repairs,
+     *   and the thrower words each better than any sentence here could.
+     * - **In the response body, not only the log.** These are operator-facing
+     *   admin endpoints — the person who can fix the file is the person holding
+     *   the failed response — and the server line is the durable copy for
+     *   whoever reads the log later instead.
+     */
+    private unreadableLedgerEntry = (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        failure: SkippedManifestEntry | undefined,
+        attempted: string,
+    ): Response => {
+        // `failure === undefined` here means the file vanished (or was emptied)
+        // between `has()` and `read()` — a real race, rare, and worth wording
+        // honestly rather than blaming a cause we were never handed. Note it
+        // names the DIRECTORY: with no failure there is no file name to quote,
+        // and inventing one would be the same self-referential mistake at a
+        // different address.
+        const detail = failure
+            ? `repair or remove ${join(this.storageDir, failure.file)}: ${describeLedgerCause(failure.cause)}`
+            : `its ledger file under ${this.storageDir} no longer yields an entry `
+              + `(removed or emptied between the existence check and the read)`;
+
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] cannot ${attempted} for ${manifestId} — its ledger entry is unreadable (${detail})`,
+        );
+
+        return c.json({
+            success: false,
+            error: {
+                code: 'MARKETPLACE_STORAGE_FAILED',
+                message: `Failed to read the manifest cache entry for ${manifestId} (${detail})`,
+            },
+        }, 500);
     };
 }

@@ -158,7 +158,7 @@ describe('rehydrate sample-data healing', () => {
         expect(loadCalls[0].config.organizationId).toBeUndefined();
 
         // The ledger now records that sample data is present again.
-        const entry = new LocalManifestSource(dir).read(MANIFEST.id)!;
+        const entry = new LocalManifestSource(dir).read(MANIFEST.id).entry!;
         expect(entry.withSampleData).toBe(true);
         expect(entry.sampleDataPurged).toBe(false);
 
@@ -190,7 +190,7 @@ describe('rehydrate sample-data healing', () => {
         seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [{ message: 'database is locked' }] };
         const { ctx } = await rehydrateWith({}, { crm_x: [], crm_y: [] });
         expect(loadCalls).toHaveLength(1);
-        const entry = new LocalManifestSource(dir).read(MANIFEST.id)!;
+        const entry = new LocalManifestSource(dir).read(MANIFEST.id).entry!;
         expect(entry.withSampleData).toBe(false);
         // The failure is loud, with the underlying reason.
         expect((ctx.logger.warn as any).mock.calls.some((c: any[]) => String(c[0]).includes('database is locked'))).toBe(true);
@@ -221,7 +221,7 @@ describe('rehydrate sample-data healing', () => {
             makeC({}, MANIFEST.id),
         );
         expect(purgeRes.payload?.success).toBe(true);
-        expect(new LocalManifestSource(dir).read(MANIFEST.id)?.sampleDataPurged).toBe(true);
+        expect(new LocalManifestSource(dir).read(MANIFEST.id).entry?.sampleDataPurged).toBe(true);
 
         // Restart (fresh plugin over the same ledger, DB now empty): no reseed.
         loadCalls = [];
@@ -248,6 +248,6 @@ describe('rehydrate sample-data healing', () => {
             makeC({ manifest: MANIFEST }),
         );
         expect(installRes.payload?.success).toBe(true);
-        expect(new LocalManifestSource(dir).read(MANIFEST.id)?.withSampleData).toBe(true);
+        expect(new LocalManifestSource(dir).read(MANIFEST.id).entry?.withSampleData).toBe(true);
     });
 });

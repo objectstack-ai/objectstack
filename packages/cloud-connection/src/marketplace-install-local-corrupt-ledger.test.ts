@@ -70,6 +70,9 @@ function makeCtx(rawApp: any) {
         manifest: { register: vi.fn() },
         objectql: { syncSchemas: async () => undefined, find: vi.fn(async () => [{ id: 'x' }]) },
         metadata: {},
+        // #5426's two handlers authenticate first; without this they answer 401
+        // and never reach the ledger read under test.
+        auth: { api: { getSession: async () => ({ user: { id: 'admin' } }) } },
     };
     return {
         ctx: {
@@ -86,15 +89,15 @@ function makeCtx(rawApp: any) {
     };
 }
 
-/** A Hono-ish context, enough for the GET handler. */
-function makeC() {
+/** A Hono-ish context. `manifestId` carries the `:manifestId` route value. */
+function makeC(manifestId?: string) {
     const json = vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 }));
     return {
         req: {
             url: 'http://localhost:3000/api/v1/marketplace/install-local',
             raw: new Request('http://localhost:3000/x'),
             json: async () => ({}),
-            param: () => undefined,
+            param: (k: string) => (k === 'manifestId' ? manifestId : undefined),
             header: () => undefined,
         },
         json,
@@ -129,6 +132,15 @@ function writeGoodEntry(manifestId = GOOD_MANIFEST.id) {
 /** The issue's repro verbatim — truncated mid-object. */
 function writeBrokenEntry(file = 'broken.json') {
     writeFileSync(join(dir, file), '{"manifestId":"broken","manifest":{"objects":[{"name":"acct"', 'utf8');
+}
+
+/**
+ * #5426's repro: a truncated file at the ledger path a given manifest id maps
+ * to — so `has()` answers TRUE and `read()` cannot parse it, which is exactly
+ * the state reseed and purge walked into.
+ */
+function writeCorruptEntryFor(manifestId: string) {
+    writeFileSync(join(dir, `${manifestId}.json`), `{"manifestId":"${manifestId}","manifest":{"data":[`, 'utf8');
 }
 
 /** Boot a fresh plugin so `kernel:ready` runs rehydrate + mounts the routes. */
@@ -229,7 +241,82 @@ describe('handleList() — the console list that looked complete', () => {
         // Named for what the CONSUMER lost, not for what the producer did.
         expect(row).toContain('MISSING from the installed-apps list');
     });
+});
 
+/**
+ * #5426 — the OTHER return contract in the same file: `read()`.
+ *
+ * These two handlers already branch on the null (unlike `list()`'s short array,
+ * which nobody could see), so the defect here is lighter — but the answer they
+ * could give was `500 Failed to read manifest cache.` and nothing else, after
+ * `has()` had just confirmed the file exists.
+ */
+describe('handleReseed() / handlePurge() — the 500 that pointed at itself', () => {
+    it.each([
+        ['reseed', 'reseed-sample-data', 'reseed sample data'],
+        ['purge', 'purge-sample-data', 'purge sample data'],
+    ])('%s: the 500 names the file and quotes the cause (#5426)', async (_label, route, attempted) => {
+        // ── The defect ───────────────────────────────────────────────────
+        // Both handlers call `has()` (true — the file IS there) and then
+        // `read()`, which answered `null` for "absent OR unreadable" and threw
+        // the reason away in an un-bound `catch`. The operator got
+        // `500 Failed to read manifest cache.` — a sentence whose only content
+        // is that the thing it just did failed, with `has()` having just said
+        // the opposite one line earlier, and nothing in the server log.
+        writeCorruptEntryFor('app.test.crm');
+        const { rawApp, ctx } = await boot();
+        ctx.logger.warn.mockClear(); // isolate from rehydrate's own warns
+
+        const c = makeC('app.test.crm');
+        const res = await rawApp.routes.get(`POST /api/v1/marketplace/install-local/:manifestId/${route}`)!(c);
+
+        // ① The wire CODE is unchanged — the same failure, newly explained. A
+        //    client branching on the code must not have to change.
+        expect(res.status).toBe(500);
+        expect(res.payload.error.code).toBe('MARKETPLACE_STORAGE_FAILED');
+        // ② THE assertion of this issue: the thrower's own words reach the
+        //    operator holding the failed response.
+        expect(res.payload.error.message).toMatch(/JSON/i);
+        // ③ …together with the file to repair. Self-reference → an address.
+        expect(res.payload.error.message).toContain(join(dir, 'app.test.crm.json'));
+        expect(res.payload.error.message).toContain('app.test.crm');
+        // ④ And a durable copy in the server log, for whoever reads it later
+        //    instead of the HTTP response.
+        const row = warnings(ctx).find((s) => s.includes('app.test.crm.json'));
+        expect(row).toBeDefined();
+        expect(row).toContain(`cannot ${attempted}`);
+        expect(row).toMatch(/JSON/i);
+    }, 60_000);
+
+    it('reseed: an unreadable file, not only an unparseable one, is explained', async () => {
+        // EISDIR, not a parse error — a different repair, which is exactly why
+        // the cause travels unwrapped instead of being summarised at the catch.
+        mkdirSync(join(dir, 'app.test.crm.json'));
+        const { rawApp } = await boot();
+
+        const c = makeC('app.test.crm');
+        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(c);
+
+        expect(res.status).toBe(500);
+        expect(res.payload.error.code).toBe('MARKETPLACE_STORAGE_FAILED');
+        expect(res.payload.error.message).toContain('EISDIR');
+    }, 60_000);
+
+    it('reseed: a package that was never installed still gets 404, not the storage 500', async () => {
+        // The other half of the split. `read()` distinguishing the two nulls
+        // must not make "never installed" start reading as "corrupt": that
+        // answer belongs to `has()` and stays a 404.
+        const { rawApp } = await boot();
+
+        const c = makeC('app.test.nope');
+        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!(c);
+
+        expect(res.status).toBe(404);
+        expect(res.payload.error.code).toBe('RESOURCE_NOT_FOUND');
+    }, 60_000);
+});
+
+describe('handleList() — the wire shape it kept', () => {
     it('leaves the wire shape untouched — the readable entries, as before', async () => {
         // ⛔ Deliberate: the skip is NOT added to the response body. Changing
         // this endpoint's schema is a separate decision (see the handler's
