@@ -112,10 +112,17 @@ describe('[#4963] SYNC_ARCHITECTURE.md pipeline examples compile', () => {
     // Anti-vacuity: a selector that matched nothing would make the compile
     // assertion below pass over an empty program — the way a gate goes dormant.
     expect(pipelineBlocks.length, 'ETLPipeline examples in SYNC_ARCHITECTURE.md').toBe(3);
-    // The other three are the L3 `Connector` examples. They are out of this
-    // gate's scope — they belong to `integration/connector.zod.ts`, and two of
-    // them deliberately elide with a bare `...`, which is not TypeScript. The
-    // total is pinned rather than left open so that ADDING a block to this
+    // The other three are the L3 `Connector` examples, out of this gate's scope
+    // because they belong to `integration/connector.zod.ts`. Two of them are
+    // Migration-Guide sketches that elide with a bare `...`, which is not
+    // TypeScript. The third — the full `sapConnector` example — is NOT exempt on
+    // its merits: run through this same harness it reports four diagnostics, and
+    // three of them are keys or values the schema REJECTS (`sourceField` /
+    // `targetField` for `source` / `target`, `transform.type: 'custom'`,
+    // `webhooks[].retryPolicy`). That is filed as #5515, not fixed here, because
+    // the fourth diagnostic is `Connector` being `z.infer` — this issue's twin
+    // on a file whose migration surface is NOT empty, so it needs its own ruling.
+    // The total is pinned rather than left open so that ADDING a block to this
     // document is a decision someone has to make on purpose: a new ETL example
     // is picked up automatically by the selector above, and anything else
     // turns this red until it is classified here.
