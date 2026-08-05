@@ -34,6 +34,14 @@
 # commit status on the branch head so it IS visible on the release PR.
 # Not wired into normal PR CI on purpose: full build + pack + clean install
 # is far too slow for the inner loop.
+#
+# That reporting path is also why there is a third job, resolve-guard (#5343):
+# every verdict this workflow can produce reaches a human through that commit
+# status, so a `resolve` that FAILS writes nothing at all — the release PR then
+# looks exactly like "there was nothing to smoke". The status is not a required
+# check (branch protection on main requires TypeScript Type Check, Build Core,
+# Test Core and Dogfood Regression Gate), so an absent one blocks nothing and is
+# simply invisible. resolve-guard turns that silence into an explicit red.
 
 name: Publish Smoke
 
@@ -92,10 +100,66 @@ jobs:
             echo "No open release PR — nothing to smoke"
           fi
 
+  # resolve failing is NOT "nothing to smoke" — it is "we do not know". Say so
+  # out loud (#5343). Without this job the two outcomes are indistinguishable
+  # everywhere it matters: pack-smoke is skipped in both, and a skipped job reads
+  # as green; and since this workflow runs on `workflow_run`, its own red run is
+  # filed against the default branch, nowhere near the release PR a human is
+  # about to merge.
+  #
+  # The alternative shape — #4928's `!cancelled() && ... != 'false'`, i.e. "when
+  # in doubt, run everything" — is wrong HERE, and that is why the decision was
+  # taken per workflow rather than copied. ci.yml's filter job defaults its
+  # outputs to "run it" (`|| 'true'`); resolve does not, and it also computes the
+  # `ref` to check out. Running on doubt would check out an EMPTY ref (the
+  # workflow_run default), spend 45 minutes smoking whatever that resolves to,
+  # and report the verdict as if it were about the release candidate. A false
+  # green on release integrity is worse than no answer.
+  resolve-guard:
+    name: Resolve target failed — the candidate was NOT smoked
+    needs: resolve
+    if: always() && needs.resolve.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Report the gap on the release PR, then fail
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Best-effort, and deliberately a SECOND lookup rather than a reuse of
+          # resolve's outputs: resolve failed, so its outputs are empty — that is
+          # the whole problem. Same query as resolve's (`--head
+          # changeset-release/main`); keep the two in step if that convention
+          # ever changes. Whatever this lookup does, the job still fails below,
+          # so the fallback can never turn into a silent pass.
+          release_head=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head changeset-release/main --state open \
+            --json headRefOid -q '.[0].headRefOid // empty') || release_head=''
+          if [ -n "$release_head" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$release_head" \
+              -f state=failure -f context='publish-smoke / packed-tarballs' \
+              -f description='Target resolution failed — the candidate was never smoked' \
+              -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              || echo "::warning::could not write the commit status on $release_head"
+          else
+            echo "::warning::no open changeset-release/main PR found — the failure is reported here only"
+          fi
+          echo "::error title=Publish smoke did not run::resolve failed, so the release candidate was never smoked. This is NOT the same as 'nothing to smoke' — re-run the workflow, or check the release PR by hand before merging."
+          exit 1
+
   pack-smoke:
     name: Packed-tarball smoke (release candidate)
     needs: resolve
-    if: needs.resolve.outputs.run == 'true'
+    # success() is spelled out rather than left to GitHub's implicit wrapper
+    # (#5343): an `if:` naming no status function is silently wrapped in one, so
+    # "resolve failed" and "resolve said don't run" both arrive here as the same
+    # skip. The behaviour is unchanged — smoke only a resolve that SUCCEEDED and
+    # said run — but it is now written down, and resolve-guard above states the
+    # failure case that this condition deliberately does not cover.
+    if: success() && needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
