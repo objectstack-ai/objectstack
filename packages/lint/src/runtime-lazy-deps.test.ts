@@ -121,6 +121,11 @@ describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
     COLD_LOAD_TIMEOUT_MS,
   );
 
+  // Same cold load as the two above, just in-process: the first `import()` of
+  // `./runtime.js` in this file pulls the whole gate graph through the transform.
+  // So it gets the same budget — the claim being pinned (the boot path loads no
+  // source parser) is proved by the assertions below, never by the wall clock,
+  // and a 5 s default only turns a busy runner into a false red on the gate.
   it('gating a flow in-process loads neither dep, and still finds the defect', async () => {
     const req = createRequire(import.meta.url);
     const { runRuntimeAuthoringRules } = await import('./runtime.js');
@@ -140,7 +145,7 @@ describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
           `may not pay for a source parser to publish a flow`,
       ).toBe(false);
     }
-  });
+  }, COLD_LOAD_TIMEOUT_MS);
 
   it('the runtime entry re-exports the gate and nothing that carries a parser', async () => {
     const mod = await import('./runtime.js');
