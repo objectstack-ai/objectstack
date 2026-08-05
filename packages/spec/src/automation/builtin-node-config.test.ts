@@ -128,6 +128,61 @@ describe('CRUD config contracts — strict as of #4001 批 9', () => {
     expect(GetRecordConfigSchema.safeParse({ objectName: 'lead', outputVariable: 'lead' }).success).toBe(true);
     expect(CreateRecordConfigSchema.safeParse({ objectName: 'task', outputVariable: 'task' }).success).toBe(true);
   });
+
+  // ── bulk intent (#5393) ────────────────────────────────────────────
+
+  it.each([
+    ['update_record', UpdateRecordConfigSchema, { objectName: 'lead', filter: { stage: 'stale' }, fields: { stage: 'archived' } }],
+    ['delete_record', DeleteRecordConfigSchema, { objectName: 'lead', filter: { stage: 'stale' } }],
+  ] as ReadonlyArray<[string, Parseable, Record<string, unknown>]>)(
+    '%s: `multi` is authorable — the declaration a predicate write needs to be reachable at all',
+    (_nodeType, schema, base) => {
+      expect(schema.safeParse({ ...base, multi: true }).success).toBe(true);
+      expect(schema.safeParse({ ...base, multi: false }).success).toBe(true);
+      // Absent is the default and still valid: the engine then refuses a
+      // predicate write, which is the contract this key makes declarable.
+      expect(schema.safeParse(base).success).toBe(true);
+      // Typed, so `multi: 'yes'` is a guard, not a truthy surprise.
+      expect(schema.safeParse({ ...base, multi: 'yes' }).success).toBe(false);
+    },
+  );
+
+  it.each([
+    ['update_record', UpdateRecordConfigSchema, { objectName: 'lead' }],
+    ['delete_record', DeleteRecordConfigSchema, { objectName: 'lead' }],
+  ] as ReadonlyArray<[string, Parseable, Record<string, unknown>]>)(
+    '%s: the measured wrong spellings of bulk intent get named, not a bare "unknown key"',
+    (_nodeType, schema, base) => {
+      for (const key of ['bulk', 'all', 'multiple']) {
+        const message = unknownKeyMessage(schema, { ...base, [key]: true })!;
+        expect(message, key).toContain('`multi: true`');
+        expect(message, key).toContain('#5393');
+        // The distance claim, pinned: none of these reaches `multi`, so
+        // without the curated entry the rejection would offer nothing.
+        expect(message, key).not.toContain(`\`${key}\` → `);
+      }
+    },
+  );
+
+  it.each([
+    ['update_record', UpdateRecordConfigSchema, { objectName: 'lead' }],
+    ['delete_record', DeleteRecordConfigSchema, { objectName: 'lead' }],
+  ] as ReadonlyArray<[string, Parseable, Record<string, unknown>]>)(
+    '%s: `options: { multi: true }` is answered as a wrong LAYER, not a typo',
+    (_nodeType, schema, base) => {
+      const message = unknownKeyMessage(schema, { ...base, options: { multi: true } })!;
+      expect(message).toContain('NODE config');
+      expect(message).toContain('executor');
+    },
+  );
+
+  it('the read-only and single-row siblings do NOT declare `multi`', () => {
+    // `get_record` bounds rows with `limit`; `create_record` writes one row.
+    // Neither dispatches on bulk intent, so the key would be inert there —
+    // the #3528 shape (a declared key nothing reads).
+    expect(GetRecordConfigSchema.safeParse({ objectName: 'lead', multi: true }).success).toBe(false);
+    expect(CreateRecordConfigSchema.safeParse({ objectName: 'task', multi: true }).success).toBe(false);
+  });
 });
 
 describe('ScreenConfigSchema / ScreenFieldConfigSchema — strict as of #4001 批 9', () => {

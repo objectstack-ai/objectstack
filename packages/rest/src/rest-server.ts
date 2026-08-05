@@ -44,6 +44,11 @@ import {
 import { runImport } from './import-runner.js';
 import { prepareImportRequest, isMetaEnvelope } from './import-prepare.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
+import {
+    isEndpointMatchAuthority,
+    selectServedEndpoints,
+    type EndpointMatchAuthority,
+} from './served-endpoints.js';
 
 // Node-safe logger — avoids importing 'console' which is absent from ES2020 lib typings.
 const logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);
@@ -1495,6 +1500,20 @@ export class RestServer {
      *  single-kernel deployments, so this prevents the gate failing open. */
     private serviceExistsProvider?: (name: string) => boolean;
     /**
+     * [#5224] `metadata` service resolver — the endpoint matcher behind
+     * `IMetadataService.matchEndpoint`, and therefore the ONE authority on
+     * which declared `api` route the runtime actually serves. Read by the two
+     * machine-readable endpoint faces (`GET /meta/api`, `GET /openapi.json`)
+     * so neither announces a declaration that answers 404.
+     */
+    private metadataServiceProvider?: (environmentId?: string) => Promise<unknown>;
+    /**
+     * One-shot latch for the "no matcher wired" degradation notice below, so a
+     * host that never wired {@link metadataServiceProvider} says so once per
+     * server rather than once per request.
+     */
+    private warnedMissingEndpointAuthority = false;
+    /**
      * In-flight async import jobs the caller has asked to cancel. The worker
      * checks membership at each progress boundary and stops cooperatively. This
      * is process-local (single-node); the persisted `sys_import_job.status` is
@@ -1522,6 +1541,7 @@ export class RestServer {
         serviceExistsProvider?: (name: string) => boolean,
         securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         requestEnvResolver?: RestRequestEnvResolver,
+        metadataServiceProvider?: (environmentId?: string) => Promise<unknown>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -1542,6 +1562,73 @@ export class RestServer {
         this.serviceExistsProvider = serviceExistsProvider;
         this.securityServiceProvider = securityServiceProvider;
         this.requestEnvResolver = requestEnvResolver;
+        this.metadataServiceProvider = metadataServiceProvider;
+    }
+
+    /**
+     * Resolve the endpoint matcher for this request — the authority the two
+     * machine-readable endpoint faces consult before announcing anything
+     * (#5224).
+     *
+     * Same lookup chain as {@link resolveProtocol}: the per-request kernel when
+     * one is resolvable (a multi-tenant host must ask the REQUEST's own
+     * matcher, or one environment's declarations would describe another's
+     * URLs), else the single-kernel provider `rest-api-plugin` wires.
+     *
+     * Returns `undefined` when nothing in the chain can answer — including when
+     * the resolved occupant of the `metadata` slot carries no `matchEndpoint`,
+     * which is a legal shape (the contract method is optional). Callers must
+     * decide what an ABSENT authority means for their surface rather than
+     * having a verdict invented here; see the call sites.
+     */
+    private async resolveEndpointMatchAuthority(
+        environmentId?: string,
+        req?: any,
+    ): Promise<EndpointMatchAuthority | undefined> {
+        let envId: string | undefined;
+        try {
+            // Shared resolution entry point (ADR-0076 D11 step 4), the same one
+            // `resolveProtocol` / `resolveI18nService` use — so the face reads
+            // the matcher of the environment whose items it just enumerated.
+            envId = await this.resolveRequestEnvironmentId(environmentId, req);
+        } catch { /* fall through to the single-kernel provider */ }
+
+        if (envId && envId !== 'platform' && this.kernelManager) {
+            try {
+                const kernel = await this.kernelManager.getOrCreate(envId);
+                const svc = await kernel.getServiceAsync<unknown>('metadata');
+                if (isEndpointMatchAuthority(svc)) return svc;
+            } catch { /* fall through */ }
+        }
+        if (this.metadataServiceProvider) {
+            try {
+                const svc = await this.metadataServiceProvider(envId);
+                if (isEndpointMatchAuthority(svc)) return svc;
+            } catch { /* an unreachable provider is an ABSENT authority */ }
+        }
+        return undefined;
+    }
+
+    /**
+     * Say — once per server — that no endpoint matcher is reachable, so the
+     * endpoint faces cannot promise they describe only served routes.
+     *
+     * Loud rather than silent (AGENTS.md, Route & surface ownership Rule 3):
+     * without the authority these surfaces fall back to enumerating what is
+     * STORED, which is exactly the pre-#5224 behaviour and exactly the state
+     * that can advertise a route answering 404. Reported at `error` because the
+     * consequence is a contract face that may lie, and the remedy is a wiring
+     * change the operator can make.
+     */
+    private notifyMissingEndpointAuthority(surface: string): void {
+        if (this.warnedMissingEndpointAuthority) return;
+        this.warnedMissingEndpointAuthority = true;
+        logError(
+            `[REST] no endpoint matcher is reachable (no \`metadata\` service with \`matchEndpoint\`), so ${surface} ` +
+                `cannot narrow declared \`api\` items to the ones this runtime actually serves. It is enumerating ` +
+                `what is STORED instead, which may advertise routes that answer 404. Wire the metadata service ` +
+                `into the REST server (rest-api-plugin does this) to restore the guarantee.`,
+        );
     }
 
     /**
@@ -3027,10 +3114,38 @@ export class RestServer {
                     const apiItems: unknown[] = Array.isArray((apiResult as any)?.items)
                         ? (apiResult as any).items
                         : Array.isArray(apiResult) ? apiResult as unknown[] : [];
-                    enriched = enrichOpenApiWithEndpoints(enriched, apiItems, {
+                    const endpointLogger = {
                         error: (message: string, meta?: unknown) =>
                             meta === undefined ? logError(message) : logError(message, meta),
-                    });
+                    };
+
+                    // [#5224] Enumerated is not served. This document is what
+                    // SDKs, codegen and AI clients build clients FROM, so it
+                    // describes only the declarations the endpoint matcher will
+                    // actually answer — asked of the matcher itself, the sole
+                    // holder of that verdict. A stored row the matcher cannot
+                    // see used to arrive here and be published as a real path,
+                    // `security: []` and all, while every request to it 404'd.
+                    let documentable: unknown[] = apiItems;
+                    const authority = apiItems.length > 0
+                        ? await this.resolveEndpointMatchAuthority(
+                            isScoped ? req.params?.environmentId : undefined,
+                            req,
+                        )
+                        : undefined;
+                    if (apiItems.length > 0 && !authority) {
+                        this.notifyMissingEndpointAuthority('GET /openapi.json');
+                    } else if (authority) {
+                        // The matcher's OWN parsed endpoint is documented, not
+                        // the stored JSON: schema defaults are materialized on
+                        // it (most importantly `authRequired`), so the document
+                        // describes the value the runtime acts on rather than a
+                        // re-parse of the same row on a second code path.
+                        documentable = (await selectServedEndpoints(apiItems, authority, endpointLogger))
+                            .map((s) => s.endpoint);
+                    }
+
+                    enriched = enrichOpenApiWithEndpoints(enriched, documentable, endpointLogger);
                 } catch (err: any) {
                     // A store that cannot be read must not take the document
                     // down with it — but say so, because a silently endpoint-
@@ -3431,6 +3546,65 @@ export class RestServer {
                         // objectql implementation actually returns the raw
                         // array. Handle both shapes defensively.
                         let visible: any = items;
+
+                        // [#5224] `api` is a CONTRACT face, so it announces only
+                        // the declarations the endpoint matcher will actually
+                        // serve — the same set `/openapi.json` documents, asked
+                        // of the same authority.
+                        //
+                        // The special case is `api`-only and stays that way on
+                        // purpose: for every other type "listed" and "in effect"
+                        // are the same fact, resolved by the one reader that
+                        // enumerated them. For `api` they are not — a declared
+                        // route is served by `IMetadataService.matchEndpoint`,
+                        // whose index is a different reader with a different
+                        // reach, and it is the SOLE holder of that verdict. So
+                        // the special case is not "api is special", it is "api
+                        // is the one type whose service verdict lives somewhere
+                        // this route cannot see without asking".
+                        //
+                        // `?preview=draft` is exempt: that surface exists to
+                        // answer "what is PENDING", which is by construction not
+                        // the served set (a draft is not live and is not meant to
+                        // look live). Filtering it would empty the drafts view of
+                        // a type whose drafts are legitimately unserved. Codegen
+                        // and SDK clients read the plain list, which is filtered.
+                        if (RestServer.metaTypeSingular(req.params.type) === 'api' && !previewDrafts) {
+                            const raw = visible as unknown;
+                            const list = RestServer.metaItemsArray(raw);
+                            if (list.length > 0) {
+                                const authority = await this.resolveEndpointMatchAuthority(environmentId, req);
+                                if (!authority) {
+                                    this.notifyMissingEndpointAuthority('GET /meta/api');
+                                } else {
+                                    // A `matchEndpoint` throw propagates: its
+                                    // contract distinguishes an unreadable store
+                                    // from a miss, so this route FAILS (through
+                                    // `handleRouteError`) rather than claiming
+                                    // the deployment declares nothing. Measured:
+                                    // that failure is currently reported as 400,
+                                    // because an unrecognised error lands on
+                                    // `mapDataError`'s terminal fallback — a
+                                    // pre-existing classification on every error
+                                    // this route reports, not something this
+                                    // narrowing chose. Filed separately; do not
+                                    // read the propagation here as a promise
+                                    // about which status arrives.
+                                    const servedList = await selectServedEndpoints(list, authority, {
+                                        error: (message: string, meta?: unknown) =>
+                                            meta === undefined ? logError(message) : logError(message, meta),
+                                    });
+                                    // The STORED item is what this face answers
+                                    // with — its `_packageId` / `_provenance` /
+                                    // `_diagnostics` decorations are read by the
+                                    // Studio list, and dropping them here would
+                                    // be a second, unannounced change.
+                                    const filtered = servedList.map((s) => s.item);
+                                    visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
+                                }
+                            }
+                        }
+
                         if (RestServer.metaTypeSingular(req.params.type) === 'app') {
                             const raw = items as unknown;
                             const list: any[] | null = Array.isArray(raw)

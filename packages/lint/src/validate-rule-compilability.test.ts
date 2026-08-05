@@ -410,7 +410,13 @@ describe('validateRuleCompilability — parity with the write path (#4762)', () 
     ).toEqual([]);
   });
 
-  it('a MISSPELLED format name is published, not refused — pinned as-is, not changed (#5029)', () => {
+  it('a MISSPELLED format name is published by THIS gate — the compile parity, unchanged (#5029/#5178)', () => {
+    // #5178 closed the gap and this assertion still reads `[]`, deliberately.
+    // The refusal lives in `validate-rule-schema-formats.ts`, a rule that
+    // compiles nothing and judges the format NAME against the registered set.
+    // Merging it into this gate would have made the publish gate disagree with
+    // the write path about what COMPILES, which is the one thing this file
+    // exists to prevent. If this ever goes red, that merge has happened.
     // Under `strict: false` ajv logs `unknown format "emial" ignored` and drops
     // the keyword — in the runtime AND here. So the gate must publish it: a
     // finding would be this gate inventing a verdict the write path does not
@@ -826,8 +832,12 @@ describe('validateRuleCompilability — reads only keys the spec declares (meta-
     // guards what the table lists.
     const receivers = [...new Set([...RULE_CODE.matchAll(/\b([a-z][\w$]*)\??\.[A-Za-z_$]/g)].map((m) => m[1]))];
     const tabled = new Set([...READ_SURFACES.map((r) => r.receiver), ...Object.keys(NOT_SCHEMA_RECEIVERS)]);
-    // Locals whose "keys" are JS methods / this file's own plumbing, not metadata.
-    const PLUMBING = new Set(['findings', 'v', 'out']);
+    // Locals whose "keys" are JS methods / this file's own plumbing, not
+    // metadata. `walked` and `names` are the two accumulators #5178 added when
+    // the rule walk and the registered-format vocabulary became shared handles
+    // (`walkObjectValidationRules`, `registeredFormatNames`) — array `.push` /
+    // `.length` / `.sort`, never a key off authored metadata.
+    const PLUMBING = new Set(['findings', 'v', 'out', 'walked', 'names']);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
 
     // …and no excuse outlives the read it excuses. A stale name in either list

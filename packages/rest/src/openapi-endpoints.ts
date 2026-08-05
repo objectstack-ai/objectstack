@@ -64,6 +64,24 @@
  * `/openapi.json` describing its two declared endpoints
  * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`).
  *
+ * ## What it is HANDED (#5224)
+ *
+ * Its production caller no longer passes the enumerated `api` items. It passes
+ * the set the endpoint matcher confirmed it will serve (`served-endpoints.ts`),
+ * because enumeration and service are two different readers and a real boot
+ * measured them disagreeing: a row written through `PUT /meta/api/{name}` was
+ * enumerated, never matched, and published here as a live path with
+ * `security: []` while every request to it answered 404.
+ *
+ * That makes the parse-and-resolve-duplicates pass below DOWNSTREAM of the
+ * authority rather than a second opinion beside it — with a matcher-narrowed
+ * input its duplicate branch cannot fire, since the matcher already resolved
+ * every route to one owner. It is kept because this function is exported and
+ * unit-tested as a unit: it must still refuse to document a half-valid shape
+ * when handed raw items directly. What it must never become is the place where
+ * "will this be served" is decided; that question has one owner, and asking it
+ * is the caller's job.
+ *
  * The empty-set case is still exact rather than approximate — with nothing to
  * add, {@link enrichOpenApiWithEndpoints} returns its input document BY
  * REFERENCE — which is what keeps a deployment that declares no endpoint
