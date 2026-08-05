@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import type { QueryAST } from '@objectstack/spec/data';
 
 /**
  * Regression: a TOP-LEVEL `where` this transport cannot compile must THROW,
@@ -68,7 +69,7 @@ function transportWithCapturingClient() {
 /** The SQL a `find` compiled to, plus its bind list. */
 async function compile(where: unknown): Promise<{ sql: string; args: any[] }> {
   const { t, calls } = transportWithCapturingClient();
-  await t.find('deal', { where } as any);
+  await t.find('deal', { where } as unknown as QueryAST);
   return calls[0];
 }
 
@@ -90,21 +91,21 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
     for (const [label, where, message] of MEASURED) {
       it(`refuses ${label}`, async () => {
         const { t } = transportWithCapturingClient();
-        await expect(t.find('deal', { where } as any)).rejects.toThrow(message);
+        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(message);
       });
 
       it(`executes no statement for ${label}`, async () => {
         // The regression itself: before the fix this resolved, having run
         // `SELECT * FROM "deal"` — every row in the table.
         const { t, calls } = transportWithCapturingClient();
-        await expect(t.find('deal', { where } as any)).rejects.toThrow();
+        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow();
         expect(calls).toEqual([]);
       });
     }
 
     it('names the object and echoes the filter so the caller is findable', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: [['stage', '=', 'won']] } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: [['stage', '=', 'won']] } as unknown as QueryAST)).rejects.toThrow(
         /where on 'deal' is an array, not a filter condition: \[\["stage","=","won"\]\]/,
       );
     });
@@ -114,14 +115,14 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // `VALID_AST_OPERATORS` leaves `parseFilterAST()` unconverted), so its
       // message carries the repair rather than only the complaint.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: [['stage', 'before', 'x']] } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: [['stage', 'before', 'x']] } as unknown as QueryAST)).rejects.toThrow(
         /parseFilterAST/,
       );
     });
 
     it('says which failure it is refusing, in the family\'s words', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: 42 } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: 42 } as unknown as QueryAST)).rejects.toThrow(
         /Refusing rather than compiling it to NO WHERE clause/,
       );
     });
@@ -143,7 +144,7 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
     for (const [label, where] of accidental) {
       it(`refuses ${label} rather than reading it as "no filter"`, async () => {
         const { t, calls } = transportWithCapturingClient();
-        await expect(t.find('deal', { where } as any)).rejects.toThrow(
+        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(
           /not a filter condition/,
         );
         expect(calls).toEqual([]);
@@ -157,7 +158,7 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // node test mean two different things at two levels.
       const { t } = transportWithCapturingClient();
       await expect(
-        t.find('deal', { where: new (class Filter { stage = 'won' })() } as any),
+        t.find('deal', { where: new (class Filter { stage = 'won' })() } as unknown as QueryAST),
       ).rejects.toThrow(/is an object, not a filter condition/);
     });
   });
@@ -210,11 +211,11 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
     for (const [label, where] of MEASURED.map(([l, w]) => [l, w] as const)) {
       it(`refuses ${label} on find / findOne / count / aggregate`, async () => {
         const { t, calls } = transportWithCapturingClient();
-        await expect(t.find('deal', { where } as any)).rejects.toThrow(/not a filter condition/);
-        await expect(t.findOne('deal', { where } as any)).rejects.toThrow(/not a filter condition/);
-        await expect(t.count('deal', { where } as any)).rejects.toThrow(/not a filter condition/);
+        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(/not a filter condition/);
+        await expect(t.findOne('deal', { where } as unknown as QueryAST)).rejects.toThrow(/not a filter condition/);
+        await expect(t.count('deal', { where } as unknown as QueryAST)).rejects.toThrow(/not a filter condition/);
         await expect(
-          t.aggregate('deal', { where, aggregations: [{ function: 'count' }] } as any),
+          t.aggregate('deal', { where, aggregations: [{ function: 'count' }] } as unknown as QueryAST),
         ).rejects.toThrow(/not a filter condition/);
         expect(calls).toEqual([]);
       });
@@ -259,7 +260,7 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // refused by the comparand gate, which names the field. The new gate must
       // not swallow that distinction.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { stage: ['won'] } } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: { stage: ['won'] } } as unknown as QueryAST)).rejects.toThrow(
         /Filter comparand 'deal\.stage'/,
       );
     });
@@ -268,10 +269,10 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // The sub-filter gate names the branch and index; the top-level gate says
       // `where`. Two levels, two messages, so a log tells you which one it was.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { $or: [null] } } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: { $or: [null] } } as unknown as QueryAST)).rejects.toThrow(
         /\$or\[0\] on 'deal'/,
       );
-      await expect(t.find('deal', { where: { $not: 'won' } } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: { $not: 'won' } } as unknown as QueryAST)).rejects.toThrow(
         /\$not on 'deal'/,
       );
     });
@@ -279,7 +280,7 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
     it('keeps refusing a nested AST array inside a logical branch as a BRANCH error', async () => {
       const { t } = transportWithCapturingClient();
       await expect(
-        t.find('deal', { where: { $and: [[['stage', '=', 'won']]] } } as any),
+        t.find('deal', { where: { $and: [[['stage', '=', 'won']]] } } as unknown as QueryAST),
       ).rejects.toThrow(/\$and\[0\] on 'deal' is an array/);
     });
   });
@@ -324,11 +325,11 @@ describe('TursoDriver remote — a refused top-level where touches no rows (#107
     }>);
 
   const ids = async (where: unknown) =>
-    ((await driver.find('deal', { where } as any)) as any[]).map((r) => r.id).sort();
+    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
 
   it('a bare AST array no longer returns the whole table from a read', async () => {
     // Pre-fix: all three rows came back for a filter naming exactly one.
-    await expect(driver.find('deal', { where: [['stage', '=', 'won']] } as any)).rejects.toThrow(
+    await expect(driver.find('deal', { where: [['stage', '=', 'won']] } as unknown as QueryAST)).rejects.toThrow(
       /not a filter condition/,
     );
   });
@@ -362,7 +363,7 @@ describe('TursoDriver remote — a refused top-level where touches no rows (#107
   it('the legitimate whole-table spellings still work on rows', async () => {
     expect(await ids({})).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids(undefined)).toEqual(['d_lost', 'd_open', 'd_won']);
-    expect(await driver.count('deal', { where: {} } as any)).toBe(3);
+    expect(await driver.count('deal', { object: 'deal', where: {} })).toBe(3);
   });
 
   it('a well-formed filter still narrows to its rows', async () => {

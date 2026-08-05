@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import type { QueryAST } from '@objectstack/spec/data';
 
 /**
  * Regression: the remote transport must compile the spec's THIRD logical
@@ -72,7 +73,7 @@ function transportWithCapturingClient() {
 /** The SQL a `find` compiled to, plus its bind list. */
 async function compile(where: unknown): Promise<{ sql: string; args: any[] }> {
   const { t, calls } = transportWithCapturingClient();
-  await t.find('deal', { where } as any);
+  await t.find('deal', { where } as unknown as QueryAST);
   return calls[0];
 }
 
@@ -295,19 +296,19 @@ describe('RemoteTransport $not (#1076)', () => {
     it('keeps refusing what the INNER filter refuses — the negation swallows nothing', async () => {
       const { t } = transportWithCapturingClient();
       // #1071: an empty operator map on a field.
-      await expect(t.find('deal', { where: { $not: { closed_at: {} } } } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: { $not: { closed_at: {} } } } as unknown as QueryAST)).rejects.toThrow(
         /compiles to NO predicate/,
       );
       // #1004: an unknown operator.
       await expect(
-        t.find('deal', { where: { $not: { stage: { $like: 'w%' } } } } as any),
+        t.find('deal', { where: { $not: { stage: { $like: 'w%' } } } } as unknown as QueryAST),
       ).rejects.toThrow(/Unsupported filter operator "\$like"/);
       // #1058: an unbindable comparand.
       await expect(
-        t.find('deal', { where: { $not: { amount: { $gt: { $field: 'budget' } } } } } as any),
+        t.find('deal', { where: { $not: { amount: { $gt: { $field: 'budget' } } } } } as unknown as QueryAST),
       ).rejects.toThrow(/Cross-field comparison is not supported/);
       // #1073: a non-node element of a nested logical array.
-      await expect(t.find('deal', { where: { $not: { $or: [null] } } } as any)).rejects.toThrow(
+      await expect(t.find('deal', { where: { $not: { $or: [null] } } } as unknown as QueryAST)).rejects.toThrow(
         /\$or\[0\] on 'deal'/,
       );
     });
@@ -329,7 +330,7 @@ describe('RemoteTransport $not (#1076)', () => {
     it('negates on count / deleteMany / updateMany', async () => {
       const { t, calls } = transportWithCapturingClient();
       const where = { $not: { stage: 'won' } };
-      await t.count('deal', { where } as any);
+      await t.count('deal', { where } as unknown as QueryAST);
       await t.deleteMany('deal', { where } as any);
       await t.updateMany('deal', { where } as any, { stage: 'lost' });
       expect(calls[0].sql).toMatch(/COUNT\(\*\).+WHERE NOT \("stage" = \?\)/i);
@@ -402,7 +403,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   const ids = async (where: unknown) =>
-    ((await driver.find('deal', { where } as any)) as any[]).map((r) => r.id).sort();
+    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
 
   it('`$not: { stage: "won" }` returns the other rows, not a `no such column` error', async () => {
     // Pre-fix: threw before reaching SQLite; had it compiled, SQLite would have
@@ -476,14 +477,14 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // Un-lowered, the transport (correctly) refuses `$between` and names a
     // lowering step that had been skipped for this depth.
     await expect(
-      driver.find('deal', { where: { $not: { amount: { $between: [15, 35] } } } } as any),
+      driver.find('deal', { object: 'deal', where: { $not: { amount: { $between: [15, 35] } } } }),
     ).resolves.toBeDefined();
     expect(await ids({ $not: { amount: { $between: [15, 35] } } })).toEqual(['d_null', 'd_won']);
   });
 
   it('`count` agrees with `find`', async () => {
-    expect(await driver.count('deal', { where: { $not: { stage: 'won' } } } as any)).toBe(2);
-    expect(await driver.count('deal', { where: { $not: {} } } as any)).toBe(0);
+    expect(await driver.count('deal', { object: 'deal', where: { $not: { stage: 'won' } } })).toBe(2);
+    expect(await driver.count('deal', { object: 'deal', where: { $not: {} } })).toBe(0);
   });
 
   it('`deleteMany` with `$not: {}` deletes NOTHING', async () => {
@@ -504,7 +505,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   it('a non-node `$not` operand is refused through the driver too', async () => {
-    await expect(driver.find('deal', { where: { $not: null } } as any)).rejects.toThrow(
+    await expect(driver.find('deal', { where: { $not: null } } as unknown as QueryAST)).rejects.toThrow(
       /not a filter condition/,
     );
   });

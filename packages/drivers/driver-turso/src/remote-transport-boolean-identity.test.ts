@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import type { QueryAST } from '@objectstack/spec/data';
 
 /**
  * Regression: `$and`/`$or` sub-filters that compile to nothing must get the
@@ -64,7 +65,7 @@ function transportWithCapturingClient() {
 /** The SQL a `find` compiled to, plus its bind list. */
 async function compile(where: unknown): Promise<{ sql: string; args: any[] }> {
   const { t, calls } = transportWithCapturingClient();
-  await t.find('deal', { where } as any);
+  await t.find('deal', { where } as unknown as QueryAST);
   return calls[0];
 }
 
@@ -175,7 +176,7 @@ describe('RemoteTransport $and/$or identity elements (#1073)', () => {
       // is a real "too many parameter values" failure, not a cosmetic one.
       const { t, calls } = transportWithCapturingClient();
       const where = { $or: [{ stage: 'won' }, {}] };
-      await t.count('deal', { where } as any);
+      await t.count('deal', { where } as unknown as QueryAST);
       await t.deleteMany('deal', { where } as any);
       await t.updateMany('deal', { where } as any, { stage: 'lost' });
       expect(calls[0].args).toEqual([]);
@@ -325,7 +326,7 @@ describe('RemoteTransport $and/$or identity elements (#1073)', () => {
   describe('(f) the same answers through every WHERE-building entry point', () => {
     it('compiles `$or: []` to FALSE on count / deleteMany / updateMany', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await t.count('deal', { where: { $or: [] } } as any);
+      await t.count('deal', { object: 'deal', where: { $or: [] } });
       await t.deleteMany('deal', { where: { $or: [] } } as any);
       await t.updateMany('deal', { where: { $or: [] } } as any, { stage: 'lost' });
       // Pre-fix these were an unfiltered COUNT, a DELETE of the whole table and
@@ -380,7 +381,7 @@ describe('TursoDriver remote — identity elements on real rows (#1073)', () => 
   });
 
   const ids = async (where: unknown) =>
-    ((await driver.find('deal', { where } as any)) as any[]).map((r) => r.id).sort();
+    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
 
   it('`$or: []` returns ZERO rows', async () => {
     // Pre-fix: all three.
@@ -404,8 +405,8 @@ describe('TursoDriver remote — identity elements on real rows (#1073)', () => 
   it('`count` with an absorbed `$or` counts every row and binds nothing', async () => {
     // Executed, not string-matched: a stray bind left over from the absorbed
     // disjunct makes better-sqlite3 reject the statement outright.
-    expect(await driver.count('deal', { where: { $or: [{ stage: 'won' }, {}] } } as any)).toBe(3);
-    expect(await driver.count('deal', { where: { $or: [] } } as any)).toBe(0);
+    expect(await driver.count('deal', { object: 'deal', where: { $or: [{ stage: 'won' }, {}] } })).toBe(3);
+    expect(await driver.count('deal', { object: 'deal', where: { $or: [] } })).toBe(0);
   });
 
   it('a real two-branch `$or` is unchanged', async () => {
@@ -429,7 +430,7 @@ describe('TursoDriver remote — identity elements on real rows (#1073)', () => 
   });
 
   it('a non-node branch element is refused through the driver too', async () => {
-    await expect(driver.find('deal', { where: { $or: [null] } } as any)).rejects.toThrow(
+    await expect(driver.find('deal', { where: { $or: [null] } } as unknown as QueryAST)).rejects.toThrow(
       /not a filter condition/,
     );
   });

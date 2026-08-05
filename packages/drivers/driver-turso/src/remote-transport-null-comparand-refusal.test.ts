@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import type { QueryAST } from '@objectstack/spec/data';
 
 /**
  * Regression: `$null` takes a BOOLEAN, and a non-boolean is refused (#1116).
@@ -89,7 +90,7 @@ function transportWithCapturingClient() {
 async function refusalOf(where: unknown): Promise<WireBearingError> {
   const { t, calls } = transportWithCapturingClient();
   try {
-    await t.find('deal', { where } as any);
+    await t.find('deal', { where } as unknown as QueryAST);
   } catch (e) {
     // A refused filter must not have run a statement on the way to throwing.
     expect(calls).toEqual([]);
@@ -103,7 +104,7 @@ async function refusalOf(where: unknown): Promise<WireBearingError> {
 /** The SQL a `find` compiled to, plus its bind list. */
 async function compile(where: unknown): Promise<{ sql: string; args: any[] }> {
   const { t, calls } = transportWithCapturingClient();
-  await t.find('deal', { where } as any);
+  await t.find('deal', { where } as unknown as QueryAST);
   return calls[0];
 }
 
@@ -226,11 +227,11 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
     it('refuses on find / findOne / count / aggregate with NO statement executed', async () => {
       const { t, calls } = transportWithCapturingClient();
       const where = { stage: { $null: 'yes' } };
-      await expect(t.find('deal', { where } as any)).rejects.toThrow(/requires a boolean comparand/);
-      await expect(t.findOne('deal', { where } as any)).rejects.toThrow(/requires a boolean comparand/);
-      await expect(t.count('deal', { where } as any)).rejects.toThrow(/requires a boolean comparand/);
+      await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(/requires a boolean comparand/);
+      await expect(t.findOne('deal', { where } as unknown as QueryAST)).rejects.toThrow(/requires a boolean comparand/);
+      await expect(t.count('deal', { where } as unknown as QueryAST)).rejects.toThrow(/requires a boolean comparand/);
       await expect(
-        t.aggregate('deal', { where, aggregations: [{ function: 'count' }] } as any),
+        t.aggregate('deal', { where, aggregations: [{ function: 'count' }] } as unknown as QueryAST),
       ).rejects.toThrow(/requires a boolean comparand/);
       expect(calls).toEqual([]);
     });
@@ -352,7 +353,7 @@ describe('TursoDriver remote — `$null` on rows (#1116)', () => {
   });
 
   const ids = async (where: unknown): Promise<string[]> =>
-    ((await driver.find('deal', { where } as any)) as any[]).map((r) => String(r.id)).sort();
+    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => String(r.id)).sort();
 
   const allRows = () =>
     stub.raw.prepare('SELECT id, stage FROM "deal" ORDER BY id').all() as Array<{
@@ -373,7 +374,7 @@ describe('TursoDriver remote — `$null` on rows (#1116)', () => {
       // Pre-fix every one of these came back as `["2"]`, i.e. the answer
       // `$null: true` gives, for a filter that never said `true`.
       const err = (await driver
-        .find('deal', { where: { stage: { $null: value } } } as any)
+        .find('deal', { where: { stage: { $null: value } } } as unknown as QueryAST)
         .catch((e) => e)) as WireBearingError;
       expect(err).toBeInstanceOf(Error);
       expect(err.code).toBe('INVALID_FILTER');
