@@ -385,11 +385,11 @@ List chart view configuration
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
-| **tree** | `Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **description** | `string` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -473,11 +473,11 @@ List chart view configuration
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
-| **tree** | `Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **description** | `string` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |

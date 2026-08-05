@@ -51,7 +51,7 @@ const result = HealthStatusSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **plugin** | `Record<string, any>` | ✅ | Plugin metadata |
+| **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
 | **success** | `boolean` | ✅ | Whether the plugin started successfully |
 | **duration** | `number` | ✅ | Time taken to start the plugin in milliseconds |
 | **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |

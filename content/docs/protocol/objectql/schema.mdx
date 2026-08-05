@@ -280,7 +280,7 @@ fields:
 | `type` | `string` | All | **Required.** Field type (see [Types](/docs/protocol/objectql/types)). |
 | `label` | `string` | All | **Required.** Display label in UI. |
 | `required` | `boolean` | All | Validation: Field must have a value. |
-| `unique` | `boolean \| 'global'` | All | Enforce uniqueness at database level. `true` = unique **within the tenant**; `'global'` = unique platform-wide. See [Uniqueness and tenancy](#uniqueness-and-tenancy). |
+| `unique` | `boolean \| 'global' \| 'organization'` | All | Enforce uniqueness at database level, at a stated scope. `'organization'` = one holder **per organization** (`true` is its positional synonym); `'global'` = one holder across the whole installation. See [Uniqueness and scope](#uniqueness-and-scope). |
 | `searchable` | `boolean` | All | Is searchable. |
 | `defaultValue` | `any` | All | Default value when creating new records. |
 | `description` | `string` | All | Tooltip/Help text. |
@@ -538,9 +538,9 @@ Optimize query performance with indexes:
 
 ```yaml
 indexes:
-  # Single-field unique index
+  # Single-field unique index — state the scope (ADR-0120)
   - fields: [email]
-    unique: true
+    unique: organization
   
   # Composite index
   - fields: [account_id, status]
@@ -568,53 +568,69 @@ Supported index `type` values: `btree` (default), `hash`, `gin`, `gist`, `fullte
   - Fields that change frequently
   - Large text fields (use full-text search instead)
 
-### Uniqueness and tenancy
+### Uniqueness and scope
 
-On a tenant-scoped object, **field-level `unique: true` means unique *within* the
-tenant**, not platform-wide. The driver materializes it as a composite index
-`(tenantField, field)`:
+`unique` states **which boundary the value must be unique within**. There are
+exactly two boundaries, and the same two words work on a field and on a declared
+index (ADR-0120):
 
 ```yaml
 fields:
   code:
     type: autonumber
     autonumberFormat: 'PROD-{00000}'
-    unique: true      # each tenant may hold its own PROD-00001
-```
-
-This matches every other tenant-aware part of the platform: reads are filtered by
-the tenant predicate, writes stamp the tenant column, and the auto-number sequence
-gives each tenant a counter starting at 1. A platform-wide index would contradict
-the sequence outright — the second tenant's `PROD-00001` would be rejected by an
-index it cannot see, and the rejection itself would reveal that *some other tenant*
-holds the value.
-
-For the identifiers that genuinely are platform-wide — a DNS hostname, a reserved
-slug, an external provider id, a device identity — say so explicitly:
-
-```yaml
-fields:
+    unique: organization   # each organization may hold its own PROD-00001
   hostname:
     type: text
-    unique: global    # no two tenants may claim the same hostname
+    unique: global         # no two organizations may claim the same hostname
 ```
 
-On an object with no tenant column (`tenancy: { enabled: false }`, or simply no
-tenant field) both spellings behave identically. **Single-tenant deployments are
-unaffected** — the tenant column is constant, so the composite index degenerates
-to the single-column one.
+`'organization'` matches every other organization-aware part of the platform:
+reads are filtered by the organization predicate, writes stamp the organization
+column, and the auto-number sequence gives each organization a counter starting
+at 1. An installation-wide index would contradict the sequence outright — the
+second organization's `PROD-00001` would be rejected by an index it cannot see,
+and the rejection itself would reveal that *some other organization* holds the
+value.
 
-**Declared `indexes` are different:** they are materialized over exactly the
-columns you list, with no tenant column injected. Write the tenant column yourself
-when you want a per-tenant index:
+Use `'global'` for the identifiers that genuinely are installation-wide: a DNS
+hostname, a reserved slug, an external provider id, a device identity, an engine
+dedup key.
+
+Field-level `unique: true` is the positional synonym of `'organization'` and
+stays valid indefinitely; `'organization'` is simply the preferred spelling in
+new code.
+
+**The organization key part is NULL-safe.** It materializes as
+`COALESCE(organization_id, '__global__')`, so rows carrying no organization —
+platform rows, and *every* row on a single-organization deployment — form one
+platform bucket that is unique among itself. A plain `(organization_id, field)`
+composite would enforce nothing on those rows, because SQL `UNIQUE` treats every
+`NULL` as distinct. The value stored in the column is still `NULL`; the sentinel
+exists only inside the index key, so `WHERE organization_id = '__global__'`
+matches nothing by design.
+
+On an object with no organization column (`tenancy: { enabled: false }`, or
+simply no such field) `'organization'` degrades to the listed columns alone —
+identical to `'global'` there.
+
+**Declared `indexes` use the same vocabulary:**
 
 ```yaml
 indexes:
-  - fields: [organization_id, code]   # unique per tenant
-    unique: true
-  - fields: [hostname]                # unique platform-wide
-    unique: true
+  - fields: [department, code]        # unique per organization —
+    unique: organization              # you do NOT list the organization column
+  - fields: [hostname]                # unique across the whole installation
+    unique: global
 ```
+
+Bare `unique: true` on a *declared index* is the deprecated spelling of
+`'global'` (materialized over exactly the listed columns). It is warned by
+`os lint` / `os build` / `os validate` as `unique/unscoped-declared-index` and
+rejected at protocol 18 — state the scope instead. A legacy index that lists the
+organization column itself (`fields: [organization_id, code]`) keeps working
+unchanged; respelling its scope to `'organization'` makes the listed column
+NULL-safe in place.
 
 ## Lifecycle Hooks
 
@@ -800,7 +816,7 @@ fields:
 # query indexes in the object-level `indexes[]` array
 email:
   type: text
-  unique: true
+  unique: organization
 
 # Use appropriate field types
 status:
@@ -913,7 +929,7 @@ fields:
     type: text
     label: SKU
     required: true
-    unique: true
+    unique: organization
     searchable: true
   
   name:

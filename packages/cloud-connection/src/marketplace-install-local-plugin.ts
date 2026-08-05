@@ -42,7 +42,17 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveTenancyPosture } from '@objectstack/types';
+import {
+    resolveTenancyPosture,
+    collectGlobalUniques,
+    unconfirmedGlobalUniques,
+    recordGlobalUniqueAttestation,
+    buildGlobalUniqueStopMessage,
+    describeGlobalUniqueFinding,
+    postureGatesGlobalUniques,
+    GLOBAL_UNIQUE_CONFIRMATION_REQUIRED,
+    type GlobalUniqueFinding,
+} from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -553,6 +563,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 409);
         }
 
+        // 2b. [ADR-0120 D5e] `isolated`-posture gate on installation-wide
+        //     uniques. Runs BEFORE hot-register and before anything is written
+        //     to the ledger: a stopped install must leave the runtime exactly as
+        //     it found it, so the installer can rewrite the metadata and retry
+        //     without an uninstall in between.
+        const previousEntry = this.ledger.read(manifestId);
+        const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
+        if (gate.blocked) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] install of ${manifestId} stopped by the ADR-0120 D5e posture gate ` +
+                `(${gate.pending.length} unconfirmed installation-wide unique(s))`,
+            );
+            return c.json({
+                success: false,
+                error: {
+                    code: GLOBAL_UNIQUE_CONFIRMATION_REQUIRED,
+                    message: buildGlobalUniqueStopMessage(manifestId, gate.pending),
+                    // Machine-readable so an AI installer can decide per index
+                    // instead of re-parsing the prose it was handed.
+                    details: {
+                        posture: gate.posture,
+                        findings: gate.pending.map((f) => ({
+                            id: f.id,
+                            object: f.object,
+                            kind: f.kind,
+                            ...(f.name ? { name: f.name } : {}),
+                            columns: f.columns,
+                            spelling: f.spelling,
+                            describe: describeGlobalUniqueFinding(f),
+                        })),
+                        confirmWith: {
+                            body: { confirmGlobalUniques: gate.pending.map((f) => f.id) },
+                            cli: 'os package install … --confirm-global-uniques',
+                        },
+                    },
+                },
+            }, 409);
+        }
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -586,6 +635,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             installedAt: new Date().toISOString(),
             installedBy: userId,
             withSampleData: false,
+            // [ADR-0120 D5e] Carry the attestation across the reinstall so the
+            // ceremony is not re-run for constraints already answered for, and
+            // fold in whatever this install confirmed.
+            ...(gate.attestation ? { globalUniqueAttestation: gate.attestation } : {}),
         };
         try {
             this.ledger.write(entry);
@@ -690,6 +743,79 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 note: 'Cached manifest removed. The app remains loaded in the running kernel until the next restart (the kernel API does not support unregistering apps in-place).',
             },
         }, 200);
+    };
+
+    /**
+     * [ADR-0120 D5e] Decide whether this install must stop for the
+     * `isolated`-posture confirmation, and what attestation the ledger entry
+     * should carry afterwards.
+     *
+     * The three outcomes, in the order they are checked:
+     *
+     * 1. **Not `isolated`** — no findings are decision points at all. Under
+     *    `single` there is one customer; under `group` the installation IS the
+     *    customer company, which is exactly what `'global'` means there. The
+     *    previous attestation (if any) is carried through untouched rather than
+     *    dropped: a posture may flip back, and a confirmation already given is
+     *    still a fact about the posture it was given under.
+     * 2. **Every finding already answered for** — proceed silently. This is the
+     *    "之后不复问" half of the decision, and it is why the record lives in the
+     *    durable ledger rather than in memory.
+     * 3. **Something unanswered** — stop, unless THIS request confirms it.
+     *
+     * Whatever this returns as `attestation` is written into the install
+     * manifest in ADR-0104 attestation style — the fact affirmed, by whom, when,
+     * and under which posture — so the ceremony is evidence, not a dismissed
+     * prompt.
+     *
+     * `confirmGlobalUniques` accepts either `true` (confirm everything the gate
+     * lists, the shape a CLI `--confirm-global-uniques` produces) or an explicit
+     * array of finding ids. The array form is the per-index ceremony the ADR
+     * asks for: confirming two of three constraints still stops on the third,
+     * so an installer cannot blanket-approve a list it did not read by echoing
+     * back one id.
+     */
+    private evaluateGlobalUniqueGate = (
+        manifest: any,
+        previous: InstalledEntry | null,
+        body: any,
+        installerId: string | null,
+    ): {
+        blocked: boolean;
+        posture: string;
+        pending: GlobalUniqueFinding[];
+        attestation?: InstalledEntry['globalUniqueAttestation'];
+    } => {
+        const posture = resolveTenancyPosture();
+        const carried = previous?.globalUniqueAttestation;
+        if (!postureGatesGlobalUniques(posture)) {
+            return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
+        }
+
+        const findings = collectGlobalUniques(manifest?.objects);
+        const pending = unconfirmedGlobalUniques(findings, carried, posture);
+        if (pending.length === 0) {
+            return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
+        }
+
+        const raw = body?.confirmGlobalUniques;
+        const confirmedIds =
+            raw === true
+                ? pending.map((f) => f.id)
+                : Array.isArray(raw)
+                  ? pending.filter((f) => raw.includes(f.id)).map((f) => f.id)
+                  : [];
+        const stillPending = pending.filter((f) => !confirmedIds.includes(f.id));
+        if (stillPending.length > 0) {
+            return { blocked: true, posture, pending: stillPending };
+        }
+
+        return {
+            blocked: false,
+            posture,
+            pending: [],
+            attestation: recordGlobalUniqueAttestation(carried, confirmedIds, posture, installerId),
+        };
     };
 
     /**

@@ -25,13 +25,50 @@ ObjectStack automatically creates indexes for:
 
 ```typescript
 indexes: [
-  { fields: ['status', 'created_at'] },              // btree (default)
-  { fields: ['email'], unique: true },                // btree + unique
-  { fields: ['description'], type: 'fulltext' },      // non-default type
-  { fields: ['tags'], type: 'gin' },                  // non-default type
-  { fields: ['location'], type: 'gist' },             // non-default type
+  { fields: ['status', 'created_at'] },                // btree (default)
+  { fields: ['email'], unique: 'organization' },       // btree + unique per org
+  { fields: ['hostname'], unique: 'global' },          // btree + unique platform-wide
+  { fields: ['description'], type: 'fulltext' },       // non-default type
+  { fields: ['tags'], type: 'gin' },                   // non-default type
+  { fields: ['location'], type: 'gist' },              // non-default type
 ]
 ```
+
+## Unique scope — always state it (ADR-0120)
+
+A unique index must say **which boundary** the value is unique within. There are
+exactly two, and the same words work on a field and on a declared index:
+
+| Scope | Meaning | Materializes as |
+|-------|---------|-----------------|
+| `unique: 'organization'` | One holder **per organization** | `(COALESCE(organization_id, '__global__'), …fields)` |
+| `unique: 'global'` | One holder across the **whole installation** | exactly the listed columns |
+
+```typescript
+// ✅ per organization — do NOT list organization_id yourself
+{ fields: ['department', 'code'], unique: 'organization' }
+
+// ✅ platform-wide — a hostname, an external id, an engine dedup key
+{ fields: ['source', 'dedup_key'], unique: 'global' }
+
+// ❌ scope unstated — this is the DEPRECATED spelling of 'global'.
+//    It reads like "per organization" and does the opposite.
+//    `os lint` reports unique/unscoped-declared-index; protocol 18 rejects it.
+{ fields: ['code'], unique: true }
+```
+
+Notes an author has to know:
+
+- **`'organization'` is NULL-safe.** Rows with no organization — and *every* row
+  on a single-organization deployment — form one platform bucket that is unique
+  among itself. A plain `(organization_id, x)` composite enforces nothing there,
+  because SQL `UNIQUE` treats every `NULL` as distinct.
+- **On a FIELD, `unique: true` means `'organization'`** and stays valid forever;
+  `'organization'` is just the preferred spelling in new code. Only on a
+  *declared index* is bare `true` deprecated.
+- **You never write the posture.** The same declaration is correct under every
+  tenancy posture — state the business boundary, not the deployment shape.
+- **`'tenant'` and `'org'` are rejected.** The word is `'organization'`.
 
 ## When to Add Indexes
 
@@ -78,11 +115,15 @@ indexes: [
 
 ```typescript
 indexes: [
-  // Single column uniqueness
-  { fields: ['email'], unique: true },
+  // Single column, one holder per organization
+  { fields: ['email'], unique: 'organization' },
 
-  // Composite uniqueness
-  { fields: ['tenant_id', 'username'], unique: true },
+  // Composite, one holder per organization — the organization key part is
+  // supplied by the driver; do not list organization_id yourself
+  { fields: ['department', 'username'], unique: 'organization' },
+
+  // Single column, one holder across the whole installation
+  { fields: ['hostname'], unique: 'global' },
 ]
 ```
 
@@ -99,7 +140,7 @@ indexes: [
   // Only index non-deleted records
   {
     fields: ['email'],
-    unique: true,
+    unique: 'organization',
     partial: "deleted_at IS NULL",
   },
 ]
@@ -152,7 +193,7 @@ indexes: [
 ```typescript
 indexes: [
   { fields: ['status'], type: 'btree', unique: false },  // ❌ Redundant defaults
-  { fields: ['email'], type: 'btree', unique: true },    // ❌ Redundant type
+  { fields: ['email'], type: 'btree', unique: 'organization' },  // ❌ Redundant type
 ]
 ```
 
@@ -161,7 +202,7 @@ indexes: [
 ```typescript
 indexes: [
   { fields: ['status'] },               // ✅ btree and unique: false are defaults
-  { fields: ['email'], unique: true },  // ✅ btree is default, only specify unique
+  { fields: ['email'], unique: 'organization' },  // ✅ btree is default; the scope is required
 ]
 ```
 
@@ -260,7 +301,7 @@ Use partial indexes to index only a subset of rows:
 // Only index non-deleted records
 {
   fields: ['email'],
-  unique: true,
+  unique: 'organization',
   partial: "deleted_at IS NULL",
 }
 ```

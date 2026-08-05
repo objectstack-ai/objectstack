@@ -21,7 +21,7 @@ export const Contact = ObjectSchema.create({
   fields: {
     first_name: Field.text({ label: 'First Name', required: true }),
     last_name: Field.text({ label: 'Last Name', required: true }),
-    email: Field.email({ label: 'Email', unique: true }),
+    email: Field.email({ label: 'Email', unique: 'organization' }),
     phone: Field.phone({ label: 'Phone' }),
     birth_date: Field.date({ label: 'Date of Birth' }),
     is_active: Field.boolean({ label: 'Active', defaultValue: true }),

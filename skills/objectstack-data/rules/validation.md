@@ -79,8 +79,9 @@ uniqueness — is declared as a unique **index** on the object:
 
 ```typescript
 indexes: [
-  { fields: ['email'], unique: true },               // single-field uniqueness
-  { fields: ['tenant_id', 'email'], unique: true },  // composite uniqueness
+  { fields: ['email'], unique: 'organization' },              // one per organization
+  { fields: ['department', 'email'], unique: 'organization' }, // composite, per organization
+  { fields: ['hostname'], unique: 'global' },                 // one across the installation
 ]
 ```
 
@@ -406,7 +407,7 @@ Not a validation — declare a unique index on the object:
 
 ```typescript
 indexes: [
-  { fields: ['tenant_id', 'email'], unique: true },
+  { fields: ['department', 'email'], unique: 'organization' },
 ]
 ```
 
@@ -418,7 +419,7 @@ indexes: [
 4. **Priority order** — System validations first (0-99), app validations second (100-999), user validations last (1000+)
 5. **Clear error messages** — Tell users exactly what's wrong and how to fix it
 6. **State machine for workflows** — Use state_machine instead of complex script logic
-7. **Uniqueness is an index concern** — Declare `indexes: [{ fields, unique: true }]`, never a script-based existence check
+7. **Uniqueness is an index concern** — Declare `indexes: [{ fields, unique: 'organization' | 'global' }]` with the scope stated, never a script-based existence check
 8. **External checks are hooks** — Call APIs from `beforeInsert`/`beforeUpdate` hooks, not validations
 9. **Cross-field for comparisons** — More efficient than script validation
 10. **Test thoroughly** — Validate edge cases, nulls, empty strings

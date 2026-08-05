@@ -73,6 +73,21 @@ function refOf(def: any): string | undefined {
 
 export const UNIQUE_DOUBLE_DECLARATION = 'unique/double-declaration';
 export const UNIQUE_UNSCOPED_DECLARED_INDEX = 'unique/unscoped-declared-index';
+export const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE = 'unique/legacy-organization-composite';
+
+/**
+ * The organization column, as an AUTHOR would have spelled it.
+ *
+ * `organization_id` is kernel-injected at registration, not authored — which is
+ * exactly why an author who typed it into an index's `fields` was hand-writing
+ * the per-organization composite the vocabulary now has a word for (ADR-0120
+ * S6). An object may declare a different column via `tenancy.tenantField`; that
+ * spelling is honored here for the same reason.
+ */
+function authoredTenantColumn(obj: any): string {
+  const declared = obj?.tenancy?.tenantField;
+  return typeof declared === 'string' && declared.trim() ? declared.trim() : 'organization_id';
+}
 
 /** Is `unique` declared at all? Mirrors `isUniqueDeclared` in @objectstack/spec/data. */
 function uniqueDeclared(u: unknown): boolean {
@@ -256,6 +271,78 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
   return issues;
 }
 
+/**
+ * R12 (ADR-0120 D5c) — a declared unique index whose column list CONTAINS the
+ * organization column: the hand-written per-organization composite (S6),
+ * predating the vocabulary that can now say so.
+ *
+ * Why this is worth a nudge rather than left alone. The legacy spelling
+ * `{ fields: ['organization_id', 'name'], unique: true }` says "per
+ * organization" to a reader and materializes as a plain composite — and SQL
+ * UNIQUE is NULL-distinct, so on every row where the organization column is
+ * NULL it enforces **nothing** (#5030, measured). On a single-organization
+ * deployment that is *every* row. The `'organization'` respelling is what closes
+ * that hole: the driver makes the LISTED organization column NULL-safe in place
+ * (`COALESCE(organization_id, '__global__')`), so the NULL rows become one
+ * platform bucket that is unique among themselves.
+ *
+ * **Advisory, and deliberately no auto-fix.** ADR-0120 D5c is explicit that the
+ * legacy spelling stays valid and unmigrated forever if untouched — zero forced
+ * drift. Opting in is a real physical tightening that goes through the D4
+ * ceremony (a `recreate_index` gated by the duplicate pre-flight probe), because
+ * the rows the void constraint admitted may still be there. Fixing this on the
+ * author's behalf would schedule that migration without asking.
+ *
+ * Not fired for `unique: 'organization'` — that IS the respelling — nor for a
+ * unique declared on the organization column ALONE, which is not a composite and
+ * has no per-organization reading to recover.
+ */
+export function lintLegacyOrganizationComposites(objects: any[]): LintIssue[] {
+  const issues: LintIssue[] = [];
+  if (!Array.isArray(objects) || objects.length === 0) return issues;
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj?.name) continue;
+    const tenantColumn = authoredTenantColumn(obj);
+    const declaredIndexes = Array.isArray(obj.indexes) ? obj.indexes : [];
+
+    for (let j = 0; j < declaredIndexes.length; j++) {
+      const idx = declaredIndexes[j];
+      // Already the target spelling, or not a unique at all.
+      if (!uniqueDeclared(idx?.unique) || idx.unique === 'organization') continue;
+      const cols = Array.isArray(idx?.fields)
+        ? idx.fields.filter((f: unknown) => typeof f === 'string')
+        : [];
+      if (cols.length < 2) continue; // a lone organization column is not a composite
+      if (!cols.includes(tenantColumn)) continue;
+
+      const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
+      const spelling = `\`unique: ${typeof idx.unique === 'string' ? `'${idx.unique}'` : idx.unique}\``;
+      const rest = cols.filter((c: string) => c !== tenantColumn);
+      issues.push({
+        severity: 'warning',
+        rule: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
+        message:
+          `"${obj.name}" declares index${indexLabel} [${cols.join(', ')}] with ${spelling} and lists the organization ` +
+          `column '${tenantColumn}' itself — the hand-written per-organization composite that predates the scope ` +
+          `vocabulary (ADR-0120 S6). It reads as "unique per organization" but materializes as a plain composite, and ` +
+          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing (#5030) — which ` +
+          `on a single-organization deployment is every row.`,
+        path: `objects[${i}].indexes[${j}]`,
+        fix:
+          `State the scope instead: \`unique: 'organization'\` on this index (keep \`fields\` exactly as they are — the ` +
+          `driver makes the listed '${tenantColumn}' NULL-safe in place rather than prepending a second organization key ` +
+          `part). ${rest.length > 0 ? `The constraint then really is "one ${rest.join(' + ')} per organization". ` : ''}` +
+          `Opting in is a physical tightening: it surfaces as a \`recreate_index\` drift op gated by the duplicate ` +
+          `pre-flight probe (ADR-0120 D4), so pre-existing duplicate NULL-organization rows block it with a report ` +
+          `rather than failing a boot. Leaving it as-is stays valid indefinitely and forces no drift.`,
+      });
+    }
+  }
+  return issues;
+}
+
 // ─── Rule engine ────────────────────────────────────────────────────
 
 /**
@@ -264,12 +351,13 @@ export function lintUniqueDeclarations(objects: any[]): LintIssue[] {
  * metadata-generation scorer.
  */
 export function lintDataModel(objects: any[]): LintIssue[] {
-  // R10/R11 live in their own exported functions so `os validate`/`os build`
+  // R10/R11/R12 live in their own exported functions so `os validate`/`os build`
   // can run those rules without pulling in the whole best-practice sweep
-  // (#3991, ADR-0120 D5a) — here `os lint` picks both up.
+  // (#3991, ADR-0120 D5a/D5b/D5c) — here `os lint` picks all three up.
   const issues: LintIssue[] = [
     ...lintUnscopedDeclaredIndexes(objects),
     ...lintUniqueDeclarations(objects),
+    ...lintLegacyOrganizationComposites(objects),
   ];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 

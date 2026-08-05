@@ -51,11 +51,15 @@ These were once declared here but never enforced. Because the contract above rul
 
 no-ops. Use the layer that already does each one correctly:
 
-- **Uniqueness** → a unique **index** (`ObjectSchema.indexes`, `\{ fields, unique: true \}`,
+- **Uniqueness** → a unique **index** whose scope is stated (`ObjectSchema.indexes`, with
 
-with `partial` for a scoped/conditional constraint), or field-level `unique: true`. A
+`unique: 'organization'` for one holder per organization or `unique: 'global'` for one
 
-SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB unique constraint is not.
+across the whole installation — ADR-0120; `partial` for a scoped/conditional constraint),
+
+or field-level `unique`. A SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB
+
+unique constraint is not.
 
 - **Async / remote validation** → a client-form concern (`debounce`/`validatorUrl` only mean
 
