@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 import {
   lintFlowPatterns,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
@@ -339,8 +340,23 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
   // boundary: these triggers build an AutomationContext with no `userId` at all,
   // so they hit the identical refusal.
   it('flags the OTHER provably user-less triggers too — time-relative and api', () => {
+    // #4966 — the descriptor must be one the runtime can actually BIND. This rule
+    // decides `time-relative` from `startCfg.timeRelative != null` alone
+    // (`lint-flow-patterns.ts`), never from the shape, so this fixture used to
+    // read `{ object, field: 'due_at', offsetDays: -1 }` and stayed green while
+    // describing a flow that never gets a sweep: `TimeRelativeTriggerPlugin.start()`
+    // `safeParse`s `config.timeRelative` against `TimeRelativeTriggerSchema` and
+    // refuses on both counts — `field` is a diagnostic alias, not an accepted key
+    // (the declared one is `dateField`), and `offsetDays` is `z.array(int).min(1)`,
+    // not a scalar. A fixture the runtime would refuse teaches the wrong shape to
+    // every reader of this file (#4001's first-class finding class). Hence the
+    // parse assertion below: the fixture is pinned against the same schema the
+    // bind path uses, so it cannot rot back into an unbindable descriptor.
+    const timeRelativeDescriptor = { object: 'task', dateField: 'due_at', offsetDays: [-1] };
+    expect(TimeRelativeTriggerSchema.safeParse(timeRelativeDescriptor).success).toBe(true);
+
     const timeRelative = lintFlowPatterns(
-      scheduledDataFlow({ flowType: 'autolaunched', startConfig: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } } }),
+      scheduledDataFlow({ flowType: 'autolaunched', startConfig: { timeRelative: timeRelativeDescriptor } }),
     );
     expect(timeRelative.map((f) => f.rule)).toContain(FLOW_RUNAS_UNSCOPED);
     expect(timeRelative[0].message).toMatch(/time-relative/);

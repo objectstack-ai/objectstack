@@ -14,6 +14,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { isServiceServeable } from '../service-serveable.js';
+import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { IAIService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -171,17 +172,30 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // absent — `ExecutionContext.systemPermissions` is optional) becomes
         // `[]`, never `undefined`, so a consumer reads "holds nothing" instead
         // of having to tolerate a missing field.
+        //
+        // [#5372] The shape itself now comes from the ONE producer
+        // (`security/actor-user.ts`) shared with the REST `/actions` and MCP
+        // `run_action` dispatch paths, and it fixes two silent wrong values
+        // this literal carried: `displayName` read a `??` chain over
+        // `ec.userDisplayName` / `ec.userName`, neither of which
+        // `ExecutionContextSchema` declares and neither of which anything ever
+        // assigned (so it always served the raw id), and `email` read
+        // `ec.userEmail` — the declared field is `ec.email`, so `user.email`
+        // here was permanently `undefined`. `name` joins `displayName` (same
+        // value) so all three paths answer to one key set.
+        //
+        // Anonymous stays `undefined` rather than the action paths' `system`
+        // principal: an AI route handler distinguishes "no caller" by the
+        // absence of `user`, and this route only reaches anonymous when the
+        // deployment does not require auth.
         const user = ec?.userId
-            ? {
-                userId: ec.userId,
-                id: ec.userId,
-                displayName: ec.userDisplayName ?? ec.userName ?? ec.userId,
-                email: ec.userEmail,
-                roles: Array.isArray(ec.positions) ? ec.positions : [],
-                permissions: Array.isArray(ec.permissions) ? ec.permissions : [],
-                systemPermissions: Array.isArray(ec.systemPermissions) ? ec.systemPermissions : [],
-                organizationId: ec.tenantId,
-            }
+            ? actorUserFromExecutionContext(
+                ec,
+                await resolveActorDisplayName(
+                    () => deps.getObjectQL(context, context?.environmentId),
+                    ec,
+                ),
+            )
             : undefined;
 
         const result = await route.handler({
