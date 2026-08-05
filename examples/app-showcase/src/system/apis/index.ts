@@ -80,10 +80,10 @@ export const TaskFeedEndpoint: ApiEndpoint = {
   // Seconds. Emitted as `Cache-Control: private, max-age=30` on a SUCCESSFUL
   // answer only — never on a 401/429/5xx, because telling a client to reuse a
   // failure for half a minute is worse than saying nothing. `private` is not
-  // this example's tuning choice: the runtime emits it for every ttl, on
-  // `authRequired: false` endpoints too, because any answer can be RLS-trimmed
-  // for its caller and a shared cache must never store one and hand it to
-  // somebody else. `computeCacheControl` in
+  // this example's tuning choice: the runtime emits it for every positive
+  // ttl, on `authRequired: false` endpoints too, because any answer can be
+  // RLS-trimmed for its caller and a shared cache must never store one and
+  // hand it to somebody else. `computeCacheControl` in
   // `packages/runtime/src/endpoint-policy.ts` states that rule and the rest of
   // the ladder with it — including `cacheTtl: 0`, which is `no-store` rather
   // than "no header": writing 0 says something, and saying nothing is spelled
