@@ -6278,6 +6278,16 @@ export class SqlDriver implements IDataDriver {
    * character (MySQL/Postgres do, but the explicit clause is correct for all
    * three). `shape` positions the wildcard: `contains` → `%v%`, `starts` → `v%`,
    * `ends` → `%v`.
+   *
+   * **Second implementation, deliberately** (#5567):
+   * `packages/services/service-analytics/src/like-pattern.ts` carries the same
+   * transform — same escaped character class, same three shapes, same bound
+   * `ESCAPE` — because `service-analytics` depends on no driver and this is a
+   * private method taking a knex builder, so there is nothing for it to import.
+   * That file's header explains the choice; it is held to THIS expression, character
+   * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
+   * A third hand-copy is the thing to refuse: import from one of the two, or add
+   * a consumer to that test.
    */
   private applyLike(
     builder: any,

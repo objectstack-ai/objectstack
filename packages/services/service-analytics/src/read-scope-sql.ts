@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
 
 /**
  * Compile an RLS / tenant read-scope `FilterCondition` into a parameterized,
@@ -66,6 +67,22 @@ import type { FilterCondition } from '@objectstack/spec/data';
  * canonical; {@link nullSafeNegationOperand} here is the same rewrite
  * `sql-driver.ts` applies, so an analytics query and an ordinary `find()` scope
  * the same rows.
+ *
+ * ## The LIKE family compares LITERALS (#5567)
+ *
+ * `_` is LIKE's single-character wildcard and `%` its multi-character one, so a
+ * comparand concatenated straight into a pattern position stops meaning what the
+ * author wrote: `{owner_name: {$contains: '_admin'}}` also admitted `xyadmin`,
+ * and `{$contains: '50%'}` also admitted `off 5012 now`. Every LIKE arm below
+ * therefore binds an ESCAPED pattern plus its escape character — see
+ * `like-pattern.ts` for the transform, for why the escape character is a bound
+ * value rather than a SQL literal, and for its correspondence with `driver-sql`'s
+ * `applyLike`.
+ *
+ * On THIS compiler that widening was the #5347 / #5324 shape again: a read scope
+ * admitting rows the policy did not is over-reach, not a degraded filter. Note
+ * the file was fail-closed everywhere else — the LIKE family was the one place an
+ * author's literal was silently reinterpreted rather than refused.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -212,6 +229,27 @@ function bind(params: unknown[], v: unknown): string {
   return '?';
 }
 
+/**
+ * [#5567] Bind a LIKE pattern together with its escape character: `? ESCAPE ?`.
+ *
+ * Both are ordinary bound values, so this whole concern stays inside the
+ * predicate: `applyReadScope` (`native-sql-strategy.ts`) and `generateSql`
+ * (`objectql-strategy.ts`) rewrite `?` → `$N` while pushing the matching value
+ * from `params`, and they carry the escape character for free — neither consumer
+ * needed a change. A SQL literal `ESCAPE '\'` would have pushed the problem up a
+ * layer AND been unportable: MySQL strips one backslash inside a string literal,
+ * so the literal spelling differs per dialect while a bound value does not.
+ *
+ * The clause is not optional decoration. SQLite honours no default escape
+ * character, so the escaped pattern alone would search for a literal backslash
+ * there and match nothing — the two halves are one fix (see `like-pattern.ts`).
+ */
+function bindLike(params: unknown[], pattern: string): string {
+  // Left-to-right evaluation of the template puts the pattern in `params` before
+  // the escape character, which is the order the `?` appear.
+  return `${bind(params, pattern)} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
+}
+
 function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
@@ -234,10 +272,12 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
       if (!Array.isArray(val) || val.length !== 2) throw new Error(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
       return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
     }
-    case '$contains': return `${col} LIKE ${bind(params, `%${String(val)}%`)}`;
-    case '$notContains': return `${col} NOT LIKE ${bind(params, `%${String(val)}%`)}`;
-    case '$startsWith': return `${col} LIKE ${bind(params, `${String(val)}%`)}`;
-    case '$endsWith': return `${col} LIKE ${bind(params, `%${String(val)}`)}`;
+    // [#5567] The comparand is a LITERAL, so it is escaped and the escape
+    // character is bound with it. See {@link bindLike}.
+    case '$contains': return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+    case '$notContains': return `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`;
+    case '$startsWith': return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
+    case '$endsWith': return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
     case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val ? `${col} IS NOT NULL` : `${col} IS NULL`;
     default:

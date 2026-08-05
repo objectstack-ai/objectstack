@@ -1130,6 +1130,14 @@ export class AutomationEngine implements IAutomationService {
      * started; only then is an unknown type a finding worth warning about.
      */
     private nodeTypeVocabularySealed = false;
+    /**
+     * Whether this engine has already told its host that
+     * {@link sealNodeTypeVocabulary} was never called (#4792). Per **instance**,
+     * not per process: an embedded host that builds several engines (one per
+     * tenant/environment is the common shape) forgot the call on each of them,
+     * and a module-level flag would report only whichever engine ran first.
+     */
+    private nodeTypeSealOmissionWarned = false;
     private triggers = new Map<string, FlowTrigger>();
     /**
      * Flows currently wired to a trigger, keyed by flow name → the trigger
@@ -2379,6 +2387,13 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' is disabled` };
         }
 
+        // #4792 — a real run is about to start, so if the vocabulary was never
+        // sealed the ADR-0018 §M1 node-type check never ran on this engine at
+        // all. Say so once. Placed after the two guards above so the trigger is
+        // an execution and not a typo'd flow name (which is already loud) or a
+        // flow that cannot run. See the helper for why here and not earlier.
+        this.warnIfNodeTypeVocabularyNeverSealed();
+
         // Re-entrancy loop guard (see `activeRecordFlows`). Break the SAME flow
         // re-firing for the SAME record while a prior execution is still active —
         // a self-trigger cascade whose start condition fails to suppress it would
@@ -3590,6 +3605,68 @@ export class AutomationEngine implements IAutomationService {
             for (const entry of audit) this.warnUnknownNodeTypes(entry);
         }
         return audit;
+    }
+
+    /**
+     * Report — once per engine — that a flow ran on an engine whose node-type
+     * vocabulary was never sealed, so the ADR-0018 §M1 check never ran (#4792).
+     *
+     * #4771 made {@link sealNodeTypeVocabulary} the *only* moment node types are
+     * validated. `AutomationServicePlugin` calls it at `kernel:bootstrapped`, so
+     * every plugin-hosted deployment is covered — but a host that constructs
+     * `new AutomationEngine()` itself has no plugin doing it, and before #4771
+     * those hosts *did* get a verdict at `registerFlow` (an accurate one, since
+     * an embedded host controls its own ordering and typically registers
+     * executors first). For them the fix traded an unreliable warning for no
+     * warning at all, discoverable only by reading a changeset. "Documented" is
+     * not "enforced" (ADR-0049, #4632), so the omission has to say its own name.
+     *
+     * **Why the first `execute()` is the right moment.** It is the earliest point
+     * that is both safe and certain to be reached: the engine cannot know when a
+     * host has finished wiring, but a host that is *running flows* has finished —
+     * this very run resolves its executors from the same registry, and would fail
+     * `NO_EXECUTOR` otherwise. On the plugin path the seal already happened at
+     * `kernel:bootstrapped`, strictly before any `execute()`, so that path can
+     * never reach this line (pinned by test, so the warning cannot become noise).
+     *
+     * **Why it names the missing CALL and not the audit findings.** Running the
+     * unknown-type audit here and warning about what it finds would be the exact
+     * shape AGENTS.md "Startup registry reads" forbids: an unsealed engine is one
+     * whose host has *not* declared the vocabulary closed, so "no executor for
+     * `approval`" is still "not registered YET" — a verdict this process can
+     * contradict a line later, recorded in a log nobody can retract. That is
+     * #4771 rebuilt inside the embedded path. The missing call, by contrast, is a
+     * fact about the host that no later registration can change. A host that
+     * wants the findings without sealing has {@link getUnknownNodeTypeAudit},
+     * which is read-only by design.
+     *
+     * **Why it does not seal here.** Sealing would silently move the authority
+     * over "the vocabulary is closed" from the host to the first execution, and
+     * it would not be harmless: after the seal `registerFlow` validates inline,
+     * so an embedded host that registers a plugin's executors *after* running a
+     * flow — legal, ADR-0018 keeps the vocabulary open — would start getting the
+     * false "will fail at execution time" assertions #4771 exists to delete. The
+     * engine states the omission; the host still decides when the world is
+     * closed.
+     *
+     * Keep this text clear of {@link warnUnknownNodeTypes}'s "no registered
+     * executor or descriptor" phrase: tests and log filters use that substring
+     * to count *per-flow* findings, and a line that merely talks about them must
+     * not be counted as one.
+     */
+    private warnIfNodeTypeVocabularyNeverSealed(): void {
+        if (this.nodeTypeVocabularySealed || this.nodeTypeSealOmissionWarned) return;
+        this.nodeTypeSealOmissionWarned = true;
+        this.logger.warn(
+            `[automation] flow executed on an engine whose node-type vocabulary was never sealed — ` +
+            `sealNodeTypeVocabulary() has not been called, so the ADR-0018 node-type check never ran and this ` +
+            `engine has never reported a flow whose node types nothing has registered; such nodes now fail ` +
+            `mid-run with NO_EXECUTOR instead of being named at startup. ` +
+            `A host that constructs AutomationEngine directly must call engine.sealNodeTypeVocabulary() once every ` +
+            `plugin has contributed its executors (AutomationServicePlugin does this at 'kernel:bootstrapped'); ` +
+            `engine.getUnknownNodeTypeAudit() returns the same finding without closing the vocabulary. ` +
+            `Reported once per engine instance.`,
+        );
     }
 
     /** One warning per flow, shared by the boot audit and the post-seal path. */
