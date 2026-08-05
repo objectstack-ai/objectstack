@@ -375,26 +375,34 @@ is one diagram a reviewer (or AI) can read end-to-end.
 Approval centers also model **send back for revision** (退回修改) — distinct from
 `reject` (terminate) and from a comment thread (which keeps the request pending).
 Send-back is a **flow movement**: the request finalizes as `returned`, the run
-walks a **`revise`** out-edge to a `wait` node where the record unlocks and the
-submitter reworks it, and an explicit *resubmit* re-enters the approval node over
-a **declared back-edge**, opening round N+1 with a fresh approver slate.
+walks a **`revise`** out-edge to an **`approval_revise`** node (the *revise
+window*) where the record unlocks and the submitter reworks it, and an explicit
+*resubmit* re-enters the approval node over a **declared back-edge**, opening
+round N+1 with a fresh approver slate.
 
 ```
 approval ──approve──▶ …
          ──reject───▶ …
-         ──revise───▶ wait (signal; record unlocked, submitter edits)
+         ──revise───▶ approval_revise (record unlocked, submitter edits)
                         └──resubmit──[type:'back']──▶ approval   (round N+1)
 ```
 
 Three pieces author it:
 
 1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
-   targeting an ordinary `wait` node (signal flavour).
-2. **`type: 'back'` resubmit edge** — the edge from the wait node back into the
-   approval node MUST be typed `'back'`. This is the *only* thing that legalizes
-   the cycle: `registerFlow` validates the graph **minus `back` edges** as a DAG,
-   so an **unmarked** cycle is rejected — you opt in, edge by edge. At run time a
-   back-edge traverses normally (it just re-enters the node).
+   targeting an **`approval_revise`** node. It must be that node type: the window
+   is a *service-owned* pause (`resumeAuthority: 'service'`), so only
+   `POST /api/v1/approvals/requests/:id/resubmit` can end it. ADR-0044 D3 first
+   prescribed an ordinary `wait` here and its **2026-07-28 amendment reversed
+   that** (#3823) — a `wait` is `resumeAuthority: 'any'`, so a raw
+   `POST /api/v1/automation/:name/runs/:runId/resume` walked the back-edge with no
+   submitter check and no audit row, and could destroy the run outright. The
+   `approval_revise` node takes **no config** — there is no signal to wait on.
+2. **`type: 'back'` resubmit edge** — the edge from the revise window back into
+   the approval node MUST be typed `'back'`. This is the *only* thing that
+   legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
+   as a DAG, so an **unmarked** cycle is rejected — you opt in, edge by edge. At
+   run time a back-edge traverses normally (it just re-enters the node).
 3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
    send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
    edge). `maxRevisions: 0` disables send-back, so never pair `0` with a `revise`
@@ -405,21 +413,21 @@ Three pieces author it:
   id: 'manager_review', type: 'approval', label: 'Manager Review',
   config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true, maxRevisions: 2 },
 },
-// The signal keys may also live in the spec-canonical node-level
-// `waitEventConfig` block (FlowNodeSchema); the wait executor reads
-// `waitEventConfig` first and falls back to these loose `config` keys.
-{ id: 'wait_revision', type: 'wait', label: 'Awaiting Revision',
-  config: { eventType: 'signal', signalName: 'budget_revision' } },
+// No config and no `waitEventConfig`: the window ends on the submitter's
+// explicit resubmit, not on a signal or a timer.
+{ id: 'wait_revision', type: 'approval_revise', label: 'Awaiting Revision' },
 // …among the approval's edges…
 { id: 'rev',  source: 'manager_review', target: 'wait_revision',  label: 'revise' },
 { id: 'back', source: 'wait_revision',  target: 'manager_review', label: 'resubmit', type: 'back' },
 ```
 
-> Two mistakes the compile-time flow lint flags: a `revise` edge whose wait node
-> never loops back (a dead end `registerFlow` accepts but that leaves the
-> submitter nowhere to resubmit), and a resubmit edge left **without**
-> `type: 'back'` (an unmarked cycle `registerFlow` rejects). Resubmit is an
-> explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
+> Three mistakes the compile-time flow lint flags: a `revise` edge into anything
+> but an `approval_revise` node (an **error** — `sendBack` refuses that metadata,
+> so the branch cannot run; `flow-approval-revise-target-not-service-owned`), a
+> `revise` edge whose window never loops back (a dead end `registerFlow` accepts
+> but that leaves the submitter nowhere to resubmit), and a resubmit edge left
+> **without** `type: 'back'` (an unmarked cycle `registerFlow` rejects). Resubmit
+> is an explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
 > record-save. See the `showcase_budget_approval` flow in the showcase app in
 > the framework repo for the canonical shape.
 
@@ -614,10 +622,11 @@ These are wired on the **graph**, not in node config:
   earlier node so the submitter can revise (the old `back_to_previous`).
 - **Send back for revision (ADR-0044)** — distinct from a plain reject: an
   Approval node can emit a third decision **`revise`** on a `revise`-labeled
-  out-edge that routes to a rework wait point. The submitter edits and
-  resubmits, re-entering the node via an edge `type: 'back'` (a declared
-  back-edge — traversed at run time but excluded from DAG cycle validation).
-  `maxRevisions` (node config, default `3`) caps the loop before auto-reject.
+  out-edge that routes to an **`approval_revise`** rework window (not a plain
+  `wait` — #3823). The submitter edits and resubmits, re-entering the node via an
+  edge `type: 'back'` (a declared back-edge — traversed at run time but excluded
+  from DAG cycle validation). `maxRevisions` (node config, default `3`) caps the
+  loop before auto-reject.
 - **Hard reject** — route the `reject` edge to an `end` node (the old
   `reject_process`).
 

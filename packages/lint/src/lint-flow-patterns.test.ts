@@ -12,6 +12,7 @@ import {
   FLOW_APPROVAL_REVISE_DEAD_END,
   FLOW_APPROVAL_REVISE_UNMARKED_BACKEDGE,
   FLOW_APPROVAL_REVISE_DISABLED,
+  FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
   FLOW_RUNAS_UNSCOPED,
   FLOW_ERROR_LABEL_NOT_FAULT,
   FLOW_BRANCH_LABEL_UNMATCHED,
@@ -216,13 +217,26 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
       nodes: [
         { id: 'start', type: 'start', config: { triggerType: 'manual' } },
         { id: 'mgr', type: 'approval', config: approvalConfig },
-        { id: 'wait', type: 'wait', config: { eventType: 'signal' } },
+        // #3823 — the revise window is the service-owned `approval_revise`
+        // node, not the bare `wait` ADR-0044 D3 originally prescribed. The
+        // dedicated case below pins that the old shape is now an error.
+        { id: 'wait', type: 'approval_revise' },
         { id: 'ok', type: 'end' },
         { id: 'no', type: 'end' },
       ],
       edges,
     }],
   });
+  /** The same flow with the revise edge pointed at a plain `wait` (pre-#3823). */
+  const legacyWaitFlow = (
+    edges: Array<{ source: string; target: string; label?: string; type?: string }>,
+  ) => {
+    const stack = approvalFlow(edges) as any;
+    stack.flows[0].nodes = stack.flows[0].nodes.map((n: any) =>
+      n.id === 'wait' ? { id: 'wait', type: 'wait', config: { eventType: 'signal' } } : n,
+    );
+    return stack;
+  };
   const declaredLoop = [
     { source: 'start', target: 'mgr' },
     { source: 'mgr', target: 'ok', label: 'approve' },
@@ -270,6 +284,32 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
       { source: 'mgr', target: 'no', label: 'reject' },
     ];
     expect(lintFlowPatterns(approvalFlow(edges))).toEqual([]);
+  });
+
+  // #3823 — the shape ADR-0044 D3 prescribed until its 2026-07-28 amendment.
+  // `error`, because `ApprovalService.sendBack` refuses this metadata outright:
+  // the revise branch can never run, and before that refusal the pause it
+  // produced was resumable by anyone holding the run id.
+  it('flags a revise edge into a bare wait node as an ERROR', () => {
+    const fnds = lintFlowPatterns(legacyWaitFlow(declaredLoop));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0]).toMatchObject({
+      rule: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
+      severity: 'error',
+    });
+    expect(fnds[0].where).toContain('mgr');
+    expect(fnds[0].message).toMatch(/node 'wait' of type 'wait'/);
+    expect(fnds[0].hint).toMatch(/type: 'approval_revise'/);
+  });
+
+  it('flags a revise edge into any other node type too (screen, not just wait)', () => {
+    const stack = approvalFlow(declaredLoop) as any;
+    stack.flows[0].nodes = stack.flows[0].nodes.map((n: any) =>
+      n.id === 'wait' ? { id: 'wait', type: 'screen', config: { fields: [{ name: 'note', type: 'text' }] } } : n,
+    );
+    const fnds = lintFlowPatterns(stack);
+    expect(fnds.map((f) => f.rule)).toEqual([FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED]);
+    expect(fnds[0].message).toMatch(/type 'screen'/);
   });
 });
 

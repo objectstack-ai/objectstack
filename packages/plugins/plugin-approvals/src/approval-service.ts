@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   APPROVAL_BRANCH_LABELS,
+  APPROVAL_REVISE_NODE_TYPE,
   approverTypeIsOrgScoped,
   canonicalApproverType,
   normalizeDecisionOutputs,
@@ -89,7 +90,7 @@ export interface ApprovalResumeSurface {
   getFlow?(name: string): Promise<any | null>;
   /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
-   * during a revision window — the run is paused at the revise wait node,
+   * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
    */
   cancelRun?(runId: string, reason?: string): Promise<unknown>;
@@ -2132,7 +2133,7 @@ export class ApprovalService implements IApprovalService {
    *
    * ADR-0044: also valid on the LATEST `returned` request of its run — the
    * submitter abandons the revision window instead of resubmitting. The run
-   * is then paused at the revise wait node (no reject edge), so it is
+   * is then paused at the revise-window node (no reject edge), so it is
    * terminally cancelled via {@link ApprovalResumeSurface.cancelRun} rather
    * than resumed.
    */
@@ -2193,7 +2194,7 @@ export class ApprovalService implements IApprovalService {
     let resumed = false;
     let resumeError: string | undefined;
     if (inReviseWindow) {
-      // ADR-0044: the run is paused at the revise wait node, which has no
+      // ADR-0044: the run is paused at the revise-window node, which has no
       // reject out-edge to resume down — terminally cancel it instead.
       if (runId) {
         resumeError = this.missingRunCapability(runId, requestId, 'the recall', 'cancelRun');
@@ -2236,7 +2237,7 @@ export class ApprovalService implements IApprovalService {
    * ADR-0044 send back for revision. Finalises the pending request as
    * `returned` (a third terminal state — approver-initiated rework, distinct
    * from submitter-initiated `recalled`) and resumes the owning flow run down
-   * its `revise` edge to a wait point: the record lock (keyed on `pending`)
+   * its `revise` edge to the revise window: the record lock (keyed on `pending`)
    * releases, the submitter reworks the data, then {@link resubmit}s.
    *
    * Requires the approval node to declare a `revise` out-edge — validated
@@ -2263,7 +2264,7 @@ export class ApprovalService implements IApprovalService {
     const runId: string | null = raw.flow_run_id ?? null;
 
     await this.assertReviseEdge(raw, nodeId);
-    // A send-back exists to move the run to its revise wait point. If the run
+    // A send-back exists to move the run to its revise window. If the run
     // is gone there is nothing to send back TO, so refuse before writing —
     // same reasoning as decideNode's pre-flight (#4420).
     await this.assertRunResumable(runId, requestId);
@@ -2381,7 +2382,7 @@ export class ApprovalService implements IApprovalService {
   /**
    * ADR-0044 resubmit after rework. Valid on the LATEST `returned` request of
    * its run, submitter-only. Audits `resubmit` on the returned (round-N)
-   * request and resumes the run from the revise wait node; traversal walks
+   * request and resumes the run from the revise-window node; traversal walks
    * the declared back-edge into the approval node, whose executor opens the
    * round-N+1 request — fresh approver slate, record re-locks.
    */
@@ -2458,6 +2459,21 @@ export class ApprovalService implements IApprovalService {
    * out-edge before send-back is allowed — the engine's branch-label fallback
    * (no matching label ⇒ ALL out-edges) must never be reachable from a user
    * action.
+   *
+   * Since #3823 it also checks WHAT that edge targets: the revise window must
+   * be an `approval_revise` node, the pause this service owns. ADR-0044 D3
+   * pointed the edge at an ordinary `wait`, which is `resumeAuthority: 'any'`,
+   * so a raw engine resume walked the resubmit back-edge with no submitter
+   * check, no `resubmit` audit row, and — with a pending request colliding on
+   * the record — destroyed the run by consuming the suspension before the
+   * re-entry failed. Refused HERE, before any mutation, for the same reason the
+   * missing-edge check is: a run must never be parked in a revise window that
+   * something other than {@link resubmit} can advance.
+   *
+   * Also refused at authoring time — `flow-approval-revise-target-not-service-owned`
+   * in `@objectstack/lint` gates `os build` / `os validate` / `os lint` and the
+   * runtime metadata publish path — so a flow reaching this check at all is one
+   * published before that gate existed.
    */
   private async assertReviseEdge(raw: any, nodeId: string | null): Promise<void> {
     const processName = String(raw.process_name ?? '');
@@ -2466,12 +2482,32 @@ export class ApprovalService implements IApprovalService {
       throw new Error('VALIDATION_FAILED: send-back requires the owning flow definition (automation engine unavailable)');
     }
     const flow: any = await this.automation.getFlow(flowName);
-    const hasRevise = Array.isArray(flow?.edges)
-      && flow.edges.some((e: any) => e?.source === nodeId && e?.label === APPROVAL_BRANCH_LABELS.revise);
-    if (!hasRevise) {
+    const reviseEdges = Array.isArray(flow?.edges)
+      ? flow.edges.filter((e: any) => e?.source === nodeId && e?.label === APPROVAL_BRANCH_LABELS.revise)
+      : [];
+    if (reviseEdges.length === 0) {
       throw new Error(
         `VALIDATION_FAILED: approval node '${nodeId}' has no '${APPROVAL_BRANCH_LABELS.revise}' out-edge — ` +
         'the flow does not support send-back for revision',
+      );
+    }
+    const nodeTypeById = new Map<string, string>(
+      (Array.isArray(flow?.nodes) ? flow.nodes : [])
+        .filter((n: any) => typeof n?.id === 'string')
+        .map((n: any) => [n.id as string, typeof n.type === 'string' ? n.type : '']),
+    );
+    for (const edge of reviseEdges) {
+      const target = typeof edge?.target === 'string' ? edge.target : '';
+      const targetType = nodeTypeById.get(target);
+      if (targetType === APPROVAL_REVISE_NODE_TYPE) continue;
+      throw new Error(
+        `VALIDATION_FAILED: approval node '${nodeId}' has a '${APPROVAL_BRANCH_LABELS.revise}' out-edge into ` +
+        `node '${target || '(unknown)'}'` +
+        (targetType === undefined ? ' which the flow does not declare' : ` of type '${targetType || '(untyped)'}'`) +
+        `, but the revise window must be an '${APPROVAL_REVISE_NODE_TYPE}' node — that pause continues only ` +
+        'through this service (submitter-only, audited, and refusing a colliding pending request), and any ' +
+        `other node type there is resumable by anyone with the run id (amended ADR-0044, #3823). Fix the flow: ` +
+        `set node '${target || '<revise target>'}' to type '${APPROVAL_REVISE_NODE_TYPE}'.`,
       );
     }
   }

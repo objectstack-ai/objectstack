@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
-import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 
 /** Minimal ObjectQL stand-in — enough for start() to build the service. */
 function fakeObjectql() {
@@ -72,7 +72,7 @@ describe('ApprovalsServicePlugin — missing automation engine is reported at wa
     expect(logs.warn.filter((m) => m.includes('no automation engine'))).toHaveLength(1);
   });
 
-  it('registers the `approval` executor and says nothing when the engine is present', async () => {
+  it('registers the `approval` + revise-window executors and says nothing when the engine is present', async () => {
     const registered: string[] = [];
     const automation = {
       registerNodeExecutor: (e: { type: string }) => registered.push(e.type),
@@ -81,7 +81,10 @@ describe('ApprovalsServicePlugin — missing automation engine is reported at wa
     const { ctx, logs } = makeCtx({ objectql: fakeObjectql(), automation });
     await new ApprovalsServicePlugin({ disableAutoHooks: true }).start(ctx);
 
-    expect(registered).toEqual([APPROVAL_NODE_TYPE]);
+    // #3823 — the service-owned revise window registers with the approval node,
+    // never separately: a deployment holding one without the other would accept
+    // approvals whose send-back can never run.
+    expect(registered).toEqual([APPROVAL_REVISE_NODE_TYPE, APPROVAL_NODE_TYPE]);
     expect(logs.warn.filter((m) => m.includes('no automation engine'))).toEqual([]);
   });
 });

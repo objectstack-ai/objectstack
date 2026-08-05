@@ -291,6 +291,35 @@ export function approverTypeIsOrgScoped(type: string): boolean {
 export const APPROVAL_NODE_TYPE = 'approval' as const;
 
 /**
+ * Registry node type for the **revise window** — the durable pause an ADR-0044
+ * send-back parks the run on while the submitter reworks the record.
+ *
+ * ADR-0044 D3 originally pointed the `revise` edge at an ordinary `wait` node
+ * and reused the pause that had already shipped for timers and signals. The
+ * 2026-07-28 amendment to that ADR (#3823) reversed it: once #3801 made
+ * `resume` authorization-bearing (a node descriptor declares who may continue
+ * a pause it produced), a generic `wait` — correctly `resumeAuthority: 'any'`,
+ * because a signal-flavored wait is *meant* to be resumable by an external
+ * producer — sat in a service-owned position. A raw
+ * `POST /automation/:name/runs/:runId/resume` walked the resubmit back-edge
+ * into the approval node with no submitter check, no `resubmit` audit row, and
+ * (when a pending request collided on the record) destroyed the run outright by
+ * consuming the suspension before the re-entry failed.
+ *
+ * So the revise pause is its own node type, registered by `plugin-approvals`
+ * with `resumeAuthority: 'service'`: still a first-class box on the canvas and
+ * in the run log, no longer raw-resumable. `ApprovalService.resubmit` is the
+ * only door — which is what keeps the submitter-only check, the latest-request
+ * check, the `resubmit` audit row and the `DUPLICATE_REQUEST` run-preservation
+ * guard on the only path that can advance it.
+ *
+ * A `revise` edge that targets anything else is rejected at authoring time
+ * (`flow-approval-revise-target-not-service-owned` in `@objectstack/lint`) and
+ * refused by `sendBack` before any mutation.
+ */
+export const APPROVAL_REVISE_NODE_TYPE = 'approval_revise' as const;
+
+/**
  * Canonical decisions an Approval node emits. The engine selects the
  * downstream branch by matching these against out-edge `label`s
  * (see {@link ApprovalNodeConfigSchema}).
@@ -308,14 +337,18 @@ export const APPROVAL_BRANCH_LABELS = {
   reject: 'reject',
   /**
    * ADR-0044 send-back-for-revision: the request finalizes `returned` and the
-   * flow walks this edge to a wait point where the submitter reworks the
+   * flow walks this edge to the revise window — an
+   * {@link APPROVAL_REVISE_NODE_TYPE} node — where the submitter reworks the
    * record; a later resubmit re-enters the approval node via a declared
    * back-edge (round N+1).
+   *
+   * The edge's target must be that node type (amended ADR-0044, #3823): a
+   * generic `wait` there is a service-owned pause anyone could resume.
    */
   revise: 'revise',
   /**
-   * ADR-0044: informational label a resubmit resume passes so the wait node's
-   * out-edge selection is explicit when authors label the back-edge.
+   * ADR-0044: informational label a resubmit resume passes so the revise
+   * window's out-edge selection is explicit when authors label the back-edge.
    */
   resubmit: 'resubmit',
 } as const;

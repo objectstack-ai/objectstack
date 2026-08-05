@@ -34,6 +34,13 @@ export {
   registerApprovalNode,
   type ApprovalAutomationSurface,
 } from './approval-node.js';
+// #3823 — the service-owned revise window. Registered by `registerApprovalNode`
+// (the two are one feature); exported for hosts that compose node executors by
+// hand and for tests that drive the send-back path.
+export {
+  registerApprovalReviseNode,
+  APPROVAL_REVISE_CORRELATION_PREFIX,
+} from './approval-revise-node.js';
 export type {
   IApprovalService,
   ApprovalRequestRow,
