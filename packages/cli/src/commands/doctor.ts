@@ -10,6 +10,11 @@ import { normalizeStackInput } from '@objectstack/spec';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
 import { checkSpecVersionGap } from '../utils/spec-version.js';
+// #5644 — "the optional package is not installed" and "it is installed and
+// will not load" are two facts, and one `catch` around `import()` cannot tell
+// them apart. That classification lives in one place, with the measurements
+// behind it written down there.
+import { loadOptionalPackage } from '../utils/optional-package.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import {
   resolveTenancyPosture,
@@ -819,6 +824,17 @@ interface InstalledPackageLedgerReading {
   skipped: SkippedLedgerEntry[];
   /** Present ONLY when the ledger EXISTS and could not be read. */
   failure?: { cause: unknown };
+  /**
+   * Present ONLY when the package that READS the ledger is installed and could
+   * not be loaded (#5644).
+   *
+   * A THIRD fact, one boundary above `failure`: that one is "the ledger is
+   * there and I could not read it", this one is "the thing I read ledgers with
+   * is there and I could not load it". Both leave the ledger unexamined; only
+   * this one leaves doctor unable to say where the ledger even is, because the
+   * directory name is the missing package's own constant.
+   */
+  readerFailure?: { cause: unknown };
 }
 
 /**
@@ -865,17 +881,34 @@ interface SkippedLedgerEntry {
  * the producer's parsing rules in the consumer — the lenient-consumer
  * workaround this repo forbids — so `list()` was changed to REPORT what it
  * skipped, and this function passes that through as `skipped`.
+ *
+ * And a FOURTH, one boundary ABOVE case 1 (#5644). Case 1 says "the specifier
+ * does not resolve"; the `catch` that implemented it said "the `import()`
+ * threw", which is not the same sentence. A package that IS installed and will
+ * not load — a pruned or unbuilt `dist/`, an interrupted install, an artefact
+ * that throws while it evaluates — threw too, and was answered with the silence
+ * meant for a package that was never there. The ledger went unread with no
+ * trace, and the report printed `✓ Unique scope` for the third time in this
+ * function's history: now over a reader it could not even start. The two are
+ * separated by `loadOptionalPackage()` (`utils/optional-package.ts` carries how,
+ * and the measurements behind it); only the genuinely-absent half stays silent.
  */
 async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackageLedgerReading> {
-  let mod: any;
-  try {
-    // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still
-    // run in a checkout where the optional package is not resolvable. THIS
-    // catch, and only this one, is allowed to be silent.
-    mod = await import('@objectstack/cloud-connection');
-  } catch {
-    return { entries: [], skipped: [] };
+  // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still run
+  // in a checkout where the optional package is not resolvable.
+  const load = await loadOptionalPackage('@objectstack/cloud-connection');
+  // Case 1, and ONLY case 1, is allowed to be silent: no package is here, so
+  // nothing was installed through it and nothing went unchecked.
+  if (load.state === 'absent') return { entries: [], skipped: [] };
+  // Case 4. Reported whether or not a ledger directory exists: doctor cannot
+  // honestly claim there is no ledger when the constant naming the ledger's
+  // location is an export of the package that would not load. Gating this row
+  // on `fs.existsSync()` is the rejected option B of #5644 — it reads "has
+  // anything ever been installed" as a proxy for "should this package be here".
+  if (load.state === 'broken') {
+    return { entries: [], skipped: [], readerFailure: { cause: load.cause } };
   }
+  const mod: any = load.module;
 
   const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
   try {
@@ -908,6 +941,14 @@ interface UniqueScopeReading {
    * say it does not.
    */
   skippedLedgerEntries: SkippedLedgerEntry[];
+  /**
+   * Present when the ledger half could not even START — the package doctor
+   * reads ledgers through is installed and would not load (#5644). Suppresses
+   * the success line for the same reason `ledgerFailure` does, and is reported
+   * separately because it is a different fact with a different remedy: repair
+   * the INSTALL of `@objectstack/cloud-connection`, not the ledger.
+   */
+  ledgerReaderFailure?: { cause: unknown };
 }
 
 /**
@@ -952,6 +993,7 @@ async function findUnscopedGlobalUniques(
     advisories: out,
     skippedLedgerEntries: ledger.skipped,
     ...(ledger.failure ? { ledgerFailure: ledger.failure } : {}),
+    ...(ledger.readerFailure ? { ledgerReaderFailure: ledger.readerFailure } : {}),
   };
 }
 
@@ -1301,6 +1343,56 @@ export function installedPackageLedgerSkippedEntriesCheck(
   };
 }
 
+/**
+ * What doctor reports when the package it reads ledgers THROUGH is installed
+ * and will not load (#5644).
+ *
+ * The third sibling of `installedPackageLedgerFailureCheck`, one boundary
+ * above it. That one fires when the ledger directory could not be enumerated;
+ * `installedPackageLedgerSkippedEntriesCheck` fires when individual files in it
+ * would not parse; this one fires when the reader itself never started. All
+ * three produce the identical false PASS if unreported — `✓ Unique scope` over
+ * installed packages nobody looked at — so all three take the `Unique scope`
+ * name column, hold back the success line, and stay warnings.
+ *
+ * What is deliberately NOT a condition here: whether
+ * `.objectstack/installed-packages/` exists. Doctor does not know that it does
+ * not — the directory's name is `DEFAULT_INSTALLED_PACKAGES_DIR`, an export of
+ * the very package that would not load, and answering from the hard-coded
+ * fallback would be doctor claiming knowledge it just lost. Making the row
+ * conditional on the directory was option B of #5644 and was rejected on
+ * exactly that ground: "has anything ever been installed" is not a proxy for
+ * "should this package be here".
+ *
+ * The row exists because the ALTERNATIVE is provably worse, and was measured:
+ * with the package present-but-unloadable, a ledger declaring an
+ * installation-wide `unique` produced `✓ Unique scope` and the finding
+ * appeared nowhere, under `--verbose` included. In-repo this state is reached
+ * daily — any worktree where `packages/cloud-connection` is unbuilt — and its
+ * silence is what sent #5612 chasing a report face that had never regressed.
+ */
+export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCheckResult {
+  const cause = describeThrown(err);
+  return {
+    name: 'Unique scope',
+    status: 'warning',
+    message:
+      'Could not load the installed-package ledger reader (installed packages NOT checked '
+      + `for installation-wide uniques) — ${reportRowHeadline(cause)}`,
+    fix:
+      '`@objectstack/cloud-connection` IS installed here — its specifier resolves — and loading\n'
+      + '      it threw. That package is how `os doctor` reads `.objectstack/installed-packages/`,\n'
+      + '      so this half of the check never started: an installed app declaring an\n'
+      + '      installation-wide `unique` would not have appeared. Doctor cannot even tell you\n'
+      + '      whether a ledger is present — the directory’s name is one of that package’s\n'
+      + '      exports.\n'
+      + '      A checkout that never installed the package says nothing at all, so this row means\n'
+      + '      the install itself is broken: reinstall it, or — in a monorepo checkout — build it\n'
+      + '      (`pnpm --filter @objectstack/cloud-connection build`).\n'
+      + `      cause: ${indentUnderGutter(cause)}`,
+  };
+}
+
 // ─── Command ────────────────────────────────────────────────────────
 
 export default class Doctor extends Command {
@@ -1599,11 +1691,12 @@ export default class Doctor extends Command {
         // so nothing is silently lost.
         if (postureReading.ok && postureGatesGlobalUniques(postureReading.posture)) {
           printStep("Checking unique scopes against the 'isolated' tenancy posture...");
-          const { advisories, ledgerFailure, skippedLedgerEntries } = await findUnscopedGlobalUniques(
-            cwd,
-            config,
-            postureReading.posture,
-          );
+          const {
+            advisories,
+            ledgerFailure,
+            ledgerReaderFailure,
+            skippedLedgerEntries,
+          } = await findUnscopedGlobalUniques(cwd, config, postureReading.posture);
           if (advisories.length > 0) {
             hasWarnings = true;
             for (const { source, finding } of advisories) {
@@ -1629,7 +1722,18 @@ export default class Doctor extends Command {
               flags.verbose,
             );
           }
-          if (ledgerFailure) {
+          // #5644 — the same claim failing one boundary UP: the reader
+          // package is installed and would not load, so neither the directory
+          // nor the entries were ever reached. Mutually exclusive with the two
+          // above (nothing downstream of a reader that never loaded can also
+          // fail), so it is an `else if` rather than a fourth independent row.
+          if (ledgerReaderFailure) {
+            hasWarnings = true;
+            renderHealthCheckResult(
+              installedPackageLedgerReaderFailureCheck(ledgerReaderFailure.cause),
+              flags.verbose,
+            );
+          } else if (ledgerFailure) {
             hasWarnings = true;
             renderHealthCheckResult(installedPackageLedgerFailureCheck(ledgerFailure.cause), flags.verbose);
           } else if (advisories.length === 0 && skippedLedgerEntries.length === 0) {
