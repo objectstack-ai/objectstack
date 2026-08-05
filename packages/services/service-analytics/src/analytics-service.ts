@@ -286,6 +286,12 @@ export interface AnalyticsServiceConfig {
    * the same mistake with a `400 INVALID_FIELD` naming the field (#4315/#4254);
    * this hook is what lets the ANALYTICS route give the same answer.
    *
+   * [#5520] The same probe now answers for DIMENSIONS too
+   * ({@link AnalyticsService.assertDimensionFields}). #4437 gated only the
+   * measure half, so the identical typo one key over — `dimensions:
+   * ['bogus_dim']` — still reached the driver as a `GROUP BY` column and came
+   * back as the same 500. One probe, one answer, both member kinds.
+   *
    * Same tiering as {@link isRegisteredObject}: absence means "skip the check"
    * (registry-less hosts, engine doubles, external datasources whose columns
    * are not mirrored locally). The production bridge in `plugin.ts` wires it
@@ -978,6 +984,13 @@ export class AnalyticsService implements IAnalyticsService {
    *   `cube.measures` (e.g. `amount_sum`, `amount_avg` emitted by dashboard
    *   widget translators), inject suffix-inferred Metric entries so the
    *   strategies pick the right aggregation function and field.
+   *
+   * It is also where the two SOURCE-FIELD gates run, on every path out of this
+   * method and always BEFORE the (possibly augmented) cube is registered:
+   * {@link assertMeasureFields} (#4437) and {@link assertDimensionFields}
+   * (#5520). Both answer the same question — does the object actually have the
+   * column this member resolves to — and both must answer it here, because from
+   * the strategy onwards the answer is the driver's `no such column`.
    */
   private ensureCube(query: AnalyticsQuery): void {
     const name = query.cube!;
@@ -997,6 +1010,11 @@ export class AnalyticsService implements IAnalyticsService {
       // (same rule the #3867 gate above keeps), or a retry would find a
       // "registered" cube carrying the bogus measure and sail straight to SQL.
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
+      // [#5520] …and the dimensions', for exactly the same reason. On this path
+      // `cube.dimensions` was minted from the query moments ago, so the bogus
+      // spelling is in there — which is why the suggestion list is computed by
+      // subtraction inside the gate rather than echoed verbatim.
+      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       this.cubeRegistry.register(cube);
       // A scalar query — only measures, no grouping (no `dimensions`/
       // `timeDimensions`) — is the first-class "metric over an object" path
@@ -1037,6 +1055,10 @@ export class AnalyticsService implements IAnalyticsService {
       // cube so the rejection can suggest what the caller could have meant —
       // and so a rejected query leaves the registry as it found it.
       this.assertMeasureFields(query, augmented, Object.keys(cube.measures));
+      // [#5520] Dimensions are never augmented (nothing infers one), so the
+      // authored/compiled list IS the vocabulary a caller may name — and the one
+      // the rejection suggests.
+      this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
       this.cubeRegistry.register(augmented);
       this.logger.debug(
         `[Analytics] Augmented cube "${name}" with inferred measures: ${Object.keys(extraMeasures).join(',')}`,
@@ -1045,6 +1067,7 @@ export class AnalyticsService implements IAnalyticsService {
       // No inference happened — every measure is declared. Still validate: an
       // authored cube can declare a measure over a field the object dropped.
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
+      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
     }
   }
 
@@ -1131,6 +1154,146 @@ export class AnalyticsService implements IAnalyticsService {
       err.object = object;
       err.param = 'measures';
       err.measure = measure;
+      throw err;
+    }
+  }
+
+  /**
+   * [#5520] Reject a DIMENSION whose source field the backing object does not
+   * have, BEFORE the strategy compiles it into `GROUP BY`.
+   *
+   * The symmetric half of {@link assertMeasureFields}. #4437 closed the measure
+   * side and stopped there, so the identical mistake one request key over still
+   * reached the driver:
+   *
+   * ```
+   * POST /analytics/query {"cube":"crm_account","measures":["account_count"],"dimensions":["bogus_dim"]}
+   * → 500 {"code":"SQLITE_ERROR","message":"Internal server error"}
+   *
+   * POST /analytics/dataset/query {"selection":{"dimensions":["bogus_dim"],…}}
+   * → 500 {"code":"ANALYTICS_QUERY_FAILED",
+   *        "error":"SELECT bogus_dim AS \"bogus_dim\", … GROUP BY bogus_dim - no such column: bogus_dim"}
+   * ```
+   *
+   * A driver error class as the caller's `error.code` is the ADR-0112 violation
+   * #4437 named, and the dataset face additionally echoed the generated
+   * statement — physical table and column names — back to the caller. The
+   * envelope here is deliberately the SAME as the measure gate's
+   * (`INVALID_FIELD`/400 + `field`/`object`/`param`), because "the query names a
+   * field the object does not have" is ONE mistake and must have one wire shape
+   * whichever member kind carried it.
+   *
+   * What it checks, and what it deliberately does not:
+   *
+   * - **Both dimension keys.** `query.dimensions` and `query.timeDimensions`
+   *   land in the same `cube.dimensions` bag, are resolved by the same
+   *   `lookupMember`, and produced the same 500 (a bogus time dimension became
+   *   `date_trunc('month', bogus_at)`); `param` reports which key carried it.
+   * - **An UNDECLARED but real field stays legal.** `dimensions: ['phone']` on a
+   *   cube that never declared `phone` groups by `phone` today — the dimension
+   *   twin of measure auto-inference, and an established contract. So the
+   *   question asked is "does the OBJECT have this field", never "did the cube
+   *   declare this dimension". An undeclared member is checked against the
+   *   object under the name the strategies would use as the column (their own
+   *   `resolveDimensionSql`/`resolveFieldName` fallback: the member itself).
+   * - Only when the cube's `sql` is a bare OBJECT NAME, only when
+   *   {@link AnalyticsServiceConfig.getObjectFieldNames} answers, and only for
+   *   sources that are BARE COLUMNS — same three stand-downs as the measure
+   *   gate, for the same reasons (no field list to check against; nothing
+   *   authoritative to consult; a dotted reference resolves through a join whose
+   *   target this gate cannot see, so it belongs to the join allowlist).
+   * - `id` / `created_at` / `updated_at` are admitted unconditionally, matching
+   *   the data path's `resolveQueryFields`.
+   *
+   * Runs after the measure gate on each `ensureCube` path, so a query that gets
+   * both wrong is answered about its measure first — one rejection at a time,
+   * naming a real mistake either way.
+   */
+  private assertDimensionFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
+    const probe = this.getObjectFieldNames;
+    if (!probe) return;
+    /** Every dimension this query names, tagged with the request key it came from. */
+    const members: Array<{ member: string; param: 'dimensions' | 'timeDimensions' }> = [
+      ...(query.dimensions ?? []).map((member) => ({ member, param: 'dimensions' as const })),
+      ...(query.timeDimensions ?? []).map((td) => ({ member: td.dimension, param: 'timeDimensions' as const })),
+    ];
+    if (members.length === 0) return;
+
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    const fieldNames = probe(object);
+    if (!fieldNames || fieldNames.length === 0) return;
+    const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
+
+    /**
+     * The `cube.dimensions` KEY a member resolves to, mirroring the strategies'
+     * `lookupMember` — including its deliberate LAST case: a dotted member that
+     * matches no declared key is a synthetic relation traversal handed to the
+     * JOIN machinery, which this gate must not judge (hence `undefined`, read as
+     * "nothing to check" rather than "undeclared bare column").
+     */
+    const declaredKeyOf = (member: string): string | undefined => {
+      const bag = cube.dimensions as Record<string, { sql?: unknown } | undefined>;
+      if (bag[member]) return member;
+      if (member.includes('.')) {
+        const [first, ...rest] = member.split('.');
+        const tail = rest.join('.');
+        if (first === cube.name && bag[tail]) return tail;
+        if (bag[tail]) return tail;
+        const flat = member.replace(/\./g, '_');
+        if (bag[flat]) return flat;
+      }
+      return undefined;
+    };
+
+    /**
+     * The `cube.dimensions` key a member resolves to (for the suggestion list)
+     * and the column it groups by — `source: null` meaning "nothing to check".
+     */
+    const resolve = (member: string): { key: string; source: string | null } => {
+      const key = declaredKeyOf(member);
+      if (key !== undefined) {
+        const dim = (cube.dimensions as Record<string, { sql?: unknown }>)[key];
+        const source = typeof dim.sql === 'string' ? dim.sql.trim() : '';
+        return { key, source: source && BARE_IDENTIFIER.test(source) ? source : null };
+      }
+      // Undeclared. A dotted spelling is the relation traversal above; a bare one
+      // IS the column the strategies will emit.
+      if (member.includes('.')) return { key: member, source: null };
+      return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
+    };
+
+    // Two passes, for the reason the measure gate has two: on the auto-inference
+    // path `cube.dimensions` was minted from this very query, so echoing its keys
+    // verbatim would offer the caller their own typo back as a valid alternative.
+    const invalid = new Set<string>();
+    for (const { member } of members) {
+      const { key, source } = resolve(member);
+      if (source && !known.has(source)) invalid.add(key);
+    }
+    if (invalid.size === 0) return;
+    const usable = declaredDimensions.filter((d) => !invalid.has(d));
+
+    for (const { member, param } of members) {
+      const { source } = resolve(member);
+      if (!source || known.has(source)) continue;
+
+      const kind = param === 'timeDimensions' ? 'Time dimension' : 'Dimension';
+      const verb = param === 'timeDimensions' ? 'buckets' : 'groups by';
+      const err = new Error(
+        `${kind} '${member}' on cube '${cube.name}' ${verb} field '${source}', which object ` +
+          `'${object}' does not have. ` +
+          `Valid dimensions: ${usable.join(', ') || '(none)'}. ` +
+          `Any of the object's OWN fields may also be used as a dimension without the cube ` +
+          `declaring it, so check the spelling of ` +
+          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
+      ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; dimension?: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = source;
+      err.object = object;
+      err.param = param;
+      err.dimension = member;
       throw err;
     }
   }

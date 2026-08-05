@@ -585,7 +585,8 @@ export class AnalyticsServicePlugin implements Plugin {
         if (!engine) return true;
         return engine.getObject?.(name) != null;
       },
-      // [#4437] Field names for the measure source-field gate. Read from the
+      // [#4437, #5520] Field names for the two source-field gates — measures
+      // (#4437) and dimensions/timeDimensions (#5520). Read from the
       // SAME schema registry `isRegisteredObject` above consults (and the data
       // path's #4315 gate reads), so "which fields exist" has one answer across
       // /data and /analytics. `undefined` — no engine, unknown object, or an
