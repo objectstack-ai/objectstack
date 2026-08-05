@@ -4,8 +4,8 @@
 // third-party eval: a record-change flow that silently never fires).
 //
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate` and
-// reusable by AI authoring. It catches the two authoring mistakes that produce
-// a flow which LOOKS armed but never launches — with zero runtime output:
+// reusable by AI authoring. It catches the authoring mistakes that produce a
+// flow which LOOKS armed but never launches — with zero runtime output:
 //
 //   1. `objectName` mismatch — the start node targets an object name that is
 //      not defined in this stack. The runtime binds an ObjectQL hook filtered
@@ -23,6 +23,20 @@
 //      deliberately or `'obsolete'` to disable. Only auto-triggered flows are
 //      flagged (manual/screen flows have no arming semantics to be unclear
 //      about).
+//
+//   3. A `config.timeRelative` descriptor that does not PARSE — the shape half
+//      of the time-relative sweep (#5496). Only `TimeRelativeTriggerSchema` can
+//      judge it, and until this rule the only place it ran was BIND time, so an
+//      unparseable descriptor produced one warn in a server log and nothing at
+//      all in `os validate`. The judgement is not re-implemented here: the rule
+//      runs that schema and forwards its issue list verbatim.
+//
+// The spec import is deliberate and is what makes rule 3 possible without a
+// second copy of the descriptor's shape living in this file. It stays inside the
+// package's stated dependency direction — lint → `@objectstack/spec`, never onto
+// a runtime.
+
+import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -41,6 +55,16 @@ export interface FlowTriggerReadinessFinding {
 export const FLOW_TRIGGER_UNKNOWN_OBJECT = 'flow-trigger-unknown-object';
 export const FLOW_DRAFT_STATUS_AMBIGUOUS = 'flow-draft-status-ambiguous';
 export const FLOW_TRIGGER_UNKNOWN_EVENT = 'flow-trigger-unknown-event';
+/**
+ * #5496 — `config.timeRelative` is present but `TimeRelativeTriggerSchema`
+ * rejects it, so the sweep is never installed.
+ *
+ * Named for the DESCRIPTOR rather than for the rule that reads it, because this
+ * is the first of a family: every flow-node `config` slot whose contract a
+ * schema (or the engine) can already decide, yet which nothing checks at
+ * authoring time. `flow-<descriptor>-<verdict>` is the shape the next one takes.
+ */
+export const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID = 'flow-time-relative-descriptor-invalid';
 
 type AnyRec = Record<string, unknown>;
 
@@ -76,7 +100,11 @@ function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined 
 
 /**
  * Validate auto-launched flow trigger wiring against the stack definition.
- * Pure and dependency-free; safe on pre- or post-parse stacks.
+ *
+ * Pure — no I/O, no runtime, no mutation of `stack` — and safe on pre- or
+ * post-parse stacks. Its one dependency is the `@objectstack/spec` schema that
+ * owns the `timeRelative` descriptor's contract, which is the point: the rule
+ * ASKS that schema rather than restating it.
  */
 export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadinessFinding[] {
   const findings: FlowTriggerReadinessFinding[] = [];
@@ -128,11 +156,32 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       }
     }
 
-    // 1b. Time-relative flow sweeping an object this stack does not define. Like
-    //     the record-change case, a wrong object name makes the sweep match
-    //     nothing forever with no runtime output.
+    // 1b. Two facts about the same `config.timeRelative` descriptor, from the two
+    //     places that can decide them. The split is what keeps them from
+    //     reporting the same thing twice:
+    //
+    //       - the NAME in `object` is checked against this stack (1b-i). Only the
+    //         stack knows it; `TimeRelativeTriggerSchema` has no stack knowledge
+    //         and can never raise it.
+    //       - the SHAPE of everything else is checked by that schema (1b-ii).
+    //         Only it knows the descriptor's contract; this rule reads no other
+    //         key of `tr`.
+    //
+    //     So a descriptor that is wrong in both ways reports both, at two
+    //     different paths (`…timeRelative.object` and `…timeRelative`) — two
+    //     facts, not one fact twice.
+    //
+    //     The `isTimeRelative` guard is deliberately the ENGINE's routing
+    //     predicate, character for character (`AutomationEngine`'s trigger
+    //     resolution: `config.timeRelative != null && typeof … === 'object'`).
+    //     This rule therefore speaks for exactly the flows the engine hands to
+    //     the time-relative trigger, and stays silent about the ones it does not.
     if (isTimeRelative && start) {
       const tr = config.timeRelative as AnyRec;
+
+      // 1b-i. Sweeping an object this stack does not define. Like the
+      //     record-change case, a wrong object name makes the sweep match
+      //     nothing forever with no runtime output.
       const objectName = typeof tr.object === 'string' ? tr.object : undefined;
       if (objectName && !objectNames.has(objectName) && !objectName.startsWith('sys_')) {
         findings.push({
@@ -146,6 +195,45 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           hint:
             `Object names match exactly. Check config.timeRelative.object against the object's registered name. ` +
             `If the object comes from another installed package, this warning can be ignored.`,
+        });
+      }
+
+      // 1b-ii. #5496 — the descriptor does not parse, so `TimeRelativeTrigger`
+      //     refuses it at bind time and the sweep is never installed. The flow
+      //     declares a time-relative trigger, passes every gate, and never runs.
+      //
+      //     Before this rule the author's ONLY feedback was one warn in the
+      //     server log at bind time — a channel an AI author's loop never reads,
+      //     unlike `os validate`. Nothing is shifted except WHEN the schema runs:
+      //     the verdict, and every word of its wording, is still
+      //     `TimeRelativeTriggerSchema`'s. Re-deriving any of it here would put a
+      //     second copy of the descriptor's contract in a consumer, which is the
+      //     drift this forwards precisely to avoid — `field` is rejected here
+      //     because the SCHEMA rejects it, and it will keep tracking the schema
+      //     when the descriptor gains a key.
+      const parsed = TimeRelativeTriggerSchema.safeParse(tr);
+      if (!parsed.success) {
+        // Rendered exactly as the bind-time warn renders the same issue list
+        // (`TimeRelativeTrigger.start`), so an author who sees both channels sees
+        // one story told twice, not two dialects. Whitespace is collapsed because
+        // a finding is one line here (the CLI prints `• where: message`) while a
+        // log line is free to wrap — the schema's guidance bullets carry newlines.
+        const problems = parsed.error.issues
+          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message.replace(/\s+/g, ' ').trim()}`)
+          .join('; ');
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,
+          message:
+            `has a config.timeRelative descriptor the time-relative trigger REFUSES at bind time, so the ` +
+            `sweep is never installed — the flow declares a time-relative trigger and then never runs ` +
+            `(the only trace is one warn in the server log). ${problems}`,
+          hint:
+            `Those messages are TimeRelativeTriggerSchema's own — the same schema the trigger safeParses at ` +
+            `bind time, so a descriptor that satisfies them binds. An unrecognized key names the declared key ` +
+            `it was probably meant to be; see content/docs/references/automation/time-relative-trigger.mdx.`,
         });
       }
     }
