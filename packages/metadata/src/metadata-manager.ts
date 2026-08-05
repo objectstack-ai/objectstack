@@ -79,21 +79,59 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 
 /**
- * [#5259] A {@link MetadataLoader} that also implements deletion.
+ * [#5276] The registration gate's message for a loader that declares it can be
+ * written to but cannot be deleted from.
  *
- * `MetadataLoader` declares `save?` but no `delete?`, so `unregister()` has
- * always duck-typed the method at the call site. Naming the shape here replaces
- * the two `as any` casts that did it before — the cast is still a cast, but it
- * is now one declared shape rather than an untyped hole, and the `typeof
- * … === 'function'` guard in front of it is what actually decides.
- *
- * Whether the loader contract itself should declare `delete?` (and what a
- * `capabilities.write` loader *without* one means) is a separate question,
- * deliberately not answered here.
+ * Built here rather than inline so the gate and its tests quote one text, in the
+ * shape AGENTS.md → "Degradation log levels" asks of a loud failure: the
+ * **consequence** (concretely, and that the system keeps looking healthy) and
+ * the **fix** (both ways out, so the author does not have to guess which one
+ * their loader wants).
  */
-type DeletableMetadataLoader = MetadataLoader & {
-  delete?: (type: string, name: string) => Promise<unknown>;
-};
+export function buildWritableLoaderMissingDeleteMessage(loaderName: string): string {
+  return (
+    `[MetadataManager] Refusing to register metadata loader \`${loaderName}\`: it declares ` +
+    "`protocol: 'datasource:'` with `capabilities.write: true` but implements no `delete()` method. " +
+    'A write-capable datasource loader is written to AND deleted from — `register()` persists every item into it, ' +
+    'and `unregister()` has to take those rows back out again. ' +
+    'Registered as-is, every deletion would be a silent lie: `unregister()` skips a loader that cannot delete, then ' +
+    'drops the registry entry, invalidates the list cache and announces a `deleted` event, so the caller ' +
+    '(Studio/Setup, REST DELETE, the CLI, a package teardown) is told the delete succeeded while the row stays in ' +
+    `\`${loaderName}\` and is read straight back out by the very next \`list()\`/\`get()\` — across restarts, with ` +
+    'nothing to retry it. ' +
+    `Fix: either implement \`delete(type: string, name: string): Promise<void>\` on \`${loaderName}\` ` +
+    '(`DatabaseLoader` in this package is the reference implementation), or, if the loader is genuinely read-only, ' +
+    "declare `capabilities.write: false` — a read-only `datasource:` loader registers without complaint and is " +
+    'never written to in the first place.'
+  );
+}
+
+/**
+ * [#5276] Registration gate: a `datasource:` loader that declares
+ * `capabilities.write` MUST implement `delete()`.
+ *
+ * `capabilities.write` used to mean two different things at the two ends of an
+ * item's life — "persist into me" to {@link MetadataManager.register}, and
+ * nothing at all to {@link MetadataManager.unregister}, which duck-typed
+ * `delete` at the call site and **silently skipped** a loader that had none
+ * before announcing the deletion anyway. That is the declared ≠ enforced shape
+ * (Prime Directive #10), and the cure it prescribes is to enforce the
+ * declaration, not to tolerate the gap: the loader is rejected at registration,
+ * where the author is standing, instead of losing a row at delete time in a
+ * deployment nobody is watching.
+ *
+ * Scope is deliberately exactly the combination `unregister()` acts on. Other
+ * protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to by the
+ * manager at runtime — `register()` filters on `datasource:` too — so they have
+ * no deletion of their own to take back and are not gated. A `datasource:`
+ * loader with `capabilities.write: false` is likewise untouched by both paths.
+ */
+function assertWritableLoaderCanDelete(loader: MetadataLoader): void {
+  const { name, protocol, capabilities } = loader.contract;
+  if (protocol !== 'datasource:' || capabilities.write !== true) return;
+  if (typeof loader.delete === 'function') return;
+  throw new Error(buildWritableLoaderMissingDeleteMessage(name));
+}
 
 /**
  * [#5189] Appended to the namespace gate's message when `publishPackage` was
@@ -561,8 +599,15 @@ export class MetadataManager implements IMetadataService {
 
   /**
    * Register a new metadata loader (data source)
+   *
+   * [#5276] Rejects — loudly, before the loader is stored — a `datasource:`
+   * loader that declares `capabilities.write` without implementing `delete()`.
+   * This is the **only** way into `this.loaders` (the constructor's
+   * `config.loaders` come through here too), which is what lets every later
+   * delete-capability guard be defensive rather than load-bearing.
    */
   registerLoader(loader: MetadataLoader) {
+    assertWritableLoaderCanDelete(loader);
     this.loaders.set(loader.contract.name, loader);
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
@@ -1032,7 +1077,14 @@ export class MetadataManager implements IMetadataService {
     // Delete only from database-backed loaders that declare write capability.
     for (const loader of this.loaders.values()) {
       if (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;
-      if (typeof (loader as DeletableMetadataLoader).delete !== 'function') continue;
+      // [#5276] Defensive only — unreachable for a registered loader. This exact
+      // combination (`datasource:` + `capabilities.write`, no `delete`) is
+      // rejected by `registerLoader()`, the sole writer of `this.loaders`, so
+      // reaching this `continue` would mean a loader entered the map without
+      // passing the gate. Kept because the alternative is a TypeError on the
+      // line below, and because `delete?` stays optional on the interface for
+      // the protocols the gate does not cover.
+      if (typeof loader.delete !== 'function') continue;
       try {
         await this.deleteMetaItemFromLoader(loader, type, name);
       } catch (error) {
@@ -1083,16 +1135,20 @@ export class MetadataManager implements IMetadataService {
    * with a blast radius of precisely this call site, mirroring `saveMetaItem`
    * on the write side (#4754).
    *
-   * `MetadataLoader` declares `save?` but no `delete?`, which is why the caller
-   * duck-types before getting here; widening the loader contract is a separate
-   * question and deliberately not answered by this issue.
+   * [#5276] `MetadataLoader` now declares `delete?`, so no cast is left here.
+   * It stays *optional* on the interface — `file:`/`memory:`/`http:`/`s3:`
+   * loaders legitimately have none — and the guard below is therefore a type
+   * narrowing rather than a policy decision. The policy lives at
+   * `registerLoader()`: a `datasource:` loader that declares
+   * `capabilities.write` cannot be registered without a `delete()`, which is
+   * exactly the set of loaders this method is ever called for.
    */
   private async deleteMetaItemFromLoader(
     loader: MetadataLoader,
     type: string,
     name: string,
   ): Promise<void> {
-    const del = (loader as DeletableMetadataLoader).delete;
+    const del = loader.delete;
     if (typeof del !== 'function') return;
     await del.call(loader, type, name);
   }

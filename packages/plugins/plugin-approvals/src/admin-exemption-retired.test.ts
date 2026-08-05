@@ -11,9 +11,14 @@
  * **delegation write-guard**. `roles` has no producer anywhere in the platform —
  * ObjectQL's `buildSession()` builds its session field by field and never writes
  * it — so both branches were dead on every real engine path. Classic
- * declared ≠ enforced: the spec's `HookContext` session declares
+ * declared ≠ enforced: the spec's `HookContext` session declared
  * `roles: z.array(z.string()).optional()`, two consumers read it, and no
- * producer ever fills it.
+ * producer ever filled it. (Past tense as of #5050: with these two readers gone
+ * the key had neither end, so the spec retired it under ADR-0049 — it is now a
+ * `retiredKey()` tombstone in `data/hook.zod.ts`. The pin below is unaffected
+ * and stays load-bearing: it guards the *dialect*, not the declaration, and the
+ * fixtures that still spell `roles: ['admin']` are deliberate — they prove the
+ * retired spelling grants nothing at runtime either.)
  *
  * They also spoke a **second privilege dialect**. This codebase judges privilege
  * by the ADR-0095 vocabulary — capability grants (`permissions`), placements

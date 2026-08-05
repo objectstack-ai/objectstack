@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { IDataEngine } from './data-engine';
+import type { IDataEngine, WriteObservabilityOptions } from './data-engine';
 import type { IDataDriver } from './data-driver';
+import {
+  EngineUpdateOptionsSchema,
+  DataEngineInsertOptionsSchema,
+  BaseEngineOptionsSchema,
+} from '../data/data-engine.zod';
 
 /**
  * Minimal DriverCapabilities object for tests.
@@ -160,6 +165,73 @@ describe('Data Engine Contract', () => {
       expect(engine.execute).toBeDefined();
       const result = await engine.execute!('SELECT * FROM users', { timeout: 5000 });
       expect(result.raw).toBe(true);
+    });
+  });
+
+  /**
+   * [#5126] `WriteObservabilityOptions` is the IN-PROCESS write-options
+   * channel. Both its members are deliberately absent from the serializable
+   * Zod bags, for two different reasons that must not be conflated:
+   *
+   *  - `onFieldsDropped` CANNOT be there — a function has no JSON-Schema
+   *    representation (#3407);
+   *  - `strictReadonlyWrites` COULD trivially be there — it is a boolean — and
+   *    is kept out ON PURPOSE. It was the rejected Option A of #5126: putting a
+   *    write-refusal switch in the client-serializable bag makes it settable
+   *    from a REST/wire body, i.e. a new toggle on a security-adjacent path.
+   *
+   * The second reason is the one that decays silently: nothing about a boolean
+   * resists being "helpfully" added to the schema later by someone who reads
+   * the contract member and assumes the bag simply lagged behind it. These
+   * cases are that decision's tripwire — if one goes red, the reader is either
+   * re-opening Option A or has moved the member, and either way it is a
+   * maintainer decision, not a merge conflict to resolve by hand.
+   */
+  describe('strictReadonlyWrites stays OFF the serializable options bags (#5126)', () => {
+    const shapeKeys = (schema: unknown): string[] =>
+      Object.keys((schema as { shape: Record<string, unknown> }).shape);
+
+    it('EngineUpdateOptionsSchema does not declare strictReadonlyWrites', () => {
+      expect(shapeKeys(EngineUpdateOptionsSchema)).not.toContain('strictReadonlyWrites');
+    });
+
+    it('a wire body carrying strictReadonlyWrites cannot smuggle it through the update bag', () => {
+      // The behavioural half of the guard: even if the key survives transport,
+      // parsing the serializable bag must not yield it. A `.strict()` schema
+      // would reject outright and a stripping one drops it — both are fine,
+      // and both are "the client did not get to set it". What is NOT fine is
+      // the value coming out the other side.
+      const parsed = EngineUpdateOptionsSchema.safeParse({
+        where: { id: 'r1' },
+        strictReadonlyWrites: true,
+      });
+      if (parsed.success) {
+        expect(parsed.data).not.toHaveProperty('strictReadonlyWrites');
+      }
+    });
+
+    it('neither does the insert bag nor the shared base every bag extends', () => {
+      // Guarding only the update bag would miss the cheapest way to re-open
+      // Option A: adding it to `BaseEngineOptionsSchema`, which every engine
+      // options schema extends — including the read ones.
+      expect(shapeKeys(DataEngineInsertOptionsSchema)).not.toContain('strictReadonlyWrites');
+      expect(shapeKeys(BaseEngineOptionsSchema)).not.toContain('strictReadonlyWrites');
+    });
+
+    it('and it IS declared on the in-process contract — the guard above is not vacuous', () => {
+      // Without this case the three above would keep passing after someone
+      // deleted the member outright: absent from the bag AND absent from the
+      // contract reads as "the rejection holds", which is the #4984 phantom-
+      // check shape. A type-level check is the honest one — the member is an
+      // optional boolean on an interface, so there is no runtime value to
+      // inspect.
+      const strict: WriteObservabilityOptions = { strictReadonlyWrites: true };
+      const off: WriteObservabilityOptions = { strictReadonlyWrites: false };
+      expect(strict.strictReadonlyWrites).toBe(true);
+      expect(off.strictReadonlyWrites).toBe(false);
+      // Absent is the default and must stay legal — strict is opt-in.
+      const unset: WriteObservabilityOptions = {};
+      expect(unset.strictReadonlyWrites).toBeUndefined();
     });
   });
 

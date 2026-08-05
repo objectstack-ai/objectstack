@@ -261,6 +261,29 @@ against GitHub at selection time, not from memory. Batch independence is
 cross-repo: two issues linked by `Blocked-by` or sharing a parent never
 ride in the same batch.
 
+**Pin 滞后 ——「上游已合入」不等于「本仓已看见」(rule 2 的盲区)。** rule 2 只要求
+`Blocked-by:` 的上游**已合并**;姊妹仓消费 framework 时还有第二个读数 —— 本仓的 pin
+是否已覆盖那个 commit。cloud#1116 的裁决来自 framework #5347、落地于 framework #5368
+(`9c5abf4e9`),而 cloud 的 `.objectstack-sha` 停在 `586d6f701a16`,`9c5abf4e9`
+**不是它的祖先**(立单时 framework main 领先 pin 87 个 commit)。于是 cloud#1117 合入
+后到下一次 pin bump 之前,同一个 `TursoDriver` 仍有分叉窗口,只是**方向反了**:remote
+抛 400,local(继承 `SqlDriver`)仍编译 `IS NULL` —— fail-closed 的一侧先到,不是新洞,
+pin 前移即自动收敛。规程两条:
+
+- **派发前核祖先关系**(REST `repos/<owner>/<repo>/compare/<pin>...<sha>` 的 `status`
+  / `ahead_by`)—— 本地 `merge-base --is-ancestor` 在 shallow 检出上解不出 pin 的
+  commit、以 `fatal:` 退出,而它在 `&&` / `||` 链里会被读成「不是祖先」,正是
+  Operational notes 6 那类假读数;
+- 未覆盖 ⇒ 派发令要求 dev 在 **PR 正文留档分叉窗口与方向**,且 ⛔ **pin bump 不做
+  rider**:`.objectstack-sha` 是共享文件、要走 `scripts/bump-objectstack.sh`(连带 hono
+  override 与 lockfile 重生),塞进这一单会把一个独立的、必冲突的改动变成 rider。
+
+滞后**本身**已有读数,不必自己算:cloud 的 `scripts/check-pin-staleness.sh`
+(`pnpm check:pin-staleness`,test.yml 里以 `continue-on-error` 跑)每次 CI 都报两个 pin
+各落后 main 多少 commit。但它是**有意的 advisory**(不设阈值,`--max-behind N` 需显式
+传 —— pin bump 是深思熟虑的动作),且它回答的是「落后多少」,**不是**「是否覆盖我这条
+裁决 commit」;后者只有派发前那一次祖先判断能回答。
+
 **3. Linkage chores are issues, not memory.** When an accepted PR's
 artifacts flow into another repo, the PM immediately files the follow-up in
 the consuming repo's backlog instead of relying on anyone remembering. The
@@ -721,6 +744,29 @@ looking dispatchable to every sweep, including another PM's; whatever you
 learned about it is worthless until it is on the issue. Rule: when step 3 pushes
 an issue to a later round, record the known trap on it before the round ends.
 
+**阻塞解除后要给延后的那一单重新定价 —— 放回队列不等于原价放回。** 上一段管
+「延后当轮就把坑记到被延后的 issue 上」;这一段管**前一单合入之后**:后一单的成本
+模型已经变了,而且方向不止一个。两个动作配对:
+
+- **派发前一单时**,派发令里带一条**必答项** —— 它的答案就是给后一单定价用的:
+  > 你的改动是否让 #X 变简单、变难、变得不必要,或完全无影响?明确回答,不要假设。
+- **派发被延后那一单之前**,用这个回答**重读它的选项与成本估计**,⛔ 不沿用立单时
+  的那一份。
+
+本轮四种方向各出现过。**变便宜(且 issue 自己的成本估计同时过期)**:#5375(#5345)
+去掉了「cube 风格数组也可作为输入」这条腿,`{member, operator, values}` 三元组自此纯属
+私有中间表示,#5373 的 B 路线因此从正文写的「工作量最大」降为不跨 spec 的内部改动。
+**没变**:#5431(#5373)对 #5374 —— dev 明确回报「**没有**让它变简单,也**没有**顺带
+修好它」,调用点现在收到真值而非字符串化的值,但「`{$not: 'x'}` 约束不了任何东西」在
+算子层,与比较数编码正交。
+
+默认假设(「前一单大概让它变简单了」)本轮**错了两次、对了一次**,而两个方向的代价
+不对称:误以为变简单 → dev 按缩小的范围做,漏修;误以为没变 → 走一条已经没必要的贵
+路线。所以这不能由 PM 推,只能由在飞那单的 dev 答 —— 本轮正是该必答项的**否定**回答
+直接决定了 #5374 不能缩范围(见 PR #5445 的「范围之外」段)。适用判据:前后两单**共用
+同一个契约或数据表示**;形态迥异的批次(纯 UI、纯文档)里前后单往往不共享成本面,这
+一项问不出信息,不必强加。
+
 ### 4. Claim
 
 All agents share one GitHub identity, so the assignee alone says "some agent
@@ -895,6 +941,28 @@ prompt:
   invalid stay **verbatim**: the guarded surface may never shrink. The two lines
   are one rule — drop the second and "flip the whole repo" degrades into "delete
   the whole repo's assertions", which is green and worthless.
+
+**多面组件:测试落点是共享一致性覆盖,不是一个新文件 —— 派发令的标准条款。**
+适用判据:该组件对**同一个契约**有 ≥2 个实现面。满足时派发令带这一句(原话):
+
+> 测试放在**未来的分叉会被抓住的地方**,不是放在一个独立测试文件里。若本组件对同一
+> 契约有多个实现面,新用例进共享一致性覆盖。
+
+`driver-memory` 有三个过滤面(`find` 的 live path、参考匹配器、analytics/cube 面)。让
+那批缺陷活下来的不是难度,是**没有一条断言在问** —— #5345 之前,共享一致性表
+`FILTER_LOGIC_CASES` 只盯住其中两个。本轮三次派发都写了这条,三次都兑现,并且长成
+**三条正交的轴共用一条不变量**:#5375 是过滤器**形状**(组合子、算子词表)、#5431 是
+**比较数类型**(布尔 / null / 数字样字符串)、#5445 是**算子**(每个声明的算子编译出的
+谓词是否真的排除行)。
+
+> 不变量:**与 `find()` 给出相同的行集,或者以 `INVALID_FILTER` 拒收 —— 不允许有
+> 第三种、更安静的答案。**
+
+第三条轴还带了「declared = enforced」的另一半:`ANALYTICS_FILTER_CAPABILITIES` 声明的
+**每一个**算子都被驱动着走两条路并必须一致,且**探针必须至少排除一行** —— 否则「一致」
+什么也证明不了,那正是 #5374 的形状。适用判据之外不要硬套:样本集中在「一个组件的多个
+实现面逐层收口」这类工作上,没有第二个实现面的活(纯 UI、文档、单面脚本)这条无处可
+绑,该省掉而不是改写它。
 
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
@@ -1087,6 +1155,17 @@ against the report's own claims:
 - Test evidence in the report shows the actual commands and passing output,
   not a bare "tests pass".
 - The diff plausibly satisfies the issue's acceptance criteria.
+- **收益穿过它必经的那道边界之后还在吗?** 判据(不是每单都做):这批工作的价值主张
+  是否**依赖某个下游组件如实转发** —— HTTP 错误信封、序列化、日志汇聚、跨进程传输。
+  是,就至少**端到端验一次**收益在边界之后仍然存在。实例:整条 filter 链的价值是
+  「拒收要说清楚作者错在哪」,而 `packages/rest/src/rest-server.ts` 的两处 4xx 直通**曾**把
+  `message.length >= 500` 的错误**整条替换**成 `'Request failed'` —— 不是截断;
+  `driver-sql` 的 `$null` 拒收实测 606 字符,越线,于是 REST 客户端拿到的是
+  `{ "code": "INVALID_FILTER", "error": "Request failed" }`:`code` 到了,**正文一个字
+  也没到**。反直觉的一层:不带 `status` 时原文完整直通,带上 `status: 400`(#4436 为进
+  ADR-0112 信封特意加的)反而被这道闸门吞掉 —— 写得越精确的拒收越确定送不到。**四个 PR
+  合入,没有任何人在复核里查过这件事**,直到一个 dev 在做别的单时顺手撞上(#5423,已按
+  「截断而非替换」修掉)。缺口不在那段代码,在清单里:本条补的就是它。
 - **A ruling-implementation PR: were the old position's pins flipped repo-wide?**
   Fetch the changed-file list, then grep the consumer layers (REST envelope
   tests, objectql, runtime) for the ruling's error code / message and confirm no
@@ -1119,6 +1198,19 @@ against the report's own claims:
   runtime and is the convention `scripts/check-nul-bytes.mjs` enforces. A
   raw NUL is never the right authoring choice: it also makes the whole file
   invisible to grep, which is how the defect hides in the first place.
+- **以「死代码 / 不可达」为由的删除,PM 在 `origin/main` 上自己核一次引用面,再
+  ACCEPT。** 这份清单的其余各条都围绕「改动是否正确」构造,删除是另一回事:它比修改
+  难回滚,而且「这是死代码」是一个**断言,不是能从 diff 读出的事实**。#5445 删掉
+  `memory-analytics.ts` 里两条映射(`'inDateRange': '$gte'`,注释自称 "Will need special
+  handling" 却无任何调用点实现;`'notSet': '$exists'`,方向还是反的)。dev 给的推理成立
+  (无条目降级到该名、`timeDimensions` 走 Stage 2、两个出口都只消费 `normalizeFilters`
+  的输出),但推理可以错,而 grep 只花十秒:
+  ```
+  git grep -n "inDateRange\|'notSet'" origin/main -- 'packages/**/*.ts'
+  ```
+  确认 `driver-memory` 内只有被删的那两行引用,其余命中全部落在 `service-analytics`
+  —— **另一个包、另一套 strategy**,不受影响。查法用 Operational notes 6(带引号精确名、
+  查声明式而非查提及):notes 6 说「怎么查才不会假阴性」,本条说「什么时候必须查」。
 
 Verdict per issue:
 
@@ -1275,6 +1367,25 @@ not wait for them. Named non-escalation classes (act immediately):
 - A dev's `needs_decision` that, on PM review, falls into the classes above:
   answer the dev yourself with the decision and rationale; do not relay it
   upward.
+
+**第三档:带前提的裁决 —— 当分歧的关键是一个可被代码证伪的事实。** 上面把结果二分成
+「PM 自己裁」与「升级给维护者」;两者之间还有一档,用在**分歧的关键既不是产品口味也不是
+契约取向,而是一个代码能证伪的事实**时。三件套,**缺一不可**:
+
+1. **裁决**(选定一条路线),
+2. **把裁决挂在一个具名、可证伪的前提上**,并在派发令里要求 dev **先验证前提再动手**,
+3. **显式禁令**:「前提不成立就报 fork,⛔ 不许硬做,也不许悄悄退回另一个选项。」
+
+实例:#5373 给了 A/B/C 三条路,正文写「这是本面数据表示的公开形状,请 PM/维护者裁」——
+按上面的门槛读,它像要升级的那一类。实际裁了 **B**,前提是「这个三元组现在是纯内部表示」。
+dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/analytics.test.ts` 与
+`runtime/src/http-dispatcher.test.ts` 各有一条测试断言 cube 风格的 `filters` 数组会被
+**拒收** —— 直接证明该三元组没有线上格式。最终 PR 未触碰一个 spec 字节。
+
+值得单列的原因:它让 PM 在信息不全时**做决定而不靠猜** —— 决定自带检验。既不是「自己拍
+了算」(那要赌前提),也不是「升级」(那要占用维护者时间去回答一个代码可以回答的问题)。
+第 3 条最容易被省掉,而省掉它就退化成最坏形态:前提不成立时 dev 自行改选,那正是**无人
+裁决**的状态,且没有任何读数会显示它发生过。
 
 Whenever a dev returns `needs_decision` that passes the bar above, an issue
 is too vague to dispatch, or rework has failed twice:

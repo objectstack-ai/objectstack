@@ -33,6 +33,58 @@ import type { IDataDriver } from './data-driver.js';
 export interface WriteObservabilityOptions {
   /** Called once per strip pass that dropped ≥1 caller-supplied field. */
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;
+
+  /**
+   * Refuse the write instead of stripping (#5126). Default `false` — off.
+   *
+   * ## Semantics
+   *
+   * When `true`, a write whose payload WOULD have caller-supplied fields
+   * stripped throws before the driver is touched, instead of committing the
+   * remainder. Nothing is written: not the stripped fields, not the fields that
+   * would have survived. The strip passes still run — that is how the engine
+   * learns WHICH fields would go — but their result is discarded.
+   *
+   * It covers every drop `onFieldsDropped` reports, i.e. both
+   * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
+   * only runs for non-system callers) and a TRUE `readonlyWhen` predicate
+   * (#3042, which runs for every caller, `isSystem` included). Covering only
+   * the static arm would leave a trusted caller — the very caller this option
+   * exists for, one that already passes `{ context: { isSystem: true } }` and
+   * is therefore exempt from the static strip — still losing `readonlyWhen`
+   * fields in silence, which is the bug this option exists to abolish.
+   *
+   * `onFieldsDropped` does NOT fire on a write this option refuses. The two are
+   * alternative outputs of one seam, not a sequence: `DroppedFieldsEvent` is
+   * documented as "fields dropped and the write completed without them", and
+   * under strict the write does not complete. Quiet-and-observable or loud —
+   * pick one per call.
+   *
+   * ## The error
+   *
+   * `ERR_READONLY_FIELD_REJECTED` (registered in `ERROR_CODE_LEDGER` under
+   * `@objectstack/objectql`), carrying the FULL list of rejected fields
+   * accumulated across both strip passes — one error naming everything, so a
+   * caller fixes its payload once instead of one round-trip per field. Engines
+   * identify it by `code`, not `instanceof`, so it survives package boundaries.
+   *
+   * ## In-process only — what a REMOTE caller observes
+   *
+   * This is an IN-PROCESS option, exactly like its neighbour above, and for the
+   * same structural reason: `WriteObservabilityOptions` is not the serializable
+   * `EngineUpdateOptionsSchema` bag, so nothing here crosses the RPC / Virtual
+   * Data Engine boundary or is reachable from a REST/wire body. A remote caller
+   * cannot set it, and gets NEITHER behaviour: its write is stripped and
+   * committed, silently from its side, exactly as before this option existed —
+   * a 200 whose read-only columns kept their stored values. That is deliberate
+   * (#5126 ruling): putting the flag in the serializable bag would let any
+   * client toggle write-refusal on a security-adjacent path. Widening strict to
+   * the wire is a SEPARATE decision, not a side effect of this one.
+   *
+   * INSERT ignores it, for the same reason `onFieldsDropped` never fires there:
+   * insert is exempt from both strips, so there is nothing to refuse.
+   */
+  strictReadonlyWrites?: boolean;
 }
 
 /**

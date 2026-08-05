@@ -232,6 +232,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_BULK_RESULT_MISMATCH',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
+    'ERR_READONLY_FIELD_REJECTED', // strictReadonlyWrites: the write would strip read-only fields, so it was refused (#5126)
     'ERR_SUMMARY_RECOMPUTE',
     'VALIDATION_FAILED',
   ],

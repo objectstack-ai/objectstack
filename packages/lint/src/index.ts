@@ -53,6 +53,7 @@ export {
   validateFlowTriggerReadiness,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
+  FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,

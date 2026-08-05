@@ -573,6 +573,9 @@ describe('HookContextSchema', () => {
 
   describe('Session Context', () => {
     it('should accept session with user info', () => {
+      // `roles` used to ride along in this fixture; it was retired in #5050
+      // (declared, never produced) and now has its own pin block below. The
+      // keys asserted here are the ones `buildSession()` really writes.
       const context = HookContextSchema.parse({
         object: 'account',
         event: 'beforeInsert',
@@ -580,14 +583,14 @@ describe('HookContextSchema', () => {
         session: {
           userId: 'user_123',
           organizationId: 'org_456',
-          roles: ['user', 'admin'],
+          isSystem: false,
         },
         ql: {},
       });
 
       expect(context.session?.userId).toBe('user_123');
       expect(context.session?.organizationId).toBe('org_456');
-      expect(context.session?.roles).toContain('admin');
+      expect(context.session?.isSystem).toBe(false);
     });
 
     it('should accept session with access token', () => {
@@ -679,7 +682,10 @@ describe('HookContextSchema', () => {
           // type-checked it — vitest only sees `HookContextSchema.parse`,
           // which strips unknown keys silently (#5286).
           organizationId: 'org_456',
-          roles: ['user'],
+          // `roles` stood here for the same reason until #5050 retired it. It
+          // is now a `retiredKey()` tombstone, so this literal — which IS typed
+          // as `HookContext` — would no longer compile: the tsc channel the
+          // #5286 comment above says this fixture never had.
         },
         transaction: { id: 'tx_789' },
         ql: {},
@@ -845,5 +851,127 @@ describe('defineHook (#4269)', () => {
       enabled: true,
     })).toThrow(/no on\/off switch/);
     expect(() => defineHook({ ...config, name: 'NotSnakeCase' })).toThrow();
+  });
+});
+
+/**
+ * `HookContext.session.roles` retirement (#5050, ADR-0049 enforce-or-remove).
+ *
+ * The key was DECLARED here, READ by two exemption branches in plugin-approvals
+ * (the approval record lock and the delegation write guard, both deleted in
+ * #4839 / PR #5049), and NEVER PRODUCED on the hook path — ObjectQL's
+ * `buildSession()` writes the session field by field and has no `roles` write,
+ * here or in `cloud` (whose hook consumers read `hookContext?.session?.userId`
+ * and nothing else). With the readers gone the key had neither end, which is
+ * the state ADR-0049 says must not persist.
+ *
+ * The one neighbour worth naming, so nobody "disproves" the above with it: an
+ * ACTION body's `ctx.session` is a different, untyped object built by
+ * `runtime`'s `buildActionSession()`, and it does populate a `roles` key from
+ * `ec.positions`. It never becomes a HookContext and no schema types it, so it
+ * is neither evidence against this retirement nor fixed by it — tracked apart.
+ *
+ * Both channels are pinned below, because they answer different questions:
+ *
+ *   - the PARSE channel (`toThrow`) — what a runtime value meets. It matters
+ *     here even though nobody authors a HookContext: `HookContextSchema` is
+ *     exported and the generated reference documents `HookContextSchema.parse`,
+ *     so a consumer parsing a context it was handed is a real, designed-for
+ *     caller;
+ *   - the TSC channel (`@ts-expect-error`) — what a producer meets, and the one
+ *     that would have caught this key being written back. It is only live
+ *     because #5286/#5478 put the test layer in front of `tsc`
+ *     (`tsconfig.test.json`); before that every directive in this package was
+ *     inert.
+ *
+ * Reverse-verified by restoring `roles: z.array(z.string()).optional()` in
+ * `hook.zod.ts`: `pnpm --filter @objectstack/spec test` turns the two parse
+ * assertions red, and `pnpm --filter @objectstack/spec typecheck` reports
+ * TS2578 "Unused '@ts-expect-error' directive" on the two directives below.
+ * Direction predicted before running it, and that is what it did.
+ */
+describe('session.roles retirement (#5050, ADR-0049)', () => {
+  it('REJECTS an authored `roles`, with the prescription in the message', () => {
+    expect(() =>
+      HookContextSchema.parse({
+        object: 'account',
+        event: 'beforeInsert',
+        input: {},
+        session: { userId: 'user_123', roles: ['admin'] },
+        ql: {},
+      }),
+    ).toThrow(/session\.roles.*removed.*never produced/s);
+  });
+
+  it('names the live vocabulary rather than only refusing', () => {
+    // A tombstone whose message stops at "removed" leaves the reader to guess,
+    // and the guess this key invites is a second admin dialect.
+    expect(() =>
+      HookContextSchema.parse({
+        object: 'account',
+        event: 'beforeInsert',
+        input: {},
+        session: { roles: [] },
+        ql: {},
+      }),
+    ).toThrow(/ctx\.session\.userId.*permissions.*positions/s);
+  });
+
+  it('parses cleanly once the key is gone, and carries no `roles` on the way out', () => {
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: { userId: 'user_123', organizationId: 'org_456', isSystem: true },
+      ql: {},
+    });
+
+    expect(context.session?.userId).toBe('user_123');
+    expect(context.session).not.toHaveProperty('roles');
+  });
+
+  it('is a TOMBSTONE, not new strictness — an unrecognized key still strips silently', () => {
+    // The distinction is the whole reason `retiredKey()` exists here. This
+    // schema must stay tolerant (the header says so: an engine-internal
+    // enrichment must not break a consumer parsing a context it was handed),
+    // so a plain deletion would have stripped `roles` in silence — the
+    // #3733 / ADR-0104 failure. Only the retired key is loud.
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: { userId: 'user_123', somethingTheEngineMayAddLater: true } as never,
+      ql: {},
+    });
+
+    expect(context.session?.userId).toBe('user_123');
+    expect(context.session).not.toHaveProperty('somethingTheEngineMayAddLater');
+  });
+
+  it('fails tsc at the producer — the channel that outranks the parse here', () => {
+    const context: HookContext = {
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: {
+        userId: 'user_123',
+        // @ts-expect-error — `session.roles` was retired in #5050; the input type is `never`.
+        roles: ['admin'],
+      },
+      ql: {},
+    };
+
+    // ...and the same directive holds for the shape ObjectQL builds, which is
+    // the site that would have had to start producing the key for any reader
+    // to ever see it.
+    const built: NonNullable<HookContext['session']> = {
+      userId: 'user_123',
+      organizationId: 'org_456',
+      // @ts-expect-error — `buildSession()` never wrote this, and now it cannot.
+      roles: [],
+    };
+
+    expect(() => HookContextSchema.parse(context)).toThrow(/session\.roles/s);
+    expect(built.userId).toBe('user_123');
   });
 });

@@ -85,5 +85,33 @@ export interface MetadataLoader {
     data: any,
     options?: MetadataSaveOptions
   ): Promise<MetadataSaveResult>;
+
+  /**
+   * Delete a metadata item from this loader's store.
+   *
+   * [#5276] Optional on the interface, **mandatory for a `datasource:` loader
+   * that declares `capabilities.write`** — `MetadataManager.registerLoader()`
+   * refuses to register such a loader when this method is missing, so the
+   * combination "declared writable, cannot delete" never reaches the runtime.
+   *
+   * The reason it is enforced at registration rather than tolerated at the
+   * delete site: `MetadataManager.register()` persists into every writable
+   * `datasource:` loader, and `unregister()` has to take those rows back out
+   * again. A loader that can be written to but not deleted from makes every
+   * deletion a silent lie — `unregister()` would skip it, then drop the
+   * registry entry, invalidate the list cache and announce a `deleted` event,
+   * so the caller is told the delete succeeded while the row is read straight
+   * back out of this loader by the next `list()`/`get()`. `capabilities.write`
+   * therefore means *both* directions of the write, on both ends of the item's
+   * life — declared = enforced.
+   *
+   * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
+   * gated: `MetadataManager` never writes to them at runtime, so it never has a
+   * deletion of its own to take back.
+   *
+   * @param type The metadata type
+   * @param name The item name
+   */
+  delete?(type: string, name: string): Promise<void>;
 }
 

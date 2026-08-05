@@ -113,15 +113,17 @@ describe('[#4963] SYNC_ARCHITECTURE.md pipeline examples compile', () => {
     // assertion below pass over an empty program — the way a gate goes dormant.
     expect(pipelineBlocks.length, 'ETLPipeline examples in SYNC_ARCHITECTURE.md').toBe(3);
     // The other three are the L3 `Connector` examples, out of this gate's scope
-    // because they belong to `integration/connector.zod.ts`. Two of them are
-    // Migration-Guide sketches that elide with a bare `...`, which is not
-    // TypeScript. The third — the full `sapConnector` example — is NOT exempt on
-    // its merits: run through this same harness it reports four diagnostics, and
-    // three of them are keys or values the schema REJECTS (`sourceField` /
-    // `targetField` for `source` / `target`, `transform.type: 'custom'`,
-    // `webhooks[].retryPolicy`). That is filed as #5515, not fixed here, because
-    // the fourth diagnostic is `Connector` being `z.infer` — this issue's twin
-    // on a file whose migration surface is NOT empty, so it needs its own ruling.
+    // because they belong to `integration/connector.zod.ts` — and covered, since
+    // #5515, by that file's own gate: `integration/connector-author-shape.test.ts`
+    // classifies the same three (two Migration-Guide sketches that elide with a
+    // bare `...`, which is not TypeScript; one full `sapConnector` example) and
+    // compiles the third. When this pin was written that example reported four
+    // diagnostics, three of them keys or values the schema REJECTS (`sourceField`
+    // / `targetField` for `source` / `target`, `transform.type: 'custom'`,
+    // `webhooks[].retryPolicy`); those are fixed in the document. The fourth was
+    // `Connector` being `z.infer` — this issue's twin on a file whose migration
+    // surface is NOT empty — and it is solved there by annotating the example
+    // with `ConnectorInput`; the alias flip itself is still open as #5551.
     // The total is pinned rather than left open so that ADDING a block to this
     // document is a decision someone has to make on purpose: a new ETL example
     // is picked up automatically by the selector above, and anything else

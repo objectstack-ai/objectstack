@@ -212,6 +212,47 @@ describe('RecordHighlightsProps', () => {
   it('should reject missing fields', () => {
     expect(() => RecordHighlightsProps.parse({})).toThrow();
   });
+
+  // #5176 — `readonly` is a declared key on the object member of
+  // RecordHighlightsField. objectui's HeaderHighlight gate reads it to keep a
+  // hook-maintained column non-editable; before it was declared the object
+  // member (non-strict) silently stripped it, so the authored intent never
+  // reached the renderer contract at all.
+  it('should preserve an authored readonly on an object-form highlight field', () => {
+    const props = {
+      fields: [{ name: 'supply_share', readonly: true, type: 'number' }],
+    };
+    const result = RecordHighlightsProps.parse(props);
+    const entry = result.fields[0] as { name: string; readonly?: boolean; type?: string };
+    expect(entry.name).toBe('supply_share');
+    expect(entry.type).toBe('number');
+    expect(entry.readonly).toBe(true);
+  });
+
+  it('should preserve readonly: false rather than dropping it', () => {
+    const result = RecordHighlightsProps.parse({ fields: [{ name: 'amount', readonly: false }] });
+    const entry = result.fields[0] as { readonly?: boolean };
+    expect(entry.readonly).toBe(false);
+  });
+
+  it('should leave readonly undefined when it is not authored (no default materialized)', () => {
+    const result = RecordHighlightsProps.parse({ fields: [{ name: 'amount' }] });
+    const entry = result.fields[0] as { readonly?: boolean };
+    expect(entry).not.toHaveProperty('readonly');
+    expect(entry.readonly).toBeUndefined();
+  });
+
+  it('should reject a non-boolean readonly instead of silently stripping it', () => {
+    expect(() => RecordHighlightsProps.parse({ fields: [{ name: 'amount', readonly: 'yes' }] })).toThrow();
+  });
+
+  it('should still accept bare-string and other object-form highlight fields', () => {
+    const result = RecordHighlightsProps.parse({
+      fields: ['name', { name: 'status', label: 'State', icon: 'flag' }],
+    });
+    expect(result.fields[0]).toBe('name');
+    expect(result.fields[1]).toEqual({ name: 'status', label: 'State', icon: 'flag' });
+  });
 });
 
 describe('ComponentPropsMap', () => {

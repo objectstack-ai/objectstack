@@ -37,7 +37,9 @@ function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {
     async aggregate(object: string, opts: any) { calls.push(['aggregate', object, opts]); return []; },
     async create(object: string, data: any) { calls.push(['create', object, data]); return { object, id: 'n1' }; },
     async update(object: string, id: string, data: any) { calls.push(['update', object, id, data]); return { object, id }; },
-    async remove(object: string, id: string) { calls.push(['remove', object, id]); return { object, id, deleted: true }; },
+    // [#5581] `success`, not `deleted` — mirrors what `callData('delete', …)`
+    // now returns on BOTH of its paths (the spec's `DeleteDataResponse`).
+    async remove(object: string, id: string) { calls.push(['remove', object, id]); return { object, id, success: true }; },
     async listActions() { calls.push(['listActions']); return [{ name: 'complete_task', objectName: 'task' }]; },
     async runAction(name: string, input: any) { calls.push(['runAction', name, input]); return { ok: true }; },
   };

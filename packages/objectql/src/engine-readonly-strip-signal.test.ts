@@ -27,9 +27,13 @@
 //     (in-process engine, no context), and `{ context: { isSystem: true } }`
 //     makes the same write land.
 //
-// What is NOT here: a strict/reject mode. That needs a new write-option key,
-// and both homes for it (`EngineUpdateOptionsSchema`, `WriteObservabilityOptions`)
-// live in `packages/spec` — see the issue thread.
+// What is NOT here: the strict/reject mode. It landed later, under #5126 —
+// `options.strictReadonlyWrites` on `WriteObservabilityOptions` (the ruling
+// chose the in-process TS contract over the client-serializable
+// `EngineUpdateOptionsSchema`, which would have made write-refusal settable
+// from a wire body). Its suite is `engine-readonly-strict-writes.test.ts`.
+// Everything below stays the DEFAULT path — strict is off unless asked for,
+// and these cases are what "off" must keep meaning.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';

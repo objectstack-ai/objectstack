@@ -224,7 +224,13 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         };
         expectSetMatches('find', EngineQueryOptionsSchema as any, PASSTHROUGH);
         expectSetMatches('findOne', EngineQueryOptionsSchema as any, PASSTHROUGH);
-        expectSetMatches('update', EngineUpdateOptionsSchema as any, ['onFieldsDropped', ...PASSTHROUGH]);
+        // [#5126] `strictReadonlyWrites` joins `onFieldsDropped` as a
+        // documented extra for the same structural reason — both are
+        // `WriteObservabilityOptions` members that deliberately do NOT appear
+        // in the serializable bag, so the schema cannot vouch for them and
+        // this list must. Spelling it here is what keeps the engine from
+        // rejecting a key the TS contract declares.
+        expectSetMatches('update', EngineUpdateOptionsSchema as any, ['onFieldsDropped', 'strictReadonlyWrites', ...PASSTHROUGH]);
         expectSetMatches('delete', EngineDeleteOptionsSchema as any, PASSTHROUGH);
         expectSetMatches('count', EngineCountOptionsSchema as any, []);
         expectSetMatches('aggregate', EngineAggregateOptionsSchema as any, []);

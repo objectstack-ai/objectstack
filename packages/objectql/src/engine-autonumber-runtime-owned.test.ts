@@ -295,6 +295,160 @@ describe('#5503 — autonumber is runtime-owned: bulk-create surfaces', () => {
   });
 });
 
+/**
+ * #5503 x #5126 — the two features superposed.
+ *
+ * #5126 gave the readonly strip a LOUD half: `strictReadonlyWrites` refuses the
+ * write instead of committing it without the stripped columns. #5503 makes
+ * `autonumber` an implicitly-readonly field. The correct joint semantics fall
+ * straight out of #5126's own stated rule — "strict adds no second policy, it
+ * refuses exactly what the strip would have taken" — so:
+ *
+ *  - strict ON  → a caller-supplied record number is REFUSED, at equal rank
+ *    with a declared `readonly` field, on insert AND update;
+ *  - strict OFF → unchanged: stripped, committed, reported via
+ *    `onFieldsDropped`;
+ *  - a value the strip does NOT take is not rejected either, so the `isSystem`
+ *    and `preserveAudit` exemptions survive strict untouched. That is the
+ *    rule applied verbatim, not a new decision.
+ *
+ * On UPDATE this needed no new code — the autonumber limb rides
+ * `stripReadonlyFields` → `reportDroppedFields` → `assertNoStrictDrops`, the
+ * seam #5126 already built. On INSERT it did: #5126 left `strictReadonlyWrites`
+ * inert there with the standing note "if insert ever gains a strip, both
+ * members wire up together at that site", and #5503 is that strip.
+ */
+describe('#5503 x #5126 — strictReadonlyWrites covers runtime-owned fields', () => {
+  it('INSERT: refuses a caller-supplied record number and writes NOTHING', async () => {
+    const rig = await makeEngine();
+    const err = await rig.engine
+      .insert(
+        'an_account',
+        { name: 'AN forge', account_number: 'ACC-777777' },
+        { strictReadonlyWrites: true },
+      )
+      .then(() => null, (e) => e);
+
+    expect(err?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.fields).toEqual(['account_number']);
+    expect(err.operation).toBe('insert');
+    expect(err.message).toContain('account_number');
+    // The refusal lands BEFORE the driver — not even the legitimate `name`.
+    expect(rig.createdRows).toHaveLength(0);
+    // …and no sequence value was burned on the refused attempt.
+    const ok = await rig.engine.insert('an_account', { name: 'clean' });
+    expect(ok.account_number).toBe('ACC-0001');
+  });
+
+  it('INSERT: the listener does NOT fire under strict — a refused write did not complete', async () => {
+    const rig = await makeEngine();
+    const events: DroppedFieldsEvent[] = [];
+    await rig.engine
+      .insert(
+        'an_account',
+        { name: 'x', account_number: 'ACC-777777' },
+        { strictReadonlyWrites: true, onFieldsDropped: (e) => { events.push(e); } },
+      )
+      .catch(() => {});
+    expect(events).toEqual([]);
+  });
+
+  it('INSERT: strict is inert when nothing would be stripped', async () => {
+    const rig = await makeEngine();
+    const row = await rig.engine.insert('an_account', { name: 'clean' }, { strictReadonlyWrites: true });
+    expect(row.account_number).toBe('ACC-0001');
+  });
+
+  it('INSERT: the exemptions survive strict — strict refuses only what the strip takes', async () => {
+    // #5126's rule, applied verbatim rather than re-decided: an exempt writer's
+    // value is never stripped, so there is nothing for strict to refuse.
+    const rig = await makeEngine();
+    const seeded = await rig.engine.insert(
+      'an_account',
+      { name: 'seeded', account_number: 'ACC-000042' },
+      { strictReadonlyWrites: true, context: { isSystem: true } },
+    );
+    expect(seeded.account_number).toBe('ACC-000042');
+
+    const legacy = await rig.engine.insert(
+      'an_account',
+      { name: 'legacy', account_number: 'LEGACY-0007' },
+      { strictReadonlyWrites: true, context: { preserveAudit: true } },
+    );
+    expect(legacy.account_number).toBe('LEGACY-0007');
+  });
+
+  it('UPDATE: refuses a caller-supplied record number, at equal rank with a declared readonly field', async () => {
+    const rig = await makeEngine();
+    const created = await rig.protocol.createData({ object: 'an_account', data: { name: 'Acme' } });
+    const id = created.id as string;
+
+    const err = await rig.engine
+      .update(
+        'an_account',
+        { id, name: 'renamed', account_number: 'ACC-888888' },
+        { where: { id }, strictReadonlyWrites: true },
+      )
+      .then(() => null, (e) => e);
+
+    expect(err?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.fields).toEqual(['account_number']);
+    expect([...err.drops].map((d: DroppedFieldsEvent) => d.reason)).toEqual(['readonly']);
+    // Nothing was written — not even the legitimate rename.
+    const readback = await rig.engine.findOne('an_account', { where: { id } });
+    expect(readback.name).toBe('Acme');
+    expect(readback.account_number).toBe('ACC-0001');
+  });
+
+  it('UPDATE: strict OFF keeps the default — stripped, committed, reported', async () => {
+    const rig = await makeEngine();
+    const created = await rig.protocol.createData({ object: 'an_account', data: { name: 'Acme' } });
+    const id = created.id as string;
+    const events: DroppedFieldsEvent[] = [];
+
+    await rig.engine.update(
+      'an_account',
+      { id, name: 'renamed', account_number: 'ACC-888888' },
+      { where: { id }, onFieldsDropped: (e) => { events.push(e); } },
+    );
+
+    expect(events.flatMap((e) => e.fields)).toContain('account_number');
+    const readback = await rig.engine.findOne('an_account', { where: { id } });
+    expect(readback.name).toBe('renamed');          // the legitimate half landed
+    expect(readback.account_number).toBe('ACC-0001'); // the forged half did not
+  });
+
+  it('UPDATE: the preserveAudit exemption survives strict', async () => {
+    const rig = await makeEngine();
+    const created = await rig.protocol.createData({ object: 'an_account', data: { name: 'Acme' } });
+    const id = created.id as string;
+    const res = await rig.engine.update(
+      'an_account',
+      { id, account_number: 'LEGACY-0007' },
+      { where: { id }, strictReadonlyWrites: true, context: { preserveAudit: true } },
+    );
+    expect(res.account_number).toBe('LEGACY-0007');
+  });
+
+  it('a strict BATCH insert is refused whole — consistent with "NOTHING was written"', async () => {
+    // `insertMany`'s partial-success mode culls bad ROWS; strict is a refusal of
+    // the WRITE. When a caller asks for both, the refusal wins: the error
+    // contract says nothing was written, and degrading to "we kept the other
+    // rows" would make that false. Pinned so the corner is a decision, not an
+    // accident.
+    const rig = await makeEngine();
+    const err = await rig.engine
+      .insertMany(
+        'an_account',
+        [{ name: 'a' }, { name: 'b', account_number: 'ACC-111111' }],
+        { strictReadonlyWrites: true },
+      )
+      .then(() => null, (e) => e);
+    expect(err?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(rig.createdRows).toHaveLength(0);
+  });
+});
+
 describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
   let rig: Awaited<ReturnType<typeof makeEngine>>;
   let id: string;

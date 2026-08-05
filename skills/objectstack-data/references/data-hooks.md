@@ -346,7 +346,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, roles, … }`. |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (#5050): it was declared but never produced, so every read was `undefined`. |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
@@ -569,8 +569,12 @@ interface HookContext {
     organizationId?: string; // Active org — the single blessed name. Matches the
                              // `organization_id` column + `current_user.organizationId` (RLS).
                              // The former `tenantId` alias was removed in #3290.
-    roles?: string[];
+                             // There is no `roles` here: `session.roles` was declared but
+                             // never produced, and was retired in 17.0.0 (#5050). Privilege
+                             // is judged by the security service (permissions / positions /
+                             // posture), never by a role-name string in a hook.
     accessToken?: string;
+    isSystem?: boolean;      // Elevated system context (engine self-writes).
   };
 
   transaction?: unknown;  // Database transaction handle
@@ -991,10 +995,18 @@ const maskSensitiveData = defineHook({
   object: ['contact', 'lead'],
   events: ['afterFind'],   // fires for findOne too — no separate afterFindOne
   handler: async (ctx) => {
-    // Check user role
-    const isAdmin = ctx.session?.roles?.includes('admin');
+    // Exempt the engine's own elevated reads (`isSystem`) — internal writes
+    // and self-reads must see the real values.
+    //
+    // ⚠️ Do NOT gate this on a role name. `ctx.session` carries no role list:
+    // `session.roles` was declared for years, never produced by any engine
+    // path, and retired in 17.0.0 (#5050) — `ctx.session?.roles?.includes(…)`
+    // was always `undefined`, so a mask written that way looked role-aware and
+    // was not. A per-role exemption belongs in field-level permissions (the
+    // callout above), which the read path applies for you.
+    const isElevated = ctx.session?.isSystem === true;
 
-    if (!isAdmin) {
+    if (!isElevated) {
       // Mask sensitive fields
       const maskField = (record: any) => {
         if (record.ssn) {

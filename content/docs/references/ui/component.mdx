@@ -300,7 +300,7 @@ const result = AIChatWindowProps.parse(data);
 
 ## RecordHighlightsField
 
-Highlight field: bare name, or `{name,label?,icon?,type?}`
+Highlight field: bare name, or `{name,label?,icon?,type?,readonly?}`
 
 ### Union Options
 
@@ -322,6 +322,7 @@ Type: `string`
 | **label** | `string` | optional | Display label (overrides schema label) |
 | **icon** | `string` | optional | Icon name (lucide icon key) |
 | **type** | `string` | optional | Override cell renderer type (rare) |
+| **readonly** | `boolean` | optional | Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header. |
 
 ---
 
@@ -334,7 +335,7 @@ Type: `string`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `string \| { name: string; label?: string; icon?: string; type?: string }[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, icon?, type?}` for inline overrides. |
+| **fields** | `string \| { name: string; label?: string; icon?: string; type?: string; … }[]` | ✅ | Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or `{name, label?, icon?, type?, readonly?}` for inline overrides. |
 | **layout** | `Enum<'horizontal' \| 'vertical'>` | ✅ | Layout orientation for highlight fields |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 

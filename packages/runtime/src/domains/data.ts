@@ -99,7 +99,13 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         // DELETE /data/:object/:id
         if (parts.length === 2 && m === 'DELETE') {
             const id = parts[1];
-            // Spec: returns DeleteDataResponse = { object, id, deleted }
+            // Spec: returns DeleteDataResponse = { object, id, success }
+            // [#5581] Said `deleted` until this fix — the one comment in this
+            // trio that did NOT match its schema (`DeleteDataResponseSchema`
+            // declares `success`; the 87/94 get/update comments above were
+            // already right). It described the ObjectQL fallback's off-spec
+            // body as if it were the spec, so the next reader of this line
+            // would have written a consumer against `deleted`.
             const result = await actionExec.callData(deps, _context, 'delete', { object: objectName, id }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }

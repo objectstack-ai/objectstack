@@ -40,7 +40,12 @@ function makeBridge(): McpDataBridge & { calls: any[] } {
     },
     async remove(object: string, id: string) {
       calls.push(['remove', object, id]);
-      return { object, id, deleted: true };
+      // [#5581] `success`, not `deleted` — this double stands in for
+      // `callData('delete', …)`, whose two paths now both answer the spec's
+      // `DeleteDataResponse` shape. No assertion here reads the key; it is
+      // kept honest so the next reader does not copy a shape the producer
+      // stopped returning.
+      return { object, id, success: true };
     },
   };
 }

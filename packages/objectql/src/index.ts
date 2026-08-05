@@ -51,6 +51,11 @@ export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from 
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 export { SummaryRecomputeError } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
+// [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
+// payload would have had read-only fields stripped. Exported so an in-process
+// caller (a cron / server-side plugin) can narrow on the class; the `code` is
+// the boundary-crossing identity.
+export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.

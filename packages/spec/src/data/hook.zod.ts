@@ -8,6 +8,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Defines the interception points in the ObjectQL execution pipeline.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
@@ -371,11 +372,71 @@ export const HookContextSchema = lazySchema(() => z.object({
      * deliberately untouched.
      */
     organizationId: z.string().optional().describe('Active organization ID (blessed developer-facing name)'),
-    roles: z.array(z.string()).optional(),
     accessToken: z.string().optional(),
     isSystem: z.boolean().optional().describe('True when the call was made with an elevated system context (engine self-writes)'),
     skipTriggers: z.boolean().optional().describe('True when record-change automation (flow triggers) must be suppressed for this write — e.g. package seed replay. Lifecycle hooks still run.'),
     skipAutomations: z.boolean().optional().describe('True when metadata-bound automation hooks must be suppressed for this write — e.g. data import with "run automations" unchecked, or import undo. Implies skipTriggers; code-registered system hooks (audit, security) still run.'),
+    // `roles` REMOVED (#5050, ADR-0049 D2). It was DECLARED here, READ by two
+    // dead exemption branches in plugin-approvals (the approval record lock and
+    // the delegation write guard, both deleted in #4839 / PR #5049), and NEVER
+    // PRODUCED on the hook path: ObjectQL's `buildSession()`
+    // (`packages/objectql/src/engine.ts`) builds the session field by field —
+    // `userId`, `organizationId`, `accessToken`, `isSystem`, `actor`, the skip
+    // flags — and has no `roles` write, and no other producer feeds a
+    // HookContext. So both readers resolved `undefined` on every real engine
+    // path: an authorization decision in shape only. #5049 removed the last two
+    // readers; this removes the declaration, which is what ADR-0049
+    // enforce-or-remove asks for once a key has neither end.
+    //
+    // ⚠️ One NEIGHBOUR, deliberately not conflated (the #4865 lesson — a
+    // tombstone claim disproven by a surface nobody checked): an ACTION body's
+    // `ctx.session` is a DIFFERENT object, built by
+    // `runtime/src/action-execution.ts` `buildActionSession()`, and it does
+    // write a `roles` key today (from `ec.positions`, i.e. the ADR-0090 D3
+    // vocabulary spelled in the banned name). It is untyped `any`, reaches no
+    // schema, and never becomes a HookContext — so it neither refutes the
+    // never-produced finding here nor is fixed by this removal. Filed as
+    // #5613; do not "restore" this key on the strength of having seen
+    // `session.roles` populated inside an action body.
+    //
+    // Tombstoned rather than deleted: `HookContextSchema` is deliberately NOT
+    // `.strict()` (see the header), so a plain deletion would make Zod strip
+    // the key silently — the #3733 / ADR-0104 failure, and exactly the silent
+    // no-op this retirement exists to end.
+    //
+    // ⚠️ Keep tombstones at the BOTTOM of this shape. The generated reference
+    // renders an inline object as its first four declared keys plus `…`
+    // (`scripts/lib/format-type.ts`, INLINE_KEY_LIMIT), and a `z.never()` has
+    // no JSON-Schema `type`, so it prints as `any` with no room for the
+    // `[REMOVED]` prescription a top-level row would carry. In its original
+    // position `roles` was the 4th key and `references/data/hook.mdx` began
+    // advertising `roles?: any` — a retired key reading as a free-form
+    // authorable slot, the ADR-0033 trap pointed at the docs. Below the live
+    // keys it is elided instead, and the two real channels (tsc + the parse)
+    // are untouched. The renderer gap itself is filed separately.
+    //
+    // The live vocabulary is unchanged and lives elsewhere on purpose: a hook
+    // that gates on the caller reads `session.userId` / `session.isSystem`
+    // here, and privilege itself is judged on the ExecutionContext the security
+    // service resolves — capability grants (`permissions`), placements
+    // (`positions`) and the derived posture (ADR-0095 D3) — never by a session
+    // field named `roles` or a comparison against the string 'admin'
+    // (ADR-0090 D3 bans the `role` spelling outright).
+    roles: retiredKey(
+      '`HookContext.session.roles` was removed in @objectstack/spec 17.0.0 (#5050, ADR-0049 D2) — '
+      + 'it was declared, read by two dead exemption branches (removed in #5049), and never '
+      + 'produced: ObjectQL\'s `buildSession()` builds the session field by field and has never '
+      + 'written `roles`, so every read resolved `undefined` and a guard keyed on it was dead '
+      + 'code that merely LOOKED like an authorization decision. Delete the key. To gate a hook '
+      + 'on the caller, read `ctx.session.userId` / `ctx.session.isSystem`; to judge PRIVILEGE, '
+      + 'ask the security service, which evaluates the ADR-0095 vocabulary on the execution '
+      + 'context — capability grants (`permissions`), placements (`positions`) and the derived '
+      + 'posture — never a role-name string comparison (ADR-0090 D3 bans the `role` spelling '
+      + 'outright). Nothing to migrate: a HookContext is built per operation by the engine and '
+      + 'never stored, so no metadata source carries this key. NOTE an ACTION body\'s '
+      + '`ctx.session` is a different object and still carries its own `roles` array today; '
+      + 'that surface is tracked separately (#5613) and is not what this key was.',
+    ),
   }).optional().describe('Current session context'),
 
   /**
