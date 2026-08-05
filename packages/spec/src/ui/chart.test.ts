@@ -377,6 +377,12 @@ describe('Chart ARIA Integration', () => {
 // by a later sweep "finishing the file" with a `strictObject` that gates
 // nothing (#4583). The same verdict is recorded in `chart.zod.ts`'s header and
 // in the ui/ row of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+//
+// UPDATE (#5020): the open half's verdict moved from `no gate` to `authorable`
+// — the react-page publish lint now PARSES `ChartAggregateSchema` instead of
+// re-deriving it, so a `strictObject` here would no longer gate nothing. The
+// posture itself is unchanged, so every assertion below stands as written; the
+// conversion is #5583, and that is the change that inverts the two STRIP pins.
 // ============================================================================
 describe('#4001 批 15 — the five closed chart sites', () => {
   const reject = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string => {
@@ -521,11 +527,20 @@ describe('#4001 批 15 — the five closed chart sites', () => {
 describe('#4001 批 15 — the two chart sites deliberately LEFT OPEN (measured, not skipped)', () => {
   // `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm have a LIVE
   // carrier — the react tier's `<ObjectChart aggregate={…}>` prop, which
-  // objectui's ObjectChart reads to run the query — but no PARSE: they are
-  // unreachable from all 24 metadata-type roots and from `ObjectStackSchema`,
-  // and the react-page publish lint re-derives their rules by hand instead of
-  // parsing them. `.strict()` is a property of a parse, so closing them would
-  // gate nothing while making the real gap harder to see.
+  // objectui's ObjectChart reads to run the query — and, as of **#5020**, a
+  // PARSE: the react-page publish lint calls `ChartAggregateSchema.safeParse()`
+  // instead of re-deriving the vocabulary and the count/field refinement by
+  // hand. That retires the 批 15 `no gate` verdict; both sites are now ordinary
+  // `authorable` ones.
+  //
+  // The two pins below are therefore UNCHANGED and must stay GREEN: the posture
+  // did not move, only the parse did. `.strict()` is a property of a parse, and
+  // now that one exists, converting these two is a behaviour change with a gate
+  // to observe it — **#5583**, where these two assertions INVERT (the stripped
+  // key becomes a named rejection). Until then they record what the wired gate
+  // still cannot see, which is the difference between a gate and a closed door
+  // (#4583). The companion pins live in `packages/lint`'s
+  // `validate-react-page-props.test.ts`.
   it('ChartAggregateSchema still STRIPS an undeclared key — deliberate', () => {
     const parsed = ChartAggregateSchema.parse({ function: 'count', groupBy: 'status', groupby: 'status' }) as Record<string, unknown>;
     expect(parsed.groupby, 'if this is no longer stripped, re-read the header in chart.zod.ts').toBeUndefined();

@@ -275,10 +275,13 @@ const TEST_DEBT = {
 // spec took -- put the file in a tsc program (drop the exclusion, widen
 // `include`, or add a sibling `tsconfig.test.json` the typecheck script names)
 // -- and then delete the entry, which RECONCILED forces anyway.
-const PHANTOM_PIN_DEBT = {
-  'packages/metadata-core/test/types.test.ts':
-    'Outside the program for a different reason, and one no exclusion names: `include` is `["src/**/*"]` while this file lives in a sibling `test/` tree, so TESTS_COVERED never saw it either (its testFiles count is 0). Repair is to widen `include` or add a test config; tracked by #5476, not by #5286 (which scoped itself to packages/spec).',
-};
+//
+// EMPTY, and that is the intended end state: both seeds #5286 planted have been
+// repaired and their entries deleted -- `packages/client` in #5449 (PR #5546),
+// `packages/metadata-core/test/types.test.ts` in #5476, each by naming a sibling
+// `tsconfig.test.json` in its `typecheck` script. A new entry here is not the
+// route for the next such finding; PINS_CHECKED going red is.
+const PHANTOM_PIN_DEBT = {};
 
 /**
  * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
@@ -380,8 +383,9 @@ function configsNamedByTypecheck(scripts) {
  *
  * `pinFiles` is PINS_CHECKED's input: test files carrying a `@ts-expect-error`
  * directive that no invoked program compiles. The scan walks the whole package,
- * not just the include roots -- `packages/metadata-core/test/` is outside
- * `include` with no exclusion naming it, and that is just as unchecked.
+ * not just the include roots -- `packages/metadata-core/test/` sat outside
+ * `include` with no exclusion naming it (until #5476 put it in a program), and
+ * that is just as unchecked.
  *
  * @returns {{excludesTests: boolean, testFiles: number, pinFiles: string[]}}
  */

@@ -1,6 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeViewMetadata, graftNormalizedOperators, stripReadDecorations } from './protocol.js';
+// [#5138] The 404 envelope every single-record path answers, exported so the
+// ObjectQL FALLBACK in `@objectstack/runtime`'s `callData` builds the SAME one
+// instead of minting a second not-found shape. See `recordNotFoundError`.
+export { recordNotFoundError } from './protocol.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
 export type { MetadataProtocolPluginOptions } from './plugin.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
