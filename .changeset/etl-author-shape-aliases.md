@@ -7,12 +7,12 @@ convention** (#4963): the bare name is `z.input` — what an author writes — a
 `XParsed` is `z.infer` — what a parse returns.
 
 Until 17 all nine were `z.infer` under the bare name with no `*Parsed` counterpart at
-all. On this file that was not a style detail. Six keys carry `.default()`
+all. On this file that was not a style detail. Five named keys carry `.default()`
 (`ETLDestination.writeMode`, `ETLTransformation.continueOnError`, `ETLPipeline.syncMode`
-/ `.enabled`, `ETLSource.incremental.enabled`, and every key of `ETLPipeline.retry`) and
-`schedule` is a `CronExpressionInputSchema` transform whose *output* is the
-`{ dialect, source }` envelope. Under `z.infer` all of them were REQUIRED and a bare
-cron string was rejected — so the single use this file has, `const p: ETLPipeline = { … }`
+/ `.enabled`, `ETLSource.incremental.enabled`), as does every key of
+`ETLPipeline.retry` and of `ETLPipelineRun.stats`, and `schedule` is a
+`CronExpressionInputSchema` transform whose *output* is the `{ dialect, source }`
+envelope. Under `z.infer` all of them were REQUIRED and a bare cron string was rejected — so the single use this file has, `const p: ETLPipeline = { … }`
 written by hand, did not compile. That is the whole authoring door: `etl.zod.ts` has no
 parse site in objectstack / objectui / cloud, so the exported schema and the exported
 type are the only surface an author touches.

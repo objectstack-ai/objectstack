@@ -112,12 +112,14 @@ export const ETLEndpointTypeSchema = lazySchema(() => z.enum([
 //
 // Until 17 all nine aliases here were `z.infer` under the bare name with no
 // `*Parsed` counterpart at all, and on this file that was not a style detail.
-// Six keys across four shapes carry `.default()` — `ETLDestination.writeMode`,
-// `ETLTransformation.continueOnError`, `ETLPipeline.syncMode` / `.enabled`,
-// `ETLSource.incremental.enabled`, plus the whole `retry` block — and `schedule`
-// is a `CronExpressionInputSchema` transform whose *output* is the `{ dialect,
-// source }` envelope. Under `z.infer` all six were REQUIRED and a bare-string
-// cron was rejected, so the one use this file actually has —
+// Five named keys across four shapes carry `.default()` —
+// `ETLDestination.writeMode`, `ETLTransformation.continueOnError`,
+// `ETLPipeline.syncMode` / `.enabled`, `ETLSource.incremental.enabled` — plus
+// all five of `ETLPipeline.retry`'s (via `retryPolicyShape()`) and all four of
+// `ETLPipelineRun.stats`'. And `schedule` is a `CronExpressionInputSchema`
+// transform whose *output* is the `{ dialect, source }` envelope. Under
+// `z.infer` every one of them was REQUIRED and a bare-string cron was
+// rejected, so the one use this file actually has —
 // `const p: ETLPipeline = { … }`, hand-written, which is the whole authoring
 // door given there is no parse site in objectstack / objectui / cloud — did not
 // compile. `packages/spec/docs/SYNC_ARCHITECTURE.md` carried three examples
