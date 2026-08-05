@@ -1040,6 +1040,10 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
     expect(fnds[0].message).toContain('WHOLE-OBJECT write');
     expect(fnds[0].message).toContain("every row of 'lead' is deleted");
     expect(fnds[0].message).toContain('driver.deleteMany');
+    // The authority it cites is the delete dispatch that is actually extracted
+    // and case-set-pinned — not a hand-waved "the engine allows it".
+    expect(fnds[0].message).toContain('delete-dispatch case-set');
+    expect(fnds[0].message).toContain('multi with no predicate at all');
     // …and that the only run-time feedback arrives too late to help.
     expect(fnds[0].message).toMatch(/`acted` row count/);
     expect(fnds[0].message).toMatch(/AFTER the rows are gone/);
@@ -1062,6 +1066,10 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
     expect(fnds[0].where).toBe("flow 'nightly_purge' · node 'purge' (update_record)");
     expect(fnds[0].message).toContain("every row of 'lead' is overwritten");
     expect(fnds[0].message).toContain('driver.updateMany');
+    // Update has no extracted dispatch module, so the message cites the branch
+    // itself rather than borrowing delete's case-set.
+    expect(fnds[0].message).toContain('bulk branch on `options.multi`');
+    expect(fnds[0].message).not.toContain('delete-dispatch case-set');
   });
 
   it('names the #3810 run-time guard and says the two judge DIFFERENT facts', () => {

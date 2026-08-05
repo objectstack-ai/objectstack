@@ -231,9 +231,24 @@ const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record',
  * "this executor forwards `config.multi` to the engine as bulk intent", which is
  * a claim about the executor, not about being a data node.
  */
-const BULK_WRITE_CONSEQUENCE: ReadonlyMap<string, { readonly verb: string; readonly engineCall: string }> = new Map([
-  ['delete_record', { verb: 'deleted', engineCall: 'driver.deleteMany' }],
-  ['update_record', { verb: 'overwritten', engineCall: 'driver.updateMany' }],
+const BULK_WRITE_CONSEQUENCE: ReadonlyMap<
+  string,
+  { readonly verb: string; readonly engineCall: string; readonly dispatchNote: string }
+> = new Map([
+  ['delete_record', {
+    verb: 'deleted',
+    engineCall: 'driver.deleteMany',
+    // The delete dispatch is the one that is EXTRACTED and case-set-pinned
+    // (`engine-delete-dispatch.ts`), so it can be cited by name.
+    dispatchNote: "the engine's delete-dispatch case-set lists `multi with no predicate at all` as a legal `multi` call",
+  }],
+  ['update_record', {
+    verb: 'overwritten',
+    engineCall: 'driver.updateMany',
+    // Update has no extracted dispatch module, so the branch itself is the
+    // authority — and its refusal fires only WITHOUT the declaration.
+    dispatchNote: "the engine takes its bulk branch on `options.multi` alone (`Update requires an ID or options.multi=true` is refused only when the declaration is absent)",
+  }],
 ]);
 
 /**
@@ -750,8 +765,7 @@ function scanUnboundedBulkWrites(
       message:
         `declares \`multi: true\` with ${filterState} — this is a WHOLE-OBJECT write, by declaration: every ` +
         `row of '${objectName}' is ${consequence.verb} on every run. The executor forwards \`where: {}\` plus the ` +
-        `bulk intent, the engine classifies that as a legal \`multi\` call (its dispatch case-set lists ` +
-        `\`multi with no predicate at all\`), and it lands on \`${consequence.engineCall}\` with no predicate. ` +
+        `bulk intent, ${consequence.dispatchNote}, and it lands on \`${consequence.engineCall}\` with no predicate. ` +
         `Nothing refuses it at run time, so the only feedback is the step's \`acted\` row count — reported ` +
         `AFTER the rows are gone.`,
       hint:
