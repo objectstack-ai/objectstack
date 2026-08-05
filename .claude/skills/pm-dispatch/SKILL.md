@@ -358,17 +358,35 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/plugins/driver-*` |
-| `domain:services` | `packages/services/*`、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`packages/connectors/*` |
+| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`packages/plugins/driver-*`、`plugin-pinyin-search`(全局写钩子,同 #4775 锚定) |
+| `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`skills/**`、`content/docs/**`、`scripts/`(门禁类) |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`packages/vscode-objectstack`、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
 | `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
-| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types` |
+| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
+| (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
 `examples/**` belongs to the subsystem it exercises; anything that fits
 nowhere is judged at triage by its principal landing site. A package missing
 from the table is classified the first time it is triaged and the table
 updated **by PR** — the taxonomy evolves deliberately, never per-claim.
+
+最后一行的三处兜底位:`examples/*` 照上一句;另两处的读法如下(表按 #5095 逐包
+核过真实消费方向补全,`packages/` 下余包都已落到上面某一行):
+
+- `packages/apps/*` 今天只是 app manifest + plugin 壳,内容仍从
+  `@objectstack/platform-objects/apps` 再导出,落点可能在 platform-objects
+  (engine)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要落地站点
+  在分诊时判定。
+- `packages/console` 是 `../objectui` 构建产物的落盘位:仓内只跟踪
+  `package.json` / `README` / `CHANGELOG`,`dist/` 由 `scripts/build-console.sh`
+  生成且⛔禁止手改。控制台 UI 的缺陷走 `repo:objectui`;仓内唯一可改面是 pin /
+  刷新脚本(`build-console.sh`、`bump-objectui.sh`、`check-console-sha.mjs`、
+  `check-objectui-pin-fresh.mjs`),归 `scripts/`(门禁类)那一行。
+
+本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**仓库级分片**,
+routing 用 `repo:*` 表达(rule 4 的分片协议),不另打 `domain:*` —— 域车道是
+「同仓多 PM 并发」的切法,不是第二套仓库标签。
 
 **Label discipline.** `domain:*` is applied during the backlog sweep (round
 loop step 0) by whichever PM triages the issue. **Labeling ≠ claiming**: any
