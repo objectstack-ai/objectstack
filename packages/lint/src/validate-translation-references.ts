@@ -222,7 +222,7 @@ function emptyFacts(): ObjectFacts {
  * A third thing was learned later, from the showcase (#5415): the container's
  * DEFAULT form (`form`) is a section anchor too. It is not one of the
  * `formViews.*` entries and it is not the record's own `sections` either, so
- * for two protocol versions its named sections contributed NOTHING — and a
+ * its named sections contributed NOTHING to the fact set — and a
  * bundle that correctly translated one of them was reported as keyed to a
  * section "nothing declares", with a hint advising the author to delete a
  * translation that renders. `ObjectForm` reads that form and resolves its
