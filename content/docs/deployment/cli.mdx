@@ -138,13 +138,28 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `-p, --port <n>` | `OS_PORT` / `PORT` | Listen port (default `3000`). In dev a busy port auto-hops to the next free one; the banner shows the actual port. |
 | `--ui` | — | Force Console UI on (already on by default in dev) |
 | `--compile` | — | Force compiling `objectstack.config.ts` → `dist/objectstack.json` before starting (auto when the artifact is missing; ignored with `--artifact`) |
-| `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads, storage), auto-deleted on exit; implies `--seed-admin` |
+| `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads root, and other `OS_HOME`-keyed state), auto-deleted on exit; implies `--seed-admin`. See the scope note below |
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
 
 By default `os dev` keeps your data between restarts in a project-local SQLite
 file at `.objectstack/data/dev.db` (created on first run). Pass `--database`,
 set `OS_DATABASE_URL`, or use `--fresh` for a throwaway run.
+
+<Callout type="info" title="What `--fresh` covers">
+`--fresh` isolates the state **the CLI places for the run**: everything keyed
+off the ephemeral `OS_HOME` (the dev SQLite DB, the uploads root, plugin state
+under `OS_HOME`) plus the env channels `os dev` publishes for it —
+`OS_DATABASE_URL` and `OS_STORAGE_LOCAL_ROOT`. That tempdir is deleted on exit.
+
+It does **not** relocate state your app reaches by a **relative path it
+declares itself** — for example a datasource with
+`config: { filename: '.objectstack/data/my.db' }`. Such a path is resolved by
+its own consumer against the process working directory, which `--fresh` does
+not change, so the file is written into your project tree and is still there
+after the run ends. Declare an absolute path (or one derived from `OS_HOME`)
+when you want a datasource to follow `--fresh`.
+</Callout>
 
 With a file-backed SQLite database, dev also provisions a sibling
 `<db>.telemetry.<ext>` file registered as the `telemetry` datasource —
