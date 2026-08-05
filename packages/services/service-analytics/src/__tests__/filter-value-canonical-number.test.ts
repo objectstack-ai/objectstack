@@ -233,7 +233,7 @@ describe("analytics SQL path — a text column's own spelling is what gets bound
   let bound: unknown[][];
 
   beforeAll(async () => {
-      const mod: any = await import('sql.js');
+    const mod: any = await import('sql.js');
     const initSqlJs = mod.default ?? mod;
     const locateFile = await locateWasm();
     const SQL = await initSqlJs(locateFile ? { locateFile } : undefined);
@@ -253,7 +253,7 @@ describe("analytics SQL path — a text column's own spelling is what gets bound
       executeRawSql: async (_object: string, sql: string, params: unknown[]) => {
         bound.push(params);
         const stmt = db.prepare(sql.replace(/\$\d+/g, '?'));
-              stmt.bind(params as any[]);
+        stmt.bind(params as any[]);
         const out: Record<string, unknown>[] = [];
         while (stmt.step()) out.push(stmt.getAsObject());
         stmt.free();
