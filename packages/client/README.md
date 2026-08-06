@@ -303,5 +303,5 @@ cd packages/client
 pnpm test:integration
 ```
 
-See [CLIENT_SERVER_INTEGRATION_TESTS.md](./CLIENT_SERVER_INTEGRATION_TESTS.md) for detailed test specifications.
+See [`tests/integration/README.md`](./tests/integration/README.md) for what is covered today and what is still unwritten.
 

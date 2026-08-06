@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-memory": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "hono": "^4.12.34",
