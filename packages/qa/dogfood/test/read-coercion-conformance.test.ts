@@ -1,10 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // Driver read-coercion conformance — exercises the reusable `checkReadCoercion`
-// helper (from @objectstack/verify) against the framework's own SQL + memory
-// drivers. A stored value must read back as its DECLARED type on every driver:
-// a boolean as a boolean (not the integer 0/1 SQLite stores), a json field as
-// an object, an integer as a number.
+// helper (from @objectstack/verify) against the framework's own SQL driver
+// (better-sqlite3 `:memory:`). A stored value must read back as its DECLARED
+// type: a boolean as a boolean (not the integer 0/1 SQLite stores), a json
+// field as an object, an integer as a number.
+//
+// The `driver-memory` arm was removed in #5704 (batch 0): driver-memory is the
+// project's legacy test-convenience backend and its in-project test surface is
+// being replaced by sqlite `:memory:` (#5499). Nothing is lost here — SQLite is
+// the driver that actually stores booleans as integers, so it is the arm that
+// carries the invariant; a mingo store that never had to coerce anything could
+// only ever be green.
 //
 // This is the invariant behind the 2026-07-06 case_escalation incident: a
 // boolean guard `field != true` read the field back as integer `1` on Turso, so
@@ -15,7 +22,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkReadCoercion } from '@objectstack/verify';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 
 const DRIVERS = [
   {
@@ -26,12 +32,6 @@ const DRIVERS = [
         connection: { filename: ':memory:' },
         useNullAsDefault: true,
       }),
-  },
-  {
-    name: 'driver-memory',
-    // `persistence: false` → pure in-memory, so the probe object does not leak to
-    // a shared on-disk snapshot and collide with other suites in the full run.
-    make: () => new InMemoryDriver({ persistence: false }),
   },
 ];
 
