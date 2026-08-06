@@ -62,13 +62,20 @@ function humanize(name: string): string {
 interface SeedOptions {
   logger?: { info?: (m: string, meta?: Record<string, any>) => void; warn?: (m: string, meta?: Record<string, any>) => void };
   /**
-   * [ADR-0066 D1] Capability names that a package has EXPLICITLY declared via
-   * `defineCapability` (materialized by `bootstrapDeclaredCapabilities`). The
-   * implicit derived-defaults path SKIPS these so it never overwrites an
-   * authored capability's label/description/scope (or its package provenance)
-   * with a humanized placeholder. Curated platform capabilities are unaffected.
+   * [ADR-0066 D1] Capability names that `bootstrapDeclaredCapabilities` has
+   * confirmed ALREADY HAVE a `sys_capability` row
+   * ({@link CapabilitySeedOutcome.materializedNames}). The implicit
+   * derived-defaults path SKIPS these so it never overwrites an authored
+   * capability's label/description (or its package provenance) with a humanized
+   * placeholder. Curated platform capabilities are unaffected.
+   *
+   * [#4967 Part 1] "Materialized", NOT "declared": a declaration the seeder
+   * REFUSED (no owning package) writes no row, so suppressing the derivation
+   * for it left the capability existing in no row at all and every
+   * `systemPermissions` grant naming it inert. Such a name is deliberately
+   * absent from this list and derives its placeholder as it always did.
    */
-  declaredCapabilityNames?: Iterable<string>;
+  materializedCapabilityNames?: Iterable<string>;
 }
 
 export async function bootstrapSystemCapabilities(
@@ -80,16 +87,16 @@ export async function bootstrapSystemCapabilities(
     return { seeded: 0, updated: 0, total: 0 };
   }
 
-  const declared = new Set<string>(options.declaredCapabilityNames ?? []);
+  const materialized = new Set<string>(options.materializedCapabilityNames ?? []);
 
   // Build the full definition set: curated first, then any extra capability
   // string referenced by the seeded permission sets (derived defaults) — EXCEPT
-  // ones a package explicitly declared, which the declared seeder owns.
+  // ones that already have a row, which the declared seeder owns.
   const byName = new Map<string, CapabilityDef>();
   for (const c of KNOWN_CAPABILITIES) byName.set(c.name, c);
   for (const ps of permissionSets) {
     for (const cap of ps?.systemPermissions ?? []) {
-      if (typeof cap === 'string' && cap && !byName.has(cap) && !declared.has(cap)) {
+      if (typeof cap === 'string' && cap && !byName.has(cap) && !materialized.has(cap)) {
         byName.set(cap, { name: cap, label: humanize(cap), description: `Capability ${cap}.`, scope: 'platform' });
       }
     }

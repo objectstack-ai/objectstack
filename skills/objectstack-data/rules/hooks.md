@@ -112,9 +112,14 @@ Sandbox essentials (full contract in
 
 > **One read event, one write event per kind.** `beforeFind`/`afterFind` fire for
 > `findOne` too (the event attaches to record materialization, not the method), and
-> the write events fire on bulk `multi:true` operations as well — the row-scoping
-> predicate is in `ctx.input.ast`. There is no `beforeFindOne`, `beforeCount`,
-> `beforeAggregate`, or `*Many` event.
+> the write events fire on bulk `multi:true` operations as well. A bulk write hands
+> hooks **no** row-scoping predicate: it lives on the engine-internal
+> `OperationContext.ast` (#2982), so the RLS / sharing filters composed onto it bind
+> the driver call itself, where no handler can widen them — scope a batch through
+> `options.where` at the caller. The `after*` events instead dispatch **once per
+> matched row**, each on a single-record-shaped context whose `input.id` names that
+> row (#5038). There is no `beforeFindOne`, `beforeCount`, `beforeAggregate`, or
+> `*Many` event.
 >
 > **Don't reach for a hook when a declarative mechanism already fits:**
 > - Read authorization / row filtering → **RLS / permission rules**, not a `beforeFind` hook.

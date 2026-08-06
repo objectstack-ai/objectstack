@@ -143,9 +143,9 @@ surface ever mounted their routes, so every call was a guaranteed 404.
 ([`route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/runtime/src/route-ledger.ts))
 records the audited disposition of every server route, and conformance tests
 on both sides fail when a route lands without a reviewed disposition or the
-ledger names a client method that doesn't exist. Integration test
-specifications live in
-[`CLIENT_SERVER_INTEGRATION_TESTS.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md).
+ledger names a client method that doesn't exist. The client-side integration
+tests that exist today are listed in
+[`packages/client/tests/integration/README.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md).
 </Callout>
 
 ---
@@ -687,7 +687,7 @@ pnpm test:integration
 Integration tests verify end-to-end communication with a live ObjectStack server across the client's API namespaces.
 
 <Callout type="info">
-**Test coverage**: Integration test specifications cover discovery/connection, authentication, metadata operations, CRUD operations (basic, batch, advanced queries), permissions, workflow, realtime, notifications, AI services, i18n, analytics, packages, views, storage, and automation.
+**Test coverage**: the client's *unit* tests are what cover the API namespaces broadly. Integration tests against a live server are far narrower — only discovery/connection is written today; the remaining namespaces are listed as a backlog in [`packages/client/tests/integration/README.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md). Per-route coverage is asserted by code in CI — [`packages/runtime/src/route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/runtime/src/route-ledger.ts) plus its conformance tests — not by integration tests and not by a hand-maintained table.
 </Callout>
 
 ---
@@ -697,7 +697,7 @@ Integration tests verify end-to-end communication with a live ObjectStack server
 For detailed information about the client's protocol implementation:
 
 - **[Protocol Compliance Matrix](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 13 namespaces
-- **[Integration Test Specifications](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md)** — Comprehensive test cases for client-server communication
+- **[Integration Tests](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md)** — What client-server integration coverage exists today, and the backlog of namespaces still unwritten
 - **[Package README](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/README.md)** — Developer navigation and API reference
 
 ---

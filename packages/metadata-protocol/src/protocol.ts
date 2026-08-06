@@ -10444,10 +10444,37 @@ export class ObjectStackProtocolImplementation implements
                     console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
-        } catch (e: any) {
-            // "no such table" is expected on first run before migrations execute — not an error.
-            if (!/no such table/i.test(e.message ?? '')) {
-                console.warn(`[Protocol] DB hydration skipped: ${e.message}`);
+        } catch (e: unknown) {
+            // #5841 — the ONE benign reason this whole read can fail is
+            // `sys_metadata` not being provisioned yet: on a first boot, before
+            // migrations execute, there genuinely are no overlay rows, so
+            // `loaded: 0` IS the truth and a warning would be noise.
+            //
+            // Classification is by error TYPE through {@link isMissingTableError}
+            // — the same predicate {@link rethrowUnlessMetadataStoreUnprovisioned}
+            // asks a few thousand lines up, that `SysMetadataRepository` asks in
+            // this package (#4867) and that `DatabaseLoader` asks in
+            // `@objectstack/metadata` (#5108). This seam used to run its own
+            // `/no such table/i` over `e.message`: a second, hand-copied
+            // vocabulary of "which driver errors are benign", wrong in both
+            // directions the moment the driver changes. Postgres phrases the very
+            // same first boot as `relation "sys_metadata" does not exist` (and
+            // sets SQLSTATE 42P01), so the regex mis-read a benign first boot as
+            // an anomaly and printed a warning nobody could act on; conversely any
+            // driver that says "no such table" for a different failure got read as
+            // benign. One driver quirk, taught to the platform once.
+            //
+            // NOT extended here (#5841 fact 2, deliberately left open): every
+            // OTHER failure is still answered with `console.warn` + `loaded: 0`,
+            // so the return shape cannot tell "the store had no overlay rows" from
+            // "the store could not be read" — ADR-0110 D3's rule, on the boot
+            // side. Changing that changes this method's return contract and its
+            // consumer in `ObjectQLPlugin.restoreMetadataFromDb`, so it is
+            // measured and reported separately rather than smuggled in here.
+            if (!isMissingTableError(e)) {
+                console.warn(
+                    `[Protocol] DB hydration skipped: ${e instanceof Error ? e.message : String(e)}`,
+                );
             }
         }
         return { loaded, errors, invalid };

@@ -168,6 +168,20 @@ Definition of done, in order:
   colour as information rather than as your verdict — every run after the label
   is exempt. Declaring the label in the PR body is not applying it: #5533 and
   #5538 each said so in prose and each still cost a PM hand-fix.
+- **Wait for CI to converge before you return the report — local green is not CI
+  green.** Read the gate jobs' real conclusions on the PR (**ESLint** and
+  **TypeScript Type Check**): this repo's family gates
+  (`check:engine-double-contract`, `check:error-code-casing`,
+  `check:route-envelope`, …) run *inside* the ESLint job, so one of them going red
+  shows up there and nowhere in your local `pnpm test` output. A job still
+  `in_progress` is not a pass, and the aggregate status is not the job's
+  conclusion. #5584 reported on local green while its ESLint job had no
+  conclusion yet; the job went red, the PR merged red anyway, and that red then
+  rode main's merge ref into every later PR's ESLint job until #5615 hot-fixed it.
+  A gate that goes red here is yours to fix in this task, not to report as done.
+  This wait is **foreground polling** — the same legitimate blocking wait as
+  `flock` in resource rule 1, and ⛔ never a background watcher you return from
+  mid-task (resource rule 6 still binds).
 - Tear down anything you started (dev servers on random ports).
 
 **Reverse verification — decide the expected direction BEFORE you run it.**

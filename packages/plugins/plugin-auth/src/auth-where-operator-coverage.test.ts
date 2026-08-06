@@ -40,10 +40,35 @@
  * unhandled operator is refused by name rather than silently widening a query
  * (the #3948 family's discipline — driver-memory's matcher `default:` arm and
  * objectql's `having` were both changed to refuse for this reason).
+ *
+ * ## Backend note (#5830 / #5704)
+ *
+ * Face 3's backend was `InMemoryDriver` when this file landed with #5844; it is
+ * now `@objectstack/driver-sql` + better-sqlite3 `:memory:`, built the way the
+ * rest of the repo builds an ephemeral store (`examples/app-crm`, `cli db
+ * clean`, PR #5715's `makeDefaultDriver()`, PR #5806's batch 3). #5704's
+ * programme replaces driver-memory's in-repo test consumers with sqlite's
+ * memory mode, and this file was a post-survey arrival, not an exemption.
+ *
+ * The swap costs this file nothing, and that is a measured claim rather than an
+ * assumption: #5813's defect was a DROPPED predicate — the filter compiled to
+ * `{}` and the query answered over the whole table. "The predicate reached the
+ * backend and narrowed the read" is witnessed identically by any backend that
+ * really executes it, and `$nin` / `$startsWith` / `$endsWith` are all
+ * `FILTER_OPERATORS` members that driver-sql compiles for real
+ * (`whereNotIn`, and `applyLike` with an explicit `ESCAPE`). Reverse-verified
+ * both ways in #5830: re-dropping the `not_in` arm turns the `not_in` pin red
+ * on sqlite exactly as it did on memory.
+ *
+ * Its sibling `auth-contains-filter.test.ts` is NOT interchangeable this way —
+ * driver-sql compiles `$regex` through the same `applyContainsLike` as
+ * `$contains` (`sql-driver.ts`, the `case '$regex':` fallthrough), so a SQL
+ * backend cannot tell #5710's defect from its fix. That file's disposition is
+ * #5830's open half; do not "finish the job" by copying this harness onto it.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { whereOperators } from '@better-auth/core/db/adapter';
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
@@ -55,15 +80,24 @@ import {
   SUPPORTED_WHERE_OPERATORS,
 } from './objectql-adapter';
 
-/** Keeps the driver's own lifecycle logging out of the test output. */
-const silentLogger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-} as any;
-
-const NOW = new Date('2026-08-06T00:00:00.000Z').toISOString();
+/**
+ * The columns face 3 reads, declared — a real table has to be told.
+ *
+ * `emailVerified` / `createdAt` / `updatedAt` used to be seeded alongside these
+ * and are gone: they were camelCase keys no assertion ever read, which only a
+ * schemaless store would have accepted (`sys_user` spells them
+ * `email_verified` / `created_at` / `updated_at`). Declaring the fixture down to
+ * what it actually asserts on is #5806's "resolve by declaring, not by
+ * relaxing" — the alternative would have been to declare three columns to hold
+ * values nothing looks at.
+ */
+const SYS_USER = {
+  name: 'sys_user',
+  fields: {
+    name: { type: 'text', name: 'name' },
+    email: { type: 'text', name: 'email' },
+  },
+};
 
 /**
  * Rows chosen so each of the three operators has something to EXCLUDE that a
@@ -74,12 +108,14 @@ const NOW = new Date('2026-08-06T00:00:00.000Z').toISOString();
  *   ends_with   'abc' → x_abc            (abc_one / abc_z start with it instead)
  *   not_in [abc_one, x_abc] → abc_z, zed
  *
- * All lowercase on purpose. `$startsWith`/`$endsWith` are case-SENSITIVE at the
- * contract layer (#5701 Q2=A) but driver-memory's mingo path compiles them with
- * the `i` flag while its own reference matcher uses `String.prototype
- * .startsWith` — that in-driver divergence is #5702's budget, not this PR's, so
- * no fixture here varies by case and no assertion below depends on which way it
- * is resolved.
+ * All lowercase on purpose, and the reason survived the backend swap intact
+ * (#5830). `$startsWith`/`$endsWith` are case-SENSITIVE at the contract layer
+ * (#5701 Q2=A); sqlite's `LIKE` is ASCII case-INsensitive by default, just as
+ * driver-memory's mingo path compiled the same operators with the `i` flag
+ * while its own reference matcher used `String.prototype.startsWith`. Both are
+ * the same debt — the per-driver alignment is #5702's budget, not this file's —
+ * so no fixture here varies by case and no assertion below depends on which way
+ * it is resolved.
  */
 const SEED = [
   { id: 'u_abc1', name: 'abc_one', email: 'abc-one@example.com' },
@@ -89,7 +125,7 @@ const SEED = [
 ];
 
 /**
- * An engine facade over a REAL `InMemoryDriver`.
+ * An engine facade over a REAL `SqlDriver`.
  *
  * `delete` opens with ObjectQL's OWN dispatch predicate
  * ({@link assertEngineDeleteDispatch}) instead of a hand-mirrored `if`, so this
@@ -99,7 +135,7 @@ const SEED = [
  * absent: nothing here exercises it, and an unexercised write verb is a second
  * contract to keep honest for no gain.
  */
-function memoryEngine(driver: InMemoryDriver): IDataEngine {
+function sqlEngine(driver: SqlDriver): IDataEngine {
   // The query bag keeps its declared driver-side type with no `any` erasure —
   // `query-options/no-any-erasure` (#4674/#4918) counts test-side calls too.
   return {
@@ -116,13 +152,32 @@ function memoryEngine(driver: InMemoryDriver): IDataEngine {
   } as unknown as IDataEngine;
 }
 
-async function seededAdapter() {
-  const driver = new InMemoryDriver({ logger: silentLogger });
-  await driver.connect();
-  for (const row of SEED) {
-    await driver.create('sys_user', { ...row, emailVerified: false, createdAt: NOW, updatedAt: NOW });
+/**
+ * Live `:memory:` databases, closed after each test — the database dies with
+ * its connection, so nothing touches the host filesystem, but a file this size
+ * would otherwise hold one open pool per behavioural case.
+ */
+const openDrivers: SqlDriver[] = [];
+
+afterEach(async () => {
+  while (openDrivers.length) {
+    const driver = openDrivers.pop();
+    try { await driver?.disconnect(); } catch { /* noop */ }
   }
-  const adapter: any = (createObjectQLAdapterFactory(memoryEngine(driver)) as any)({} as any);
+});
+
+async function seededAdapter() {
+  const driver = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+  openDrivers.push(driver);
+  // Real DDL through the driver's own path — the table every row below lands in
+  // is created by the backend, not conjured by a store on first write.
+  await driver.initObjects([SYS_USER]);
+  for (const row of SEED) await driver.create('sys_user', row);
+  const adapter: any = (createObjectQLAdapterFactory(sqlEngine(driver)) as any)({} as any);
   return { driver, adapter };
 }
 

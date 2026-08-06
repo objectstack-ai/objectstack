@@ -1997,19 +1997,29 @@ export class SecurityPlugin implements Plugin {
         // `stack.capabilities`) land with `managed_by:'package'` + package_id
         // provenance — the formal replacement for the implicit derive-from-
         // systemPermissions back-door. THEN the platform curated set + the
-        // back-compat derived defaults, SKIPPING any name a package already
-        // declared (so the placeholder never clobbers the authored capability).
-        let declaredCapabilityNames: string[] = [];
+        // back-compat derived defaults, SKIPPING any name that already HAS a row
+        // (so the placeholder never clobbers the authored capability).
+        // [#4967 Part 1] The skip list is the names the first pass confirmed are
+        // materialized — not every name it read. A declaration the first pass
+        // REFUSES (no owning package) writes no row, so skipping its derivation
+        // too left the capability existing nowhere and every grant naming it
+        // inert; it now falls through to the placeholder. The permission sets are
+        // passed to the first pass as well, so a refusal can name the grantor(s)
+        // it affects (#4967 Part 3).
+        let materializedCapabilityNames: string[] = [];
         try {
-          const capOutcome = await bootstrapDeclaredCapabilities(ql, this.metadata, { logger: ctx.logger });
-          declaredCapabilityNames = capOutcome.declaredNames;
+          const capOutcome = await bootstrapDeclaredCapabilities(ql, this.metadata, {
+            logger: ctx.logger,
+            permissionSets: this.bootstrapPermissionSets,
+          });
+          materializedCapabilityNames = capOutcome.materializedNames;
         } catch (e) {
           ctx.logger.warn('[security] declared-capability seeding failed', { error: (e as Error).message });
         }
         try {
           await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {
             logger: ctx.logger,
-            declaredCapabilityNames,
+            materializedCapabilityNames,
           });
         } catch (e) {
           ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });

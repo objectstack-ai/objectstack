@@ -1,408 +1,427 @@
 ---
 title: Protocol Reference
-description: Complete reference of all 133 ObjectStack protocol specifications
+description: Every schema published by @objectstack/spec — 1609 schemas across 14 protocol modules
 ---
 
-# Protocol Reference
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-This is the complete reference for all protocol specifications in the ObjectStack ecosystem. Each protocol is implemented as a **Zod schema** providing runtime validation and TypeScript type safety.
+This is the complete reference for every protocol schema published by `@objectstack/spec`. Each protocol is defined as a **Zod schema** (Prime Directive #1), which is where its runtime validation, its TypeScript type and its JSON Schema all come from.
 
 <Callout type="info">
-These reference pages are **auto-generated** from the Zod source files in `packages/spec/src/`. Run `pnpm gen:docs` to regenerate.
+This index — like every page under it — is generated from the Zod sources in `packages/spec/src/` by
+`packages/spec/scripts/build-docs.ts`. Its rows are enumerated from the same JSON Schema output the
+reference pages are built from, so a schema that no longer exists cannot keep a row here, and the
+counts are sums of the rows they head. Regenerate with
+`pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs`.
 </Callout>
 
 ## Quick Navigation
 
-| Module | Schemas | Description |
-| :--- | :---: | :--- |
-| [Data Protocol](#data-protocol) | 19 | Objects, Fields, Queries, Drivers (ObjectQL) |
-| [UI Protocol](#ui-protocol) | 18 | Views, Apps, Dashboards, Reports, Actions (ObjectUI) |
-| [Kernel Protocol](#kernel-protocol) | 32 | Plugin Lifecycle, Manifests, Events, Service Registry |
-| [System Protocol](#system-protocol) | 27 | Logging, Jobs, Cache, Metrics, Notifications (ObjectOS) |
-| [AI Protocol](#ai-protocol) | 14 | Agents, RAG, Models, Conversations, NLQ |
-| [API Protocol](#api-protocol) | 25 | REST, GraphQL, WebSocket, Batch, Discovery |
-| [Automation Protocol](#automation-protocol) | 8 | Flows, Workflows, Approvals, Triggers, ETL |
-| [Security Protocol](#security-protocol) | 5 | Permissions, Policies, RLS, Sharing |
-| [Identity Protocol](#identity-protocol) | 4 | Users, Organizations, Roles, SCIM |
-| [Cloud Protocol](#cloud-protocol) | 4 | Cloud deployment, Marketplace, Tenancy, Licensing |
-| [Integration Protocol](#integration-protocol) | 7 | Connectors, Message Queues, HTTP, Object Storage |
-| [Shared Protocol](#shared-protocol) | 9 | HTTP, Identifiers, Mappings, Enums, Auth |
-| [QA Protocol](#qa-protocol) | 1 | Test Suites and BDD Scenarios |
-| [Studio Protocol](#studio-protocol) | 1 | Studio plugin development |
-
-**Total: 169 Zod schemas** (across 14 protocol modules + 1 root stack schema)
-
----
-
-## Data Protocol (ObjectQL)
-
-**Location:** `packages/spec/src/data/`
-**Count:** 18 schemas
-
-Defines the "Shape of Data" and business logic.
-
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `field.zod.ts` | `FieldSchema` | Field definitions (text, number, select, lookup, formula, vector, location, etc.) |
-| `object.zod.ts` | `ObjectSchema` | Object/table definitions with fields, indexes, and capabilities |
-| `query.zod.ts` | `QuerySchema` | Abstract query AST supporting window functions, HAVING, DISTINCT, subqueries |
-| `validation.zod.ts` | `ValidationRuleSchema` | Validation rules for data integrity |
-| `filter.zod.ts` | `FilterSchema` | Query filtering and conditions |
-| `dataset.zod.ts` | `DatasetSchema` | Dataset definitions for reporting and analytics |
-| `datasource.zod.ts` | `DatasourceSchema` | Data source connection configurations |
-| `analytics.zod.ts` | `AnalyticsSchema` | Analytics definitions and aggregation |
-| `mapping.zod.ts` | `FieldMappingSchema` | Field mapping configurations for data transformation |
-| `hook.zod.ts` | `HookSchema` | Lifecycle hooks (before/after insert, update, delete) |
-| `data-engine.zod.ts` | `DataEngineSchema` | Data engine configuration and capabilities |
-| `driver.zod.ts` | `DriverSchema` | Generic database driver interface and capabilities |
-| `driver-sql.zod.ts` | `SQLDriverSchema` | SQL-specific driver configuration |
-| `driver-nosql.zod.ts` | `NoSQLDriverSchema` | NoSQL-specific driver configuration |
-| `document.zod.ts` | `DocumentSchema` | Document-oriented data structures |
-| `external-lookup.zod.ts` | `ExternalLookupSchema` | External data source lookup configurations |
-| `driver/postgres.zod.ts` | `PostgresConfigSchema` | PostgreSQL driver configuration |
-| `driver/mongo.zod.ts` | `MongoConfigSchema` | MongoDB driver configuration |
-
-**Key Features:**
-- Field types spanning text, relationships, formulas, AI/ML vectors, and GPS locations
-- Advanced query capabilities (window functions, HAVING, DISTINCT, subqueries)
-- Validation rules and formulas
-- Lifecycle hooks for business logic
-
-**Learn more:** [ObjectQL Documentation]((/docs/protocol/objectql))
-
----
-
-## UI Protocol (ObjectUI)
-
-**Location:** `packages/spec/src/ui/`
-**Count:** 10 schemas
-
-Defines the "Shape of Interaction" for rendering interfaces.
-
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `view.zod.ts` | `ViewSchema` | List views (grid, kanban, calendar, gantt) and form layouts |
-| `page.zod.ts` | `PageSchema` | FlexiPage layouts with regions and components |
-| `app.zod.ts` | `AppSchema` | Application structure and navigation menus |
-| `dashboard.zod.ts` | `DashboardSchema` | Dashboard layouts with grid-based widgets |
-| `report.zod.ts` | `ReportSchema` | Report definitions (tabular, summary, matrix, chart) |
-| `action.zod.ts` | `ActionSchema` | UI actions (buttons, scripts, URLs, flows) |
-| `component.zod.ts` | `ComponentSchema` | Reusable UI components |
-| `chart.zod.ts` | `ChartSchema` | Chart definitions and configurations |
-| `theme.zod.ts` | `ThemeSchema` | Theming (colors, typography, breakpoints, animations) |
-| `widget.zod.ts` | `WidgetSchema` | Custom field widgets with lifecycle hooks |
-
-**Key Features:**
-- Server-driven UI with multiple view types
-- Flexible page layouts with component regions
-- Rich dashboard and reporting capabilities
-- Comprehensive theming system
-
-**Learn more:** [ObjectUI Documentation](/docs/protocol/objectui)
-
----
-
-## Kernel Protocol
-
-**Location:** `packages/spec/src/kernel/`
-**Count:** 17 schemas
-
-Defines the plugin architecture and kernel runtime.
-
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `manifest.zod.ts` | `ManifestSchema` | Application/plugin manifest (`objectstack.config.ts`) with 7 package types |
-| `context.zod.ts` | `KernelContextSchema` | Kernel execution context with user, org, tenant info |
-| `plugin.zod.ts` | `PluginSchema` | Plugin lifecycle and interface definitions |
-| `plugin-capability.zod.ts` | `PluginCapabilitySchema` | Plugin capability declarations |
-| `plugin-lifecycle-advanced.zod.ts` | `PluginLifecycleAdvancedSchema` | Advanced lifecycle hooks |
-| `plugin-loading.zod.ts` | `PluginLoadingSchema` | Plugin loading and initialization |
-| `plugin-security-advanced.zod.ts` | `PluginSecurityAdvancedSchema` | Plugin security and sandboxing |
-| `plugin-structure.zod.ts` | `PluginStructureSchema` | Plugin file structure conventions |
-| `plugin-validator.zod.ts` | `PluginValidatorSchema` | Plugin validation rules |
-| `plugin-versioning.zod.ts` | `PluginVersioningSchema` | Plugin versioning and compatibility |
-| `service-registry.zod.ts` | `ServiceRegistrySchema` | Service discovery and registration |
-| `startup-orchestrator.zod.ts` | `StartupOrchestratorSchema` | System startup orchestration |
-| `events.zod.ts` | `EventSchema` | Event bus and pub/sub patterns |
-| `feature.zod.ts` | `FeatureFlagSchema` | Feature flag definitions |
-| `metadata-loader.zod.ts` | `MetadataLoaderSchema` | Metadata loading configuration |
-| `package-registry.zod.ts` | `PackageRegistrySchema` | Package registry and resolution |
-
-**Learn more:** [Kernel Protocol Reference](/docs/references/kernel)
-
----
-
-## System Protocol (ObjectOS)
-
-**Location:** `packages/spec/src/system/`
-**Count:** 22 schemas
-
-Defines the "Runtime Environment" and platform capabilities.
-
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `audit.zod.ts` | `AuditEventSchema` | Audit logging for compliance |
-| `auth-config.zod.ts` | `AuthConfigSchema` | Authentication configuration |
-| `cache.zod.ts` | `CacheSchema` | Caching layer configuration |
-| `change-management.zod.ts` | `ChangeManagementSchema` | Change tracking and deployment |
-| `collaboration.zod.ts` | `CollaborationSchema` | Real-time collaboration features |
-| `compliance.zod.ts` | `ComplianceSchema` | Compliance and regulatory controls |
-| `encryption.zod.ts` | `EncryptionSchema` | Encryption and key management |
-| `http-server.zod.ts` | `HTTPServerSchema` | HTTP server configuration |
-| `job.zod.ts` | `JobSchema` | Background job scheduling (cron, interval, delayed) |
-| `logging.zod.ts` | `LoggingSchema` | Structured logging configuration |
-| `masking.zod.ts` | `MaskingSchema` | Data masking rules |
-| `message-queue.zod.ts` | `MessageQueueSchema` | Message queue integration |
-| `metadata-persistence.zod.ts` | `MetadataPersistenceSchema` | Metadata storage and persistence |
-| `metrics.zod.ts` | `MetricsSchema` | Application metrics and monitoring |
-| `migration.zod.ts` | `MigrationSchema` | Data and schema migration |
-| `notification.zod.ts` | `NotificationSchema` | Notification service configuration |
-| `object-storage.zod.ts` | `ObjectStorageSchema` | Object storage configuration |
-| `search-engine.zod.ts` | `SearchEngineSchema` | Full-text search configuration |
-| `service-registry.zod.ts` | `ServiceRegistrySchema` | System service registry |
-| `tracing.zod.ts` | `TracingSchema` | Distributed tracing configuration |
-| `translation.zod.ts` | `TranslationSchema` | i18n/l10n support |
-| `worker.zod.ts` | `WorkerSchema` | Background worker configuration |
-
-**Learn more:** [System Protocol Reference](/docs/references/system)
+| Module | Pages | Schemas | Description |
+| :--- | ---: | ---: | :--- |
+| [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
+| [API Protocol](/docs/references/api) | 28 | 416 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
+| [Automation Protocol](/docs/references/automation) | 14 | 77 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
+| [Data Protocol](/docs/references/data) | 29 | 164 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Identity Protocol](/docs/references/identity) | 5 | 28 | Users and accounts, organizations, positions, API keys, SCIM provisioning. |
+| [Integration Protocol](/docs/references/integration) | 1 | 26 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
+| [Kernel Protocol](/docs/references/kernel) | 31 | 187 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
+| [Qa Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
+| [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
+| [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
+| [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
+| [System Protocol](/docs/references/system) | 37 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [UI Protocol](/docs/references/ui) | 17 | 155 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **201** | **1609** | 14 protocol modules |
 
 ---
 
 ## AI Protocol
 
-**Location:** `packages/spec/src/ai/`
-**Count:** 13 schemas
+**Source:** `packages/spec/src/ai/` · **Import:** `@objectstack/spec/ai` · **11 pages, 66 schemas**
 
-Defines AI agent integration capabilities.
+Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `agent.zod.ts` | `AgentSchema` | AI agent definitions and configurations |
-| `agent-action.zod.ts` | `AgentActionSchema` | Actions that agents can perform |
-| `model-registry.zod.ts` | `ModelRegistrySchema` | LLM registry and selection |
-| `rag-pipeline.zod.ts` | `RAGPipelineSchema` | Retrieval-augmented generation |
-| `nlq.zod.ts` | `NLQSchema` | Natural language query processing (NL to ObjectQL) |
-| `conversation.zod.ts` | `ConversationSchema` | Conversation management and memory |
-| `cost.zod.ts` | `CostTrackingSchema` | AI cost tracking and budget management |
-| `predictive.zod.ts` | `PredictiveModelSchema` | Predictive analytics models |
-| `orchestration.zod.ts` | `OrchestrationSchema` | AI-powered workflow automation |
-| `feedback-loop.zod.ts` | `FeedbackLoopSchema` | AI feedback loop and learning |
-| `devops-agent.zod.ts` | `DevOpsAgentSchema` | DevOps automation agents |
-| `plugin-development.zod.ts` | `PluginDevelopmentSchema` | AI-assisted plugin development |
-| `runtime-ops.zod.ts` | `RuntimeOpsSchema` | AI runtime operations and monitoring |
-
-**Learn more:** [AI Protocol Reference](/docs/references/ai)
+| File | Schemas |
+| :--- | :--- |
+| [`agent.zod.ts`](/docs/references/ai/agent) | `AIModelConfig`, `Agent`, `StructuredOutputConfig`, `StructuredOutputFormat`, `TransformPipelineStep` |
+| [`conversation.zod.ts`](/docs/references/ai/conversation) | `CodeContent`, `ConversationAnalytics`, `ConversationContext`, `ConversationMessage`, `ConversationSession`, `ConversationSummary`, `FileContent`, `FunctionCall`, `ImageContent`, `MessageContent`, `MessageContentType`, `MessagePruningEvent`, `MessageRole`, `TextContent`, `TokenBudgetConfig`, `TokenBudgetStrategy`, `TokenUsageStats`, `ToolCall` |
+| [`embedding.zod.ts`](/docs/references/ai/embedding) | `EmbeddingModel`, `VectorStore`, `VectorStoreProvider` |
+| [`knowledge-document.zod.ts`](/docs/references/ai/knowledge-document) | `KnowledgeChunk`, `KnowledgeDocument`, `KnowledgeHit` |
+| [`knowledge-source.zod.ts`](/docs/references/ai/knowledge-source) | `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeRefreshPolicy`, `KnowledgeSource`, `KnowledgeSourceKind`, `ObjectKnowledgeSource` |
+| [`mcp.zod.ts`](/docs/references/ai/mcp) | `MCPApprovalPolicy`, `MCPServerRef`, `MCPToolBinding`, `MCPTransport` |
+| [`model-registry.zod.ts`](/docs/references/ai/model-registry) | `ModelCapability`, `ModelConfig`, `ModelLimits`, `ModelPricing`, `ModelProvider`, `ModelRegistry`, `ModelRegistryEntry`, `ModelSelectionCriteria`, `PromptTemplate`, `PromptVariable` |
+| [`skill.zod.ts`](/docs/references/ai/skill) | `Skill`, `SkillTriggerCondition` |
+| [`solution-blueprint.zod.ts`](/docs/references/ai/solution-blueprint) | `BlueprintApp`, `BlueprintCondition`, `BlueprintDashboard`, `BlueprintField`, `BlueprintNavItem`, `BlueprintObject`, `BlueprintSeed`, `BlueprintSummaryOperations`, `BlueprintView`, `BlueprintWidgetCondition`, `SolutionBlueprint`, `SolutionBlueprintStrict` |
+| [`tool.zod.ts`](/docs/references/ai/tool) | `Tool` |
+| [`usage.zod.ts`](/docs/references/ai/usage) | `AIUsageRecord`, `TokenUsage` |
 
 ---
 
 ## API Protocol
 
-**Location:** `packages/spec/src/api/`
-**Count:** 20 schemas
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 416 schemas**
 
-Defines standardized API contracts.
+REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `contract.zod.ts` | `APIContractSchema` | API endpoint definitions and specifications |
-| `endpoint.zod.ts` | `EndpointSchema` | REST endpoint definitions with rate limiting |
-| `router.zod.ts` | `RouterSchema` | API routing configuration |
-| `odata.zod.ts` | `ODataSchema` | OData query protocol support |
-| `graphql.zod.ts` | `GraphQLSchema` | GraphQL API configuration |
-| `realtime.zod.ts` | `RealtimeSchema` | WebSocket/SSE real-time subscriptions |
-| `websocket.zod.ts` | `WebSocketSchema` | WebSocket protocol configuration |
-| `discovery.zod.ts` | `DiscoverySchema` | API discovery and introspection |
-| `batch.zod.ts` | `BatchSchema` | Batch API request processing |
-| `http-cache.zod.ts` | `HTTPCacheSchema` | HTTP caching strategies |
-| `errors.zod.ts` | `ErrorSchema` | Standardized error responses |
-| `protocol.zod.ts` | `ProtocolSchema` | API protocol definitions |
-| `rest-server.zod.ts` | `RESTServerSchema` | REST server configuration |
-| `auth.zod.ts` | `AuthSchema` | API authentication configuration |
-| `analytics.zod.ts` | `AnalyticsSchema` | API analytics and usage tracking |
-| `documentation.zod.ts` | `DocumentationSchema` | API documentation generation |
-| `hub.zod.ts` | `HubSchema` | API hub integration |
-| `metadata.zod.ts` | `MetadataSchema` | API metadata endpoints |
-| `registry.zod.ts` | `RegistrySchema` | API registry and versioning |
-| `storage.zod.ts` | `StorageSchema` | API-level storage operations |
-
-**Learn more:** [API Protocol Reference](/docs/references/api)
+| File | Schemas |
+| :--- | :--- |
+| [`analytics.zod.ts`](/docs/references/api/analytics) | `AnalyticsEndpoint`, `AnalyticsMetadataResponse`, `AnalyticsQueryRequest`, `AnalyticsResultResponse`, `AnalyticsSqlResponse`, `GetAnalyticsMetaRequest` |
+| [`auth.zod.ts`](/docs/references/api/auth) | `AuthProvider`, `LoginRequest`, `LoginType`, `RefreshTokenRequest`, `RegisterRequest`, `Session`, `SessionResponse`, `SessionUser`, `UserProfileResponse` |
+| [`auth-endpoints.zod.ts`](/docs/references/api/auth-endpoints) | `AuthEndpoint`, `AuthFeaturesConfig`, `AuthProviderInfo`, `DeviceRequestResponse`, `DeviceTokenResponse`, `EmailPasswordConfigPublic`, `GetAuthConfigResponse` |
+| [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowSummary`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListFlowsRequest`, `ListFlowsResponse`, `ListRunsRequest`, `ListRunsResponse`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
+| [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
+| [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
+| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
+| [`dispatcher.zod.ts`](/docs/references/api/dispatcher) | `DispatcherConfig`, `DispatcherErrorCode`, `DispatcherErrorResponse`, `DispatcherRoute` |
+| [`documentation.zod.ts`](/docs/references/api/documentation) | `ApiChangelogEntry`, `ApiDocumentationConfig`, `ApiTestCollection`, `ApiTestRequest`, `ApiTestingUiConfig`, `ApiTestingUiType`, `CodeGenerationTemplate`, `GeneratedApiDocumentation`, `OpenApiSecurityScheme`, `OpenApiServer`, `OpenApiSpec` |
+| [`endpoint.zod.ts`](/docs/references/api/endpoint) | `ApiEndpoint`, `ApiMapping` |
+| [`error-code-ledger.zod.ts`](/docs/references/api/error-code-ledger) | `ErrorCode` |
+| [`errors.zod.ts`](/docs/references/api/errors) | `EnhancedApiError`, `ErrorCategory`, `ErrorResponse`, `FieldError`, `FieldErrorCode`, `RetryStrategy`, `StandardErrorCode` |
+| [`events.zod.ts`](/docs/references/api/events) | `BulkDataEvent`, `BulkDataEventType`, `DataEvent`, `DataEventType`, `MetadataEvent`, `MetadataEventType` |
+| [`export.zod.ts`](/docs/references/api/export) | `CreateExportJobRequest`, `CreateExportJobResponse`, `CreateImportJobRequest`, `CreateImportJobResponse`, `DeduplicationStrategy`, `ExportFormat`, `ExportImportTemplate`, `ExportJobProgress`, `ExportJobStatus`, `ExportJobSummary`, `FieldMappingEntry`, `GetExportJobDownloadRequest`, `GetExportJobDownloadResponse`, `ImportJobProgress`, `ImportJobResults`, `ImportJobStatus`, `ImportJobSummary`, `ImportMapping`, `ImportRequest`, `ImportResponse`, `ImportRowResult`, `ImportValidationConfig`, `ImportValidationMode`, `ImportValidationResult`, `ImportWriteMode`, `ListExportJobsRequest`, `ListExportJobsResponse`, `ListImportJobsRequest`, `ListImportJobsResponse`, `ScheduleExportRequest`, `ScheduleExportResponse`, `ScheduledExport`, `UndoImportJobResponse` |
+| [`http-cache.zod.ts`](/docs/references/api/http-cache) | `CacheControl`, `CacheDirective`, `CacheInvalidationRequest`, `CacheInvalidationResponse`, `CacheInvalidationTarget`, `ETag`, `MetadataCacheRequest`, `MetadataCacheResponse` |
+| [`metadata.zod.ts`](/docs/references/api/metadata) | `AppDefinitionResponse`, `ConceptListResponse`, `MetadataBulkRegisterRequest`, `MetadataBulkResponse`, `MetadataBulkUnregisterRequest`, `MetadataDeleteResponse`, `MetadataDependenciesResponse`, `MetadataDependentsResponse`, `MetadataEffectiveResponse`, `MetadataExistsResponse`, `MetadataExportRequest`, `MetadataExportResponse`, `MetadataImportRequest`, `MetadataImportResponse`, `MetadataItemResponse`, `MetadataListResponse`, `MetadataNamesResponse`, `MetadataOverlayResponse`, `MetadataOverlaySaveRequest`, `MetadataQueryRequest`, `MetadataQueryResponse`, `MetadataRegisterRequest`, `MetadataTypeInfoResponse`, `MetadataTypesResponse`, `MetadataValidateRequest`, `MetadataValidateResponse`, `ObjectDefinitionResponse` |
+| [`odata.zod.ts`](/docs/references/api/odata) | `ODataConfig`, `ODataError`, `ODataFilterFunction`, `ODataMetadata`, `ODataQuery`, `ODataResponse` |
+| [`package-api.zod.ts`](/docs/references/api/package-api) | `GetInstalledPackageRequest`, `GetInstalledPackageResponse`, `ListInstalledPackagesRequest`, `ListInstalledPackagesResponse`, `PackageApiErrorCode`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageRollbackResponse`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
+| [`plugin-rest-api.zod.ts`](/docs/references/api/plugin-rest-api) | `ErrorHandlingConfig`, `HandlerStatus`, `OpenApiGenerationConfig`, `RequestValidationConfig`, `ResponseEnvelopeConfig`, `RestApiEndpoint`, `RestApiPluginConfig`, `RestApiRouteCategory`, `RestApiRouteRegistration`, `RouteCoverageEntry`, `RouteCoverageReport`, `ValidationMode` |
+| [`protocol.zod.ts`](/docs/references/api/protocol) | `AiAgentCapabilities`, `AiAgentChatRequest`, `AiAgentSummary`, `AiAgentsResponse`, `AiChatRequest`, `AiChatResponse`, `AiCompleteRequest`, `AiConversation`, `AiMessage`, `AiModelsResponse`, `AiPendingAction`, `AiPendingActionStatus`, `AiStreamChunk`, `ApproveAiPendingActionResponse`, `AutomationActionsResponse`, `AutomationTriggerRequest`, `AutomationTriggerResponse`, `BatchDataRequest`, `BatchDataResponse`, `CheckPermissionRequest`, `CheckPermissionResponse`, `CreateAiConversationRequest`, `CreateDataRequest`, `CreateDataResponse`, `CreateManyDataRequest`, `CreateManyDataResponse`, `CreateViewRequest`, `CreateViewResponse`, `DeleteDataRequest`, `DeleteDataResponse`, `DeleteManyDataRequest`, `DeleteManyDataResponse`, `DeleteMetaItemRequest`, `DeleteMetaItemResponse`, `DeleteViewRequest`, `DeleteViewResponse`, `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `FindDataRequest`, `FindDataResponse`, `GetDataRequest`, `GetDataResponse`, `GetDiscoveryRequest`, `GetDiscoveryResponse`, `GetEffectivePermissionsRequest`, `GetEffectivePermissionsResponse`, `GetFieldLabelsRequest`, `GetFieldLabelsResponse`, `GetLocalesRequest`, `GetLocalesResponse`, `GetMetaItemCachedRequest`, `GetMetaItemCachedResponse`, `GetMetaItemRequest`, `GetMetaItemResponse`, `GetMetaItemsRequest`, `GetMetaItemsResponse`, `GetMetaTypesRequest`, `GetMetaTypesResponse`, `GetNotificationPreferencesRequest`, `GetNotificationPreferencesResponse`, `GetObjectPermissionsRequest`, `GetObjectPermissionsResponse`, `GetPackageRequest`, `GetPackageResponse`, `GetPresenceRequest`, `GetPresenceResponse`, `GetTranslationsRequest`, `GetTranslationsResponse`, `GetUiViewRequest`, `GetUiViewResponse`, `GetViewRequest`, `GetViewResponse`, `HttpFindQueryParams`, `InstallPackageRequest`, `InstallPackageResponse`, `ListAiConversationsRequest`, `ListAiConversationsResponse`, `ListAiPendingActionsRequest`, `ListAiPendingActionsResponse`, `ListNotificationsRequest`, `ListNotificationsResponse`, `ListPackagesRequest`, `ListPackagesResponse`, `ListViewsRequest`, `ListViewsResponse`, `MarkAllNotificationsReadRequest`, `MarkAllNotificationsReadResponse`, `MarkNotificationsReadRequest`, `MarkNotificationsReadResponse`, `Notification`, `NotificationPreferences`, `RealtimeConnectRequest`, `RealtimeConnectResponse`, `RealtimeDisconnectRequest`, `RealtimeDisconnectResponse`, `RealtimeSubscribeRequest`, `RealtimeSubscribeResponse`, `RealtimeUnsubscribeRequest`, `RealtimeUnsubscribeResponse`, `RegisterDeviceRequest`, `RegisterDeviceResponse`, `RejectAiPendingActionResponse`, `SaveMetaItemRequest`, `SaveMetaItemResponse`, `SetPresenceRequest`, `SetPresenceResponse`, `UninstallPackageRequest`, `UninstallPackageResponse`, `UnregisterDeviceRequest`, `UnregisterDeviceResponse`, `UpdateAiConversationRequest`, `UpdateDataRequest`, `UpdateDataResponse`, `UpdateManyDataRequest`, `UpdateManyDataResponse`, `UpdateNotificationPreferencesRequest`, `UpdateNotificationPreferencesResponse`, `UpdateViewRequest`, `UpdateViewResponse` |
+| [`query-adapter.zod.ts`](/docs/references/api/query-adapter) | `ODataQueryAdapter`, `OperatorMapping`, `QueryAdapterConfig`, `QueryAdapterTarget`, `RestQueryAdapter` |
+| [`realtime.zod.ts`](/docs/references/api/realtime) | `RealtimeConfig`, `RealtimeEvent`, `RealtimeEventType`, `RealtimePresence`, `Subscription`, `SubscriptionEvent`, `TransportProtocol` |
+| [`realtime-shared.zod.ts`](/docs/references/api/realtime-shared) | `BasePresence`, `PresenceStatus`, `RealtimeRecordAction` |
+| [`rest-server.zod.ts`](/docs/references/api/rest-server) | `BatchEndpointsConfig`, `CrudEndpointPattern`, `CrudEndpointsConfig`, `CrudOperation`, `EndpointRegistry`, `GeneratedEndpoint`, `MetadataEndpointsConfig`, `RestApiConfig`, `RestServerConfig`, `RouteGenerationConfig` |
+| [`router.zod.ts`](/docs/references/api/router) | `ConflictResolutionStrategy`, `HttpMethod`, `RouteCategory`, `RouteDefinition`, `RouterConfig` |
+| [`storage.zod.ts`](/docs/references/api/storage) | `CompleteChunkedUploadRequest`, `CompleteChunkedUploadResponse`, `CompleteUploadRequest`, `FileDownloadUrlResponse`, `FileTypeValidation`, `FileUploadResponse`, `GetPresignedUrlRequest`, `InitiateChunkedUploadRequest`, `InitiateChunkedUploadResponse`, `PresignedUrlResponse`, `RawUploadResponse`, `UploadChunkRequest`, `UploadChunkResponse`, `UploadProgress` |
+| [`versioning.zod.ts`](/docs/references/api/versioning) | `VersionDefinition`, `VersionNegotiationResponse`, `VersionStatus`, `VersioningConfig`, `VersioningStrategy` |
+| [`websocket.zod.ts`](/docs/references/api/websocket) | `AckMessage`, `CursorMessage`, `CursorPosition`, `DocumentState`, `EditMessage`, `EditOperation`, `EditOperationType`, `ErrorMessage`, `EventMessage`, `EventPattern`, `EventSubscription`, `PingMessage`, `PongMessage`, `PresenceMessage`, `PresenceState`, `PresenceUpdate`, `SimpleCursorPosition`, `SimplePresenceState`, `SubscribeMessage`, `UnsubscribeMessage`, `UnsubscribeRequest`, `WebSocketConfig`, `WebSocketEvent`, `WebSocketMessage`, `WebSocketMessageType`, `WebSocketPresenceStatus`, `WebSocketServerConfig` |
 
 ---
 
 ## Automation Protocol
 
-**Location:** `packages/spec/src/automation/`
-**Count:** 8 schemas
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **14 pages, 77 schemas**
 
-Defines workflow automation and business process management.
+Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `workflow.zod.ts` | `WorkflowSchema` | State machine and approval processes |
-| `flow.zod.ts` | `FlowSchema` | Visual logic orchestration (autolaunched, screen, schedule) |
-| `approval.zod.ts` | `ApprovalSchema` | Approval process configuration |
-| `state-machine.zod.ts` | `StateMachineSchema` | State machine definitions |
-| `webhook.zod.ts` | `WebhookSchema` | Webhook definitions and handlers |
-| `etl.zod.ts` | `ETLSchema` | Extract, transform, load pipelines |
-| `trigger-registry.zod.ts` | `TriggerRegistrySchema` | Event-driven automation triggers |
-| `sync.zod.ts` | `SyncSchema` | Data synchronization configurations |
-
-**Learn more:** [Automation Protocol Reference](/docs/references/automation)
+| File | Schemas |
+| :--- | :--- |
+| [`approval.zod.ts`](/docs/references/automation/approval) | `ApprovalDecision`, `ApprovalEscalation`, `ApprovalNodeApprover`, `ApprovalNodeConfig`, `ApproverType`, `DecisionOutputDef` |
+| [`bpmn-interop.zod.ts`](/docs/references/automation/bpmn-interop) | `BpmnDiagnostic`, `BpmnElementMapping`, `BpmnExportOptions`, `BpmnImportOptions`, `BpmnInteropResult`, `BpmnUnmappedStrategy`, `BpmnVersion` |
+| [`builtin-node-config.zod.ts`](/docs/references/automation/builtin-node-config) | `CreateRecordConfig`, `DeleteRecordConfig`, `GetRecordConfig`, `MapConfig`, `ScreenConfig`, `ScreenFieldConfig`, `UpdateRecordConfig` |
+| [`control-flow.zod.ts`](/docs/references/automation/control-flow) | `FlowRegion`, `LoopConfig`, `ParallelBranch`, `ParallelConfig`, `RetryPolicy`, `TryCatchConfig` |
+| [`etl.zod.ts`](/docs/references/automation/etl) | `ETLDestination`, `ETLEndpointType`, `ETLPipeline`, `ETLPipelineRun`, `ETLRunStatus`, `ETLSource`, `ETLSyncMode`, `ETLTransformation`, `ETLTransformationType` |
+| [`execution.zod.ts`](/docs/references/automation/execution) | `Checkpoint`, `ConcurrencyPolicy`, `ExecutionError`, `ExecutionErrorSeverity`, `ExecutionLog`, `ExecutionStatus`, `ExecutionStepLog`, `ExecutionStepMetrics`, `ExecutionStepSkipReason`, `FlowRunGateSummary`, `FlowRunNodeSummary`, `FlowRunSummary`, `ScheduleState` |
+| [`flow.zod.ts`](/docs/references/automation/flow) | `Flow`, `FlowEdge`, `FlowNode`, `FlowNodeAction`, `FlowVariable`, `FlowVersionHistory` |
+| [`flow-function.zod.ts`](/docs/references/automation/flow-function) | `FlowFunctionEffect` |
+| [`io-node-config.zod.ts`](/docs/references/automation/io-node-config) | `HttpConfig`, `NotifyConfig` |
+| [`node-executor.zod.ts`](/docs/references/automation/node-executor) | `ActionCategory`, `ActionDescriptor`, `ActionParadigm`, `NodeExecutorDescriptor`, `WaitEventType`, `WaitExecutorConfig`, `WaitResumePayload`, `WaitTimeoutBehavior` |
+| [`schemaless-node-config.zod.ts`](/docs/references/automation/schemaless-node-config) | `DecisionCondition`, `DecisionConfig`, `ScriptConfig`, `SubflowConfig` |
+| [`state-machine.zod.ts`](/docs/references/automation/state-machine) | `ActionRef`, `GuardRef`, `StateMachine`, `StateNode`, `Transition` |
+| [`time-relative-trigger.zod.ts`](/docs/references/automation/time-relative-trigger) | `TimeRelativeTrigger` |
+| [`webhook.zod.ts`](/docs/references/automation/webhook) | `Webhook`, `WebhookTriggerType` |
 
 ---
 
-## Security Protocol
+## Cloud Protocol
 
-**Location:** `packages/spec/src/security/`
-**Count:** 5 schemas
+**Source:** `packages/spec/src/cloud/` · **Import:** `@objectstack/spec/cloud` · **11 pages, 94 schemas**
 
-Defines access control and security policies.
+Environments, packages and versions, marketplace, developer portal, tenancy.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `permission.zod.ts` | `PermissionSchema` | Permission profiles and object-level CRUD access |
-| `rls.zod.ts` | `RLSSchema` | Row-level security rules |
-| `sharing.zod.ts` | `SharingSchema` | Sharing rules and access grants |
-| `tenancy-posture.ts` | `TenancyPostureSchema` | Which organization wall Layer 0 enforces (`single` / `group` / `isolated`) |
+| File | Schemas |
+| :--- | :--- |
+| [`app-store.zod.ts`](/docs/references/cloud/app-store) | `AppDiscoveryRequest`, `AppDiscoveryResponse`, `AppSubscription`, `InstalledAppSummary`, `ListInstalledAppsRequest`, `ListInstalledAppsResponse`, `ListReviewsRequest`, `ListReviewsResponse`, `RecommendationReason`, `RecommendedApp`, `ReviewModerationStatus`, `SubmitReviewRequest`, `SubscriptionStatus`, `UserReview` |
+| [`developer-portal.zod.ts`](/docs/references/cloud/developer-portal) | `AnalyticsTimeRange`, `CreateListingRequest`, `ListingActionRequest`, `PublisherProfile`, `PublishingAnalyticsRequest`, `PublishingAnalyticsResponse`, `ReleaseChannel`, `TimeSeriesPoint`, `UpdateListingRequest`, `VersionRelease` |
+| [`environment.zod.ts`](/docs/references/cloud/environment) | `Environment`, `EnvironmentCredential`, `EnvironmentCredentialStatus`, `EnvironmentDriver`, `EnvironmentMember`, `EnvironmentRole`, `EnvironmentStatus`, `EnvironmentType`, `EnvironmentVisibility`, `ProvisionEnvironmentRequest`, `ProvisionEnvironmentResponse`, `ProvisionOrganizationRequest`, `ProvisionOrganizationResponse` |
+| [`environment-artifact.zod.ts`](/docs/references/cloud/environment-artifact) | `Sha256Digest` |
+| [`environment-package.zod.ts`](/docs/references/cloud/environment-package) | `EnvironmentPackageInstallation`, `EnvironmentPackageStatus`, `InstallPackageToEnvironmentRequest`, `ListEnvironmentPackagesResponse`, `RollbackEnvironmentPackageRequest`, `UpgradeEnvironmentPackageRequest` |
+| [`marketplace.zod.ts`](/docs/references/cloud/marketplace) | `ArtifactDownloadResponse`, `ArtifactReference`, `ListingStatus`, `MarketplaceCategory`, `MarketplaceInstallRequest`, `MarketplaceInstallResponse`, `MarketplaceListing`, `MarketplaceSearchRequest`, `MarketplaceSearchResponse`, `PackageSubmission`, `PricingModel`, `Publisher`, `PublisherVerification` |
+| [`marketplace-admin.zod.ts`](/docs/references/cloud/marketplace-admin) | `CuratedCollection`, `FeaturedListing`, `MarketplaceHealthMetrics`, `PolicyAction`, `PolicyViolationType`, `RejectionReason`, `ReviewCriterion`, `ReviewDecision`, `SubmissionReview`, `TrendingListing` |
+| [`package.zod.ts`](/docs/references/cloud/package) | `CreatePackageRequest`, `Package`, `PackageCategory`, `PackageLocale`, `PackagePublisher`, `PackageTranslation`, `PackageTranslations`, `PackageVisibility`, `UpdatePackageRequest` |
+| [`package-version.zod.ts`](/docs/references/cloud/package-version) | `CreatePackageVersionRequest`, `PackageDependency`, `PackageManifest`, `PackageVersion`, `PackageVersionStatus`, `PublishPackageVersionRequest`, `UpdatePackageVersionRequest` |
+| [`template-manifest.zod.ts`](/docs/references/cloud/template-manifest) | `TemplateManifest` |
+| [`tenant.zod.ts`](/docs/references/cloud/tenant) | `PackageInstallation`, `PackageInstallationStatus`, `ProvisionTenantRequest`, `ProvisionTenantResponse`, `TenantContext`, `TenantDatabase`, `TenantDatabaseStatus`, `TenantIdentificationSource`, `TenantPlan`, `TenantRoutingConfig` |
 
-**Learn more:** [Security Protocol Reference](/docs/references/security)
+---
+
+## Data Protocol
+
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 164 schemas**
+
+Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
+
+| File | Schemas |
+| :--- | :--- |
+| [`analytics.zod.ts`](/docs/references/data/analytics) | `AggregationMetricType`, `AnalyticsQuery`, `Cube`, `CubeJoin`, `Dimension`, `DimensionType`, `Metric`, `TimeUpdateInterval` |
+| [`context-tokens.zod.ts`](/docs/references/data/context-tokens) | `ContextToken`, `ContextTokenPlaceholder` |
+| [`data-engine.zod.ts`](/docs/references/data/data-engine) | `BaseEngineOptions`, `DataEngineAggregateOptions`, `DataEngineAggregateRequest`, `DataEngineCountOptions`, `DataEngineCountRequest`, `DataEngineDeleteOptions`, `DataEngineDeleteRequest`, `DataEngineExecuteRequest`, `DataEngineFilter`, `DataEngineFindOneRequest`, `DataEngineFindRequest`, `DataEngineInsertOptions`, `DataEngineInsertRequest`, `DataEngineQueryOptions`, `DataEngineRequest`, `DataEngineSort`, `DataEngineUpdateOptions`, `DataEngineUpdateRequest`, `DataEngineVectorFindRequest`, `DroppedFieldsEvent`, `EngineAggregateOptions`, `EngineCountOptions`, `EngineDeleteOptions`, `EngineQueryOptions`, `EngineUpdateOptions` |
+| [`datasource.zod.ts`](/docs/references/data/datasource) | `Datasource`, `DriverDefinition`, `DriverType`, `ExternalDatasourceSettings`, `SchemaMode` |
+| [`date-macros.zod.ts`](/docs/references/data/date-macros) | `DateMacroPlaceholder`, `DateMacroToken` |
+| [`document.zod.ts`](/docs/references/data/document) | `Document`, `DocumentTemplate`, `DocumentVersion`, `ESignatureConfig` |
+| [`driver.zod.ts`](/docs/references/data/driver) | `DriverCapabilities`, `DriverConfig`, `DriverOptions`, `PoolConfig` |
+| [`driver/common.zod.ts`](/docs/references/data/driver-common) | `DriverSslToggle`, `SqlAutoMigrate` |
+| [`driver/memory.zod.ts`](/docs/references/data/driver-memory) | `AutoPersistenceConfig`, `FilePersistenceConfig`, `LocalStoragePersistenceConfig`, `PersistenceType` |
+| [`driver/mongo.zod.ts`](/docs/references/data/driver-mongo) | `MongoConfig` |
+| [`driver/mysql.zod.ts`](/docs/references/data/driver-mysql) | `MysqlConfig` |
+| [`driver-nosql.zod.ts`](/docs/references/data/driver-nosql) | `AggregationPipeline`, `AggregationStage`, `ConsistencyLevel`, `DocumentSchemaValidation`, `NoSQLDataTypeMapping`, `NoSQLDatabaseType`, `NoSQLDriverConfig`, `NoSQLIndex`, `NoSQLIndexType`, `NoSQLOperationType`, `NoSQLQueryOptions`, `NoSQLTransactionOptions`, `ReplicationConfig`, `ShardingConfig` |
+| [`driver/postgres.zod.ts`](/docs/references/data/driver-postgres) | `PostgresConfig` |
+| [`driver-sql.zod.ts`](/docs/references/data/driver-sql) | `DataTypeMapping`, `SQLDialect`, `SQLDriverConfig`, `SSLConfig` |
+| [`driver/sqlite.zod.ts`](/docs/references/data/driver-sqlite) | `SqliteConfig`, `SqliteWasmConfig`, `SqliteWasmPersistMode` |
+| [`external-catalog.zod.ts`](/docs/references/data/external-catalog) | `ExternalCatalog`, `ExternalColumn`, `ExternalTable` |
+| [`external-lookup.zod.ts`](/docs/references/data/external-lookup) | `ExternalDataSource`, `ExternalFieldMapping`, `ExternalLookup` |
+| [`feed.zod.ts`](/docs/references/data/feed) | `FeedFilterMode`, `FeedItemType` |
+| [`field.zod.ts`](/docs/references/data/field) | `Address`, `CurrencyConfig`, `CurrencyValue`, `Field`, `FieldType`, `LocationCoordinates`, `SelectOption`, `UniqueScope` |
+| [`field-value.zod.ts`](/docs/references/data/field-value) | `AddressValue`, `CalendarDateValue`, `ClockTimeValue`, `FileLikeValue`, `FileReferenceIdValue`, `FileValue`, `InstantValue`, `LocationValue`, `ReferenceIdValue` |
+| [`filter.zod.ts`](/docs/references/data/filter) | `EqualityOperator`, `FieldReference`, `FilterArray`, `FilterCondition`, `QueryFilter`, `SetOperator`, `SpecialOperator`, `StringOperator` |
+| [`hook.zod.ts`](/docs/references/data/hook) | `HookContext`, `HookEvent` |
+| [`hook-body.zod.ts`](/docs/references/data/hook-body) | `ExpressionBody`, `HookBody`, `HookBodyCapability`, `ScriptBody` |
+| [`mapping.zod.ts`](/docs/references/data/mapping) | `ImportFieldMapping`, `Mapping`, `TransformType` |
+| [`object.zod.ts`](/docs/references/data/object) | `ApiMethod`, `ApiOperation`, `Index`, `Lifecycle`, `LifecycleClass`, `Object`, `ObjectAccessConfig`, `ObjectCapabilities`, `ObjectExtension`, `ObjectExternalBinding`, `ObjectFieldGroup`, `ObjectOwnershipEnum`, `ObjectRequiredPermissions`, `PerOperationRequiredPermissions`, `RowCrudActionOverride`, `TenancyConfig` |
+| [`query.zod.ts`](/docs/references/data/query) | `AggregationFunction`, `AggregationNode`, `DateGranularity`, `FieldNode`, `FullTextSearch`, `GroupByNode`, `Query`, `SortNode` |
+| [`seed.zod.ts`](/docs/references/data/seed) | `Seed`, `SeedMode` |
+| [`seed-loader.zod.ts`](/docs/references/data/seed-loader) | `ObjectDependencyGraph`, `ObjectDependencyNode`, `ReferenceResolution`, `ReferenceResolutionError`, `SeedIdentity`, `SeedLoadResult`, `SeedLoaderConfig`, `SeedLoaderRequest`, `SeedLoaderResult` |
+| [`validation.zod.ts`](/docs/references/data/validation) | `ConditionalValidation`, `CrossFieldValidation`, `FormatValidation`, `JSONValidation`, `ScriptValidation`, `StateMachineValidation`, `ValidationRule` |
 
 ---
 
 ## Identity Protocol
 
-**Location:** `packages/spec/src/identity/`
-**Count:** 4 schemas
+**Source:** `packages/spec/src/identity/` · **Import:** `@objectstack/spec/identity` · **5 pages, 28 schemas**
 
-Defines user identity and organization management.
+Users and accounts, organizations, positions, API keys, SCIM provisioning.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `identity.zod.ts` | `IdentitySchema` | User identity and authentication profiles |
-| `organization.zod.ts` | `OrganizationSchema` | Organization structures and hierarchies |
-| `role.zod.ts` | `RoleSchema` | Role definitions and hierarchies |
-| `scim.zod.ts` | `SCIMSchema` | SCIM 2.0 provisioning support |
-
-**Learn more:** [Identity Protocol Reference](/docs/references/identity)
-
----
-
-## Hub Protocol
-
-**Location:** `packages/spec/src/hub/`
-**Count:** 9 schemas
-
-Defines marketplace and multi-tenancy capabilities.
-
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `marketplace.zod.ts` | `MarketplaceSchema` | Plugin marketplace configuration |
-| `plugin-registry.zod.ts` | `PluginRegistrySchema` | Plugin registry and versioning |
-| `plugin-security.zod.ts` | `PluginSecuritySchema` | Plugin security policies |
-| `composer.zod.ts` | `ComposerSchema` | Application composition tools |
-| `space.zod.ts` | `SpaceSchema` | Workspace and environment management |
-| `tenant.zod.ts` | `TenantSchema` | Multi-tenancy configuration |
-| `license.zod.ts` | `LicenseSchema` | Licensing and entitlement management |
-| `hub-federation.zod.ts` | `HubFederationSchema` | Hub federation and cross-instance communication |
-| `registry-config.zod.ts` | `RegistryConfigSchema` | Registry configuration and settings |
-
-**Learn more:** [Hub Protocol Reference](/docs/references/hub)
+| File | Schemas |
+| :--- | :--- |
+| [`eval-user.zod.ts`](/docs/references/identity/eval-user) | `EvalUser` |
+| [`identity.zod.ts`](/docs/references/identity/identity) | `Account`, `ApiKey`, `User`, `VerificationToken` |
+| [`organization.zod.ts`](/docs/references/identity/organization) | `Invitation`, `InvitationStatus`, `Member`, `Organization` |
+| [`position.zod.ts`](/docs/references/identity/position) | `Position` |
+| [`scim.zod.ts`](/docs/references/identity/scim) | `SCIMAddress`, `SCIMBulkOperation`, `SCIMBulkRequest`, `SCIMBulkResponse`, `SCIMBulkResponseOperation`, `SCIMEmail`, `SCIMEnterpriseUser`, `SCIMError`, `SCIMGroup`, `SCIMGroupReference`, `SCIMListResponse`, `SCIMMemberReference`, `SCIMMeta`, `SCIMName`, `SCIMPatchOperation`, `SCIMPatchRequest`, `SCIMPhoneNumber`, `SCIMUser` |
 
 ---
 
 ## Integration Protocol
 
-**Location:** `packages/spec/src/integration/`
-**Count:** 1 schema
+**Source:** `packages/spec/src/integration/` · **Import:** `@objectstack/spec/integration` · **1 page, 26 schemas**
 
-Defines external system connectors — one protocol (ADR-0097). A connector
-entry is either a catalog descriptor or a provider-bound instance that a
-generic executor (connector-openapi / connector-mcp) materializes at boot.
-The per-provider "templates" (`connector/saas.zod.ts` and five siblings) were
-removed in #4480: they hand-modelled each external system's shape inside the
-spec, which ADR-0023 rejected, and nothing ever consumed them.
+The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `connector.zod.ts` | `ConnectorSchema` | The connector protocol — auth, sync, webhooks, rate limiting |
+| File | Schemas |
+| :--- | :--- |
+| [`connector.zod.ts`](/docs/references/integration/connector) | `CircuitBreakerConfig`, `Connector`, `ConnectorAction`, `ConnectorConflictResolution`, `ConnectorErrorCategory`, `ConnectorFieldMapping`, `ConnectorHealth`, `ConnectorInstanceAPIKeyAuth`, `ConnectorInstanceAuth`, `ConnectorInstanceBasicAuth`, `ConnectorInstanceBearerAuth`, `ConnectorInstanceNoAuth`, `ConnectorRetryStrategy`, `ConnectorStatus`, `ConnectorTrigger`, `ConnectorType`, `DataSyncConfig`, `DeclarativeConnectorEntry`, `ErrorMappingConfig`, `ErrorMappingRule`, `HealthCheckConfig`, `RetryConfig`, `SyncStrategy`, `WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm` |
 
-**Learn more:** [Integration Protocol Reference](/docs/references/integration)
+---
+
+## Kernel Protocol
+
+**Source:** `packages/spec/src/kernel/` · **Import:** `@objectstack/spec/kernel` · **31 pages, 187 schemas**
+
+Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.
+
+| File | Schemas |
+| :--- | :--- |
+| [`cli-extension.zod.ts`](/docs/references/kernel/cli-extension) | `CLICommandContribution`, `OclifPluginConfig` |
+| [`cluster.zod.ts`](/docs/references/kernel/cluster) | `ClusterCapabilityConfig`, `ClusterDriver`, `ClusterTenantIsolation`, `EventClusterOptions`, `EventDeliverySemantics`, `EventScope`, `MetadataChangeOperation`, `ServiceClusterAnnotations`, `ServiceClusterScope`, `ServiceLeaderStrategy` |
+| [`context.zod.ts`](/docs/references/kernel/context) | `KernelContext`, `PreviewModeConfig`, `RuntimeMode`, `TenantRuntimeContext` |
+| [`dependency-resolution.zod.ts`](/docs/references/kernel/dependency-resolution) | `DependencyResolutionResult`, `DependencyStatusEnum`, `RequiredAction`, `ResolvedDependency` |
+| [`events/bus.zod.ts`](/docs/references/kernel/events-bus) | `EventBusConfig` |
+| [`events/core.zod.ts`](/docs/references/kernel/events-core) | `Event`, `EventMetadata`, `EventPriority`, `EventTypeDefinition` |
+| [`events/dlq.zod.ts`](/docs/references/kernel/events-dlq) | `DeadLetterQueueEntry`, `EventLogEntry` |
+| [`events/handlers.zod.ts`](/docs/references/kernel/events-handlers) | `EventHandler`, `EventPersistence`, `EventRoute` |
+| [`events/integrations.zod.ts`](/docs/references/kernel/events-integrations) | `EventMessageQueueConfig`, `EventWebhookConfig`, `RealTimeNotificationConfig` |
+| [`events/queue.zod.ts`](/docs/references/kernel/events-queue) | `EventQueueConfig`, `EventReplayConfig`, `EventSourcingConfig` |
+| [`execution-context.zod.ts`](/docs/references/kernel/execution-context) | `ExecutionContext` |
+| [`manifest.zod.ts`](/docs/references/kernel/manifest) | `Manifest`, `ManifestPermissions`, `PluginEngines`, `PluginIntegrity`, `PluginPackaging`, `PluginPermissions`, `PluginRuntime` |
+| [`metadata-customization.zod.ts`](/docs/references/kernel/metadata-customization) | `CustomizationOrigin`, `CustomizationPolicy`, `FieldChange`, `MergeConflict`, `MergeResult`, `MergeStrategyConfig`, `MetadataOverlay` |
+| [`metadata-loader.zod.ts`](/docs/references/kernel/metadata-loader) | `MetadataFallbackStrategy`, `MetadataManagerConfig` |
+| [`metadata-plugin.zod.ts`](/docs/references/kernel/metadata-plugin) | `MetadataBulkResult`, `MetadataDependency`, `MetadataPluginConfig`, `MetadataPluginManifest`, `MetadataQuery`, `MetadataQueryResult`, `MetadataType`, `MetadataTypeRegistryEntry`, `MetadataValidationResult` |
+| [`metadata-protection.zod.ts`](/docs/references/kernel/metadata-protection) | `MetadataLock`, `MetadataLockSource`, `MetadataProvenance` |
+| [`package-artifact.zod.ts`](/docs/references/kernel/package-artifact) | `ArtifactChecksum`, `ArtifactFileEntry`, `ArtifactSignature`, `MetadataCategoryEnum`, `PackageArtifact` |
+| [`package-registry.zod.ts`](/docs/references/kernel/package-registry) | `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `GetPackageRequest`, `GetPackageResponse`, `InstallPackageRequest`, `InstallPackageResponse`, `InstalledPackage`, `ListPackagesRequest`, `ListPackagesResponse`, `NamespaceConflictError`, `NamespaceRegistryEntry`, `PackageStatusEnum`, `UninstallPackageRequest`, `UninstallPackageResponse` |
+| [`package-upgrade.zod.ts`](/docs/references/kernel/package-upgrade) | `MetadataChangeType`, `MetadataDiffItem`, `RollbackPackageRequest`, `RollbackPackageResponse`, `UpgradeImpactLevel`, `UpgradePackageRequest`, `UpgradePackageResponse`, `UpgradePhase`, `UpgradePlan`, `UpgradeSnapshot` |
+| [`plugin.zod.ts`](/docs/references/kernel/plugin) | `Plugin` |
+| [`plugin-capability.zod.ts`](/docs/references/kernel/plugin-capability) | `CapabilityConformanceLevel`, `ExtensionPoint`, `PluginCapability`, `PluginCapabilityManifest`, `PluginDependency`, `PluginInterface`, `ProtocolFeature`, `ProtocolReference`, `ProtocolVersion` |
+| [`plugin-lifecycle-advanced.zod.ts`](/docs/references/kernel/plugin-lifecycle-advanced) | `AdvancedPluginLifecycleConfig`, `DistributedStateConfig`, `GracefulDegradation`, `HotReloadConfig`, `PluginHealthCheck`, `PluginHealthReport`, `PluginHealthStatus`, `PluginStateSnapshot`, `PluginUpdateStrategy` |
+| [`plugin-loading.zod.ts`](/docs/references/kernel/plugin-loading) | `PluginCaching`, `PluginCodeSplitting`, `PluginDependencyResolution`, `PluginDynamicImport`, `PluginHotReload`, `PluginInitialization`, `PluginLoadingConfig`, `PluginLoadingEvent`, `PluginLoadingState`, `PluginLoadingStrategy`, `PluginPerformanceMonitoring`, `PluginPreloadConfig`, `PluginSandboxing` |
+| [`plugin-registry.zod.ts`](/docs/references/kernel/plugin-registry) | `PluginInstallConfig`, `PluginQualityMetrics`, `PluginRegistryEntry`, `PluginSearchFilters`, `PluginStatistics`, `PluginVendor` |
+| [`plugin-security.zod.ts`](/docs/references/kernel/plugin-security) | `DependencyGraph`, `DependencyGraphNode`, `PackageDependencyConflict`, `PackageDependencyResolutionResult`, `PluginProvenance`, `PluginTrustScore`, `ResolvedPackageDependency`, `SBOM`, `SBOMEntry`, `SecurityPolicy`, `SecurityScanResult`, `SecurityVulnerability`, `VulnerabilitySeverity` |
+| [`plugin-security-advanced.zod.ts`](/docs/references/kernel/plugin-security-advanced) | `KernelSecurityPolicy`, `KernelSecurityScanResult`, `KernelSecurityVulnerability`, `PermissionAction`, `PermissionScope`, `PluginPermission`, `PluginPermissionSet`, `PluginSecurityManifest`, `PluginTrustLevel`, `ResourceType`, `RuntimeConfig`, `SandboxConfig` |
+| [`plugin-structure.zod.ts`](/docs/references/kernel/plugin-structure) | `OpsDomainModule`, `OpsFilePath`, `OpsPluginStructure` |
+| [`plugin-validator.zod.ts`](/docs/references/kernel/plugin-validator) | `PluginMetadata`, `ValidationError`, `ValidationResult`, `ValidationWarning` |
+| [`plugin-versioning.zod.ts`](/docs/references/kernel/plugin-versioning) | `BreakingChange`, `CompatibilityLevel`, `CompatibilityMatrixEntry`, `DependencyConflict`, `DeprecationNotice`, `MultiVersionSupport`, `PluginCompatibilityMatrix`, `PluginDependencyResolutionResult`, `PluginVersionMetadata`, `SemanticVersion`, `VersionConstraint` |
+| [`service-registry.zod.ts`](/docs/references/kernel/service-registry) | `ScopeConfig`, `ScopeInfo`, `ServiceFactoryRegistration`, `ServiceMetadata`, `ServiceRegistryConfig`, `ServiceScopeType` |
+| [`startup-orchestrator.zod.ts`](/docs/references/kernel/startup-orchestrator) | `HealthStatus`, `PluginStartupResult`, `StartupOptions`, `StartupOrchestrationResult` |
+
+---
+
+## Qa Protocol
+
+**Source:** `packages/spec/src/qa/` · **Import:** `@objectstack/spec/qa` · **1 page, 8 schemas**
+
+Declarative test suites — scenarios, steps, actions and assertions.
+
+| File | Schemas |
+| :--- | :--- |
+| [`testing.zod.ts`](/docs/references/qa/testing) | `TestAction`, `TestActionType`, `TestAssertion`, `TestAssertionType`, `TestContext`, `TestScenario`, `TestStep`, `TestSuite` |
+
+---
+
+## Security Protocol
+
+**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 27 schemas**
+
+Permission sets, row-level security, sharing rules, tenancy posture.
+
+| File | Schemas |
+| :--- | :--- |
+| [`explain.zod.ts`](/docs/references/security/explain) | `AccessMatrix`, `AccessMatrixEntry`, `AuthzPosture`, `ExplainDecision`, `ExplainLayer`, `ExplainMatchedRule`, `ExplainOperation`, `ExplainRecordAttribution`, `ExplainRequest` |
+| [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `TenancyPosture` |
+| [`permission.zod.ts`](/docs/references/security/permission) | `AdminScope`, `EffectiveObjectPermission`, `FieldPermission`, `ObjectAccessScope`, `ObjectPermission`, `PermissionSet` |
+| [`rls.zod.ts`](/docs/references/security/rls) | `RLSEvaluationResult`, `RLSOperation`, `RLSUserContext`, `RowLevelSecurityPolicy` |
+| [`sharing.zod.ts`](/docs/references/security/sharing) | `CriteriaSharingRule`, `OWDModel`, `ShareRecipientType`, `SharingLevel`, `SharingRule`, `SharingRuleType` |
 
 ---
 
 ## Shared Protocol
 
-**Location:** `packages/spec/src/shared/`
-**Count:** 4 schemas
+**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **8 pages, 31 schemas**
 
-Common utilities and identifiers shared across protocols.
+Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `http.zod.ts` | `HTTPSchema` | HTTP request/response definitions |
-| `identifiers.zod.ts` | `IdentifiersSchema` | Common identifier patterns (IDs, names, URIs) |
-| `mapping.zod.ts` | `MappingSchema` | Generic mapping definitions |
-| `connector-auth.zod.ts` | `ConnectorAuthSchema` | Connector authentication patterns |
-
-**Learn more:** [Shared Protocol Reference](/docs/references/shared)
+| File | Schemas |
+| :--- | :--- |
+| [`branded-types.zod.ts`](/docs/references/shared/branded-types) | `AppName`, `FieldName`, `FlowName`, `ObjectName`, `RoleName`, `ViewName` |
+| [`enums.zod.ts`](/docs/references/shared/enums) | `IsolationLevelEnum`, `MutationEventEnum`, `SortDirectionEnum`, `SortItem` |
+| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
+| [`http.zod.ts`](/docs/references/shared/http) | `CorsConfig`, `HttpMethod`, `HttpRequest`, `RateLimitConfig`, `StaticMount` |
+| [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `EventName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
+| [`mapping.zod.ts`](/docs/references/shared/mapping) | `FieldMapping`, `FieldMappingTransform` |
+| [`metadata-types.zod.ts`](/docs/references/shared/metadata-types) | `BaseMetadataRecord`, `MetadataFormat` |
+| [`protection.zod.ts`](/docs/references/shared/protection) | `Protection` |
 
 ---
 
-## QA Protocol
+## Studio Protocol
 
-**Location:** `packages/spec/src/qa/`
-**Count:** 1 schema
+**Source:** `packages/spec/src/studio/` · **Import:** `@objectstack/spec/studio` · **3 pages, 35 schemas**
 
-Defines testing and quality assurance capabilities.
+Studio designer metadata — the authoring surfaces for the protocols above.
 
-| File | Schema | Purpose |
-| :--- | :--- | :--- |
-| `testing.zod.ts` | `TestSuiteSchema` | Test suites, scenarios, steps, actions, and assertions |
+| File | Schemas |
+| :--- | :--- |
+| [`flow-builder.zod.ts`](/docs/references/studio/flow-builder) | `FlowBuilderConfig`, `FlowCanvasEdge`, `FlowCanvasEdgeStyle`, `FlowCanvasNode`, `FlowLayoutAlgorithm`, `FlowLayoutDirection`, `FlowNodeRenderDescriptor`, `FlowNodeShape` |
+| [`object-designer.zod.ts`](/docs/references/studio/object-designer) | `ERDiagramConfig`, `ERLayoutAlgorithm`, `ERNodeDisplay`, `FieldEditorConfig`, `FieldGroup`, `FieldPropertySection`, `ObjectDesignerConfig`, `ObjectDesignerDefaultView`, `ObjectFilter`, `ObjectListDisplayMode`, `ObjectManagerConfig`, `ObjectPreviewConfig`, `ObjectPreviewTab`, `ObjectSortField`, `RelationshipDisplay`, `RelationshipMapperConfig` |
+| [`plugin.zod.ts`](/docs/references/studio/plugin) | `ActionContribution`, `ActionContributionLocation`, `CommandContribution`, `MetadataIconContribution`, `MetadataViewerContribution`, `PanelContribution`, `PanelLocation`, `SidebarGroupContribution`, `StudioPluginContributions`, `StudioPluginManifest`, `ViewMode` |
 
-**Key Features:**
-- Declarative test definitions with setup/teardown
-- Action-based testing (create, update, delete, API calls)
-- Comprehensive assertion operators
-- Test context and variable capture between steps
-- Permission testing with user impersonation
+---
 
-**Learn more:** [QA Protocol Reference](/docs/references/qa)
+## System Protocol
+
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 295 schemas**
+
+The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
+
+| File | Schemas |
+| :--- | :--- |
+| [`app-install.zod.ts`](/docs/references/system/app-install) | `AppCompatibilityCheck`, `AppInstallRequest`, `AppInstallResult`, `AppManifest` |
+| [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
+| [`book.zod.ts`](/docs/references/system/book) | `Book`, `BookAudience`, `BookGroup`, `BookInclude`, `BookNode` |
+| [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
+| [`change-management.zod.ts`](/docs/references/system/change-management) | `ChangeImpact`, `ChangePriority`, `ChangeRequest`, `ChangeStatus`, `ChangeType`, `RollbackPlan` |
+| [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |
+| [`core-services.zod.ts`](/docs/references/system/core-services) | `CoreServiceName`, `KernelServiceMap`, `ServiceConfig`, `ServiceCriticality`, `ServiceStatus` |
+| [`deploy-bundle.zod.ts`](/docs/references/system/deploy-bundle) | `DeployBundle`, `DeployDiff`, `DeployManifest`, `DeployStatusEnum`, `DeployValidationIssue`, `DeployValidationResult`, `MigrationPlan`, `MigrationStatement`, `SchemaChange` |
+| [`disaster-recovery.zod.ts`](/docs/references/system/disaster-recovery) | `BackupConfig`, `BackupRetention`, `BackupStrategy`, `DisasterRecoveryPlan`, `FailoverConfig`, `FailoverMode`, `RPO`, `RTO` |
+| [`doc.zod.ts`](/docs/references/system/doc) | `Doc` |
+| [`email-config.zod.ts`](/docs/references/system/email-config) | `EmailAddressConfig`, `EmailProvider`, `EmailServiceConfig` |
+| [`email-template.zod.ts`](/docs/references/system/email-template) | `EmailTemplateDefinition`, `EmailTemplateDefinitionCategory`, `EmailTemplateDefinitionVariable` |
+| [`encryption.zod.ts`](/docs/references/system/encryption) | `EncryptionAlgorithm`, `EncryptionConfig`, `FieldEncryption`, `KeyManagementProvider`, `KeyRotationPolicy` |
+| [`environment-artifact.zod.ts`](/docs/references/system/environment-artifact) | `Sha256Digest` |
+| [`http-server.zod.ts`](/docs/references/system/http-server) | `MiddlewareConfig`, `MiddlewareType`, `RouteHandlerMetadata`, `ServerCapabilities`, `ServerEvent`, `ServerEventType`, `ServerStatus` |
+| [`incident-response.zod.ts`](/docs/references/system/incident-response) | `Incident`, `IncidentCategory`, `IncidentNotificationMatrix`, `IncidentNotificationRule`, `IncidentResponsePhase`, `IncidentResponsePolicy`, `IncidentSeverity`, `IncidentStatus` |
+| [`job.zod.ts`](/docs/references/system/job) | `CronSchedule`, `IntervalSchedule`, `Job`, `JobExecution`, `JobExecutionStatus`, `OnceSchedule`, `RetryPolicy`, `Schedule` |
+| [`license.zod.ts`](/docs/references/system/license) | `Feature`, `License`, `LicenseMetricType`, `Plan` |
+| [`logging.zod.ts`](/docs/references/system/logging) | `ConsoleDestinationConfig`, `ExtendedLogLevel`, `ExternalServiceDestinationConfig`, `FileDestinationConfig`, `HttpDestinationConfig`, `LogDestination`, `LogDestinationType`, `LogEnrichmentConfig`, `LogEntry`, `LogFormat`, `LogLevel`, `LoggerConfig`, `LoggingConfig`, `StructuredLogEntry` |
+| [`message-queue.zod.ts`](/docs/references/system/message-queue) | `ConsumerConfig`, `DeadLetterQueue`, `MessageQueueConfig`, `MessageQueueProvider`, `TopicConfig` |
+| [`metadata-persistence.zod.ts`](/docs/references/system/metadata-persistence) | `MetadataCollectionInfo`, `MetadataDiffResult`, `MetadataFallbackStrategy`, `MetadataFormat`, `MetadataHistoryQueryOptions`, `MetadataHistoryQueryResult`, `MetadataHistoryRecord`, `MetadataHistoryRetentionPolicy`, `MetadataLoadOptions`, `MetadataLoadResult`, `MetadataLoaderContract`, `MetadataManagerConfig`, `MetadataRecord`, `MetadataSaveOptions`, `MetadataSaveResult`, `MetadataScope`, `MetadataSource`, `MetadataState`, `MetadataStats`, `MetadataWatchEvent`, `PackagePublishResult` |
+| [`metrics.zod.ts`](/docs/references/system/metrics) | `HistogramBucketConfig`, `MetricAggregationConfig`, `MetricAggregationType`, `MetricDataPoint`, `MetricDefinition`, `MetricExportConfig`, `MetricLabels`, `MetricType`, `MetricUnit`, `MetricsConfig`, `ServiceLevelIndicator`, `ServiceLevelObjective`, `TimeSeries`, `TimeSeriesDataPoint` |
+| [`migration.zod.ts`](/docs/references/system/migration) | `AddFieldOperation`, `ChangeSet`, `CreateObjectOperation`, `DataMigrationFlag`, `DeleteObjectOperation`, `ExecuteSqlOperation`, `MigrationDependency`, `MigrationJournalEvent`, `MigrationOperation`, `ModifyFieldOperation`, `RemoveFieldOperation`, `RenameObjectOperation` |
+| [`notification.zod.ts`](/docs/references/system/notification) | `NotificationChannel` |
+| [`object-storage.zod.ts`](/docs/references/system/object-storage) | `AccessControlConfig`, `BucketConfig`, `FileMetadata`, `LifecycleAction`, `LifecyclePolicyConfig`, `LifecyclePolicyRule`, `MultipartUploadConfig`, `ObjectMetadata`, `ObjectStorageConfig`, `PresignedUrlConfig`, `StorageAcl`, `StorageClass`, `StorageConnection`, `StorageProvider`, `StorageScope` |
+| [`registry-config.zod.ts`](/docs/references/system/registry-config) | `RegistryConfig`, `RegistrySyncPolicy`, `RegistryUpstream` |
+| [`search-engine.zod.ts`](/docs/references/system/search-engine) | `AnalyzerConfig`, `FacetConfig`, `SearchConfig`, `SearchIndexConfig`, `SearchProvider` |
+| [`security-context.zod.ts`](/docs/references/system/security-context) | `ComplianceAuditRequirement`, `ComplianceEncryptionRequirement`, `ComplianceFramework`, `DataClassification`, `DataClassificationPolicy`, `MaskingVisibilityRule`, `SecurityContextConfig`, `SecurityEventCorrelation` |
+| [`settings-client.zod.ts`](/docs/references/system/settings-client) | `SettingsChangeEvent` |
+| [`settings-manifest.zod.ts`](/docs/references/system/settings-manifest) | `ResolvedSettingValue`, `SettingsActionResult`, `SettingsManifest`, `SettingsNamespacePayload`, `Specifier`, `SpecifierHandler`, `SpecifierOption`, `SpecifierScope`, `SpecifierType` |
+| [`stack-server.zod.ts`](/docs/references/system/stack-server) | `ServerRateLimitConfig`, `StackServerConfig`, `StackServerSecurity` |
+| [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
+| [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |
+| [`tracing.zod.ts`](/docs/references/system/tracing) | `OpenTelemetryCompatibility`, `OtelExporterType`, `SamplingDecision`, `SamplingStrategyType`, `Span`, `SpanAttributeValue`, `SpanAttributes`, `SpanEvent`, `SpanKind`, `SpanLink`, `SpanStatus`, `TraceContext`, `TraceContextPropagation`, `TraceFlags`, `TracePropagationFormat`, `TraceSamplingConfig`, `TraceState`, `TracingConfig` |
+| [`training.zod.ts`](/docs/references/system/training) | `TrainingCategory`, `TrainingCompletionStatus`, `TrainingCourse`, `TrainingPlan`, `TrainingRecord` |
+| [`translation.zod.ts`](/docs/references/system/translation) | `ActionResultDialogTranslation`, `CoverageBreakdownEntry`, `FieldTranslation`, `Locale`, `ObjectTranslationData`, `TranslationBundle`, `TranslationConfig`, `TranslationCoverageResult`, `TranslationData`, `TranslationDiffItem`, `TranslationDiffStatus`, `TranslationItem` |
+| [`worker.zod.ts`](/docs/references/system/worker) | `BatchProgress`, `QueueConfig`, `Task`, `TaskExecutionResult`, `TaskPriority`, `TaskRetryPolicy`, `TaskStatus`, `WorkerStats` |
+
+---
+
+## UI Protocol
+
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **17 pages, 155 schemas**
+
+Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
+
+| File | Schemas |
+| :--- | :--- |
+| [`action.zod.ts`](/docs/references/ui/action) | `Action`, `ActionAi`, `ActionLocation`, `ActionParam`, `ActionType`, `InlineAction` |
+| [`action-params.zod.ts`](/docs/references/ui/action-params) | `ActionSession` |
+| [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
+| [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
+| [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
+| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `PageAccordionProps`, `PageCardProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
+| [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
+| [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
+| [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `DateFormat`, `I18nLabel`, `I18nObject`, `LocaleConfig`, `NumberFormat`, `PluralRule` |
+| [`notification.zod.ts`](/docs/references/ui/notification) | `NotificationPosition`, `NotificationSeverity`, `NotificationType` |
+| [`page.zod.ts`](/docs/references/ui/page) | `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PageRegion`, `PageType`, `PageVariable` |
+| [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |
+| [`responsive.zod.ts`](/docs/references/ui/responsive) | `BreakpointColumnMap`, `BreakpointName`, `BreakpointOrderMap`, `ResponsiveConfig`, `ResponsiveStyles`, `StyleMap` |
+| [`sharing.zod.ts`](/docs/references/ui/sharing) | `SharingConfig` |
+| [`theme.zod.ts`](/docs/references/ui/theme) | `BorderRadius`, `ColorPalette`, `Shadow`, `Theme`, `ThemeMode`, `Typography` |
+| [`view.zod.ts`](/docs/references/ui/view) | `AddRecordConfig`, `AppearanceConfig`, `CalendarConfig`, `ColumnPrefix`, `ColumnSummary`, `ColumnSummaryConfig`, `FormButtonConfig`, `FormField`, `FormSection`, `FormView`, `GalleryConfig`, `GanttConfig`, `GanttQuickFilter`, `GroupingConfig`, `GroupingField`, `HttpMethod`, `HttpRequest`, `KanbanConfig`, `ListChartConfig`, `ListColumn`, `ListView`, `NavigationConfig`, `NavigationMode`, `ObjectListView`, `ObjectUserFilters`, `PaginationConfig`, `RowColorConfig`, `RowHeight`, `SelectionConfig`, `TimelineConfig`, `TreeConfig`, `UserActionsConfig`, `UserFilterField`, `UserFilters`, `View`, `ViewData`, `ViewFilterRule`, `ViewItem`, `ViewItemName`, `ViewItemWire`, `ViewKind`, `ViewScope`, `ViewSharing`, `ViewTab`, `VisualizationType` |
+| [`widget.zod.ts`](/docs/references/ui/widget) | `WidgetEvent`, `WidgetLifecycle`, `WidgetManifest`, `WidgetProperty`, `WidgetSource` |
 
 ---
 
 ## Schema Conventions
 
-All schemas follow these conventions:
-
 ### Naming
-- **Configuration Keys (TS Props):** `camelCase` (e.g., `maxLength`, `referenceFilters`)
-- **Machine Names (Data Values):** `snake_case` (e.g., `name: 'project_task'`, `object: 'account'`)
+
+- **Configuration keys (TypeScript props):** `camelCase` — `maxLength`, `referenceFilters`
+- **Machine names (data values):** `snake_case` — `name: 'project_task'`, `object: 'account'`
+- **Metadata type names:** singular — `'view'`, `'flow'`, `'agent'`
 
 ### Validation
-- All schemas use **Zod** for runtime validation
-- TypeScript types are inferred via `z.infer<typeof Schema>`
-- JSON schemas are auto-generated for IDE support
+
+- Every schema is a Zod schema; TypeScript types are inferred with `z.infer<typeof Schema>`
+- JSON Schemas are generated from the Zod sources, so IDE completion and the docs cannot drift apart
 
 ### Usage
 
 ```typescript
-import { Data, UI, Automation, AI } from '@objectstack/spec';
+import { ObjectSchema } from '@objectstack/spec/data';
 
 // Runtime validation
-import { ObjectSchema } from '@objectstack/spec/data';
 const result = ObjectSchema.safeParse(objectDefinition);
 ```
+
+Each module is importable on its own subpath (`@objectstack/spec/<module>`); every reference page
+shows the exact import line for the schemas it documents.
 
 ---
 
 ## Next Steps
 
 <Cards>
-  <Card
-    href="/docs/getting-started/architecture"
-    title="Protocol Architecture"
-    description="Understand how protocols relate to each other"
-  />
   <Card
     href="/docs/getting-started/glossary"
     title="Glossary"
@@ -412,10 +431,5 @@ const result = ObjectSchema.safeParse(objectDefinition);
     href="/docs/deployment/cli"
     title="CLI Guide"
     description="Validate, compile, and generate metadata"
-  />
-  <Card
-    href="/docs/guides/cheatsheets/quick-reference"
-    title="Quick Reference"
-    description="Fast protocol lookup table"
   />
 </Cards>

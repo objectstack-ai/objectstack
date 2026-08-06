@@ -22,6 +22,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { runMigrationJournal, readRunJournal } from '@objectstack/core';
+// [#5619] The producer's OWN write-verb dispatch decisions. Imported from
+// `@objectstack/metadata-core` rather than `@objectstack/objectql` because
+// objectql depends on THIS package — the import that would pin these doubles to
+// objectql closes a cycle turbo refuses. #5619 sank the two predicates into a
+// package both sides already depend on, which is what makes this line legal.
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 import {
   createRecordedBySentinelPlan,
   findSentinelHistoryRows,
@@ -76,6 +85,7 @@ class FakeEngine {
     data: FakeRow,
     options?: { where?: Record<string, unknown>; context?: unknown },
   ): Promise<unknown> {
+    assertEngineUpdateDispatch(data, options);
     this.updateContexts.push(options?.context);
     const id = options?.where?.id;
     if (this.failOnUpdateOfId !== null && id === this.failOnUpdateOfId) {
@@ -87,7 +97,10 @@ class FakeEngine {
     return row;
   }
 
-  async delete(): Promise<unknown> { return { deleted: 0 }; }
+  async delete(_objectName: string, options?: { where?: Record<string, unknown>; multi?: unknown }): Promise<unknown> {
+    assertEngineDeleteDispatch(options);
+    return { deleted: 0 };
+  }
   async count(): Promise<number> { return 0; }
   async aggregate(): Promise<unknown[]> { return []; }
   getObject(name: string): unknown { return { name }; }

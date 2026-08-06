@@ -110,7 +110,16 @@ The plugin accepts configuration via `AuthConfig` schema from `@objectstack/spec
 
 ## API Routes
 
-The plugin forwards all requests under `/api/v1/auth/*` directly to better-auth's universal handler. Better-auth provides the following endpoints:
+The plugin forwards all requests under `/api/v1/auth/*` directly to better-auth's universal handler, so **better-auth's own route table is the route table** — the plugin does not hand-register a `login` / `register` / `logout` / `session` route set.
+
+**The single source of truth is [`src/auth-route-ledger.ts`](./src/auth-route-ledger.ts)**
+(#3656): the reviewed `AUTH_ROUTE_LEDGER` rows — every route the SDK actually calls, each
+naming its client method — plus the full `BETTER_AUTH_MOUNTED_SURFACE` inventory, both
+verified against the live `auth.api` table by `src/auth-route-ledger.conformance.test.ts`.
+The list below is a reading aid, not a second contract: where it disagrees with the ledger,
+the ledger is right. A route table transcribed by hand drifts the next time better-auth is
+upgraded — that is how four routes that never existed (`/auth/login`, `/auth/register`,
+`/auth/logout`, `/auth/session`) survived in this package's docs until #5085 / #5772.
 
 ### Email/Password Authentication
 - `POST /api/v1/auth/sign-in/email` - Sign in with email and password

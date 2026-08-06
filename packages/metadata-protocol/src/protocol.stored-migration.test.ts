@@ -18,6 +18,14 @@
  * it declines to touch says so instead of being silently counted clean.
  */
 import { describe, expect, it } from 'vitest';
+// [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
+// #5480 update), so the fake engine below cannot accept a call ObjectQL
+// refuses. Imported from `@objectstack/metadata-core` and not from
+// `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
+// would close a dependency cycle turbo rejects outright — which is why all 26
+// of this package's (file, verb) pairs sat in the gate's DEBT ledger until
+// #5619 sank the two predicates into a package both sides already depend on.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { formatStoredMigrationReport, storedMigrationClean } from './stored-migration.js';
 
@@ -83,11 +91,15 @@ function makeStubEngine(
             return withId;
         },
         async update(t: string, patch: Record<string, any>, opts: { where: Record<string, unknown> }) {
+            assertEngineUpdateDispatch(patch, opts);
             const target = rowsOf(t).find((r) => matches(r, opts.where));
             if (target) Object.assign(target, patch);
             return target ?? { id: 'x' };
         },
-        async delete() { return { deleted: 0 }; },
+        async delete(_t: string, opts?: Record<string, unknown>) {
+            assertEngineDeleteDispatch(opts);
+            return { deleted: 0 };
+        },
         registry: {
             listItems: () => [],
             isPackageDisabled: () => false,
