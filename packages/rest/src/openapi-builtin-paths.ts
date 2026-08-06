@@ -248,9 +248,8 @@ export function buildBuiltinPaths(
     // OpenAPI ("identical" per the Paths Object) and would silently shadow
     // each other in the document. It cannot happen on today's surface; say so
     // loudly if it ever starts to, rather than publishing the survivor alone.
-    // Keyed by shape ALONE, not by method+shape: OpenAPI's "identical" verdict
-    // is a property of the Paths Object, so `GET /x/{a}` and `POST /x/{b}`
-    // collide with each other too.
+    // Keyed by shape ALONE, not by method+shape, because that verdict is a
+    // property of the Paths Object: `GET /x/{a}` and `POST /x/{b}` collide too.
     const shape = template.replace(/\{[^}]*\}/g, '{}');
     const incumbentShape = shapes.get(shape);
     if (incumbentShape !== undefined && incumbentShape !== template) {
@@ -301,10 +300,11 @@ export function buildBuiltinPaths(
       for (const tag of tags) if (!tagNames.includes(tag)) tagNames.push(tag);
     }
 
+    // Read off the FULL wire path, so the scoped base's own `:environmentId` —
+    // part of the base, but still a path parameter of every operation in that
+    // document — is declared like any other. De-duplicated because a parameter
+    // may only be declared once per operation.
     const parameterNames = pathParameterNames(route.path).filter(
-      // The scoped base's own `:environmentId` is part of the base, not of the
-      // route tail; it is still a path parameter of every operation in that
-      // document, so it is declared exactly once here.
       (name, index, all) => all.indexOf(name) === index,
     );
     if (parameterNames.length > 0) {
