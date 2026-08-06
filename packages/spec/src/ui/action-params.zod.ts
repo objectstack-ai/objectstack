@@ -157,9 +157,32 @@ export interface ActionEngineFacade {
  * The caller session an action BODY / handler reads as `ctx.session`.
  *
  * This is the CONTRACT for what `packages/runtime`'s `buildActionSession()`
- * (`src/action-execution.ts`) produces today — phase 1 of #5613's
- * contract-first ruling (#5697). It DECLARES the current shape and changes
- * nothing about what the runtime builds.
+ * (`src/action-execution.ts`) hands an action body. It arrived in two steps of
+ * #5613's contract-first ruling: phase 1 (#5697) DECLARED the shape exactly as
+ * the runtime already built it, and phase 2's spec half (#5779) added the
+ * canonical `positions` key and demoted `roles` to a deprecated alias of it.
+ *
+ * ## Two spellings, one value — the #5613 deprecation window
+ *
+ * `positions` and `roles` are the SAME array (`ExecutionContext.positions`)
+ * under two names. `positions` is canonical — it is the ADR-0090 D3 vocabulary
+ * the rest of the platform already uses — and `roles` is the alias kept alive
+ * only for the length of the window, then removed on the path
+ * `session.tenantId` already walked (#3280 deprecate → #3290 removed in v11).
+ * The announcement a reader migrates from is the ADR-0087 semantic migration
+ * `action-session-roles-to-positions`. Two live spellings is the MIGRATION,
+ * not the destination; phase 1 withheld `positions` precisely so that the
+ * window would open once, deliberately, with a removal path attached.
+ *
+ * Contract-first means the two halves land apart, and this file is the first
+ * of them. The PRODUCER change — `buildActionSession()` emitting both keys —
+ * is #5613's runtime half and is NOT in yet. Read that literally: a session
+ * built today still carries only `roles`, so an action body cannot yet rely on
+ * `positions` being PRESENT, only on its meaning being fixed. Every key here
+ * is `.optional()`, which is what lets a declaration lead its producer at all
+ * — and, concretely, what keeps the runtime consistency pin (below) green
+ * across this change instead of red, since a non-strict parse of a session
+ * without `positions` neither gains the key nor rejects the object.
  *
  * Why a declaration was worth its own change: `actionContext` is a bare `any`
  * at both dispatch sites (`domains/actions.ts`, `action-execution.ts`) and the
@@ -171,7 +194,7 @@ export interface ActionEngineFacade {
  *
  * ## Read the shape exactly — absent means the KEY IS ABSENT
  *
- * All three keys are optional and the builder emits them by CONDITIONAL
+ * All four keys are optional and the builder emits them by CONDITIONAL
  * SPREAD, so a missing value means the key is **not present**:
  * `'organizationId' in ctx.session` answers `false`, not `undefined`. The hook
  * path's `input.id` on a bulk write is the OPPOSITE case — key present, value
@@ -181,8 +204,9 @@ export interface ActionEngineFacade {
  * The session as a whole is `undefined` — never `{}` — for a call carrying
  * neither `userId` nor `tenantId`, so a body can distinguish "no identity
  * envelope at all" from "an anonymous caller" the same way a hook does
- * (#3712). One consequence worth knowing: `roles` can never appear on its own,
- * because a context with positions but no user and no org yields no session.
+ * (#3712). One consequence worth knowing: neither `positions` nor `roles` can
+ * ever appear on its own, because a context with positions but no user and no
+ * org yields no session at all.
  *
  * ## NOT the hook `ctx.session`
  *
@@ -190,8 +214,15 @@ export interface ActionEngineFacade {
  * with a different key set (`actor`, `accessToken`, `isSystem`, the skip flags)
  * from a different producer (ObjectQL's `buildSession()`). The
  * `buildActionSession()` docblock still says it mirrors the hook shape; that
- * sentence stopped being true at #5050, and correcting it rides with the
- * phase-2 rename (#5613), not with this declaration.
+ * sentence stopped being true at #5050, and correcting it belongs to #5613's
+ * runtime half — it is a statement about the PRODUCER, so it rides with the
+ * producer change, not with this contract.
+ *
+ * The two sessions do now agree on one thing, which is the point of the rename
+ * rather than a coincidence: `HookContext.session.positions` was declared in
+ * #5605 (PR #5722) with the same ADR-0090 D3 vocabulary and the same
+ * "descriptive, never an authorization input" boundary. After the window
+ * closes, one platform will have one spelling for one value on both surfaces.
  *
  * ## Deliberately NOT strict
  *
@@ -221,24 +252,80 @@ export const ActionSessionSchema = lazySchema(() => z.object({
   organizationId: z.string().optional().describe('Active organization id (blessed developer-facing name; absent when the call is org-less)'),
 
   /**
-   * @deprecated ADR-0090 D3 — the forbidden spelling of `positions`. Declared
-   * because the runtime produces it, not because the name is blessed. The
-   * rename is #5613 phase 2; do NOT add a `positions` key here ahead of it.
+   * Position names held by the caller — the CANONICAL spelling of this value
+   * at the action boundary, and the key an action body should read. Sourced
+   * verbatim from `ExecutionContext.positions` (ADR-0090 D3; that schema's own
+   * comment reads "Formerly `roles`"), so the action surface now speaks the
+   * same vocabulary as the execution context, the sharing service and — since
+   * #5605 / PR #5722 — the hook `ctx.session`.
+   *
+   * Added by #5613 phase 2's spec half (#5779), which is what lifted phase 1's
+   * deliberate prohibition on minting this key early. The prohibition was
+   * never about the name: it was about opening a two-spelling window without a
+   * closing date. This key opens it WITH one — see the deprecated `roles`
+   * below and the ADR-0087 semantic migration `action-session-roles-to-positions`.
+   *
+   * ## Presence, during the window
+   *
+   * Once #5613's runtime half lands, `buildActionSession()` emits the same
+   * array under both keys, so a body reading either sees identical values and
+   * migrating is a change of key and nothing else. Until it lands the producer
+   * still emits only `roles` — the contract leads, the producer follows — so
+   * treat this key as MEANING-fixed but not yet presence-guaranteed. A reader
+   * that must work across both sides of that seam reads `positions` and falls
+   * back to `roles` for the window's duration only; that fallback expires with
+   * the alias and must not outlive it.
+   *
+   * ⚠️ Never gate PRIVILEGE on this array — ask the security service, which
+   * evaluates capability grants, placements and the derived posture
+   * (ADR-0095), never a name-string comparison. The caution belongs to the
+   * VALUE, not to the spelling, so it survives the rename intact: an author
+   * who rewrites `roles.includes('admin')` as `positions.includes('admin')`
+   * has migrated the defect rather than the read.
+   */
+  positions: z.array(z.string()).optional().describe(
+    'Position names held by the caller (ADR-0090 D3 vocabulary; the value of '
+    + '`ExecutionContext.positions`, whose schema comment reads "Formerly `roles`") — the CANONICAL '
+    + 'spelling at this boundary and the key an action body should read. Within the #5613 '
+    + 'deprecation window `buildActionSession()` emits the same array under both this key and the '
+    + 'deprecated `roles`, so migrating is a change of key and nothing else; `roles` is then removed '
+    + 'on the v11 session-alias removal path (#3280 deprecate → #3290 remove: one window, then gone). '
+    + 'Never gate PRIVILEGE on this array — ask the security service, which evaluates capability '
+    + 'grants, placements and the derived posture (ADR-0095), never a position-name string '
+    + 'comparison.',
+  ),
+
+  /**
+   * @deprecated Use `positions`. Deprecated ALIAS — the same array under the
+   * one spelling ADR-0090 D3 forbids. Migration prescription and acceptance
+   * criteria: the ADR-0087 semantic migration
+   * `action-session-roles-to-positions`. Removal follows the `session.tenantId`
+   * alias precedent (#3280 deprecated → #3290 removed in v11), i.e. one
+   * deprecation window after #5613's runtime half lands, not before.
+   *
+   * Why it is still declared at all: it is what the runtime produces today,
+   * and the entire point of a deprecation window is that a body reading it
+   * keeps working while its author migrates. Phase 1 (#5697) declared it as
+   * current reality — declaring is not endorsing — and every reason it must
+   * not survive the window is unchanged: ADR-0090 D3 makes `role` a
+   * reserved-forbidden word, #4839 deleted the last two
+   * `roles.includes('admin')` readers, and #5050 retired the hook-side
+   * `HookContext.session.roles` outright, so until this closes a body author
+   * still meets two different answers to one key name on one platform.
+   *
+   * ⚠️ Never gate PRIVILEGE on this array — see `positions` above. The caution
+   * is a property of the value, so it applies identically to both spellings.
    */
   roles: z.array(z.string()).optional().describe(
-    'DEPRECATED — the VALUE is the caller\'s ADR-0090 D3 `positions` '
-    + '(`ExecutionContext.positions`, "Formerly `roles`"), delivered at this boundary under the one '
-    + 'spelling that vocabulary forbids. Declared here because `buildActionSession()` produces it '
-    + 'today — declaring current reality is not endorsing the name: ADR-0090 D3 makes `role` a '
-    + 'reserved-forbidden word, #4839 deleted the last two `roles.includes(\'admin\')` readers, and '
-    + '#5050 retired the hook-side `HookContext.session.roles` outright, so a body author currently '
-    + 'meets two different answers to one key name on one platform. The rename to `positions` — with '
-    + 'its deprecation window, ADR-0087 semantic migration and the `buildActionSession()` comment '
-    + 'correction — is #5613 phase 2. There is deliberately NO `positions` key on this shape yet: '
-    + 'minting one before the migration would ship two live spellings of one value, which is the '
-    + 'defect, not the fix. Never gate PRIVILEGE on this array — ask the security service, which '
-    + 'evaluates capability grants, placements and the derived posture (ADR-0095), never a '
-    + 'role-name string comparison.',
+    'DEPRECATED alias of `positions` — the same caller position names under the one spelling '
+    + 'ADR-0090 D3 forbids (the value is `ExecutionContext.positions`, "Formerly `roles`"). Read '
+    + '`positions` instead: within the #5613 deprecation window `buildActionSession()` emits both '
+    + 'keys with identical values, so migrating is a change of key and nothing else. The migration '
+    + 'prescription and its acceptance criteria are the ADR-0087 semantic migration '
+    + '`action-session-roles-to-positions`; removal follows the v11 session-alias removal path '
+    + '(#3280 deprecated → #3290 removed). Never gate PRIVILEGE on this array — ask the '
+    + 'security service, which evaluates capability grants, placements and the derived posture '
+    + '(ADR-0095), never a role-name string comparison.',
   ),
 }).describe('Action-body `ctx.session` — the caller identity an action body reads (runtime shape, never authored)'));
 

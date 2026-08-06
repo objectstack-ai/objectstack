@@ -229,6 +229,62 @@ describe('IndexSchema', () => {
   });
 });
 
+/**
+ * `indexes[].type` / `indexes[].partial` retirement (#5248, #4943, ADR-0049).
+ *
+ * Both were authorable with zero DDL consumers. `IndexSchema` is not
+ * `.strict()`, so a plain delete would have Zod strip an authored value in
+ * silence — swapping one no-op for another (#3726 / #3733, the ADR-0104
+ * class). The tombstone is what makes the removal audible, so these tests pin
+ * the PRESCRIPTION, not merely the rejection.
+ */
+describe('IndexSchema retired keys (#5248 / #4943)', () => {
+  it('REJECTS `type`, with the fix and the reason in the message', () => {
+    expect(() => IndexSchema.parse({ fields: ['tags'], type: 'gin' }))
+      .toThrow(/`indexes\[\]\.type` was removed.*no driver ever read it.*Delete the key/s);
+  });
+
+  it('REJECTS `partial`, naming the database-layer replacement', () => {
+    expect(() => IndexSchema.parse({ fields: ['name'], partial: "state = 'active'" }))
+      .toThrow(/`indexes\[\]\.partial` was removed.*Delete the key.*CREATE \[UNIQUE\] INDEX/s);
+  });
+
+  it('points at the CLI conversion rather than naming the conversion id', () => {
+    for (const bad of [{ fields: ['a'], type: 'btree' }, { fields: ['a'], partial: 'x' }]) {
+      expect(() => IndexSchema.parse(bad)).toThrow(/os migrate meta --from 16/);
+    }
+  });
+
+  it('the live keys are untouched — the retirement is surgical', () => {
+    const parsed = IndexSchema.parse({
+      name: 'idx_invoice_no',
+      fields: ['invoice_no'],
+      unique: 'organization',
+    });
+    expect(parsed).toEqual({ name: 'idx_invoice_no', fields: ['invoice_no'], unique: 'organization' });
+  });
+
+  it('no longer materializes a phantom `btree` into every parsed index', () => {
+    // The louder half of the defect: `type` carried `.default('btree')`, so an
+    // access-method knob nothing has ever read appeared in the parse output of
+    // every index of every object (it was pinned in service-realtime's
+    // sys_presence test, on an object that never declared it).
+    const parsed = IndexSchema.parse({ fields: ['email'] });
+    expect(parsed).not.toHaveProperty('type');
+    expect(parsed).not.toHaveProperty('partial');
+    expect(parsed).toEqual({ fields: ['email'], unique: false });
+  });
+
+  it('rejects the retired keys through a whole object too, not just the sub-schema', () => {
+    expect(() => ObjectSchema.parse({
+      name: 'crm_invoice',
+      label: 'Invoice',
+      fields: { name: { type: 'text', label: 'Name' } },
+      indexes: [{ fields: ['name'], partial: "state = 'active'" }],
+    })).toThrow(/`indexes\[\]\.partial` was removed/s);
+  });
+});
+
 describe('ObjectSchema', () => {
   describe('Basic Object Properties', () => {
     it('should accept minimal valid object', () => {

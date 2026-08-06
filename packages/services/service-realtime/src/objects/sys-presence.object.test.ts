@@ -60,10 +60,16 @@ describe('SysPresence object definition', () => {
   });
 
   it('should have indexes on user_id, session_id, and status', () => {
+    // No `type` here: `sys-presence.object.ts` never declared one. It used to
+    // show up anyway because `IndexSchema.type` carried `.default('btree')`,
+    // so the parse materialized an access-method knob that no driver has ever
+    // read into every index of every object — this assertion was pinning that
+    // phantom. The key was retired at protocol 18 (#5248), and the parsed
+    // shape is now exactly what the author wrote.
     expect(SysPresence.indexes).toEqual([
-      { fields: ['user_id'], unique: false, type: 'btree' },
-      { fields: ['session_id'], unique: true, type: 'btree' },
-      { fields: ['status'], unique: false, type: 'btree' },
+      { fields: ['user_id'], unique: false },
+      { fields: ['session_id'], unique: true },
+      { fields: ['status'], unique: false },
     ]);
   });
 

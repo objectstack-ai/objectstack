@@ -200,21 +200,33 @@ export const SysMetadataObject = ObjectSchema.create({
 
   indexes: [
     // ADR-0005 (revised 2026-05) + ADR-0048: overlay uniqueness is scoped by
-    // (type, name, organization_id, package_id), restricted to active rows so
-    // resets / archived versions don't collide. `package_id` is part of the
+    // (type, name, organization_id, package_id). `package_id` is part of the
     // discriminator so two installed packages shipping the same `type`/`name`
     // each get their OWN customization row (a package-less / global overlay
     // uses NULL). environment_id is deprecated and not part of the
-    // discriminator. The runtime layer (protocol.ts ensureOverlayIndex) issues
-    // a DROP-then-CREATE migration that uses `COALESCE(package_id,'')` so the
-    // package-less rows stay unique among themselves (SQLite treats NULLs as
-    // distinct in a plain unique index); this declaration is the fallback shape
-    // for drivers without the runtime migration.
+    // discriminator.
+    //
+    // ⚠️ The active-row restriction is NOT declared here, and never was in any
+    // effective sense: this entry carried `partial: "state = 'active'"` until
+    // #5248 / #4943 retired the key, and no driver ever emitted the predicate
+    // — `syncDeclaredIndexes` builds indexes through knex's `table.unique()`,
+    // which cannot express a `WHERE`. So the shape this declaration has always
+    // materialized is the UNRESTRICTED unique index below; dropping the key is
+    // a zero-DDL change (verified byte-for-byte against the created SQL).
+    //
+    // What actually delivers active-row scoping is the runtime layer:
+    // `protocol.ts ensureOverlayIndex` issues a DROP-then-CREATE migration for
+    // `CREATE UNIQUE INDEX … ON sys_metadata (type, name, organization_id,
+    // COALESCE(package_id,'')) WHERE state = 'active'` — which additionally
+    // fixes NULL-distinctness for package-less rows, something this
+    // declaration could not express either. This entry is therefore the
+    // coarser fallback that a driver without that runtime migration gets: it
+    // still prevents duplicate ACTIVE overlays, at the cost of also colliding
+    // with archived/reset rows.
     {
       name: 'idx_sys_metadata_overlay_active',
       fields: ['type', 'name', 'organization_id', 'package_id'],
       unique: true,
-      partial: "state = 'active'",
     },
     { name: 'idx_sys_metadata_org_type', fields: ['organization_id', 'type'] },
     { fields: ['type', 'scope'] },
