@@ -30,6 +30,13 @@ import { escapeMdxDescription } from './lib/escape-mdx';
 import { anchorFor, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import {
+  blurbCoverage,
+  docLinkTargets,
+  formatBlurbCoverage,
+  renderRootIndex,
+  type RootIndexCategory,
+} from './lib/root-index';
+import {
   buildSchemaIndex,
   formatConflicts,
   resolveSchemaPage,
@@ -75,6 +82,15 @@ const CATEGORIES = fs.readdirSync(SRC_DIR)
 
 // Track all zod files per category
 const categoryZodFiles = new Map<string, Set<string>>();
+/**
+ * `category` -> page slug -> the published schema names that page documents.
+ *
+ * Filled while the category pages are generated, and read back by the root
+ * index (§2.6) so the master table enumerates from the SAME map that decided
+ * which pages exist. Anything derived from it — rows, per-category counts, the
+ * grand total — cannot disagree with the pages themselves (#4759).
+ */
+const categoryPageSchemas = new Map<string, Map<string, string[]>>();
 /**
  * Page slug -> its real path under `packages/spec/src/<category>/`.
  *
@@ -532,6 +548,102 @@ function buildCategoryPages(category: string, emitted: string[]): string[] {
   return out;
 }
 
+// ── Root index prose (#4759) ─────────────────────────────────────────────────
+//
+// The rot this ends, and why every column is enumerated rather than asserted,
+// is written down once in `lib/root-index.ts`. What lives here is the prose the
+// page still needs — in reviewed generator source, the same treatment the
+// category `index.mdx` pages' intro sentences already get, and the reason this
+// file grows no preserve/marker mechanism: hand-written text preserved inside
+// `content/docs/references/` would recreate the ownerless state #4759 is about.
+
+const ROOT_INDEX_INTRO =
+  'This is the complete reference for every protocol schema published by `@objectstack/spec`. ' +
+  'Each protocol is defined as a **Zod schema** (Prime Directive #1), which is where its runtime ' +
+  'validation, its TypeScript type and its JSON Schema all come from.\n';
+
+/**
+ * One line per category, keyed by the `src/` directory name — the only
+ * hand-written prose in the index's tables, and deliberately per-CATEGORY:
+ * `blurbCoverage` holds this map to exactly the categories that have pages, in
+ * both directions. A per-FILE purpose map (201 entries today) could not be held
+ * to anything but existence, so it would be the same unverifiable hand-kept
+ * prose that rotted the old table, merely moved into TypeScript.
+ */
+const CATEGORY_BLURBS: Record<string, string> = {
+  ai: 'Agents, tools, skills, RAG and knowledge sources, model registry, conversations.',
+  api: 'REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.',
+  automation: 'Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.',
+  cloud: 'Environments, packages and versions, marketplace, developer portal, tenancy.',
+  data: 'Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.',
+  identity: 'Users and accounts, organizations, positions, API keys, SCIM provisioning.',
+  integration: 'The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.',
+  kernel: 'Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.',
+  qa: 'Declarative test suites — scenarios, steps, actions and assertions.',
+  security: 'Permission sets, row-level security, sharing rules, tenancy posture.',
+  shared: 'Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.',
+  studio: 'Studio designer metadata — the authoring surfaces for the protocols above.',
+  system: 'The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.',
+  ui: 'Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.',
+};
+
+const ROOT_INDEX_CONVENTIONS =
+  '## Schema Conventions\n\n' +
+  '### Naming\n\n' +
+  '- **Configuration keys (TypeScript props):** `camelCase` — `maxLength`, `referenceFilters`\n' +
+  '- **Machine names (data values):** `snake_case` — `name: \'project_task\'`, `object: \'account\'`\n' +
+  '- **Metadata type names:** singular — `\'view\'`, `\'flow\'`, `\'agent\'`\n\n' +
+  '### Validation\n\n' +
+  '- Every schema is a Zod schema; TypeScript types are inferred with `z.infer<typeof Schema>`\n' +
+  '- JSON Schemas are generated from the Zod sources, so IDE completion and the docs cannot drift apart\n\n' +
+  '### Usage\n\n' +
+  '```typescript\n' +
+  "import { ObjectSchema } from '@objectstack/spec/data';\n\n" +
+  '// Runtime validation\n' +
+  'const result = ObjectSchema.safeParse(objectDefinition);\n' +
+  '```\n\n' +
+  'Each module is importable on its own subpath (`@objectstack/spec/<module>`); every reference page\n' +
+  'shows the exact import line for the schemas it documents.\n';
+
+// Both cards point at pages that exist — asserted below, because the two this
+// section replaced (`getting-started/architecture`, `guides/cheatsheets/quick-reference`)
+// did not, and nothing noticed.
+const ROOT_INDEX_NEXT_STEPS =
+  '## Next Steps\n\n' +
+  '<Cards>\n' +
+  '  <Card\n' +
+  '    href="/docs/getting-started/glossary"\n' +
+  '    title="Glossary"\n' +
+  '    description="Key terminology across all protocol namespaces"\n' +
+  '  />\n' +
+  '  <Card\n' +
+  '    href="/docs/deployment/cli"\n' +
+  '    title="CLI Guide"\n' +
+  '    description="Validate, compile, and generate metadata"\n' +
+  '  />\n' +
+  '</Cards>\n';
+
+const CONTENT_DOCS_ROOT = path.resolve(REPO_ROOT, 'content/docs');
+
+/**
+ * Which of the index's internal `/docs/...` links resolve to no page.
+ *
+ * A page counts as existing when it is on disk OR emitted by this run: the
+ * reference pages the tables link to are this run's own output, and under
+ * `--check` nothing is written, so reading only the disk would make the check
+ * disagree with the write it models.
+ */
+function deadDocLinks(mdx: string): string[] {
+  return docLinkTargets(mdx).filter(target => {
+    const rel = target.replace(/^\/docs\/?/, '');
+    const candidates = [
+      path.join(CONTENT_DOCS_ROOT, `${rel}.mdx`),
+      path.join(CONTENT_DOCS_ROOT, rel, 'index.mdx'),
+    ];
+    return !candidates.some(p => fs.existsSync(p) || wasEmitted(p));
+  });
+}
+
 // === EXECUTION ===
 
 console.log('Building documentation...');
@@ -605,6 +717,12 @@ Object.keys(CATEGORIES).forEach(category => {
     emit(path.join(categoryDir, fileName), mdx);
   });
 
+  // Hand the same grouping to the root index — never a second enumeration.
+  categoryPageSchemas.set(
+    category,
+    new Map([...zodFileSchemas].map(([zodFile, schemas]) => [zodFile, schemas.map(s => s.name).sort()])),
+  );
+
   // Generate Category Meta. Group into fumadocs `---Section---` separators when the
   // category has a SECTION_GROUPS entry; otherwise a flat sorted list (see #1880).
   const meta = {
@@ -651,6 +769,69 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
   // makes /docs/references/<category> resolve.
   emit(path.join(DOCS_ROOT, category, 'index.mdx'), mdx);
 });
+
+// 2.6 Generate the root index — the protocol master table (#4759).
+//
+// Every cell is rendered from `categoryPageSchemas`, i.e. from the same
+// grouping that decided which pages exist two steps ago, so a deleted
+// `.zod.ts` cannot leave a row behind and a name that is not a published
+// schema cannot appear. See `lib/root-index.ts` for the rot this replaces.
+if (managedCount > 0) {
+  // Claim the two root-level files this generator owns — and ONLY those, which
+  // is what `owns` is for: root-level hand-written `.mdx` (an
+  // `implementation-status.mdx` and the like) stays untouched, and the category
+  // sub-trees are already managed above.
+  //
+  // Without this claim the index would be checked only while it is emitted:
+  // delete the `emit()` below and `check:docs` goes green again at one file
+  // fewer, which is precisely how this page spent its life outside every gate.
+  // Owned means a run that stops generating it reports it as stale instead.
+  const ROOT_OWNED = new Set([
+    path.join(DOCS_ROOT, 'index.mdx'),
+    path.join(DOCS_ROOT, 'meta.json'),
+  ]);
+  manageDir(DOCS_ROOT, p => ROOT_OWNED.has(p));
+
+  const indexCategories: RootIndexCategory[] = [...categoryPageSchemas].map(([category, pages]) => ({
+    category,
+    title: CATEGORIES[category],
+    pages: [...pages].map(([slug, schemas]) => ({
+      slug,
+      sourceRel: zodFileSourceRel.get(`${category}/${slug}`),
+      schemas,
+    })),
+  }));
+
+  const coverage = blurbCoverage(indexCategories, CATEGORY_BLURBS);
+  if (coverage.missing.length > 0 || coverage.extra.length > 0) {
+    console.error(`\n✗ ${formatBlurbCoverage(coverage)}`);
+    process.exit(1);
+  }
+
+  const rootIndex = renderRootIndex({
+    categories: indexCategories,
+    blurbs: CATEGORY_BLURBS,
+    prose: {
+      intro: ROOT_INDEX_INTRO,
+      conventions: ROOT_INDEX_CONVENTIONS,
+      nextSteps: ROOT_INDEX_NEXT_STEPS,
+    },
+  });
+
+  const dead = deadDocLinks(rootIndex);
+  if (dead.length > 0) {
+    console.error(
+      `\n✗ The root reference index links to ${dead.length} page(s) that do not exist:\n\n` +
+        dead.map(d => `    • ${d}`).join('\n') +
+        `\n\nThese come from the hand-written prose constants in this file — the generated tables\n` +
+        `cannot invent a target. Repoint the link at the page that replaced it, or drop it: two\n` +
+        `dead "Next Steps" cards sat on this page for months because nothing looked (#4759).`,
+    );
+    process.exit(1);
+  }
+
+  emit(path.join(DOCS_ROOT, 'index.mdx'), rootIndex);
+}
 
 // 3. Update root meta.json
 // Collect categories that have actual generated content (non-empty zod files)
