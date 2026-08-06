@@ -1,0 +1,65 @@
+{
+  "$comment": [
+    "Accepted exceptions for the READ-SEAM INVENTION rule in",
+    "scripts/check-durability-degradation-log-level.mjs (#5186; family #4728 / #4825 / #5108).",
+    "",
+    "The rule: a `catch` around a storage READ (find / findOne / count, or a same-file wrapper",
+    "over one) that logs NOTHING and `return`s an empty/zero value on a path that never",
+    "discriminated the error's TYPE. The caller is then handed an answer indistinguishable from",
+    "'the store genuinely holds none' — and per ADR-0110 D3 those are different facts with",
+    "opposite meanings.",
+    "",
+    "SHRINK-ONLY and hand-edited under review: the checker fails on a stale entry, so a seam",
+    "that gets fixed must have its entry deleted in the same PR. There is deliberately no",
+    "`--fix`/`--update` flag — a generator would let a new violation be admitted by 'just run",
+    "the update command', which is precisely how a gate stops meaning anything (same reasoning,",
+    "same wording, as the sibling durability-degradation.baseline.json).",
+    "",
+    "Key granularity is `<file>::<enclosing function>`, NOT `<file>::<callee>` and NOT a line.",
+    "The callee is always `find`/`findOne`/`count` and these files are enormous, so a",
+    "file+callee key would license every read in the file. A line-keyed ledger would go stale",
+    "on every unrelated edit.",
+    "",
+    "Two `verdict` values, and the difference is the whole reason this file has a schema rather",
+    "than being a list of paths:",
+    "",
+    "  - `unfixed-degradation` — a REAL instance of the family, not fixed by the PR that",
+    "    introduced the rule (which is a gate PR: it may not touch the packages it scans).",
+    "    Tracked by its own issue, named in `tracked_by`. This is debt.",
+    "  - `reviewed-legitimate` — the empty value is NOT invented: it is this method's declared",
+    "    'could not determine' answer, and the caller is written to read it as such. The rule",
+    "    cannot see a tri-state return contract, so the exception is recorded here rather than",
+    "    by weakening the rule. This is not debt; `closes` says what would retire the entry.",
+    "",
+    "Every entry names WHY it is here and WHAT closes it. Adding one is a reviewable act; the",
+    "checker's message points here only after it has printed the fix it would rather you made."
+  ],
+  "entries": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "fn": "listCommits",
+      "verdict": "unfixed-degradation",
+      "invents": "return [] (catch has no log and no error-type discrimination)",
+      "why": "`listCommits` reads `sys_metadata_commit` through `engine.find` and answers `[]` for every failure — its own JSDoc says so ('Returns [] if the commit store is unavailable'). An unreachable commit store is then rendered as 'this package has no history', which is the ADR-0067 timeline reading as empty rather than as unavailable: the exact ADR-0110 D3 miss/outage confusion #5108 fixed one layer down in `DatabaseLoader` and #5532 fixed for `getMetaItems` in this same file.",
+      "closes": "Ask `isMissingTableError` (already imported in this file) and rethrow everything else, exactly as `rethrowUnlessMetadataStoreUnprovisioned` a few thousand lines up already does for the overlay reads. Tracked separately — a gate PR does not edit the packages it scans.",
+      "tracked_by": "#5980"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "fn": "seedAutonumber",
+      "verdict": "unfixed-degradation",
+      "invents": "return 0 (catch has no log and no error-type discrimination)",
+      "why": "The #4825 shape, live, and the costly half of the family: this seeds an autonumber counter from `MAX(existing)` and answers `0` when the read fails. Against a table that already holds rows, the next allocation restarts at 1 and issues autonumbers that COLLIDE with existing ones — a value written wrong, which no retry and no restart repairs, with not one line logged. The code comment directly above the read already names the hazard ('the catch below would have swallowed the guard's rejection into \"seed from 0\", i.e. duplicate autonumbers') — the read was fixed there, the catch was not.",
+      "closes": "Discriminate by error type: a never-provisioned table genuinely has no rows and may seed from 0; every other failure must propagate so the write does not allocate a number derived from data it never read. Tracked separately — a gate PR does not edit the packages it scans.",
+      "tracked_by": "#5979"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "fn": "referenceExists",
+      "verdict": "reviewed-legitimate",
+      "invents": "return null (catch has no log and no error-type discrimination)",
+      "why": "`null` here is NOT an invented answer — it is this method's declared third state. The signature is `Promise< boolean | null >` and the JSDoc pins the contract: '`false` only when the probe RAN and found nothing; `null` when it could not run at all'. The failure is therefore handed to the caller in the return value itself, and `assertReferencesResolve` is written against that distinction (its fail-open note is a deliberate, documented decision about reference validation, not a swallowed outage). The rule flags it because it reads syntax, not return types: `null` is in the empty-value set and no discriminator was consulted.",
+      "closes": "Either the seam adopts the discriminator anyway (`isMissingTableError` → `null`, everything else rethrown), or the rule learns to read a declared unknown sentinel from the return type. Until one of those, this entry is the honest record that the verdict was reviewed and rejected — NOT debt."
+    }
+  ]
+}
