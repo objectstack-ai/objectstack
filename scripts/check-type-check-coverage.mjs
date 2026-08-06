@@ -115,6 +115,17 @@
 //               made of -- and when the delta cannot be attributed, say so in
 //               the note rather than inventing composition.
 //
+//               One thing to know before re-measuring: a `pull_request` run
+//               compiles your branch MERGED INTO the current main, not your
+//               branch. So the number to record is the one measured on a tree
+//               rebased onto main as of that moment, and a sweep that re-measures
+//               MANY entries races every PR landing beside it -- #5278's own PR
+//               went red on `@objectstack/rest` twice for exactly that reason,
+//               three rest-touching PRs having landed between the sweep and the
+//               run. That race is a bootstrapping cost, not a standing one: once
+//               this invariant is on main, the PR that adds the errors is the PR
+//               that goes red, which is the whole point.
+//
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
 // script (tsc, invoked from lint.yml) or by a ledger entry like anyone else.
@@ -340,11 +351,16 @@ const TEST_DEBT = {
       + 'possibly-undefined grew; the net -2 hides a much larger churn in both directions.',
   },
   '@objectstack/rest': {
-    tests: 56,
-    errors: 136,
-    note: 'TS2835 x61 (NodeNext extensions), TS7006 x54, TS2554 x10, TS2550 x7. Also in DEBT. Re-measured '
-      + '136 at 5ab08428, up from 105. Read the top-of-ledger NodeNext note before sizing this one: TS2835 '
-      + 'and the implicit-any pile it causes are 115 of the 136, and they are one repair, not 115.',
+    tests: 58,
+    errors: 143,
+    note: 'TS2835 x64 (NodeNext extensions), TS7006 x56, TS2554 x10, TS2550 x7. Also in DEBT. Re-measured '
+      + '136 at 5ab08428, up from 105, and 143 a few hours later at 77adf29 the same day. Read the '
+      + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
+      + 'are 120 of the 143, and '
+      + 'they are one repair, not 120. This is also the fastest-moving entry in either ledger, and it is '
+      + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
+      + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
+      + 'ledger number is always a number about a moment.',
   },
   '@objectstack/plugin-auth': {
     tests: 34,
