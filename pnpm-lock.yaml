@@ -1441,6 +1441,9 @@ importers:
       '@objectstack/driver-memory':
         specifier: workspace:*
         version: link:../../drivers/driver-memory
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
