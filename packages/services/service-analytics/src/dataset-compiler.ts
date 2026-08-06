@@ -234,7 +234,13 @@ export function compileDataset(
     const targetDatasource = declaredDatasource(targetObject);
     if (!targetDatasource) return; // cannot answer for this target
     if (sameDatasource(targetDatasource, baseDatasource)) return;
-    throw new Error(
+    // [#5716] `DATASET_INVALID` / 400 — the AUTHOR's verdict, decided entirely
+    // from metadata before any query runs: the dataset's `include` path and the
+    // two objects' `datasource` bindings. Both are things the author (or an
+    // admin) can change, and the message already names both fixes. Nothing here
+    // is a runtime fault, so a 500 told the author "the platform is broken"
+    // about a document they wrote.
+    throw datasetInvalidError(
       `[dataset-compiler] dataset "${dataset.name}" declares a JOIN that crosses datasources: ` +
       `its base object "${dataset.object}" is on datasource "${baseDatasource}", but the joined ` +
       `object "${targetObject}" — reached via the \`include\` path "${path}" — is on datasource ` +
@@ -257,7 +263,22 @@ export function compileDataset(
     if (!resolver) return { object: rel, table: rel };
     const resolved = resolver(fromObject, rel);
     if (!resolved) {
-      throw new Error(
+      // [#5716] `DATASET_INVALID` / 400 — the dataset's own `include` names a
+      // relationship the object graph does not have: a typo or a stale dataset,
+      // fixable only by the author. Sibling of the already-enveloped "…is not
+      // declared in the dataset's `include`" (#5367), one step earlier in the
+      // same resolution.
+      //
+      // ⚠️ The WORDING is left exactly as it was, and that is not an oversight:
+      // it contains both "relation"(ship) and "does not exist", so
+      // `analytics-service.ts`'s `isMissingSourceError` matches it — the mine
+      // #5717 filed. Enveloping it does not disarm that sniffer (it reads the
+      // message, not the envelope) and does not arm it either (this throw is
+      // still OUTSIDE `queryDataset`'s try, which is the only reason the mine
+      // has never gone off). What it DOES do is make #5717's option B — "never
+      // degrade an error that declares a 4xx envelope to an empty result" —
+      // able to cover this site, which before today it could not.
+      throw datasetInvalidError(
         `[dataset-compiler] dataset "${dataset.name}" includes relationship "${rel}" ` +
         `which does not exist on object "${fromObject}".`,
       );
@@ -268,7 +289,12 @@ export function compileDataset(
   for (const path of include) {
     const segments = path.split('.');
     if (segments.length > MAX_JOIN_HOPS) {
-      throw new Error(
+      // [#5716] `DATASET_INVALID` / 400 — a limit of the v1 runtime, reported
+      // against a path the author wrote. Same family as the aggregate refusal a
+      // few lines up ("not supported by the v1 dataset runtime", #5367): what
+      // the runtime cannot do is stated as a property of the dataset, because
+      // that is what the author has to change.
+      throw datasetInvalidError(
         `[dataset-compiler] dataset "${dataset.name}" include path "${path}" exceeds the ` +
         `${MAX_JOIN_HOPS}-hop limit (${segments.length} hops). Deeper traversal is not supported.`,
       );

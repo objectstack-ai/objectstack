@@ -11,7 +11,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
-import { datasetInvalidError } from '../dataset-refusal.js';
+import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
@@ -465,9 +465,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // for revenue and got a row count, aliased AS "revenue". #4157.
     if (!measure) {
       const declared = Object.keys(cube.measures ?? {});
-      throw new Error(
+      // [#5716] `INVALID_FIELD` / 400, naming the member — the request's
+      // `measures` entry is the only input, and #4437's gate already answers
+      // exactly this code for the measure one character away (a measure whose
+      // SOURCE FIELD the object lacks). Two spellings of "your `measures` entry
+      // is wrong" must not get two wire shapes. `DATASET_INVALID` would be wrong
+      // on the other face this fires on: `/analytics/query` names a cube, not a
+      // dataset.
+      throw invalidMemberError(
         `[native-sql-strategy] cube "${cube.name}" declares no measure "${member}"` +
           (declared.length ? ` (declared: ${declared.join(', ')})` : ' (it declares none)'),
+        { member, param: 'measures', cube: cube.name },
       );
     }
 
@@ -484,6 +492,18 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // keep; silently substituting `COUNT(*)` did not keep it for them.
     if (EXPRESSION_METRIC_TYPES.has(measure.type)) return col;
 
+    // [#5716] Deliberately BARE — an undeclared 500, and the one site on that
+    // issue's list of nine that is NOT the author's mistake. `Metric.type` is the
+    // CLOSED `AggregationMetricType` enum; `metric-type-coverage.test.ts` pins
+    // that {@link AGGREGATE_SQL} ∪ {@link EXPRESSION_METRIC_TYPES} partitions it
+    // exactly, `dataset-compiler` only ever writes a `SUPPORTED_AGGREGATES`
+    // member into a cube, and `inferMeasure` mints six known types. So no
+    // spec-valid cube can arrive here: what does is our own drift or a host
+    // registering a cube object that never met `CubeSchema`. Answering the
+    // CALLER 400 for that would hide a platform bug from ops alerting and tell a
+    // dashboard user to fix metadata they cannot see. Same tier as
+    // `dataset-compiler`'s "non-derived measure has no aggregate"; the reasoning
+    // is written once in `dataset-refusal.ts`'s header.
     throw new Error(
       `[native-sql-strategy] measure "${member}" on cube "${cube.name}" has ` +
         `unrecognised type "${measure.type}" — expected an aggregate ` +
