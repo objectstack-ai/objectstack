@@ -6927,6 +6927,7 @@
     "ui/ActionParam:type",
     "ui/ActionParam:visible",
     "ui/ActionSession:organizationId",
+    "ui/ActionSession:positions",
     "ui/ActionSession:roles",
     "ui/ActionSession:userId",
     "ui/AddRecordConfig:enabled",
