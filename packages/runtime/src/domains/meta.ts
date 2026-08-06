@@ -203,9 +203,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     try {
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
                         const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
-                        // Protocol returns `{ type, name, item }` — only
-                        // treat the lookup as a hit when item is present.
-                        if (data && (data.item ?? data)) {
+                        // Protocol returns `{ type, name, item }` — only treat the
+                        // lookup as a hit when `item` is really there. [#5563] The
+                        // test used to be `data.item ?? data`, which is truthy for
+                        // ANY truthy `data`: an item-less answer (what a metadata
+                        // store outage resolves to) was served as a hit and the
+                        // registry fallback below never ran. The guard now asks the
+                        // question its own comment claims it asks.
+                        if (data?.item != null) {
                             return { handled: true, response: deps.success(data) };
                         }
                     } catch { /* fall through to registry / 404 */ }
@@ -214,7 +219,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const qlService = await deps.getObjectQL(_context);
                 if (qlService?.registry) {
                     const data = qlService.registry.getObject(name);
-                    if (data) return { handled: true, response: deps.success(data) };
+                    // [#5563] The registry hands back the bare ObjectSchema, so this
+                    // fallback used to answer a different body shape than the
+                    // protocol branch above for the very same request. Wrap it in
+                    // the declared `GetMetaItemResponseSchema` envelope — `type` and
+                    // `name` come from the request, the same values the protocol
+                    // would have echoed back.
+                    if (data) return { handled: true, response: deps.success({ type: 'object', name, item: data }) };
                 }
 
                 // Last-ditch protocol attempt for unscoped kernels whose
@@ -224,7 +235,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     try {
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
                         const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
-                        if (data && (data.item ?? data)) {
+                        if (data?.item != null) {
                             return { handled: true, response: deps.success(data) };
                         }
                     } catch { /* fall through to 404 */ }
@@ -258,7 +269,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // ADR-0048 — thread `?package=` so single-item resolution is
                     // package-scoped (prefer-local), matching list resolution.
                     const data = await (metaSvc as any).getItem(singularType, name, packageId);
-                    if (data) return { handled: true, response: deps.success(data) };
+                    // [#5563] Same convergence as the object branch above: the
+                    // MetadataService hands back the bare document, so wrap it in
+                    // the declared envelope rather than letting which service
+                    // answered decide the caller's parse.
+                    if (data) return { handled: true, response: deps.success({ type: singularType, name, item: data }) };
                 } catch { /* not found */ }
             }
             return { handled: true, response: deps.error('Not found', 404) };

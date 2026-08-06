@@ -92,26 +92,36 @@ describe('ObjectStackClient', () => {
     });
 
     it('should get metadata item by type and name', async () => {
+        // The server's body is the spec-declared `GetMetaItemResponseSchema`
+        // envelope — `{ type, name, item }`, with the metadata document under
+        // `item`. This double used to serve the bare document, which is what
+        // the route's DEFAULT (cached) path really answered while its
+        // non-cached path answered the envelope; #5563 converged the route on
+        // the declared shape, so the double speaks it too.
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ 
+            json: async () => ({
+                type: 'object',
                 name: 'customer',
-                fields: []
+                item: { name: 'customer', label: 'Customer', fields: [] },
             })
         });
 
-        const client = new ObjectStackClient({ 
+        const client = new ObjectStackClient({
             baseUrl: 'http://localhost:3000',
             fetch: fetchMock
         });
 
-        const result = await client.meta.getItem('object', 'customer');
+        const result = await client.meta.getItem('object', 'customer') as any;
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/meta/object/customer', expect.any(Object));
         // `meta.getItem` has no declared return type (unlike the `getItems`
         // beside it — #5545), so its unwrapped payload is `unknown`. Asserted
         // structurally rather than cast: same assertion strength, without
         // pretending this surface is typed (#5449).
-        expect(result).toMatchObject({ name: 'customer' });
+        expect(result).toMatchObject({ type: 'object', name: 'customer' });
+        // Load-bearing: the document lives under `item`, not spread at the top
+        // level. A regression to the bare shape fails HERE, not on a missing key.
+        expect(result.item).toMatchObject({ label: 'Customer' });
     });
 
     it('meta.getView speaks the path-param dialect both surfaces accept (#3611)', async () => {

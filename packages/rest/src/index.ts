@@ -16,11 +16,15 @@ export type { RestApiPluginConfig } from './rest-api-plugin.js';
 // Bulk-import building blocks (#2766 V2) — shared with the identity import
 // endpoint in plugin-auth so it accepts payloads byte-identical to the
 // generic /data/:object/import routes and reuses the same row engine.
+// [#5563] The meta-envelope shape predicate that used to be exported here is
+// gone: `GET /meta/:type/:name` answers exactly one body shape now — the
+// spec-declared `{ type, name, item, … }` envelope — so there is no shape
+// question left to ask at runtime, and reading `.item` is unconditionally
+// correct. Removal + migration are written up in the changeset.
 export {
     prepareImportRequest,
     parseCsvToRows,
     parseXlsxToRows,
-    isMetaEnvelope,
 } from './import-prepare.js';
 export type { PreparedImport, PrepareImportResult } from './import-prepare.js';
 export { runImport } from './import-runner.js';
