@@ -177,6 +177,10 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal } from './guard-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
+// #5660 — the degrade registration reports a FOREIGN failure (a third-party
+// provider factory's text), so it renders it as structured `meta` rather than
+// interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
+import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -1710,12 +1714,73 @@ export class AutomationEngine implements IAutomationService {
      * than "unknown connector". The materializer retries and replaces this
      * registration via {@link registerConnector} once the upstream is back.
      * Same cross-origin collision rule as {@link registerConnector} (ADR-0097 §4).
+     *
+     * #5660 — this record's message used to end in `— ${reason}`, and `reason`
+     * is not ours: the only caller passes `ConnectorUpstreamUnavailableError`'s
+     * message, constructed by a third-party provider factory (ADR-0097 invites
+     * people to write them; the spec defines the error class and says nothing
+     * about its text), so an upstream SDK's multi-line failure landed inside the
+     * message verbatim. `ObjectLogger.write()` emits one `<ts> <LEVEL> …` head
+     * per call, so a message carrying newlines becomes several physical lines
+     * and only the first is a record. This is the seam of that family (#5048,
+     * #5575, #5636) that fires **first and on the default branch** — every
+     * successful husk registration, i.e. every first degrade — and it fires at
+     * cold boot inside `serve`'s boot-quiet window, which wraps
+     * `process.stdout.write` (where `warn` goes) and whose `BootLogCapture`
+     * *drops* any physical line `classifyBootLogLine` finds no level head on.
+     * So the continuation lines were not merely hard to parse, they were gone.
+     *
+     * The message is now self-sufficient and newline-free by construction
+     * (`name` is `^[a-z_][a-z0-9_]*$` per {@link ConnectorSchema}, `origin` is
+     * an enum), and the facts travel in the logger's `meta`:
+     *
+     *   - `degradedReason` — always present: the text this registration STORED
+     *     on the husk. Named for the field it mirrors, and deliberately not
+     *     `reason`/`cause`/`key`-flavoured: `ObjectLogger` redacts recursively
+     *     by substring over `password`/`token`/`secret`/`key` (#5573), and this
+     *     name matches none of them, so the operator's one fact survives.
+     *   - the thrown value's own rendering (`error` or `issues`, via
+     *     {@link describeThrownForLog}) — present only when the caller supplied
+     *     `cause`. It is a fact about the FAILURE, where `degradedReason` is a
+     *     fact about the REGISTRATION; today's single caller derives one from
+     *     the other, so the two coincide, but the record's shape does not
+     *     depend on that and a caller that summarizes is not silently lossy.
+     *     Note `describeThrownForLog` renders the thrown value's own `.message`
+     *     only — `ConnectorUpstreamUnavailableError.cause` (the underlying
+     *     connect error) is carried here but not yet rendered; widening that
+     *     rendering is a change to the shared helper, not to this seam.
+     *
+     * `reason` itself — and therefore `degradedReason` on the descriptor, what
+     * `GET /connectors` shows and what a `connector_action` refusal quotes — is
+     * unchanged, verbatim, newlines included. It is read by a human through
+     * JSON, not by a line splitter (#5636 made the same call at the caller).
+     *
+     * @param reason operator-facing text stored as the husk's `degradedReason`.
+     *   Kept verbatim; never interpolated into a log message.
+     * @param origin how the connector reached the engine (ADR-0097 §4).
+     * @param cause the thrown value behind the degrade, for the log record's
+     *   structured `meta`. Optional — a caller with no thrown value in hand
+     *   still gets `degradedReason` in the record.
      */
-    registerDegradedConnector(def: Connector, reason: string, origin: ConnectorOrigin = 'declarative'): void {
+    registerDegradedConnector(
+        def: Connector,
+        reason: string,
+        origin: ConnectorOrigin = 'declarative',
+        cause?: unknown,
+    ): void {
         const parsed = ConnectorSchema.parse(def);
         this.assertSameOriginOrFree(parsed.name, origin);
         this.connectors.set(parsed.name, { def: parsed, handlers: {}, origin, state: 'degraded', degradedReason: reason });
-        this.logger.warn(`Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — ${reason}`);
+        // `warn(message, meta?)` per the `Logger` contract — no `Error` slot
+        // below `error`, so the cause belongs in argument TWO here.
+        this.logger.warn(
+            `Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — no actions and no handlers ` +
+                `until its upstream is reachable; a connector_action dispatching to it fails with the stored ` +
+                `reason, and the materializer retries with backoff (#3017).`,
+            cause === undefined
+                ? { degradedReason: reason }
+                : { degradedReason: reason, ...describeThrownForLog(cause) },
+        );
     }
 
     /** Enforce the ADR-0097 §4 two-sources-of-truth rule; warn on same-origin replace. */
