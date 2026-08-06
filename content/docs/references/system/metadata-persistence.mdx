@@ -16,8 +16,8 @@ Defines the lifecycle and mutability of a metadata item.
 ## TypeScript Usage
 
 ```typescript
-import { MetadataCollectionInfoSchema, MetadataDiffResultSchema, MetadataHistoryQueryOptionsSchema, MetadataHistoryQueryResultSchema, MetadataHistoryRecordSchema, MetadataHistoryRetentionPolicySchema, MetadataLoadOptionsSchema, MetadataLoadResultSchema, MetadataLoaderContractSchema, MetadataRecordSchema, MetadataSaveOptionsSchema, MetadataSaveResultSchema, MetadataScopeSchema, MetadataSourceSchema, MetadataStateSchema, MetadataStatsSchema, MetadataWatchEventSchema, PackagePublishResultSchema } from '@objectstack/spec/system';
-import type { MetadataCollectionInfo, MetadataDiffResult, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
+import { MetadataCollectionInfoSchema, MetadataDiffResultSchema, MetadataFallbackStrategySchema, MetadataFormatSchema, MetadataHistoryQueryOptionsSchema, MetadataHistoryQueryResultSchema, MetadataHistoryRecordSchema, MetadataHistoryRetentionPolicySchema, MetadataLoadOptionsSchema, MetadataLoadResultSchema, MetadataLoaderContractSchema, MetadataManagerConfigSchema, MetadataRecordSchema, MetadataSaveOptionsSchema, MetadataSaveResultSchema, MetadataScopeSchema, MetadataSourceSchema, MetadataStateSchema, MetadataStatsSchema, MetadataWatchEventSchema, PackagePublishResultSchema } from '@objectstack/spec/system';
+import type { MetadataCollectionInfo, MetadataDiffResult, MetadataFallbackStrategy, MetadataFormat, MetadataHistoryQueryOptions, MetadataHistoryQueryResult, MetadataHistoryRecord, MetadataHistoryRetentionPolicy, MetadataLoadOptions, MetadataLoadResult, MetadataLoaderContract, MetadataManagerConfig, MetadataRecord, MetadataSaveOptions, MetadataSaveResult, MetadataScope, MetadataSource, MetadataStats, MetadataWatchEvent, PackagePublishResult } from '@objectstack/spec/system';
 
 // Validate data
 const result = MetadataCollectionInfoSchema.parse(data);
@@ -53,6 +53,31 @@ const result = MetadataCollectionInfoSchema.parse(data);
 | **identical** | `boolean` | ✅ |  |
 | **patch** | `any[]` | optional | JSON patch operations |
 | **summary** | `string` | optional | Human-readable summary of changes |
+
+
+---
+
+## MetadataFallbackStrategy
+
+### Allowed Values
+
+* `filesystem`
+* `memory`
+* `none`
+
+
+---
+
+## MetadataFormat
+
+Metadata file format
+
+### Allowed Values
+
+* `yaml`
+* `json`
+* `typescript`
+* `javascript`
 
 
 ---
@@ -176,6 +201,27 @@ const result = MetadataCollectionInfoSchema.parse(data);
 | **supportsWrite** | `boolean` | optional |  |
 | **supportsCache** | `boolean` | optional |  |
 | **capabilities** | `{ read: boolean; write: boolean; watch: boolean; list: boolean }` | ✅ |  |
+
+
+---
+
+## MetadataManagerConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **datasource** | `string` | optional | Datasource name reference for database persistence |
+| **tableName** | `string` | ✅ | Database table name for metadata storage |
+| **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | ✅ | Fallback strategy when datasource is unavailable |
+| **rootDir** | `string` | optional | Root directory path |
+| **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | ✅ | Enabled formats |
+| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
+| **watch** | `boolean` | ✅ | Enable file watching |
+| **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
+| **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |
+| **loaderOptions** | `Record<string, any>` | optional | Loader-specific configuration |
+| **persistence** | `{ writable: boolean; overlayWritable: boolean }` | optional | Persistence write gates |
 
 
 ---

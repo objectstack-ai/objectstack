@@ -134,8 +134,8 @@ a dead end of the same class in #4738.)
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -268,6 +268,119 @@ Connector health configuration
 | :--- | :--- | :--- | :--- |
 | **healthCheck** | `{ enabled: boolean; intervalMs: number; timeoutMs: number; endpoint?: string; … }` | optional | Health check configuration |
 | **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutMs: number; halfOpenMaxRequests: number; … }` | optional | Circuit breaker configuration |
+
+
+---
+
+## ConnectorInstanceAPIKeyAuth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'api-key'` | ✅ |  |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the API key at materialization. Never an inline key. |
+| **headerName** | `string` | optional | HTTP header carrying the key (default X-API-Key). |
+| **paramName** | `string` | optional | Query parameter carrying the key (alternative to header). |
+
+
+---
+
+## ConnectorInstanceAuth
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+**Type:** `none`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'none'` | ✅ |  |
+
+---
+
+#### Option 2
+
+**Type:** `bearer`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'bearer'` | ✅ |  |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token. |
+
+---
+
+#### Option 3
+
+**Type:** `api-key`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'api-key'` | ✅ |  |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the API key at materialization. Never an inline key. |
+| **headerName** | `string` | optional | HTTP header carrying the key (default X-API-Key). |
+| **paramName** | `string` | optional | Query parameter carrying the key (alternative to header). |
+
+---
+
+#### Option 4
+
+**Type:** `basic`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'basic'` | ✅ |  |
+| **username** | `string` | ✅ | Username (not a secret; safe to keep in metadata). |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the password at materialization. Never an inline password. |
+
+---
+
+
+---
+
+## ConnectorInstanceBasicAuth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'basic'` | ✅ |  |
+| **username** | `string` | ✅ | Username (not a secret; safe to keep in metadata). |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the password at materialization. Never an inline password. |
+
+
+---
+
+## ConnectorInstanceBearerAuth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'bearer'` | ✅ |  |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token. |
+
+
+---
+
+## ConnectorInstanceNoAuth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'none'` | ✅ |  |
 
 
 ---
