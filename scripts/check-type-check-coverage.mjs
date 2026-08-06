@@ -118,13 +118,39 @@
 //               One thing to know before re-measuring: a `pull_request` run
 //               compiles your branch MERGED INTO the current main, not your
 //               branch. So the number to record is the one measured on a tree
-//               rebased onto main as of that moment, and a sweep that re-measures
+//               merged with main as of that moment, and a sweep that re-measures
 //               MANY entries races every PR landing beside it -- #5278's own PR
 //               went red on `@objectstack/rest` twice for exactly that reason,
 //               three rest-touching PRs having landed between the sweep and the
 //               run. That race is a bootstrapping cost, not a standing one: once
 //               this invariant is on main, the PR that adds the errors is the PR
 //               that goes red, which is the whole point.
+//
+//               The MERGE QUEUE sharpens the same edge, and is worth its own
+//               paragraph because the usual remedy does not work there. The queue
+//               builds your PR as merged onto the head of the queue, which keeps
+//               moving as the entries ahead of you land -- so a count frozen even
+//               minutes earlier can already be stale, and RE-RUNNING the failed
+//               job cannot fix it (a rerun replays the same merge ref, so it
+//               re-measures the same stale base). The only repair is a new commit
+//               carrying a re-measured number. #5278's PR was kicked from the
+//               queue on `@objectstack/objectql` +2 -- #5802's registry tests and
+//               #5850's new file -- and while it sat there red-looping, two
+//               unrelated PRs queued behind it were each kicked once as
+//               collateral, then landed untouched once it left the queue. So: if
+//               a re-measure PR goes red in the queue, take it OUT of the queue
+//               before repairing it, and if you are the one re-measuring, push
+//               the calibration immediately after measuring rather than batching
+//               it with other work.
+//
+//               Before treating any such red as base drift, falsify the other
+//               explanation: run `--re-measure` TWICE on the same tree. Identical
+//               output means the count is deterministic and calibration is the
+//               right answer; a count that oscillates would mean tsc itself is
+//               nondeterministic here, which is a tolerance question for this
+//               ratchet and NOT a calibration -- take it back to #5278. Measured
+//               2026-08-06 on the objectql case: two back-to-back runs were
+//               byte-identical, so this gate has no known nondeterminism.
 //
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
@@ -334,12 +360,17 @@ const TEST_DEBT = {
       + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
   },
   '@objectstack/objectql': {
-    tests: 125,
-    errors: 333,
-    note: 'TS2339 x114, TS2554 x91 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
+    tests: 126,
+    errors: 335,
+    note: 'TS2339 x115, TS2554 x92 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
       + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
-      + 'went 87 -> 125; src/engine.test.ts alone carries 103.',
+      + 'went 87 -> 126; src/engine.test.ts alone carries 103. Re-calibrated to 335 at 909895dc: +1 TS2339 '
+      + 'in src/registry.test.ts (#5802 added ~116 lines of registry tests) and +1 TS2554 in the file '
+      + '#5850 introduced, src/engine-update-prior-read-scope.test.ts -- both attributed, neither a new '
+      + 'class. This is the package that showed what the merge queue does to a frozen number: the queue '
+      + 'builds the PR as merged onto the CURRENT main, so a count frozen minutes earlier is already '
+      + 'stale, and #5278\'s own PR was kicked from the queue on exactly this +2.',
   },
   '@objectstack/runtime': {
     tests: 101,
