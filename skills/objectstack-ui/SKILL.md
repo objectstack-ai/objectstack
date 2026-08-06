@@ -1822,6 +1822,26 @@ RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
 isolation axes as hooks — `organization_id` row-scoping vs environment /
 database-per-tenant; see the objectstack-data hooks reference.)
 
+The caller's position names are on `ctx.session.positions` — the ADR-0090 D3
+spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
+sharing service use:
+
+```typescript
+// ✅ Canonical since #5613
+const positions = ctx.session?.positions ?? [];
+
+// ⚠️ Deprecated alias of the SAME array — emitted for one deprecation window
+// (ADR-0087 `action-session-roles-to-positions`), then removed.
+const legacy = ctx.session?.roles;
+```
+
+> Both keys are absent (not empty) when the caller holds no positions, and the
+> whole `ctx.session` is `undefined` for a call with no identity envelope.
+> **Neither array is an authorization input.** Do not migrate
+> `roles.includes('admin')` into `positions.includes('admin')` — that renames a
+> defect. Ask the security service for privilege (capability grants,
+> placements, derived posture — ADR-0095).
+
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
 There are **two** mechanisms here. Pick by whether the URL is static or computed:
