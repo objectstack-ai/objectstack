@@ -360,17 +360,22 @@ const TEST_DEBT = {
       + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
   },
   '@objectstack/objectql': {
-    tests: 126,
-    errors: 335,
-    note: 'TS2339 x115, TS2554 x92 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
+    tests: 127,
+    errors: 339,
+    note: 'TS2339 x115, TS2554 x93 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
       + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
-      + 'went 87 -> 126; src/engine.test.ts alone carries 103. Re-calibrated to 335 at 909895dc: +1 TS2339 '
-      + 'in src/registry.test.ts (#5802 added ~116 lines of registry tests) and +1 TS2554 in the file '
-      + '#5850 introduced, src/engine-update-prior-read-scope.test.ts -- both attributed, neither a new '
-      + 'class. This is the package that showed what the merge queue does to a frozen number: the queue '
-      + 'builds the PR as merged onto the CURRENT main, so a count frozen minutes earlier is already '
-      + 'stale, and #5278\'s own PR was kicked from the queue on exactly this +2.',
+      + 'went 87 -> 127; src/engine.test.ts alone carries 103. Then +2 at 909895dc (+1 TS2339 in '
+      + 'src/registry.test.ts, #5802 having added ~116 lines of registry tests; +1 TS2554 in the file '
+      + '#5850 introduced, src/engine-update-prior-read-scope.test.ts), and +4 more at c15fcee4c -- ALL '
+      + 'FOUR in one file #5861 added, src/save-meta-response-conformance.test.ts: one TS2554 at :115, '
+      + 'and at :119 a TS6133 (`LOG` declared, never read) beside two TS2304 (`appendFileSync` and `OUT` '
+      + 'are not names in scope). That last line is worth a look by whoever next touches the file -- an '
+      + 'unresolved name is a line that cannot run, not a typing nicety -- but it is that PR\'s to fix, '
+      + 'not this ledger\'s. This is the package that showed what the merge queue does to a frozen '
+      + 'number: the queue builds the PR as merged onto the CURRENT queue head, so a count frozen minutes '
+      + 'earlier is already stale, and #5278\'s own PR was kicked on this entry three times before it '
+      + 'landed.',
   },
   '@objectstack/runtime': {
     tests: 101,
