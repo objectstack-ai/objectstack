@@ -42,19 +42,35 @@ import type { QueryAST } from '@objectstack/spec/data';
  * one RLS scope answered correctly on a local SqlDriver and broke on Turso
  * remote — a local/remote divergence on a declared spec construct.
  *
- * Two semantics are deliberate and pinned below, because the three in-tree
- * implementations do not agree on them (filed as objectstack#5146):
+ * Two semantics are deliberate and pinned below. One of them has since been
+ * RULED and reversed; both are recorded here because the reversal is the point.
  *
- * - **NULL rows follow the SQL family.** `NOT ("stage" = ?)` is UNKNOWN when
- *   `stage` is NULL, so that row is not returned — exactly what Knex's
- *   `whereNot` emits for local mode (`select … where (not (\`stage\` = ?))`,
- *   measured). `driver-memory`/`matchesFilterCondition` return it. Remote mode
- *   is pinned to the family it belongs to, so local and remote SQL agree.
- * - **`$not: {}` is FALSE.** The inner filter compiles to no SQL, which under
- *   the #1073 invariant can only mean "vacuously TRUE", and `NOT TRUE` is
- *   FALSE. `driver-memory` and `matchesFilterCondition` agree; driver-sql
- *   returns every row there, but only because Knex drops an empty group — the
- *   widening direction of the very bug family #2704 closed.
+ * - **NULL rows are RETURNED (#5146, landed on this face by #5903).** This
+ *   bullet used to say the opposite — "NULL rows follow the SQL family:
+ *   `NOT ("stage" = ?)` is UNKNOWN when `stage` is NULL, so that row is not
+ *   returned, exactly what Knex's `whereNot` emits for local mode;
+ *   `driver-memory`/`matchesFilterCondition` return it; remote mode is pinned to
+ *   the family it belongs to, so local and remote SQL agree." Every clause of
+ *   that was true when it was written and the CONCLUSION expired eleven months
+ *   later: objectstack#5146 ruled the two-valued answer canonical and PR #5296
+ *   landed it on `SqlDriver.applyFilterCondition`, so local mode — which
+ *   inherits it — started returning the NULL row while this independent
+ *   compiler did not. The sentence that justified the pin ("local and remote SQL
+ *   agree") became the reason to flip it. Measured on `origin/main` on
+ *   2026-08-06 against the shared conformance fixture: LOCAL `['2','3','4']`,
+ *   REMOTE `['2']`.
+ *
+ *   The predicate is made TOTAL leaf by leaf before the negation, so
+ *   `NOT (…)` is TRUE or FALSE for every row and never UNKNOWN. That is why the
+ *   compiled SQL below carries an `IS NOT NULL` conjunct that was not there
+ *   before, and why the polarity is per operator rather than a blanket
+ *   `OR col IS NULL`: `{ $not: { a: { $ne: 5 } } }` means "a is 5", which a
+ *   no-value row must NOT satisfy (pinned in section (g) below).
+ * - **`$not: {}` is FALSE.** UNCHANGED. The inner filter compiles to no SQL,
+ *   which under the #1073 invariant can only mean "vacuously TRUE", and
+ *   `NOT TRUE` is FALSE. `driver-memory` and `matchesFilterCondition` agree;
+ *   driver-sql returns every row there, but only because Knex drops an empty
+ *   group — the widening direction of the very bug family #2704 closed.
  */
 function transportWithCapturingClient() {
   const calls: Array<{ sql: string; args: any[] }> = [];
@@ -98,7 +114,11 @@ describe('RemoteTransport $not (#1076)', () => {
       // Pre-fix: THREW `Filter on 'deal.$not' has an object comparand whose key
       // "stage" is not an operator`.
       const call = await compile({ $not: { stage: 'won' } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ("stage" = ?)`);
+      // [#5903] The `IS NOT NULL` conjunct is #5146's leaf-totalising guard: a
+      // row with no `stage` does not satisfy `stage = 'won'`, so it must satisfy
+      // the negation. Without it `NOT (NULL = ?)` is UNKNOWN and the row
+      // vanishes.
+      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`);
       expect(call.args).toEqual(['won']);
       expectBindsBalanced(call);
     });
@@ -123,7 +143,11 @@ describe('RemoteTransport $not (#1076)', () => {
       // `NOT (a AND b)`, never `NOT (a) AND b` — the inner object is one
       // condition and De Morgan is not the caller's intent.
       const call = await compile({ $not: { stage: 'won', amount: 10 } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ("stage" = ? AND "amount" = ?)`);
+      // Each leaf is guarded independently and the four conjuncts stay inside
+      // the ONE negated group — `NOT (a AND b)`, never `NOT (a) AND b`.
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?) AND ("amount" IS NOT NULL) AND ("amount" = ?)))`,
+      );
       expect(call.args).toEqual(['won', 10]);
     });
 
@@ -202,27 +226,44 @@ describe('RemoteTransport $not (#1076)', () => {
     it('compiles `$not: { $not: {…} }` as two nested negations', async () => {
       // Pre-fix: THREW `Unsupported filter operator "$not" on 'deal.$not'`.
       const call = await compile({ $not: { $not: { stage: 'won' } } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT (NOT ("stage" = ?))`);
+      // The INNER `$not` is left un-rewritten by the outer one on purpose: its
+      // own branch totalises its operand, and `NOT <total>` is itself total, so
+      // recursing would stack a redundant guard on the same column. The guard
+      // therefore appears exactly once, innermost.
+      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT (NOT ((("stage" IS NOT NULL) AND ("stage" = ?))))`);
       expect(call.args).toEqual(['won']);
       expectBindsBalanced(call);
     });
 
     it('compiles `$not` over a nested `$or`', async () => {
       const call = await compile({ $not: { $or: [{ stage: 'won' }, { stage: 'lost' }] } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ((("stage" = ?) OR ("stage" = ?)))`);
+      // De Morgan is sound over two-valued leaves, which is the whole reason the
+      // guard rides each LEAF rather than the `NOT`: hoisting it above this
+      // `$or` would let a NULL `stage` satisfy the negation even when the other
+      // disjunct is satisfied.
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE NOT ((((("stage" IS NOT NULL) AND ("stage" = ?))) OR ((("stage" IS NOT NULL) AND ("stage" = ?)))))`,
+      );
       expect(call.args).toEqual(['won', 'lost']);
       expectBindsBalanced(call);
     });
 
     it('compiles `$not` over a nested `$and`', async () => {
       const call = await compile({ $not: { $and: [{ stage: 'won' }, { amount: 10 }] } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ((("stage" = ?) AND ("amount" = ?)))`);
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE NOT ((((("stage" IS NOT NULL) AND ("stage" = ?))) AND ((("amount" IS NOT NULL) AND ("amount" = ?)))))`,
+      );
       expect(call.args).toEqual(['won', 10]);
     });
 
     it('carries operator maps through the negation with their binds in order', async () => {
       const call = await compile({ $not: { amount: { $gte: 10, $lt: 100 } } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ("amount" >= ? AND "amount" < ?)`);
+      // ONE guard for the whole field constraint, not one per operator: the
+      // constraint is the AND of its operators, so a NULL column satisfies it
+      // only if it satisfies all of them — and it satisfies neither bound.
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE NOT ((("amount" IS NOT NULL) AND ("amount" >= ? AND "amount" < ?)))`,
+      );
       expect(call.args).toEqual([10, 100]);
       expectBindsBalanced(call);
     });
@@ -243,20 +284,29 @@ describe('RemoteTransport $not (#1076)', () => {
       // 'lost')`. Pre-fix the whole read THREW, so the scope was unusable on
       // Turso remote while working locally.
       const call = await compile({ $and: [{ owner_id: 'u1' }, { $not: { stage: 'lost' } }] });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE (("owner_id" = ?) AND (NOT ("stage" = ?)))`);
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE (("owner_id" = ?) AND (NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))))`,
+      );
       expect(call.args).toEqual(['u1', 'lost']);
       expectBindsBalanced(call);
     });
 
     it('compiles a `$not` inside an `$or` branch', async () => {
       const call = await compile({ $or: [{ $not: { stage: 'lost' } }, { owner_id: 'u1' }] });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE ((NOT ("stage" = ?)) OR ("owner_id" = ?))`);
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE ((NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))) OR ("owner_id" = ?))`,
+      );
       expect(call.args).toEqual(['lost', 'u1']);
     });
 
     it('keeps a `$not` sibling of plain field keys at the same level', async () => {
       const call = await compile({ owner_id: 'u1', $not: { stage: 'lost' } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE "owner_id" = ? AND NOT ("stage" = ?)`);
+      // The guard stays INSIDE the negated group. This is the assertion that
+      // fails if it were ever spliced into the node's bare ` AND ` join, where
+      // a stray `OR` would bind looser than the AND and widen the whole filter.
+      expect(call.sql).toBe(
+        `${BARE_SCAN} WHERE "owner_id" = ? AND NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`,
+      );
       expect(call.args).toEqual(['u1', 'lost']);
     });
 
@@ -351,9 +401,16 @@ describe('RemoteTransport $not (#1076)', () => {
       await t.count('deal', { where } as unknown as QueryAST);
       await t.deleteMany('deal', { where } as any);
       await t.updateMany('deal', { where } as any, { stage: 'lost' });
-      expect(calls[0].sql).toMatch(/COUNT\(\*\).+WHERE NOT \("stage" = \?\)/i);
-      expect(calls[1].sql).toBe('DELETE FROM "deal" WHERE NOT ("stage" = ?)');
-      expect(calls[2].sql).toMatch(/^UPDATE "deal" SET .* WHERE NOT \("stage" = \?\)$/);
+      // The one negated predicate all three statements must carry, verbatim —
+      // a WHERE that is right for `find` and wrong for `deleteMany` is how a
+      // filter fix becomes a data-loss bug.
+      const NEGATION = 'WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))';
+      expect(calls[0].sql).toMatch(/COUNT\(\*\)/i);
+      expect(calls[0].sql).toContain(NEGATION);
+      expect(calls[1].sql).toBe(`DELETE FROM "deal" ${NEGATION}`);
+      expect(calls[2].sql).toMatch(
+        /^UPDATE "deal" SET .* WHERE NOT \(\(\("stage" IS NOT NULL\) AND \("stage" = \?\)\)\)$/,
+      );
       for (const call of calls) expectBindsBalanced(call);
     });
 
@@ -425,21 +482,34 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
 
   it('`$not: { stage: "won" }` returns the other rows, not a `no such column` error', async () => {
     // Pre-fix: threw before reaching SQLite; had it compiled, SQLite would have
-    // answered `no such column: $not`.
-    expect(await ids({ $not: { stage: 'won' } })).toEqual(['d_lost', 'd_open']);
+    // answered `no such column: $not`. `d_null` joins the answer at #5903 — see
+    // the next case.
+    expect(await ids({ $not: { stage: 'won' } })).toEqual(['d_lost', 'd_null', 'd_open']);
   });
 
-  it('drops the NULL-`stage` row — SQL three-valued logic, as `whereNot` does locally', async () => {
+  it('RETURNS the NULL-`stage` row — the #5146 ruling, on this face since #5903', async () => {
+    // The direction of this case is REVERSED, deliberately. It read: "drops the
+    // NULL-`stage` row — SQL three-valued logic, as `whereNot` does locally.
     // `d_null` is absent above and here. This is the SQL family's answer:
     // `NOT (NULL = 'won')` is UNKNOWN, not TRUE. `driver-memory` and
     // `matchesFilterCondition` would return it. Remote mode is pinned to local
     // SqlDriver so the two SQL transports cannot disagree; the cross-family
-    // divergence is objectstack#5146.
+    // divergence is objectstack#5146."
+    //
+    // #5146 ruled that cross-family divergence — the JS answer is canonical, a
+    // column with no value does not satisfy the negated condition — and PR
+    // #5296 landed it on `SqlDriver`. The last clause of the old comment is
+    // what makes this a flip rather than a regression: "the two SQL transports
+    // cannot disagree" stopped being true the moment local inherited the fix,
+    // and it is true again only with `d_null` on this side of the answer.
     const rows = await ids({ $not: { stage: 'won' } });
-    expect(rows).not.toContain('d_null');
-    // …and the row IS reachable — it is excluded by the negation's semantics,
-    // not missing from the table.
+    expect(rows).toContain('d_null');
+    // …and the row is still identifiable as the no-value row, so this is not
+    // passing because the seed lost its NULL.
     expect(await ids({ stage: null })).toEqual(['d_null']);
+    // The complement still excludes it: negation is not a licence to return
+    // everything.
+    expect(await ids({ $not: { stage: { $ne: 'won' } } })).toEqual(['d_won']);
   });
 
   it('`$not: {}` returns ZERO rows', async () => {
@@ -455,7 +525,12 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   it('negates a nested `$or` (De Morgan on real rows)', async () => {
-    expect(await ids({ $not: { $or: [{ stage: 'won' }, { stage: 'lost' }] } })).toEqual(['d_open']);
+    // `d_null` is in the answer for the same reason it is above: it satisfies
+    // neither disjunct, so it satisfies the negation.
+    expect(await ids({ $not: { $or: [{ stage: 'won' }, { stage: 'lost' }] } })).toEqual([
+      'd_null',
+      'd_open',
+    ]);
   });
 
   it('answers the RLS shape — owner AND NOT lost', async () => {
@@ -488,7 +563,19 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     });
     // `d_lost` closed WITHIN 2025-01-15, so the negation excludes it; `d_won`
     // closed later, so the negation keeps it. Un-lowered, both come back.
-    expect(await ids({ $not: { closed_at: { $lte: '2025-01-15' } } })).toEqual(['d_won']);
+    //
+    // [#5903] `d_open` and `d_null` never got a `closed_at`, and a row with no
+    // value does not satisfy `closed_at <= …`, so the negation now returns
+    // them. That is the SAME ruling as the case above applied to a range
+    // operator — the guard is `requireValue` for every positive comparison —
+    // and it is what LOCAL mode has answered since PR #5296. The lowering
+    // assertion is unaffected: `d_lost` is still excluded, which is the only
+    // way to tell a lowered upper bound from an un-lowered one.
+    expect(await ids({ $not: { closed_at: { $lte: '2025-01-15' } } })).toEqual([
+      'd_null',
+      'd_open',
+      'd_won',
+    ]);
   });
 
   it('lowers `$between` inside `$not` instead of refusing it', async () => {
@@ -501,7 +588,11 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   it('`count` agrees with `find`', async () => {
-    expect(await driver.count('deal', { object: 'deal', where: { $not: { stage: 'won' } } })).toBe(2);
+    // Three since #5903 — `d_null` is inside the negation now, and a count that
+    // disagreed with the list under it is exactly the local/remote split this
+    // issue closed, wearing a total instead of a row set.
+    expect(await driver.count('deal', { object: 'deal', where: { $not: { stage: 'won' } } })).toBe(3);
+    expect((await ids({ $not: { stage: 'won' } })).length).toBe(3);
     expect(await driver.count('deal', { object: 'deal', where: { $not: {} } })).toBe(0);
   });
 
