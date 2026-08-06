@@ -1762,6 +1762,16 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
+        // ── Gates run BEFORE any domain body (ADR-0076 D11 step ③) ──
+        // Scope resolution plus the two gates below are the dispatcher's half of
+        // the D11 contract: a body extracted to `./domains/` receives an
+        // already-scoped, already-gated request. Domains add their OWN
+        // authorization on top (`/ai`'s declared per-route `auth`, `/keys`'
+        // identity gate), but NOTHING downstream re-runs these two — so the
+        // ordering is not overhead to optimize away: moving the domain-registry
+        // resolve (further down) above these lines would un-gate every migrated
+        // domain at once and hand handlers a context whose per-request kernel was
+        // never resolved (#5155). Anchored in scripts/adr-anchors.json.
         await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──
