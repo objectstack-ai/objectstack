@@ -56,6 +56,9 @@ import {
   GetFieldLabelsResponse,
   RegisterRequest,
   WellKnownCapabilities,
+  // [#5672] A VALUE, not a type: the capability vocabulary's key list, so the
+  // getter below enumerates the spec's keys instead of the server's.
+  WELL_KNOWN_CAPABILITY_KEYS,
   ApiRoutes,
   ImportRequest,
   ImportResponse,
@@ -456,22 +459,61 @@ export class ObjectStackClient {
 
   /**
    * Well-known capability flags discovered from the server.
-   * Returns undefined if the client has not yet connected or the server
-   * did not include capabilities in its discovery response.
+   *
+   * Returns `undefined` only when the client has not connected (or the server
+   * returned no `capabilities` block at all). Otherwise **every** flag in the
+   * vocabulary is present and boolean — see below.
    *
    * The server may return capabilities in hierarchical format
    * `{ key: { enabled: boolean } }` or flat boolean format `{ key: boolean }`.
    * This getter normalizes both to flat `WellKnownCapabilities`.
+   *
+   * ## [#5672] The type used to lie; now it does not
+   *
+   * This getter copied whatever keys the server happened to send and then
+   * ASSERTED the result was a `WellKnownCapabilities`
+   * (`result as unknown as WellKnownCapabilities`). The two discovery
+   * producers filled disjoint key sets, so against a dispatcher-served host
+   * `client.capabilities.transactionalBatch` was statically `boolean` and
+   * actually `undefined` — as were `comments`, `cron`, `export` and
+   * `chunkedUpload`. Every consumer that trusted the type got `undefined`
+   * where it had been promised a boolean.
+   *
+   * The fix is not a wider return type: it is to stop copying the server's key
+   * set. This iterates {@link WELL_KNOWN_CAPABILITY_KEYS} — the vocabulary
+   * derived from `WellKnownCapabilitiesSchema` itself — so the returned object
+   * has exactly the declared keys, all boolean, BY CONSTRUCTION. The assertion
+   * is gone because there is nothing left to assert. Add a key to the spec and
+   * this getter reports it with no edit here.
+   *
+   * Two deliberate reading rules:
+   *
+   * * **A key the server omits reads `false`**, matching the wire contract's
+   *   own rule (ruling A: an undelivered capability is `enabled: false`). Since
+   *   protocol 18 every conforming producer sends every key, so this only
+   *   applies to a server that predates the vocabulary — and for a capability
+   *   flag, "assume absent" is the fail-closed direction: a consumer skips the
+   *   feature instead of calling an endpoint that may not exist.
+   * * **Only a real `true` counts.** A non-boolean (`"yes"`, `1`) is off-spec
+   *   on a machine-readable surface, and coercing it would fossilise a second
+   *   dialect in the consumer — exactly the tolerance Prime Directive #12
+   *   forbids. It reads `false` and the producer's conformance gate is the
+   *   place that says so out loud.
    */
   get capabilities(): WellKnownCapabilities | undefined {
     const raw = this.discoveryInfo?.capabilities;
     if (!raw) return undefined;
-    // Normalize: hierarchical { enabled: boolean } → flat boolean
-    const result: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(raw)) {
-      result[key] = typeof value === 'object' && value !== null ? !!(value as any).enabled : !!value;
+    const source = raw as Record<string, unknown>;
+    // Seeded empty and filled from the vocabulary's own key list, which is why
+    // the result really is a complete `WellKnownCapabilities` when the loop ends.
+    const flags = {} as WellKnownCapabilities;
+    for (const key of WELL_KNOWN_CAPABILITY_KEYS) {
+      const value = source[key];
+      flags[key] = typeof value === 'object' && value !== null
+        ? (value as { enabled?: unknown }).enabled === true
+        : value === true;
     }
-    return result as unknown as WellKnownCapabilities;
+    return flags;
   }
 
   /**

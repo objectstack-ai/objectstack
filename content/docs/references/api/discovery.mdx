@@ -28,8 +28,8 @@ not been verified (may 501 at runtime).
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutesSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
-import type { ApiRoutes, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, CapabilityDescriptorSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, CapabilityDescriptor, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiRoutesSchema.parse(data);
@@ -62,6 +62,19 @@ const result = ApiRoutesSchema.parse(data);
 
 ---
 
+## CapabilityDescriptor
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | ✅ | Whether this capability is available |
+| **features** | `Record<string, boolean>` | optional | Sub-feature flags within this capability |
+| **description** | `string` | optional | Human-readable capability description |
+
+
+---
+
 ## Discovery
 
 ### Properties
@@ -74,7 +87,7 @@ const result = ApiRoutesSchema.parse(data);
 | **routes** | `{ data: string; metadata: string; discovery?: string; ui?: string; … }` | ✅ |  |
 | **locale** | `{ default: string; supported: string[]; timezone: string }` | ✅ |  |
 | **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | ✅ | Per-service availability map keyed by CoreServiceName |
-| **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
+| **capabilities** | `{ comments: object; automation: object; cron: object; search: object; … }` | ✅ | Hierarchical capability descriptors — the full WellKnownCapabilities vocabulary, every key present |
 | **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **scoping** | `{ enabled: boolean; resolution: Enum<'required' \| 'optional' \| 'auto'>; scoped: boolean; environmentId?: string }` | optional | Environment-scoping posture, added by the REST discovery endpoint |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
@@ -189,6 +202,12 @@ Well-known capability flags for frontend intelligent adaptation
 | **export** | `boolean` | ✅ | Whether the backend supports async export |
 | **chunkedUpload** | `boolean` | ✅ | Whether the backend supports chunked (multipart) uploads |
 | **transactionalBatch** | `boolean` | ✅ | Whether the backend exposes the atomic cross-object batch endpoint (POST `{basePath}`/batch, #1604/ADR-0034): all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction. |
+| **websockets** | `boolean` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12, #2462). |
+| **files** | `boolean` | ✅ | Whether a file-storage surface (upload/download/attachments) is served |
+| **analytics** | `boolean` | ✅ | Whether the backend serves the analytics / BI query surface |
+| **ai** | `boolean` | ✅ | Whether the backend serves the AI surface (NLQ, chat, agents, suggest) |
+| **notifications** | `boolean` | ✅ | Whether the backend serves the notification surface (inbox, delivery) |
+| **i18n** | `boolean` | ✅ | Whether the backend serves the i18n surface (translations, locale negotiation) |
 
 
 ---
