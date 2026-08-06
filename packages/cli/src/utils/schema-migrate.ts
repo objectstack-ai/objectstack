@@ -14,7 +14,6 @@
  */
 import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
-import { isInPlaceSchemaWork } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
 
@@ -269,6 +268,42 @@ export async function bootSchemaStack(
 
 // ── Rendering ───────────────────────────────────────────────────────
 
+/**
+ * Load the driver's additive/in-place classifier at the moment it is used,
+ * rather than when this module is loaded (#5726).
+ *
+ * `isInPlaceSchemaWork` is the ONLY thing this module needs from
+ * `@objectstack/driver-sql` at runtime — everything else it takes from that
+ * package is `import type`, which erases. A *static* value import for it was
+ * not a local cost, because this file is not loaded only when someone migrates:
+ * oclif's `findCommand` `import()`s every command module on **every** CLI
+ * invocation, and nine commands reach this file (`meta:resync`, `migrate`, and
+ * seven `migrate:*`). So an unbuilt `packages/drivers/driver-sql/dist` did not
+ * merely break those nine — running *any* command, `os dev` included, printed
+ * one `MODULE_NOT_FOUND` block per command in front of the output you asked for
+ * (and `os dev` forks a child, so you saw each one twice), while the nine
+ * dropped out of the command table entirely: `os migrate plan` answered
+ * `Command migrate:plan not found.` None of that noise named the real cause
+ * (`pnpm build`) and the one actionable line it ended on pointed elsewhere.
+ *
+ * Deliberately a lazy import of the driver's own predicate rather than a copy
+ * of it here. The additive/in-place split is a fact about
+ * `PendingSchemaWorkKind`, declared next to that union in the driver; a second
+ * copy in the CLI would be free to disagree the day a kind is added — and the
+ * way it would disagree is by listing a row rewrite under a heading that
+ * promises the work is never data-losing (#3954). One definition, loaded later.
+ *
+ * By the time either renderer runs, the caller is holding a live SQL driver
+ * (the entries it renders came from `previewDeferredSchemaWork()`), so the
+ * module is already in the loader cache and this costs nothing. It is
+ * deliberately not wrapped in a `try`: if it ever did fail, rendering must fail
+ * loudly rather than fall back to a guess about which work rewrites data.
+ */
+async function loadIsInPlaceSchemaWork(): Promise<(kind: PendingSchemaWork['kind']) => boolean> {
+  const { isInPlaceSchemaWork } = await import('@objectstack/driver-sql');
+  return isInPlaceSchemaWork;
+}
+
 const CATEGORY_ORDER: DriftCategory[] = ['safe', 'needs_confirm', 'destructive'];
 
 const CATEGORY_META: Record<DriftCategory, { label: string; color: (s: string) => string; icon: string }> = {
@@ -328,9 +363,10 @@ export function summarize(drift: ManagedDriftEntry[]): string {
  * get their own heading, and their row counts, because "how long will this hold
  * the table" is the question they raise and the additive kinds do not.
  */
-export function renderPendingSchemaWork(pending: PendingSchemaWork[]): void {
+export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Promise<void> {
   if (pending.length === 0) return;
 
+  const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
   const additive = pending.filter((p) => !isInPlaceSchemaWork(p.kind));
   const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
 
@@ -367,7 +403,7 @@ function formatRows(rows: number | undefined): string {
   return rows === undefined ? '?' : rows.toLocaleString('en-US');
 }
 
-export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string {
+export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): Promise<string> {
   const creates = pending.filter((p) => p.kind === 'create_table').length;
   const columns = pending
     .filter((p) => p.kind === 'add_columns')
@@ -376,6 +412,7 @@ export function summarizePendingSchemaWork(pending: PendingSchemaWork[]): string
 
   // Only mentioned when there is some, so the common in-sync summary is
   // unchanged — but never omitted when there is, which is the #3954 point.
+  const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
   const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);

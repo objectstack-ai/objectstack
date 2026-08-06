@@ -46,13 +46,13 @@ const IN_PLACE: PendingSchemaWork[] = [
 ];
 
 describe('renderPendingSchemaWork (#3954)', () => {
-  it('renders nothing at all when there is nothing pending', () => {
-    renderPendingSchemaWork([]);
+  it('renders nothing at all when there is nothing pending', async () => {
+    await renderPendingSchemaWork([]);
     expect(out()).toBe('');
   });
 
-  it('keeps the additive section exactly as it was when only additive work is pending', () => {
-    renderPendingSchemaWork(ADDITIVE);
+  it('keeps the additive section exactly as it was when only additive work is pending', async () => {
+    await renderPendingSchemaWork(ADDITIVE);
     expect(out()).toContain('New (additive — created when you apply)');
     expect(out()).toContain('widgets');
     expect(out()).toContain('[create_table, 2 column(s)]');
@@ -61,16 +61,16 @@ describe('renderPendingSchemaWork (#3954)', () => {
     expect(out()).not.toContain('In place');
   });
 
-  it('puts the datetime convergence under its OWN heading, not the additive one', () => {
-    renderPendingSchemaWork(IN_PLACE);
+  it('puts the datetime convergence under its OWN heading, not the additive one', async () => {
+    await renderPendingSchemaWork(IN_PLACE);
     expect(out()).toContain('In place (existing rows converged when you apply)');
     // The additive heading claims the work is never data-losing; a row rewrite
     // must never be listed beneath it.
     expect(out()).not.toContain('New (additive');
   });
 
-  it('names the columns and the size of each in-place step', () => {
-    renderPendingSchemaWork(IN_PLACE);
+  it('names the columns and the size of each in-place step', async () => {
+    await renderPendingSchemaWork(IN_PLACE);
     expect(out()).toContain('normalize_datetime_storage: at');
     expect(out()).toContain('1,234,567 row update(s)');
     expect(out()).toContain('widen_datetime_columns: at, created_at');
@@ -83,30 +83,30 @@ describe('renderPendingSchemaWork (#3954)', () => {
     expect(out()).toContain('9 row table rebuild');
   });
 
-  it('shows both sections when both kinds are pending', () => {
-    renderPendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
+  it('shows both sections when both kinds are pending', async () => {
+    await renderPendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
     expect(out()).toContain('New (additive — created when you apply)');
     expect(out()).toContain('In place (existing rows converged when you apply)');
   });
 
-  it('reads an unmeasured count as unknown rather than zero', () => {
-    renderPendingSchemaWork([{ table: 'evt', kind: 'normalize_datetime_storage', columns: ['at'] }]);
+  it('reads an unmeasured count as unknown rather than zero', async () => {
+    await renderPendingSchemaWork([{ table: 'evt', kind: 'normalize_datetime_storage', columns: ['at'] }]);
     expect(out()).toContain('? row update(s)');
     expect(out()).not.toContain('0 row update(s)');
   });
 });
 
 describe('summarizePendingSchemaWork (#3954)', () => {
-  it('is unchanged for purely additive work', () => {
-    expect(summarizePendingSchemaWork(ADDITIVE)).toBe('1 table(s) to create, 1 column(s) to add');
+  it('is unchanged for purely additive work', async () => {
+    expect(await summarizePendingSchemaWork(ADDITIVE)).toBe('1 table(s) to create, 1 column(s) to add');
   });
 
-  it('is unchanged when nothing is pending', () => {
-    expect(summarizePendingSchemaWork([])).toBe('0 table(s) to create, 0 column(s) to add');
+  it('is unchanged when nothing is pending', async () => {
+    expect(await summarizePendingSchemaWork([])).toBe('0 table(s) to create, 0 column(s) to add');
   });
 
-  it('never omits in-place work — this is the line read before confirming', () => {
-    const summary = summarizePendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
+  it('never omits in-place work — this is the line read before confirming', async () => {
+    const summary = await summarizePendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
     expect(summary).toContain('1 table(s) to create');
     expect(summary).toContain('1 column(s) to add');
     expect(summary).toContain('5 temporal column(s) to converge in place');
