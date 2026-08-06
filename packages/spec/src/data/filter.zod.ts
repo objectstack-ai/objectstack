@@ -136,20 +136,103 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
 
 /**
  * String pattern matching operators.
- * Note: Case sensitivity should be handled at backend level.
+ *
+ * ## Case sensitivity IS part of the contract (#5701, maintainer ruling 2026-08-06)
+ *
+ * **`$contains` / `$notContains` / `$startsWith` / `$endsWith` compare
+ * CASE-SENSITIVELY. `$icontains` is the case-INSENSITIVE twin, and its folding
+ * domain is ASCII (`A-Z` against `a-z`) and nothing else.**
+ *
+ * ### This SUPERSEDES a recorded decision (Prime Directive #13)
+ *
+ * Until 2026-08-06 this docblock read, in full:
+ *
+ *   > Note: Case sensitivity should be handled at backend level.
+ *
+ * That sentence was not an omission — it was a written-down NON-guarantee, and
+ * the #4706 ruling (Q2 = A, transcribed on #5701) withdraws it. It is quoted
+ * here rather than deleted because reversing a recorded decision is itself a
+ * decision, and the next author needs to find the reversal from the sentence
+ * they remember.
+ *
+ * What that non-guarantee actually bought, measured surface by surface before
+ * the ruling:
+ *
+ * | surface | `$contains` case behaviour | mechanism |
+ * |---|---|---|
+ * | `formula` `matchesFilterCondition` | SENSITIVE | `actual.includes(v)` |
+ * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` |
+ * | `driver-memory` — reference matcher (`memory-matcher`) | SENSITIVE | `value.includes(target)` |
+ * | `driver-mongodb` | INSENSITIVE, full Unicode | hardcoded `$options: 'i'` |
+ * | `driver-sql` family | the DIALECT's | `LIKE '%v%'` — ASCII-insensitive on SQLite (so also turso and sqlite-wasm), sensitive on Postgres, collation-dependent on MySQL |
+ *
+ * One declared operator, three different answers, selected by which backend ran
+ * the query — and `driver-memory` alone accounts for two of them, so the answer
+ * could change without changing driver. An author could not tell from the
+ * operator name which one they were getting, and neither could a generated
+ * filter. That is what a written-down "handled at backend level" costs once
+ * there is more than one backend.
+ *
+ * ### Why the folding domain is ASCII and not Unicode
+ *
+ * A Unicode fold cannot be delivered by every backend, so promising one would
+ * repeat the defect this retires rather than fix it. Measured on this repo's
+ * `better-sqlite3` (SQLite 3.53.4, no ICU): `LOWER(col) LIKE LOWER(?)` folds
+ * ASCII only, so `café` does not match `CAFÉ` and `москва` does not match
+ * `МОСКВА`, while the JS matchers' `toLowerCase()` folds both. Pinning the
+ * contract at ASCII is the one domain all five backends can actually deliver.
+ *
+ * **The boundary, stated plainly for authors: `café` does NOT match `CAFÉ`.**
+ * Outside `A-Z`/`a-z`, `$icontains` compares literally, exactly like
+ * `$contains`. An application whose users search non-ASCII text should not read
+ * `$icontains` as "accent- and case-blind search" — it is not one.
+ *
+ * ### Implementation status — declared here, NOT yet answered by any backend
+ *
+ * This PR is the contract half of the #4706 ruling and deliberately ships no
+ * runtime behaviour (#5701). No driver evaluates `$icontains` today; all five
+ * refuse it, loudly, as an operator they do not implement — which is the
+ * fail-closed direction and stays true until #5702 lands the lowerings. The
+ * same issue carries the `$contains`-family alignment the ruling above
+ * requires (SQLite/turso `LIKE` made case-exact, mongo's hardcoded `'i'`
+ * removed). Until then the sentence above is the DECLARATION and #5702 is the
+ * gap; `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
+ * measures the gap, and the driver-conformance ledger carries one DEBT row per
+ * backend so the gap is counted rather than assumed.
+ *
+ * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
+ * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
+ * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the backends)
  */
 export const StringOperatorSchema = lazySchema(() => z.object({
-  /** Contains substring - SQL: LIKE %?% | MongoDB: $regex */
+  /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
   $contains: z.string().optional(),
-  
-  /** Does not contain substring - SQL: NOT LIKE %?% | MongoDB: $not: $regex */
+
+  /** Does not contain substring, CASE-SENSITIVELY - SQL: NOT LIKE %?% (case-exact) */
   $notContains: z.string().optional(),
-  
-  /** Starts with prefix - SQL: LIKE ?% | MongoDB: $regex */
+
+  /** Starts with prefix, CASE-SENSITIVELY - SQL: LIKE ?% (case-exact) */
   $startsWith: z.string().optional(),
-  
-  /** Ends with suffix - SQL: LIKE %? | MongoDB: $regex */
+
+  /** Ends with suffix, CASE-SENSITIVELY - SQL: LIKE %? (case-exact) */
   $endsWith: z.string().optional(),
+
+  /**
+   * Contains substring, IGNORING ASCII case (#5701). The replacement for the
+   * retired `$regex` — see {@link RETIRED_FILTER_OPERATORS}.
+   */
+  $icontains: z.string().optional().describe(
+    'Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). '
+    + 'Every other character compares literally, so "café" does NOT match "CAFÉ" '
+    + 'and "москва" does not match "МОСКВА". The domain is ASCII because that is '
+    + 'the one fold all five backends can deliver: SQLite (and therefore turso and '
+    + 'sqlite-wasm) folds ASCII only, so a Unicode promise here would be a '
+    + 'guarantee three of the five could not keep. The comparand is matched '
+    + 'LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not '
+    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701: declared by the '
+    + 'protocol; the driver lowerings land with #5702.]'
+  ),
 }));
 
 // ============================================================================
@@ -194,12 +277,14 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
     z.union([z.number(), z.date(), FieldReferenceSchema])
   ]).optional(),
   
-  // String-specific
+  // String-specific. Case-SENSITIVE, except `$icontains` which folds ASCII case
+  // only — see {@link StringOperatorSchema} for the contract and its boundary.
   $contains: z.string().optional(),
   $notContains: z.string().optional(),
   $startsWith: z.string().optional(),
   $endsWith: z.string().optional(),
-  
+  $icontains: z.string().optional(),
+
   // Special
   $null: z.boolean().optional(),
   $exists: z.boolean().optional(),
@@ -390,6 +475,8 @@ export type Filter<T = any> = {
         $notContains?: T[K] extends string ? string : never;
         $startsWith?: T[K] extends string ? string : never;
         $endsWith?: T[K] extends string ? string : never;
+        /** Case-insensitive containment, ASCII fold only — see {@link StringOperatorSchema}. */
+        $icontains?: T[K] extends string ? string : never;
         $null?: boolean;
         $exists?: boolean;
       }
@@ -951,8 +1038,49 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
 // ============================================================================
 
 /**
- * All supported operator keys.
- * Useful for validation and parsing.
+ * The operator keys every backend is expected to EVALUATE.
+ *
+ * ## This list is a runtime allowlist, not a word list (#5701)
+ *
+ * It reads like documentation and is used like a gate. Two consumers derive
+ * enforcement from it rather than restating it — which is the right design, and
+ * is exactly why an entry here is a claim about implementations, not about
+ * vocabulary:
+ *
+ * - `driver-memory`'s `SUPPORTED_FIELD_OPERATORS` (`filter-refusal.ts`) is
+ *   `new Set([...FILTER_OPERATORS, '$regex', '$options'])` — the set its shape
+ *   gate ACCEPTS. Its matcher's `default:` arm then `break`s, on the documented
+ *   assumption that the gate already refused anything unimplemented.
+ * - `service-analytics`' `objectql-echo-operator-coverage.test.ts` asserts its
+ *   compiler renders a predicate for every member.
+ *
+ * So a name added here before any backend implements it does not merely
+ * document an intention. Measured on this branch by adding `$icontains` to this
+ * array and rebuilding: `SUPPORTED_FIELD_OPERATORS.has('$icontains')` became
+ * `true`, driver-memory's gate stopped refusing it, and
+ * `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned **`true`**
+ * — the predicate silently dropped, every row matched. A dropped predicate does
+ * not narrow a query, it WIDENS it, and on an RLS read scope that is a
+ * permission bypass rather than a degraded feature (#3948).
+ *
+ * ## `$icontains` is DECLARED but deliberately NOT here yet
+ *
+ * {@link StringOperatorSchema}, {@link FieldOperatorsSchema} and {@link Filter}
+ * declare `$icontains` (#5701, the contract half of the #4706 ruling). This
+ * array does not, and the difference is deliberate rather than an oversight:
+ * those three are declaration and TYPE surfaces with no runtime allowlist
+ * reader (verified — `NormalizedFilterSchema` is their only consumer, and
+ * nothing parses a filter through it at runtime), so declaring there is inert.
+ * Adding it HERE would flip driver-memory from a loud refusal to the silent
+ * widening measured above, before a single backend can answer the operator.
+ *
+ * **`$icontains` joins this array in the PR that implements it (#5702), not
+ * before.** `filter-operator-vocabulary.test.ts` pins the difference between
+ * the two surfaces at exactly `{ $icontains }`, so this staging cannot silently
+ * grow a second member, and clearing it is what makes that pin fail.
+ *
+ * Retired operators (`$regex`, `$options`) are not here either, and never were.
+ * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.
  */
 export const FILTER_OPERATORS = [
   // Equality
@@ -980,3 +1108,89 @@ export const ALL_OPERATORS = [...FILTER_OPERATORS, ...LOGICAL_OPERATORS] as cons
 export type FilterOperatorKey = typeof FILTER_OPERATORS[number];
 export type LogicalOperatorKey = typeof LOGICAL_OPERATORS[number];
 export type OperatorKey = typeof ALL_OPERATORS[number];
+
+// ============================================================================
+// Retired Operators — the prescriptions a refusal prints (#5701)
+// ============================================================================
+
+/** The prescription for one retired filter operator. */
+export interface RetiredFilterOperatorGuidance {
+  /**
+   * The operator that replaces it, when one does. Absent when the retirement
+   * has no successor and the fix is to restructure the query.
+   */
+  readonly to?: string;
+  /**
+   * The upgrade prescription, written as an instruction. This string IS the
+   * migration doc for whoever hits it — a refusal is expected to print it
+   * verbatim rather than paraphrase, so that five refusal sites say one thing.
+   */
+  readonly why: string;
+}
+
+/**
+ * Filter operators that were REMOVED from the protocol, and what to write
+ * instead (#5701, the #4706 ruling's contract half).
+ *
+ * ## What this is, and what it deliberately is not
+ *
+ * It is **data**: a lookup table, no behaviour (Prime Directive #2). It does
+ * not reject anything, and this file's schemas are unchanged by its existence —
+ * {@link FilterConditionSchema} still accepts any `$`-key, because narrowing it
+ * to a closed vocabulary is structurally impossible here (a nested relation
+ * constraint `{ profile: { verified: true } }` and an operator object are the
+ * same shape) and would reach every filter consumer at once. The #4706 ruling
+ * took that trade explicitly: the spec declares, the existing refusal sites
+ * enforce.
+ *
+ * Those sites are the five that already refuse unknown operators today —
+ * `driver-sql`'s `default:` arm, `driver-turso`'s remote transport,
+ * `driver-memory`'s `filter-refusal.ts`, `driver-mongodb`'s
+ * `translateFieldOperators`, and `objectql`'s `having` — and the point of one
+ * table is that they stop each writing their own sentence. Wiring them to it is
+ * **#5702**, deliberately not this PR: `$regex` still has one live producer
+ * (`plugin-auth`'s ObjectQL adapter, on the authentication path), so a refusal
+ * landing before #5710 flips that producer would break sign-in. Hard order:
+ * **#5710 flips the producer, then #5702 turns these strings into refusals.**
+ *
+ * ## Why `$regex` was retired rather than implemented (#4706)
+ *
+ * It was never in {@link FILTER_OPERATORS} — it was an undeclared operator that
+ * one producer emitted and four consumers grew arms for, each reading it
+ * differently. `driver-sql` compiled it to a substring `LIKE` with the value
+ * LIKE-escaped, so it was not a regex at all: `a.b` matched only the literal
+ * `a.b`. `driver-memory` ran it as a real `RegExp`, so the same filter matched
+ * `axb` too, and an invalid pattern was caught and answered `false` — zero rows,
+ * in silence. Implementing a real regex on all five was rejected as
+ * structurally impossible: turso's remote transport speaks a wire protocol with
+ * no way to register a SQLite `REGEXP` function.
+ *
+ * The replacement is the case-insensitive containment the one real producer
+ * actually wanted: {@link StringOperatorSchema}'s `$icontains`.
+ */
+export const RETIRED_FILTER_OPERATORS: Readonly<
+  Record<string, RetiredFilterOperatorGuidance>
+> = Object.freeze({
+  $regex: {
+    to: '$icontains',
+    why:
+      '`$regex` was never declared by the Filter Protocol and is retired (#4706). It could not '
+      + 'mean one thing across the backends: driver-sql compiled it to a LIKE-escaped substring '
+      + 'match (so "a.b" matched only the literal "a.b"), driver-memory evaluated it as a real '
+      + 'RegExp (so it also matched "axb", and an invalid pattern silently matched nothing), and '
+      + 'a real regex is not implementable on all five — driver-turso\'s remote transport cannot '
+      + 'register a SQLite REGEXP function over its wire protocol. Write `$icontains` for the '
+      + 'case-insensitive substring search this was almost always used for (ASCII case fold; the '
+      + 'comparand is matched literally, so "." and "%" are ordinary characters), or `$contains` '
+      + 'for a case-sensitive one. A pattern that genuinely needs a regex has no filter-level '
+      + 'replacement — narrow with the declared operators and match in application code.',
+  },
+  $options: {
+    to: '$icontains',
+    why:
+      '`$options` was never a predicate — it was the regex-flags companion to `$regex`, which is '
+      + 'retired (#4706). Its only real use was `$options: "i"` for a case-insensitive match: '
+      + 'write `$icontains` instead, which says that in the operator name and folds ASCII case on '
+      + 'every backend. On its own, with no `$regex` beside it, it never constrained anything.',
+  },
+});

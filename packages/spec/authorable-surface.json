@@ -3815,6 +3815,7 @@
     "data/StateMachineValidation:type",
     "data/StringOperator:$contains",
     "data/StringOperator:$endsWith",
+    "data/StringOperator:$icontains",
     "data/StringOperator:$notContains",
     "data/StringOperator:$startsWith",
     "data/TenancyConfig:enabled",
