@@ -28,39 +28,46 @@ This directory contains integration tests that verify `@objectstack/client` agai
 
 ## Test Structure
 
-Tests are organized by protocol namespace:
+Tests are organized by protocol namespace, one file per namespace, numbered in the order
+a session goes through them. **What exists today is exactly this:**
 
 ```
 01-discovery.test.ts          # Discovery & connection
-02-auth.test.ts                # Authentication flows
-03-metadata.test.ts            # Metadata operations
-04-data-crud.test.ts           # Basic CRUD operations
-05-data-batch.test.ts          # Batch operations
-06-data-query.test.ts          # Advanced queries
-07-permissions.test.ts         # Permission checking
-08-workflow.test.ts            # Workflow operations
-09-realtime.test.ts            # Realtime subscriptions
-10-notifications.test.ts       # Notifications
-11-ai.test.ts                  # AI services
-12-i18n.test.ts                # Internationalization
-13-analytics.test.ts           # Analytics queries
-14-packages.test.ts            # Package management
-15-views.test.ts               # View management
-16-storage.test.ts             # File storage
-17-automation.test.ts          # Automation triggers
 ```
 
-## Test Coverage Goals
+That is the whole list. Read it as the list — do not infer a suite from the numbering.
 
-- Core Services (discovery, meta, data, auth): **100%**
-- Optional Services: **90%**
-- Error Scenarios: **80%**
-- Edge Cases: **70%**
+### Not yet written
+
+The namespaces below have no integration coverage yet. This is a topic-level backlog, not
+a specification: write each file against the SDK's **current** return shapes
+(`packages/client/src/index.ts`) and the server routes the ledgers record, never against a
+remembered shape.
+
+- Authentication — login / register / logout / current session (route names come from
+  `packages/plugins/plugin-auth/src/auth-route-ledger.ts`; the SDK wraps the session
+  payload in `data`, it is not flattened onto the response root)
+- Metadata — type listing, item read/write, ETag-conditional reads
+- Data CRUD — create / read / update / delete, filtering, pagination
+- Data batch — createMany / updateMany / deleteMany and mixed batches
+- Data query — ObjectQL AST queries, lookup expansion, aggregation
+- Notifications, AI, i18n, analytics, packages, storage, automation, approvals
+
+Namespaces that no longer exist are deliberately absent: `permissions`, `workflow`,
+`realtime` and `views` were removed in #3612 because no server surface ever mounted their
+routes. Do not add tests for them.
 
 ## Related Documentation
 
-- [Integration Test Specification](../../CLIENT_SERVER_INTEGRATION_TESTS.md)
 - [Client Spec Compliance](../../CLIENT_SPEC_COMPLIANCE.md)
+- [Auth route ledger](../../../plugins/plugin-auth/src/auth-route-ledger.ts) — the audited
+  auth route table, guarded by a conformance test
+
+> A hand-written `CLIENT_SERVER_INTEGRATION_TESTS.md` "Test Specification" used to sit
+> beside this file. It described 13–17 test files of which only `01-discovery.test.ts` was
+> ever written, and its assertions had drifted from the SDK's actual return shapes, so it
+> read as a finished suite that did not exist. It was retired in #5824; the full text is in
+> git history (`git log --diff-filter=D -- packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md`).
 
 ## CI/CD
 
@@ -69,4 +76,5 @@ Integration tests can be run in CI, but require:
 - Test database with sample data
 - Proper environment configuration
 
-See `CLIENT_SERVER_INTEGRATION_TESTS.md` for example CI configuration structure.
+No CI workflow runs them today. Wiring one up means standing that server up in the job
+first; there is no ready-made workflow file to copy.
