@@ -4,20 +4,28 @@
  * [cloud ADR-0024 D5.2] Break-glass — a write may never leave this environment
  * with ZERO administrators able to sign in.
  *
- * `sys_user.banned = true` is how EVERY deprovision lands: the better-auth
- * admin plugin's ban endpoint writes it, and `@better-auth/scim` maps a SCIM
- * `active: false` onto that same admin ban (which is why SCIM forces the admin
- * plugin on — ADR-0071). SCIM writes are driven by an EXTERNAL system: nobody
- * reads the payload before it commits, so one mis-scoped IdP group or one
- * over-broad deprovision run is enough for an organization to ban its own last
+ * TWO writes can take the last administrator away, and this guard holds on
+ * both — they are one invariant, not two policies:
+ *
+ *  1. **`sys_user.banned = true`** (#5892) — how every *disable* lands: the
+ *     better-auth admin plugin's ban endpoint writes it, and
+ *     `@better-auth/scim` maps a SCIM `active: false` onto that same admin ban
+ *     (which is why SCIM forces the admin plugin on — ADR-0071).
+ *  2. **deleting the `sys_user` row** (#5941) — how every *remove* lands: SCIM
+ *     `DELETE /Users/{id}`, better-auth's `/admin/remove-user` and
+ *     `/delete-user`, an import, a script.
+ *
+ * In the case that matters both are driven by an EXTERNAL system: nobody reads
+ * the payload before it commits, so one mis-scoped IdP group or one over-broad
+ * deprovision run is enough for an organization to remove its own last
  * administrator and lock itself out of its environment permanently. There is no
  * recovery path from inside the product once that happens.
  *
- * So the invariant is enforced at the WRITE, on the one chokepoint every path
- * goes through — `beforeUpdate` on `sys_user` — rather than at any individual
- * endpoint. HTTP-level guards protect only the endpoint they are attached to;
- * this one holds for the admin ban endpoint, the SCIM adapter write, an import,
- * a script, and anything added later.
+ * So the invariant is enforced at the WRITE, on the two chokepoints every path
+ * goes through — `beforeUpdate` and `beforeDelete` on `sys_user` — rather than
+ * at any individual endpoint. HTTP-level guards protect only the endpoints they
+ * are attached to; these hold for the admin ban / remove endpoints, the SCIM
+ * adapter writes, an import, a script, and anything added later.
  *
  * ## What counts as an administrator
  *
@@ -40,16 +48,52 @@
  * service account is not loginable, so it can never be the escape hatch (the
  * same exclusion the first-admin bootstrap makes).
  *
+ * The population both halves protect is the administrators who can sign in
+ * TODAY — the ones whose row is not already banned. A ban that takes the last
+ * of them is refused; so is a delete. Conversely a write aimed at an
+ * administrator who is ALREADY banned takes nothing away (that account cannot
+ * sign in either way), so it is not this guard's business.
+ *
  * ## Fail-closed
  *
- * Every lookup this guard makes is part of a SAFETY proof: a ban is permitted
- * only when at least one other unbanned administrator is provably left. A
- * lookup that fails, or a population too large to enumerate, proves nothing —
- * so the ban is REFUSED, loudly, with the reason. That is the opposite of the
- * fail-OPEN posture the neighbouring last-local-credential guard takes in
- * `auth-manager.ts` (an HTTP-level convenience check whose failure mode is a
- * blocked legitimate op); here the failure mode is a permanent lockout, so the
- * two directions are chosen deliberately and are not a drift.
+ * Every lookup this guard makes is part of a SAFETY proof: the write is
+ * permitted only when at least one other unbanned administrator is provably
+ * left. A lookup that fails, or a population too large to enumerate, proves
+ * nothing — so the write is REFUSED, loudly, with the reason. That is the
+ * opposite of the fail-OPEN posture the neighbouring last-local-credential
+ * guard takes in `auth-manager.ts`; the two directions are chosen deliberately
+ * and are not a drift.
+ *
+ * ## Relationship to the `auth-manager.ts` break-glass HTTP guard
+ *
+ * `auth-manager.ts` already guards `/delete-user`, `/admin/remove-user` and
+ * `/admin/ban-user` — but it answers a DIFFERENT question: "is the target the
+ * last holder of a local `credential` account", i.e. the password escape hatch
+ * that survives an IdP outage. When the target holds no local credential it
+ * skips entirely, which is exactly the shape #5941 reported: under enforced SSO
+ * the last administrator is IdP-managed (SCIM JIT-provisioned, no password), so
+ * that guard never fires and the row is removed. It is also fail-OPEN by
+ * design, because its failure mode is a blocked legitimate operation rather
+ * than a lockout. Both properties are right FOR IT, so it is left untouched and
+ * keeps enforcing its own invariant; this hook is the fail-closed one that
+ * counts *administrators*, and it covers every write path rather than three
+ * endpoints.
+ *
+ * ## What a `beforeDelete` can see (measured on this engine, #5929 included)
+ *
+ *  - **by-id** (`delete(obj, { where: { id } })` — what better-auth's adapter
+ *    emits, and what every cascade recursion re-enters with): `input.id`
+ *    carries the scalar id.
+ *  - **predicate / `multi`**: `input.id` is unbound and the row-scoping
+ *    predicate rides on `input.options.where` — the same shape #5273 pinned
+ *    for update.
+ *  - `ctx.previous` (the engine's #5272 pre-image, and objectql's
+ *    `sys_fetch_previous_delete` builtin — `object: '*'`, priority 5) is bound
+ *    for the by-id shape ONLY; a batch dispatch names no single row, so it
+ *    stays undefined there. The guard therefore never consumes it: it needs the
+ *    target IDS, not a pre-image, and a `previous`-based implementation would
+ *    be correct by-id and blind on exactly the bulk path that can sweep every
+ *    administrator at once.
  *
  * ## Scope: the ENVIRONMENT, not each organization
  *
@@ -59,18 +103,26 @@
  * policy with its own product decisions (what happens to an org whose only
  * owner leaves the company); it is deliberately not invented here.
  *
+ * Scope in the other direction: this guard watches the two writes that take the
+ * administrator away WITH THEIR ROW. Revoking the standing that MAKES someone
+ * an administrator — deleting their `sys_member` row, downgrading its role,
+ * removing the `admin_full_access` grant — leaves the user in place and writes
+ * a different table, so neither hook here sees it. Same end state, third write
+ * shape; filed as #5978 rather than half-guarded from this file.
+ *
  * ## Relationship to the ADR-0092 identity write guard
  *
  * `identity-write-guard.ts` answers "may this CALLER write identity tables
  * through the generic data path" and bypasses system-context writes by design —
  * better-auth's own adapter is exactly what it must let through. This guard
- * answers a different question, "may this VALUE be written at all", and
- * therefore applies to EVERY context, `isSystem` included: the ban path that
- * actually causes lockouts is the system one. The two are registered together
- * (`auth-plugin.ts`, `kernel:ready`) and ordered so the ADR-0092 strip runs
- * first (priority 10 → 20): a user-context caller keeps getting the ADR-0092
- * message ("`banned` is not editable via the data API"), and only the writes
- * that legitimately carry `banned` reach this guard.
+ * answers a different question, "may this WRITE happen at all", and therefore
+ * applies to EVERY context, `isSystem` included: the deprovision path that
+ * actually locks organizations out is the system one. The two are registered
+ * together (`auth-plugin.ts`, `kernel:ready`) and ordered so the ADR-0092
+ * checks run first (priority 10 → 20): a user-context caller keeps getting the
+ * ADR-0092 answer (`banned` is not editable through the data API; an identity
+ * row is not deletable through it at all), and only the writes that legitimately
+ * reach the identity tables reach this guard.
  */
 
 import type { BaseEngineOptions, EngineQueryOptions } from '@objectstack/spec/data';
@@ -99,7 +151,7 @@ type LoggerLike = {
  * reads. Structural rather than `IObjectQLEngine` so the guard can be driven
  * directly in tests without standing up an engine.
  */
-export interface LastAdminBanGuardEngine {
+export interface LastAdminGuardEngine {
   registerHook(
     event: string,
     handler: (ctx: unknown) => Promise<void>,
@@ -112,13 +164,13 @@ export interface LastAdminBanGuardEngine {
   ): Promise<Array<Record<string, unknown>>>;
 }
 
-export interface LastAdminBanGuardOptions {
+export interface LastAdminGuardOptions {
   packageId: string;
   logger?: LoggerLike;
   /**
    * Largest row count any one enumeration read may return before the guard
    * gives up and refuses (fail-closed). The administrator population of an
-   * environment is tiny; this exists so a pathological predicate ban — or a
+   * environment is tiny; this exists so a pathological predicate write — or a
    * `sys_member` table with tens of thousands of non-plain-member rows —
    * cannot be silently under-counted into a lockout. Default 1000.
    */
@@ -129,6 +181,19 @@ const DEFAULT_MAX_SCAN = 1000;
 
 /** Reads run as system: this is a safety proof, never RLS-scoped to a caller. */
 const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
+
+/**
+ * The two writes this guard judges. Carried into every message so a refusal
+ * describes the operation the caller actually attempted — an operator reading
+ * "refusing this ban" after a SCIM `DELETE /Users/{id}` would go looking in the
+ * wrong place.
+ */
+type GuardedOp = 'ban' | 'delete';
+
+const OP_WORDS: Record<GuardedOp, { noun: string; verb: string; gerund: string; Verb: string }> = {
+  ban: { noun: 'ban', verb: 'ban', gerund: 'banning', Verb: 'Ban' },
+  delete: { noun: 'delete', verb: 'delete', gerund: 'deleting', Verb: 'Delete' },
+};
 
 /**
  * Boolean columns arrive spelled by whichever driver / transport wrote them:
@@ -170,49 +235,54 @@ function toId(value: unknown): string | undefined {
 }
 
 /**
- * Register the last-administrator ban guard on an ObjectQL engine.
+ * Register the last-administrator guard on an ObjectQL engine: the ban half
+ * (`beforeUpdate`) and the delete half (`beforeDelete`) of ONE invariant, off
+ * one administrator enumeration.
  *
  * Idempotent per package the same way the identity write guard is: a caller
  * re-binding after a hot reload runs `engine.unregisterHooksByPackage(packageId)`
  * first.
  */
-export function registerLastAdminBanGuard(
-  engine: LastAdminBanGuardEngine,
-  opts: LastAdminBanGuardOptions,
+export function registerLastAdminGuard(
+  engine: LastAdminGuardEngine,
+  opts: LastAdminGuardOptions,
 ): void {
   const { packageId, logger } = opts;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
 
   /** Enumerate `object` under a hard ceiling; overflow proves nothing → refuse. */
   const scan = async (
+    op: GuardedOp,
     object: string,
     query: EngineQueryOptions,
   ): Promise<Array<Record<string, unknown>>> => {
     const rows = await engine.find(object, { ...query, limit: maxScan + 1 }, SYSTEM_READ);
     const list = Array.isArray(rows) ? rows : [];
     if (list.length > maxScan) {
+      const words = OP_WORDS[op];
       throw refuse(
-        `Refusing this ban: '${object}' returned more than ${maxScan} rows, so the remaining ` +
-          `administrators could not be verified (${BREAK_GLASS_CITATION}). Ban a narrower set of ` +
-          'users, or raise the guard\'s maxScan if this environment really is that large.',
+        `Refusing this ${words.noun}: '${object}' returned more than ${maxScan} rows, so the ` +
+          `remaining administrators could not be verified (${BREAK_GLASS_CITATION}). ` +
+          `${words.Verb} a narrower set of users, or raise the guard's maxScan if this ` +
+          'environment really is that large.',
       );
     }
     return list;
   };
 
   /** Every user this environment currently recognises as an administrator. */
-  const resolveAdminUserIds = async (): Promise<Set<string>> => {
+  const resolveAdminUserIds = async (op: GuardedOp): Promise<Set<string>> => {
     const ids = new Set<string>();
     const now = Date.now();
 
     // 1) Platform admins — unscoped, in-window `admin_full_access` grants.
-    const sets = await scan(SystemObjectName.PERMISSION_SET, {
+    const sets = await scan(op, SystemObjectName.PERMISSION_SET, {
       where: { name: ADMIN_FULL_ACCESS },
       fields: ['id', 'name'],
     });
     const adminSetIds = sets.map((r) => toId(r.id)).filter((v): v is string => Boolean(v));
     if (adminSetIds.length > 0) {
-      const links = await scan(USER_PERMISSION_SET, {
+      const links = await scan(op, USER_PERMISSION_SET, {
         where: { permission_set_id: { $in: adminSetIds } },
       });
       for (const link of links) {
@@ -233,7 +303,7 @@ export function registerLastAdminBanGuard(
     //    only owner for an ordinary member. Narrowed to non-plain-member rows
     //    so a large membership table is not read wholesale; the grade test
     //    itself still runs in memory, over every row that narrowing kept.
-    const members = await scan(SystemObjectName.MEMBER, {
+    const members = await scan(op, SystemObjectName.MEMBER, {
       where: { role: { $ne: MEMBERSHIP_ROLE_MEMBER } },
     });
     for (const m of members) {
@@ -249,8 +319,11 @@ export function registerLastAdminBanGuard(
   };
 
   /** Of `adminIds`, those whose `sys_user` row is present and not banned. */
-  const resolveUnbannedAdmins = async (adminIds: Set<string>): Promise<Set<string>> => {
-    const rows = await scan(SystemObjectName.USER, {
+  const resolveUnbannedAdmins = async (
+    op: GuardedOp,
+    adminIds: Set<string>,
+  ): Promise<Set<string>> => {
+    const rows = await scan(op, SystemObjectName.USER, {
       where: { id: { $in: [...adminIds] } },
       fields: ['id', 'banned'],
     });
@@ -264,18 +337,23 @@ export function registerLastAdminBanGuard(
     return out;
   };
 
-  /** Which `sys_user` rows this one update writes to. */
+  /**
+   * Which `sys_user` rows this one write addresses — the same answer for both
+   * halves. A scalar id when the engine dispatched by id (an update payload
+   * also carries it in `data.id`; a delete's `input` has no `data` at all),
+   * and otherwise the row-scoping predicate on `input.options.where`: the
+   * shape #5273 pinned for update and the one measured on `beforeDelete`.
+   */
   const resolveTargetIds = async (
+    op: GuardedOp,
     id: unknown,
-    data: Record<string, unknown>,
     options: { where?: unknown } | undefined,
+    data?: Record<string, unknown>,
   ): Promise<Set<string>> => {
-    const single = toId(id) ?? toId(data.id);
+    const single = toId(id) ?? toId(data?.id);
     if (single) return new Set([single]);
-    // Predicate / multi update: `input.id` is unbound and the row-scoping
-    // predicate rides on `input.options.where` (#5273 pinned that shape).
     const where = options?.where as EngineQueryOptions['where'];
-    const rows = await scan(SystemObjectName.USER, {
+    const rows = await scan(op, SystemObjectName.USER, {
       ...(where !== undefined ? { where } : {}),
       fields: ['id'],
     });
@@ -285,6 +363,71 @@ export function registerLastAdminBanGuard(
       if (rid) out.add(rid);
     }
     return out;
+  };
+
+  /**
+   * The verdict, shared by both halves: refuse when this write takes away every
+   * administrator who can still sign in. Fail-closed — any lookup that throws
+   * becomes a refusal naming the reason.
+   */
+  const enforce = async (
+    op: GuardedOp,
+    input:
+      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } }
+      | undefined,
+  ): Promise<void> => {
+    const words = OP_WORDS[op];
+    try {
+      const admins = await resolveAdminUserIds(op);
+      // Nothing recognised as an administrator: there is no break-glass account
+      // to protect and refusing every write would be a guard inventing a policy
+      // out of an empty measurement. (A deployment reaches this only before the
+      // first admin is bootstrapped.)
+      if (admins.size === 0) return;
+
+      const unbanned = await resolveUnbannedAdmins(op, admins);
+      const targets = await resolveTargetIds(op, input?.id, input?.options, input?.data);
+
+      const losing = [...unbanned].filter((id) => targets.has(id));
+      // No administrator that could still sign in is affected → not our case.
+      // This is also what makes re-banning — or removing — an already-banned
+      // admin a no-op rather than a refusal: nothing is being taken away.
+      if (losing.length === 0) return;
+
+      const remaining = [...unbanned].filter((id) => !targets.has(id));
+      if (remaining.length > 0) return;
+
+      logger?.warn(
+        `[LastAdminGuard] refused a ${words.noun} that would have left this environment with no ` +
+          `unbanned administrator (target: ${losing.join(', ')})`,
+      );
+      const many = losing.length > 1;
+      throw refuse(
+        `Refusing to ${words.verb} ${losing.map((id) => `'${id}'`).join(', ')}: ` +
+          `${many ? 'those are the last administrators' : 'that is the last administrator'} this ` +
+          `environment has that ${many ? 'are' : 'is'} not already banned, and ${words.gerund} ` +
+          `${many ? 'them' : 'that account'} would leave nobody able to administer the ` +
+          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). Grant another user ` +
+          `the '${ADMIN_FULL_ACCESS}' permission set or an organization ` +
+          `'${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership first, then retry. ` +
+          `If the ${words.noun} came from an identity provider, the SCIM deprovision is too ` +
+          'broad — fix the IdP group, not this guard.',
+      );
+    } catch (err) {
+      if (isRefusal(err)) throw err;
+      // Fail CLOSED: the guard could not prove another administrator survives,
+      // and the cost of guessing wrong is a permanently locked-out environment.
+      const reason = (err as Error)?.message ?? String(err);
+      logger?.warn(
+        `[LastAdminGuard] administrator lookup failed — ${words.noun} refused: ${reason}`,
+      );
+      throw refuse(
+        `Refusing this ${words.noun}: the remaining administrators could not be verified ` +
+          `(${reason}). This guard fails closed — a ${words.noun} is only permitted when at ` +
+          `least one other unbanned administrator is provably left (${BREAK_GLASS_CITATION}). ` +
+          'Retry once the identity tables are readable again.',
+      );
+    }
   };
 
   const guardBan = async (rawCtx: unknown): Promise<void> => {
@@ -300,64 +443,35 @@ export function registerLastAdminBanGuard(
     // of `banned` can never reduce the administrator population.
     if (!('banned' in data) || !isTrueFlag(data.banned)) return;
 
-    try {
-      const admins = await resolveAdminUserIds();
-      // Nothing recognised as an administrator: there is no break-glass account
-      // to protect and refusing every ban would be a guard inventing a policy
-      // out of an empty measurement. (A deployment reaches this only before the
-      // first admin is bootstrapped.)
-      if (admins.size === 0) return;
-
-      const unbanned = await resolveUnbannedAdmins(admins);
-      const targets = await resolveTargetIds(ctx.input?.id, data, ctx.input?.options);
-
-      const losing = [...unbanned].filter((id) => targets.has(id));
-      // No administrator that could still sign in is affected → not our case.
-      // This is also what makes re-banning an already-banned admin a no-op
-      // rather than a refusal: nothing is being taken away.
-      if (losing.length === 0) return;
-
-      const remaining = [...unbanned].filter((id) => !targets.has(id));
-      if (remaining.length > 0) return;
-
-      logger?.warn(
-        `[LastAdminBanGuard] refused a ban that would have left this environment with no ` +
-          `unbanned administrator (target: ${losing.join(', ')})`,
-      );
-      const many = losing.length > 1;
-      throw refuse(
-        `Refusing to ban ${losing.map((id) => `'${id}'`).join(', ')}: ` +
-          `${many ? 'those are the last administrators' : 'that is the last administrator'} this ` +
-          `environment has that ${many ? 'are' : 'is'} not already banned, and banning ` +
-          `${many ? 'them' : 'that account'} would leave nobody able to administer the ` +
-          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). Grant another user ` +
-          `the '${ADMIN_FULL_ACCESS}' permission set or an organization ` +
-          `'${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership first, then retry. ` +
-          'If the ban came from an identity provider, the SCIM deprovision is too broad — fix the ' +
-          'IdP group, not this guard.',
-      );
-    } catch (err) {
-      if (isRefusal(err)) throw err;
-      // Fail CLOSED: the guard could not prove another administrator survives,
-      // and the cost of guessing wrong is a permanently locked-out environment.
-      const reason = (err as Error)?.message ?? String(err);
-      logger?.warn(`[LastAdminBanGuard] administrator lookup failed — ban refused: ${reason}`);
-      throw refuse(
-        'Refusing this ban: the remaining administrators could not be verified ' +
-          `(${reason}). This guard fails closed — a ban is only permitted when at least one other ` +
-          `unbanned administrator is provably left (${BREAK_GLASS_CITATION}). Retry once the ` +
-          'identity tables are readable again.',
-      );
-    }
+    await enforce('ban', { ...ctx.input, data });
   };
 
-  // Priority 20: AFTER the ADR-0092 identity write guard's strip (10), before
+  const guardDelete = async (rawCtx: unknown): Promise<void> => {
+    const ctx = (rawCtx ?? {}) as {
+      object?: string;
+      input?: { id?: unknown; options?: { where?: unknown } };
+    };
+    if (ctx.object !== SystemObjectName.USER) return;
+
+    // Unlike a ban there is no payload to pre-filter on: EVERY delete of a
+    // `sys_user` row removes whatever standing that row had, so every one of
+    // them is judged. The population reads are a handful of small indexed
+    // queries, and deleting a user is a rare, deliberate operation.
+    await enforce('delete', ctx.input);
+  };
+
+  // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
   // default-priority hooks (100) spend work on a write this may refuse.
   engine.registerHook('beforeUpdate', guardBan, {
     object: SystemObjectName.USER,
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeDelete', guardDelete, {
+    object: SystemObjectName.USER,
+    priority: 20,
+    packageId,
+  });
 
-  logger?.info('[LastAdminBanGuard] last-administrator ban guard registered (ADR-0024 D5.2)');
+  logger?.info('[LastAdminGuard] last-administrator ban + delete guard registered (ADR-0024 D5.2)');
 }

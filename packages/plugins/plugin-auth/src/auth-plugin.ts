@@ -41,7 +41,7 @@ import {
   registerManagedUpdateWhitelist,
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
-import { registerLastAdminBanGuard } from './last-admin-ban-guard.js';
+import { registerLastAdminGuard } from './last-admin-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
@@ -988,17 +988,18 @@ export class AuthPlugin implements Plugin {
             this.effectiveSecondaryStorage as SecondaryStorageLike | undefined,
         });
         // [cloud ADR-0024 D5.2] Break-glass — the SAME `sys_user` write
-        // chokepoint, guarding a different question: not "may this caller
+        // chokepoints, guarding a different question: not "may this caller
         // write identity tables" (above, and system writes bypass it by
-        // design) but "may this VALUE be written at all". A `banned = true`
-        // that would leave the environment with no administrator able to sign
-        // in is refused for EVERY context, `isSystem` included — because the
-        // path that actually locks an org out is the system one (better-auth's
-        // admin ban, driven by a SCIM `active: false`). Registered at
-        // priority 20 so the ADR-0092 strip above (10) still answers first for
-        // user-context callers. See last-admin-ban-guard.ts.
-        registerLastAdminBanGuard(engine, {
-          packageId: 'com.objectstack.plugin-auth.last-admin-ban-guard',
+        // design) but "may this WRITE happen at all". A `banned = true` (#5892)
+        // or a row DELETE (#5941) that would leave the environment with no
+        // administrator able to sign in is refused for EVERY context,
+        // `isSystem` included — because the paths that actually lock an org out
+        // are the system ones (better-auth's admin ban and remove-user, driven
+        // by a SCIM `active: false` / `DELETE /Users/{id}`). Registered at
+        // priority 20 so the ADR-0092 checks above (10) still answer first for
+        // user-context callers. See last-admin-guard.ts.
+        registerLastAdminGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
         });
       } catch {
