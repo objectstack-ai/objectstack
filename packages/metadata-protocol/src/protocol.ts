@@ -7689,18 +7689,29 @@ export class ObjectStackProtocolImplementation implements
         //    overlays are written with organization_id = NULL.
         await this.ensureOverlayIndex();
 
-        // ADR-0008 — overlay-allowed metadata types ALWAYS route through the
-        // repository write path: every mutation appends to the change log
-        // and emits a watch event with a monotonic `seq` (which Studio /
-        // browser clients consume for HMR). Non-overlay-allowed types
-        // (`object`, `flow`, `agent`, ...) take the legacy raw-engine path
-        // below — this preserves the control-plane bootstrap semantic where
-        // `saveMetaItem` is permitted by the outer protocol gate to write
-        // any metadata type when `environmentId` is undefined (the repository's
-        // `assertAllowed()` would 403 those writes).
+        // ADR-0008 — persistence has exactly ONE route: the repository write
+        // path. Every mutation appends to the change log and emits a watch
+        // event with a monotonic `seq` (which Studio / browser clients consume
+        // for HMR).
         //
-        // PR-10d.6 (this PR) removed the `useRepositoryWritePath` flag.
-        // For overlay-allowed types the repo path is no longer opt-out-able.
+        // #5264 — the second route is gone. A legacy raw-engine branch used to
+        // sit after this block (`engine.insert`/`engine.update` straight into
+        // `sys_metadata`: no history row, no watch event, no `seq`) and ran
+        // whenever `isOverlayAllowed(type) || isRuntimeCreateAllowed(type)`
+        // was false. #5086 (PR #5263) made that condition unreachable HERE:
+        // the code-only refusal earlier in this method throws on exactly that
+        // predicate, on EVERY kernel (`environmentId` no longer keys it), read
+        // off the same canonical type key — `canonicalizeMetaRequestType` folds
+        // plural→singular at the top, and both flag readers fold again
+        // internally, so the two evaluations cannot disagree. A type that
+        // reaches this line always has a repository write path.
+        // `OS_METADATA_WRITABLE` is not a hole either: unlocking a type there
+        // makes `isOverlayAllowed` true, which routes it right back here — one
+        // door, not a bypass. The delete side's symmetric-looking branch is
+        // NOT dead and was deliberately left alone; see {@link deleteMetaItem}.
+        //
+        // PR-10d.6 removed the `useRepositoryWritePath` flag. The repository
+        // path is no longer opt-out-able for any type that gets this far.
         //
         // Callers that omit `parentVersion` get backward-compatible
         // "last-write-wins" semantics: we read the current row's checksum
@@ -7711,246 +7722,148 @@ export class ObjectStackProtocolImplementation implements
         // reading an item) get true optimistic-lock conflict detection
         // surfaced as a 409.
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-        const overlayAllowedForRepo = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
-        const runtimeCreateAllowedForRepo = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);
-        const useRepoPath = overlayAllowedForRepo || runtimeCreateAllowedForRepo;
-        if (useRepoPath) {
-            const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
-            const intent: 'override-artifact' | 'runtime-only' = artifactBacked
-                ? 'override-artifact'
-                : 'runtime-only';
-            // D1 (ADR-0070) — a brand-new, DB-only ("runtime-only") metadata
-            // item MUST resolve to a WRITABLE base. Binding it to a read-only
-            // code/installed package makes it read back as "code-provided" and
-            // lock read-only after publish (the #2252 bug). We used to silently
-            // coerce such a binding to `null`, but that scattered orphans into a
-            // package-less bucket with no container to delete; ADR-0070 replaces
-            // the coercion with an actionable rejection so the authoring surface
-            // (Studio / AI) redirects the user to pick or create a base first.
-            //
-            // Left untouched (the binding survives):
-            //   • `override-artifact` writes — an org overlay OF a packaged item
-            //     must keep pointing at the package it customizes (ADR-0005).
-            //   • a project-scoped base, or a bare ADR-0048 authoring-workspace
-            //     id — both are writable; `isWritablePackage` returns true.
-            // A `null` packageId is still accepted here (legacy org-overlay
-            // destination); ADR-0070 D5 retires it once the surfaces always
-            // resolve a base and the orphan migration has run.
-            if (
-                intent === 'runtime-only' &&
-                request.packageId != null &&
-                !this.isWritablePackage(request.packageId)
-            ) {
-                // Surfaced verbatim as a console toast — keep the sentence
-                // user-actionable; the ADR pointer lives in `docs` below.
-                const err = new Error(
-                    `[writable_package_required] Cannot save ${singularTypeForRepo}/${request.name}: `
-                    + `the package '${request.packageId}' is read-only (provided by code or an installed app). `
-                    + `Switch to a writable package in the package selector, or create a new one, and retry.`,
-                );
-                (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
-                (err as any).status = 422;
-                (err as any).packageId = request.packageId;
-                (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
-                throw err;
-            }
-            const orgId = request.organizationId ?? null;
-            const repo = this.getOverlayRepo(orgId);
-            const ref = {
-                type: singularTypeForRepo,
-                name: request.name,
-                org: orgId ?? 'env',
-            } as Parameters<typeof repo.put>[0];
-            let parentVersion: string | null;
-            if (request.parentVersion !== undefined) {
-                parentVersion = request.parentVersion;
-            } else {
-                // Parent is scoped to the lifecycle we're about to write:
-                // a draft's parent is the current draft hash (or null
-                // for the first draft); a publish's parent is the
-                // current published hash. ADR-0048 — scope to the same
-                // package the upsert targets so a collision's other-package
-                // row is never read as this item's parent.
-                const current = await repo.get(ref, {
-                    state: mode === 'draft' ? 'draft' : 'active',
+        const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
+            ? 'override-artifact'
+            : 'runtime-only';
+        // D1 (ADR-0070) — a brand-new, DB-only ("runtime-only") metadata
+        // item MUST resolve to a WRITABLE base. Binding it to a read-only
+        // code/installed package makes it read back as "code-provided" and
+        // lock read-only after publish (the #2252 bug). We used to silently
+        // coerce such a binding to `null`, but that scattered orphans into a
+        // package-less bucket with no container to delete; ADR-0070 replaces
+        // the coercion with an actionable rejection so the authoring surface
+        // (Studio / AI) redirects the user to pick or create a base first.
+        //
+        // Left untouched (the binding survives):
+        //   • `override-artifact` writes — an org overlay OF a packaged item
+        //     must keep pointing at the package it customizes (ADR-0005).
+        //   • a project-scoped base, or a bare ADR-0048 authoring-workspace
+        //     id — both are writable; `isWritablePackage` returns true.
+        // A `null` packageId is still accepted here (legacy org-overlay
+        // destination); ADR-0070 D5 retires it once the surfaces always
+        // resolve a base and the orphan migration has run.
+        if (
+            intent === 'runtime-only' &&
+            request.packageId != null &&
+            !this.isWritablePackage(request.packageId)
+        ) {
+            // Surfaced verbatim as a console toast — keep the sentence
+            // user-actionable; the ADR pointer lives in `docs` below.
+            const err = new Error(
+                `[writable_package_required] Cannot save ${singularTypeForRepo}/${request.name}: `
+                + `the package '${request.packageId}' is read-only (provided by code or an installed app). `
+                + `Switch to a writable package in the package selector, or create a new one, and retry.`,
+            );
+            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
+            (err as any).status = 422;
+            (err as any).packageId = request.packageId;
+            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
+            throw err;
+        }
+        const orgId = request.organizationId ?? null;
+        const repo = this.getOverlayRepo(orgId);
+        const ref = {
+            type: singularTypeForRepo,
+            name: request.name,
+            org: orgId ?? 'env',
+        } as Parameters<typeof repo.put>[0];
+        let parentVersion: string | null;
+        if (request.parentVersion !== undefined) {
+            parentVersion = request.parentVersion;
+        } else {
+            // Parent is scoped to the lifecycle we're about to write:
+            // a draft's parent is the current draft hash (or null
+            // for the first draft); a publish's parent is the
+            // current published hash. ADR-0048 — scope to the same
+            // package the upsert targets so a collision's other-package
+            // row is never read as this item's parent.
+            const current = await repo.get(ref, {
+                state: mode === 'draft' ? 'draft' : 'active',
+                packageId: request.packageId ?? null,
+            });
+            parentVersion = current?.hash ?? null;
+        }
+        try {
+            const result = await repo.put(ref, request.item, {
+                parentVersion,
+                // #4556 — `actor` lands in `sys_metadata_history.recorded_by`,
+                // a lookup('sys_user'). No caller actor → NULL, never the
+                // sentinel string 'system' (which resolves to no user row).
+                actor: request.actor ?? null,
+                source: writeSource,
+                intent,
+                state: mode === 'draft' ? 'draft' : 'active',
+                ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+            });
+            // Persistence succeeded — NOW it's safe to mutate the
+            // in-memory registry. If put() had thrown, the registry
+            // would still reflect the prior state. Drafts are NOT
+            // live: don't propagate them into the runtime registry
+            // (would defeat the staging buffer).
+            // #4521 — write through for EVERY overlay type, not just
+            // `object`: the runtime dispatch path reads this registry,
+            // so an item that is already listable must be dispatchable
+            // in the same breath. See {@link applyRegistryWriteThrough}.
+            if (mode === 'publish') {
+                this.applyRegistryWriteThrough({
+                    type: singularTypeForRepo,
+                    name: request.name,
+                    item: request.item,
                     packageId: request.packageId ?? null,
                 });
-                parentVersion = current?.hash ?? null;
+                await this.ensureObjectStorage(request.type, request.name);
             }
-            try {
-                const result = await repo.put(ref, request.item, {
-                    parentVersion,
-                    // #4556 — `actor` lands in `sys_metadata_history.recorded_by`,
-                    // a lookup('sys_user'). No caller actor → NULL, never the
-                    // sentinel string 'system' (which resolves to no user row).
-                    actor: request.actor ?? null,
-                    source: writeSource,
-                    intent,
-                    state: mode === 'draft' ? 'draft' : 'active',
-                    ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
-                });
-                // Persistence succeeded — NOW it's safe to mutate the
-                // in-memory registry. If put() had thrown, the registry
-                // would still reflect the prior state. Drafts are NOT
-                // live: don't propagate them into the runtime registry
-                // (would defeat the staging buffer).
-                // #4521 — write through for EVERY overlay type, not just
-                // `object`: the runtime dispatch path reads this registry,
-                // so an item that is already listable must be dispatchable
-                // in the same breath. See {@link applyRegistryWriteThrough}.
-                if (mode === 'publish') {
-                    this.applyRegistryWriteThrough({
-                        type: singularTypeForRepo,
-                        name: request.name,
-                        item: request.item,
-                        packageId: request.packageId ?? null,
-                    });
-                    await this.ensureObjectStorage(request.type, request.name);
-                }
-                // ADR-0010 — success audit (best-effort).
-                await this.recordMetadataAudit({
-                    type: request.type,
-                    name: request.name,
-                    organizationId: orgId,
-                    operation: 'save',
-                    outcome: 'allowed',
-                    code: 'ok',
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    source: writeSource,
-                    note: mode === 'draft' ? 'draft' : 'active',
-                });
-                // [ADR-0094] Awaited projection BEFORE the fire-and-forget
-                // listeners: a derived read-model (e.g. sys_permission_set)
-                // is already consistent when this save returns.
-                const projectionApplied = await this.runMutationProjector({
-                    type: singularTypeForRepo,
-                    name: request.name,
-                    state: mode === 'draft' ? 'draft' : 'active',
-                    organizationId: orgId,
-                    body: request.item,
-                });
-                this.emitMetadataMutation({
-                    type: singularTypeForRepo,
-                    name: request.name,
-                    state: mode === 'draft' ? 'draft' : 'active',
-                    organizationId: orgId,
-                });
-                return {
-                    success: true,
-                    version: result.version,
-                    seq: result.seq,
-                    ...(projectionApplied ? { projectionApplied } : {}),
-                    state: mode === 'draft' ? 'draft' : 'active',
-                    message: orgId
-                        ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
-                        : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
-                };
-            } catch (err: any) {
-                if (err instanceof ConflictError) {
-                    const conflict = new Error(
-                        `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
-                        + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
-                    );
-                    (conflict as any).code = 'METADATA_CONFLICT';
-                    (conflict as any).status = 409;
-                    (conflict as any).expectedParent = err.expectedParent;
-                    (conflict as any).actualHead = err.actualHead;
-                    throw conflict;
-                }
-                throw err;
-            }
-        }
-
-        // Legacy raw-engine path — taken when the type is NOT overlay-allowed
-        // (control-plane bootstrap of `object`/`flow`/etc. when `environmentId` is
-        // undefined). This branch is intentionally retained: the repository
-        // write path's `assertAllowed()` would 403 these types. There is no
-        // change-log / HMR machinery for non-overlay metadata because
-        // control-plane mutations are bootstrap-only and not subject to
-        // per-org overlay semantics.
-        //
-        // Note: the registry mutation for the legacy path happens BEFORE
-        // persistence (preserved historical behaviour). The overlay-allowed
-        // path moved it to AFTER persistence in PR-10d.3 (rubber-duck #3).
-        this.applyObjectRegistryMutation(request);
-
-        try {
-            const now = new Date().toISOString();
-            const orgId = request.organizationId ?? null;
-            const scopedWhere: Record<string, unknown> = {
+            // ADR-0010 — success audit (best-effort).
+            await this.recordMetadataAudit({
                 type: request.type,
                 name: request.name,
-                organization_id: orgId,
-                state: 'active',
-            };
-            const existing = await this.engine.findOne('sys_metadata', {
-                where: scopedWhere,
+                organizationId: orgId,
+                operation: 'save',
+                outcome: 'allowed',
+                code: 'ok',
+                ...(request.actor ? { actor: request.actor } : {}),
+                source: writeSource,
+                note: mode === 'draft' ? 'draft' : 'active',
             });
-
-            if (existing) {
-                const updateRow: Record<string, unknown> = {
-                    metadata: JSON.stringify(request.item),
-                    updated_at: now,
-                    version: (existing.version || 0) + 1,
-                    state: 'active',
-                };
-                // Preserve an existing non-null package binding; only fill when
-                // unset (mirror of SysMetadataRepository.put semantics).
-                const existingPkg = (existing as { package_id?: string | null }).package_id ?? null;
-                const nextPkg = existingPkg ?? request.packageId ?? null;
-                if (nextPkg !== null) updateRow.package_id = nextPkg;
-                await this.engine.update('sys_metadata', updateRow, {
-                    where: { id: existing.id }
-                });
-            } else {
-                // Use crypto.randomUUID() when available (modern browsers and Node ≥ 14.17);
-                // fall back to a time+random ID for older or restricted environments.
-                const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-                    ? crypto.randomUUID()
-                    : `meta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-                const row: Record<string, unknown> = {
-                    id,
-                    name: request.name,
-                    type: request.type,
-                    // `scope` enum is ['system','platform','user']; per-org
-                    // overlays use 'platform' as the informational tag. The
-                    // authoritative isolation key is `organization_id`.
-                    scope: 'platform',
-                    metadata: JSON.stringify(request.item),
-                    state: 'active',
-                    version: 1,
-                    created_at: now,
-                    updated_at: now,
-                    organization_id: orgId,
-                };
-                if (request.packageId) row.package_id = request.packageId;
-                await this.engine.insert('sys_metadata', row);
-            }
-
-            this.emitMetadataMutation({
-                type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
+            // [ADR-0094] Awaited projection BEFORE the fire-and-forget
+            // listeners: a derived read-model (e.g. sys_permission_set)
+            // is already consistent when this save returns.
+            const projectionApplied = await this.runMutationProjector({
+                type: singularTypeForRepo,
                 name: request.name,
-                state: 'active',
+                state: mode === 'draft' ? 'draft' : 'active',
+                organizationId: orgId,
+                body: request.item,
+            });
+            this.emitMetadataMutation({
+                type: singularTypeForRepo,
+                name: request.name,
+                state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: orgId,
             });
             return {
                 success: true,
+                version: result.version,
+                seq: result.seq,
+                ...(projectionApplied ? { projectionApplied } : {}),
+                state: mode === 'draft' ? 'draft' : 'active',
                 message: orgId
-                    ? `Saved customization overlay (org=${orgId}) — type=${request.type}, name=${request.name}`
-                    : `Saved customization overlay (env-wide) — type=${request.type}, name=${request.name}`,
+                    ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
+                    : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
             };
-        } catch (dbError: any) {
-            // DB write failed — surface as an error rather than silently
-            // succeeding (regression from the pre-ADR-0005 "silent loss" bug).
-            console.error(
-                `[Protocol] sys_metadata persistence failed for ${request.type}/${request.name}: ${dbError.message}`,
-            );
-            const err = new Error(
-                `Failed to persist customization overlay to sys_metadata: ${dbError.message}. `
-                + `In-memory registry was updated but will be lost on restart.`,
-            );
-            (err as any).code = 'OVERLAY_PERSISTENCE_FAILED';
-            (err as any).status = 500;
+        } catch (err: any) {
+            if (err instanceof ConflictError) {
+                const conflict = new Error(
+                    `[metadata_conflict] ${request.type}/${request.name} has been modified since you loaded it. `
+                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                );
+                (conflict as any).code = 'METADATA_CONFLICT';
+                (conflict as any).status = 409;
+                (conflict as any).expectedParent = err.expectedParent;
+                (conflict as any).actualHead = err.actualHead;
+                throw conflict;
+            }
             throw err;
         }
     }
@@ -8003,10 +7916,16 @@ export class ObjectStackProtocolImplementation implements
      *   (#4498) — flows are migrated like anything else (#4454); when none is,
      *   they are reported `skipped` with that reason, never counted done.
      * - **Types with no repository write path** (neither `allowOrgOverride` nor
-     *   `allowRuntimeCreate`). `saveMetaItem` routes those down the legacy
-     *   raw-engine branch, which records no history and forces `state:
-     *   'active'` — a historyless rewrite that could also promote a draft is
-     *   not what this pass promises, so it declines instead.
+     *   `allowRuntimeCreate`). This pass declines them, and since #5086 it
+     *   would have no choice: `saveMetaItem` refuses a code-only type with
+     *   `403 NOT_CREATABLE` / `NOT_OVERRIDABLE` before persistence. The skip
+     *   predates that refusal and outranks it — declining is a *reported*
+     *   `skipped` row, where forwarding the write would surface as `failed`
+     *   noise on every run. (Historical note for anyone reading the skip
+     *   reason: until #5264 the write would instead have landed in a legacy
+     *   raw-engine branch that recorded no history and forced `state:
+     *   'active'`. That branch is gone; the skip is what always kept this
+     *   pass away from it.)
      *
      *   Today that is exactly one type, `agent`, and its skip is **permanent
      *   by design, not a to-do** (#4507): ADR-0063 §2 closes `*.agent.ts` to
@@ -8243,9 +8162,12 @@ export class ObjectStackProtocolImplementation implements
      * in event_seq order. Powers the Studio "History" tab and any
      * client-side audit timeline.
      *
-     * Returns `[]` for non-overlay-allowed types (the legacy raw-engine
-     * path doesn't record history) instead of throwing — callers can treat
-     * "no history" uniformly.
+     * Returns `[]` for code-only types (neither `allowOrgOverride` nor
+     * `allowRuntimeCreate`) instead of throwing — callers can treat "no
+     * history" uniformly. Those types have no history to yield by
+     * construction: `saveMetaItem` refuses them outright (#5086), and the one
+     * write channel they retain — `deleteMetaItem`'s legacy raw-engine branch
+     * on a control-plane kernel — appends no `sys_metadata_history` row.
      */
     async historyMetaItem(request: {
         type: string;
@@ -10257,10 +10179,31 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // ── Legacy raw-engine path: only reachable in control-plane bootstrap
-        // (environmentId === undefined) for non-overlay-allowed types like
-        // `object`, `flow`, `agent`. No history row, no watch event — these
-        // types don't participate in the change-log model.
+        // ── Legacy raw-engine path: reachable in control-plane bootstrap
+        // (`environmentId === undefined`) for a code-only type — one whose
+        // registry entry sets BOTH `allowOrgOverride: false` and
+        // `allowRuntimeCreate: false` (today `job` and `agent`). No history
+        // row, no watch event — these types don't participate in the
+        // change-log model, and `SysMetadataRepository.assertAllowed()` would
+        // 403 the delete outright.
+        //
+        // #5264 — THIS ONE IS ALIVE. `saveMetaItem` used to carry a branch of
+        // the same shape; that one was deleted because #5086 (PR #5263) put an
+        // unconditional code-only refusal in front of it, on every kernel.
+        // The delete side was left ungated ON PURPOSE by that same PR, and the
+        // asymmetry is the point: refusing to CREATE a code-only row is a new
+        // guarantee, while REMOVING a code-only row that predates the refusal
+        // is the repair action the guarantee depends on. Note where the gate
+        // above stops — the two-tier delete authorization runs only when
+        // `environmentId !== undefined`, so on a control-plane kernel a
+        // code-only delete arrives here with `useRepoPath === false` and this
+        // is the only code that can serve it.
+        //
+        // So: do not "clean up the symmetry" by deleting this the way #5264
+        // deleted its twin, and do not gate it to match `saveMetaItem` —
+        // either would strand the very rows #5263 made unwritable. If it ever
+        // does become unreachable, the proof has to come from the delete
+        // side's own gates, not from the save side's.
         const scopedWhere: Record<string, unknown> = {
             type: request.type,
             name: request.name,

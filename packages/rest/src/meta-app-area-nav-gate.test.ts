@@ -65,7 +65,7 @@ function makeRes() {
  */
 function setup(perms: string[], services: string[] = ['org-scoping']) {
     const protocol: any = {
-        getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+        getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         // Deep-clone per call: the filter must never mutate stored metadata, and
         // a shared object would hide that by carrying a prior call's damage.

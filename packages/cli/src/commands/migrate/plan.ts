@@ -158,9 +158,9 @@ export default class MigratePlan extends Command {
         return;
       }
 
-      renderPendingSchemaWork(pending);
+      await renderPendingSchemaWork(pending);
       renderPlan(drift);
-      if (pending.length > 0) printInfo(summarizePendingSchemaWork(pending));
+      if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
       console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
         chalk.dim(' (add --allow-destructive for drops / tightenings)'));
