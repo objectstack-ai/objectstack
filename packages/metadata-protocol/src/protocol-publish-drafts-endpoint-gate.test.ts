@@ -1,6 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+// [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
+// #5480 update), so the fake engine below cannot accept a call ObjectQL
+// refuses. Imported from `@objectstack/metadata-core` and not from
+// `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
+// would close a dependency cycle turbo rejects outright — which is why all 26
+// of this package's (file, verb) pairs sat in the gate's DEBT ledger until
+// #5619 sank the two predicates into a package both sides already depend on.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { identityFreeEndpointGateFailure, ApiEndpointSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -146,6 +154,7 @@ function makeStubEngine(namespace?: string) {
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+            assertEngineUpdateDispatch(data, opts);
             const found = findRow(opts.where);
             if (!found) return { id: null };
             const merged = { ...found.row, ...(data as any) };
@@ -154,6 +163,7 @@ function makeStubEngine(namespace?: string) {
             return { id: found.row.id };
         },
         async delete(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineDeleteDispatch(opts);
             const found = findRow(opts.where);
             if (!found) return { deleted: 0 };
             rows.delete(found.key);

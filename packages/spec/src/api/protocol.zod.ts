@@ -249,9 +249,60 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
 
 /**
  * Save Metadata Item Response
+ *
+ * Describes the FULL body `PUT /api/v1/meta/:type/:name` returns, not a subset
+ * of it (#5745, settled by the #5563 maintainer ruling "补齐 spec 字段"). The
+ * declaration previously stopped at `{ success, message }`, so a `.parse()` of
+ * a real response silently STRIPPED `version` / `seq` / `state` — and
+ * `SaveMetaItemResponse` could not even name them at the type level. `version`
+ * in particular is the token the ADR-0008 optimistic-concurrency chain already
+ * runs on (echo it back as `If-Match` on the next write to get a 409 instead of
+ * a lost update), so leaving it undeclared meant the OCC carrier existed on the
+ * wire with no contract behind it.
+ *
+ * Presence was measured against `origin/main`, not assumed: the sole producer is
+ * `ObjectStackProtocolImplementation.saveMetaItem`, whose single success return
+ * is the repository write path, and the REST route hands that object to
+ * `res.json()` verbatim. That path always sets `version` / `seq` / `state`, so
+ * the three are REQUIRED here; `projectionApplied` is conditional on an
+ * ADR-0094 mutation projector being registered for the type, so it alone is
+ * optional. (A second, receipt-less legacy return used to exist and would have
+ * forced all three to be optional — it was proved unreachable and deleted in
+ * #5264 / PR #5782, which is why `required` is safe to state.)
  */
 export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
+  version: z.string().describe(
+    'Content hash of the just-committed body, and the token the ADR-0008 '
+    + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
+    + 'request header on the next write to that item and a concurrent edit is '
+    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
+    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
+    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+  ),
+  seq: z.number().int().describe(
+    'Monotonic sequence number of the metadata event this write appended to '
+    + 'the item history (sys_metadata_history.event_seq). Orders writes; unlike '
+    + '`version` it is not an OCC token.',
+  ),
+  state: z.enum(['draft', 'active']).describe(
+    'Lifecycle the body was written into: "draft" when the request asked for '
+    + 'draft mode (`?mode=draft`), otherwise "active" (published and live). A '
+    + 'draft is staged only — it is not served to the runtime until published.',
+  ),
+  projectionApplied: z.object({
+    success: z.boolean().describe('False when the projector threw; the metadata write itself still succeeded.'),
+    error: z.string().optional().describe('Projector failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
+    + 'that materializes this metadata into its derived data-plane read model '
+    + '(e.g. `permission` → `sys_permission_set`). Present ONLY when a projector '
+    + 'is registered for this metadata type, which is why it is optional: its '
+    + 'absence means "no projector ran", never "the projection failed". '
+    + 'Best-effort by design — a projector failure is reported here and logged, '
+    + 'never thrown, so a caller that needs the read model to be live must check '
+    + '`projectionApplied.success` rather than rely on the 200.',
+  ),
   message: z.string().optional(),
 }));
 

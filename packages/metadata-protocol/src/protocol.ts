@@ -7938,7 +7938,12 @@ export class ObjectStackProtocolImplementation implements
                 version: result.version,
                 seq: result.seq,
                 ...(projectionApplied ? { projectionApplied } : {}),
-                state: mode === 'draft' ? 'draft' : 'active',
+                // #5745 — the literal union, not `string`. An object-literal
+                // property widens a two-literal ternary to `string`, which made
+                // this method fail to satisfy `MetadataProtocol.saveMetaItem`
+                // once the spec declared `state` as the closed set it has always
+                // emitted. Type-only: the value is unchanged.
+                state: (mode === 'draft' ? 'draft' : 'active') as 'draft' | 'active',
                 message: orgId
                     ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
                     : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
