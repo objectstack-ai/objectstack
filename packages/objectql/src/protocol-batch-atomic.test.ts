@@ -18,9 +18,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
- * A driver with real transaction semantics: `beginTransaction` snapshots every
- * table, `rollback` restores the snapshot wholesale, `commit` drops it — the
- * same shape `driver-memory` uses, small enough to assert against.
+ * A stub driver with real transaction semantics: `beginTransaction` snapshots
+ * every table, `rollback` restores the snapshot wholesale, `commit` drops it —
+ * a genuine rollback, small enough to assert against.
  */
 function makeSnapshotDriver() {
     const stores = new Map<string, Map<string, any>>();

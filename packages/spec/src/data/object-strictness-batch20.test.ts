@@ -350,15 +350,25 @@ describe('#4001 批 20 — `IndexSchema` is deliberately NOT closed', () => {
     expect(parsed.indexes[0].fields).toEqual(['name']);
   });
 
-  it('the drift is real: the console offers `where`, this schema declares `partial`', () => {
+  it('the console drift outlived BOTH spellings: `where` strips, `partial` is now retired', () => {
     // objectui `metadata-admin/EmbeddedItemEditor.tsx` → FALLBACK_SCHEMAS.index
-    // publishes `where` for the partial-index predicate. The spec's key is
-    // `partial`. The editor splices its output into `object.indexes[]` and PUTs
-    // the whole object, and `saveMetaItem` keeps the body verbatim — so closing
-    // this shape 422s a control the console itself renders (the #5114 class).
-    accept(IndexSchema, { fields: ['name'], partial: "status = 'open'" });
+    // publishes `where` for the partial-index predicate. The spec's key WAS
+    // `partial` — until #5248 / #4943 retired it (no driver ever emitted the
+    // predicate). So the editor now renders a control for a key that does not
+    // exist under either spelling, which is #5247's job to delete.
+    //
+    // The two halves fail DIFFERENTLY, and that difference is the point:
+    //   - `where` was never declared here, and the shape still `.strip()`s, so
+    //     it is discarded in silence — the held-open defect above;
+    //   - `partial` IS declared, as a tombstone, so it is rejected loudly with
+    //     the migration prescription rather than stripped (the whole reason a
+    //     non-strict schema gets a tombstone instead of a plain delete).
     const parsedWhere = accept(IndexSchema, { fields: ['name'], where: "status = 'open'" }) as Record<string, unknown>;
     expect(parsedWhere.where, 'the console spelling is silently discarded today').toBeUndefined();
+
+    const retired = IndexSchema.safeParse({ fields: ['name'], partial: "status = 'open'" });
+    expect(retired.success, '`partial` is retired, not stripped').toBe(false);
+    expect(retired.error!.issues[0]!.message).toMatch(/`indexes\[\]\.partial` was removed.*Delete the key/s);
   });
 
   it('its SIBLINGS in the same file are closed — this is a held site, not an unwalked file', () => {

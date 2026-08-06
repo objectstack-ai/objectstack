@@ -40,7 +40,9 @@ describe('[#3058] PUBLIC_FORM_SERVER_MANAGED_FIELDS conformance', () => {
 
   const activelyInjected = (): Set<string> =>
     new Set<string>([
-      ...injectedByRegistry(), // organization_id, created_at, created_by, updated_at, updated_by, owner_id
+      // organization_id, created_at, created_by, updated_at, updated_by,
+      // owner_id, owning_business_unit_id
+      ...injectedByRegistry(),
       SEARCH_COMPANION_FIELD, // '__search' — hidden search-normalization companion (search-companion.ts)
       SystemFieldName.ID, // 'id' — driver-provisioned primary key
     ]);
@@ -51,29 +53,37 @@ describe('[#3058] PUBLIC_FORM_SERVER_MANAGED_FIELDS conformance', () => {
   //   • tenant_id  — legacy/enterprise tenant key (not injected by open-core).
   //   • is_deleted / deleted_at — soft-delete state, written by the lifecycle/
   //     trash layer at runtime, never client-suppliable on a public form.
-  //   • owning_business_unit_id — ADR-0117 D1's record-level BU ownership stamp.
-  //     The NAME is reserved (SystemFieldName.OWNING_BUSINESS_UNIT_ID, #4611) but
-  //     open-core does NOT inject it yet: `applySystemFields`' `wantOwner` is a
-  //     DENY-list (only 'org'/'none' opt out), so the `ownership: 'business_unit'`
-  //     tier cannot land until that flips to an allow-list — until then the enum
-  //     value stays rejected by ObjectSchema on purpose. Denied here in advance
-  //     because it is an ownership anchor of exactly the owner_id/organization_id
-  //     forge class, and a denylist entry added only once the column ships is a
-  //     hole with a release in it. MOVE THIS to the injected group (Group A) in
-  //     the same PR that lands the injection — it is derived from live code
-  //     there, so leaving it here would then fail as a stray entry.
+  //
+  // `owning_business_unit_id` USED TO LIVE HERE and has MOVED to Group A
+  // (#5677): ADR-0117 D1's injection landed, `applySystemFields` now provisions
+  // the column on the default (`ownership: undefined` / `'user'`) tier this
+  // group's probe object uses, so Group A derives it from live code. Leaving it
+  // listed here as well would now fail the partition test as a stray entry —
+  // which is exactly the signal #4611 wrote this migration note for.
   const reservedDefenseInDepth = new Set<string>([
     SystemFieldName.TENANT_ID, // 'tenant_id'
     'is_deleted',
     SystemFieldName.DELETED_AT, // 'deleted_at'
-    SystemFieldName.OWNING_BUSINESS_UNIT_ID, // 'owning_business_unit_id'
   ]);
 
   it('registry injection actually produces the fields this test reasons about', () => {
     // Guards the test itself: if applySystemFields stops injecting these, the
     // conformance assertions below would pass vacuously.
     const injected = new Set(injectedByRegistry());
-    for (const f of ['organization_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id']) {
+    for (const f of [
+      'organization_id',
+      'created_at',
+      'created_by',
+      'updated_at',
+      'updated_by',
+      'owner_id',
+      // [ADR-0117 D1 / #5677] The migrated name. Listed explicitly so the move
+      // out of the reserved group is PINNED: without this, a regression that
+      // stopped injecting the column would silently make Group A shrink back
+      // and the partition test would then demand it be re-listed as reserved —
+      // a green suite describing the opposite of the accepted decision.
+      SystemFieldName.OWNING_BUSINESS_UNIT_ID,
+    ]) {
       expect(injected.has(f)).toBe(true);
     }
   });

@@ -379,16 +379,23 @@ See [rules/validation.md](./rules/validation.md) for all types and examples.
 
 ### Index Patterns
 
-**Omit default values:** `type` defaults to `'btree'`, `unique` defaults to `false`.
+**The whole declaration surface is `fields` / `unique` / `name`.** `unique`
+defaults to `false`; omit it when that is what you mean.
 
 ```typescript
 indexes: [
-  { fields: ['status', 'created_at'] },                // btree (default)
+  { fields: ['status', 'created_at'] },                // composite
   { fields: ['email'], unique: 'organization' },       // unique per organization
   { fields: ['hostname'], unique: 'global' },          // unique platform-wide
-  { fields: ['description'], type: 'fulltext' },       // non-default type
+  { name: 'idx_acct_status', fields: ['status'] },     // custom name
 ]
 ```
+
+> **`type` and `partial` were retired at protocol 17** (#5248, #4943): no driver
+> ever read either, so an authored `type` chose no access method and an authored
+> `partial` produced a full index with the predicate discarded. Both are now a
+> `tsc` error and a parse error; `os migrate meta --from 16` strips them. Access
+> methods and partial predicates are database-layer migrations.
 
 > **A unique index must state its scope** — `'organization'` (one holder per
 > organization, NULL-safe) or `'global'` (one holder across the installation).
@@ -397,7 +404,8 @@ indexes: [
 > warns and protocol 18 rejects it. On a FIELD, `unique: true` means
 > `'organization'` and stays valid.
 
-See [rules/indexing.md](./rules/indexing.md) for composite/partial/gin/gist indexes.
+See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope,
+and how to build partial / gin / gist indexes at the database layer.
 
 ### Lifecycle Hooks
 

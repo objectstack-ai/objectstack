@@ -1010,3 +1010,211 @@ describe('build-schemas.ts — only --update-base moves the in-tree anchor (#535
     },
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5370 — the anchor moves FORWARD, or it does not move.
+//
+// #5358 answered WHEN the anchor may be written (only in `--update-base`). It did
+// not answer WHERE FROM, and the answer was still "wherever `merge-base(HEAD,
+// origin/main)` lands" — which is not always ahead of the anchor already
+// committed. The reported shape is a stopped merge: until it is committed, HEAD is
+// the branch tip from BEFORE the merge, so the merge base is the branch's OLD fork
+// point rather than the main tip being merged in, and re-anchoring there rolls
+// `baseRev` BACKWARDS. Measured on the #5312 sync relay: `1c3da1f` → `5aae790`,
+// returning the 109 keys #5321 had just retired.
+//
+// The reason this needs a refusal rather than a warning is that the regressed file
+// is INDISTINGUISHABLE from a good one by every property the gates check. The old
+// rev is a genuine origin/main ancestor and the keys written are that commit's
+// surface verbatim, so `verifyCommittedSurfaceBase`, `check:authorable-surface`
+// and the pre-commit os-regen guard are all green before and after. Nothing
+// anywhere reports it; the only trace is a reverse `baseRev` move in the diff,
+// which reads like #4650's attack shape and was written by the generator.
+//
+// So both guards are refusals, and each pins its own half here: MERGE_HEAD present
+// is refused before a single schema is generated, and any re-anchor whose new rev
+// is not a descendant of the committed one is refused at the write.
+describe('build-schemas.ts — --update-base moves the anchor forward or not at all (#5370)', () => {
+  /** Absent from `older` and from `tip` — the key a backwards move would drop. */
+  const FORKED_KEY = 'data/Object:label';
+  /** Absent from `older` and from `tip`, present at `mainTip` — so the remedy WRITES. */
+  const LANDED_KEY = 'data/Object:description';
+
+  /** The branch's fork point: upstream, and behind the committed anchor. */
+  let older: string;
+  /** The commit the anchor authentically mirrors — ahead of `older`, on origin/main. */
+  let tip: string;
+  /** origin/main. Ahead of `tip`, so the anchor is authentic and merely lags. */
+  let mainTip: string;
+  let anchorAtTip: string;
+
+  const mergeHeadFile = (): string =>
+    path.resolve(sandbox, git('rev-parse', '--git-path', 'MERGE_HEAD'));
+
+  beforeAll(() => {
+    const keys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    for (const k of [FORKED_KEY, LANDED_KEY]) {
+      expect(keys, `${k} is no longer in the baseline — pick another live key`).toContain(k);
+    }
+  });
+
+  beforeEach(() => {
+    seedManifest((s) => s);
+    // Three upstream commits, linear, each one key richer than the last. The
+    // anchor mirrors the MIDDLE one: authentic (its keys ARE that commit's
+    // baseline), an ancestor of origin/main, and lagging — the ordinary state of
+    // every checkout between two surface changes.
+    older = seedBase((s) => s.filter((k) => k !== FORKED_KEY && k !== LANDED_KEY));
+    tip = seedBase((s) => s.filter((k) => k !== LANDED_KEY));
+    seedBase((s) => s);
+    seedSurface((s) => s);
+    anchorAtTip = seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
+    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: anchor at the middle upstream commit');
+    mainTip = git('rev-parse', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/main', mainTip);
+
+    // HEAD forks at `older` and then makes main's own surface change BYTE FOR
+    // BYTE. Two consequences, both wanted: `merge-base(HEAD, origin/main)` is
+    // `older` (behind the anchor), and merging main in is conflict-free and stages
+    // nothing — so `git status` staying empty across a run means the run wrote
+    // nothing, with no merge noise to subtract.
+    git('checkout', '-q', '-B', 'issue-5370-fork', older);
+    seedSurface((s) => s);
+    seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
+    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: branch work, forked before the anchor advanced');
+    expect(git('status', '--porcelain', '-uno')).toBe('');
+    expect(git('merge-base', 'HEAD', mainTip)).toBe(older);
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(mergeHeadFile())) git('merge', '--abort');
+    git('checkout', '-q', '-f', 'main');
+    git('update-ref', 'refs/remotes/origin/main', mainTip);
+  });
+
+  it(
+    'refuses while a merge is uncommitted — before generating anything — and the commit-first remedy works',
+    { timeout: SPAWN_TIMEOUT_MS * 3 },
+    () => {
+      git('merge', '--no-commit', '--no-ff', mainTip);
+      expect(fs.existsSync(mergeHeadFile()), 'fixture is not actually mid-merge').toBe(true);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+
+      const refused = run(['--update-base']);
+
+      expect(refused.status).toBe(1);
+      expect(refused.output).toContain('refuses to run mid-merge (#5370)');
+      expect(refused.output).toContain('Commit the merge first');
+      expect(refused.output).toContain('gen:authorable-surface-base');
+      // Refused before the ~1600-schema generation, like `--check --update-base`.
+      expect(refused.output).not.toContain('Generating JSON Schemas');
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+
+      // The guard is narrow: a plain build mid-merge is NOT refused. #5807 took the
+      // anchor out of every build, which is why `scripts/regen-artifacts.mjs` can
+      // still prescribe `gen:schema` after a merge — refusing that too would break
+      // the driver's own deferred regeneration.
+      const build = run([]);
+      expect(build.status).toBe(0);
+      expect(build.output).not.toContain('#5370');
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+
+      // Now the prescription, literally: commit the merge, then re-anchor. HEAD's
+      // merge base with origin/main is `mainTip` once the merge is a commit, so the
+      // move is forward and the write lands — the refusal has a working remedy, not
+      // just a rule.
+      git('commit', '-q', '--no-edit');
+      const reanchored = run(['--update-base']);
+
+      expect(reanchored.status).toBe(0);
+      expect(reanchored.output).toContain('⚓');
+      const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
+      expect(doc.baseRev).toBe(mainTip);
+      expect(doc.keys).toContain(LANDED_KEY);
+      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+    },
+  );
+
+  it(
+    'refuses a re-anchor whose new rev is an ancestor of the committed one, and writes nothing',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // No merge in sight: the same backwards move reached by ordinary means — a
+      // branch forked before the anchor advanced (a `git checkout origin/main --
+      // <anchor>` or a driver resolution to THEIRS gets here too). MERGE_HEAD is
+      // not the defect, it is one way in; the write is where the defect is decided.
+      const { status, output } = run(['--update-base']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('would move authorable-surface.base.json BACKWARDS (#5370)');
+      expect(output).toContain(tip.slice(0, 12)); // committed baseRev
+      expect(output).toContain(older.slice(0, 12)); // what the run resolved
+      expect(output).not.toContain('⚓');
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+    },
+  );
+
+  it(
+    'refuses rather than guesses when a NEGATIVE ancestry answer cannot be trusted — a shallow checkout',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Truncating history AT `mainTip` cuts the walk that would reach the anchor's
+      // own commit, so `merge-base --is-ancestor tip mainTip` reports "not an
+      // ancestor" about a commit that plainly is one — the shape that failed #5358's
+      // first CI run, and the live state of every agent container today (the
+      // anchor's baseRev sits in `.git/shallow` as its own grafted root).
+      //
+      // The move here is genuinely FORWARD, so this is the guard's own cost, stated
+      // rather than hidden: where the answer is unusable it refuses, and the message
+      // has to name the reason and the remedy instead of the backwards verdict. The
+      // opposite disposition — trusting the 1 — would fail every re-anchor in a
+      // shallow clone with an accusation of a backwards move that never happened.
+      fs.writeFileSync(path.join(sandbox, '.git', 'shallow'), `${mainTip}\n`);
+      try {
+        expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+
+        const { status, output } = run(['--update-base']);
+
+        expect(status).toBe(1);
+        expect(output).toContain('cannot establish which way');
+        expect(output).toContain('shallow checkout');
+        // The reason it refuses is truncation, NOT a backwards move — a message
+        // that said otherwise would send the reader to fix a history that is fine.
+        expect(output).not.toContain('BACKWARDS');
+        expect(output).toContain('git fetch --unshallow origin');
+        expect(output).not.toContain('⚓');
+        expect(readSurfaceBase()).toBe(anchorAtTip);
+      } finally {
+        fs.rmSync(path.join(sandbox, '.git', 'shallow'), { force: true });
+      }
+    },
+  );
+
+  it(
+    'an origin/main rewound BEHIND the anchor is caught one gate earlier, by the authenticity check',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Recorded because it is the fixture this guard reads like it needs and does
+      // not: pointing origin/main at an ancestor of the committed `baseRev` never
+      // reaches the write at all. `verifyCommittedSurfaceBase` runs first and the
+      // anchor is no longer an ancestor of origin/main, so the run dies on
+      // authenticity — a different fact, with a different remedy. The backwards move
+      // the monotonicity guard exists for is the one where BOTH revs are authentic
+      // (the case above), which is precisely why nothing else could see it.
+      git('update-ref', 'refs/remotes/origin/main', older);
+
+      const { status, output } = run(['--update-base']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('NOT an ancestor of');
+      expect(output).toContain(tip.slice(0, 12));
+      expect(output).not.toContain('#5370');
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+    },
+  );
+});

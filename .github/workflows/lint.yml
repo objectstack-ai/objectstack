@@ -616,6 +616,30 @@ jobs:
       - name: Check generated skill references are in sync with the spec
         run: pnpm --filter @objectstack/spec check:skill-refs
 
+      # Same third-party reason as the two gates above, applied to the SKILL.md
+      # PROSE those gates never look at: they compare frontmatter and generated
+      # indexes only, so the binding decision frame in the body — written out four
+      # times across `.claude/**` (internal) and `skills/**` (published) — had no
+      # gate at all. #5130 widened the internal frame from two axes to three and
+      # the published mirror stayed at two for two days, which is the drift
+      # "served straight to consumers' agents" in its purest form: third-party PM
+      # agents escalated on two axes while this repo ruled on three. #5451 /
+      # PR #5799 re-converged them by hand; this keeps them converged.
+      #
+      # Structure only — axis count, axis order, the binding sentence. The
+      # published copy is deliberately generalized (#5451 route B: no startup
+      # self-description, no this-repo issue numbers), so a wording comparison
+      # would be permanently red and would get deleted instead of obeyed.
+      #
+      # Lives in this job for the same reason as its neighbours: no paths filter
+      # and required, so it cannot go dormant on exactly the PR that breaks it —
+      # and a `.claude/**` filter in particular would blind it, since half the
+      # copies live there. It is a root script (not `--filter @objectstack/spec`)
+      # because it reads no spec source and generates no artifact; see the
+      # script header on layering.
+      - name: Check the decision frame is in sync across its four copies
+        run: pnpm check:skill-frame-sync
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 

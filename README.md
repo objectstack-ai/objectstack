@@ -342,7 +342,6 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 | :--- | :--- |
 | [`@objectstack/cli`](packages/cli) | CLI binary (`os` / `objectstack`) — `init`, `dev`, `start`, `serve`, `compile`, `publish`, `validate`, `generate`, `lint`, `doctor` |
 | [`create-objectstack`](packages/create-objectstack) | Project scaffolder (`npx create-objectstack`) |
-| [`objectstack-vscode`](packages/vscode-objectstack) | VS Code extension — autocomplete, validation, diagnostics |
 | [`@object-ui/console`](https://github.com/objectstack-ai/objectui/tree/main/apps/console) | Fork-ready runtime console SPA (lives in objectstack-ai/objectui, served via `@object-ui/console` on npm) |
 | [`@objectstack/account`](apps/account) | Account & identity portal — sign in, organizations, connected apps |
 | [`@objectstack/docs`](apps/docs) | Documentation site (Fumadocs + Next.js) |

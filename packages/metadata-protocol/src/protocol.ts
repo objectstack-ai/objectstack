@@ -21,7 +21,7 @@ import type {
     InstallPackageRequest,
     InstallPackageResponse
 } from '@objectstack/spec/api';
-import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities } from '@objectstack/spec/api';
+import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
@@ -2771,8 +2771,23 @@ export class ObjectStackProtocolImplementation implements
         };
 
         // Build well-known capabilities from registered services.
-        // DiscoverySchema defines capabilities as Record<string, { enabled, features?, description? }>
-        // (hierarchical format). We also keep a flat WellKnownCapabilities for backward compat.
+        //
+        // [#5672] `WellKnownCapabilitiesSchema` is THE capability vocabulary and
+        // `DiscoverySchema.capabilities` is now a closed object over it, so this
+        // literal must answer EVERY key — a capability this host does not
+        // deliver is `enabled: false`, never an absent key (maintainer ruling A,
+        // 2026-08-06). The `WellKnownCapabilities` annotation is what enforces
+        // that at compile time: adding a key to the vocabulary breaks this line
+        // until it is answered here.
+        //
+        // Each key's basis is recorded next to it. Where a capability is backed
+        // by a service slot, the predicate is deliberately the SAME one that
+        // decides whether the route is advertised (`advertisedRoute`/
+        // `unserveable` above) — what we advertise and what we claim cannot
+        // disagree.
+        const capabilityServed = (serviceName: string) =>
+            registeredServices.has(serviceName) && !unserveable(serviceName);
+
         const wellKnown: WellKnownCapabilities = {
             // Comments/chatter are served by the `sys_comment` object via the generic
             // data API (ADR-0052 §5) — not a dedicated service. The capability is true
@@ -2783,7 +2798,18 @@ export class ObjectStackProtocolImplementation implements
             cron: registeredServices.has('job'),
             search: registeredServices.has('search'),
             export: registeredServices.has('automation') || registeredServices.has('queue'),
-            chunkedUpload: registeredServices.has('file-storage'),
+            // [#5672] Serveability-gated, was presence-only. Two reasons, and
+            // the second is the binding one:
+            //   1. `declared === enforced` — a self-declared stub file-storage
+            //      mounts no HTTP surface, so this builder already withholds
+            //      `routes.storage` from it; advertising chunked upload anyway
+            //      promised an upload endpoint that cannot exist.
+            //   2. the runtime dispatcher answers this key `hasFiles`, i.e.
+            //      `isServiceServeable(filesSvc)`. Leaving this one on presence
+            //      would make the two producers give the SAME host opposite
+            //      answers for the SAME key — a new dialect inside the
+            //      vocabulary this issue exists to unify.
+            chunkedUpload: capabilityServed('file-storage'),
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
@@ -2795,12 +2821,45 @@ export class ObjectStackProtocolImplementation implements
             // (ADR-0119 D1: `transaction` is contract-declared, so this probe
             // no longer needs a structural cast to ask the question.)
             transactionalBatch: typeof this.engine?.transaction === 'function',
+
+            // ── Joined the vocabulary with ruling A (#5672) ───────────────────
+            // These six used to be the runtime dispatcher's half of the split.
+            // This builder can answer all of them from the services registry it
+            // already reads, so none of them is a "cannot deliver ⇒ false"
+            // placeholder — they are measured, per key:
+
+            // No host mounts a WS/SSE surface: service-realtime is an in-process
+            // pub/sub bus, which is precisely why SERVICE_CONFIG.realtime
+            // declares `noHttpSurface` and no `routes.realtime` is ever
+            // advertised (ADR-0076 D12, #2462). A literal `false` is the honest
+            // answer here, not a stand-in for one — and it matches the runtime
+            // dispatcher's answer for the same reason, in the same words.
+            websockets: false,
+            // Storage: the `file-storage` slot, gated on serveability rather
+            // than presence — a self-declared stub mounts nothing, and this
+            // builder already withholds `routes.storage` from it.
+            files: capabilityServed('file-storage'),
+            analytics: capabilityServed('analytics'),
+            ai: capabilityServed('ai'),
+            // Slot is `notification` (singular, CoreServiceName); the capability
+            // and the route key are plural. Same slot, three spellings — the
+            // mapping is here so nothing has to guess it.
+            notifications: capabilityServed('notification'),
+            i18n: capabilityServed('i18n'),
         };
 
-        // Convert flat booleans → hierarchical capability objects
-        const capabilities: Record<string, { enabled: boolean; description?: string }> = {};
-        for (const [key, enabled] of Object.entries(wellKnown)) {
-            capabilities[key] = { enabled };
+        // Convert flat booleans → hierarchical capability objects.
+        //
+        // [#5672] Keyed by the vocabulary, not by `string`. The old
+        // `Record<string, …>` was assignable to the open record
+        // `DiscoverySchema.capabilities` used to be; against the closed shape
+        // it no longer is, and that is the closure doing its job — the compiler
+        // now refuses a producer whose capability map is not the whole
+        // vocabulary. Iterating `wellKnown`'s own keys means fullness is
+        // carried over from the annotated literal above rather than re-asserted.
+        const capabilities = {} as Record<keyof WellKnownCapabilities, CapabilityDescriptor>;
+        for (const key of Object.keys(wellKnown) as Array<keyof WellKnownCapabilities>) {
+            capabilities[key] = { enabled: wellKnown[key] };
         }
 
         // [#4828] Locale, derived from the registered i18n service exactly the
@@ -3701,6 +3760,19 @@ export class ObjectStackProtocolImplementation implements
      * `code` is null if no artifact baseline exists; `overlay` is null if
      * no sys_metadata row exists for the requested scope; `effective` is
      * never null when either layer exists.
+     *
+     * [#5707] Those three sentences are ASSERTIONS about what the author
+     * declared, so the method may only make them from a read that happened.
+     * The layers are a 3-LAYER shape (code / overlay / effective), not a
+     * 3-VALUE one: there is no "unknown" spelling for a layer, and the null
+     * that would have to stand in for it already means "not customised". So
+     * an overlay read that failed is reported as a failure, never as a layer.
+     *
+     * @throws {@link metadataStoreUnavailableError} — 503 /
+     *         `SERVICE_UNAVAILABLE`, driver error on `cause`, when the
+     *         `sys_metadata` overlay read fails for any reason other than the
+     *         table not being provisioned yet (which genuinely means "no
+     *         overlay row" and still returns normally).
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -3823,8 +3895,27 @@ export class ObjectStackProtocolImplementation implements
                     overlayScope = 'env';
                 }
             }
-        } catch {
-            // DB unavailable — overlay stays null
+        } catch (error) {
+            // [#5707] The same rule as the four overlay reads in
+            // `getMetaItems` / `getMetaItem` (#5532), on the one overlay read
+            // PR #5705 deliberately did not reach.
+            //
+            // Swallowing here does not answer 404 — it answers something this
+            // method states positively in THREE fields at once: `overlay: null`
+            // ("nothing was ever customised"), `overlayScope: null` ("no scope
+            // holds a row"), and `effective = code` ("what runs today is the
+            // packaged artifact, verbatim"). The whole point of the layered
+            // read is to show an author what they changed; during an outage it
+            // told them they had changed nothing, which is the #5532 error —
+            // an availability failure reported as an authorship fact — landing
+            // in the diff view instead of on a 404.
+            //
+            // The benign case is unchanged and is why this is not a bare
+            // rethrow: an unprovisioned `sys_metadata` genuinely holds no
+            // overlay row, so `overlay: null` / `effective = code` IS the truth
+            // and first boot still renders the code layer.
+            // See {@link rethrowUnlessMetadataStoreUnprovisioned}.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
         const effective: unknown | null = overlay ?? code;

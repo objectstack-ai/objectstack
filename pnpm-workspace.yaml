@@ -26,6 +26,12 @@ onlyBuiltDependencies:
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
 #     multipart field names. Pulled 4.0.5 transitively through @vscode/vsce;
 #     force the patched >=4.0.6 line. Fails `pnpm audit --audit-level=high` (CI).
+#     CONSUMER GONE (#5825): retiring packages/vscode-objectstack took @vscode/vsce
+#     with it, and form-data no longer resolves anywhere in the tree — this
+#     selector now matches nothing. Kept as defense-in-depth so a future
+#     transitive reintroduction lands on the patched line instead of silently
+#     re-arming the advisory; dropping a security pin is its own decision, not a
+#     rider on a package retirement. Retire it deliberately or not at all.
 #   - undici: GHSA-vmh5-mc38-953g (high) — TLS cert validation bypass via
 #     dropped requestTls in SOCKS5 ProxyAgent. Pulled 7.27.2 through
 #     @vscode/vsce > cheerio (declares undici ^7.19.0); force the patched
@@ -37,6 +43,11 @@ onlyBuiltDependencies:
 #     an exclusive upper bound stops covering the very version it pinned once
 #     that version is itself flagged, so the selector AND the target must move
 #     together — same shape as the brace-expansion 5.0.8 → 5.0.9 lift (#4945).
+#     CONSUMER GONE (#5825): cheerio came in only through @vscode/vsce, which
+#     left with packages/vscode-objectstack. The two undici copies that remain —
+#     @ai-sdk/provider-utils' 7.29.0 and jsdom's 8.9.0 — are both OUTSIDE this
+#     selector's `<7.29.0` bound, so it now matches nothing. Kept as
+#     defense-in-depth on the same reasoning as form-data above.
 #     Still transitive-only via cheerio; @ai-sdk/provider-utils already resolves
 #     7.29.0, so the two dedupe. jsdom's undici 8.9.0 is outside the selector
 #     and unaffected.
@@ -119,7 +130,8 @@ overrides:
   # brace-expansion GHSA-mh99-v99m-4gvg (via minimatch@10.x), then GHSA-rgw5-rvv9-x895
   # (7.5 high) which affects 5.0.8 itself — the version the first pin landed on — so the
   # bound moves to <5.0.9. Still transitive-only through minimatch (ts-morph, eslint,
-  # @typescript-eslint, glob, @vscode/vsce, archiver); sharp GHSA-f88m-g3jw-g9cj
+  # @typescript-eslint, glob, archiver — @vscode/vsce left with #5825's retirement,
+  # the rest still pull it, so this pin stays live); sharp GHSA-f88m-g3jw-g9cj
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
   # 7.x fix — fumadocs-core peer allows 8.x and docs uses the next adapter, so jump to 8;
   # @sveltejs/kit GHSA-866w-xmhq-wj7x/GHSA-wqjv-9729-c5q2 (better-auth optional peer);

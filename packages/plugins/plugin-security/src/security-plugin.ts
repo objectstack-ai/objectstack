@@ -2398,6 +2398,33 @@ export class SecurityPlugin implements Plugin {
     }
   }
 
+  /**
+   * The read scope for `object` under `context` — the filter the analytics /
+   * raw-SQL path ANDs into its query, being the one surface that bypasses the
+   * engine and so has no other source of scope.
+   *
+   * Its contract is agreement: this must be **the same filter the engine
+   * middleware ANDs into every find**. That chain injects THREE things, and
+   * this method composes the same three:
+   *
+   *   1. {@link computeRlsFilter} — tenant Layer 0 + RLS policies;
+   *   2. {@link computeControlledByParentFilter} — ADR-0055, `masterFK IN
+   *      (accessible master ids)`;
+   *   3. {@link resolveSharingReadFilter} — plugin-sharing's OWD / record-share
+   *      visibility filter, contributed by the sibling middleware.
+   *
+   * Each layer has been missing here at some point, and each absence had the
+   * same shape: a caller who cannot read a row through `/data` could still
+   * `COUNT(*)` / `GROUP BY` it through `/analytics`. Layer 3 was #4467; layer 2
+   * was #5815 — for a `controlled_by_parent` object, halves 1 and 3 BOTH
+   * commonly return `null` by design (such an object carries no authored RLS,
+   * and maps to `public` in plugin-sharing's `effectiveSharingModel`), so the
+   * composed scope was `undefined` — no predicate at all over what are usually
+   * line-item rows.
+   *
+   * Fails CLOSED on any resolution failure: a dropped predicate here is the
+   * leak, so an unresolvable layer denies (zero rows) rather than widening.
+   */
   async getReadFilter(
     object: string,
     context?: any,
@@ -2427,6 +2454,11 @@ export class SecurityPlugin implements Plugin {
     // already 401s without a token). Mirrors the middleware's early `return next()`
     // — which is the RLS middleware's early exit only, so the sharing predicate
     // resolved above still applies.
+    // [#5815] The controlled_by_parent derivation is deliberately NOT resolved
+    // ahead of this branch the way the sharing predicate is: it stands down
+    // without a `userId` (`computeControlledByParentFilter` returns null), and
+    // this branch is reached only when there is none — so the middleware adds
+    // nothing here either. Agreement holds by both sides standing down.
     if (positions.length === 0 && explicit.length === 0 && !context?.userId) {
       return sharingFilter ?? undefined;
     }
@@ -2454,10 +2486,23 @@ export class SecurityPlugin implements Plugin {
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-      // [#4467] RLS AND sharing — the same AND-composition the two middlewares
-      // achieve by both writing into `ast.where`. Either half may be absent;
-      // `andComposeLayers` returns the other, or null when neither constrains.
-      return andComposeLayers(filter, sharingFilter) ?? undefined;
+      // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
+      // for a read. Resolved from the sets already resolved above, exactly as
+      // the middleware feeds it its own, so the derived master id set is
+      // computed for this identity once and never re-resolved. It stands down
+      // (null) for any object that is not controlled_by_parent, and it is
+      // internally fail-closed; a THROW propagates to the catch below, which
+      // denies — the same posture as the surrounding layers.
+      const cbpFilter = await this.computeControlledByParentFilter(
+        permissionSets,
+        object,
+        context,
+      );
+      // [#4467] RLS AND controlled-by-parent AND sharing — the same
+      // AND-composition the middlewares achieve by all writing into `ast.where`.
+      // Any layer may be absent; `andComposeLayers` returns the others, or null
+      // when none constrains.
+      return andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter) ?? undefined;
     } catch (e) {
       // Fail CLOSED — a resolution failure must deny (zero rows), never expose
       // every tenant's data through the raw-SQL analytics path.
