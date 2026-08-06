@@ -18,6 +18,8 @@
  * staring at an unchanged page.
  */
 
+import { injectedColumnsFor } from './system-fields.js';
+
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
 export const FIELD_GROUP_SHADOWED = 'field-group-shadowed';
@@ -70,7 +72,22 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
     const fields = (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))
       ? (obj.fields as Record<string, AnyRec | undefined>)
       : {};
-    const fieldNames = new Set(Object.keys(fields));
+    // Declared fields UNION the system columns the platform injects on THIS
+    // object (#5378). A semantic role pointing at an injected-only column
+    // (`highlightFields: ['owner_id']`, `stageField: 'owner_id'`) is a live
+    // pointer — the column exists at render time — so warning that it "is not a
+    // field on this object" was a false finding, and one with teeth: it pushed
+    // apps into re-declaring system columns just to silence it (hotcrm#548, 6
+    // objects). Same conditional derivation the registry's `applySystemFields`
+    // consumes, so `ownership: 'none'` still has no `owner_id` to point at and
+    // still warns.
+    //
+    // Only the EXISTENCE question widens. `fields` itself stays declared-only
+    // below, which is what the group rules (a/b/d) want: an injected column
+    // carries no `group`, is filtered out of default layouts anyway
+    // (`FIELD_GROUP_SYSTEM_FIELDS`), and must not count as a group member or a
+    // title candidate.
+    const fieldNames = new Set([...Object.keys(fields), ...injectedColumnsFor(obj)]);
 
     // ── (a) Field.group → declared fieldGroups[].key ──
     const declaredGroups = new Set(
