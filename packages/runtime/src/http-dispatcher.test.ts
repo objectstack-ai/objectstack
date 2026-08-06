@@ -3643,6 +3643,28 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     expect(session.tenantId).toBeUndefined();
   });
 
+  it('hands the body its positions under the canonical `positions`, with `roles` as the equal deprecated alias (#5613)', async () => {
+    // Verified through a REAL dispatch rather than by calling the builder — the
+    // ADR-0087 semantic migration `action-session-roles-to-positions` asks for
+    // exactly this shape of evidence: invoke an action as a caller holding
+    // positions, then assert what the BODY observed.
+    const { dispatcher, executeAction, ctx } = captureCtx({
+      userId: 'user_42',
+      positions: ['sales_rep', 'org_admin'],
+      tenantId: 'org_acme',
+    });
+    await dispatcher.handleActions('/lead/convert', 'POST', {}, ctx);
+    const session = actionSession(executeAction);
+    // The canonical key an action body should read (ADR-0090 D3 vocabulary).
+    expect(session.positions).toEqual(['sales_rep', 'org_admin']);
+    // The alias, dual-emitted with the SAME value for the length of the
+    // deprecation window — which is what makes migrating a body a change of
+    // key and nothing else. This assertion is removed by the change that
+    // stops producing `roles`, not before.
+    expect(session.roles).toEqual(session.positions);
+    expect(Object.keys(session).sort()).toEqual(['organizationId', 'positions', 'roles', 'userId']);
+  });
+
   it('falls back to a `system` principal for a SELF-INVOKED call — the anonymous door is 401 now (#5519)', async () => {
     // REPLACED, not re-spelled. This was driven with NO execution context —
     // the shape an anonymous HTTP request has — and asserted over the action

@@ -9,6 +9,7 @@ export type {
   ScriptOrigin,
   ScriptResult,
   ScriptRunOptions,
+  ScriptSession,
 } from './script-runner.js';
 export { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
 export type { QuickJSScriptRunnerOptions } from './quickjs-runner.js';

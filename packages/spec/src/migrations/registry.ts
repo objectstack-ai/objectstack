@@ -992,6 +992,18 @@ const step17: MigrationStep = {
     + '`session.isSystem` in the hook, and judge PRIVILEGE through the security service, which '
     + 'reads capability grants (`permissions`), placements (`positions`) and the derived posture '
     + 'off the execution context.\n\n'
+    + 'The same enforce-or-remove reading reaches the storage contract: '
+    + '`IStorageService.list(prefix)` is removed (#5540, analysis #5266). It had no '
+    + 'consumer — the only in-repo call site was a proxy pass-through — and the two shipped '
+    + 'adapters answered it with two different, silently incomplete semantics: the local '
+    + 'adapter listed a single level and reported directories as files, the S3 adapter '
+    + 'recursed and stopped at 1000 objects without reading `IsTruncated` / '
+    + '`ContinuationToken`. Enumerating a prefix without a cursor is the wrong signature to '
+    + 'inherit, so nothing replaces it in place: query the file records you wrote, and let a '
+    + 'real caller bring back a cursor-shaped `list(prefix, { cursor, limit })` with '
+    + 'adapter-conformance cases behind it. Same shape and same disposition as the '
+    + '`findStream` retirement above — a TS/API contract, no stored source, no tombstone, '
+    + 'tsc at the call site.\n\n'
     + 'Finally it retires the two inert `IndexSchema` keys, `indexes[].type` and '
     + '`indexes[].partial` (#5248, #4943). Neither ever had a DDL consumer: '
     + '`SqlDriver.syncDeclaredIndexes` creates declared indexes through knex\'s `table.index()` / '
@@ -1954,6 +1966,57 @@ const step17: MigrationStep = {
         + 'be migrated and verified before the alias is removed; after it, `roles` is absent '
         + 'and a body still reading it sees `undefined` — which is why the read must be moved '
         + 'inside the window rather than at its close.',
+    },
+    {
+      id: 'storage-service-list-retired',
+      surface: 'contracts.IStorageService.list',
+      replacement:
+        'no replacement — track the keys you wrote (sys_file / file-reference records, '
+        + 'queryable through ObjectQL with real pagination) instead of enumerating the bucket',
+      reason:
+        '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
+        + 'directory/prefix", and the two shipped adapters answered the same call with two '
+        + 'different semantics — both of them silently incomplete. `LocalStorageAdapter.list` '
+        + 'was a single-level `readdir`, so a nested key `a/b/c` was invisible under '
+        + '`list(\'a\')` (only `a/b` came back), and a subdirectory that `stat` succeeded on '
+        + 'was pushed into the result as a file, yielding a `StorageFileInfo` whose `size` is '
+        + 'a directory inode and which cannot be downloaded at all. `S3StorageAdapter.list` '
+        + 'was RECURSIVE (`ListObjectsV2` matches the whole key) and read neither '
+        + '`IsTruncated` nor `ContinuationToken`, so past 1000 objects the "all files" a '
+        + 'caller received was the first page, with no signal. One contract method, two '
+        + 'dialects, both quietly incomplete — and the first feature that genuinely needed to '
+        + 'enumerate a prefix (backup, orphan sweep, migration audit) would have got two '
+        + 'different answers on two deployments without an error on either. #5172 was nearly '
+        + 'that feature: it planned to drive attachment reclamation off '
+        + '`list(EMAIL_ATTACHMENT_KEY_PREFIX)`, found the local adapter could not see one '
+        + 'level down, and switched to queue-driven deferred work instead. Nothing consumed '
+        + 'it afterwards: the only in-repo call site was the `SwappableStorageService` '
+        + 'pass-through (which itself rejects when the active adapter has no `list`), and '
+        + 'REST, CLI and the storage routes never called it. Remove was chosen over '
+        + 'align-and-tighten (maintainer ruling, 2026-08-05, #5266): aligning would grow a '
+        + 'conformance surface nobody walks, while a prefix listing that cannot paginate is '
+        + 'the wrong signature to inherit — when a real caller needs enumeration it returns '
+        + 'cursor-shaped, `list(prefix, { cursor, limit })`, with adapter-conformance cases '
+        + '(nested keys, directory entries, >1000 objects) proving both backends agree. This '
+        + 'is a TS/API contract surface — a storage adapter is CODE, never stack metadata — '
+        + 'so there is no source for the chain to rewrite, and deliberately no schema '
+        + 'tombstone: nothing ever ran an adapter through a `.parse()`, so a prescription '
+        + 'there would reach no one. The enforced channel is tsc, and it reports at the call '
+        + 'site. Same disposition, and the same reason, as '
+        + '`data-driver-find-stream-retired` (#4484). ADR-0049 / ADR-0087, #5540 '
+        + '(analysis #5266).',
+      acceptanceCriteria:
+        'No code calls `storage.list(...)` on the `file-storage` service or on any '
+        + '`IStorageService` value. Code that needed "which files are under this prefix" '
+        + 'reads the records it wrote — `sys_file` / file-reference rows carry the storage '
+        + 'key and page deterministically through ObjectQL — rather than asking the bucket, '
+        + 'which is also the only form that stays correct past 1000 objects and across both '
+        + 'adapters. An adapter that still IMPLEMENTS `list` keeps compiling (an extra '
+        + 'method is not an error on a class) and is simply unreachable through the '
+        + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
+        + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
+        + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
+        + 'one in `@objectstack/service-storage` goes with the adapters (#5541).',
     },
   ],
 };

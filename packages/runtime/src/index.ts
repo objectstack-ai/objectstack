@@ -146,6 +146,7 @@ export type {
   ScriptOrigin,
   ScriptResult,
   ScriptRunOptions,
+  ScriptSession,
   QuickJSScriptRunnerOptions,
 } from './sandbox/index.js';
 
