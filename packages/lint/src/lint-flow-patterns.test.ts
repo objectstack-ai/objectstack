@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema } from '@objectstack/spec/automation';
 import {
   lintFlowPatterns,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
@@ -473,7 +473,21 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
    * so the widening cannot drift the wording authors already see.
    */
   describe('#5633 — descends into nested regions for the data-node evidence', () => {
-    /** The canonical scheduled sweep: `get_record` at the top, the write in the loop body. */
+    /** The canonical scheduled sweep: the write lives in the loop BODY. */
+    const loopConfig = (bodyNodeType = 'update_record') => ({
+      collection: '{vars.rows}',
+      iteratorVariable: 'row',
+      body: {
+        nodes: [{
+          id: 'touch',
+          type: bodyNodeType,
+          label: 'Touch Row',
+          config: { objectName: 'thing', recordId: '{row.id}', fields: { seen: true } },
+        }],
+        edges: [],
+      },
+    });
+
     const sweepFlow = (opts: { runAs?: 'system' | 'user'; bodyNodeType?: string } = {}) => ({
       flows: [{
         name: 'nightly_sweep',
@@ -481,20 +495,7 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
         ...(opts.runAs ? { runAs: opts.runAs } : {}),
         nodes: [
           { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
-          {
-            id: 'loop_rows', type: 'loop',
-            config: {
-              collection: '{vars.rows}', itemVar: 'row',
-              body: {
-                nodes: [{
-                  id: 'touch',
-                  type: opts.bodyNodeType ?? 'update_record',
-                  config: { objectName: 'thing', recordId: '{row.id}', fields: { seen: true } },
-                }],
-                edges: [],
-              },
-            },
-          },
+          { id: 'loop_rows', type: 'loop', config: loopConfig(opts.bodyNodeType) },
           { id: 'end', type: 'end' },
         ],
         edges: [
@@ -502,6 +503,33 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
           { id: 'e2', source: 'loop_rows', target: 'end' },
         ],
       }],
+    });
+
+    /**
+     * The container these fixtures nest the write inside must be a shape the
+     * schema ACCEPTS, or the rule is only proven on metadata that never reaches
+     * it — the #4966 trap, one container down (see the `TimeRelativeTriggerSchema`
+     * pin above for the same guard on a trigger descriptor).
+     *
+     * This one is not hypothetical: the item-binding key here is
+     * `iteratorVariable`, and `LoopConfigSchema` is a `strictObject`, so the
+     * plausible-looking `itemVar` is reported as an `unrecognized_key` rather
+     * than quietly ignored (#4001). A fixture spelling it would still exercise
+     * this rule — region collection reads `config.body`, which is unaffected —
+     * so nothing here would have gone red while the fixture taught a `loop` the
+     * author cannot actually write.
+     *
+     * Full `safeParse` green rather than merely "no unrecognized keys", because
+     * what this rule judges is a VALUE verdict (`runAs` against the trigger
+     * kind), and its evidence is a node that must really be reachable inside a
+     * really-authorable container.
+     */
+    it('pins the loop container against the schema — the fixture must be authorable', () => {
+      const parsed = LoopConfigSchema.safeParse(loopConfig());
+      expect(parsed.success).toBe(true);
+      // And the near-miss spelling really is rejected, so the pin has teeth.
+      const near = LoopConfigSchema.safeParse({ ...loopConfig(), iteratorVariable: undefined, itemVar: 'row' });
+      expect(near.success).toBe(false);
     });
 
     it('flags a loop-body write — the shape that passed the build and is refused at run time', () => {
@@ -557,14 +585,14 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
             {
               id: 'loop_rows', type: 'loop',
               config: {
-                collection: '{vars.rows}', itemVar: 'row',
+                collection: '{vars.rows}', iteratorVariable: 'row',
                 body: {
                   nodes: [{
-                    id: 'loop_children', type: 'loop',
+                    id: 'loop_children', type: 'loop', label: 'Loop Children',
                     config: {
-                      collection: '{row.children}', itemVar: 'child',
+                      collection: '{row.children}', iteratorVariable: 'child',
                       body: {
-                        nodes: [{ id: 'touch', type: 'create_record', config: { objectName: 'thing', fields: { a: 1 } } }],
+                        nodes: [{ id: 'touch', type: 'create_record', label: 'Create', config: { objectName: 'thing', fields: { a: 1 } } }],
                         edges: [],
                       },
                     },
@@ -597,8 +625,8 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
               id: 'fan', type: 'parallel',
               config: {
                 branches: [
-                  { name: 'writes', nodes: [{ id: 'w1', type: 'update_record', config: { objectName: 'a' } }], edges: [] },
-                  { name: 'deletes', nodes: [{ id: 'w2', type: 'delete_record', config: { objectName: 'b' } }], edges: [] },
+                  { name: 'writes', nodes: [{ id: 'w1', type: 'update_record', label: 'Write', config: { objectName: 'a' } }], edges: [] },
+                  { name: 'deletes', nodes: [{ id: 'w2', type: 'delete_record', label: 'Delete', config: { objectName: 'b' } }], edges: [] },
                 ],
               },
             },
