@@ -16,7 +16,12 @@
 // undeclared.
 
 import { describe, it, expect, vi } from 'vitest';
-import { ApiRoutesSchema, DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
+import {
+  ApiRoutesSchema,
+  DiscoverySchema,
+  GetDiscoveryResponseSchema,
+  WELL_KNOWN_CAPABILITY_KEYS,
+} from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
@@ -41,6 +46,11 @@ function declaredResponseKeys(): Set<string> {
  */
 function declaredRouteKeys(): Set<string> {
   return new Set(Object.keys((ApiRoutesSchema as any).shape));
+}
+
+/** [#5672] The capability vocabulary, derived from the spec — never hand-listed. */
+function declaredCapabilityKeys(): Set<string> {
+  return new Set(WELL_KNOWN_CAPABILITY_KEYS as readonly string[]);
 }
 
 function createMockServer() {
@@ -192,6 +202,54 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
     });
     // Still schema-clean with every `scoping` sub-key populated.
     expect(DiscoverySchema.safeParse(body).success).toBe(true);
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // [#5672] Fullness — on the COMPOSED shape, which is the one a browser gets
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // This producer composes over `getDiscovery()` and then overwrites exactly
+  // one capability entry (`transactionalBatch`, ANDed with `api.enableBatch`).
+  // So the vocabulary reaches the wire through it, and the one entry it
+  // rewrites is the one most at risk of being rewritten into a different shape
+  // — `caps.transactionalBatch = { enabled, description }` is a whole-entry
+  // assignment, not a merge.
+  describe('[#5672] the capability vocabulary survives composition, in full', () => {
+    it('emits EVERY declared capability key on the composed body', async () => {
+      const body = await invoke(discoveryHandler());
+
+      const missing = [...declaredCapabilityKeys()].filter(
+        k => !Object.prototype.hasOwnProperty.call(body.capabilities, k),
+      );
+      expect(missing, 'capability keys the composed REST /discovery body fails to emit').toEqual([]);
+    });
+
+    it('reports every capability with a boolean `enabled`', async () => {
+      const body = await invoke(discoveryHandler());
+
+      const nonBoolean = Object.entries(body.capabilities as Record<string, any>)
+        .filter(([, v]) => typeof v?.enabled !== 'boolean')
+        .map(([k, v]) => `${k}: ${typeof v?.enabled}`);
+      expect(nonBoolean, 'capability entries whose `enabled` is not a boolean').toEqual([]);
+    });
+
+    it('emits NO capability key the vocabulary does not declare', async () => {
+      const body = await invoke(discoveryHandler());
+
+      const declared = declaredCapabilityKeys();
+      const undeclared = Object.keys(body.capabilities).filter(k => !declared.has(k));
+      expect(undeclared, 'undeclared keys inside `capabilities` on the composed body').toEqual([]);
+    });
+
+    it("the REST layer's own AND rewrites `transactionalBatch` without dropping it out of the vocabulary", async () => {
+      const body = await invoke(discoveryHandler());
+
+      // Anti-vacuity for the three above: the composition really does run here
+      // (the entry carries the REST layer's description, which `getDiscovery()`
+      // never attaches), and it still lands as a well-formed vocabulary entry.
+      expect(typeof body.capabilities.transactionalBatch.enabled).toBe('boolean');
+      expect(body.capabilities.transactionalBatch.description).toMatch(/Atomic cross-object batch/);
+    });
   });
 
   it('keeps `capabilities` as the one capability key — no `features`, no `endpoints`', async () => {
