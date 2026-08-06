@@ -171,10 +171,15 @@ jumping several majors at once, whom the load-path conversion no longer covers.
 
 ## 3. Register the surface (ADR-0087 D2/D3) — or the gate stops you
 
-`scripts/build-schemas.ts` gate (b) fails any newly-tombstoned key with no
-registered migration surface: the tombstone is audible only to whoever *hits*
-it, while `spec-changes.json`, the generated upgrade guide and the
-`spec_changes` MCP tool are the primary channel and would stay empty.
+`scripts/build-schemas.ts` gate (b) fails any newly-tombstoned key that is not
+registered by its **exact** `${defKey}:${name}` in `RETIRED_KEYS_BY_MAJOR`: the
+tombstone is audible only to whoever *hits* it, while `spec-changes.json`, the
+generated upgrade guide and the `spec_changes` MCP tool are the primary channel
+and would stay empty.
+
+⚠ **This is two separate obligations, and only one of them is a string match.**
+The registry entry is what the gate reads; the conversion is what a consumer
+follows. Write both.
 
 - [ ] **A `MetadataConversion`** in `packages/spec/src/conversions/registry.ts`:
       kebab-case `id` ending `-removed`, `toMajor`, one
@@ -183,13 +188,27 @@ it, while `spec-changes.json`, the generated upgrade guide and the
       not the item count. Walkers (`mapCollection`, `mapFlowNodes`, `renameKey`)
       live in `conversions/walk.ts` and are copy-on-write — return the input
       reference untouched when nothing matched.
-- [ ] **`surface` must end with the bare key.** The matcher is
-      `surfaces.some((s) => s.endsWith('.' + key))` after
-      `.flatMap((s) => s.split(' / '))`. Multi-key conversions join clauses with
-      exactly `' / '` (house style since the tool sweep) and **each clause must
-      end with its own key**. Caveat: only the last dotted segment is compared,
-      so the schema name is never checked — `dashboard.aria` would satisfy
-      `ui/FormView:aria`. Don't lean on the gate for attribution.
+- [ ] **A `RETIRED_KEYS_BY_MAJOR` entry** in
+      `packages/spec/src/migrations/registry.ts` — the literal
+      `'<defKey>:<name>'` as `authorable-surface.json` spells it, minus the
+      `[RETIRED]` mark, under this major. This is the string gate (b) reads, by
+      exact set membership; nothing is inferred and nothing radiates from a
+      neighbouring key. The gate's failure prints the line to paste. ⚠ Do **not**
+      add the entry before the tombstone lands: an entry naming a key that is
+      still live fails gate (b2) as a registration nothing consumed.
+      *Why a second table:* until #4659 gate (b) matched the key's **leaf** against
+      every registered `surface` (`endsWith('.' + name)`, all majors, def
+      ignored), so `dashboard.aria` registered `ui/FormView:aria` and protocol
+      11's `flow.node.type` registered any `.type` at all (#4658). The guarantee
+      had lapsed for every common leaf.
+- [ ] **`surface` stays prose — it is no longer matched.** Write it the way an
+      author writes metadata (`flow.nodes[].outputSchema`), which is what the
+      upgrade guide prints. Multi-key conversions still join clauses with exactly
+      `' / '` (house style since the tool sweep). Nothing downstream parses it
+      for attribution any more — that job moved to the entry above. ⚠ One
+      consumer still does read the clauses by leaf: gate (c)'s *aged-out
+      tombstone* proof, which adjudicates retirements older than
+      `RETIRED_KEYS_BY_MAJOR` and could not be moved with it (#5898).
 - [ ] **`retiredFromLoadPath: true`** — for a retirement, always. Two distinct
       justifications, and they are not interchangeable: for a *rename* it means
       "no alias window, deliberately" (the tombstone owns the refusal; the entry
@@ -243,7 +262,7 @@ Work top to bottom; each line has a gate behind it.
       keys from `defineAction`'s input and the snapshot did not change). Its gate
       also lives in a different workflow (`TypeScript Type Check`, not
       `Check Generated Artifacts`) and reads the built `dist/*.d.ts`.
-- [ ] **Conversion + chain step** (§3).
+- [ ] **Conversion + chain step + the exact-key `RETIRED_KEYS_BY_MAJOR` entry** (§3).
 - [ ] **Liveness ledger** — per §2's route table, with `verifiedAt`. Update the
       README's per-type row **and its counts** (that table has drifted badly
       once; regenerate the counts with the python snippet in the README rather

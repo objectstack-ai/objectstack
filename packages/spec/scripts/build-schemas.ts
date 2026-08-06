@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
+import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
@@ -566,17 +566,26 @@ function isRetired(prop: unknown): boolean {
   return !!not && typeof not === 'object' && Object.keys(not).length === 0;
 }
 
-/** Every conversion/migration surface registered across the ADR-0087 registries. */
-function registeredRetirementSurfaces(): string[] {
-  const out: string[] = [];
-  for (const list of Object.values(CONVERSIONS_BY_MAJOR)) {
-    for (const c of list) out.push(c.surface);
-  }
-  for (const step of Object.values(MIGRATIONS_BY_MAJOR)) {
-    for (const sem of step.semantic ?? []) out.push(sem.surface);
+/**
+ * Every authorable key the ADR-0087 registries declare as tombstoned, by exact
+ * `${defKey}:${name}` — carried through declared def renames so an entry
+ * written under the old def name still resolves (same discipline as the
+ * baseline snapshot below).
+ */
+function registeredRetiredKeys(): Map<string, number> {
+  const out = new Map<string, number>(); // key -> earliest major that registered it
+  for (const [major, keys] of Object.entries(RETIRED_KEYS_BY_MAJOR)) {
+    for (const key of keys) {
+      const carried = carryAuthorableKey(key);
+      const prev = out.get(carried);
+      if (prev === undefined || Number(major) < prev) out.set(carried, Number(major));
+    }
   }
   return out;
 }
+
+/** The protocol major this build is: the major any retirement it makes belongs to. */
+const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
 
 const currentKeys = new Map<string, boolean>(); // key -> isRetired
 for (const [defKey, schema] of generatedSchemas) {
@@ -662,20 +671,28 @@ if (surfaceDoc) {
 
   // (b) live → retired: a removal. It must be registered, or the change never
   //     reaches the upgrade guide / `spec_changes` / `migrate meta`.
+  //
+  //     Registration means EXACT set membership in RETIRED_KEYS_BY_MAJOR
+  //     (src/migrations/registry.ts) — the literal `${defKey}:${name}`. Until
+  //     #4659 this check matched the key's LEAF against every conversion
+  //     `surface` in the ADR-0087 registries (`endsWith('.' + name)`, all
+  //     majors, def ignored), so any unrelated registration ending in the same
+  //     leaf registered a tombstone for free: #4658 measured
+  //     `automation/Event:type` passing silently on protocol 11's
+  //     `flow.node.type`, and #5509 widened the vocabulary to `.description`.
+  //     A conversion `surface` is prose addressed to authors
+  //     (`flow.nodes[].outputSchema`) and cannot be mapped back onto a def key,
+  //     so the machine fact moved to its own table instead of being encoded
+  //     into the prose. The conversion is still the PRESCRIPTION consumers
+  //     follow — the message below asks for both.
+  const registeredRetired = registeredRetiredKeys();
   const newlyRetired = [...currentKeys.entries()]
     .filter(([k, retired]) => retired && prev.get(k) === false)
     .map(([k]) => k);
   if (newlyRetired.length > 0) {
-    // A multi-key conversion names its keys as ' / '-separated clauses
-    // (`'flow.active / flow.template / …'` — the house style since the tool
-    // sweep), so split before matching: every clause must still END with the
-    // key, which keeps the check exactly as strict per key as before.
-    const surfaces = registeredRetirementSurfaces().flatMap((s) => s.split(' / '));
-    const unregistered = newlyRetired.filter(
-      (k) => !surfaces.some((s) => s.endsWith('.' + k.split(':')[1])),
-    );
+    const unregistered = newlyRetired.filter((k) => !registeredRetired.has(k));
     if (unregistered.length > 0) {
-      console.error(`\n❌ ${unregistered.length} key(s) were tombstoned with no registered migration:`);
+      console.error(`\n❌ ${unregistered.length} key(s) were tombstoned with no registered retirement:`);
       for (const k of unregistered) console.error(`     - ${k}`);
       console.error(
         `\n   The tombstone makes the removal audible to whoever hits it, but the change\n` +
@@ -683,11 +700,44 @@ if (surfaceDoc) {
         `   (ADR-0087 D4) is a projection of the conversion + migration registries, and the\n` +
         `   generated upgrade guide and the \`spec_changes\` MCP tool are projections of that.\n` +
         `   Without an entry a consumer only learns of this by failing.\n\n` +
-        `   Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
-        `   chain step referencing it) so \`os migrate meta\` rewrites their source.`,
+        `   1. Declare each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR\n` +
+        `      (packages/spec/src/migrations/registry.ts) — copy these lines in:\n\n` +
+        unregistered.map((k) => `        '${k}',\n`).join('') +
+        `\n      under \`${CURRENT_MAJOR}: [ … ]\` (create the major's array if it is the first).\n` +
+        `      Nothing is inferred here: a leaf name matched against unrelated conversion\n` +
+        `      surfaces is what let tombstones register themselves by coincidence (#4659).\n\n` +
+        `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
+        `      chain step referencing it) so \`os migrate meta\` rewrites their source.`,
       );
       process.exit(1);
     }
+  }
+
+  // (b2) The other direction: an entry that registers a key this build still
+  //      emits as LIVE. Nothing consumed that registration — it pre-approves a
+  //      retirement that has not happened, and check (b) would then wave the
+  //      real one through without anyone writing it down. An entry naming a key
+  //      the build no longer emits at all is NOT an error: that is the expected
+  //      steady state once a tombstone ages out and check (c) lets its baseline
+  //      line go (see RETIRED_KEYS_BY_MAJOR's "Lifecycle").
+  const liveButRegistered = [...registeredRetired.entries()].filter(
+    ([k]) => currentKeys.get(k) === false,
+  );
+  if (liveButRegistered.length > 0) {
+    console.error(
+      `\n❌ ${liveButRegistered.length} RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE:`,
+    );
+    for (const [k, major] of liveButRegistered) console.error(`     - ${k}  (registered at major ${major})`);
+    console.error(
+      `\n   RETIRED_KEYS_BY_MAJOR records keys that ARE tombstoned — \`retiredKey()\`, which Zod\n` +
+      `   emits as \`{ "not": {} }\`. These are still writable, so the entry registers a\n` +
+      `   retirement nobody performed, and check (b) above would accept the real tombstone\n` +
+      `   later without it ever being declared.\n\n` +
+      `   Either tombstone the key in its schema (\`retiredKey('<key> was removed in … — use\n` +
+      `   <replacement>. …')\`), or delete the entry from\n` +
+      `   packages/spec/src/migrations/registry.ts.`,
+    );
+    process.exit(1);
   }
 }
 
@@ -722,14 +772,21 @@ if (surfaceDoc) {
 
 /** A tombstone may be deleted once its registration is this many majors old. */
 const TOMBSTONE_AGE_MAJORS = 2;
-const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
 
 /**
  * Every ' / '-separated surface clause registered across the ADR-0087
  * registries, mapped to the EARLIEST major that registered it — the moment the
  * retirement became visible to consumers, which is when its aging clock
- * started. Same clause vocabulary as check (b) above (#4659 tracks the shared
- * leaf-name matching).
+ * started.
+ *
+ * This is now the LAST leaf-name matcher in this file: check (b) above moved to
+ * exact `${defKey}:${name}` membership in RETIRED_KEYS_BY_MAJOR (#4659). Check
+ * (c) cannot follow it there, because it adjudicates tombstones that predate
+ * that table and were deliberately not backfilled into it — so the aging proof
+ * still reads the conversion clauses, leaf and all, and inherits the same
+ * coincidence (an unrelated cluster's `.type` can date a tombstone's clock).
+ * Narrowing it needs the historical mapping #4659 would have had to invent —
+ * all 97 current tombstones predate that table — so it is tracked in #5898.
  */
 function registeredClauseMajors(): Map<string, number> {
   const out = new Map<string, number>();
