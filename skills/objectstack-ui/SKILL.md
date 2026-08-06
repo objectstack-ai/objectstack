@@ -475,7 +475,11 @@ export const CrmApp = App.create({
   name: 'crm_enterprise',
   label: 'Enterprise CRM',
   icon: 'briefcase',
-  defaultAgent: 'sales_copilot',          // optional AI copilot binding
+  // defaultAgent: 'build',                // ADR-0063 §2 — the resolvable set is exactly two
+                                           // platform agents: `ask` (data surface) / `build`
+                                           // (authoring, e.g. Studio). Any other name parses
+                                           // but binds nothing at chat time. A data app like
+                                           // this one omits the key — `ask` is the default.
   // hidden: true,                         // ADR-0045 — drop from the App Switcher but keep
                                            // routable & permission-checked; the shell surfaces
                                            // hidden apps (e.g. `account`) via the avatar menu.
