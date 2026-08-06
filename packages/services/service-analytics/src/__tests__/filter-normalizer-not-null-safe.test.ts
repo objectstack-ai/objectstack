@@ -354,8 +354,16 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // filter excludes. `{$not: {$ne: 'won'}}` means "stage IS won".
       expect(await ids({ $not: { stage: { $ne: 'won' } } })).toEqual(['1']);
       expect(await ids({ $not: { stage: { $nin: ['won'] } } })).toEqual(['1']);
+      // [#5298] The guard now appears TWICE: `nullSafeNegationOperand`'s
+      // `allowNull` arm wraps the field spec, and `fieldLeaves` wraps the `$ne`
+      // leaf itself because the operator is NULL-safe everywhere now, not only
+      // under a `$not`. `X OR (X OR Y)` ≡ `X OR Y`, so the predicate is the one
+      // this case has always asserted — the two id sets above are the guarantee,
+      // and they are unchanged. Asserted as it is actually emitted rather than
+      // trimmed to the prettier form: a pin that describes SQL the compiler does
+      // not produce is how the next reader learns to distrust this file.
       const { sql } = await sqlFor({ $not: { stage: { $ne: 'won' } } });
-      expect(sql).toContain('NOT ((stage IS NULL OR stage != $1))');
+      expect(sql).toContain('NOT ((stage IS NULL OR (stage IS NULL OR stage != $1)))');
     });
 
     it('`$not` of an ordering comparison returns the NULL rows', async () => {
@@ -435,6 +443,103 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       const { sql } = await sqlFor({ $not: { account: { region: 'NA' } } });
       expect(sql).toContain('NOT (("account"."region" IS NOT NULL AND "account"."region" = $1))');
       expect(sql).not.toContain('"deal"."account" IS NOT NULL');
+    });
+  });
+
+  // ── [#5298] The operators that carry their OWN negation ───────────────────
+
+  /**
+   * [#5298] `$ne` / `$nin` / `$notContains` OUTSIDE a `$not`.
+   *
+   * The ruling that finished what #5146 started: an operator that means "not
+   * this" answers TRUE for a column with no value, on every backend. Before
+   * this, the Cube face compiled the bare three-valued forms (`stage != $1`,
+   * `NOT IN`, `NOT LIKE`), each of which is UNKNOWN for a NULL column, so a
+   * `WHERE` dropped exactly the rows the JS backends return.
+   *
+   * The ids are the same ones `driver-sql`'s `sql-driver-not-null-safe.test.ts`,
+   * `formula`'s `matches-filter-not-null-safe.test.ts` and this package's
+   * `read-scope-not-null-safe.test.ts` assert for the same filters — moving one
+   * re-opens the divergence rather than adjusting a local expectation.
+   *
+   * Measured before the fix on this exact fixture (#5977), each answering `2`:
+   * `NativeSQLStrategy`, and the display-SQL echo. The ObjectQL ENGINE column
+   * already answered `2,3,4` — because `driver-sql` guards for itself since
+   * #5962, not because this module did — which is the whole reason the guard
+   * belongs here: three compilers of one tree must not need three copies of one
+   * rule to agree.
+   */
+  describe('[#5298] `$ne` / `$nin` / `$notContains` include the no-value rows', () => {
+    const echo = async (where: unknown): Promise<{ sql: string; params: unknown[] }> =>
+      new ObjectQLStrategy().generateSql(query(where), objectqlCtx);
+
+    it('`$ne` returns the NULL-stage rows — was `2`', async () => {
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
+    });
+
+    it('`$nin` returns them — was `2`', async () => {
+      expect(await ids({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
+    });
+
+    it('`$notContains` returns them — was `2`', async () => {
+      expect(await ids({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
+    });
+
+    it('the guard is an OR expansion, the shape #5962 landed everywhere else', async () => {
+      // Not a dialect equivalent (`IS DISTINCT FROM` / `<=>`): `NOT LIKE` has no
+      // such form, so the family would have needed two shapes. The cost-list
+      // measurement (#5298 §2/§3) found the query plans identical either way.
+      expect((await sqlFor({ stage: { $ne: 'won' } })).sql)
+        .toContain('WHERE (stage IS NULL OR stage != $1)');
+      expect((await sqlFor({ stage: { $nin: ['won'] } })).sql)
+        .toContain('WHERE (stage IS NULL OR stage NOT IN ($1))');
+      expect((await sqlFor({ stage: { $notContains: 'wo' } })).sql)
+        .toContain('WHERE (stage IS NULL OR stage NOT LIKE $1 ESCAPE $2)');
+    });
+
+    it('the ObjectQL path and the display SQL agree with the raw-SQL path', async () => {
+      // The three compilers of this tree, one predicate. The echo matters on its
+      // own: a statement that describes a NARROWER query than the one that ran
+      // sends whoever is debugging "why does this chart show empty rows" after a
+      // predicate the engine never applied (#5333's failure, mirrored).
+      expect(await engineIds({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
+      expect(await engineIds({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
+      expect(await engineIds({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
+      expect((await echo({ stage: { $ne: 'won' } })).sql)
+        .toContain('(stage IS NULL OR stage != $1)');
+    });
+
+    it('positive comparisons take NO guard — the polarity table decides, not a name list', async () => {
+      // A blanket null escape would hand back the rows these filters exclude.
+      // `$eq` / `$in` / `$contains` are the family `nullValueSatisfiesOperator`
+      // answers `false` for, and they compile byte-identically to before.
+      expect((await sqlFor({ stage: { $eq: 'won' } })).sql).toContain('WHERE stage = $1');
+      expect((await sqlFor({ stage: { $in: ['won'] } })).sql).toContain('WHERE stage IN ($1)');
+      expect((await sqlFor({ stage: { $contains: 'wo' } })).sql)
+        .toContain('WHERE stage LIKE $1 ESCAPE $2');
+      expect(await ids({ stage: { $eq: 'won' } })).toEqual(['1']);
+      expect(await ids({ stage: { $contains: 'wo' } })).toEqual(['1']);
+    });
+
+    it('the operators that are already TOTAL are not wrapped either', async () => {
+      // `$ne: null` compiles to `set` (`IS NOT NULL`), which is two-valued by
+      // construction — wrapping it would turn "stage has a value" into a
+      // tautology. `operatorIsNullTotal` is what keeps the two apart, and it
+      // reads the COMPARAND, which is why a hard-coded list of three operator
+      // NAMES would have been wrong here as well as duplicated.
+      expect((await sqlFor({ stage: { $ne: null } })).sql).toContain('WHERE stage IS NOT NULL');
+      expect(await ids({ stage: { $ne: null } })).toEqual(['1', '2']);
+      // An empty `$nin` is the TRUE constant (#5134), also total.
+      expect((await sqlFor({ stage: { $nin: [] } })).sql).toContain('1 = 1');
+      expect(await ids({ stage: { $nin: [] } })).toEqual(ALL);
+    });
+
+    it('a guarded leaf still ANDs with its siblings', async () => {
+      // The guard is ONE conjunct — `(stage IS NULL OR stage != 'won')` — so the
+      // OR binds tighter than the AND the node's keys form. Parenthesised
+      // wrongly, `owner = 'u1'` would have been swallowed into the disjunction
+      // and the filter would have widened instead of narrowing.
+      expect(await ids({ stage: { $ne: 'won' }, owner: 'u1' })).toEqual(['3']);
     });
   });
 
@@ -627,9 +732,12 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(sql).toContain('WHERE stage = $1');
       expect(params).toEqual(['won']);
       expect(await ids({ stage: 'won' })).toEqual(['1']);
-      // Still three-valued OUTSIDE a negation: `!= 'won'` drops the NULL rows.
-      // That divergence from the JS backends is real and out of #5146's scope.
-      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
+      // [#5298] `$ne` outside a negation used to answer `['2']` — three-valued
+      // SQL dropping the NULL rows the JS backends return — and this line
+      // recorded that divergence as "real and out of #5146's scope". #5298 ruled
+      // it, so the answer moved to the JS family's; the cases for the whole
+      // trio are in the `$ne` / `$nin` / `$notContains` block below.
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
       expect(await ids({})).toEqual(ALL);
     });
   });
@@ -714,9 +822,12 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(normalizeAnalyticsFilterTree({ where: { stage: { $eq: '' } } })).toEqual({
         kind: 'leaf', member: 'stage', operator: 'equals', values: [''],
       });
-      // And a non-null comparand of the same operators is untouched.
+      // And a non-null comparand of the same operators is still a VALUE
+      // comparison — `$eq` unchanged, `$ne` answering the JS family's row set
+      // since #5298 (the NULL rows satisfy "is not 'won'"; what stays out is the
+      // reading of `''` as a null predicate, which is what this case guards).
       expect(await ids({ stage: { $eq: 'won' } })).toEqual(['1']);
-      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
     });
 
     it('the ObjectQL path hands the engine a null predicate, not `\'\'`', async () => {

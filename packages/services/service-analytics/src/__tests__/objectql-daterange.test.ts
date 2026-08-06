@@ -307,9 +307,15 @@ describe('ObjectQLStrategy — window ∧ where on one field (#3650)', () => {
       ctx,
     );
 
+    // [#5298] The `$ne` operand arrives NULL-safe: `fieldLeaves` emits it as an
+    // `or` of the null predicate with the comparison, so "stage is not lost"
+    // keeps the rows that have no stage — the answer every other backend gives.
+    // What this case is about is unchanged and still visible: BOTH operands
+    // survive, the second as its own `$and` conjunct rather than overwriting the
+    // bare equality.
     expect(seen[0].filter).toEqual({
       stage: 'won',
-      $and: [{ stage: { $ne: 'lost' } }],
+      $and: [{ $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }],
     });
   });
 });
