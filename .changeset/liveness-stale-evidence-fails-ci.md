@@ -1,7 +1,8 @@
 ---
+"@objectstack/spec": patch
 ---
 
-chore(spec): `check:liveness` 的 stale-evidence 从 `⚠` 升级为 `✗` 判红,摘要行不再把「声明数」当作「解析成功数」(#5623)
+fix(spec): `check:liveness` 的 stale-evidence 从 `⚠` 升级为 `✗` 判红,摘要行不再把「声明数」当作「解析成功数」(#5623)
 
 `live` 判定的语义就是它的 evidence 指针 ——「这个属性有运行时消费者,在这里」。指针指向本仓已不存在的文件时,这条声明就不再可证伪:declared 有,enforced 无。而把它变成这样,只需要一次目录重组或一次改名。
 
@@ -34,4 +35,4 @@ evidence paths: 330 resolved against this checkout, 101 attributed to another re
 
 `check-liveness.test.ts`(新增 8 例)直接 spawn 真脚本断言退出码 —— 这个 bug 从来不是「检查看不见」:它把五条全点名了还是 exit 0,所以只测 `checkEvidence` 的单测全程是绿的。
 
-纯开发脚本 / CI gate 改动,不改任何运行时或可发布的产物,因此用空 frontmatter changeset(不发布任何包)。当前 `main` 上 330 条本仓路径全部解析成功,该 gate 落地即绿。
+脚本本身(`scripts/`)不进 npm 包,但 `packages/spec/liveness/**` **是发布内容**(`package.json` 的 `files` 里有 `liveness`,`npm pack --dry-run` 实测 29 个文件入包,含该目录的 `README.md`)。一个新开始判红的 gate 必须同步它面向作者的文档,否则下一位作者只能靠撞红的 CI 才知道规则变了 —— 所以 README 里那段新的失败语义也随包发出,按 patch 记账,而不是空 frontmatter(空 changeset 是 `changesets/action` 的真实输入,全空集合会静默绿着卡住发布 —— #4898 卡住 17.0.0-rc.2 的就是这个)。当前 `main` 上 330 条本仓路径全部解析成功,该 gate 落地即绿。
