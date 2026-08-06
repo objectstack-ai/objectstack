@@ -277,3 +277,132 @@ describe('[#5532] the benign case and the healthy case are untouched', () => {
         expect(res.item?.label).toBe('Overlaid');
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#5707] The same rule on the LAYERED read — kept in this file on purpose
+// ---------------------------------------------------------------------------
+// `getMetaItemLayered` is a different method and a different read, which is why
+// PR #5705 did not reach it (scope = the issue). It is the same DEFECT, so its
+// coverage lives next to the four reads above: a future edit that re-widens one
+// catch and not the others is then a diff in one file, and the shared
+// `expectStoreUnavailable` keeps the envelope from drifting per-method.
+//
+// What the swallow answered is worse-shaped here than on the singular read. A
+// 404 at least says "I have no item for you"; the layered envelope makes three
+// POSITIVE claims at once, all of them about what the author declared:
+//
+//   overlay: null        → "this item has never been customised"
+//   overlayScope: null   → "no org and no env scope holds a row"
+//   effective === code   → "what runs today is the packaged artifact, verbatim"
+//
+// and it makes them with HTTP 200, so no client can tell. The Studio diff tab
+// exists to answer "what did I change?" — during an outage it answered
+// "nothing", which is #5532's error (an availability failure told as an
+// authorship fact) landing in the diff view instead of on a 404.
+//
+// Reverse verification, direction predicted BEFORE running: ordinary red.
+// Restoring `} catch { /* DB unavailable — overlay stays null */ }` turns the
+// three outage cases below red (they resolve instead of throwing) and leaves
+// the three benign/healthy cases green — that separation is what shows the
+// change is the outage split and not a blanket "layered now throws".
+
+describe('[#5707] the layered read stops painting an outage as "nothing was customised"', () => {
+    /** The registry's artifact baseline — the layer an outage used to promote to `effective`. */
+    const codeBaseline = { name: 'acct', label: 'Account (packaged)' };
+
+    it('throws the same 503 envelope instead of resolving a fabricated 3-layer view', async () => {
+        const err = connectionRefused();
+        const p = new ObjectStackProtocolImplementation(
+            engineThatCannotBeRead(() => err, { acct: codeBaseline }),
+        );
+
+        const caught = await rejection(
+            () => p.getMetaItemLayered({ type: 'object', name: 'acct' } as any),
+        );
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('the two failures that used to render IDENTICALLY are now told apart', async () => {
+        // Same registry, same request, same all-reads-fail engine — only the
+        // error TYPE differs, and before the fix both produced byte-identical
+        // envelopes (`overlay: null`, `overlayScope: null`, `effective = code`,
+        // HTTP 200). That indistinguishability IS the defect: one of them means
+        // "nothing was ever customised", the other means "I could not look".
+        const benign = new ObjectStackProtocolImplementation(
+            engineThatCannotBeRead(missingTable, { acct: codeBaseline }),
+        );
+        const outage = new ObjectStackProtocolImplementation(
+            engineThatCannotBeRead(connectionRefused, { acct: codeBaseline }),
+        );
+
+        const firstBoot: any = await benign.getMetaItemLayered({ type: 'object', name: 'acct' } as any);
+        expect([firstBoot.overlay, firstBoot.overlayScope]).toEqual([null, null]);
+        expect(firstBoot.effective).toBe(firstBoot.code);
+
+        const caught = await rejection(
+            () => outage.getMetaItemLayered({ type: 'object', name: 'acct' } as any),
+        );
+        expect([caught.status, caught.code]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+    });
+
+    it('a failed ORG-scope read does not silently demote to the env row it never got to', async () => {
+        // The org lookup runs first and the env lookup is inside the same
+        // `try`, so the swallow hid BOTH: an env-wide overlay row that was
+        // perfectly readable was reported as "no overlay" because the org read
+        // failed ahead of it.
+        const err = connectionRefused();
+        const engine = engineWithRows([]);
+        engine.findOne = vi.fn(async (_o: string, opts: any) => {
+            if (opts?.where?.organization_id === 'org_acme') throw err;
+            return { type: 'object', name: 'acct', state: 'active', metadata: JSON.stringify({ name: 'acct', label: 'Env overlay' }) };
+        });
+
+        const caught = await rejection(
+            () => p_layered(engine, { type: 'object', name: 'acct', organizationId: 'org_acme' }),
+        );
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('an unprovisioned sys_metadata still renders the code layer (benign, unchanged)', async () => {
+        // First boot: no overlay row EXISTS, so `overlay: null`,
+        // `overlayScope: null` and `effective === code` are the truth — and the
+        // diff tab must keep rendering rather than 503 on every fresh install.
+        const p = new ObjectStackProtocolImplementation(
+            engineThatCannotBeRead(missingTable, { acct: codeBaseline }),
+        );
+
+        const res: any = await p.getMetaItemLayered({ type: 'object', name: 'acct' } as any);
+        expect(res.code).toMatchObject({ label: 'Account (packaged)' });
+        expect(res.overlay).toBeNull();
+        expect(res.overlayScope).toBeNull();
+        expect(res.effective).toBe(res.code);
+    });
+
+    it('an unprovisioned sys_metadata + nothing anywhere is still an all-null envelope, not a 503', async () => {
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(missingTable));
+
+        const res: any = await p.getMetaItemLayered({ type: 'object', name: 'ghost' } as any);
+        expect(res.code).toBeNull();
+        expect(res.overlay).toBeNull();
+        expect(res.effective).toBeNull();
+    });
+
+    it('a healthy store still reports the overlay layer and its scope', async () => {
+        const engine = engineWithRows([], { acct: codeBaseline });
+        engine.findOne = vi.fn(async (_o: string, opts: any) =>
+            (opts?.where?.organization_id === null
+                ? { type: 'object', name: 'acct', state: 'active', metadata: JSON.stringify({ name: 'acct', label: 'Env overlay' }) }
+                : null),
+        );
+
+        const res: any = await p_layered(engine, { type: 'object', name: 'acct' });
+        expect(res.overlay).toMatchObject({ label: 'Env overlay' });
+        expect(res.overlayScope).toBe('env');
+        expect(res.effective).toBe(res.overlay);
+    });
+});
+
+/** `getMetaItemLayered` on a protocol built over `engine` — the call is 3 lines otherwise. */
+function p_layered(engine: any, request: Record<string, unknown>): Promise<any> {
+    return new ObjectStackProtocolImplementation(engine).getMetaItemLayered(request as any);
+}

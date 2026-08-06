@@ -14,111 +14,9 @@ import {
 } from './chart.zod';
 import { ReportChartSchema, ReportSchema } from './report.zod';
 import { REACT_BLOCKS } from './react-blocks';
-import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../kernel/metadata-type-schemas';
-import { ObjectStackSchema } from '../stack.zod';
-
-/**
- * Reachability of a schema from every metadata-type root plus `defineStack`'s
- * `ObjectStackSchema`, by BFS over this build's in-memory Zod graph.
- *
- * Mirrors `computeSurfaceReachability` in `scripts/build-schemas.ts` (the
- * #4650 closure). `derived-clone` counts as reachable: `.extend()` / `.strip()`
- * produce a clone that shares no identity with the original but DOES share its
- * per-property schema instances, which is exactly how `ChartConfigSchema` is
- * reached through `ReportChartSchema`.
- *
- * ⚠️ Identity-keyed, so it must see the REAL schema instances. `lazySchema`
- * returns a Proxy unless `OS_EAGER_SCHEMAS=1`, and comparing a Proxy against
- * the instance stored in the graph reports every root as unreachable — which
- * is precisely how the first run of this measurement produced three failing
- * positive controls. Hence the resolve step.
- */
-function reachableFromMetadataRoots(): (schema: unknown) => boolean {
-  // Identity is the schema's `_zod.def` OBJECT, never the schema binding.
-  // `lazySchema` hands out a Proxy unless `OS_EAGER_SCHEMAS=1`, and the graph
-  // holds the real instances — so comparing bindings reports every root as
-  // unreachable. That is not hypothetical: it is what the first run of this
-  // assertion did, and the positive controls above are the only reason it was
-  // caught instead of shipping as a green that proved nothing. `def` survives
-  // the Proxy (the `_zod` facade delegates to the real internals), so it is
-  // the one stable key for both identities.
-  const defOf = (s: unknown): unknown => (s as { _zod?: { def?: unknown } })?._zod?.def;
-
-  const childrenOf = (node: unknown): unknown[] => {
-    const out: unknown[] = [];
-    const seen = new Set<unknown>();
-    const walk = (v: unknown): void => {
-      // `typeof v !== 'object'` alone is WRONG here and silently halves the
-      // graph: `lazySchema`'s Proxy target is `function lazyZod() {}`, so every
-      // lazy schema is `typeof 'function'`. Skipping those made the BFS stop at
-      // the first lazy node and report the whole chart family unreachable —
-      // caught only because the positive controls above went red.
-      // (`build-schemas.ts`'s equivalent walk never hit this: it runs under
-      // `OS_EAGER_SCHEMAS=1`, where there are no proxies at all.)
-      if (v === null || (typeof v !== 'object' && typeof v !== 'function') || seen.has(v)) return;
-      seen.add(v);
-      if (defOf(v)) { out.push(v); return; }
-      if (Array.isArray(v)) { for (const x of v) walk(x); return; }
-      if (v instanceof Map) { for (const x of v.values()) walk(x); return; }
-      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
-    };
-    walk(defOf(node));
-    return out;
-  };
-  const shapeOf = (node: unknown): Record<string, unknown> | null => {
-    const def = defOf(node) as { type?: string; shape?: Record<string, unknown> } | undefined;
-    return def?.type === 'object' && def.shape ? def.shape : null;
-  };
-
-  const roots: unknown[] = [];
-  for (const type of listMetadataTypeSchemaTypes()) {
-    const s = getMetadataTypeSchema(type);
-    if (s) roots.push(s);
-  }
-  roots.push(ObjectStackSchema);
-
-  const visitedDefs = new Set<unknown>();
-  const visitedNodes: unknown[] = [];
-  const queue = [...roots];
-  while (queue.length > 0) {
-    const node = queue.pop();
-    const def = defOf(node);
-    if (!def || visitedDefs.has(def)) continue;
-    visitedDefs.add(def);
-    visitedNodes.push(node);
-    for (const child of childrenOf(node)) queue.push(child);
-  }
-
-  // (propName → prop def) pairs of every visited object node — the bridge that
-  // recognises a derived clone (`.extend()` / `.strip()` share no identity with
-  // the original but DO share its per-property schema instances, which is how
-  // `ChartConfigSchema` is reached through `ReportChartSchema`).
-  const bridged = new Map<unknown, Set<string>>();
-  for (const node of visitedNodes) {
-    const shape = shapeOf(node);
-    if (!shape) continue;
-    for (const [name, prop] of Object.entries(shape)) {
-      const d = defOf(prop);
-      if (!d) continue;
-      let names = bridged.get(d);
-      if (!names) { names = new Set<string>(); bridged.set(d, names); }
-      names.add(name);
-    }
-  }
-
-  return (schema: unknown): boolean => {
-    const def = defOf(schema);
-    if (!def) return false;
-    if (visitedDefs.has(def)) return true;
-    const shape = shapeOf(schema);
-    if (!shape) return false;
-    for (const [name, prop] of Object.entries(shape)) {
-      const d = defOf(prop);
-      if (d && bridged.get(d)?.has(name)) return true;
-    }
-    return false;
-  };
-}
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { measureDoors } from './door-reachability.testkit';
+import { z } from 'zod';
 
 describe('ChartTypeSchema', () => {
   it('should accept all comparison chart types', () => {
@@ -563,21 +461,46 @@ describe('#4001 批 15 — the two chart sites deliberately LEFT OPEN (measured,
     // closure `build-schemas.ts` uses for the #4650 deletion check — NOT a
     // string search over a serialized schema, which cannot see a shape at all
     // and would pass no matter what (the vacuous-green this campaign keeps
-    // paying for). The positive controls below are what prove that.
-    const reachable = reachableFromMetadataRoots();
+    // paying for). The controls below are what prove that.
+    //
+    // ⚠️ #5056: this file used to carry its OWN copy of that walk, and the copy
+    // kept the defective `any one shared property ⇒ derived clone` bridge after
+    // the shared walker had been fixed to a whole-shape overlap ratio. One
+    // implementation now, in `door-reachability.testkit.ts`, whose own controls
+    // live in `door-reachability.testkit.test.ts`.
+    const { verdict, nodeCount, rootCount } = measureDoors();
 
-    // Positive controls, in the SAME run: the five closed sites of this file
-    // resolve. An instrument that says "unreachable" to everything is broken,
-    // not informative.
-    expect(reachable(ChartConfigSchema), 'positive control').toBe(true);
-    expect(reachable(ChartAxisSchema), 'positive control').toBe(true);
-    expect(reachable(ChartSeriesSchema), 'positive control').toBe(true);
-    expect(reachable(ChartAnnotationSchema), 'positive control').toBe(true);
-    expect(reachable(ChartInteractionSchema), 'positive control').toBe(true);
+    // Controls FIRST, in the SAME run. An instrument that reached nothing at
+    // all produces the same output as a correct "no door" verdict.
+    expect(rootCount, 'roots must include every metadata type plus ObjectStackSchema').toBeGreaterThan(20);
+    expect(nodeCount, 'the graph must actually have been walked').toBeGreaterThan(1000);
+
+    // Positive controls: the five closed sites of this file resolve.
+    expect(verdict(ChartConfigSchema), 'positive control').toBe('direct');
+    expect(verdict(ChartAxisSchema), 'positive control').toBe('direct');
+    expect(verdict(ChartSeriesSchema), 'positive control').toBe('direct');
+    expect(verdict(ChartAnnotationSchema), 'positive control').toBe('direct');
+    expect(verdict(ChartInteractionSchema), 'positive control').toBe('direct');
+
+    // Negative control: a shape this graph has never seen must stay out.
+    expect(verdict(z.object({ osChartProbe: z.string() })), 'negative control').toBe('unreachable');
 
     // The measurement itself.
-    expect(reachable(ChartAggregateSchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe(false);
-    expect(reachable(ChartGroupBySchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe(false);
+    expect(verdict(ChartAggregateSchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe('unreachable');
+    expect(verdict(ChartGroupBySchema), 'a carrier key would make this reachable — re-read chart.zod.ts').toBe('unreachable');
+  });
+
+  it('a synthetic carrier flips both — the verdict is the graph, not the walker', () => {
+    // The third control #5056 requires and this file never had. Without it the
+    // assertion above is satisfiable by a walker that finds no doors anywhere,
+    // which is the vacuous green 批 15 shipped once already.
+    const carrier = z.object({
+      aggregate: ChartAggregateSchema,
+      groupBy: ChartGroupBySchema,
+    });
+    const { verdict } = measureDoors([carrier]);
+    expect(verdict(ChartAggregateSchema), 'must become reachable once something carries it').toBe('direct');
+    expect(verdict(ChartGroupBySchema), 'must become reachable once something carries it').toBe('direct');
   });
 });
 

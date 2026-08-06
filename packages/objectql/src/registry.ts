@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
+import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
@@ -233,6 +234,17 @@ export interface SchemaRegistryOptions {
  *     opt-out is harmless (a spare nullable column), whereas forgetting to
  *     ADD ownership — the failure mode we are eliminating — silently breaks
  *     every owner-keyed feature.
+ *   - `owning_business_unit_id` — [ADR-0117 D1] record-level ORG-UNIT
+ *     ownership (lookup to `sys_business_unit`): the tier between `owner_id`
+ *     (a person) and `organization_id` (a tenant). Injected on the same
+ *     objects `owner_id` is, PLUS the `ownership: 'business_unit'` tier which
+ *     has an owning unit but deliberately no owning person (inventory, asset
+ *     ledgers, departmental budgets). Withheld for `org` / `none` exactly like
+ *     `owner_id`. Shaped like `organization_id`, not like `owner_id`
+ *     (`readonly: true`, `hidden: true`): it is a SERVER-STAMPED scope anchor,
+ *     and the stamping middleware (ADR-0117 D2/D4) has not landed — so the
+ *     column is provisioned but inert. See {@link applySystemFields}' injection
+ *     site for why that shape presumes nothing about the undecided D2 policy.
  */
 /**
  * Column definitions for the audit-provenance family, keyed by the spec's
@@ -299,6 +311,15 @@ const AUDIT_FIELD_GOVERNANCE: Record<AuditProvenanceField, Record<string, unknow
     AUDIT_PROVENANCE_FIELDS.map((name) => [name, { readonly: true, system: true }]),
   ) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
 
+/**
+ * [ADR-0117 D1] The injected BU-ownership column name, spelled out so it greps
+ * from this file, and annotated with the spec's registered protocol name so the
+ * two cannot drift: a rename in `SystemFieldName.OWNING_BUSINESS_UNIT_ID` makes
+ * this line a compile error rather than a silently orphaned injection.
+ */
+const OWNING_BUSINESS_UNIT_FIELD: typeof SystemFieldName.OWNING_BUSINESS_UNIT_ID =
+  'owning_business_unit_id';
+
 export function applySystemFields(
   schema: ServiceObject,
   opts: { multiTenant: boolean }
@@ -355,12 +376,42 @@ export function applySystemFields(
   // authors silently ship objects with no working ownership at all.
   // `ownership` is now a declared ObjectSchema field (record-ownership model),
   // so it reads off the typed schema — no `as any` (#3175).
-  const ownership = schema.ownership;
-  const wantOwner =
-    ownership !== 'org' &&
-    ownership !== 'none' &&
-    !(schema as any).managedBy &&
-    !schema.name.startsWith('sys_');
+  //
+  // [ADR-0117 D1 / #5677] Widened to `string` on purpose. The spec enum is
+  // `'user' | 'org' | 'none'` TODAY; D1's fourth tier `'business_unit'` is
+  // declared in #5678, strictly AFTER this PR — that ordering is the whole
+  // point of #5677: the engine must recognise the tier BEFORE the schema can
+  // emit it, or the tier's first appearance would be judged by the branch
+  // below and get the INVERSE of what D1 declares. Without the widening `tsc`
+  // rejects the comparison as a no-overlap literal test; with it the engine is
+  // ready and the enum lands into a runtime that already honours it.
+  const ownership: string | undefined = schema.ownership;
+
+  // Platform-managed tables and the `sys_*` namespace never carry a per-record
+  // ownership anchor, whichever tier is declared — unchanged, and shared by
+  // both anchors below so they cannot drift apart.
+  const ownershipEligible = !(schema as any).managedBy && !schema.name.startsWith('sys_');
+
+  // [ADR-0117 D1 / #5677] POSITIVE LIST, deliberately — this used to read
+  // `ownership !== 'org' && ownership !== 'none'`, i.e. a DENY-list, so ANY
+  // value outside the two exclusions fell through to "inject `owner_id`".
+  // That default is safe only while the enum has exactly three members: D1's
+  // `business_unit` tier means "owned by a UNIT, not a person" (`owner_id` ❌,
+  // `owning_business_unit_id` ✅), and under the deny-list it would have been
+  // stamped with `owner_id` — the exact inverse. Behaviour for the three
+  // values that exist today is IDENTICAL (`undefined`/`user` inject, `org`/
+  // `none` do not); the change is only that a NEW tier no longer inherits the
+  // owner branch by accident.
+  const wantOwner = ownershipEligible && (ownership === undefined || ownership === 'user');
+
+  // [ADR-0117 D1] The BU anchor covers the owner tiers PLUS `business_unit`:
+  //
+  //   ownership        owner_id   owning_business_unit_id
+  //   undefined/user      ✅              ✅
+  //   business_unit       ❌              ✅
+  //   org                 ❌              ❌
+  //   none                ❌              ❌
+  const wantOwningBusinessUnit = wantOwner || (ownershipEligible && ownership === 'business_unit');
 
   const additions: Record<string, any> = {};
   // Platform-owned field settings that must WIN over a declared field, rather
@@ -433,6 +484,52 @@ export function applySystemFields(
       description:
         'Record owner (auto-stamped to the creating user on insert; reassignable). ' +
         'Drives owner-scoped views, reports and notifications.',
+    };
+  }
+
+  // [ADR-0117 D1] Record-level business-unit ownership. Shaped after
+  // `organization_id` (server-stamped scope anchor), NOT after `owner_id`
+  // (a user-assignable business field) — the two differ in exactly the keys
+  // that decide who may write and whether it renders:
+  //
+  //   • `readonly: true` — D3 requires the value to be derived and validated
+  //     server-side (`record.organization_id` must equal the unit's org), so a
+  //     client-supplied value is overwritten, never trusted. Reassignment is a
+  //     TRANSFER-class operation gated on `allowTransfer` (D4), which has not
+  //     landed; until it does, no client write path may set this column.
+  //   • `hidden: true` — nothing stamps the column yet (D2's policy is
+  //     undecided, D8's backfill unwritten), so it is provisioned-but-inert.
+  //     Surfacing a permanently-NULL lookup on every business object's layout
+  //     would advertise a capability the runtime does not deliver (Prime
+  //     Directive #10). Presentation is a one-key flip for the PR that lands
+  //     stamping — a capability grant is not.
+  //   • `required: false` — nullable, like every other injected column.
+  //
+  // ⚠️ None of the three presumes ADR-0117 D2 (`pinned`/`follow_owner`/
+  // `transferable`), which is NOT YET RULED. They are the fail-closed shape:
+  // they grant no capability, so every D2 outcome remains reachable. D2's
+  // `owningBusinessUnit.required` is an INSERT-time rejection rule, not column
+  // nullability — it cannot be read off this definition either. `system: true`
+  // writes (the future stamping middleware, seeds) are checked downstream of
+  // `readonly`, so the flag blocks clients without blocking the platform —
+  // exactly how `organization_id` is stamped today.
+  //
+  // No index: the hierarchical predicate that would use one (`… IN (units)`,
+  // D6) ships with the enterprise scope resolver. An index on a column nothing
+  // writes and nothing filters is dead weight — the same reasoning that gates
+  // `organization_id`'s index on `multiTenant`.
+  if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
+    additions[OWNING_BUSINESS_UNIT_FIELD] = {
+      type: 'lookup',
+      reference: 'sys_business_unit',
+      label: 'Owning Business Unit',
+      required: false,
+      hidden: true,
+      readonly: true,
+      system: true,
+      description:
+        'Record-level business-unit ownership (ADR-0117 D1). Server-stamped scope anchor; ' +
+        'NULL until the stamping middleware lands.',
     };
   }
 

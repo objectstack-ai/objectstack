@@ -28,8 +28,8 @@ not been verified (may 501 at runtime).
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutesSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
-import type { ApiRoutes, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiRoutesSchema.parse(data);
@@ -155,6 +155,21 @@ Deployment posture a discovery response advertises. Deliberately three coarse bu
 | **status** | `Enum<'stub' \| 'degraded'>` | ✅ | stub = placeholder or dev fake (do not use for real work); degraded = functional fallback with reduced capability |
 | **handlerReady** | `boolean` | optional | Whether the HTTP handler genuinely serves requests. Defaults: false for stub, true for degraded. |
 | **message** | `string` | optional | Human-readable explanation, e.g. what to install for the full implementation |
+
+
+---
+
+## ServiceStatus
+
+available = fully operational, registered = route declared but handler unverified, unavailable = not installed, degraded = partial, stub = placeholder that returns 501
+
+### Allowed Values
+
+* `available`
+* `registered`
+* `unavailable`
+* `degraded`
+* `stub`
 
 
 ---

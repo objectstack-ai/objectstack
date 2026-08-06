@@ -3701,6 +3701,19 @@ export class ObjectStackProtocolImplementation implements
      * `code` is null if no artifact baseline exists; `overlay` is null if
      * no sys_metadata row exists for the requested scope; `effective` is
      * never null when either layer exists.
+     *
+     * [#5707] Those three sentences are ASSERTIONS about what the author
+     * declared, so the method may only make them from a read that happened.
+     * The layers are a 3-LAYER shape (code / overlay / effective), not a
+     * 3-VALUE one: there is no "unknown" spelling for a layer, and the null
+     * that would have to stand in for it already means "not customised". So
+     * an overlay read that failed is reported as a failure, never as a layer.
+     *
+     * @throws {@link metadataStoreUnavailableError} — 503 /
+     *         `SERVICE_UNAVAILABLE`, driver error on `cause`, when the
+     *         `sys_metadata` overlay read fails for any reason other than the
+     *         table not being provisioned yet (which genuinely means "no
+     *         overlay row" and still returns normally).
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -3823,8 +3836,27 @@ export class ObjectStackProtocolImplementation implements
                     overlayScope = 'env';
                 }
             }
-        } catch {
-            // DB unavailable — overlay stays null
+        } catch (error) {
+            // [#5707] The same rule as the four overlay reads in
+            // `getMetaItems` / `getMetaItem` (#5532), on the one overlay read
+            // PR #5705 deliberately did not reach.
+            //
+            // Swallowing here does not answer 404 — it answers something this
+            // method states positively in THREE fields at once: `overlay: null`
+            // ("nothing was ever customised"), `overlayScope: null` ("no scope
+            // holds a row"), and `effective = code` ("what runs today is the
+            // packaged artifact, verbatim"). The whole point of the layered
+            // read is to show an author what they changed; during an outage it
+            // told them they had changed nothing, which is the #5532 error —
+            // an availability failure reported as an authorship fact — landing
+            // in the diff view instead of on a 404.
+            //
+            // The benign case is unchanged and is why this is not a bare
+            // rethrow: an unprovisioned `sys_metadata` genuinely holds no
+            // overlay row, so `overlay: null` / `effective = code` IS the truth
+            // and first boot still renders the code layer.
+            // See {@link rethrowUnlessMetadataStoreUnprovisioned}.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
         const effective: unknown | null = overlay ?? code;

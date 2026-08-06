@@ -75,7 +75,6 @@
       "@objectstack/embedder-openai",
       "@objectstack/account",
       "create-objectstack",
-      "objectstack-vscode",
       "@objectstack/connector-openapi",
       "@objectstack/verify"
     ]
