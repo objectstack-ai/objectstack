@@ -17,7 +17,19 @@
  * a fix INSIDE `saveMetaItem` cannot use.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hashSpec } from '@objectstack/metadata-core';
+// [#5619] `assertEngine{Delete,Update}Dispatch` are the producer's OWN write-verb
+// dispatch decisions (#4550 delete / #5480 update), so the fake engine below
+// cannot accept a call ObjectQL refuses. They arrive from
+// `@objectstack/metadata-core` and not from `@objectstack/objectql`: objectql
+// DEPENDS ON this package, so that import would close a dependency cycle turbo
+// rejects outright — which is why all 26 of this package's (file, verb) pairs sat
+// in the gate's DEBT ledger until #5619 sank the two predicates into a package
+// both sides already depend on.
+import {
+  hashSpec,
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /** A flow body that passes `saveMetaItem`'s schema gate. */
@@ -107,12 +119,14 @@ function makeStubEngine() {
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+            assertEngineUpdateDispatch(data, opts);
             const found = findRow(opts.where);
             if (!found) return { id: null };
             rows.set(found.key, { ...found.row, ...(data as any) });
             return { id: found.row.id };
         },
         async delete(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineDeleteDispatch(opts);
             const found = findRow(opts.where);
             if (!found) return { deleted: 0 };
             rows.delete(found.key);

@@ -1421,6 +1421,10 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
+| **version** | `string` | ✅ | Content hash of the just-committed body, and the token the ADR-0008 optimistic-concurrency chain runs on: send it back as the `If-Match` request header on the next write to that item and a concurrent edit is reported as 409 `metadata_conflict` instead of silently overwritten. Opaque to callers — echo it verbatim, never parse it. Currently emitted as `sha256:<64 hex chars>`, but the format is not part of this contract. |
+| **seq** | `integer` | ✅ | Monotonic sequence number of the metadata event this write appended to the item history (sys_metadata_history.event_seq). Orders writes; unlike `version` it is not an OCC token. |
+| **state** | `Enum<'draft' \| 'active'>` | ✅ | Lifecycle the body was written into: "draft" when the request asked for draft mode (`?mode=draft`), otherwise "active" (published and live). A draft is staged only — it is not served to the runtime until published. |
+| **projectionApplied** | `{ success: boolean; error?: string }` | optional | Outcome of the awaited ADR-0094 mutation projector — the post-persist step that materializes this metadata into its derived data-plane read model (e.g. `permission` → `sys_permission_set`). Present ONLY when a projector is registered for this metadata type, which is why it is optional: its absence means "no projector ran", never "the projection failed". Best-effort by design — a projector failure is reported here and logged, never thrown, so a caller that needs the read model to be live must check `projectionApplied.success` rather than rely on the 200. |
 | **message** | `string` | optional |  |
 
 

@@ -34,9 +34,21 @@
  *  - admin-authored rows (`managed_by:'admin'`) are NEVER clobbered.
  *
  * Runs on `kernel:ready` in `@objectstack/plugin-security` alongside the other
- * declared-metadata seeders. The set of declared names is returned so the
- * caller can tell `bootstrapSystemCapabilities` to SKIP re-deriving (and thus
- * clobbering) an explicitly-declared capability.
+ * declared-metadata seeders. {@link CapabilitySeedOutcome.materializedNames} is
+ * returned so the caller can tell `bootstrapSystemCapabilities` to SKIP
+ * re-deriving (and thus clobbering) a capability that already has a row.
+ *
+ * [#4967 Part 1] That list reports names this pass CONFIRMED have a row — NOT
+ * every name it read. The two are different facts, and conflating them turned a
+ * REFUSED declaration into a hole: the refusal writes no row, the reported name
+ * suppressed the back-compat derivation too, and the capability then existed in
+ * no row at all, leaving every `systemPermissions` grant naming it inert. Adding
+ * an explicit declaration was therefore strictly WORSE than omitting one. The
+ * suppression rule is now uniform and stated per refusal path in
+ * {@link upsertPackageCapability}: a name suppresses the derivation IFF
+ * `sys_capability` holds a row for it after this pass — protecting an authored
+ * row from a humanized placeholder is the whole purpose of the list, and a
+ * refusal with no row is not an authored row there is anything to protect.
  */
 
 import {
@@ -49,8 +61,21 @@ import {
 import { readDeclared } from './bootstrap-declared-permissions.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 
+/** The only shape this seeder reads off a permission set: who grants what. */
+type GrantingPermissionSet = { name?: string; systemPermissions?: readonly string[] };
+
 interface SeedOptions {
   logger?: ProjectionLogger;
+  /**
+   * [#4967 Part 3] The bootstrap permission sets that GRANT capabilities via
+   * `systemPermissions[]` — the SAME array `bootstrapSystemCapabilities` derives
+   * its placeholders from, so "granted by X" and "will be derived" are read off
+   * one source. Used only to name the grantor(s) in the refusal diagnostics: a
+   * seeder-side warn that names the capability but not the permission set(s)
+   * that grant it does not tell the reader the consequence. Threaded as an
+   * argument on every call — never module-level state.
+   */
+  permissionSets?: readonly GrantingPermissionSet[];
 }
 
 /** Aggregated outcome of a declared-capability seeding pass. */
@@ -61,8 +86,30 @@ export interface CapabilitySeedOutcome {
   skippedAdmin: number;
   skippedForeign: number;
   skippedPlatform: number;
-  /** Names of every capability EXPLICITLY declared (regardless of seed outcome). */
-  declaredNames: string[];
+  /**
+   * [#4967 Part 1] Declarations refused for want of an owning package
+   * (`_packageId`/`packageId` both absent) — previously the one refusal path
+   * with no counter at all, which is why `declaredNames` and the counters could
+   * not be reconciled.
+   */
+  skippedUnowned: number;
+  /**
+   * [#4967 Part 1] Names this pass CONFIRMED are materialized in
+   * `sys_capability`, i.e. the names `bootstrapSystemCapabilities` must NOT
+   * re-derive a placeholder for. A name lands here when this pass wrote its row
+   * (seeded / updated / claimed) or found a row it must not clobber
+   * (admin-authored, another package's, or a curated platform name the curated
+   * pass owns) — and NOT when a refusal left the name with no row anywhere.
+   *
+   * Accounting: every named declaration falls into exactly one counter, so
+   * `seeded + updated + claimed + skippedAdmin + skippedForeign +
+   * skippedPlatform + skippedUnowned` is the number of named declarations read,
+   * and `materializedNames` is that same set minus the refusals that found no
+   * row. (Pre-existing caveat, unchanged: a write the engine rejects increments
+   * no counter — and a rejected INSERT deliberately keeps its name out of this
+   * list, so the derivation gets its own attempt.)
+   */
+  materializedNames: string[];
 }
 
 function humanize(name: string): string {
@@ -79,36 +126,99 @@ function capabilityRowFields(cap: any): { label: string; description: string; sc
 }
 
 /**
+ * [#4967 Part 3] Index `capability name → granting permission set name(s)` over
+ * the bootstrap permission sets, so a refusal can name the grantor(s) — and,
+ * because this is the same array the back-compat derivation reads, can state
+ * the ACTUAL consequence rather than a generic "not materialized".
+ */
+function indexGrantors(sets: readonly GrantingPermissionSet[] = []): Map<string, string[]> {
+  const byCapability = new Map<string, string[]>();
+  for (const ps of sets) {
+    const setName = typeof ps?.name === 'string' && ps.name ? ps.name : '(unnamed permission set)';
+    for (const cap of ps?.systemPermissions ?? []) {
+      if (typeof cap !== 'string' || !cap) continue;
+      const grantors = byCapability.get(cap);
+      if (!grantors) byCapability.set(cap, [setName]);
+      else if (!grantors.includes(setName)) grantors.push(setName);
+    }
+  }
+  return byCapability;
+}
+
+/**
+ * [#4967 Part 3] The unowned-declaration diagnostic. Stays at `warn` per the
+ * #4632 rule — this is FUNCTIONAL degradation (a declaration that does not
+ * carry its provenance), not a durability failure. What changes is the payload:
+ * it names the permission set(s) that GRANT the capability, and the real
+ * consequence of the refusal, which differs by whether a row already exists and
+ * whether anything grants the name at all.
+ */
+function unownedRefusalMessage(name: string, grantors: readonly string[], hasRow: boolean): string {
+  const granted = grantors.length > 0
+    ? `granted by ${grantors.join(', ')}`
+    : 'granted by no bootstrap permission set';
+  const consequence = hasRow
+    ? 'an existing sys_capability row already resolves it and is left as-is — the declaration adds no package provenance'
+    : grantors.length > 0
+      ? 'falls back to the back-compat derived placeholder — the grant resolves, but with no package provenance (ADR-0086 D3: uninstall undefined)'
+      : 'nothing derives it either — the capability is materialized nowhere';
+  return `[security] declared capability "${name}" has no owning package (${granted}): ${consequence}`;
+}
+
+/**
  * Upsert ONE declared capability into `sys_capability` under the owning
  * `packageId`, applying the ADR-0066 D1 provenance rules (own-row re-seed,
  * derived-platform-row claim, curated/foreign/admin refuse-or-skip).
+ *
+ * Returns whether the name is MATERIALIZED — i.e. whether `sys_capability`
+ * holds a row for it after this call, and so whether the caller must suppress
+ * the back-compat derived placeholder for it (#4967 Part 1). The three refusal
+ * paths differ, and the difference is the whole bug:
+ *
+ *  - CURATED platform name → `true`. The curated pass of
+ *    `bootstrapSystemCapabilities` seeds every curated name unconditionally, so
+ *    the row exists regardless of this refusal; the derived path cannot reach a
+ *    curated name in the first place (it is already in the curated map), which
+ *    makes the answer a no-op here — but a truthful one.
+ *  - FOREIGN owner (and admin-authored rows) → `true`. A row exists and its
+ *    label/description are AUTHORED; re-deriving would overwrite them with a
+ *    humanized placeholder, which is exactly what the suppression list is for.
+ *  - NO OWNING PACKAGE → `true` only if a row already exists. With no row this
+ *    is the #4967 hole: suppressing the derivation left the capability existing
+ *    nowhere, so it falls through and the placeholder is derived as it would
+ *    have been had the declaration never been written.
  */
 async function upsertPackageCapability(
   ql: any,
   cap: any,
   packageId: string | null | undefined,
   out: CapabilitySeedOutcome,
+  grantors: readonly string[],
   logger?: ProjectionLogger,
-): Promise<void> {
-  if (!cap?.name) return;
+): Promise<boolean> {
+  if (!cap?.name) return false;
 
   // Curated platform capabilities are platform-owned — a package must never
   // claim one (that would let it silently redefine `manage_users`, `setup.access`, …).
   if (PLATFORM_CAPABILITY_NAMES.has(cap.name)) {
     out.skippedPlatform += 1;
     logger?.warn?.('[security] capability name is a curated platform capability — not materialized as package', { name: cap.name });
-    return;
-  }
-
-  // A `managed_by:'package'` row without a `package_id` makes uninstall
-  // undefined (the ambiguity ADR-0086 D3 removes) — skip an unowned declaration.
-  if (!packageId) {
-    logger?.warn?.('[security] capability has no owning package — not materialized', { name: cap.name });
-    return;
+    return true;
   }
 
   const fields = capabilityRowFields(cap);
   const existing = (await tryFind(ql, 'sys_capability', { name: cap.name }, 1))[0];
+
+  // A `managed_by:'package'` row without a `package_id` makes uninstall
+  // undefined (the ambiguity ADR-0086 D3 removes) — skip an unowned declaration.
+  if (!packageId) {
+    out.skippedUnowned += 1;
+    logger?.warn?.(unownedRefusalMessage(cap.name, grantors, Boolean(existing?.id)), {
+      name: cap.name,
+      grantedBy: [...grantors],
+    });
+    return Boolean(existing?.id);
+  }
 
   if (!existing?.id) {
     const created = await tryInsert(ql, 'sys_capability', {
@@ -120,7 +230,9 @@ async function upsertPackageCapability(
       active: true,
     });
     if (created) out.seeded += 1;
-    return;
+    // A rejected insert leaves no row — fall through so the derivation gets its
+    // own attempt rather than the name landing in a hole.
+    return Boolean(created);
   }
 
   if (existing.managed_by === 'package') {
@@ -133,7 +245,8 @@ async function upsertPackageCapability(
         name: cap.name, declaredBy: packageId, ownedBy: existing.package_id,
       });
     }
-    return;
+    // Either way a package-authored row exists and must not be re-derived over.
+    return true;
   }
 
   if (existing.managed_by === 'platform') {
@@ -143,11 +256,12 @@ async function upsertPackageCapability(
     if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields, managed_by: 'package', package_id: packageId })) {
       out.claimed += 1;
     }
-    return;
+    return true;
   }
 
   // `admin` (or any other) — environment/admin-authored. Never clobbered.
   out.skippedAdmin += 1;
+  return true;
 }
 
 export async function bootstrapDeclaredCapabilities(
@@ -156,7 +270,9 @@ export async function bootstrapDeclaredCapabilities(
   options: SeedOptions = {},
 ): Promise<CapabilitySeedOutcome> {
   const out: CapabilitySeedOutcome = {
-    seeded: 0, updated: 0, claimed: 0, skippedAdmin: 0, skippedForeign: 0, skippedPlatform: 0, declaredNames: [],
+    seeded: 0, updated: 0, claimed: 0,
+    skippedAdmin: 0, skippedForeign: 0, skippedPlatform: 0, skippedUnowned: 0,
+    materializedNames: [],
   };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
@@ -169,13 +285,19 @@ export async function bootstrapDeclaredCapabilities(
   }
   if (!Array.isArray(caps) || caps.length === 0) return out;
 
+  const grantorsByCapability = indexGrantors(options.permissionSets);
+
   for (const cap of caps) {
     if (!cap?.name) continue;
-    out.declaredNames.push(cap.name);
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = cap._packageId ?? cap.packageId ?? undefined;
-    await upsertPackageCapability(ql, cap, packageId, out, options.logger);
+    const grantors = grantorsByCapability.get(cap.name) ?? [];
+    const materialized = await upsertPackageCapability(ql, cap, packageId, out, grantors, options.logger);
+    // [#4967 Part 1] Report the name ONLY once this pass knows a row exists for
+    // it. Reporting it before the upsert decided anything is what let a refused
+    // declaration suppress the derivation it needed.
+    if (materialized) out.materializedNames.push(cap.name);
   }
 
   options.logger?.info?.('[security] declared capabilities seeded into sys_capability (ADR-0066 D1)', {
