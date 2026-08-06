@@ -324,15 +324,17 @@ export function registerLastAdminBanGuard(
         `[LastAdminBanGuard] refused a ban that would have left this environment with no ` +
           `unbanned administrator (target: ${losing.join(', ')})`,
       );
+      const many = losing.length > 1;
       throw refuse(
         `Refusing to ban ${losing.map((id) => `'${id}'`).join(', ')}: ` +
-          `${losing.length > 1 ? 'they are' : 'it is'} the last administrator this environment ` +
-          `has that is not already banned, and banning ${losing.length > 1 ? 'them' : 'it'} would ` +
-          `leave nobody able to administer the environment or restore anyone's access ` +
-          `(${BREAK_GLASS_CITATION}). Grant another user the '${ADMIN_FULL_ACCESS}' permission set ` +
-          `or an organization '${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership ` +
-          'first, then retry. If the ban came from an identity provider, the SCIM deprovision is ' +
-          'too broad — fix the IdP group, not this guard.',
+          `${many ? 'those are the last administrators' : 'that is the last administrator'} this ` +
+          `environment has that ${many ? 'are' : 'is'} not already banned, and banning ` +
+          `${many ? 'them' : 'that account'} would leave nobody able to administer the ` +
+          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). Grant another user ` +
+          `the '${ADMIN_FULL_ACCESS}' permission set or an organization ` +
+          `'${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership first, then retry. ` +
+          'If the ban came from an identity provider, the SCIM deprovision is too broad — fix the ' +
+          'IdP group, not this guard.',
       );
     } catch (err) {
       if (isRefusal(err)) throw err;
