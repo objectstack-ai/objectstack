@@ -1,6 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+// [#5855] The fake engine's write verbs route through the producer's OWN
+// dispatch predicates (#4550 delete / #5480 update), so this double cannot
+// accept a call `ObjectQL.<verb>` refuses. Imported from
+// `@objectstack/metadata-core` (already a `dependencies` entry here) and not
+// from `@objectstack/objectql`, which depends on this package — that import
+// would close a dependency cycle turbo rejects, and is why both of this file's
+// (file, verb) pairs sat in the gate's DEBT ledger until #5619 sank the two
+// predicates into a package that depends on neither side.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { migrateSysNotificationToEvent } from './migrate-sys-notification-to-event.js';
 
 /** Columns the legacy (pre-ADR-0030) sys_notification table physically has. */
@@ -42,13 +51,17 @@ function fakeEngine() {
                 inserts.push({ object, row });
                 return { id: `${object}_${inserts.length}`, ...row };
             },
-            async update(object: string, data: any) {
+            async update(object: string, data: any, options?: Record<string, unknown>) {
+                assertEngineUpdateDispatch(data, options);
                 updates.push({ object, data });
                 return data;
             },
             async find() { return []; },
             async findOne() { return null; },
-            async delete() { return {}; },
+            async delete(_object?: string, options?: Record<string, unknown>) {
+                assertEngineDeleteDispatch(options);
+                return {};
+            },
             async count() { return 0; },
             async aggregate() { return []; },
         } as any,

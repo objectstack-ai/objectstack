@@ -1,6 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// [#5855] The fake engine's `update` routes through the producer's OWN dispatch
+// predicate (#5480), so this double cannot accept a call `ObjectQL.update`
+// refuses. Imported from `@objectstack/metadata-core` (already a `dependencies`
+// entry here) and not from `@objectstack/objectql`, which depends on this
+// package — that import would close a dependency cycle turbo rejects, and is
+// why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
+// the predicate into a package that depends on neither side.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { CREATION_ATTESTED_MIGRATION_IDS } from '@objectstack/spec/system';
 import {
   readDataMigrationFlag,
@@ -26,7 +34,11 @@ function fakeEngine(rows: Array<Record<string, unknown>> = [], opts: { registere
       (tables[object] ??= []).push({ ...data });
       return data;
     },
-    async update(object, data: any) {
+    async update(object, data: any, options) {
+      // `recordDataMigrationRun` updates an existing flag row by its `id` in
+      // the payload — the shape `ObjectQL.update` routes `by-id`. Asserting it
+      // here binds this double to that verdict instead of re-deciding it.
+      assertEngineUpdateDispatch(data, options);
       const row = (tables[object] ?? []).find((r) => r.id === data.id);
       if (row) Object.assign(row, data);
       return row;
