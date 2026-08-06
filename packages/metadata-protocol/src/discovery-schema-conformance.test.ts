@@ -30,12 +30,27 @@
 //     from becoming a third dialect of the contract.
 
 import { describe, it, expect } from 'vitest';
-import { DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
+import { ApiRoutesSchema, DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
 function declaredResponseKeys(): Set<string> {
   return new Set(Object.keys((GetDiscoveryResponseSchema as any).shape));
+}
+
+/**
+ * [#5679] The keys `ApiRoutesSchema` declares INSIDE `routes` — the #4828 gate
+ * extended one level down, where `routes.mcp` had been living undeclared.
+ *
+ * Unlike the REST and dispatcher gates, this one was ALREADY green before
+ * #5679: this builder's `routes` is annotated `const routes: ApiRoutes`, so
+ * the compiler kept it inside the declared key set and it never grew an `mcp`.
+ * It is added anyway so all three producers carry the same gate — this is the
+ * producer the OTHER two compose over, and the one place where an undeclared
+ * routes key would today be caught by `tsc` rather than by a test.
+ */
+function declaredRouteKeys(): Set<string> {
+  return new Set(Object.keys((ApiRoutesSchema as any).shape));
 }
 
 /**
@@ -70,6 +85,27 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
     const declared = declaredResponseKeys();
     const undeclared = Object.keys(discovery).filter(k => !declared.has(k));
     expect(undeclared, 'undeclared top-level keys on the getDiscovery() shape').toEqual([]);
+  });
+
+  it('[#5679] emits NO `routes` key the schema does not declare', async () => {
+    const discovery: any = await makeImpl().getDiscovery();
+
+    const declared = declaredRouteKeys();
+    const undeclared = Object.keys(discovery.routes).filter(k => !declared.has(k));
+    expect(undeclared, 'undeclared keys inside `routes` on the getDiscovery() shape').toEqual([]);
+  });
+
+  it('[#5679] does NOT advertise `mcp` — this builder knows nothing about the /mcp mount', async () => {
+    const discovery: any = await makeImpl().getDiscovery();
+
+    // The negative half of the same fact: `mcp` is now DECLARED (optional), and
+    // this producer legitimately leaves it empty — the /mcp route is mounted by
+    // the host (rest-server) or gated on the kernel's mcp service (dispatcher),
+    // neither of which this builder can see. Declaring the key does not oblige
+    // every producer to fill it; it obliges every producer that fills it to
+    // spell it this way.
+    expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'mcp')).toBe(false);
+    expect(declaredRouteKeys().has('mcp')).toBe(true);
   });
 
   it('carries the canonical `name`, and keeps `apiName` for its deprecation window', async () => {

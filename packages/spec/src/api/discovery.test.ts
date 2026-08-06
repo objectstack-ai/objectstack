@@ -983,6 +983,53 @@ describe('[#4828] DiscoverySchema ↔ GetDiscoveryResponseSchema', () => {
   });
 });
 
+// ===========================================================================
+// [#5679] The same contract, one level down: `routes`
+// ===========================================================================
+//
+// #4828 pinned its gate at the TOP level, deliberately. `routes.mcp` lived in
+// exactly the gap that left: emitted by `@objectstack/rest` (behind an `as any`)
+// and by the runtime dispatcher, read by objectui's Integrations connect card,
+// declared by nothing. `ApiRoutesSchema` is a plain `z.object`, so a
+// spec-strict consumer stripped it silently — the connect card would blank with
+// no error. The producer-side conformance tests now check `routes` keys the same
+// way they check top-level keys, and derive their allowance from
+// `ApiRoutesSchema`; these two pin that the allowance is the real one.
+describe('[#5679] routes: the declared key set the producer gates check against', () => {
+  it('is the very schema `DiscoverySchema` nests, not a second copy of it', () => {
+    // The three producer gates read `ApiRoutesSchema.shape`. That is only a
+    // faithful allowance while it IS what `DiscoverySchema.routes` declares —
+    // if the two ever diverge the gates would be policing a schema nothing
+    // parses with, which is how #4828's blind spot was built in the first place.
+    const nested = (DiscoverySchema as any).shape.routes;
+    expect(new Set(Object.keys(nested.shape)))
+      .toEqual(new Set(Object.keys((ApiRoutesSchema as any).shape)));
+  });
+
+  it('declares `mcp` — optional, string, and stripped-not-rejected before it was declared', () => {
+    const declared = Object.keys((ApiRoutesSchema as any).shape);
+    expect(declared).toContain('mcp');
+
+    const base = { data: '/api/v1/data', metadata: '/api/v1/meta' };
+
+    // Present: survives the parse. This is the assertion that was impossible
+    // before — `mcp` used to be dropped here, which is the whole defect.
+    expect(ApiRoutesSchema.parse({ ...base, mcp: '/api/v1/mcp' }).mcp).toBe('/api/v1/mcp');
+
+    // Absent: optional, so a producer that cannot answer omits it.
+    expect(ApiRoutesSchema.parse(base).mcp).toBeUndefined();
+
+    // A non-string is now rejected rather than silently dropped — the value
+    // half of the contract, which a key-set gate alone cannot judge.
+    expect(() => ApiRoutesSchema.parse({ ...base, mcp: 123 })).toThrow();
+
+    // And a still-undeclared key is still stripped, which is why the producer
+    // gates need their key-set check in addition to this parse.
+    expect(ApiRoutesSchema.parse({ ...base, notAThing: '/x' } as any))
+      .not.toHaveProperty('notAThing');
+  });
+});
+
 describe('[#4828] scoping (decision 3 — declare what REST actually emits)', () => {
   const base = {
     name: 'ObjectStack',

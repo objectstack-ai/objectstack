@@ -197,6 +197,47 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
 
   /** Base URL for Internationalization */
   i18n: z.string().optional().describe('e.g. /api/v1/i18n'),
+
+  /**
+   * Base URL for the MCP (Model Context Protocol) Streamable-HTTP surface.
+   *
+   * Declared by #5679 — the #4828 defect one level down, and the opposite
+   * disposition to the `endpoints` key that issue deleted. `endpoints` had no
+   * measured reader, so it was retired; `mcp` has two real ones in `objectui`
+   * (`ConnectAgentWidget.tsx` gates the Integrations connect card on it, and
+   * `AgentConnectSection.tsx` reads it for the same card) — in fact it is the
+   * ONLY `routes.*` key anything in objectui reads. So the fix is to declare
+   * it, not to remove it.
+   *
+   * Why it was a real defect and not just tidiness: `ApiRoutesSchema` is a
+   * plain `z.object`, which STRIPS unknown keys. Any consumer that parsed
+   * `/discovery` through the spec dropped `routes.mcp` silently and blanked
+   * the connect card with no error. Nothing broke only because those two
+   * readers happen to read raw JSON. Both producers emitted it through the
+   * blind spot: `@objectstack/rest` behind an `as any` cast (removed with this
+   * declaration — that cast was the compiler telling the truth), and the
+   * runtime dispatcher's `getDiscoveryInfo()` inside an untyped object literal.
+   *
+   * Shape as MEASURED off both producers, not as guessed:
+   *
+   * - a plain path string, e.g. `/api/v1/mcp`;
+   * - always the UNSCOPED base — `/mcp` is mounted bare, so a scoped mount
+   *   that advertises `/api/v1/environments/env_alpha/data` still advertises
+   *   `/api/v1/mcp` here;
+   * - `optional`, not `nullable`: the key is ABSENT when the surface is not
+   *   advertised. rest-server `delete`s it when `OS_MCP_SERVER_ENABLED` is off
+   *   or the serveability probe returns `false` (#4024); the dispatcher leaves
+   *   it `undefined`, which `JSON.stringify` drops on the wire. Neither ever
+   *   emits `null`.
+   *
+   * Optional also because a producer may legitimately not know: the
+   * `getDiscovery()` builder in `metadata-protocol` sees neither the host's
+   * route table nor the kernel's mcp service, so it emits nothing here rather
+   * than inventing a value — the same reasoning as `scoping` above.
+   *
+   * @see ADR-0036 (MCP as a first-class surface)
+   */
+  mcp: z.string().optional().describe('e.g. /api/v1/mcp — always the unscoped base; absent when MCP is disabled or unserveable'),
 }));
 
 /**

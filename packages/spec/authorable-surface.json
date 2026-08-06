@@ -528,6 +528,7 @@
     "api/ApiRoutes:data",
     "api/ApiRoutes:discovery",
     "api/ApiRoutes:i18n",
+    "api/ApiRoutes:mcp",
     "api/ApiRoutes:metadata",
     "api/ApiRoutes:notifications",
     "api/ApiRoutes:packages",
