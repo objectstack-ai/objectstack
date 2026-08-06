@@ -108,7 +108,7 @@ const CONFORMANCE_CUBE: Cube = {
   sql: TABLE,
   measures: { count: { name: 'count', label: 'Rows', type: 'count', sql: 'id' } },
   dimensions: Object.fromEntries(
-    (['id', 'a', 'b', 'c', 'owner', 'status', 'parent_object', 'parent_id'] as const).map((f) => [
+    (['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'] as const).map((f) => [
       f,
       { name: f, label: f, type: 'string' as const, sql: f },
     ]),
@@ -132,6 +132,10 @@ describe('[#5324] InMemoryDriver.find — filter logic conformance (the LIVE que
         a: { type: 'text', name: 'a' },
         b: { type: 'text', name: 'b' },
         c: { type: 'text', name: 'c' },
+        // [#5298] Nullable by construction — rows 3-4 seed `d: null`. This driver
+        // stores what it is given, so no `nullable` flag exists to set; what
+        // matters is that the seed keeps the null instead of substituting ''.
+        d: { type: 'text', name: 'd' },
         owner: { type: 'text', name: 'owner' },
         status: { type: 'text', name: 'status' },
         parent_object: { type: 'text', name: 'parent_object' },
@@ -188,7 +192,7 @@ describe('[#5345] MemoryAnalyticsService — the same table, through the THIRD f
     await driver.connect();
     await driver.syncSchema(TABLE, {
       fields: Object.fromEntries(
-        (['id', 'a', 'b', 'c', 'owner', 'status', 'parent_object', 'parent_id'] as const).map((f) => [
+        (['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'] as const).map((f) => [
           f,
           { type: 'text', name: f },
         ]),

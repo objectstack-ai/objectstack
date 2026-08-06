@@ -184,7 +184,30 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
     case '$endsWith': return typeof actual === 'string' && typeof v === 'string' && actual.endsWith(v);
     case '$null': return v === true ? actual == null : actual != null;
-    case '$exists': return v === true ? actual !== undefined : actual === undefined;
+    /**
+     * [#5298/#5369] `$exists` means "the field HAS A VALUE", not "the key is
+     * present" — so it is the exact mirror of `$null` and reads `!= null`, not
+     * `!== undefined`.
+     *
+     * This used to read `actual !== undefined`, which made `{ x: null }` answer
+     * TRUE for `$exists: true` while `driver-sql` compiled the same operator to
+     * `IS NOT NULL` and answered FALSE. On an RLS rule that is one `check`
+     * clause allowing a write the read side would then hide.
+     *
+     * The ruling picked "has a value" over "key is present" for a reason the SQL
+     * side makes unavoidable: a column IS the schema, so there is no such thing
+     * as an absent key in a row, and a backend cannot honour a semantics its
+     * storage model has no way to represent. Field existence is a property of
+     * the SCHEMA, not of the record — so the record-level operator can only be
+     * asking about the value. Declaring "key is present" would be the spec
+     * promising something two of its backends can never deliver.
+     *
+     * With that, `$exists` and `$null` are strict complements on every backend:
+     * `$exists: true` ≡ `$null: false`, `$exists: false` ≡ `$null: true`. A
+     * missing key and an explicit `null` are the same fact here, which is also
+     * what `getPath` already returns for both (`undefined`).
+     */
+    case '$exists': return v === true ? actual != null : actual == null;
     default: return false; // unknown operator → fail closed
   }
 }
