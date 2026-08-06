@@ -3,6 +3,7 @@
   "pages": [
     "---Apps & Navigation---",
     "action",
+    "action-params",
     "app",
     "page",
     "view",
