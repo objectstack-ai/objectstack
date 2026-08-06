@@ -48,6 +48,11 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         icon: 'window', category: 'human', source: 'builtin',
         // Human-input nodes suspend the flow awaiting input.
         supportsPause: true, isAsync: true,
+        // The generic resume route IS this node's intended door: the flow-runner
+        // collects the inputs and hands them back as the continuation, so there
+        // is no service decision to route around (#3801). Stated rather than
+        // inherited from a default — an omission is now a reported fact (#5561).
+        resumeAuthority: 'any',
         // Designer form (ADR-0018, #3304) — mirrors objectui's hardcoded `screen`
         // field group: flat input list OR an object form, plus title/description.
         // `visibleWhen` is bare CEL (xExpression), `defaults` a free-form keyValue

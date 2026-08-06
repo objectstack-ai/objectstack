@@ -165,6 +165,12 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       // Durable pause — the run suspends and resumes later (timer/signal).
       supportsPause: true,
       isAsync: true,
+      // An external producer is *meant* to resume a signal wait, so the generic
+      // route is the door (#3801). Stated rather than inherited from a default:
+      // #3823 is what inheriting it costs — ADR-0044 pointed a revise edge at a
+      // generic `wait`, and the pause in that service-owned position took this
+      // value without anyone choosing it (#5561).
+      resumeAuthority: 'any',
     }),
     async execute(node, variables, _context) {
       // `waitEventConfig` is the whole contract (`FlowNodeSchema`, flow.zod.ts).

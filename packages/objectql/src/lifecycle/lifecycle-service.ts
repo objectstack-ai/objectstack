@@ -316,6 +316,10 @@ const REAP_GUARD_MAX_BATCHES_PER_SWEEP = 20;
  * Guards are registered at runtime (`registerReapGuard`), not declared in the
  * spec: detection and scheduling stay inside the single platform sweep
  * (ADR-0057 §3.3 — a guard is a domain callback, not a second sweeper).
+ *
+ * [#5535] An object may carry SEVERAL guards, and they compose by
+ * intersection: an id is deleted only if every guard confirmed it. See
+ * {@link LifecycleService.registerReapGuard}.
  */
 export type LifecycleReapGuard = (
   object: string,
@@ -331,8 +335,13 @@ export class LifecycleService {
   private lastCounts = new Map<string, number>();
   /** Governance snapshot for the sweep in flight. */
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
-  /** Per-object reap guards ({@link LifecycleReapGuard}). */
-  private readonly reapGuards = new Map<string, LifecycleReapGuard>();
+  /**
+   * [#5535] Per-object reap guards ({@link LifecycleReapGuard}), in
+   * registration order. A LIST, not a single slot: every registrar of an
+   * object keeps its say (all must confirm), the same reason
+   * {@link registerRetentionFloor} keys by registrar rather than overwriting.
+   */
+  private readonly reapGuards = new Map<string, LifecycleReapGuard[]>();
   /**
    * [#5195] Registered retention floors, keyed `object::policy::declaredBy` so
    * a re-registration replaces rather than accumulates, while two independent
@@ -413,12 +422,56 @@ export class LifecycleService {
   /**
    * Register a {@link LifecycleReapGuard} for one object. From then on the
    * Reaper never blind-deletes that object's rows: candidates are fetched,
-   * the guard confirms (after external cleanup) or vetoes each row, and only
-   * confirmed ids are deleted. One guard per object (last registration wins —
-   * guards are platform wiring, not user surface).
+   * each guard confirms (after external cleanup) or vetoes each row, and only
+   * confirmed ids are deleted.
+   *
+   * [#5535] **Several guards may govern one object, and they COMPOSE by
+   * intersection** — an id is deleted only if every registered guard confirmed
+   * it; a single veto keeps the row for the next sweep to retry. Registering
+   * does not replace: the previous registrar keeps its say.
+   *
+   * The alternative — one slot, last registration wins — was how this started,
+   * and it is unsafe for exactly the reason the guard seam exists. A guard's
+   * contract is "external cleanup first, then confirm", so `sys_file`'s guard
+   * reclaims storage bytes before it confirms, and the row is the only pointer
+   * to those bytes. A second registrar (ADR-0057 §3.3 explicitly invites one —
+   * a domain callback such as de-indexing a derived index by id) would have
+   * displaced that byte reclaim wholesale: rows deleted, bytes leaked, not one
+   * line of log to say so, and nothing the newcomer could have read to notice
+   * (#5535). Intersection is the composition the "confirm before delete"
+   * contract already implies, and it is what {@link registerRetentionFloor}
+   * does one policy over (there: the strictest window wins).
+   *
+   * Two consequences worth knowing when writing a guard:
+   *
+   * - Guards run in registration order, but a guard is only ever asked about
+   *   rows the guards before it have already confirmed. That is deliberate:
+   *   being asked implies "everyone so far agrees this row can go", so a guard
+   *   never performs irreversible cleanup for a row another guard is about to
+   *   keep. The delete set itself does not depend on the order.
+   * - A guard that throws aborts the object's reap with nothing deleted
+   *   (unchanged: an erroring guard must never fail open into deletion), so
+   *   cleanup already done by an earlier guard in that batch is retried next
+   *   sweep rather than paid out in a delete.
+   *
+   * Registering the identical function twice is a no-op — re-run wiring, not a
+   * second opinion: intersecting a guard's verdict with itself changes no
+   * outcome, while calling it twice would run its external cleanup twice.
    */
   registerReapGuard(object: string, guard: LifecycleReapGuard): void {
-    this.reapGuards.set(object, guard);
+    const guards = this.reapGuards.get(object);
+    if (!guards) {
+      this.reapGuards.set(object, [guard]);
+      return;
+    }
+    if (!guards.includes(guard)) guards.push(guard);
+  }
+
+  /** Snapshot of the guards governing `object`, in registration order — a copy,
+   * so a registration mid-sweep cannot change the set a reap in flight is
+   * consulting. */
+  private reapGuardsFor(object: string): LifecycleReapGuard[] {
+    return [...(this.reapGuards.get(object) ?? [])];
   }
 
   /**
@@ -1017,8 +1070,8 @@ export class LifecycleService {
 
     // A guarded object is NEVER blind-deleted: without row reads the guard
     // cannot confirm, so the reap is skipped (fail-safe), not degraded.
-    const guard = this.reapGuards.get(object);
-    if (guard && typeof engine.find !== 'function') {
+    const guards = this.reapGuardsFor(object);
+    if (guards.length > 0 && typeof engine.find !== 'function') {
       if (!report.skipped.some((s) => s.object === object && s.reason === 'reap-guard-unsupported')) {
         report.skipped.push({ object, reason: 'reap-guard-unsupported' });
       }
@@ -1031,8 +1084,8 @@ export class LifecycleService {
       else if (total !== undefined) total += n;
     };
     const reapWhere = async (where: Record<string, unknown>): Promise<number | undefined> =>
-      guard
-        ? this.guardedReap(engine, object, guard, where)
+      guards.length > 0
+        ? this.guardedReap(engine, object, guards, where)
         : countDeleted(await engine.delete(object, { where, multi: true, context: { ...SYSTEM_CTX } }));
 
     if (tenantWindows.length === 0) {
@@ -1073,17 +1126,27 @@ export class LifecycleService {
   }
 
   /**
-   * Guarded reap: fetch candidate rows in batches, let the guard confirm
-   * (after performing external cleanup) or veto each, delete only confirmed
-   * ids. A guard error propagates to the per-object handler in `sweep()` —
-   * an erroring guard must never fail open into deletion. A batch that isn't
-   * fully confirmed ends the pass: vetoed rows still match the cutoff filter
-   * and would be re-fetched forever; the next sweep retries them.
+   * Guarded reap: fetch candidate rows in batches, let every guard confirm
+   * (after performing external cleanup) or veto each, delete only the ids
+   * ALL of them confirmed. A guard error propagates to the per-object handler
+   * in `sweep()` — an erroring guard must never fail open into deletion. A
+   * batch that isn't fully confirmed ends the pass: vetoed rows still match
+   * the cutoff filter and would be re-fetched forever; the next sweep retries
+   * them.
+   *
+   * [#5535] The intersection is computed as a narrowing pipeline rather than
+   * N independent verdicts unioned at the end, because a guard's confirmation
+   * is not an opinion — it is the *receipt* for cleanup it has already
+   * performed. Handing guard 2 a row guard 1 already vetoed would have it
+   * de-index (or otherwise reclaim) a row that then survives the sweep. So a
+   * guard is asked only about rows still standing, and one that vetoes
+   * everything ends the batch before the rest are called at all. The delete
+   * set is the same whatever the registration order.
    */
   private async guardedReap(
     engine: LifecycleEngineLike,
     object: string,
-    guard: LifecycleReapGuard,
+    guards: readonly LifecycleReapGuard[],
     where: Record<string, unknown>,
   ): Promise<number> {
     let total = 0;
@@ -1094,13 +1157,23 @@ export class LifecycleService {
         context: { ...SYSTEM_CTX },
       });
       if (!rows?.length) break;
-      const confirmed = (await guard(object, rows)).filter((id) => id !== null && id !== undefined);
+      let confirmed = rows;
+      for (const guard of guards) {
+        const ids = new Set(
+          (await guard(object, confirmed)).map(idKey).filter((k): k is string => k !== undefined),
+        );
+        confirmed = confirmed.filter((row) => {
+          const k = idKey(row?.id);
+          return k !== undefined && ids.has(k);
+        });
+        if (confirmed.length === 0) break;
+      }
       // Per-id deletes (NOT a `{$in}` filter): the engine's delete path reads
       // `where.id` as a scalar target, and by-id deletes get referential
       // cascade handling a filter-delete would bypass.
-      for (const id of confirmed) {
+      for (const row of confirmed) {
         await engine.delete(object, {
-          where: { id },
+          where: { id: row.id },
           multi: true,
           context: { ...SYSTEM_CTX },
         });
@@ -1110,6 +1183,21 @@ export class LifecycleService {
     }
     return total;
   }
+}
+
+/**
+ * [#5535] Identity key used to intersect one guard's confirmed ids with the
+ * rows it was handed. `undefined` for an unusable id (null/undefined), which
+ * never matches anything — a row with no id cannot be confirmed, and a guard
+ * that returns one is confirming nothing.
+ *
+ * Stringified because the two sides are typed independently: a guard returns
+ * `string | number` while a row's id is whatever the driver stored, so a guard
+ * that hands back `String(row.id)` must not silently stop reclaiming. Within
+ * one batch the rows' ids are distinct, so the collapse cannot merge two rows.
+ */
+function idKey(id: unknown): string | undefined {
+  return id === null || id === undefined ? undefined : String(id);
 }
 
 /** Best-effort row-count extraction from a driver's delete result. */

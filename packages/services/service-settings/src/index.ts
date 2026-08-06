@@ -27,6 +27,7 @@ export {
   type SettingsActionHandler,
   type SettingsAuditSink,
   type SettingsContext,
+  type SettingsDiagnosticsLogger,
   type SettingsEngine,
   type SettingsRow,
   type SettingsServiceOptions,

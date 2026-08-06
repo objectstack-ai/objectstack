@@ -557,6 +557,57 @@ function applyFormulaPlan(
   }
 }
 
+/**
+ * Hydrate `formula` virtual fields onto the records a WRITE hands back (#5504).
+ *
+ * `applyFormulaPlan` used to hang off the read path only — `find` and `findOne`
+ * — so `POST /data/:object` and `PATCH /data/:object/:id` answered with the
+ * stored document, in which a formula field is not merely `null` but ABSENT
+ * (formulas are virtual: no driver ever returns a column for one). The very
+ * next `GET` of that same row carried every one of them, so a caller that
+ * rendered the create response — the natural thing to do, the response calls
+ * itself `record` — got a blank title on every object whose `nameField` points
+ * at a formula, and could not tell "not configured" from "not evaluated".
+ * Read-your-write, restored: the write response is now the same materialization
+ * a read produces.
+ *
+ * Deliberately the SAME plan builder and the SAME evaluation the read path uses
+ * — one formula semantic, not a write-path dialect:
+ *  - `planFormulaProjection(schema, undefined)` is exactly find's no-projection
+ *    branch: every formula field the schema declares, and no `projected`
+ *    rewrite (a write returns whole rows, so there is nothing to project).
+ *    It also carries the perf threshold unchanged — an object declaring no
+ *    formula yields an empty plan and `applyFormulaPlan` returns at its first
+ *    line, so a write on an ordinary object pays a field-name loop and nothing
+ *    else.
+ *  - the execution context is threaded exactly as find threads it, so `os.user`
+ *    / `os.org` resolve identically on both sides. Widening what that context
+ *    carries is #1979's work and stays out of here.
+ *
+ * Evaluates against the record the driver returned (a full row: `create` uses
+ * `RETURNING *`, `update` re-reads), so no extra round-trip is needed and no
+ * formula sees a partial record. Mutates in place, like the read path.
+ *
+ * Non-record entries (a `null` readback when the write moved the row out of the
+ * caller's scope; the affected-row COUNT a predicate update resolves to) are
+ * skipped rather than special-cased at each call site — the primitive would
+ * otherwise take a property assignment, which throws under ES module strict
+ * mode.
+ */
+function hydrateWriteFormulas(
+  schema: any,
+  results: unknown[],
+  execCtx?: ExecutionContextInput,
+): void {
+  const records = results.filter(
+    (r): r is Record<string, unknown> => r != null && typeof r === 'object',
+  );
+  if (records.length === 0) return;
+  const { plan } = planFormulaProjection(schema, undefined);
+  if (plan.length === 0) return;
+  applyFormulaPlan(plan, records, execCtx);
+}
+
 export type HookHandler = (context: HookContext) => Promise<void> | void;
 
 /**
@@ -824,6 +875,33 @@ function eventMatchedCount(value: unknown): number | undefined {
   return value;
 }
 
+/**
+ * What the engine knows about the transaction it opened, beyond the handle
+ * itself (#4619, ADR-0119 D1 follow-up).
+ *
+ * Purely an OBSERVABILITY record: nothing here changes which driver a write is
+ * routed to, whether a transaction is opened, or what is committed. It exists
+ * so the write path can tell a caller that a write it believes is inside the
+ * transaction is not — the one thing today's engine cannot say.
+ */
+interface TransactionScope {
+  /**
+   * The driver instance the open transaction belongs to. Compared by IDENTITY
+   * rather than by name: two drivers can transiently claim one name (see
+   * `registerDriver`'s collision branch), and identity is what actually decides
+   * whether a write rides this transaction's connection.
+   */
+  readonly driver: IDataDriver;
+  /** The datasource name that driver is registered under — for the message. */
+  readonly datasource: string;
+  /**
+   * Datasources already reported for THIS transaction. AGENTS.md's
+   * "say it once, at the first degradation, not once per failed write" — a
+   * 500-row batch routed elsewhere is one split, not 500.
+   */
+  readonly reportedOutOfScope: Set<string>;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -833,11 +911,37 @@ export class ObjectQL implements IObjectQLEngine {
    * instead of asking the pool for another one and deadlocking on the
    * single-connection SQLite pool.
    */
-  private readonly txStore = new AsyncLocalStorage<{ transaction: unknown }>();
+  private readonly txStore = new AsyncLocalStorage<{
+    transaction: unknown;
+    /**
+     * Which driver actually owns this transaction, when the engine opened it
+     * (#4619). `transaction()` covers the DEFAULT datasource only — a caveat
+     * that is part of the declared contract (ADR-0119 D1) — so a write routed
+     * elsewhere by `setDatasourceMapping` runs OUTSIDE it and cannot be rolled
+     * back with it. Carrying the owner here is what lets the write path SAY so
+     * ({@link reportWriteOutsideTransaction}); it changes no routing.
+     *
+     * Absent on the sandbox runner's explicitly-threaded handles (the
+     * `beginTransaction`/`commit`/`rollback` trio does not use this store at
+     * all) and on any store entry an outside caller populated, so every reader
+     * must treat it as optional.
+     */
+    scope?: TransactionScope;
+  }>();
 
   private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
   private logger: Logger;
+
+  /**
+   * Datasources already reported by {@link warnTransactionUnsupported}, so the
+   * "no `beginTransaction`" degrade says its piece ONCE per engine instance per
+   * driver instead of once per `transaction()` call (#4619). Test doubles and
+   * foreign engines hit that path on every call; a per-call warning would be
+   * skimmed, which is the same unreadability that made the #4420 `warn`
+   * worthless.
+   */
+  private readonly transactionUnsupportedReported = new Set<string>();
 
   // Datasource mapping rules (imported from defineStack)
   private datasourceMapping: Array<{
@@ -4859,6 +4963,8 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     const driver = this.getDriver(object);
+    // #4619 — diagnostic only, changes nothing about where this write goes.
+    this.reportWriteOutsideTransaction(object, driver, 'insert');
 
     const opCtx: OperationContext = {
       object,
@@ -5108,6 +5214,24 @@ export class ObjectQL implements IObjectQLEngine {
         // Only live rows have results — dead (partial-mode) rows never reach
         // afterInsert.
         const resultRows: any[] = isBatch ? (Array.isArray(result) ? result : [result]) : [result];
+        // [#5504] Evaluate `formula` virtual fields onto what this write hands
+        // back, so a create response is the same materialization the following
+        // GET produces. Placed HERE for three reasons, all load-bearing:
+        //  - AFTER every strip / refusal above (#5503's runtime-owned strip,
+        //    #5126's `strictReadonlyWrites` throw): a payload the engine
+        //    refuses never reaches a driver, so there is nothing to hydrate,
+        //    and a stripped field must not reappear via a formula that read it.
+        //  - AFTER the bulk contract guard, so `resultRows` is already known to
+        //    be one row per live input row — no `undefined` slot to evaluate a
+        //    formula against.
+        //  - BEFORE the afterInsert dispatch, mirroring the read path's
+        //    `applyFormulaPlan` → `afterFind` order. An after-hook therefore
+        //    observes the same complete record on a write as it does on a read,
+        //    and — because `coerceBooleanFields` copies the row it is handed —
+        //    the caller-facing `rowCtx.result` carries the values too.
+        // Batch (`insertMany` / `createManyData`) is covered by construction:
+        // one hydration pass over every returned row, not one per call site.
+        hydrateWriteFormulas(schemaForValidation, resultRows, opCtx.context);
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
           rowCtx.event = 'afterInsert';
@@ -5188,6 +5312,8 @@ export class ObjectQL implements IObjectQLEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
+     // #4619 — diagnostic only, changes nothing about where this write goes.
+     this.reportWriteOutsideTransaction(object, driver, 'update');
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads
@@ -5557,6 +5683,23 @@ export class ObjectQL implements IObjectQLEngine {
            }
 
            hookContext.event = 'afterUpdate';
+           // [#5504] Same formula hydration the insert path runs, on the same
+           // terms: after both strip passes and `assertNoStrictDrops()` (which
+           // throw before any driver call), before the afterUpdate dispatch.
+           //
+           // Only the BY-ID branch has records to hydrate. A predicate write
+           // resolves to the affected-row COUNT `driver.updateMany` returns
+           // (#4639) — it names no row and returns none, so there is nothing to
+           // materialize and `isPredicateWrite` says so explicitly rather than
+           // letting a `typeof` sniff decide. Giving a bulk update a record
+           // response is a contract change, not a hydration gap.
+           if (!isPredicateWrite) {
+             hydrateWriteFormulas(
+               updateSchema,
+               Array.isArray(result) ? result : [result],
+               opCtx.context,
+             );
+           }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
            // of both the new row and the prior row, so flow conditions comparing
            // `record.is_escalated`/`previous.status` against booleans behave.
@@ -5744,6 +5887,8 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
+    // #4619 — diagnostic only, changes nothing about where this write goes.
+    this.reportWriteOutsideTransaction(object, driver, 'delete');
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -6228,9 +6373,18 @@ export class ObjectQL implements IObjectQLEngine {
    * - If the default driver does not support `beginTransaction`, the callback
    *   runs directly with the supplied base context (no rollback). This keeps
    *   the API safe to call on drivers without ACID support (e.g. the
-   *   in-memory driver in tests).
+   *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
+   *   a bug to be discovered — but since v17 it is no longer *silent*: the
+   *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}).
    * - On callback success the transaction is committed; on any thrown error
    *   it is rolled back and the original error is re-thrown.
+   * - The transaction covers the DEFAULT datasource only — also declared
+   *   (ADR-0119 D1). A write that `setDatasourceMapping` routes elsewhere runs
+   *   OUTSIDE it and survives the rollback; that split is now reported at
+   *   `error` from the write path (#4619,
+   *   {@link reportWriteOutsideTransaction}). Reporting it does not fix it:
+   *   refusing, or committing across drivers, would change the declared
+   *   contract and is tracked by #4619's spec half.
    *
    * Use case: multi-step operations that must be atomic (e.g. CRM
    * `convertLead`, which creates an account + contact + opportunity + flips
@@ -6255,6 +6409,9 @@ export class ObjectQL implements IObjectQLEngine {
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
     if (!drv?.beginTransaction) {
+      // Declared degrade (ADR-0119 D1) — behaviour unchanged, but no longer
+      // mute: the caller asked for atomicity and is not getting it (#4619).
+      this.warnTransactionUnsupported(this.defaultDriver ?? drv?.name);
       return callback(baseContext);
     }
     const trx = await drv.beginTransaction();
@@ -6262,7 +6419,10 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034).
-      const result = await this.txStore.run({ transaction: trx }, () => callback(trxCtx));
+      const result = await this.txStore.run(
+        { transaction: trx, scope: this.newTransactionScope(driver!) },
+        () => callback(trxCtx),
+      );
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
@@ -6275,6 +6435,121 @@ export class ObjectQL implements IObjectQLEngine {
       }
       throw err;
     }
+  }
+
+  /**
+   * Build the observability record for a transaction this engine just opened
+   * (#4619). See {@link TransactionScope} — records only, routes nothing.
+   */
+  private newTransactionScope(owner: IDataDriver): TransactionScope {
+    return {
+      driver: owner,
+      datasource: this.datasourceNameOf(owner),
+      reportedOutOfScope: new Set<string>(),
+    };
+  }
+
+  /**
+   * Which datasource name is `driver` registered under?
+   *
+   * `registerDriver` keys {@link drivers} by `driver.name`, so the two normally
+   * agree — but the map is the routing authority (`getDriver` resolves through
+   * it), so the map is what is searched, and `driver.name` is only the fallback
+   * for a driver that was never registered. Runs at most once per transaction
+   * (and once per out-of-scope report), never on the hot path.
+   */
+  private datasourceNameOf(driver: IDataDriver): string {
+    for (const [name, registered] of this.drivers) {
+      if (registered === driver) return name;
+    }
+    return driver?.name ?? 'unknown';
+  }
+
+  /**
+   * A caller asked for a transaction and the driver cannot give it one (#4619).
+   *
+   * The behaviour is unchanged and DECLARED (ADR-0119 D1: "when that driver has
+   * no `beginTransaction` the callback runs with NO transaction and NO
+   * rollback"). What was missing is that a caller had no way to find out —
+   * the same shape as `batchData`'s `atomic` flag being a lie for as long as it
+   * was (ADR-0119 D4). Tightening this into a throw would change the declared
+   * contract and is deliberately NOT done here.
+   *
+   * `warn`, not `error`, on purpose. AGENTS.md's judgment question asks whether
+   * the system looks normal *while something it claims is persisted has not
+   * landed*; at this moment nothing has been lost — a capability simply is not
+   * there, and every write in the callback still lands. This is the
+   * `if (!capability)` composition branch the same section names as the
+   * usual `warn`; escalating it would train readers to skim `error`, which is
+   * exactly what made the #4420 `warn` unreadable.
+   *
+   * Once per engine instance per driver: the drivers that reach this path (test
+   * doubles, foreign engines) reach it on EVERY call.
+   */
+  private warnTransactionUnsupported(datasource: string | undefined): void {
+    const name = datasource ?? '<no default datasource>';
+    if (this.transactionUnsupportedReported.has(name)) return;
+    this.transactionUnsupportedReported.add(name);
+    this.logger.warn(
+      `transaction() requested a transaction but driver '${name}' has no beginTransaction — ` +
+        'running WITHOUT transaction or rollback. Every write the callback makes commits as it executes, ' +
+        'so a later throw leaves the earlier ones PERSISTED even though the call rejects as if the whole ' +
+        'unit of work had been undone; no caller is told, and the records stay behind. ' +
+        'Register a driver that implements beginTransaction for this datasource, or have the caller fail ' +
+        "closed itself when it cannot tolerate losing atomicity (batchData's atomic gate, ADR-0119 D4, is " +
+        'the pattern). Reported once per driver per engine instance.',
+      { datasource: name },
+    );
+  }
+
+  /**
+   * A write inside an open `transaction()` was routed to a driver that
+   * transaction does not cover (#4619).
+   *
+   * `transaction()` opens on the DEFAULT datasource only — declared behaviour
+   * (ADR-0119 D1) — so an object that `setDatasourceMapping` (or an explicit
+   * `datasource:` binding, or lifecycle-class separation) routes elsewhere is
+   * written on another connection entirely. It commits immediately, the
+   * transaction's rollback cannot reach it, and today NOTHING says so: a failed
+   * "atomic" multi-datasource write reverts one store, keeps the other, and
+   * returns a clean rejection either way.
+   *
+   * `error`, per AGENTS.md's judgment question — after the degradation the
+   * system looks entirely normal from the outside while a write it claimed was
+   * part of an atomic unit has landed on its own. This is the durability class,
+   * not the functional one.
+   *
+   * Diagnostic ONLY: the write still goes exactly where routing sent it.
+   * Refusing the cross-driver write would change the declared contract and
+   * belongs to #4619's spec half.
+   */
+  private reportWriteOutsideTransaction(
+    objectName: string,
+    driver: IDataDriver,
+    operation: 'insert' | 'update' | 'delete',
+  ): void {
+    const scope = this.txStore.getStore()?.scope;
+    // No engine-owned transaction in scope (or a handle threaded explicitly by
+    // the sandbox trio, which this store never sees) — nothing to be outside of.
+    if (!scope) return;
+    // Identity, not name: this is about riding the same connection.
+    if (driver === scope.driver) return;
+    const target = this.datasourceNameOf(driver);
+    if (scope.reportedOutOfScope.has(target)) return;
+    scope.reportedOutOfScope.add(target);
+    this.logger.error(
+      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}', but the ` +
+        `transaction was opened on the default datasource '${scope.datasource}' and covers only that one — ` +
+        'so this write is running OUTSIDE the transaction. It commits on its own the moment it executes, and ' +
+        "rolling the transaction back will NOT undo it: a failed \"atomic\" unit of work reverts " +
+        `'${scope.datasource}' while these rows stay behind in '${target}', and the caller is told only that ` +
+        'the whole thing failed. Keep every object written inside one transaction() on the default ' +
+        'datasource (move the object, or drop the datasourceMapping rule that routes it away), or split the ' +
+        'work into per-datasource units and have the caller reconcile them explicitly — cross-driver ' +
+        'atomicity is not something this engine provides. Reported once per transaction per datasource.',
+      undefined,
+      { object: objectName, operation, datasource: target, transactionDatasource: scope.datasource },
+    );
   }
 
   // ============================================
@@ -6730,6 +7005,15 @@ export class ScopedContext {
    *
    * Falls back to non-transactional execution if the driver
    * does not support transactions.
+   *
+   * Carries BOTH of `ObjectQL.transaction`'s declared caveats (ADR-0119 D1) —
+   * default-datasource-only, and a silent degrade when that driver has no
+   * `beginTransaction` — because it is a second implementation of the same
+   * thing, reached from `ctx.api.transaction(fn)` in sandboxed hook and action
+   * bodies. Behaviour is unchanged, and so is the split: since #4619 both
+   * caveats report through the SAME engine-side helpers the engine's own
+   * `transaction()` uses, so the sandbox surface is no quieter than the direct
+   * one and "say it once" holds across both.
    */
   async transaction(callback: (trxCtx: ScopedContext) => Promise<any>): Promise<any> {
     const engine = this.engine as any;
@@ -6740,7 +7024,10 @@ export class ScopedContext {
       : undefined;
 
     if (!driver?.beginTransaction) {
-      // No transaction support — execute directly
+      // No transaction support — execute directly. Declared (ADR-0119 D1), but
+      // said out loud since #4619: the caller asked for atomicity and the
+      // callback is about to run without any.
+      engine.warnTransactionUnsupported?.(engine.defaultDriver ?? driver?.name);
       return callback(this);
     }
 
@@ -6750,12 +7037,16 @@ export class ScopedContext {
       this.engine
     );
     // Share the engine's ambient transaction store so internal queries during
-    // writes reuse this transaction's connection (ADR-0034).
+    // writes reuse this transaction's connection (ADR-0034). The store entry
+    // also carries WHICH driver owns the transaction (#4619) so the write path
+    // can report a write routed off it; `newTransactionScope` is the engine's,
+    // reached the same `as any` way as `txStore` itself.
     const txStore = (this.engine as any)?.txStore as
-      | { run<R>(s: { transaction: unknown }, fn: () => R): R }
+      | { run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R }
       | undefined;
+    const scope = engine.newTransactionScope?.(driver);
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      txStore ? txStore.run({ transaction: trx }, fn) : fn();
+      txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
 
     try {
       const result = await runIn(() => callback(trxCtx));

@@ -16,8 +16,10 @@
  *  - condemn on a failed probe → "an unprobeable target is undetermined" fails
  *  - report on an existing row → "does NOT report a reference that resolves" fails
  *  - add any write            → "NEVER rewrites" fails (data JSON compared)
- *  - drop the readonly skip   → "a readonly reference is not audited" fails
  *  - drop the empty-value skip → "empty is not a reference" fails
+ *  - restore the readonly SKIP → every [#4743] test below fails: the provenance
+ *    bucket goes empty and the probe is never issued
+ *  - merge provenance into `dangling` → the [#4743] separation tests fail
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,10 +50,23 @@ const task: AuditableObject = {
     project: { type: 'lookup', reference: 'showcase_project' },
     tags: { type: 'lookup', reference: 'showcase_tag', multiple: true },
     // Audit-provenance shape: readonly, platform-minted (`applySystemFields`
-    // stamps `created_by` exactly like this). #4441 skips it on the write path
-    // because the value there is never the caller's; the audit skips it for the
-    // same reason — `sys_metadata_history.recorded_by` legitimately holds the
-    // SENTINEL STRING 'system'.
+    // stamps `created_by` exactly like this). #4441 still skips it on the WRITE
+    // path — the value there is never the caller's. The audit no longer skips
+    // it (#4743): it holds a genuine user id, and a deleted user dangles it.
+    created_by: { type: 'lookup', reference: 'sys_user', readonly: true },
+  },
+};
+
+/**
+ * [#4743] A table whose ONLY reference field is the injected provenance family
+ * — what `applySystemFields` leaves on an object that declares no lookup of its
+ * own. Before #4743 the audit read zero rows of a table shaped like this.
+ */
+const note: AuditableObject = {
+  name: 'showcase_note',
+  fields: {
+    id: { type: 'text', primaryKey: true },
+    body: { type: 'text' },
     created_by: { type: 'lookup', reference: 'sys_user', readonly: true },
   },
 };
@@ -218,21 +233,12 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     expect(JSON.stringify(rows)).toBe(before);        // …and changed none of them
   });
 
-  it('a READONLY reference field is not audited — its value was minted by the platform', async () => {
-    // Same judgment #4441 makes on the write path, and for the same reason:
-    // `stripReadonlyFields` removes a caller's value first, so what remains is
-    // the platform's. `sys_metadata_history.recorded_by` is the real case — a
-    // `lookup('sys_user')` filled with the SENTINEL STRING `actor ?? 'system'`.
-    const port = makePort({
-      objects: [task],
-      rows: { showcase_task: [{ id: 't1', title: 'T', created_by: 'system' }] },
-    });
-
-    const out = await auditDanglingReferences(port);
-    expect(out.dangling).toEqual([]);
-    // Not merely unreported — never even probed.
-    expect(port.probes).not.toContain('sys_user system');
-  });
+  // The former "a READONLY reference field is not audited" case lived here. It
+  // was retired by #4743 rather than re-spelled: its `dangling: []` assertion
+  // still PASSES under the new behaviour — the finding simply moved one bucket
+  // over — so keeping it would have been a test that is green because nothing
+  // is produced rather than because the logic is right. Its replacements, which
+  // assert where the value actually goes, are in the [#4743] block below.
 
   it('empty values are not references — null / "" / [] are skipped', async () => {
     // `deleteBehavior: 'set_null'` writes exactly these. Matching #4441's
@@ -529,5 +535,206 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
 
     const noSignal = await auditDanglingReferences(port);
     expect(noSignal.aborted).toBe(false);
+  });
+});
+
+/**
+ * [#4743] "The user who created this is gone" is a finding, and it is not the
+ * same finding as a broken business foreign key.
+ *
+ * The `readonly` family used to be skipped whole. Two grounds; #4556 deleted
+ * one of them (the platform stopped writing the `recorded_by` SENTINEL STRING
+ * into a lookup column), and what the skip covered afterwards was only the
+ * audit-provenance family — genuine user/organization ids that genuinely
+ * dangle the moment their target row is deleted.
+ *
+ * Reverse verification, direction predicted BEFORE running it: restoring the
+ * wholesale skip turns every test in this block RED — `provenance` goes empty
+ * and the probe is never issued. Note the direction the *retired* test would
+ * have gone instead: its `dangling: []` assertion stays GREEN under the new
+ * behaviour, because the finding moved rather than vanished. That is exactly
+ * the "green because nothing is produced" trap, which is why it was replaced
+ * rather than re-spelled.
+ */
+describe('[#4743] provenance references are audited, in their OWN bucket', () => {
+  it('a dangling `created_by` is reported — in `provenance`, not in `dangling`', async () => {
+    // Delete a user and every row they created points at a row that is gone.
+    // "Who made this" failing to resolve is what an audit trail exists for.
+    const port = makePort({
+      objects: [task],
+      rows: {
+        showcase_task: [
+          { id: 't1', title: 'T', project: 'proj_real', created_by: 'usr_deleted' },
+        ],
+      },
+      existing: new Set(['showcase_project proj_real']),
+    });
+
+    const out = await auditDanglingReferences(port);
+
+    // The business link is fine, so `dangling` must stay empty — and it must be
+    // empty for the RIGHT reason, which the bucket below is what proves.
+    expect(out.dangling).toEqual([]);
+    expect(out.provenance).toEqual([{
+      objectName: 'showcase_task',
+      recordId: 't1',
+      field: 'created_by',
+      target: 'sys_user',
+      value: 'usr_deleted',
+    }]);
+    // …and it really was probed, which the old wholesale skip never did.
+    expect(port.probes).toContain('sys_user usr_deleted');
+  });
+
+  it('a resolvable `created_by` is not reported at all', async () => {
+    const port = makePort({
+      objects: [task],
+      rows: { showcase_task: [{ id: 't1', title: 'T', created_by: 'usr_alive' }] },
+      existing: new Set(['sys_user usr_alive']),
+    });
+
+    const out = await auditDanglingReferences(port);
+    expect(out.provenance).toEqual([]);
+    expect(out.dangling).toEqual([]);
+    // Silent because it RESOLVED, not because nobody looked — without this the
+    // case would pass just as well under the old wholesale skip.
+    expect(port.probes).toContain('sys_user usr_alive');
+  });
+
+  it('the two buckets never merge — a broken FK and a deleted user are filed apart', async () => {
+    // The whole point of B over C: one report, two questions, two remedies
+    // (re-seed the project vs. nothing to do about a user who left).
+    const port = makePort({
+      objects: [task],
+      rows: {
+        showcase_task: [
+          { id: 't1', title: 'T', project: 'proj_gone', created_by: 'usr_deleted' },
+        ],
+      },
+    });
+
+    const out = await auditDanglingReferences(port);
+
+    expect(out.dangling.map((d) => d.field)).toEqual(['project']);
+    expect(out.provenance!.map((d) => d.field)).toEqual(['created_by']);
+  });
+
+  it('an unprobeable provenance target counts in `provenanceUndetermined`, never in `undetermined`', async () => {
+    // `sys_user` unregistered is a fact about which platform tables are
+    // mounted, not about the audited data — and `undetermined` raises the
+    // summary warning, so folding it in there would ring an alarm about the
+    // wrong thing on every run of a stack that never mounts `sys_user`.
+    const port = makePort({
+      objects: [task],
+      rows: {
+        showcase_task: [
+          { id: 't1', title: 'T', project: 'proj_real', created_by: 'usr_x' },
+        ],
+      },
+      unprobeable: new Set(['sys_user']),
+      existing: new Set(['showcase_project proj_real']),
+    });
+
+    const out = await auditDanglingReferences(port);
+
+    expect(out.provenanceUndetermined).toBe(1);
+    expect(out.undetermined).toBe(0);
+    expect(out.provenance).toEqual([]);   // unknown is not a verdict, here either
+  });
+
+  it('a table whose ONLY reference is provenance is now read — it used to be skipped whole', async () => {
+    const reads: string[] = [];
+    const port = makePort({
+      objects: [note],
+      rows: { showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }] },
+    });
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
+
+    const out = await auditDanglingReferences(port);
+
+    expect(reads).toEqual(['showcase_note']);
+    expect(out.scanned).toBe(1);
+    expect(out.provenance).toHaveLength(1);
+  });
+
+  it('provenance-only tables are scanned LAST, so a finite budget still answers the business question', async () => {
+    // Admitting the family means nearly every object has an auditable field,
+    // so without this the budget would be spent on tables carrying only
+    // provenance and the business findings would be what a bounded run never
+    // reached. Same argument as the security surface, one tier down.
+    const reads: string[] = [];
+    const port = makePort({
+      // Registration order is deliberately the WORST case: provenance-only
+      // first, security surface last.
+      objects: [note, task, binding],
+      rows: {
+        showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }],
+        showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
+        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+      },
+    });
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
+
+    await auditDanglingReferences(port);
+
+    expect(reads).toEqual(['sys_position_permission_set', 'showcase_task', 'showcase_note']);
+  });
+
+  it('provenance ALONE does not raise the summary warning', async () => {
+    // On a database of any age this bucket is non-empty on every healthy run.
+    // A line that always fires is #4747's broken alarm, and it would train its
+    // reader straight past the run where `dangling` had something in it.
+    const port = makePort({
+      objects: [note],
+      rows: { showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }] },
+    });
+
+    const out = await auditDanglingReferences(port);
+
+    expect(out.provenance).toHaveLength(1);   // found, and reported in the report
+    expect(port.warnings).toEqual([]);        // …just not shouted about
+  });
+
+  it('…but rides along in the payload once the line fires for a real finding', async () => {
+    const port = makePort({
+      objects: [task],
+      rows: {
+        showcase_task: [
+          { id: 't1', title: 'T', project: 'proj_gone', created_by: 'usr_deleted' },
+        ],
+      },
+      unprobeable: new Set(['sys_user']),
+    });
+
+    const out = await auditDanglingReferences(port);
+
+    const summary = port.warnings.find((w) => w[0].includes('#4551'));
+    expect(summary).toBeDefined();
+    const meta = summary![1] as Record<string, unknown>;
+    expect(meta.dangling).toBe(1);
+    expect(meta.provenanceUndetermined).toBe(1);
+    // Counted, never itemised: on an aged database this outnumbers every other
+    // finding, and the rows themselves are in the returned report.
+    expect(meta.provenance).toBe(0);
+    expect(meta.references).toEqual([
+      'showcase_task#t1.project → showcase_project#proj_gone',
+    ]);
+    expect(out.provenanceUndetermined).toBe(1);
+  });
+
+  it('a run with nothing to say still states both provenance buckets explicitly', async () => {
+    // Same reason `aborted: false` is explicit: a consumer must never have to
+    // guess whether `undefined` meant "clean" or "old report shape".
+    const port = makePort({
+      objects: [binding],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
+      existing: new Set(['sys_permission_set ps_real']),
+    });
+
+    const out = await auditDanglingReferences(port);
+    expect(out.provenance).toEqual([]);
+    expect(out.provenanceUndetermined).toBe(0);
   });
 });

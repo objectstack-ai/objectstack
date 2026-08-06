@@ -1,7 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Action-param VALUE validation (ADR-0104 D2).
+ * The action DISPATCH contract: what the platform validates on the way in, and
+ * what it hands the handler on the way out.
+ *
+ * Two halves, one surface. **Inbound** — action-param VALUE validation
+ * (ADR-0104 D2), below. **Outbound** — the runtime context an action body /
+ * handler receives: {@link ActionSessionSchema} (the `ctx.session` contract,
+ * #5697), {@link ActionEngineFacade}, {@link ActionHandlerContext} and
+ * {@link ActionHandler}.
+ *
+ * ## Inbound — action-param VALUE validation (ADR-0104 D2)
  *
  * An action's declared `params[]` is a complete value contract — `type`,
  * `required`, `multiple`, `options`, `reference` — but before this it only
@@ -17,8 +26,11 @@
  * resolved descriptors.
  */
 
+import { z } from 'zod';
+
 import { valueSchemaFor } from '../data/field-value.zod';
 import type { FieldErrorCode } from '../api/errors.zod';
+import { lazySchema } from '../shared/lazy-schema';
 
 /**
  * A declared action param resolved to its effective value-shape inputs. A
@@ -142,6 +154,102 @@ export interface ActionEngineFacade {
 }
 
 /**
+ * The caller session an action BODY / handler reads as `ctx.session`.
+ *
+ * This is the CONTRACT for what `packages/runtime`'s `buildActionSession()`
+ * (`src/action-execution.ts`) produces today — phase 1 of #5613's
+ * contract-first ruling (#5697). It DECLARES the current shape and changes
+ * nothing about what the runtime builds.
+ *
+ * Why a declaration was worth its own change: `actionContext` is a bare `any`
+ * at both dispatch sites (`domains/actions.ts`, `action-execution.ts`) and the
+ * sandbox seam types `ScriptContext.session` as `unknown`, so this key set
+ * reached no schema, no gate and no generated reference page. It was
+ * declared-nowhere / produced-anyway — which is how the `roles` spelling below
+ * survived a vocabulary ban and a sibling retirement without either being
+ * noticed. A shape nothing declares is a shape nothing can catch drifting.
+ *
+ * ## Read the shape exactly — absent means the KEY IS ABSENT
+ *
+ * All three keys are optional and the builder emits them by CONDITIONAL
+ * SPREAD, so a missing value means the key is **not present**:
+ * `'organizationId' in ctx.session` answers `false`, not `undefined`. The hook
+ * path's `input.id` on a bulk write is the OPPOSITE case — key present, value
+ * `undefined`, because the engine builds it with a shorthand (#5668). The two
+ * are not interchangeable; do not port an `in` test between them.
+ *
+ * The session as a whole is `undefined` — never `{}` — for a call carrying
+ * neither `userId` nor `tenantId`, so a body can distinguish "no identity
+ * envelope at all" from "an anonymous caller" the same way a hook does
+ * (#3712). One consequence worth knowing: `roles` can never appear on its own,
+ * because a context with positions but no user and no org yields no session.
+ *
+ * ## NOT the hook `ctx.session`
+ *
+ * `HookContextSchema.session` (`@objectstack/spec/data`) is a DIFFERENT object,
+ * with a different key set (`actor`, `accessToken`, `isSystem`, the skip flags)
+ * from a different producer (ObjectQL's `buildSession()`). The
+ * `buildActionSession()` docblock still says it mirrors the hook shape; that
+ * sentence stopped being true at #5050, and correcting it rides with the
+ * phase-2 rename (#5613), not with this declaration.
+ *
+ * ## Deliberately NOT strict
+ *
+ * A runtime shape the platform hands a body, never authored — same posture and
+ * same reason as `HookContextSchema`: making an engine-side enrichment a
+ * breaking parse for whoever parses a context they were GIVEN inverts the
+ * contract. What the non-strict posture still buys is the pin in
+ * `packages/runtime/src/action-session-shape-contract.test.ts`: parsing the
+ * real built object must return it UNCHANGED, so any key the builder starts
+ * producing without declaring here is stripped and the pin goes red.
+ */
+export const ActionSessionSchema = lazySchema(() => z.object({
+  /**
+   * The invoking user's id (`ExecutionContext.userId`, stringified). Absent for
+   * a call with no user — a service/system invocation scoped only to an org.
+   */
+  userId: z.string().optional().describe('Invoking user id (absent when the call carries no user)'),
+
+  /**
+   * Active organization id — the blessed developer-facing name for the
+   * caller's current org, the same value as the `organization_id` column and
+   * `current_user.organizationId` (RLS). Sourced from
+   * `ExecutionContext.tenantId`, which is the distinct driver-level isolation
+   * axis and keeps its own name; the deprecated `session.tenantId` alias
+   * (#3280) was removed in v11 (#3290) and must not come back.
+   */
+  organizationId: z.string().optional().describe('Active organization id (blessed developer-facing name; absent when the call is org-less)'),
+
+  /**
+   * @deprecated ADR-0090 D3 — the forbidden spelling of `positions`. Declared
+   * because the runtime produces it, not because the name is blessed. The
+   * rename is #5613 phase 2; do NOT add a `positions` key here ahead of it.
+   */
+  roles: z.array(z.string()).optional().describe(
+    'DEPRECATED — the VALUE is the caller\'s ADR-0090 D3 `positions` '
+    + '(`ExecutionContext.positions`, "Formerly `roles`"), delivered at this boundary under the one '
+    + 'spelling that vocabulary forbids. Declared here because `buildActionSession()` produces it '
+    + 'today — declaring current reality is not endorsing the name: ADR-0090 D3 makes `role` a '
+    + 'reserved-forbidden word, #4839 deleted the last two `roles.includes(\'admin\')` readers, and '
+    + '#5050 retired the hook-side `HookContext.session.roles` outright, so a body author currently '
+    + 'meets two different answers to one key name on one platform. The rename to `positions` — with '
+    + 'its deprecation window, ADR-0087 semantic migration and the `buildActionSession()` comment '
+    + 'correction — is #5613 phase 2. There is deliberately NO `positions` key on this shape yet: '
+    + 'minting one before the migration would ship two live spellings of one value, which is the '
+    + 'defect, not the fix. Never gate PRIVILEGE on this array — ask the security service, which '
+    + 'evaluates capability grants, placements and the derived posture (ADR-0095), never a '
+    + 'role-name string comparison.',
+  ),
+}).describe('Action-body `ctx.session` — the caller identity an action body reads (runtime shape, never authored)'));
+
+/**
+ * The parsed action-body `ctx.session`. `ActionHandlerContext.session` is this
+ * type, so the schema and the handler-facing type cannot drift into two shapes
+ * for one object.
+ */
+export type ActionSession = z.infer<typeof ActionSessionSchema>;
+
+/**
  * The runtime context an action handler receives (ADR-0104 D2). `params` is
  * validated against the action's declared param contract at dispatch BEFORE
  * the handler runs, so its values conform to the declared value shapes — it is
@@ -163,8 +271,21 @@ export interface ActionHandlerContext<
   params: TParams;
   /** The invoking principal. */
   user: { id: string; name?: string; email?: string; organizationId?: string; [k: string]: unknown };
-  /** Caller session (active org / roles), mirroring the hook `ctx.session`. */
-  session?: { userId?: string; organizationId?: string; roles?: string[]; [k: string]: unknown };
+  /**
+   * Caller session — {@link ActionSessionSchema}, the declared contract for
+   * what `buildActionSession()` produces. Absent entirely for a call with no
+   * identity envelope.
+   *
+   * Previously an inline literal carrying a `[k: string]: unknown` catch-all
+   * and the claim that it mirrors the hook `ctx.session`. Both are gone: the
+   * shape now has ONE declaration (#5697), and it does not mirror the hook
+   * session — see the schema's docblock. Dropping the catch-all narrows no
+   * live call site (measured across objectstack / objectui / cloud: this
+   * interface has zero importers outside its own module today); the SCHEMA
+   * stays non-strict, so an extra key at runtime still parses — it just stops
+   * being something the type invites an author to invent.
+   */
+  session?: ActionSession;
   /** Trusted engine facade for cross-object writes (see {@link ActionEngineFacade}). */
   engine: ActionEngineFacade;
 }

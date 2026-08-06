@@ -6794,21 +6794,39 @@ export class RestServer {
                         return res.status(envelopeStatus).json({ code: envelopeCode, message: msg.slice(0, 1000) });
                     }
                     // ── ② TRANSITIONAL fallback: message sniffing ────────────
-                    // Dataset-compiler D-C / unsupported-aggregate / read-scope
-                    // errors are client-side mistakes — surface as 400.
+                    // ⚠️ ONE entry left, and it is on a retirement schedule.
                     //
-                    // ⚠️ This list survives only because those producers are
-                    // still bare `Error`s: nothing in the dataset compiler or
-                    // `read-scope-sql` carries a `code`/`status` yet, so with the
-                    // list gone they would regress from `400 DATASET_INVALID` to
-                    // 500. It is a placeholder for their enveloping, NOT a
-                    // second classification mechanism — a phrasing change in any
-                    // of these messages silently reclassifies the error, which
-                    // is exactly the fragility #5352 removed for the filter
-                    // family. Enveloping them retires this branch; until then,
-                    // do not add to it — give the new refusal a `code`/`status`
-                    // and it is served by ① for free.
-                    if (/not declared in the dataset|not backed by a declared relationship|not supported by the v1 dataset runtime|read-scope-sql|not a selected dimension or measure|is not a subset of the selected dimensions/.test(msg)) {
+                    // #5352 left this list at six entries because all six
+                    // producers were bare `Error`s. That made the HTTP status of
+                    // six error families a property of their WORDING: rephrasing
+                    // a message — no logic change — moved the error from 400 to
+                    // 500 with no test and no gate going red, which is #5352's
+                    // own fragility surviving in the thing that patched it.
+                    // #5367 is the schedule the accommodation was missing
+                    // (Prime Directive #12: declared, loud, tested AND removable
+                    // on a schedule).
+                    //
+                    // FIVE entries are gone because their producers now carry the
+                    // ADR-0112 envelope and are served by ① — `dataset-compiler`
+                    // (undeclared relationship path, unsupported aggregate),
+                    // `dataset-executor` (order key, totals grouping) and
+                    // `native-sql-strategy` (join outside the allowlist) all throw
+                    // `datasetInvalidError` (`DATASET_INVALID` / 400) from
+                    // `service-analytics`'s `dataset-refusal.ts`.
+                    //
+                    // `read-scope-sql` is the LAST entry, and deliberately so:
+                    // its ten refusals are fail-closed RLS-lowering failures
+                    // whose inputs are an admin-authored policy and a
+                    // compiler-generated join alias — NOT caller input — so
+                    // `DATASET_INVALID` ("your request is invalid") is very
+                    // possibly the wrong verdict for them and the right one is a
+                    // separate judgement. Until that judgement lands, deleting
+                    // this entry would regress them from `400 DATASET_INVALID` to
+                    // 500, i.e. #5352 again. Tracked as the final item of #5367.
+                    //
+                    // Do not add to this list. Give the new refusal a
+                    // `code`/`status` and ① serves it for free.
+                    if (/read-scope-sql/.test(msg)) {
                         return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });
                     }
                     // ── ③ The 500 — and it does not ship driver internals ────

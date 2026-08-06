@@ -9,6 +9,10 @@ import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
+// [#5532] One vocabulary of "which driver read errors are benign", shared with
+// `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
+// `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 import type {
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -1115,6 +1119,71 @@ function rowRequiredIdError(operation: 'update' | 'delete'): Error {
     const err = new Error(`Record id is required for ${operation}`) as Error & { code?: string; status?: number };
     err.code = 'VALIDATION_FAILED';
     err.status = 400;
+    return err;
+}
+
+/**
+ * [#5532] The client-facing sentence for "the `sys_metadata` overlay read
+ * failed, so I do not know whether this item exists".
+ *
+ * Deliberately does NOT interpolate the driver's own message. #5437 records
+ * why: the REST boundary drops a 5xx's prose unconditionally, and the two
+ * write-side 500s in this very file (`Failed to persist customization overlay
+ * to sys_metadata: ${dbError.message}`) are the specimen that made it drop —
+ * a driver line is nowhere near the length bound, so it arrived intact. The
+ * driver error still reaches the operator: it rides as `cause` on the thrown
+ * error, and `handleRouteError` / `logWithheldServerFault` print the whole
+ * object.
+ */
+const METADATA_STORE_UNAVAILABLE_MESSAGE =
+    'The metadata store could not be read, so whether this item exists is unknown. '
+    + 'Retry once the metadata database is reachable.';
+
+/**
+ * [#5532] A `sys_metadata` READ that failed for a reason that is NOT "the table
+ * has not been provisioned yet" — i.e. the rows may well exist and simply were
+ * not seen.
+ *
+ * 503, not 500: nothing about the REQUEST is wrong, the condition is a
+ * dependency outage that may clear, and a caller/proxy SHOULD retry. That is
+ * the same verdict `mapDataError` already gives `ERR_DATASOURCE_UNAVAILABLE`.
+ * `SERVICE_UNAVAILABLE` is the standard catalog's own code for 503
+ * (`HttpStatusErrorCodeMap[503]`, ADR-0112) — a catalogued code rather than an
+ * invented string, and no new ledger vocabulary for a distinction no consumer
+ * measures today.
+ */
+function metadataStoreUnavailableError(cause: unknown): Error {
+    const err = new Error(METADATA_STORE_UNAVAILABLE_MESSAGE) as Error & {
+        code?: string;
+        status?: number;
+        cause?: unknown;
+    };
+    err.code = 'SERVICE_UNAVAILABLE';
+    err.status = 503;
+    err.cause = cause;
+    return err;
+}
+
+/**
+ * [#5532] The terminal "this metadata item does not exist" — structured, so it
+ * stops falling out of `mapDataError`'s catch-all.
+ *
+ * A miss is a 404 with the catalog's own not-found code
+ * (`HttpStatusErrorCodeMap[404] === 'RESOURCE_NOT_FOUND'`, and the spelling
+ * `GET /meta/:type/:name` already emits from its app-visibility gate). Before
+ * this, the throw was a bare `Error`: no `status`, no `code`, so it reached the
+ * REST boundary's terminal branch and was answered — verbatim as a 400 before
+ * #5489, as a sanitised `500 INTERNAL_ERROR` after it. Both are wrong answers
+ * for a plain miss, in opposite directions; neither could be told apart from a
+ * genuine fault by any client.
+ */
+function metadataItemNotFoundError(type: string, name: string): Error {
+    const err = new Error(`Metadata item ${type}/${name} not found`) as Error & {
+        code?: string;
+        status?: number;
+    };
+    err.code = 'RESOURCE_NOT_FOUND';
+    err.status = 404;
     return err;
 }
 
@@ -2984,6 +3053,57 @@ export class ObjectStackProtocolImplementation implements
         };
     }
 
+    /**
+     * [#5532] Decide what a failed READ against `sys_metadata` means, and
+     * rethrow unless it is the ONE benign reason.
+     *
+     * ## The defect
+     *
+     * Every overlay read in `getMetaItems`/`getMetaItem` used to `catch {}` into
+     * its own empty value — `items` left as-is, `item` left `undefined`, the
+     * draft lookup falling through to the active read. That made a metadata
+     * store the protocol cannot reach **indistinguishable** from an environment
+     * where the item was never customised, and the emptiness then travelled
+     * the whole read chain unremarked:
+     *
+     *   - `getMetaItemCached` turned it into `not found` — an outage answered
+     *     as "that item does not exist", which is the opposite disposition
+     *     (retry the backend vs. create the item / fix the link);
+     *   - the `state='draft'` read turned it into `NO_DRAFT` / 404 — an outage
+     *     answered as "there is no pending edit", which a publish flow reads as
+     *     "nothing to publish";
+     *   - `getMetaItems` turned it into `items: []` — an outage answered as
+     *     "this environment declares none of these", the exact shape #5108 fixed
+     *     one layer down in `DatabaseLoader` and #5089 in `listForIndex`.
+     *
+     * ADR-0110 D3 is the rule: a miss and an outage are different facts with
+     * opposite meanings, and a consumer must never read one as the other.
+     *
+     * ## The one benign reason
+     *
+     * `sys_metadata` has not been provisioned yet. There are then genuinely no
+     * overlay rows, so falling through to the registry / MetadataService IS the
+     * truth, and a first boot must not explode. Classification is by error TYPE
+     * through {@link isMissingTableError} — the same predicate `DatabaseLoader`
+     * (#5108) and this package's own `SysMetadataRepository` (#4867) ask, so a
+     * driver quirk is taught to the platform once. Conservative in the same
+     * direction: an unrecognised error is NOT benign, because a false "benign"
+     * silently mis-answers "does this exist?" while a false "real" costs one
+     * 503 the caller can retry.
+     *
+     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
+     *         error as `cause`. Not the driver error itself: unwrapped, it has
+     *         no status, so the REST boundary would have to guess from the
+     *         message text — and `mapDataError` guesses `no such table` into
+     *         `404 OBJECT_NOT_FOUND`, i.e. straight back into a miss.
+     * @returns normally ONLY for the benign case, licensing the caller to treat
+     *          the overlay as absent.
+     */
+    private rethrowUnlessMetadataStoreUnprovisioned(error: unknown): void {
+        if (isMissingTableError(error)) return;
+        throw metadataStoreUnavailableError(error);
+    }
+
     async getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
         // is load-bearing twice over: the SchemaRegistry indexes code-authored
@@ -3114,8 +3234,12 @@ export class ObjectStackProtocolImplementation implements
                     }
                 }
             }
-        } catch {
-            // DB not available — fall through with whatever we already have.
+        } catch (error) {
+            // [#5532] Only "sys_metadata not provisioned yet" licenses us to
+            // answer with whatever we already have. Any other read failure
+            // means overlay rows may exist and were not seen — serving the
+            // registry-only set would report them as never declared.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
         // ADR-0033 draft-overlay preview: when the caller opts in (admin-gated
@@ -3166,8 +3290,12 @@ export class ObjectStackProtocolImplementation implements
                         return data;
                     });
                 }
-            } catch {
-                // DB unavailable — serve the active result unchanged.
+            } catch (error) {
+                // [#5532] Same rule as the active-overlay read above. Serving
+                // the active result "unchanged" is a lie to a caller that asked
+                // for a draft preview: it renders the published world while the
+                // pending edits it asked to see were never read.
+                this.rethrowUnlessMetadataStoreUnprovisioned(error);
             }
         }
 
@@ -3338,8 +3466,11 @@ export class ObjectStackProtocolImplementation implements
                     }
                     return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, draftItem) };
                 }
-            } catch {
-                // DB unavailable — fall through to the active read.
+            } catch (error) {
+                // [#5532] Falling through to the active read here would answer
+                // "there is no draft for this item" from a read that never
+                // reached the table the drafts live in.
+                this.rethrowUnlessMetadataStoreUnprovisioned(error);
             }
         }
 
@@ -3398,8 +3529,13 @@ export class ObjectStackProtocolImplementation implements
                     (item as any)._packageId = recPkg;
                 }
             }
-        } catch {
-            // DB not available — fall through to registry / MetadataService
+        } catch (error) {
+            // [#5532] THE site this issue was raised on. Falling through to the
+            // registry / MetadataService with `item` still `undefined` is what
+            // let a storage outage arrive at the client as `not found` (active
+            // read) or `NO_DRAFT` (draft read) — both of them claims about
+            // authorship, made from a read that never happened.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
         // Draft reads stop here — they intentionally do NOT fall through
@@ -5677,7 +5813,13 @@ export class ObjectStackProtocolImplementation implements
             const item = (result as any)?.item;
 
             if (!item) {
-                throw new Error(`Metadata item ${request.type}/${request.name} not found`);
+                // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
+                // Reaching here now means a real miss — `getMetaItem` throws
+                // 503 rather than answering `undefined` when the store could
+                // not be read (see
+                // {@link rethrowUnlessMetadataStoreUnprovisioned}) — so the
+                // 404 is a claim this layer is finally entitled to make.
+                throw metadataItemNotFoundError(request.type, request.name);
             }
 
             // Calculate ETag (simple hash of the stringified metadata).

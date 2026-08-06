@@ -261,8 +261,22 @@ describe('Wait Executor — pause/resume scenario', () => {
 describe('ActionDescriptorSchema.resumeAuthority', () => {
   const base = { type: 'demo', version: '1.0.0', name: 'Demo' };
 
-  it("defaults to 'any' — the generic resume route stays the door for screen / wait", () => {
-    expect(defineActionDescriptor(base).resumeAuthority).toBe('any');
+  // Replaces the assertion that pinned the old `.default('any')` (#5561). That
+  // default is what made an omission unreadable: it produced a descriptor
+  // byte-identical to an author's explicit `'any'`, so the registration warning
+  // this field now feeds could not have existed. Absent must stay absent —
+  // reinstating any default turns the two cases below into one.
+  it('leaves an omission absent rather than defaulting it — the fact the registration warning reads', () => {
+    const desc = defineActionDescriptor(base);
+    expect(desc.resumeAuthority).toBeUndefined();
+    expect(Object.hasOwn(desc, 'resumeAuthority')).toBe(false);
+  });
+
+  it("keeps an explicit 'any' distinguishable from an omission (the same value, a different fact)", () => {
+    const declared = defineActionDescriptor({ ...base, supportsPause: true, resumeAuthority: 'any' });
+    expect(declared.resumeAuthority).toBe('any');
+    expect(Object.hasOwn(declared, 'resumeAuthority')).toBe(true);
+    expect(Object.hasOwn(defineActionDescriptor({ ...base, supportsPause: true }), 'resumeAuthority')).toBe(false);
   });
 
   it("accepts 'service' for a node only its owning service may resume", () => {

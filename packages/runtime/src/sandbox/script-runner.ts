@@ -68,6 +68,28 @@ export interface ScriptContext {
   input: unknown;
   previous?: unknown;
   user?: unknown;
+  /**
+   * The caller session. TWO different shapes reach this one field, because
+   * this interface is a single generic seam over both body kinds:
+   *
+   *  - a HOOK body gets `HookContext.session` (`@objectstack/spec/data`) —
+   *    `userId` / `actor` / `organizationId` / `accessToken` / `isSystem` /
+   *    the skip flags, built by ObjectQL's `buildSession()`;
+   *  - an ACTION body gets `ActionSession` (`@objectstack/spec/ui`,
+   *    {@link ActionSessionSchema}) — `userId` / `organizationId` / `roles`,
+   *    built by `buildActionSession()`.
+   *
+   * They are NOT the same object and never converge: `roles` exists on the
+   * action side only (and is deprecated there — #5613 phase 2 renames it to
+   * `positions`), while the hook side retired that key at #5050.
+   *
+   * Left `unknown` rather than typed as the union on purpose (#5697, which is
+   * a zero-behaviour-change declaration): narrowing this field would force
+   * every consumer of the seam — `quickjs-runner`'s `installCtx`, the body
+   * runners, the hook path's own producers — to discriminate a body kind this
+   * type does not carry. Typing it belongs with whatever change is willing to
+   * pay that, not with declaring what the producers already build.
+   */
   session?: unknown;
   /**
    * The lifecycle event name the hook is firing for (e.g. `beforeInsert`,

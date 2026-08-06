@@ -3170,6 +3170,8 @@
     "ActionParamIssue (interface)",
     "ActionParamSchema (const)",
     "ActionSchema (const)",
+    "ActionSession (type)",
+    "ActionSessionSchema (const)",
     "ActionType (const)",
     "AddRecordConfig (type)",
     "AddRecordConfigSchema (const)",

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema } from '@objectstack/spec/automation';
 import {
   lintFlowPatterns,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
@@ -443,6 +443,234 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
     it('a NON-schedule flow with a data op (record-change / screen runs carry a user)', () => {
       expect(lintFlowPatterns(scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record-after-update', objectName: 'thing' } }))).toHaveLength(0);
       expect(lintFlowPatterns(scheduledDataFlow({ flowType: 'screen', startConfig: {} }))).toHaveLength(0);
+    });
+  });
+
+  /**
+   * #5633 — the data-node search descends into every ADR-0031 region.
+   *
+   * #5383/#5635 gave this whole rule family the per-region walk and deliberately
+   * left THIS rule reading the top-level `nodes` only, because widening a
+   * build-GATING rule is its own change with its own blast radius. That exemption
+   * is what this block removes.
+   *
+   * The evidence and the verdict are at different altitudes here, and keeping
+   * them apart is the whole design:
+   *
+   *  - the VERDICT is flow-level. `runAs` is a flow property and the trigger is a
+   *    property of the start node, so a flow is either unscoped or it is not —
+   *    one finding per flow, `where` = `flow 'x' · runAs`, never per region and
+   *    never once per data node.
+   *  - the EVIDENCE is "does this flow touch data at all", and a `loop` body is
+   *    as much part of the flow as its top level. A data node one level down is
+   *    refused by exactly the same `resolveRunAsIdentity` check (#3760) as one at
+   *    the top; the nesting depth is not a property the runtime consults.
+   *
+   * The shape missed until now is not a corner but the DEFAULT shape of a
+   * scheduled data flow — query a set, loop it, write per item — so the write is
+   * almost always the nested node. Every case below pins the nested finding
+   * against its top-level twin, and the twin's message is asserted byte-for-byte
+   * so the widening cannot drift the wording authors already see.
+   */
+  describe('#5633 — descends into nested regions for the data-node evidence', () => {
+    /** The canonical scheduled sweep: the write lives in the loop BODY. */
+    const loopConfig = (bodyNodeType = 'update_record') => ({
+      collection: '{vars.rows}',
+      iteratorVariable: 'row',
+      body: {
+        nodes: [{
+          id: 'touch',
+          type: bodyNodeType,
+          label: 'Touch Row',
+          config: { objectName: 'thing', recordId: '{row.id}', fields: { seen: true } },
+        }],
+        edges: [],
+      },
+    });
+
+    const sweepFlow = (opts: { runAs?: 'system' | 'user'; bodyNodeType?: string } = {}) => ({
+      flows: [{
+        name: 'nightly_sweep',
+        type: 'schedule',
+        ...(opts.runAs ? { runAs: opts.runAs } : {}),
+        nodes: [
+          { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
+          { id: 'loop_rows', type: 'loop', config: loopConfig(opts.bodyNodeType) },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'loop_rows' },
+          { id: 'e2', source: 'loop_rows', target: 'end' },
+        ],
+      }],
+    });
+
+    /**
+     * The container these fixtures nest the write inside must be a shape the
+     * schema ACCEPTS, or the rule is only proven on metadata that never reaches
+     * it — the #4966 trap, one container down (see the `TimeRelativeTriggerSchema`
+     * pin above for the same guard on a trigger descriptor).
+     *
+     * This one is not hypothetical: the item-binding key here is
+     * `iteratorVariable`, and `LoopConfigSchema` is a `strictObject`, so the
+     * plausible-looking `itemVar` is reported as an `unrecognized_key` rather
+     * than quietly ignored (#4001). A fixture spelling it would still exercise
+     * this rule — region collection reads `config.body`, which is unaffected —
+     * so nothing here would have gone red while the fixture taught a `loop` the
+     * author cannot actually write.
+     *
+     * Full `safeParse` green rather than merely "no unrecognized keys", because
+     * what this rule judges is a VALUE verdict (`runAs` against the trigger
+     * kind), and its evidence is a node that must really be reachable inside a
+     * really-authorable container.
+     */
+    it('pins the loop container against the schema — the fixture must be authorable', () => {
+      const parsed = LoopConfigSchema.safeParse(loopConfig());
+      expect(parsed.success).toBe(true);
+      // And the near-miss spelling really is rejected, so the pin has teeth.
+      const near = LoopConfigSchema.safeParse({ ...loopConfig(), iteratorVariable: undefined, itemVar: 'row' });
+      expect(near.success).toBe(false);
+    });
+
+    it('flags a loop-body write — the shape that passed the build and is refused at run time', () => {
+      const fnds = lintFlowPatterns(sweepFlow());
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_RUNAS_UNSCOPED);
+      expect(fnds[0].severity).toBe('error');
+      // The verdict stays FLOW-level: `runAs` is a flow property, so the region
+      // never enters `where` — it is evidence, not location.
+      expect(fnds[0].where).toBe("flow 'nightly_sweep' · runAs");
+      expect(fnds[0].where).not.toContain('loop');
+      // …but the message names the region, or the author has to hunt for the node.
+      expect(fnds[0].message).toContain("its data node 'touch' (update_record), in loop 'loop_rows' body,");
+    });
+
+    it('flags a loop-body delete_record the same way', () => {
+      const fnds = lintFlowPatterns(sweepFlow({ bodyNodeType: 'delete_record' }));
+      expect(fnds.map((f) => f.rule)).toEqual([FLOW_RUNAS_UNSCOPED]);
+      expect(fnds[0].message).toContain("its data node 'touch' (delete_record), in loop 'loop_rows' body,");
+    });
+
+    // The A/B twin. Same flow, same node, moved out of the body — this was
+    // already flagged before #5633, and its message must not have moved a byte.
+    it('leaves the TOP-LEVEL twin byte-identical (no region clause, no regression)', () => {
+      const fnds = lintFlowPatterns({
+        flows: [{
+          name: 'nightly_sweep',
+          type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
+            { id: 'touch', type: 'update_record', config: { objectName: 'thing', fields: { seen: true } } },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'touch' }],
+        }],
+      });
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe("flow 'nightly_sweep' · runAs");
+      expect(fnds[0].message).toBe(
+        "schedule-triggered flow runs as the default `runAs:'user'`, but a schedule run has no trigger " +
+        "user — so its data node 'touch' (update_record) has no identity to scope to and " +
+        "will be REFUSED at run time.",
+      );
+      expect(fnds[0].message).not.toContain('in loop');
+    });
+
+    it('descends two levels — a loop inside a loop', () => {
+      const fnds = lintFlowPatterns({
+        flows: [{
+          name: 'nightly_sweep',
+          type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
+            {
+              id: 'loop_rows', type: 'loop',
+              config: {
+                collection: '{vars.rows}', iteratorVariable: 'row',
+                body: {
+                  nodes: [{
+                    id: 'loop_children', type: 'loop', label: 'Loop Children',
+                    config: {
+                      collection: '{row.children}', iteratorVariable: 'child',
+                      body: {
+                        nodes: [{ id: 'touch', type: 'create_record', label: 'Create', config: { objectName: 'thing', fields: { a: 1 } } }],
+                        edges: [],
+                      },
+                    },
+                  }],
+                  edges: [],
+                },
+              },
+            },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'loop_rows' }],
+        }],
+      }).filter((f) => f.rule === FLOW_RUNAS_UNSCOPED);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].message).toContain(
+        "its data node 'touch' (create_record), in loop 'loop_rows' body → loop 'loop_children' body,",
+      );
+    });
+
+    // Exactly ONE finding, not one per data node and not one per region: a
+    // container's config physically contains its body, and the walk visits the
+    // body in its own right, so a rule that pushed per hit would double-report.
+    it('reports ONCE for a flow whose regions hold several data nodes', () => {
+      const fnds = lintFlowPatterns({
+        flows: [{
+          name: 'nightly_sweep',
+          type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
+            {
+              id: 'fan', type: 'parallel',
+              config: {
+                branches: [
+                  { name: 'writes', nodes: [{ id: 'w1', type: 'update_record', label: 'Write', config: { objectName: 'a' } }], edges: [] },
+                  { name: 'deletes', nodes: [{ id: 'w2', type: 'delete_record', label: 'Delete', config: { objectName: 'b' } }], edges: [] },
+                ],
+              },
+            },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'fan' }],
+        }],
+      }).filter((f) => f.rule === FLOW_RUNAS_UNSCOPED);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].message).toContain("in parallel 'fan' branch 0,");
+    });
+
+    // The top-level graph comes first out of `collectFlowGraphs`, so a flow with
+    // data nodes at BOTH altitudes still cites the top-level one — the exact node
+    // it cited before #5633.
+    it('prefers the top-level node as evidence when the flow has both', () => {
+      const stack = sweepFlow() as { flows: Array<{ nodes: unknown[] }> };
+      stack.flows[0].nodes.splice(1, 0, {
+        id: 'query', type: 'get_record', config: { objectName: 'thing', filter: { done: false } },
+      });
+      const fnds = lintFlowPatterns(stack).filter((f) => f.rule === FLOW_RUNAS_UNSCOPED);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].message).toContain("its data node 'query' (get_record) has no identity");
+      expect(fnds[0].message).not.toContain('in loop');
+    });
+
+    describe('does NOT flag', () => {
+      it("a loop-body write under runAs:'system' (the correct shape for a sweep)", () => {
+        expect(lintFlowPatterns(sweepFlow({ runAs: 'system' }))
+          .filter((f) => f.rule === FLOW_RUNAS_UNSCOPED)).toHaveLength(0);
+      });
+
+      it('a loop-body write on a non-user-less trigger (a record-change run carries a user)', () => {
+        const stack = sweepFlow() as { flows: Array<Record<string, unknown>> };
+        stack.flows[0].type = 'record_change';
+        (stack.flows[0].nodes as Array<Record<string, unknown>>)[0] = {
+          id: 'start', type: 'start', config: { triggerType: 'record-after-update', objectName: 'thing' },
+        };
+        expect(lintFlowPatterns(stack).filter((f) => f.rule === FLOW_RUNAS_UNSCOPED)).toHaveLength(0);
+      });
+
+      it('a loop body holding no data node at all (runAs stays moot — a notify-only sweep)', () => {
+        expect(lintFlowPatterns(sweepFlow({ bodyNodeType: 'notify' }))
+          .filter((f) => f.rule === FLOW_RUNAS_UNSCOPED)).toHaveLength(0);
+      });
     });
   });
 });

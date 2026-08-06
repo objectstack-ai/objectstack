@@ -415,6 +415,216 @@ describe('LifecycleService.sweep — reap guard', () => {
   });
 });
 
+// [#5535] Two registrars on ONE object. Before this, `registerReapGuard` was a
+// single-slot `set()`: the second registrant silently unhooked the first — on
+// `sys_file` that means the byte-reclaim guard stops running while the rows
+// (the only pointer to those bytes) keep being deleted. Guards now compose by
+// intersection, which is what "confirm before delete" already implied.
+describe('LifecycleService.sweep — reap guard composition', () => {
+  const guarded: LifecycleObjectLike[] = [
+    { name: 'sys_file', lifecycle: { class: 'transient', ttl: { field: 'deleted_at', expireAfter: '30d' } } },
+  ];
+
+  const rowsOf = (...ids: string[]) => ids.map((id) => ({ id, deleted_at: '2020-01-01T00:00:00Z' }));
+
+  /** A store the sweep actually drains, so "retried next sweep" is observable. */
+  function backedEngine(seed: Array<Record<string, unknown>>) {
+    const store = [...seed];
+    const captured = captureEngine(guarded, {
+      findImpl: () => store.slice(),
+      deleteImpl: (_object, options) => {
+        const idx = store.findIndex((r) => r.id === options?.where?.id);
+        if (idx >= 0) store.splice(idx, 1);
+        return { deletedCount: idx >= 0 ? 1 : 0 };
+      },
+    });
+    return { ...captured, store };
+  }
+
+  const idsOf = (rows: Array<Record<string, unknown>>) => rows.map((r) => r.id as string);
+
+  it('deletes only ids EVERY guard confirmed; a veto by either one keeps the row', async () => {
+    const rows = rowsOf('f1', 'f2', 'f3');
+    const { engine, deletes } = captureEngine(guarded, { findImpl: () => rows });
+    const svc = service(engine);
+    // Each guard vetoes a different id — neither alone would keep both.
+    svc.registerReapGuard('sys_file', async (_o, r) => idsOf(r).filter((id) => id !== 'f2'));
+    svc.registerReapGuard('sys_file', async (_o, r) => idsOf(r).filter((id) => id !== 'f3'));
+
+    const report = await svc.sweep();
+
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'f1' }]);
+    expect(report.swept[0].deleted).toBe(1);
+    expect(report.errors).toEqual([]);
+  });
+
+  it('is order-independent: the same two guards registered the other way round agree', async () => {
+    const vetoF2 = async (_o: string, r: Array<Record<string, unknown>>) =>
+      idsOf(r).filter((id) => id !== 'f2');
+    const vetoF3 = async (_o: string, r: Array<Record<string, unknown>>) =>
+      idsOf(r).filter((id) => id !== 'f3');
+
+    const deleteSets: string[][] = [];
+    for (const order of [[vetoF2, vetoF3], [vetoF3, vetoF2]]) {
+      const { engine, deletes } = captureEngine(guarded, { findImpl: () => rowsOf('f1', 'f2', 'f3') });
+      const svc = service(engine);
+      for (const g of order) svc.registerReapGuard('sys_file', g);
+      await svc.sweep();
+      deleteSets.push(deletes.map((d) => d.where.id as string));
+    }
+
+    expect(deleteSets[0]).toEqual(['f1']);
+    expect(deleteSets[1]).toEqual(deleteSets[0]);
+  });
+
+  it('asks a guard only about rows the guards before it confirmed', async () => {
+    // The point of the narrowing: a guard's confirmation is the RECEIPT for
+    // cleanup it has already performed. Showing guard 2 a row guard 1 vetoed
+    // would have it reclaim/de-index a row that then survives the sweep.
+    const rows = rowsOf('f1', 'f2', 'f3');
+    const { engine } = captureEngine(guarded, { findImpl: () => rows });
+    const svc = service(engine);
+    const first = vi.fn(async (_o: string, r: Array<Record<string, unknown>>) =>
+      idsOf(r).filter((id) => id !== 'f2'),
+    );
+    const second = vi.fn(async (_o: string, r: Array<Record<string, unknown>>) => idsOf(r));
+    svc.registerReapGuard('sys_file', first);
+    svc.registerReapGuard('sys_file', second);
+
+    await svc.sweep();
+
+    expect(first).toHaveBeenCalledWith('sys_file', rows); // the full candidate batch
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(idsOf(second.mock.calls[0][1])).toEqual(['f1', 'f3']); // f2 already vetoed
+  });
+
+  it('a guard that vetoes the whole batch spares the later guards the call', async () => {
+    const { engine, deletes } = captureEngine(guarded, { findImpl: () => rowsOf('f1', 'f2') });
+    const svc = service(engine);
+    const second = vi.fn(async (_o: string, r: Array<Record<string, unknown>>) => idsOf(r));
+    svc.registerReapGuard('sys_file', async () => []);
+    svc.registerReapGuard('sys_file', second);
+
+    const report = await svc.sweep();
+
+    expect(second).not.toHaveBeenCalled();
+    expect(deletes).toHaveLength(0);
+    expect(report.swept[0].deleted).toBe(0);
+  });
+
+  it('a row one guard vetoed is retried by the next sweep and deleted once both confirm', async () => {
+    const { engine, store } = backedEngine(rowsOf('f1', 'f2'));
+    const svc = service(engine);
+    let firstSweep = true;
+    svc.registerReapGuard('sys_file', async (_o, r) =>
+      idsOf(r).filter((id) => !(firstSweep && id === 'f2')),
+    );
+    svc.registerReapGuard('sys_file', async (_o, r) => idsOf(r));
+
+    const one = await svc.sweep();
+    expect(idsOf(store)).toEqual(['f2']); // vetoed, still there
+    expect(one.swept[0].deleted).toBe(1);
+
+    firstSweep = false;
+    const two = await svc.sweep();
+    expect(store).toEqual([]); // retried and reaped
+    expect(two.swept[0].deleted).toBe(1);
+  });
+
+  it('a throwing guard deletes nothing — not even ids an earlier guard confirmed', async () => {
+    // Same fail-safe as the single-guard case: the error reaches the per-object
+    // handler in sweep() and no row is deleted. The earlier guard's external
+    // cleanup for this batch is simply retried next sweep — never paid out in
+    // a delete on a batch no one finished confirming.
+    const { engine, deletes } = captureEngine(guarded, { findImpl: () => rowsOf('f1', 'f2') });
+    const svc = service(engine);
+    const first = vi.fn(async (_o: string, r: Array<Record<string, unknown>>) => idsOf(r));
+    svc.registerReapGuard('sys_file', first);
+    svc.registerReapGuard('sys_file', async () => {
+      throw new Error('index unreachable');
+    });
+
+    const report = await svc.sweep();
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(deletes).toHaveLength(0);
+    expect(report.swept).toEqual([]);
+    expect(report.errors).toEqual([{ object: 'sys_file', error: 'index unreachable' }]);
+  });
+
+  it('registering the identical guard twice runs it once (re-run wiring, not a second opinion)', async () => {
+    const { engine, deletes } = captureEngine(guarded, { findImpl: () => rowsOf('f1') });
+    const svc = service(engine);
+    const guard = vi.fn(async (_o: string, r: Array<Record<string, unknown>>) => idsOf(r));
+    svc.registerReapGuard('sys_file', guard);
+    svc.registerReapGuard('sys_file', guard);
+
+    await svc.sweep();
+
+    // Called twice, its external cleanup would run twice per batch.
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'f1' }]);
+  });
+
+  it('multiple guards on an engine without find are skipped, never blind-deleted', async () => {
+    const { engine, deletes } = captureEngine(guarded); // no findImpl → no engine.find
+    const svc = service(engine);
+    svc.registerReapGuard('sys_file', async () => ['f1']);
+    svc.registerReapGuard('sys_file', async () => ['f1']);
+
+    const report = await svc.sweep();
+
+    expect(deletes).toHaveLength(0);
+    expect(report.skipped).toEqual([{ object: 'sys_file', reason: 'reap-guard-unsupported' }]);
+  });
+
+  it('keeps byte reclaim running when a second consumer registers (the #5535 shape)', async () => {
+    // service-storage's `sys_file` guard, in the same shape but stubbed here:
+    // reclaim the bytes FIRST, confirm only if that succeeded (the row is the
+    // only pointer to the bytes, so a failed reclaim must veto). The second
+    // registrar is the ADR-0057 §3.3 domain callback #4672 will add — it
+    // de-indexes by id. Under the old single-slot registry the byte reclaim
+    // was unhooked wholesale by that second call: rows deleted, bytes leaked.
+    const bytes = new Map([
+      ['f1', 'k1'],
+      ['f2', 'k2'],
+      ['f3', 'k3'],
+    ]);
+    const index = new Set(['f1', 'f2', 'f3']);
+    const { engine, store } = backedEngine(rowsOf('f1', 'f2', 'f3'));
+    const svc = service(engine);
+
+    svc.registerReapGuard('sys_file', async (_o, rows) => {
+      const confirmed: string[] = [];
+      for (const row of rows) {
+        const id = row.id as string;
+        if (id === 'f2') continue; // storage.delete threw → veto, keep the pointer
+        bytes.delete(id);
+        confirmed.push(id);
+      }
+      return confirmed;
+    });
+    svc.registerReapGuard('sys_file', async (_o, rows) => {
+      const confirmed: string[] = [];
+      for (const row of rows) {
+        index.delete(row.id as string);
+        confirmed.push(row.id as string);
+      }
+      return confirmed;
+    });
+
+    const report = await svc.sweep();
+
+    expect(idsOf(store)).toEqual(['f2']); // vetoed row retained for the next sweep
+    expect([...bytes.keys()]).toEqual(['f2']); // …with its bytes intact — no leak
+    // …and the de-indexer was never shown f2, so a surviving row keeps its
+    // index entry rather than silently disappearing from search.
+    expect([...index]).toEqual(['f2']);
+    expect(report.swept[0].deleted).toBe(2);
+    expect(report.errors).toEqual([]);
+  });
+});
+
 describe('LifecycleService.sweep — Archiver (P3)', () => {
   const AUDIT_OBJ: LifecycleObjectLike = {
     name: 'sys_audit_log',

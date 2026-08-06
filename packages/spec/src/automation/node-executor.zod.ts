@@ -278,7 +278,18 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
     .describe('JSON Schema for the node config (drives the designer form; undeclared keys are rejected at registration)'),
 
   // ── capabilities ──────────────────────────────────────────────────
-  /** Supports async pause/resume (e.g. wait, human_task). */
+  /**
+   * Supports async pause/resume (e.g. wait, human_task).
+   *
+   * **A declaration, not an enforced fact** (#5703). No execution path reads
+   * it: a run pauses because the executor's `execute()` returned
+   * `suspend: true`, and the #3801 resume gate keys on the suspended node's
+   * `resumeAuthority` alone. What it does drive is authoring-time: the designer
+   * palette, the registration warning below, and the
+   * `check:resume-authority-declared` gate. So an executor that suspends
+   * while leaving this `false` is invisible to both of those — #5703 tracks
+   * closing that seam.
+   */
   supportsPause: z.boolean().default(false).describe('Supports async pause/resume'),
   /** Supports mid-execution cancellation. */
   supportsCancellation: z.boolean().default(false).describe('Supports cancellation'),
@@ -326,9 +337,9 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * exists — so the node type that *produced* the pause is what decides
    * whether a raw resume is a legitimate continuation or a bypass.
    *
-   *  - `'any'` (default) — the caller supplies the continuation and the route
-   *    is the intended door: a `screen` node's collected inputs, a `wait`
-   *    node's external signal.
+   *  - `'any'` — the caller supplies the continuation and the route is the
+   *    intended door: a `screen` node's collected inputs, a `wait` node's
+   *    external signal.
    *  - `'service'` — resuming is a SIDE EFFECT of a decision some service must
    *    authorize and record first, so only that service may drive it. An
    *    `approval` node declares this: `ApprovalService.decide` enforces the
@@ -340,9 +351,29 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * The engine enforces it: a resume of a `'service'` suspension is refused
    * unless the signal carries the in-process `RESUME_AUTHORITY_SERVICE`
    * marker — a symbol, so a JSON body can never carry it.
+   *
+   * **Carrying no `.default()` is the point** (#5561). A default would make
+   * "the author decided `'any'`" and "the author never considered it" the same
+   * value by the time any consumer sees the descriptor: Zod fills the key
+   * inside {@link defineActionDescriptor}, so the omission becomes
+   * unrecoverable one function call after it happens — measured, not assumed
+   * (the two parses are byte-identical). That erasure is how #3823 shipped:
+   * ADR-0044 pointed a revise edge at a generic `wait`, `wait` is legitimately
+   * `'any'`, and a pause standing in a service-owned position inherited a
+   * fail-open value nobody had chosen. Absent therefore means absent, and two
+   * seams read it: `AutomationEngine.registerNodeExecutor` warns once per node
+   * type when a `supportsPause` descriptor omits it, and
+   * `check:resume-authority-declared` fails CI on an omission in this repo's
+   * own executors.
+   *
+   * Runtime semantics are unchanged by that: the engine still resolves an
+   * absent value to `'any'` (`resolveResumeAuthority`), so omitting it is
+   * fail-open exactly as before — loudly now instead of silently. Flipping
+   * that fallback to `'service'` (fail-closed by omission) is the breaking
+   * half, still tracked on #5561 for a version window that allows it.
    */
-  resumeAuthority: z.enum(['any', 'service']).default('any')
-    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals)"),
+  resumeAuthority: z.enum(['any', 'service']).optional()
+    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Deliberately has no default — an omission is a distinct, reportable fact, and a pausing node type that omits it is warned about at registration (#5561)"),
 
   /**
    * Runtime maturity of the capability behind this descriptor (ADR-0041 §4).

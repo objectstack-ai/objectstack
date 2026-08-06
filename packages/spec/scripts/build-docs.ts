@@ -448,7 +448,11 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Content & Collaboration', pages: ['doc', 'book', 'collaboration'] },
   ],
   ui: [
-    { section: 'Apps & Navigation', pages: ['app', 'page', 'view', 'action'] },
+    // `action-params` sits beside `action` deliberately: it is the same
+    // surface's RUNTIME half (the `ctx.session` contract an action body reads,
+    // #5697), and a reader who found the action declaration should find what a
+    // body receives in the same section rather than under "More".
+    { section: 'Apps & Navigation', pages: ['app', 'page', 'view', 'action', 'action-params'] },
     { section: 'Visualization', pages: ['chart', 'dashboard', 'dataset', 'report', 'widget', 'component'] },
     // `animation` / `dnd` / `keyboard` / `touch` / `offline` left this section at
     // #4988: the five `ui/` interaction config modules were retired whole

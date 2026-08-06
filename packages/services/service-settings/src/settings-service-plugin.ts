@@ -108,6 +108,13 @@ export class SettingsServicePlugin implements Plugin {
     this.service = new SettingsService({
       crypto: this.opts.crypto,
       env: this.opts.env,
+      // #5204 — the service reports a rejected `OS_*` override at `error`, and
+      // it must land in the deployment's real log pipeline rather than raw
+      // stdout. Passed before `registerManifest` below, because that call is
+      // what audits this namespace's env overrides: constructing the service
+      // without the logger first would send the boot-time report to the
+      // `console.error` fallback instead.
+      logger: ctx.logger,
     });
     for (const m of this.opts.manifests ?? []) this.service.registerManifest(m);
     for (const [ns, handlers] of Object.entries(this.opts.actionHandlers ?? {})) {

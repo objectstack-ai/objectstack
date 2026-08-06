@@ -86,6 +86,28 @@ describe('SystemFieldName', () => {
     expect(SystemFieldName.TENANT_ID).toBe('tenant_id');
     expect(SystemFieldName.USER_ID).toBe('user_id');
     expect(SystemFieldName.DELETED_AT).toBe('deleted_at');
+    expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).toBe('owning_business_unit_id');
+  });
+
+  // [#4611 / ADR-0117 D1] The BU ownership stamp's canonical spelling is
+  // reserved here BEFORE open-core injects it, so consumers stop inventing
+  // `business_unit_id` / `bu_id` / `dept_id` — the same drift that put
+  // `tenant_id`/`org_id`/`space` into three hand-copied lists (cloud#982).
+  //
+  // This table is a NAME registry, not the injected set, so a reserved-but-not-
+  // injected entry is a legitimate row (tenant_id / user_id / deleted_at are the
+  // precedents). The gate that keeps the classification honest lives in objectql
+  // (`system-managed-fields-conformance.test.ts`): it pins the public-form
+  // denylist to exactly (actively-injected ∪ documented-reserved), and this name
+  // is currently in the RESERVED half.
+  it('reserves the ADR-0117 business-unit ownership stamp without claiming injection (#4611)', () => {
+    expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).toBe('owning_business_unit_id');
+    // Guard the naming discipline ADR-0117 D10 spells out: the record stamp must
+    // NOT be confused with `sys_user.primary_business_unit_id`, which is a USER
+    // attribute projected from BU membership — different object, different concept.
+    expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).not.toBe('primary_business_unit_id');
+    const names: readonly string[] = Object.values(SystemFieldName);
+    expect(names).not.toContain('primary_business_unit_id');
   });
 
   it('should be readonly (const assertion)', () => {

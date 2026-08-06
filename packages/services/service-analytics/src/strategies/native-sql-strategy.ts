@@ -11,6 +11,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { datasetInvalidError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
@@ -220,7 +221,27 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (allowed) {
       for (const alias of joins.keys()) {
         if (!allowed.has(alias)) {
-          throw new Error(
+          // [#5367] `DATASET_INVALID` / 400 — verified caller-shaped before
+          // enveloping. Every join in `joins` was registered by
+          // `qualifyAndRegisterJoin`, and on the dataset route the only inputs
+          // that can register one OUTSIDE the allowlist are the REQUEST's own:
+          // `lookupMember`'s synthetic relation fallback mints a dotted
+          // dimension nobody declared, so `selection.dimensions`,
+          // `selection.timeDimensions` and a `runtimeFilter` member spelled
+          // `account.name` each land here. The dataset's OWN dimensions and
+          // measures cannot: `compileDataset`'s `assertDeclared` refuses an
+          // undeclared relationship path at compile time (also 400
+          // `DATASET_INVALID`, so the two agree rather than diverge), and
+          // `resolveMeasureSql` has no synthetic fallback at all.
+          //
+          // The one non-caller trigger is the legacy
+          // `config.getAllowedRelationships` hook for hand-authored cubes,
+          // where a mismatch is the host's configuration rather than the
+          // caller's query. It is unreachable from
+          // `/analytics/dataset/query`: `queryDataset` registers the compiled
+          // dataset first, so `getAllowedRelationships` answers from
+          // `datasetRegistry` and never falls through to the hook.
+          throw datasetInvalidError(
             `[NativeSQLStrategy] join "${alias}" is not backed by a declared relationship on ` +
             `cube "${query.cube}". v1 only joins along relationships listed in the dataset's \`include\`.`,
           );

@@ -941,6 +941,24 @@ export class RemoteTransport {
 
   /**
    * Build a SELECT SQL statement from a QueryAST-like object.
+   *
+   * **The ORDER BY below is rendered, not decided.** `query.orderBy` is already
+   * the COMPLETE sort key list by the time it gets here — caller's keys plus
+   * whatever the deterministic-paging contract requires
+   * (`IDataDriver.find` / objectstack#4363) — because `TursoDriver` resolves it
+   * through the inherited `SqlDriver.orderKeysFor` in `toRemoteReadQuery`
+   * before handing the query over. Reusing that one method is what stops this
+   * driver's two transports from giving the same paged query different ordering
+   * guarantees on nothing but a URL (#5653, ADR-0053 D-A1).
+   *
+   * So: do NOT grow a tie-breaker rule of your own in here. Besides being the
+   * second copy the fix was about, this method cannot see the distinction the
+   * rule turns on — {@link findOne} spells an id lookup as
+   * `find(object, { ...query, limit: 1 })`, which by this point is
+   * indistinguishable from page one of a walk with page size 1, and the two
+   * want opposite clauses (see `toRemoteReadQuery`). An empty or absent
+   * `orderBy` is likewise an ANSWER — #4363's carve-out for an unpaged
+   * unordered read — and emitting no ORDER BY for it is correct.
    */
   private buildSelectSQL(object: string, query: any): { sql: string; args: any[] } {
     const fields = query.fields && Array.isArray(query.fields) && query.fields.length > 0
