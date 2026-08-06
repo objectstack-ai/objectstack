@@ -52,6 +52,12 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // A child that suspends (approval/screen/wait) suspends this node too —
       // the parent run pauses here and resumes when the child completes.
       supportsPause: true,
+      // `'any'` on this node is not the authority that ends up applying: the
+      // #3801 gate follows the `subflow:` correlation down to the CHILD and
+      // judges the node the signal actually lands on (#3853), so a parent parked
+      // above a pending approval is still refused. Stated rather than inherited
+      // so the omission-warning's silence here is a decision, not a gap (#5561).
+      resumeAuthority: 'any',
     }),
     async execute(node, variables, context) {
       // #4343 — the contract is parsed before anything runs, the same seam the

@@ -115,10 +115,71 @@ export interface RowToNormalizedOptions {
 /**
  * Internal persistence shim — typed loosely so the service can run
  * without an ObjectQL engine wired (e.g. unit tests, serverless).
+ *
+ * ## `insert` must return the row's own id (#5523)
+ *
+ * The id is **minted by the service**, written into `row.id`, and is already
+ * load-bearing by the time `insert` is called: out-of-row attachment content
+ * has been uploaded under `sys_email/attachments/<row.id>/…` *before* the
+ * insert, so the row id is the only key that finds those bytes again.
+ *
+ * `insert` therefore **must** answer with that same id — `{ id: row.id }` (or
+ * `row.id`). The return value is a **confirmation**, not an opportunity to
+ * substitute an id of the implementation's own: returning a different one makes
+ * `send()` throw, naming this contract and the id returned, before the message
+ * is delivered.
+ *
+ * Why the contract is this way round, rather than the service adopting whatever
+ * id came back: the `sys_email` `afterInsert` outbox drain hook decides whether
+ * a freshly-inserted row is the service's to deliver by asking
+ * {@link EmailService.isServiceManaged} about **the inserted row's own id**. An
+ * implementation that re-keyed the row would hand the hook an id the service
+ * had never reserved, the hook would read the row as an application-inserted
+ * outbox entry, and the same message would go out twice — once from the hook,
+ * once from `send()` — with two terminal updates racing on one row.
+ *
+ * A store that insists on assigning its own primary key is still supportable:
+ * keep the service-minted id as the row's `id` and record the store's key in a
+ * column of its own. What is not supportable is silently changing the identity
+ * the rest of the pipeline has already committed to.
  */
 export interface EmailPersistence {
+  /**
+   * Persist `row` and confirm it by returning **`row.id`** — see the contract
+   * on {@link EmailPersistence}. Returning any other id throws.
+   */
   insert(row: Record<string, any>): Promise<{ id: string } | string>;
   update?(id: string, patch: Record<string, any>): Promise<void>;
+}
+
+/**
+ * Enforce {@link EmailPersistence}'s `insert` contract: the confirmation must
+ * name the row the service asked to have inserted.
+ *
+ * Scope is deliberate — this judges the **value** of the confirmation, not its
+ * presence. A confirmation that names no id at all (`undefined`/`null`, only
+ * reachable from an untyped JS implementation, since the declared return type
+ * requires one) leaves nothing to disagree with and is treated as confirmed:
+ * the drain hook reads the id off the **inserted row**, which is the minted one
+ * either way, so no double-send is reachable that way. The defect this closes
+ * is a *different* id, and that is what it rejects.
+ *
+ * @throws Error naming the contract, the id returned, and the id expected.
+ */
+function assertInsertConfirmedRowId(res: { id: string } | string | undefined, rowId: string): void {
+  const returned = typeof res === 'string' ? res : res == null ? undefined : res.id;
+  if (returned == null) return;
+  const confirmed = String(returned);
+  if (confirmed === rowId) return;
+  throw new Error(
+    'EmailService: EmailPersistence.insert must return the row\'s own id — it returned '
+    + `'${confirmed}' for a row inserted as '${rowId}'. The return value is a CONFIRMATION only: the id is `
+    + 'minted by the service before the insert (out-of-row attachment content is already stored under '
+    + `'sys_email/attachments/${rowId}/…'), and re-keying the row makes the sys_email outbox drain hook read it `
+    + 'as an application-inserted entry — delivering the same message a second time. Fix: return '
+    + '`{ id: row.id }` (or `row.id`) from insert; if your store assigns its own primary key, keep the '
+    + 'service id in the row\'s `id` column and record the store\'s key in a column of its own.',
+  );
 }
 
 /**
@@ -584,35 +645,40 @@ export class EmailService implements IEmailService {
     // (which fires synchronously inside that insert) sees it as managed
     // and skips it — `send()` owns this row's delivery.
     //
-    // `EmailPersistence` is a PUBLIC interface and its `insert` may answer with
-    // an id of its own (a database-assigned primary key, an external delivery
-    // system's receipt id). That id is reserved too — and it has to be released
-    // by the same `finally`, which is why it is held in a variable declared
-    // OUT here rather than recomputed from `persistedId` inside the try (#5169).
-    // Reserving without releasing would leave `isServiceManaged(persistedId)`
-    // permanently true: one leaked string per message for the life of the
-    // process, and — worse than the memory — a standing "this row belongs to a
-    // live send()" assertion that the drain hook and the boot outbox sweep both
-    // trust and nothing ever re-checks.
-    let extraManagedId: string | undefined;
+    // ONE id, reserved once and released once. `EmailPersistence.insert` is
+    // contractually required to confirm the id it was handed (#5523), so there
+    // is no second identity for this row to reserve: the drain hook, the boot
+    // outbox sweep, the attachment storage keys and the queued job all name
+    // `id`. An implementation that returns something else is rejected below,
+    // before delivery — the service does not adopt the substitute.
     this.managedRowIds.add(id);
     try {
-      let persistedId: string | undefined;
+      // Did the row land? That is the only thing the insert's answer tells us
+      // (the id is already known), so it is a boolean and not an id.
+      let rowPersisted = false;
       if (this.options.persistence) {
+        let res: { id: string } | string | undefined;
+        let insertThrew = false;
         try {
-          const res = await this.options.persistence.insert(baseRow);
-          persistedId = typeof res === 'string' ? res : res?.id ?? id;
-          if (persistedId !== id) {
-            this.managedRowIds.add(persistedId);
-            extraManagedId = persistedId;
-          }
+          res = await this.options.persistence.insert(baseRow);
         } catch (err: any) {
+          insertThrew = true;
           this.options.logger?.warn('EmailService: sys_email persist failed (non-fatal)', { error: err?.message });
         }
+        if (!insertThrew) {
+          // Deliberately OUTSIDE the catch above. An insert that *fails* is an
+          // operational condition the service is built to ride out (the mail
+          // still goes, inline, with a warning). An insert that succeeds while
+          // renaming the row is a WIRING defect: tolerate it and the drain hook
+          // double-sends this very message. So it escapes the non-fatal path,
+          // and it is raised here — before any delivery below — rather than
+          // after the second copy has already gone out.
+          assertInsertConfirmedRowId(res, id);
+          rowPersisted = true;
+        }
       }
-      const rowId = persistedId ?? id;
       const storageKeys = encodedAttachments.kind === 'storage' ? encodedAttachments.keys : [];
-      if (persistedId === undefined && storageKeys.length > 0) {
+      if (!rowPersisted && storageKeys.length > 0) {
         // Content was uploaded for a row that does not exist. No row will ever
         // reference these bytes, so nothing will ever reclaim them either —
         // delete them here rather than create the one orphan class this design
@@ -624,23 +690,23 @@ export class EmailService implements IEmailService {
         // job with nothing to reference. Deliver inline instead of publishing
         // a job that can only fail — the insert failure was already reported
         // above, and dropping the message would be the worse answer.
-        if (persistedId === undefined) {
+        if (!rowPersisted) {
           this.reportQueueDegradation(
             'the sys_email row could not be persisted, so a queued job would have nothing to deliver',
           );
-        } else if (await this.publishRow(queue, rowId)) {
+        } else if (await this.publishRow(queue, id)) {
           // The row is in the database at `queued` and the job is in the
           // queue's own store: a process death here loses neither.
-          return { id: rowId, status: 'queued' };
+          return { id, status: 'queued' };
         }
       }
       // Inline delivery of a message whose content IS in storage (the publish
       // failed, or queue mode is off for this send): the in-memory message is
       // still whole, so the mail goes out — and the content still has to be
       // reclaimed afterwards, which is why the keys travel with the delivery.
-      return await this.deliverNormalized(rowId, normalized, undefined, storageKeys);
+      return await this.deliverNormalized(id, normalized, undefined, storageKeys);
     } finally {
-      // Release EXACTLY what was reserved above — both ids, and only here.
+      // Release EXACTLY what was reserved above — the one id, and only here.
       // Here and not earlier: the reservation has to outlive the whole body,
       // because in inline mode the delivery (and the `sent`/`failed` update of
       // this very row) happens inside the try, and a sweep that ran mid-flight
@@ -649,7 +715,6 @@ export class EmailService implements IEmailService {
       // the worker's — with the row committed at `queued`, re-checkable, which
       // is what makes the boot sweep a backstop rather than a double-send.
       this.managedRowIds.delete(id);
-      if (extraManagedId !== undefined) this.managedRowIds.delete(extraManagedId);
     }
   }
 

@@ -381,6 +381,24 @@ jobs:
       - name: Engine test-double contract gate
         run: pnpm check:engine-double-contract
 
+      # Resume-authority declaration gate (#5561, from #3823). The #3801 resume
+      # gate keys on the SUSPENDED NODE, so it covers a pausing node type exactly
+      # when that type's author remembered to declare `resumeAuthority`. #3823 is
+      # what forgetting costs: ADR-0044 pointed a revise edge at a generic `wait`,
+      # `wait` is legitimately 'any', and a pause standing in a service-owned
+      # position inherited that value with nobody choosing it — an unaudited
+      # resubmit plus a destroyed remote run. Until #5561 removed the schema
+      # default the omission was not even observable (Zod filled the key, so it
+      # parsed byte-identically to an explicit 'any'); now a pausing descriptor
+      # that never states its authority cannot merge. Shipped sources only —
+      # fixtures deliberately construct the omission to test the engine's
+      # registration warning. Static AST, no build needed, so it belongs in this
+      # job. Runs its own --self-test first: the detector can be broken while
+      # every descriptor is fine, and a scan that stops matching would report OK
+      # while reading nothing (#4868's family).
+      - name: Resume-authority declaration gate
+        run: pnpm check:resume-authority-declared
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest

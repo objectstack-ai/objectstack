@@ -6,37 +6,45 @@
  *
  * The local twin of this suite passes by INHERITANCE: `TursoDriver extends
  * SqlDriver`, so `orderKeysFor()` appends the `id` tie-breaker to every paged
- * read. Remote mode inherits nothing — `RemoteTransport.buildSelectSQL`
- * assembles its own ORDER BY / LIMIT / OFFSET — which makes it a second
- * implementation of this contract inside ONE driver, selected by URL alone.
- * That is exactly the shape #4363 wrote these cases for.
+ * read. Remote mode does not inherit the SQL — `RemoteTransport.buildSelectSQL`
+ * assembles its own ORDER BY / LIMIT / OFFSET — so what has to be proved here
+ * is that it does not also carry a second implementation of the *rule*, chosen
+ * by nothing but the URL. That is exactly the shape #4363 wrote these cases
+ * for.
  *
- * ## What this suite measured, stated plainly
+ * ## What this suite measured before #5653, and what it measures now
  *
- * Both case-sets pass here, and they do NOT pass for the reason the local
- * twin's do. `buildSelectSQL` maps the caller's `orderBy` entries verbatim and
- * appends no unique column, so:
+ * When #5590 first wrote this file both case-sets passed, and they did NOT
+ * pass for the reason the local twin's did. `buildSelectSQL` mapped the
+ * caller's `orderBy` entries verbatim and appended no unique column, so:
  *
- * - a sorted paged read goes out as `ORDER BY status LIMIT ? OFFSET ?`, and
- *   the ties come back in storage order rather than id order;
- * - an unsorted paged read goes out with no ORDER BY at all.
+ * - a sorted paged read went out as `ORDER BY status LIMIT ? OFFSET ?`, and
+ *   the ties came back in storage order rather than id order;
+ * - an unsorted paged read went out with no ORDER BY at all.
  *
- * The property holds on this fixture because the stub is `better-sqlite3` over
+ * The property held on this fixture because the stub is `better-sqlite3` over
  * a twelve-row in-memory table: one plan, one arrangement, every time. On a
  * real endpoint the arrangement of equal keys across two statements is not
  * promised — the case-set's own module doc says so, and names the unsorted
  * read as the same defect at full strength rather than as an exemption. The
  * `driver-memory` carve-out ("storage order steady between reads") is about a
- * JS array, not a SQL plan.
+ * JS array, not a SQL plan. So a green run then read as: **the transport
+ * satisfied the cases without implementing the mechanism the contract asks
+ * for** — and the two `records the measured mechanism` tests below pinned that
+ * gap rather than let it sit undocumented under a green suite.
  *
- * So the honest reading of a green run here is: **the transport currently
- * satisfies the cases without implementing the mechanism the contract asks
- * for.** That gap is filed as #5653, and the two `records the measured
- * mechanism` tests below pin it — they assert the tie arrangement IS storage
- * order, so the day #5653 lands they go red and get updated with it, instead
- * of the divergence sitting here undocumented under a green suite. Fixing the
- * transport is deliberately not this file's job (#5590's boundary: write the
- * suite, do not grade your own paper).
+ * #5653 closed it, and those two pins were flipped with it — they now assert
+ * the concrete sequences the mechanism produces (ties in id order; an unsorted
+ * page walk in id order), each against the storage-order arrangement it
+ * replaced, so restoring the old behaviour turns them red rather than leaving
+ * them passing for a vacuous reason. The fix is NOT a second rule inside
+ * `buildSelectSQL`: `TursoDriver.toRemoteReadQuery` resolves the whole ORDER BY
+ * through the same inherited `SqlDriver.orderKeysFor` local mode calls, and the
+ * transport renders what it is handed. The clause that comes out of that is
+ * pinned separately, statement by statement, in
+ * `remote-pagination-tiebreaker.test.ts` — rows on a twelve-row table cannot
+ * tell a real tie-breaker from a lucky plan, which is the whole reason this
+ * file needed pins in the first place.
  *
  * ## Why a SQLite-backed client stub
  *
@@ -139,10 +147,18 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
       expect([...seen].sort()).toEqual([...PAGINATION_ALL_IDS].sort());
     });
 
-    it(`page boundaries are invisible with NO orderBy — ${testCase.name}`, async () => {
-      const paged = await walk(testCase.pageSize);
-      const whole: Array<Record<string, unknown>> = await driver.find('ticket', {});
-      expect(paged).toEqual(whole.map((r) => String(r.id)));
+    it(`walks an unsorted read in id order — ${testCase.name}`, async () => {
+      // The local twin's assertion, now that remote answers the same way. Its
+      // predecessor here compared the page walk against the UNPAGED unordered
+      // read and passed because neither was ordered; after #5653 the two
+      // legitimately differ — the walk is a partition ordered by `id`, while
+      // the unpaged read keeps #4363's carve-out and is handed back in whatever
+      // order the plan chose. Comparing them would now pin the carve-out's
+      // absence, so the honest replacement is the property the walk itself must
+      // have. The fixture's ids are shuffled relative to insertion order, so
+      // this distinguishes "the tie-breaking ORDER BY reached the endpoint"
+      // from "SQLite happened to hand back rowid order".
+      expect(await walk(testCase.pageSize)).toEqual([...PAGINATION_ALL_IDS].sort());
     });
   }
 
@@ -152,27 +168,32 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
   });
 
   /**
-   * The two pins. See the module doc: the cases above pass, but not by the
-   * mechanism the contract names, and a green suite that leaves that unsaid is
-   * how "covered" quietly stops meaning anything. Both assert the CURRENT
-   * behaviour and are expected to go red — and be rewritten — the day #5653
-   * gives this transport the tie-breaker local mode already has.
+   * The two pins, flipped by #5653. See the module doc: the cases above pass,
+   * and until #5653 they did not pass by the mechanism the contract names —
+   * a green suite that leaves that unsaid is how "covered" quietly stops
+   * meaning anything. Each now asserts the concrete sequence the mechanism
+   * produces AND the storage-order arrangement it replaced, so a regression
+   * that took the tie-breaker back out turns them red on the positive
+   * assertion instead of leaving them green on an empty one.
    */
-  it('records the measured mechanism: a sorted paged read appends NO tie-breaker (#5653)', async () => {
+  it('a sorted paged read breaks its ties by id, not by storage order (#5653)', async () => {
     const seen = await walk(5, [{ field: 'status', order: 'asc' }]);
-    // What the caller's key alone produces: the `status` groups in order, and
-    // INSIDE each group the rows in storage (insertion) order. With the `id`
-    // tie-breaker local mode appends, the `done` group would instead read
-    // r02,r03,r09,r10 — id order.
+    // The `status` groups in order, and INSIDE each group the rows in id
+    // order — `done` reads r02,r03,r09,r10, where the caller's key alone left
+    // it r03,r09,r02,r10 (insertion order).
+    const groupedByStatusThenId = [...PAGINATION_ROWS]
+      .sort((x, y) => x.status.localeCompare(y.status) || x.id.localeCompare(y.id))
+      .map((row) => row.id);
+    expect(seen).toEqual(groupedByStatusThenId);
     const groupedByStatusThenInsertion = PAGINATION_ROWS.map((row, index) => ({ row, index }))
       .sort((x, y) => x.row.status.localeCompare(y.row.status) || x.index - y.index)
       .map(({ row }) => row.id);
-    expect(seen).toEqual(groupedByStatusThenInsertion);
+    expect(seen).not.toEqual(groupedByStatusThenInsertion);
   });
 
-  it('records the measured mechanism: an unsorted paged read is served in storage order, not id order (#5653)', async () => {
+  it('an unsorted paged read is served in id order, not storage order (#5653)', async () => {
     const seen = await walk(5);
-    expect(seen).toEqual(PAGINATION_ROWS.map((r) => r.id));
-    expect(seen).not.toEqual([...PAGINATION_ALL_IDS].sort());
+    expect(seen).toEqual([...PAGINATION_ALL_IDS].sort());
+    expect(seen).not.toEqual(PAGINATION_ROWS.map((r) => r.id));
   });
 });

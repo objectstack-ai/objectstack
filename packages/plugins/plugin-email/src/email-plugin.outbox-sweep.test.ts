@@ -31,6 +31,13 @@ const flush = () => new Promise((r) => setTimeout(r, 5));
 interface EngineOpts {
   /** Make `find` throw for the drain hook's own `where: { id }` re-read. */
   failIdLookup?: boolean;
+  /**
+   * Store every `sys_email` insert under THIS id instead of the one it was
+   * handed, and answer with it — a datasource that assigns its own primary key
+   * (#5523). The row the afterInsert hook sees then carries an id `send()` never
+   * reserved, which is the whole mechanism the insert contract closes.
+   */
+  reKeyInsert?: string;
 }
 
 /**
@@ -84,12 +91,13 @@ function fakeEngine(opts: EngineOpts = {}) {
       return out;
     },
     async insert(table: string, data: any) {
-      const row = { ...data };
+      const reKeyed = opts.reKeyInsert && table === 'sys_email';
+      const row = reKeyed ? { ...data, id: opts.reKeyInsert } : { ...data };
       const t = rowsOf(table);
       t.push(row);
       tables.set(table, t);
       for (const fn of hooks.afterInsert ?? []) await fn({ object: table, result: row });
-      return { id: data.id };
+      return { id: row.id };
     },
     async update(table: string, patch: any) {
       const r = rowsOf(table).find((x) => x.id === patch.id);
@@ -421,5 +429,52 @@ describe('normal delivery is unchanged', () => {
     expect(h.transport.send).toHaveBeenCalledTimes(1);
     expect(h.sysEmail()[0]).toMatchObject({ id: 'row-app', status: 'sent', message_id: '<sent@x>' });
     expect(h.ctx.logger.error).not.toHaveBeenCalled();
+  });
+});
+
+// ── the insert id contract, at the seam that motivated it (#5523) ───────────
+
+describe('a datasource that re-keys a sys_email insert', () => {
+  it('makes send() reject by name instead of double-sending through the drain hook', async () => {
+    // The full mechanism, end to end, through the REAL plugin persistence
+    // adapter (which forwards the engine's own answer rather than laundering it
+    // back into `row.id`):
+    //
+    //   send() mints id → reserves it → engine.insert stores the row under
+    //   'db-pk-7' and fires afterInsert with THAT id → the drain hook asks
+    //   isServiceManaged('db-pk-7'), gets false, and schedules a delivery of
+    //   its own → insert returns 'db-pk-7'.
+    //
+    // Before the contract check, `send()` then adopted 'db-pk-7' and delivered
+    // the message a second time down its own path: two deliveries of one mail
+    // and two terminal updates racing on one row. The only thing that ever
+    // stopped it was the drain hook's `setTimeout(0)` losing to send()'s inline
+    // delivery — so this transport is deliberately SLOWER than that timer,
+    // which is what real network I/O is. Reverting the check turns the
+    // `toHaveBeenCalledTimes(1)` below into 2.
+    const transport = {
+      send: vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+        return { messageId: '<sent@x>' };
+      }),
+    };
+    const h = await boot({ engine: { reKeyInsert: 'db-pk-7' }, transport });
+    await h.ready();
+
+    await expect(
+      h.service().send({ to: 'a@b.com', from: 'x@y.com', subject: 'Hi', text: 'hello' }),
+    ).rejects.toThrow(/EmailPersistence\.insert must return the row's own id/);
+
+    // Give the hook's already-scheduled delivery time to finish. It is NOT
+    // cancellable: the hook runs synchronously inside `engine.insert`, i.e.
+    // before `insert` has even returned to the service, so the contract check
+    // cannot pre-empt it. What the check removes is send()'s SECOND delivery —
+    // the row that did land is still delivered once, by the hook, and the
+    // caller is told loudly that its persistence is misconfigured.
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(h.sysEmail()).toHaveLength(1);
+    expect(h.sysEmail()[0]).toMatchObject({ id: 'db-pk-7', status: 'sent' });
   });
 });

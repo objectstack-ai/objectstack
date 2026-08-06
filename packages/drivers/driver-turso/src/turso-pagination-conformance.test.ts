@@ -17,9 +17,12 @@
  *
  * The REMOTE transport keeps its own file
  * (`turso-remote-pagination-conformance.test.ts`): it does not go through knex
- * at all and assembles its own ORDER BY / LIMIT / OFFSET, which is a second
- * implementation of this contract rather than a second engine under the same
- * one.
+ * at all and assembles its own ORDER BY / LIMIT / OFFSET, so the same contract
+ * has to be re-measured against a second SQL assembler. Since #5653 it is only
+ * the assembler that is second — `TursoDriver.toRemoteReadQuery` resolves the
+ * remote sort keys through this very same `orderKeysFor`, so the rule has one
+ * implementation and the URL no longer decides which guarantee a paged read
+ * gets.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

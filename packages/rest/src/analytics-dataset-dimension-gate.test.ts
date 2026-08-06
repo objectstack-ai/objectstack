@@ -295,16 +295,38 @@ describe('[#5520] the 500 body no longer ships driver internals', () => {
     expect(a.body.code).toBe('INVALID_FILTER');
     expect(String(a.body.message)).toMatch(/\$sortOf/);
 
-    // …② and the transitional message list still answers 400 DATASET_INVALID
-    // with its message intact. #5367 owns that list; this change is 5xx-only.
+    // …② and so does a dataset refusal, with its message intact.
+    //
+    // [#5367] This half used to send a BARE `Error` reading "… is not declared
+    // in the dataset." and rely on the route's transitional message list to
+    // classify it. #5367 enveloped that producer (`dataset-compiler` now throws
+    // `datasetInvalidError`) and deleted the list entry, so the same refusal is
+    // now carried by branch ① — same outward answer, chosen by reading the error
+    // instead of by matching its prose. This change is still 5xx-only.
     const b = await post(
       buildRoute(async () =>
-        throwingAnalytics(new Error('[dataset-compiler] dimension "region" is not declared in the dataset.')),
+        throwingAnalytics(
+          Object.assign(
+            new Error('[dataset-compiler] dimension "region" references relationship path "account" via "account.region", but "account" is not declared in the dataset\'s `include`.'),
+            { code: 'DATASET_INVALID', status: 400 },
+          ),
+        ),
       ),
       { dataset, selection: { measures: ['account_count'], dimensions: ['industry'] } },
     );
     expect(b.statusCode).toBe(400);
     expect(b.body.code).toBe('DATASET_INVALID');
     expect(String(b.body.message)).toMatch(/not declared in the dataset/);
+
+    // …③ and the ONE message-list entry #5367 deliberately left in place still
+    // answers 400 for `read-scope-sql`'s bare fail-closed refusals.
+    const c = await post(
+      buildRoute(async () =>
+        throwingAnalytics(new Error('[read-scope-sql] unsupported operator "$regex" on "owner" (fail-closed).')),
+      ),
+      { dataset, selection: { measures: ['account_count'], dimensions: ['industry'] } },
+    );
+    expect(c.statusCode).toBe(400);
+    expect(c.body.code).toBe('DATASET_INVALID');
   });
 });

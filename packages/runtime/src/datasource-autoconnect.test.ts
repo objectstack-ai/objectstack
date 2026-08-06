@@ -7,9 +7,18 @@
 //
 // This boots the host-config shape (instantiated plugins, no MetadataPlugin —
 // the same shape `examples/app-showcase` runs under `os dev`) with the REAL
-// driver factory (`createDefaultDatasourceDriverFactory`) building an in-memory
-// driver, so the full AppPlugin → `datasource-connection` → engine path runs
-// without any native driver dependency.
+// driver factory (`createDefaultDatasourceDriverFactory`) building a real
+// sqlite `:memory:` pool, so the full AppPlugin → `datasource-connection` →
+// engine path runs against the same engine production uses.
+//
+// Backend note (#5704 batch 0): both the host default driver and the declared
+// datasources ran on `@objectstack/driver-memory` until this file was migrated
+// to `@objectstack/driver-sql` + better-sqlite3 `:memory:` — the repo's
+// canonical ephemeral store (`examples/app-crm`, `cli db clean`). driver-memory
+// is the project's legacy test-convenience backend and its in-project test
+// surface is being retired (#5499). `:memory:` keeps every acceptance below
+// hermetic: the database lives and dies inside the process, so nothing reaches
+// the host filesystem and each boot starts empty.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
@@ -20,6 +29,32 @@ import { AppPlugin } from './app-plugin.js';
 import type { DatasourceConnectPolicy } from '@objectstack/service-datasource';
 
 const BOOT_TIMEOUT = 60_000;
+
+/** The host's default driver — sqlite `:memory:`, constructed the canonical way. */
+async function makeDefaultDriver() {
+  const { SqlDriver } = await import('@objectstack/driver-sql');
+  return new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+}
+
+/**
+ * `schemaMode: 'external'` forbids DDL through the driver (ADR-0015 — ObjectStack
+ * is a guest in that database), so the federated table has to already exist,
+ * exactly as the real remote database an external datasource points at would
+ * hold it. Raw `execute()` is the out-of-band channel that stands in for
+ * "somebody else's migration already ran".
+ *
+ * With driver-memory this step did not exist: a mingo store materialises a
+ * collection on first write, so an undeclared table was indistinguishable from a
+ * declared one. Making it explicit is the point of the migration, not a
+ * workaround for it.
+ */
+async function ensureRemoteExtNoteTable(driver: any): Promise<void> {
+  await driver.execute('CREATE TABLE IF NOT EXISTS ext_note (id text primary key, title text)');
+}
 
 // One external datasource (auto-connect target) + one managed, unrouted
 // datasource (must stay metadata-only). NO `onEnable` anywhere.
@@ -41,11 +76,11 @@ function artifact() {
     datasources: [
       {
         name: 'autoconn_ext',
-        label: 'External (in-memory)',
-        driver: 'memory',
+        label: 'External (sqlite :memory:)',
+        driver: 'sqlite',
         schemaMode: 'external',
         origin: 'code',
-        config: {},
+        config: { filename: ':memory:' },
         external: { allowWrites: false, validation: { onMismatch: 'warn', checkOnBoot: false } },
         active: true,
       },
@@ -54,10 +89,10 @@ function artifact() {
       {
         name: 'decorative',
         label: 'Decorative (unrouted)',
-        driver: 'memory',
+        driver: 'sqlite',
         schemaMode: 'managed',
         origin: 'code',
-        config: {},
+        config: { filename: ':memory:' },
         active: true,
       },
     ],
@@ -66,17 +101,13 @@ function artifact() {
 
 async function boot(opts: { connectPolicy?: DatasourceConnectPolicy } = {}) {
   const { ObjectQLPlugin } = await import('@objectstack/objectql');
-  const { InMemoryDriver } = await import('@objectstack/driver-memory');
   const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
     '@objectstack/service-datasource'
   );
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  // `persistence: false` keeps the acceptance hermetic. The driver's own default
-  // is `'auto'` — in Node a file adapter at `.objectstack/data/…` under the CWD,
-  // which both reloads and rewrites ambient state between runs (#4083).
-  await kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }))); // default driver
+  await kernel.use(new DriverPlugin(await makeDefaultDriver())); // default driver
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AppPlugin(artifact()));
   await kernel.use(
@@ -127,6 +158,7 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
     // Seed the live external driver directly (bypassing the read-only write gate,
     // exactly as a real remote DB would already hold the rows).
     const driver = engine.getDriverByName('autoconn_ext');
+    await ensureRemoteExtNoteTable(driver);
     await driver.bulkCreate('ext_note', [
       { id: 'n1', title: 'first' },
       { id: 'n2', title: 'second' },
@@ -136,20 +168,36 @@ describe('ADR-0062 declared-datasource auto-connect', () => {
   });
 });
 
-// #4083 — the acceptance above passed on a clean checkout and failed on every
-// subsequent run, reading 2×N rows on the Nth: the auto-connected `memory`
-// datasource inherited `InMemoryDriver`'s then-default `persistence: 'auto'`
-// (#4065 has since made that default `false`), so it
-// flushed `ext_note` into `.objectstack/data/memory-driver.json` under the CWD
-// and the next boot's connect() loaded those rows back before this file seeded
-// its own. CI never caught it because CI always runs #1 on a fresh checkout.
+// ADR-0062 D1 acceptance — an auto-connected in-memory federated pool leaves
+// nothing behind and does not outlive its kernel.
 //
-// The intermittency ("passes once in four") came from WHEN the flush lands: the
-// file adapter writes on a 2s unref'd autosave timer, so a run short enough to
-// finish first left nothing behind. `flush()` below stands in for that timer, so
-// this pins the property that was actually broken — a federated in-memory pool
-// leaves nothing behind and does not outlive its kernel — without a timing race
-// and without depending on run-to-run state.
+// ## What this pinned before, and why it still says the same thing
+//
+// #4083: the acceptance above passed on a clean checkout and failed on every
+// subsequent run, reading 2×N rows on the Nth. The auto-connected `memory`
+// datasource inherited `InMemoryDriver`'s then-default `persistence: 'auto'`
+// (#4065 has since made that default `false`), so it flushed `ext_note` into
+// `.objectstack/data/memory-driver.json` under the CWD and the next boot's
+// connect() loaded those rows back before this file seeded its own. CI never
+// caught it because CI always runs #1 on a fresh checkout. The intermittency
+// ("passes once in four") came from WHEN the flush landed — the file adapter
+// wrote on a 2s unref'd autosave timer — so the original block called
+// `driver.flush?.()` to force the timer's work and remove the race.
+//
+// Those three things — `memory-driver.json`, `flush()`, the autosave timer —
+// are driver-memory FILE-ADAPTER specifics, and this file no longer runs on
+// driver-memory (#5704 batch 0). The acceptance target was never the file
+// adapter: ADR-0062 D1 asks for a runtime property — a federated in-memory pool
+// leaves nothing on the host and a restart starts empty — so the block is
+// rewritten against sqlite `:memory:` rather than deleted (deleting it would
+// drop D1's acceptance) and rather than moved into driver-memory's own suite
+// (the factory-level #4083 pin already lives in service-datasource's tests).
+//
+// Under `:memory:` the property is asserted more directly than before: a fresh
+// pool has no `ext_note` TABLE at all, not merely no rows — the one thing a
+// reloaded snapshot could never look like. The filesystem half is unchanged and
+// still load-bearing: `filename: ':memory:'` is one config typo away from a
+// relative file path, and that typo is exactly what #4083 was.
 describe('ADR-0062 D1 — the auto-connected in-memory pool leaves nothing behind (#4083)', () => {
   const STATE_DIR = join(process.cwd(), '.objectstack');
   const clearState = () => { try { rmSync(STATE_DIR, { recursive: true, force: true }); } catch { /* noop */ } };
@@ -159,25 +207,49 @@ describe('ADR-0062 D1 — the auto-connected in-memory pool leaves nothing behin
   beforeAll(clearState);
   afterAll(clearState);
 
+  function externalDriver(kernel: Awaited<ReturnType<typeof boot>>) {
+    const engine = kernel.getService<{ getDriverByName(n: string): any }>('data');
+    return engine.getDriverByName('autoconn_ext');
+  }
+
+  /** Rows knex returns for a raw SELECT, whichever envelope the dialect uses. */
+  function rowsOf(result: any): any[] {
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result?.rows)) return result.rows;
+    return result == null ? [] : [result];
+  }
+
+  /**
+   * Does this pool's database already hold the federated table? A pool that
+   * reloaded a previous boot's state would; a genuinely fresh `:memory:` one
+   * cannot, because nothing in this composition is allowed to run DDL on an
+   * `external` datasource.
+   */
+  async function hasExtNoteTable(kernel: Awaited<ReturnType<typeof boot>>) {
+    const result = await externalDriver(kernel).execute(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ext_note'",
+    );
+    return rowsOf(result).length > 0;
+  }
+
   async function seedAndRead(kernel: Awaited<ReturnType<typeof boot>>) {
     const engine = kernel.getService<{
       getDriverByName(n: string): any;
       find(object: string, query?: any): Promise<any[]>;
     }>('data');
     const driver = engine.getDriverByName('autoconn_ext');
+    await ensureRemoteExtNoteTable(driver);
     await driver.bulkCreate('ext_note', [
       { id: 'n1', title: 'first' },
       { id: 'n2', title: 'second' },
     ]);
-    const titles = (await engine.find('ext_note')).map((r) => r.title).sort();
-    // Whatever the autosave timer would have written, written now.
-    await driver.flush?.();
-    return titles;
+    return (await engine.find('ext_note')).map((r) => r.title).sort();
   }
 
   it('writes no state file, and a second boot in the same process starts empty', async () => {
     const first = await boot();
     try {
+      expect(await hasExtNoteTable(first)).toBe(false);
       expect(await seedAndRead(first)).toEqual(['first', 'second']);
       // The seeded rows must not have reached the host filesystem at all.
       expect(existsSync(STATE_DIR)).toBe(false);
@@ -187,8 +259,11 @@ describe('ADR-0062 D1 — the auto-connected in-memory pool leaves nothing behin
 
     const second = await boot();
     try {
-      // Was ['first','first','second','second'] — the first boot's rows, reloaded.
+      // The whole point: not "no rows carried over" but "no database carried
+      // over". Was ['first','first','second','second'] under the #4083 defect.
+      expect(await hasExtNoteTable(second)).toBe(false);
       expect(await seedAndRead(second)).toEqual(['first', 'second']);
+      expect(existsSync(STATE_DIR)).toBe(false);
     } finally {
       try { await (second as any)?.stop?.(); } catch { /* noop */ }
     }
@@ -206,10 +281,10 @@ describe('ADR-0062 credentials fail-closed (D3)', () => {
       datasources: [
         {
           name: 'needs_secret',
-          driver: 'memory',
+          driver: 'sqlite',
           schemaMode: 'external',
           origin: 'code',
-          config: {},
+          config: { filename: ':memory:' },
           external: {
             allowWrites: false,
             credentialsRef: 'sys_secret:does-not-exist',
@@ -223,13 +298,12 @@ describe('ADR-0062 credentials fail-closed (D3)', () => {
 
   it('bricks boot with a clear message when a required credential cannot be resolved', async () => {
     const { ObjectQLPlugin } = await import('@objectstack/objectql');
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
     const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
       '@objectstack/service-datasource'
     );
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new DriverPlugin(await makeDefaultDriver()));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AppPlugin(credArtifact()));
     await kernel.use(
@@ -275,13 +349,12 @@ describe('ADR-0062 D5 — an explicitly-bound datasource that cannot connect bri
 
   async function bootBound() {
     const { ObjectQLPlugin } = await import('@objectstack/objectql');
-    const { InMemoryDriver } = await import('@objectstack/driver-memory');
     const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
       '@objectstack/service-datasource'
     );
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    await kernel.use(new DriverPlugin(new InMemoryDriver()));
+    await kernel.use(new DriverPlugin(await makeDefaultDriver()));
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AppPlugin(boundArtifact()));
     await kernel.use(

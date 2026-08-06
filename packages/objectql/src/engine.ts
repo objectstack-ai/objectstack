@@ -557,6 +557,57 @@ function applyFormulaPlan(
   }
 }
 
+/**
+ * Hydrate `formula` virtual fields onto the records a WRITE hands back (#5504).
+ *
+ * `applyFormulaPlan` used to hang off the read path only — `find` and `findOne`
+ * — so `POST /data/:object` and `PATCH /data/:object/:id` answered with the
+ * stored document, in which a formula field is not merely `null` but ABSENT
+ * (formulas are virtual: no driver ever returns a column for one). The very
+ * next `GET` of that same row carried every one of them, so a caller that
+ * rendered the create response — the natural thing to do, the response calls
+ * itself `record` — got a blank title on every object whose `nameField` points
+ * at a formula, and could not tell "not configured" from "not evaluated".
+ * Read-your-write, restored: the write response is now the same materialization
+ * a read produces.
+ *
+ * Deliberately the SAME plan builder and the SAME evaluation the read path uses
+ * — one formula semantic, not a write-path dialect:
+ *  - `planFormulaProjection(schema, undefined)` is exactly find's no-projection
+ *    branch: every formula field the schema declares, and no `projected`
+ *    rewrite (a write returns whole rows, so there is nothing to project).
+ *    It also carries the perf threshold unchanged — an object declaring no
+ *    formula yields an empty plan and `applyFormulaPlan` returns at its first
+ *    line, so a write on an ordinary object pays a field-name loop and nothing
+ *    else.
+ *  - the execution context is threaded exactly as find threads it, so `os.user`
+ *    / `os.org` resolve identically on both sides. Widening what that context
+ *    carries is #1979's work and stays out of here.
+ *
+ * Evaluates against the record the driver returned (a full row: `create` uses
+ * `RETURNING *`, `update` re-reads), so no extra round-trip is needed and no
+ * formula sees a partial record. Mutates in place, like the read path.
+ *
+ * Non-record entries (a `null` readback when the write moved the row out of the
+ * caller's scope; the affected-row COUNT a predicate update resolves to) are
+ * skipped rather than special-cased at each call site — the primitive would
+ * otherwise take a property assignment, which throws under ES module strict
+ * mode.
+ */
+function hydrateWriteFormulas(
+  schema: any,
+  results: unknown[],
+  execCtx?: ExecutionContextInput,
+): void {
+  const records = results.filter(
+    (r): r is Record<string, unknown> => r != null && typeof r === 'object',
+  );
+  if (records.length === 0) return;
+  const { plan } = planFormulaProjection(schema, undefined);
+  if (plan.length === 0) return;
+  applyFormulaPlan(plan, records, execCtx);
+}
+
 export type HookHandler = (context: HookContext) => Promise<void> | void;
 
 /**
@@ -5108,6 +5159,24 @@ export class ObjectQL implements IObjectQLEngine {
         // Only live rows have results — dead (partial-mode) rows never reach
         // afterInsert.
         const resultRows: any[] = isBatch ? (Array.isArray(result) ? result : [result]) : [result];
+        // [#5504] Evaluate `formula` virtual fields onto what this write hands
+        // back, so a create response is the same materialization the following
+        // GET produces. Placed HERE for three reasons, all load-bearing:
+        //  - AFTER every strip / refusal above (#5503's runtime-owned strip,
+        //    #5126's `strictReadonlyWrites` throw): a payload the engine
+        //    refuses never reaches a driver, so there is nothing to hydrate,
+        //    and a stripped field must not reappear via a formula that read it.
+        //  - AFTER the bulk contract guard, so `resultRows` is already known to
+        //    be one row per live input row — no `undefined` slot to evaluate a
+        //    formula against.
+        //  - BEFORE the afterInsert dispatch, mirroring the read path's
+        //    `applyFormulaPlan` → `afterFind` order. An after-hook therefore
+        //    observes the same complete record on a write as it does on a read,
+        //    and — because `coerceBooleanFields` copies the row it is handed —
+        //    the caller-facing `rowCtx.result` carries the values too.
+        // Batch (`insertMany` / `createManyData`) is covered by construction:
+        // one hydration pass over every returned row, not one per call site.
+        hydrateWriteFormulas(schemaForValidation, resultRows, opCtx.context);
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
           rowCtx.event = 'afterInsert';
@@ -5557,6 +5626,23 @@ export class ObjectQL implements IObjectQLEngine {
            }
 
            hookContext.event = 'afterUpdate';
+           // [#5504] Same formula hydration the insert path runs, on the same
+           // terms: after both strip passes and `assertNoStrictDrops()` (which
+           // throw before any driver call), before the afterUpdate dispatch.
+           //
+           // Only the BY-ID branch has records to hydrate. A predicate write
+           // resolves to the affected-row COUNT `driver.updateMany` returns
+           // (#4639) — it names no row and returns none, so there is nothing to
+           // materialize and `isPredicateWrite` says so explicitly rather than
+           // letting a `typeof` sniff decide. Giving a bulk update a record
+           // response is a contract change, not a hydration gap.
+           if (!isPredicateWrite) {
+             hydrateWriteFormulas(
+               updateSchema,
+               Array.isArray(result) ? result : [result],
+               opCtx.context,
+             );
+           }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
            // of both the new row and the prior row, so flow conditions comparing
            // `record.is_escalated`/`previous.status` against booleans behave.

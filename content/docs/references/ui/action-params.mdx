@@ -1,0 +1,76 @@
+---
+title: Action Params
+description: Action Params protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+The action DISPATCH contract: what the platform validates on the way in, and
+
+what it hands the handler on the way out.
+
+Two halves, one surface. **Inbound** — action-param VALUE validation
+
+(ADR-0104 D2), below. **Outbound** — the runtime context an action body /
+
+handler receives: `ActionSessionSchema` (the `ctx.session` contract,
+
+#5697), `ActionEngineFacade`, `ActionHandlerContext` and
+
+`ActionHandler`.
+
+## Inbound — action-param VALUE validation (ADR-0104 D2)
+
+An action's declared `params[]` is a complete value contract — `type`,
+
+`required`, `multiple`, `options`, `reference` — but before this it only
+
+informed the client dialog: the server passed `reqBody.params` straight to
+
+the handler, unvalidated (`http-dispatcher.ts`). This module is the pure
+
+contract that lets the REST and MCP dispatch paths enforce that declaration
+
+BEFORE the handler runs, reusing the D1 field value-shape contract
+
+(`valueSchemaFor`).
+
+Purity: schema derivation only (Prime Directive #2). Field-backed params are
+
+resolved to their effective value-shape inputs by the CALLER (the runtime,
+
+which holds the object metadata registry); this module validates the already
+
+resolved descriptors.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ui/action-params.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ActionSessionSchema } from '@objectstack/spec/ui';
+import type { ActionSession } from '@objectstack/spec/ui';
+
+// Validate data
+const result = ActionSessionSchema.parse(data);
+```
+
+---
+
+## ActionSession
+
+Action-body `ctx.session` — the caller identity an action body reads (runtime shape, never authored)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string` | optional | Invoking user id (absent when the call carries no user) |
+| **organizationId** | `string` | optional | Active organization id (blessed developer-facing name; absent when the call is org-less) |
+| **roles** | `string[]` | optional | DEPRECATED — the VALUE is the caller's ADR-0090 D3 `positions` (`ExecutionContext.positions`, "Formerly `roles`"), delivered at this boundary under the one spelling that vocabulary forbids. Declared here because `buildActionSession()` produces it today — declaring current reality is not endorsing the name: ADR-0090 D3 makes `role` a reserved-forbidden word, #4839 deleted the last two `roles.includes('admin')` readers, and #5050 retired the hook-side `HookContext.session.roles` outright, so a body author currently meets two different answers to one key name on one platform. The rename to `positions` — with its deprecation window, ADR-0087 semantic migration and the `buildActionSession()` comment correction — is #5613 phase 2. There is deliberately NO `positions` key on this shape yet: minting one before the migration would ship two live spellings of one value, which is the defect, not the fix. Never gate PRIVILEGE on this array — ask the security service, which evaluates capability grants, placements and the derived posture (ADR-0095), never a role-name string comparison. |
+
+
+---
+

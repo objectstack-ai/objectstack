@@ -32,10 +32,11 @@
  * Reading the envelope makes this route classify on what the error SAYS about
  * itself. Three regressions would each be worse than the bug:
  *
- *   1. The message list still classifies the families that remain bare `Error`s
- *      (the dataset compiler, `read-scope-sql`, the executor) — all six of its
- *      entries were re-verified unenveloped at the time of #5352, so deleting
- *      it would regress them from `400 DATASET_INVALID` to 500.
+ *   1. The message list still classifies the ONE family that remains a bare
+ *      `Error` — `read-scope-sql` — so deleting its entry would regress it from
+ *      `400 DATASET_INVALID` to 500. (#5352 left six entries here. #5367
+ *      enveloped five of the six producers and deleted their entries; the block
+ *      near the bottom of this file now pins the deletion in both directions.)
  *   2. A genuine internal fault must still be a 500 with its `logError` line —
  *      "read the envelope" must not become "call everything a 400".
  *   3. A 5xx-status error is NOT passed through, so an internal fault can never
@@ -268,16 +269,43 @@ describe('[#5322] empty combinators are boolean identities at the REST face — 
   }
 });
 
-describe('[#5352] the message-sniffing fallback still classifies the families that carry no envelope', () => {
-  // Every entry of the route's regex list, produced as its owner produces it:
-  // a bare `Error`. Re-verified unenveloped while #5352 was implemented —
-  // `dataset-compiler.ts`, `native-sql-strategy.ts`, `dataset-executor.ts` and
-  // `read-scope-sql.ts` all `throw new Error(…)` with no `code`/`status` — so
-  // the list is the only thing standing between them and a 500.
-  const FALLBACK: Array<{ name: string; message: string }> = [
+describe('[#5352 → #5367] the message-sniffing fallback is down to its last entry', () => {
+  // ── The surviving entry ────────────────────────────────────────────────────
+  // `read-scope-sql.ts`'s ten refusals are still bare `Error`s, and #5367
+  // deliberately left them that way: their inputs are an admin-authored RLS
+  // policy and a compiler-generated join alias, not caller input, so
+  // `DATASET_INVALID` may well be the wrong verdict for them and choosing the
+  // right one is a separate judgement. Until it lands, this entry is all that
+  // stands between them and a 500.
+  it('read-scope-sql: a fail-closed read scope → still 400 DATASET_INVALID by the message list', async () => {
+    const message = '[read-scope-sql] unsupported operator "$regex" on "owner" (fail-closed).';
+    const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(new Error(message)) }));
+    const res = await post(route, { dataset, selection });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('DATASET_INVALID');
+    expect(String(res.body.message)).toMatch(/read-scope-sql/);
+  });
+
+  // ── The five entries #5367 deleted, pinned in BOTH directions ──────────────
+  // These rows used to assert "a bare `Error` with this message → 400", which is
+  // precisely the fragility #5367 removed: the status was a property of the
+  // wording. Re-asserting it would now be asserting the defect. So each family
+  // is pinned twice instead:
+  //
+  //   - ENVELOPED (what its producer now throws) → 400 `DATASET_INVALID` by ①,
+  //     i.e. the same outward answer, reached by reading the error rather than
+  //     by matching its prose;
+  //   - BARE with the identical message → 500, which is what proves the regex
+  //     entry is really gone. Re-adding one turns this half red.
+  //
+  // The producer end — that these are the messages and envelopes the real
+  // `dataset-compiler` / `dataset-executor` / `native-sql-strategy` throw — is
+  // pinned in `service-analytics`'s `dataset-refusal-envelope.test.ts`, and the
+  // whole path is driven end-to-end in `analytics-dataset-refusal-envelope.test.ts`.
+  const RETIRED: Array<{ name: string; message: string }> = [
     {
       name: 'dataset-compiler: undeclared relationship path',
-      message: 'dimension "region" references relationship path "account" via "account.region", but "account" is not declared in the dataset\'s `include`.',
+      message: '[dataset-compiler] dimension "region" references relationship path "account" via "account.region", but "account" is not declared in the dataset\'s `include`.',
     },
     {
       name: 'native-sql-strategy: join outside the allowlist',
@@ -286,10 +314,6 @@ describe('[#5352] the message-sniffing fallback still classifies the families th
     {
       name: 'dataset-compiler: aggregate outside the v1 runtime',
       message: '[dataset-compiler] measure "x" uses aggregate "median" which is not supported by the v1 dataset runtime (supported: sum, avg).',
-    },
-    {
-      name: 'read-scope-sql: fail-closed read scope',
-      message: '[read-scope-sql] unsupported operator "$regex" on "owner" (fail-closed).',
     },
     {
       name: 'dataset-executor: order key that is not selected',
@@ -301,12 +325,21 @@ describe('[#5352] the message-sniffing fallback still classifies the families th
     },
   ];
 
-  for (const c of FALLBACK) {
-    it(`${c.name} → still 400 DATASET_INVALID`, async () => {
-      const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(new Error(c.message)) }));
+  for (const c of RETIRED) {
+    it(`${c.name} → 400 DATASET_INVALID by its ENVELOPE`, async () => {
+      const err = Object.assign(new Error(c.message), { code: 'DATASET_INVALID', status: 400 });
+      const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(err) }));
       const res = await post(route, { dataset, selection });
       expect(res.statusCode).toBe(400);
       expect(res.body.code).toBe('DATASET_INVALID');
+      expect(String(res.body.message)).toBe(c.message);
+    });
+
+    it(`${c.name} → the same message WITHOUT an envelope is no longer sniffed (500)`, async () => {
+      const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(new Error(c.message)) }));
+      const res = await post(route, { dataset, selection });
+      expect(res.statusCode).toBe(500);
+      expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
     });
   }
 });

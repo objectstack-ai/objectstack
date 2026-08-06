@@ -27,6 +27,11 @@ export const PUBLIC_FORM_SERVER_MANAGED_FIELDS: ReadonlySet<string> = new Set([
   'id',
   // Ownership anchor (OWD/RLS owner scoping keys off it; #3004-class forge).
   'owner_id',
+  // Business-unit ownership anchor (ADR-0117 D1, name reserved by #4611).
+  // Not injected by open-core yet — denied here BEFORE it exists, because once
+  // stamped a forged value moves the row behind another department's wall, and
+  // a denylist entry added after the column ships is a hole with a release in it.
+  'owning_business_unit_id',
   // Tenant anchors — a forged value lands the row in another tenant.
   'organization_id',
   'tenant_id',

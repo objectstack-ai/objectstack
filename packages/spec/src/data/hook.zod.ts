@@ -405,6 +405,66 @@ export const HookContextSchema = lazySchema(() => z.object({
     isSystem: z.boolean().optional().describe('True when the call was made with an elevated system context (engine self-writes)'),
     skipTriggers: z.boolean().optional().describe('True when record-change automation (flow triggers) must be suppressed for this write — e.g. package seed replay. Lifecycle hooks still run.'),
     skipAutomations: z.boolean().optional().describe('True when metadata-bound automation hooks must be suppressed for this write — e.g. data import with "run automations" unchecked, or import undo. Implies skipTriggers; code-registered system hooks (audit, security) still run.'),
+    /**
+     * Position names held by the caller (ADR-0090 D3 vocabulary — the schema
+     * comment on `ExecutionContext.positions` spells it "Formerly `roles`").
+     * Copied verbatim from `ExecutionContext.positions` by ObjectQL's
+     * `buildSession()` (`packages/objectql/src/engine.ts`).
+     *
+     * ⚠️ **Descriptive, NOT an authorization input.** A hook may READ this to
+     * describe the caller — forwarding it as the sharing service's evaluation
+     * context (`services.sharing.canEdit(..., { positions })`, the shape both
+     * `content/docs/kernel/runtime-services/` pages teach), tailoring a
+     * message, logging — and nothing more. It grants nothing on its own, no
+     * security middleware keys on it here, and a hook must never make the
+     * access decision itself by testing it
+     * (`session.positions.includes('sales_manager')` is the anti-pattern).
+     * PRIVILEGE is judged by the security service on the ExecutionContext:
+     * capability grants (`permissions`), placements (`positions`) and the
+     * derived posture (ADR-0095 D3). A hook that re-decides access from this
+     * array is deciding, in a place with no access to the grant model,
+     * something already decided — structurally the same mistake as the
+     * `roles` tombstone below (#5050), one vocabulary later. That is why this
+     * key is declared with the boundary written down rather than left to be
+     * inferred from its name.
+     *
+     * Declared in #5605 (maintainer ruling A): it was PRODUCED by
+     * `buildSession()` and TAUGHT by two kernel doc pages while the contract
+     * omitted it — so `HookContextSchema.parse()` silently stripped it (this
+     * shape is deliberately non-strict, see the header) and a handler typed
+     * `(ctx: HookContext)` could not read it without TS2339. Produced-never-
+     * declared, the mirror of `roles`' declared-never-produced.
+     */
+    positions: z.array(z.string()).optional().describe(
+      'Position names held by the caller (ADR-0090 D3; formerly `roles`), copied from '
+      + 'ExecutionContext.positions. For hook READS only — e.g. forwarding to the sharing '
+      + 'service as evaluation context. Authorization is decided by the security service on '
+      + 'the ExecutionContext (permissions / positions / derived posture); this is NOT an '
+      + 'authorization input and a hook must not gate a write by testing it.',
+    ),
+    /**
+     * Historical-import audit-preservation flag (#3493). Set by
+     * `buildSession()` only when the write context carries it, so a normal
+     * write leaves it absent.
+     *
+     * Its one consumer is the built-in audit hook
+     * (`packages/objectql/src/plugin.ts`, `applyToRecord`): when true, a
+     * client-supplied `updated_at` / `updated_by` is PREFERRED and kept —
+     * reinstating the original timeline of imported history — instead of
+     * being overwritten with the import instant, symmetric with how
+     * `created_at` / `created_by` behave on insert. It also whitelists the
+     * audit/timestamp family through `stripReadonlyFields()`.
+     *
+     * Server-set and opt-in; like {@link positions} it authorizes nothing —
+     * it selects a stamping policy for a write the security service has
+     * already allowed.
+     */
+    preserveAudit: z.boolean().optional().describe(
+      'True when this write is a historical import that must KEEP its caller-supplied '
+      + 'updated_at/updated_by (and the readonly audit family) instead of being stamped with '
+      + 'the import instant (#3493). Server-set, opt-in, absent on normal writes; read by the '
+      + 'built-in audit hook. A stamping policy, not an authorization input.',
+    ),
     // `roles` REMOVED (#5050, ADR-0049 D2). It was DECLARED here, READ by two
     // dead exemption branches in plugin-approvals (the approval record lock and
     // the delegation write guard, both deleted in #4839 / PR #5049), and NEVER

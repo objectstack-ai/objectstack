@@ -1138,6 +1138,15 @@ export class AutomationEngine implements IAutomationService {
      * and a module-level flag would report only whichever engine ran first.
      */
     private nodeTypeSealOmissionWarned = false;
+    /**
+     * Node types already named by {@link warnIfResumeAuthorityUndeclared}
+     * (#5561). Per **instance** and per **type**, for the same reason
+     * {@link nodeTypeSealOmissionWarned} is per instance: a hot-reload or a
+     * multi-tenant host re-registers the same executor repeatedly, and one
+     * omission must read as one finding rather than as a log that grows with
+     * uptime.
+     */
+    private readonly resumeAuthorityOmissionWarned = new Set<string>();
     private triggers = new Map<string, FlowTrigger>();
     /**
      * Flows currently wired to a trigger, keyed by flow name → the trigger
@@ -1334,9 +1343,58 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
             this.actionDescriptors.set(descriptorType, executor.descriptor);
+            this.warnIfResumeAuthorityUndeclared(executor.descriptor);
         }
 
         this.logger.info(`Node executor registered: ${executor.type}`);
+    }
+
+    /**
+     * Name a pausing node type that never declared WHO may resume the pauses it
+     * creates (#5561, the tracking item ADR-0044's amendment deferred).
+     *
+     * `resumeAuthority` carries no schema default precisely so this warning can
+     * exist: with `.default('any')` an omission parsed into a descriptor
+     * byte-identical to an author's explicit `'any'`, so the fact was gone
+     * before the engine ever saw the object. Absent now means absent, and a
+     * pausing type that leaves it absent is fail-open by omission rather than
+     * by decision — #3823 is what that costs (a revise pause standing in a
+     * service-owned position inherited `wait`'s legitimate `'any'`, and a raw
+     * resume walked past an unrecorded decision).
+     *
+     * **What it asserts, and why that is safe here.** Only the static fact that
+     * THIS descriptor omits the key — a property of the object being registered,
+     * fixed at authoring time, which no later registration can contradict. It
+     * reads no registry and draws no conclusion from anything being absent from
+     * one, so it is not the shape AGENTS.md "Startup registry reads" forbids and
+     * needs no seal flag (contrast {@link warnIfNodeTypeVocabularyNeverSealed},
+     * which reports a missing CALL for the same reason). Whether the omission
+     * *matters* at run time is deliberately not judged: the engine still
+     * resolves absent to `'any'` ({@link resolveResumeAuthority}), so nothing
+     * about today's behaviour changes.
+     *
+     * **Blind spot, stated up front:** the trigger is `supportsPause`, itself a
+     * declaration no execution path enforces (#5703) — a run pauses because
+     * `execute()` returned `suspend: true`. An executor that suspends while
+     * leaving `supportsPause` false is therefore fail-open AND silent here.
+     * `check:resume-authority-declared` catches this repo's own executors at
+     * authoring time; #5703 tracks the runtime half.
+     */
+    private warnIfResumeAuthorityUndeclared(descriptor: ActionDescriptor): void {
+        if (descriptor.supportsPause !== true) return;
+        if (descriptor.resumeAuthority !== undefined) return;
+        if (this.resumeAuthorityOmissionWarned.has(descriptor.type)) return;
+        this.resumeAuthorityOmissionWarned.add(descriptor.type);
+        this.logger.warn(
+            `[automation] node type '${descriptor.type}' declares supportsPause but never declares ` +
+            `resumeAuthority, so the #3801 resume gate treats every pause it creates as raw-resumable ` +
+            `through the generic route (POST /automation/:name/runs/:runId/resume) — fail-open by omission ` +
+            `rather than by decision, which is how #3823 walked past an unrecorded approval decision. ` +
+            `Declare it on the descriptor: 'any' if that route IS the intended door (a screen's collected ` +
+            `inputs, a signal wait's external producer), or 'service' if resuming is the tail of a decision ` +
+            `some service must authorize and record first. Declaring 'any' explicitly silences this and ` +
+            `changes no behaviour. Reported once per node type per engine.`,
+        );
     }
 
     /**
@@ -2704,8 +2762,16 @@ export class AutomationEngine implements IAutomationService {
      * snapshotting at alias-registration time) also keeps it correct whichever
      * order the two register in. No alias of a pausing type exists today; this
      * keeps it from becoming a hole the day one does.
+     *
+     * The `?? 'any'` is load-bearing in a second way since #5561: with no schema
+     * default on `resumeAuthority`, an undeclared descriptor arrives with the key
+     * absent and this is the one place that resolves it. It resolves fail-OPEN,
+     * exactly as the removed default did — step one of #5561 changed nothing
+     * here, it only made the omission audible at registration. Flipping this
+     * fallback to `'service'` is the breaking half still tracked on #5561, and
+     * it is this single expression.
      */
-    private resolveResumeAuthority(nodeType: string): ActionDescriptor['resumeAuthority'] {
+    private resolveResumeAuthority(nodeType: string): NonNullable<ActionDescriptor['resumeAuthority']> {
         let descriptor = this.actionDescriptors.get(nodeType);
         for (let hop = 0; descriptor?.aliasOf && hop < AutomationEngine.MAX_ALIAS_HOPS; hop++) {
             const canonical = this.actionDescriptors.get(descriptor.aliasOf);

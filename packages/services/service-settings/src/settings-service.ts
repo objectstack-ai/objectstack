@@ -83,6 +83,34 @@ function declaredOptionValues(options: unknown): string[] {
   return out;
 }
 
+/**
+ * The first member of `value` that the declared table does not admit, or
+ * `null` when every member is admissible.
+ *
+ * ONE comparison, shared by both paths that produce an effective value — the
+ * save path ({@link SettingsService.validatePatch}) and the env path
+ * ({@link SettingsService.get} / `reportRejectedEnvOverride`). #5204 exists
+ * precisely because one of those two checked the option table and the other
+ * did not; two open-coded copies of this comparison would be the same defect
+ * deferred rather than fixed.
+ *
+ * `multiselect` stores an array, `select`/`radio` a scalar; both are checked
+ * element-wise against the one table. A scalar arriving at a multiselect is
+ * wrapped rather than rejected — policing the value's SHAPE is a different
+ * constraint (`invalid_type`) with a different owner, and inventing it here
+ * would reject writes this check was never asked to touch.
+ *
+ * Returns a WRAPPER, not the offending value itself: a bare return cannot
+ * distinguish "nothing was rejected" from "the rejected member WAS
+ * `undefined`", and the latter would slip through the check. Same reason the
+ * implementation uses `findIndex` rather than `find`.
+ */
+function firstRejectedOption(allowed: string[], value: unknown): { value: unknown } | null {
+  const picked = Array.isArray(value) ? value : [value];
+  const at = picked.findIndex((v) => !allowed.includes(String(v)));
+  return at === -1 ? null : { value: picked[at] };
+}
+
 interface RegisteredManifest {
   manifest: SettingsManifest;
   /** Resolved specifier scopes for fast lookup. */
@@ -93,6 +121,19 @@ interface RegisteredManifest {
   defaults: Map<string, unknown>;
   /** Action handlers registered alongside this manifest. */
   actions: Map<string, SettingsActionHandler>;
+  /**
+   * Declared option values (string form) for every option-bearing specifier
+   * that actually declares a non-empty table, keyed by specifier key.
+   *
+   * Precomputed at registration because `get()` is the service's hottest path
+   * — `getNamespace` calls it once per specifier on every settings page load —
+   * and the alternative is re-scanning `manifest.specifiers` per read. A key
+   * ABSENT from this map is a key with nothing to enforce (not option-bearing,
+   * or an option-bearing type whose manifest declares no usable table), so
+   * absence means "unchanged behaviour" at both call sites rather than
+   * "check against an empty set", which would reject everything.
+   */
+  optionTables: Map<string, string[]>;
 }
 
 /**
@@ -108,7 +149,14 @@ export class SettingsService {
   private auditWriter?: import('./settings-service.types.js').SettingsAuditWriter;
   private readonly env: Record<string, string | undefined>;
   private readonly objectName: string;
+  private readonly logger?: import('./settings-service.types.js').SettingsDiagnosticsLogger;
   private readonly registry = new Map<string, RegisteredManifest>();
+  /**
+   * `OS_*` overrides already reported as rejected (#5204), keyed
+   * `<envVar>=<offending value>`. See {@link reportRejectedEnvOverride} for why
+   * the value is part of the key and not just the var name.
+   */
+  private readonly reportedEnvOverrides = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
   /** Change subscribers, optionally scoped to a namespace. */
@@ -126,6 +174,7 @@ export class SettingsService {
     this.auditWriter = opts.auditWriter;
     this.env = opts.env ?? (typeof process !== 'undefined' ? process.env : {});
     this.objectName = opts.objectName ?? DEFAULT_OBJECT;
+    this.logger = opts.logger;
   }
 
   /**
@@ -223,21 +272,181 @@ export class SettingsService {
   // Manifest registry
   // ---------------------------------------------------------------------
 
-  /** Register (or replace) a manifest. Idempotent. */
+  /**
+   * Register (or replace) a manifest. Idempotent.
+   *
+   * Registration is also where the deployment's `OS_*` overrides for this
+   * namespace are audited against the manifest's option tables (#5204) — see
+   * {@link auditEnvOverrides}. Registration REPORTS, it never rejects: a value
+   * that was legal yesterday and left the table today must not keep an
+   * existing deployment from booting.
+   */
   registerManifest(manifest: SettingsManifest): void {
     const scopes = new Map<string, SpecifierScope>();
     const encryptedKeys = new Set<string>();
     const defaults = new Map<string, unknown>();
+    const optionTables = new Map<string, string[]>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
       scopes.set(spec.key, spec.scope ?? defaultScope);
       if (spec.encrypted || spec.type === 'password') encryptedKeys.add(spec.key);
       if (typeof spec.default !== 'undefined') defaults.set(spec.key, spec.default);
+      if (OPTION_BEARING_TYPES.has(spec.type)) {
+        // A manifest with no option table cannot say what is legal. The spec
+        // refuses that shape at parse time, but `registerManifest` takes
+        // manifests as given (no Zod pass), so record nothing rather than
+        // record an empty table — same leniency the save path takes, and the
+        // reason the map's ABSENT key means "nothing to enforce".
+        const allowed = declaredOptionValues((spec as { options?: unknown }).options);
+        if (allowed.length > 0) optionTables.set(spec.key, allowed);
+      }
     }
     const prev = this.registry.get(manifest.namespace);
     const actions = prev?.actions ?? new Map<string, SettingsActionHandler>();
-    this.registry.set(manifest.namespace, { manifest, scopes, encryptedKeys, defaults, actions });
+    this.registry.set(manifest.namespace, {
+      manifest,
+      scopes,
+      encryptedKeys,
+      defaults,
+      actions,
+      optionTables,
+    });
+    this.auditEnvOverrides(manifest.namespace);
+  }
+
+  /**
+   * #5204 — report every `OS_*` override in this namespace whose value the
+   * specifier's declared `options` table does not admit.
+   *
+   * Why at registration and not only on read: an override that will never take
+   * effect is a **misconfigured deployment**, and the operator should learn
+   * that at boot, next to the rest of the startup output — not the first time
+   * somebody happens to open the settings page, and not never (a key nobody
+   * reads during the process's life would otherwise stay silent forever).
+   *
+   * Why it does NOT refuse to boot: the option tables move. #5094 retired
+   * `sendgrid` and `ses` from `mail.provider`; a deployment pinning
+   * `OS_MAIL_PROVIDER=sendgrid` was correct the day it was written, and turning
+   * an upgrade into a crash-on-start would punish exactly the operator this
+   * message is trying to help. The value is ignored either way (see `get`); the
+   * difference is whether the rest of the platform still comes up around it.
+   */
+  private auditEnvOverrides(namespace: string): void {
+    const reg = this.registry.get(namespace);
+    if (!reg || reg.optionTables.size === 0) return;
+    // Only the option-bearing keys can be rejected, so only they are worth
+    // walking. `effectiveEnvOverride` does the judging (and the reporting);
+    // the value it returns is of no interest here.
+    for (const key of reg.optionTables.keys()) {
+      this.effectiveEnvOverride(reg, namespace, key);
+    }
+  }
+
+  /**
+   * The `OS_*` override for this key **if it is actually in force**, else null.
+   *
+   * THE one place that answers "does env win here?", for every site that used to
+   * ask in its own way. There were three, and #5204 is what having three costs:
+   * `get()` coerced the value and returned it, `setMany` locked the key on the
+   * mere PRESENCE of the variable, and neither consulted the `options` table
+   * that the save path had been enforcing since #5131.
+   *
+   * Routing all three through one judgment is what keeps `locked` coherent. A
+   * rejected override is not in force, so it must not pin the key either:
+   * reporting `locked: false` from `get()` while `setMany` still threw
+   * `SETTINGS_LOCKED` would leave the settings UI rendering the field as
+   * editable and then failing the save — and, worse, would leave that key
+   * configurable by NOTHING (env value rejected, UI refused), a lockout only an
+   * env edit could clear. That is strictly worse than the hole #5204 closes,
+   * and it is the same reasoning `validatePatch` already applies when it
+   * refuses to lock a workspace out over historical drift.
+   *
+   * Reporting lives here rather than at the call sites so no future fourth
+   * caller can read an override without the rejection being heard.
+   */
+  private effectiveEnvOverride(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+  ): { envName: string; value: unknown } | null {
+    const envName = envKeyOf(namespace, key);
+    const envRaw = this.env[envName];
+    if (typeof envRaw !== 'string') return null;
+
+    const value = coerceEnvValue(envRaw, reg.defaults.get(key));
+    // A key with no declared table has nothing to enforce — unchanged behaviour.
+    const allowed = reg.optionTables.get(key);
+    if (!allowed) return { envName, value };
+
+    const rejected = firstRejectedOption(allowed, value);
+    if (!rejected) return { envName, value };
+
+    this.reportRejectedEnvOverride(reg, namespace, key, envName, allowed, rejected.value);
+    return null;
+  }
+
+  /**
+   * Emit the one loud line a rejected `OS_*` override owes its operator, at
+   * most once per (env var, value) for the life of the service.
+   *
+   * **Level is `error`, deliberately.** AGENTS.md → "Degradation log levels"
+   * decides this by one question: afterwards, does the system still look normal
+   * from the outside while something it claims to honour has not landed? Here
+   * it does — the read API answers with a perfectly plausible value tagged with
+   * a perfectly plausible source, and nothing anywhere looks broken, while the
+   * operator's declared intent is simply not in force. #5152 reached the same
+   * verdict for `auth.membership_policy` in `bindAuthSettings` for the same
+   * reason, and that case shows the stakes: a typo'd `invite_only` read as
+   * `auto` leaves an operator believing the wall is up while every sign-up is
+   * auto-bound.
+   *
+   * **Once, not once per read.** Same section: "Say it once, at the first
+   * degradation, not once per failed write." `getNamespace` resolves every
+   * specifier in the namespace on every settings page load, so a per-read line
+   * would be a firehose — and training people to skim `error` is the
+   * mirror-image failure AGENTS.md names in the very next paragraph. Keying the
+   * dedupe on the VALUE as well as the var means a genuinely new bad value is
+   * still reported: `this.env` may be a live `process.env` reference, so an
+   * override can appear or change after registration and must not inherit an
+   * earlier line's silence.
+   *
+   * **No structured `meta`.** Everything an operator needs is in the sentence,
+   * and `Logger.redactSensitive` (`packages/core/src/logger.ts`) redacts any
+   * meta field whose name merely CONTAINS `key`/`token`/`secret`/`password` —
+   * so the obvious `{ key }` / `{ envKey }` field would arrive as
+   * `***REDACTED***` and delete the diagnostic while looking complete (#5573).
+   */
+  private reportRejectedEnvOverride(
+    reg: RegisteredManifest,
+    namespace: string,
+    key: string,
+    envName: string,
+    allowed: string[],
+    offending: unknown,
+  ): void {
+    const dedupeAt = `${envName}=${String(offending)}`;
+    if (this.reportedEnvOverrides.has(dedupeAt)) return;
+    this.reportedEnvOverrides.add(dedupeAt);
+
+    // An option value is not a secret, but `encrypted` is authorable on ANY
+    // specifier — so never echo the rejected value for a key whose contents are
+    // held encrypted, in a message that lands in logs. Same rule, same reason,
+    // as the save path's `invalid_option` error.
+    const secret = reg.encryptedKeys.has(key);
+    const rejected = secret ? '' : ` Rejected value: '${String(offending)}'.`;
+    const message =
+      `[SettingsService] env override ${envName} is not a declared option for ` +
+      `setting '${namespace}.${key}' — IGNORED.${rejected} Allowed values: ${allowed.join(', ')}. ` +
+      `Consequence: this override does NOT take effect and nothing else looks wrong — ` +
+      `'${namespace}.${key}' resolves from the next layer of the cascade instead ` +
+      `(a stored global/tenant/user value, else the manifest default), and reads report ` +
+      `THAT layer as the source rather than 'env'. ` +
+      `Fix: set ${envName} to one of the allowed values, or unset it and configure ` +
+      `'${namespace}.${key}' through the settings UI.`;
+
+    if (this.logger?.error) this.logger.error(message);
+    else console.error(message);
   }
 
   /** Look up a manifest, or throw `UnknownNamespaceError`. */
@@ -306,12 +515,27 @@ export class SettingsService {
     if (!reg) throw new UnknownNamespaceError(namespace);
     if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
 
-    // 1. OS_* env
-    const envName = envKeyOf(namespace, key);
-    const envRaw = this.env[envName];
-    if (typeof envRaw === 'string') {
-      const def = reg.defaults.get(key);
-      const value = coerceEnvValue(envRaw, def);
+    // 1. OS_* env — but only when the override is actually in force.
+    //
+    // #5204: the `options` table is an ENFORCEMENT surface on this side too.
+    // `setMany` has checked it since #5131, yet an env override reached the
+    // effective value without passing through that path at all, and did so at
+    // the TOP of the cascade with `locked: true` — so `OS_MAIL_PROVIDER=sendgrid`
+    // handed the mail plugin the exact value #5094 had just retired, through the
+    // one door nobody was watching. `coerceEnvValue` only ever reshaped the
+    // string by the default's type; it never consulted the enumeration.
+    //
+    // A rejected value is IGNORED rather than repaired: there is no honest way to
+    // guess which declared option a typo meant, and guessing is worse than not
+    // applying it (#5152, on `invite_only` silently read as `auto`). Ignored
+    // means the env layer contributes NOTHING here — no value and, critically,
+    // no `cascadeChain` entry: an `env` entry carrying `locked: true` would be
+    // picked up by the `lockedEntry` scan below and reported as locking a value
+    // it is not even providing, which is the opposite of what the read API owes
+    // its caller.
+    const envOverride = this.effectiveEnvOverride(reg, namespace, key);
+    if (envOverride) {
+      const { envName, value } = envOverride;
       return {
         value: value as T,
         source: 'env',
@@ -504,8 +728,16 @@ export class SettingsService {
     // Pre-flight: reject the whole batch if any key is locked or unknown.
     for (const key of Object.keys(patch)) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
-      const envRaw = this.env[envKeyOf(namespace, key)];
-      if (typeof envRaw === 'string') throw new SettingsLockedError(namespace, key);
+      // An env override pins the key against writes — but only one that is IN
+      // FORCE (#5204). This used to trigger on the mere PRESENCE of the
+      // variable, which after the read-side gate would have produced a key
+      // configurable by nothing at all: the env value rejected and ignored, the
+      // UI refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false`
+      // to a settings page that would then fail its own save. See
+      // `effectiveEnvOverride`.
+      if (this.effectiveEnvOverride(reg, namespace, key)) {
+        throw new SettingsLockedError(namespace, key);
+      }
 
       // Phase 2 lock: a row at an upper scope marked locked=true
       // refuses writes at this (lower) scope. Writing AT the same
@@ -743,19 +975,11 @@ export class SettingsService {
         // write to a hand-built manifest — same leniency the unparseable
         // `visible` and invalid `pattern` branches already take.
         if (allowed.length > 0) {
-          // `multiselect` stores an array, `select`/`radio` a scalar; both are
-          // checked element-wise against the one table. A scalar arriving at a
-          // multiselect is wrapped rather than rejected — policing the value's
-          // SHAPE is a different constraint (`invalid_type`) with a different
-          // owner, and inventing it here would reject writes this change was
-          // never asked to touch.
-          const picked = Array.isArray(value) ? value : [value];
-          // `findIndex`, not `find`: a `find` returning `undefined` cannot say
-          // whether nothing was rejected or whether the rejected element WAS
-          // `undefined` — and the latter would slip through the check.
-          const at = picked.findIndex((v) => !allowed.includes(String(v)));
-          if (at !== -1) {
-            const offending = picked[at];
+          // Shared with the env path (#5204) — see `firstRejectedOption` for the
+          // array/scalar handling and why the result is wrapped.
+          const rejected = firstRejectedOption(allowed, value);
+          if (rejected) {
+            const offending = rejected.value;
             // An option value is not a secret, but `encrypted` is authorable on
             // any specifier — so never echo the rejected value for a key whose
             // contents are held encrypted, in a message that lands in logs.

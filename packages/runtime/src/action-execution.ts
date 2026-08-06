@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
@@ -750,8 +750,22 @@ export function enforceActionParams(deps: ActionExecutionDeps,
  * a distinct, configurable axis and stays. Returns undefined for a genuinely
  * context-less / self-invoked call so a body can distinguish "no session" the
  * same way hooks do.
+ *
+ * [#5697] The shape this returns is now DECLARED — {@link ActionSessionSchema}
+ * in `@objectstack/spec/ui`, phase 1 of #5613's contract-first ruling — and the
+ * annotation here is that declaration, not a restatement of it. Nothing about
+ * what this builds changed; the consistency between the two is pinned in
+ * `action-session-shape-contract.test.ts`.
+ *
+ * ⚠️ Two sentences above are tracked as WRONG, deliberately left standing for
+ * #5613 phase 2 to correct together with the rename they belong to: "mirroring
+ * the hook `ctx.session` shape" has not been true since #5050 retired
+ * `HookContext.session.roles` (the hook session is a different key set from a
+ * different producer), and the `roles` key this builds carries `ec.positions`,
+ * i.e. the ADR-0090 D3 vocabulary under the spelling that ADR bans. Read the
+ * schema's docblock before relying on either.
  */
-export function buildActionSession(_deps: ActionExecutionDeps, ec: any): any | undefined {
+export function buildActionSession(_deps: ActionExecutionDeps, ec: any): ActionSession | undefined {
     if (!ec || (ec.userId == null && ec.tenantId == null)) return undefined;
     return {
         ...(ec.userId != null ? { userId: String(ec.userId) } : {}),

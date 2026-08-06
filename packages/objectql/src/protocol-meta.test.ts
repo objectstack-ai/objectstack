@@ -628,12 +628,33 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.item).toBeUndefined();
         });
 
-        it('should handle DB errors gracefully and return undefined item', async () => {
-            mockEngine.findOne.mockRejectedValue(new Error('DB down'));
+        // [#5532] REPLACED, not re-spelled. This slot used to read "should
+        // handle DB errors gracefully and return undefined item": it fed
+        // `new Error('DB down')` to the overlay read and asserted the answer
+        // was an item-shaped `undefined`. That assertion passed because the
+        // protocol swallowed the failure, and the emptiness then became
+        // "Metadata item app/test_app not found" at `getMetaItemCached` —
+        // an outage answered as a miss, which ADR-0110 D3 forbids and #5108
+        // already fixed one layer down. "Gracefully" now means the ONE benign
+        // reason; everything else is reported.
+        it('an unreadable store is REPORTED, not answered as an absent item (#5532)', async () => {
+            const outage = new Error('DB down');
+            mockEngine.findOne.mockRejectedValue(outage);
+
+            await expect(protocol.getMetaItem({ type: 'app', name: 'test_app' }))
+                .rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        });
+
+        it('an UNPROVISIONED sys_metadata still degrades gracefully (#5532)', async () => {
+            // The one benign read failure: no table means genuinely no overlay
+            // rows, so the registry answer is the truth and first boot must not
+            // explode. This is the half of the old test that was right.
+            registry.registerItem('app', sampleApp, 'name' as any);
+            mockEngine.findOne.mockRejectedValue(new Error('SQLITE_ERROR: no such table: sys_metadata'));
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
-            expect(result.item).toBeUndefined();
+            expect(result.item).toMatchObject(sampleApp);
             expect(result.type).toBe('app');
             expect(result.name).toBe('test_app');
         });
@@ -1026,12 +1047,25 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.items).toHaveLength(0);
         });
 
-        it('should handle DB errors gracefully and return empty items', async () => {
+        // [#5532] REPLACED — the plural twin of the singular case above. The old
+        // slot ("should handle DB errors gracefully and return empty items")
+        // asserted that an unreadable store lists nothing, which is the exact
+        // answer #5089/#5108 call dangerous: every consumer that gates on a
+        // DECLARED SET reads "zero declarations" as "the author declared none".
+        it('an unreadable store is REPORTED, not listed as an empty type (#5532)', async () => {
             mockEngine.find.mockRejectedValue(new Error('DB down'));
+
+            await expect(protocol.getMetaItems({ type: 'app' }))
+                .rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        });
+
+        it('an UNPROVISIONED sys_metadata still lists what the registry holds (#5532)', async () => {
+            registry.registerItem('app', sampleApp, 'name' as any);
+            mockEngine.find.mockRejectedValue(new Error('SQLITE_ERROR: no such table: sys_metadata'));
 
             const result = await protocol.getMetaItems({ type: 'app' });
 
-            expect(result.items).toHaveLength(0);
+            expect(result.items).toHaveLength(1);
             expect(result.type).toBe('app');
         });
 
