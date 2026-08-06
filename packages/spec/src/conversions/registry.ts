@@ -26,6 +26,7 @@ import {
   renameKey,
 } from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
+import { deepEqualAuthored } from '../shared/deep-equal.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -550,34 +551,13 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
   surface: 'page.component.visibility',
   summary: "page component key 'visibility' → 'visibleWhen' (ADR-0089)",
   apply(stack, emit) {
-    return mapPages(stack, (page, path) => {
-      const regions = page.regions;
-      if (!Array.isArray(regions)) return page;
-      let regionsChanged = false;
-      const nextRegions = regions.map((region, ri) => {
-        if (!region || typeof region !== 'object' || Array.isArray(region)) return region;
-        const dict = region as Record<string, unknown>;
-        const components = dict.components;
-        if (!Array.isArray(components)) return region;
-        let componentsChanged = false;
-        const nextComponents = components.map((component, ci) => {
-          if (!component || typeof component !== 'object' || Array.isArray(component)) return component;
-          const mapped = renameVisibilityAlias(
-            component as Record<string, unknown>,
-            'visibility',
-            `${path}.regions[${ri}].components[${ci}]`,
-            emit,
-          );
-          if (mapped !== component) componentsChanged = true;
-          return mapped;
-        });
-        if (!componentsChanged) return region;
-        regionsChanged = true;
-        return { ...dict, components: nextComponents };
-      });
-      if (!regionsChanged) return page;
-      return { ...page, regions: nextRegions };
-    });
+    // The region→component descent this used to open-code is the shared
+    // `mapPageComponents` walker (#5509, adopted per #5511): identical
+    // copy-on-write contract, identical `pages[i].regions[j].components[k]`
+    // paths, and one fewer hand-rolled traversal to keep in step with
+    // `PageComponentSchema`'s reach.
+    return mapPageComponents(stack, (component, path) =>
+      renameVisibilityAlias(component, 'visibility', path, emit));
   },
   fixture: {
     before: {
@@ -923,8 +903,12 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'get_record', config: { object: 'lead', recordId: '{leadId}' } },
-            // canonical already present → the shadowed alias is left alone (no notice)
-            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+            // Both spellings, DIFFERENT objects (#4923): real author ambiguity,
+            // so both keys survive and the strict gate refuses naming both.
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ticket' } },
+            // Both spellings, SAME object: the alias carries nothing the
+            // canonical key does not, so it is deleted (with a notice).
+            { id: 'n4', type: 'update_record', config: { objectName: 'lead', object: 'lead' } },
           ],
         },
       ],
@@ -936,12 +920,15 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'get_record', config: { objectName: 'lead', recordId: '{leadId}' } },
-            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ignored' } },
+            { id: 'n3', type: 'create_record', config: { objectName: 'task', object: 'ticket' } },
+            { id: 'n4', type: 'update_record', config: { objectName: 'lead' } },
           ],
         },
       ],
     },
-    expectedNotices: 1,
+    // n2's rename + n4's redundant-twin deletion. n3 is the ambiguous pair: no
+    // rewrite, no notice — the refusal is the strict gate's to make.
+    expectedNotices: 2,
   },
 };
 
@@ -951,14 +938,26 @@ const flowNodeCrudObjectAlias: MetadataConversion = {
  *
  * The fifth notify alias, and the only one that is not a 1:1 rename — it is a
  * 1→2 destructuring, so {@link renameFlowConfigAliases}' pair mechanism cannot
- * express it. Semantics mirror the `??` precedence the executor used to carry:
- * a canonical key already present WINS and its nested counterpart is left
- * shadowed, exactly as {@link renameConfigKey} treats a shadowed alias.
+ * express it. It nevertheless follows {@link renameConfigKey}'s rule for a
+ * shadowed alias, which #4923 settled **by value**:
  *
- * `source` is dropped once at least one part was lifted — every part is by then
- * either lifted or shadowed by a canonical key, so nothing observable is lost
- * (the executor only ever read `.object` / `.id`). A `source` that is not a dict,
- * or carries neither key, is left untouched rather than silently deleted.
+ *  - a nested part whose flat counterpart is ABSENT is lifted (a notice each);
+ *  - a nested part that merely REPEATS the value already on its flat key is
+ *    redundant — nothing to lift, but the part is accounted for, and the notice
+ *    still fires so the removal is loud;
+ *  - a nested part that DISAGREES with its flat key is genuine author
+ *    ambiguity. The node is then left **entirely** untouched — no partial lift,
+ *    no notice — so `source` survives to the strict `notify` contract, which
+ *    refuses naming both the nested key and the flat pair. Choosing here would
+ *    mean rewriting a click-through target the author never agreed to.
+ *
+ * `source` is dropped only when every part it carries was lifted or found
+ * redundant, so nothing observable is lost. Leaving the ambiguous node whole
+ * rather than half-converted also keeps the pass idempotent: a replay of the
+ * unresolved shape re-derives the same verdict and emits nothing.
+ *
+ * A `source` that is not a dict, or carries neither key, is left untouched
+ * rather than silently deleted.
  */
 function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
   return mapFlowNodes(stack, (node, path) => {
@@ -969,15 +968,22 @@ function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
     if (!isDict(source)) return node;
 
     const nextConfig: Dict = { ...config };
-    let lifted = false;
+    const pending: ConversionApplication[] = [];
+    let ambiguous = false;
     for (const [from, to] of [['object', 'sourceObject'], ['id', 'sourceId']] as const) {
       if (source[from] == null) continue;
-      if (nextConfig[to] != null) continue; // canonical already wins
-      nextConfig[to] = source[from];
-      emit({ from: `source.${from}`, to, path: `${path}.config.${to}` });
-      lifted = true;
+      if (nextConfig[to] == null) {
+        nextConfig[to] = source[from];
+      } else if (!deepEqualAuthored(source[from], nextConfig[to])) {
+        ambiguous = true;
+        break;
+      }
+      pending.push({ from: `source.${from}`, to, path: `${path}.config.${to}` });
     }
-    if (!lifted) return node;
+    // The author named one slot twice, differently — hand the whole shape to
+    // the strict gate rather than resolving part of it (#4923).
+    if (ambiguous || pending.length === 0) return node;
+    for (const application of pending) emit(application);
     delete nextConfig.source;
     return { ...node, config: nextConfig };
   });
@@ -1043,15 +1049,29 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
                 source: { object: 'showcase_task', id: '{record.id}' },
               },
             },
-            // A canonical `sourceObject` WINS: only the unshadowed `id` is
-            // lifted, and `source` is dropped since every part is accounted for.
+            // `source.object` DISAGREES with the flat `sourceObject` (#4923).
+            // The node is left whole — not even the unambiguous `id` is
+            // lifted — so `source` reaches the strict `notify` contract and is
+            // refused there, naming both the nested key and the flat pair.
             {
               id: 'n3',
               type: 'notify',
               config: {
                 recipients: ['{record.owner}'],
                 sourceObject: 'showcase_project',
-                source: { object: 'ignored', id: '{record.project}' },
+                source: { object: 'crm_account', id: '{record.project}' },
+              },
+            },
+            // `source.object` merely REPEATS the flat `sourceObject`: redundant,
+            // so it counts as accounted for, `id` lifts, and `source` is
+            // dropped — two notices, nothing observable lost.
+            {
+              id: 'n4',
+              type: 'notify',
+              config: {
+                recipients: ['{record.reviewer}'],
+                sourceObject: 'showcase_task',
+                source: { object: 'showcase_task', id: '{record.task}' },
               },
             },
           ],
@@ -1083,16 +1103,26 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
               config: {
                 recipients: ['{record.owner}'],
                 sourceObject: 'showcase_project',
-                sourceId: '{record.project}',
+                source: { object: 'crm_account', id: '{record.project}' },
+              },
+            },
+            {
+              id: 'n4',
+              type: 'notify',
+              config: {
+                recipients: ['{record.reviewer}'],
+                sourceObject: 'showcase_task',
+                sourceId: '{record.task}',
               },
             },
           ],
         },
       ],
     },
-    // 4 renames on n2 + `source.object`/`source.id` lifted on n2 + the single
-    // unshadowed `source.id` on n3 (its `source.object` is shadowed → no notice).
-    expectedNotices: 7,
+    // 4 renames on n2 + `source.object`/`source.id` lifted on n2 = 6; n3 is the
+    // ambiguous pair and converts nothing; n4 adds 2 (the redundant `object`
+    // and the lifted `id`).
+    expectedNotices: 8,
   },
 };
 
@@ -1135,8 +1165,15 @@ const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidate
  *
  * Precedence mirrors those `??` chains, so the rewrite is behaviour-preserving:
  * a value already on `waitEventConfig` WINS and its loose counterpart is left
- * shadowed (as {@link renameConfigKey} treats a shadowed alias), and among loose
- * candidates the first one present decides.
+ * shadowed in place, and among loose candidates the first one present decides.
+ *
+ * This is a LIFT between two locations, not an alias pair in one dict, so
+ * #4923's by-value split (delete a redundant twin, keep a disagreeing one)
+ * deliberately does NOT apply — {@link renameConfigKey} judges two spellings of
+ * one slot, while here the loose `config` location is itself the retired thing
+ * and `WAIT_EVENT_CONFIG_LIFTS` may map several candidate names onto one
+ * target. Extending the rule here would be a separate ruling on a different
+ * question; the shadowed loose key is left for the strict contract to reject.
  *
  * `eventType` is defaulted to `'timer'` whenever lifting would otherwise leave
  * the block without one. That is load-bearing, not tidiness: the loader parses
@@ -1275,8 +1312,11 @@ const flowNodeMapFlowAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'map', config: { collection: '{tasks}', flow: 'one_task_signoff' } },
-            // canonical already present → the shadowed alias is left alone (no notice)
-            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'ignored' } },
+            // Both spellings naming DIFFERENT flows (#4923): which subflow runs
+            // per item is the author's call, so both keys survive to the gate.
+            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'per_row_v2' } },
+            // Both spellings naming the SAME flow: redundant, so deleted.
+            { id: 'n4', type: 'map', config: { collection: '{items}', flowName: 'per_item', flow: 'per_item' } },
           ],
         },
       ],
@@ -1288,12 +1328,14 @@ const flowNodeMapFlowAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'map', config: { collection: '{tasks}', flowName: 'one_task_signoff' } },
-            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'ignored' } },
+            { id: 'n3', type: 'map', config: { collection: '{rows}', flowName: 'per_row', flow: 'per_row_v2' } },
+            { id: 'n4', type: 'map', config: { collection: '{items}', flowName: 'per_item' } },
           ],
         },
       ],
     },
-    expectedNotices: 1,
+    // n2's rename + n4's redundant-twin deletion; n3 converts nothing.
+    expectedNotices: 2,
   },
 };
 
@@ -1327,8 +1369,11 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'subflow', config: { flow: 'escalation_flow', input: { caseId: '{record.id}' } } },
-            // canonical already present → the shadowed alias is left alone (no notice)
-            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'ignored' } },
+            // Both spellings naming DIFFERENT flows (#4923): both survive, and
+            // the strict `subflow` contract refuses naming both.
+            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'audit_flow_v2' } },
+            // Both spellings naming the SAME flow: redundant, so deleted.
+            { id: 'n4', type: 'subflow', config: { flowName: 'notify_flow', flow: 'notify_flow' } },
           ],
         },
       ],
@@ -1340,12 +1385,14 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
           nodes: [
             { id: 'n1', type: 'start' },
             { id: 'n2', type: 'subflow', config: { flowName: 'escalation_flow', input: { caseId: '{record.id}' } } },
-            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'ignored' } },
+            { id: 'n3', type: 'subflow', config: { flowName: 'audit_flow', flow: 'audit_flow_v2' } },
+            { id: 'n4', type: 'subflow', config: { flowName: 'notify_flow' } },
           ],
         },
       ],
     },
-    expectedNotices: 1,
+    // n2's rename + n4's redundant-twin deletion; n3 converts nothing.
+    expectedNotices: 2,
   },
 };
 
@@ -3148,9 +3195,10 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
  * So the tolerance graduates here: every stored-row rehydration seam replays
  * the full chain (`applyConversionsToStoredItem`, #3903), hands the factory
  * the canonical key, and the factory reads ONE spelling. Precedence follows
- * {@link renameKey}: a canonical key already present wins and the alias is
- * left shadowed in place, which is also what the factory's `??` chains
- * resolved to.
+ * {@link renameKey}: a canonical key already present wins, which is also what
+ * the factory's `??` chains resolved to — and since #4923 the alias beside it
+ * is deleted when it merely repeats that value, or kept (for the authoring
+ * gate to refuse naming both) when the two disagree.
  *
  * **Retired from the load path** — not because the keys misdescribed
  * themselves (they were honest spellings, merely undeclared), but because the
@@ -3179,7 +3227,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
       let nextConfig = config;
       for (const [from, to] of pairs) {
         const renamed = renameKey(nextConfig, from, to);
-        if (!renamed) continue; // absent, or canonical already wins (alias stays shadowed)
+        if (!renamed) continue; // absent, or an ambiguous pair `renameKey` refuses (#4923)
         emit({ from, to, path: `${path}.config.${to}` });
         nextConfig = renamed;
       }
@@ -3200,8 +3248,9 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
         // `database` is CANONICAL for mysql — only `user` converts
         { name: 'orders', driver: 'mysql', config: { host: 'db.internal', database: 'orders', user: 'svc_orders' } },
         { name: 'events', driver: 'mongodb', config: { uri: 'mongodb://mongo.internal:27017/events' } },
-        // canonical already present → the shadowed alias is left alone (no notice)
-        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: 'ignored.db' } },
+        // Both spellings, DIFFERENT files (#4923): kept, so the authoring gate
+        // can refuse naming both rather than the loader picking a database.
+        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: './scratch.db' } },
       ],
     },
     after: {
@@ -3215,7 +3264,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
         },
         { name: 'orders', driver: 'mysql', config: { host: 'db.internal', database: 'orders', username: 'svc_orders' } },
         { name: 'events', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/events' } },
-        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: 'ignored.db' } },
+        { name: 'scratch', driver: 'sqlite', config: { filename: ':memory:', file: './scratch.db' } },
       ],
     },
     // app_db 1 + archive_db 1 + warehouse 2 + orders 1 + events 1 + scratch 0.
@@ -3620,12 +3669,13 @@ const retryPolicyConverged: MetadataConversion = {
     // below and for the same reason, reached one level up: `errorHandling`
     // hangs off the flow document, not off a node, so `mapFlowNodes` walks
     // straight past it — which is a small echo of why this divergence survived
-    // #4661 at all. `renameKey` leaves an already-canonical `backoffMs` alone
-    // and, when BOTH spellings are present, leaves the alias shadowed rather
-    // than guessing which number the author meant; the strict block then
-    // rejects naming both. (#4923 is queued to revisit that shadowing rule —
-    // this entry deliberately relies on the shared helper's semantics rather
-    // than open-coding its own, so it moves with that ruling.)
+    // #4661 at all. `renameKey` leaves an already-canonical `backoffMs` alone;
+    // when BOTH spellings are present it now (#4923) deletes `retryDelayMs`
+    // only if it repeats the same number, and otherwise keeps both rather than
+    // guessing which delay the author meant — the strict block then rejects
+    // naming both. This entry relied on the shared helper's semantics rather
+    // than open-coding its own precisely so it would move with that ruling,
+    // and it did: no change was needed here.
     const withErrorHandling = mapCollection(stack, 'flows', (flow, path) => {
       const eh = flow.errorHandling;
       if (!eh || typeof eh !== 'object' || Array.isArray(eh)) return flow;
@@ -4187,8 +4237,9 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
                 // The canonical type authored with the legacy key: converted too,
                 // because today this second line is dropped on the floor.
                 { type: 'page:header', properties: { title: 'Lead', description: 'One lead' } },
-                // Canonical already present → the shadowed alias is left alone (no notice).
-                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'ignored' } },
+                // Both spellings, DIFFERENT text (#4923): kept, so the author
+                // reconciles the two second lines rather than the loader picking.
+                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'other' } },
                 // `description` is this component's OWN declared prop (helper text) — untouched.
                 { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
               ],
@@ -4207,7 +4258,7 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
               components: [
                 { type: 'page-header', properties: { title: 'Leads', subtitle: 'All open leads' } },
                 { type: 'page:header', properties: { title: 'Lead', subtitle: 'One lead' } },
-                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'ignored' } },
+                { type: 'page:header', properties: { title: 'Both', subtitle: 'wins', description: 'other' } },
                 { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
               ],
             },

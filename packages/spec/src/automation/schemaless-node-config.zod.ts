@@ -119,10 +119,11 @@ const SCHEMALESS_NODE_CONFIG_HISTORY =
  * `functionName` and `input` are retired SPELLINGS that
  * `flow-node-script-config-aliases` rewrites at load, so — like the notify
  * family — a config still carrying one at parse time carries the canonical key
- * too (`renameConfigKey` leaves a shadowed alias alone). `input` earns its
- * entry twice over: edit distance would suggest `inputs` without ever saying
- * that `input` is *canonical* on `connector_action`'s `connectorConfig`, which
- * is where the spelling leaked in from and where it must NOT be changed.
+ * too, and since #4923 it carries a canonical key holding a DIFFERENT value
+ * (an identical twin is deleted by the conversion). `input` earns its entry
+ * twice over: edit distance would suggest `inputs` without ever saying that
+ * `input` is *canonical* on `connector_action`'s `connectorConfig`, which is
+ * where the spelling leaked in from and where it must NOT be changed.
  *
  * The five `actionType`-branch keys need no entry here: `retiredKey()` puts the
  * prescription in the shape itself, which is strictly stronger (it also types
@@ -132,12 +133,15 @@ const SCHEMALESS_NODE_CONFIG_HISTORY =
 const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   functionName:
     'The callable reference is `function` (#1870). `functionName` was the AI/template-emitted alias, rewritten at '
-    + 'load by the ADR-0087 D2 conversion `flow-node-script-config-aliases`; if `function` is already present the '
-    + 'conversion left `functionName` behind as a dead twin — delete it.',
+    + 'load by the ADR-0087 D2 conversion `flow-node-script-config-aliases`. If `function` is also present, the two '
+    + 'name DIFFERENT callables and the conversion kept both rather than picking which one runs (#4923) — decide '
+    + 'which it is, put it on `function`, and delete `functionName`.',
   input:
     'The input map on a `script` node is `inputs` (plural). The singular `input` leaked in from '
     + "`connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical surface — do not \"fix\" that "
-    + 'one. `flow-node-script-config-aliases` rewrites this key at load; delete it once `inputs` carries the values.',
+    + 'one. `flow-node-script-config-aliases` rewrites this key at load; delete it once `inputs` carries the values. '
+    + 'If `inputs` is also present with DIFFERENT values, the conversion kept both rather than choosing (#4923) — '
+    + 'reconcile them onto `inputs`.',
 };
 
 /** `subflow` prescriptions — one retired spelling, one wrong layer. */
@@ -145,7 +149,9 @@ const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   flow:
     'The invoked flow is named by `flowName`. `flow` was an undeclared executor fallback that no schema or form '
     + 'ever described; it graduated into the ADR-0087 D2 conversion `flow-node-subflow-flow-alias` (#4278), which '
-    + 'rewrites it at load — so a surviving `flow` means `flowName` already won and this key is dead. Delete it.',
+    + 'rewrites it at load. If `flowName` is also present, the two name DIFFERENT flows and the conversion kept '
+    + 'both rather than picking which one this step invokes (#4923) — decide which it is, put it on `flowName`, '
+    + 'and delete `flow`.',
   timeoutMs:
     "A subflow step's timeout is the engine's per-node guard, so it belongs on the NODE, not in its config: "
     + '`{ id, type: "subflow", timeoutMs: 30000, config: { … } }`. `FlowNodeSchema.timeoutMs` is the declared key.',

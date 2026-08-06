@@ -244,12 +244,18 @@ describe('MapConfigSchema — strict as of #4001 批 9', () => {
     expect(message).toMatch(/delete/i);
   });
 
-  it('rejects the SHADOWED alias the ADR-0087 conversion deliberately leaves behind', () => {
-    // `renameConfigKey` does nothing when the canonical key is already
-    // present, so `{ flowName, flow }` survives the load-path conversion
-    // intact — and under `.strip` the dead twin was then deleted in silence at
-    // this parse. That silence is the whole point of #4001: the author wrote
-    // two names for one thing and the platform picked one without saying so.
-    expect(MapConfigSchema.safeParse({ collection: '{r}', flowName: 'per_row', flow: 'ignored' }).success).toBe(false);
+  it('rejects the AMBIGUOUS pair the ADR-0087 conversion deliberately leaves behind', () => {
+    // Since #4923 `renameConfigKey` resolves `{ flowName, flow }` itself when
+    // the two agree, so the pair that survives the load-path conversion to
+    // reach this parse is the one naming two DIFFERENT flows. Under `.strip`
+    // the loser was then deleted in silence — the whole point of #4001: the
+    // author wrote two names for one thing and the platform picked one without
+    // saying so. This is the case where picking would be a guess, so the
+    // refusal names both keys instead.
+    expect(MapConfigSchema.safeParse({ collection: '{r}', flowName: 'per_row', flow: 'per_row_v2' }).success)
+      .toBe(false);
+    const message = unknownKeyMessage(MapConfigSchema, { collection: '{r}', flowName: 'per_row', flow: 'per_row_v2' })!;
+    expect(message).toContain('`flow`');
+    expect(message).toContain('`flowName`');
   });
 });
