@@ -4347,6 +4347,13 @@ export class RestServer {
                             if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
+                                // The document under audience test. [#5563] This
+                                // used to unwrap an envelope-or-document here;
+                                // `visible` is always the document now, so the
+                                // name is all that is left — and it is worth
+                                // keeping, because `audience` is read off the
+                                // DOCUMENT and reading it off an envelope would
+                                // silently grant everyone (`undefined` audience).
                                 const target = visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
