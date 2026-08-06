@@ -19,8 +19,6 @@
   "packages/qa/dogfood/test/showcase-bu-hierarchy-sharing.dogfood.test.ts": 1,
   "packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts": 1,
   "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts": 1,
-  "packages/rest/src/external-datasource-routes.ts": 1,
-  "packages/rest/src/rest-api-plugin.ts": 15,
   "packages/services/service-datasource/src/admin-routes.ts": 2,
   "packages/services/service-job/src/job-service-plugin.ts": 4,
   "packages/services/service-messaging/src/messaging-service-plugin.test.ts": 2,
