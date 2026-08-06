@@ -20,6 +20,8 @@
  *  - restore the readonly SKIP → every [#4743] test below fails: the provenance
  *    bucket goes empty and the probe is never issued
  *  - merge provenance into `dangling` → the [#4743] separation tests fail
+ *  - drop the `unscannedObjects` filing → the [#5718] tests fail: the budget
+ *    stop goes back to being silent about the objects it never opened
  */
 
 import { describe, it, expect } from 'vitest';
@@ -736,5 +738,229 @@ describe('[#4743] provenance references are audited, in their OWN bucket', () =>
     const out = await auditDanglingReferences(port);
     expect(out.provenance).toEqual([]);
     expect(out.provenanceUndetermined).toBe(0);
+  });
+});
+
+/**
+ * [#5718] A budget that runs out BETWEEN objects used to end the run in
+ * silence.
+ *
+ * `truncatedObjects` covers the budget running out INSIDE a table. The overall
+ * `maxRows` budget also runs out between tables — the loop just stopped, and
+ * every object behind the stop left no trace in the report at all. Their
+ * `dangling: []` was indistinguishable from the `dangling: []` of a table that
+ * really was read and really was clean, which is the exact confusion every
+ * bucket in this file exists to prevent.
+ *
+ * Reverse verification, direction predicted BEFORE running it: delete the
+ * `fileUnscanned` call at the budget stop and every test in this block goes
+ * RED — the list empties while the run keeps returning `dangling: []`. Note
+ * which assertion does the work: a test that only checked `dangling` (or
+ * `scanned`) would stay GREEN under the old silent break, because nothing about
+ * the findings changes. The names ARE the behaviour under test.
+ */
+describe('[#5718] objects a finite budget never reached are named, not dropped', () => {
+  /** Every object below carries a reference field, so all three are scannable. */
+  const budgetPort = (objects: AuditableObject[]) => makePort({
+    objects,
+    rows: {
+      sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }],
+      showcase_task: [{ id: 't1', title: 'T', project: 'proj_real' }],
+      showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_alive' }],
+    },
+    existing: new Set([
+      'sys_permission_set ps_real', 'showcase_project proj_real', 'sys_user usr_alive',
+    ]),
+  });
+
+  it('the objects behind the stop are listed, in the order the run would have read them', async () => {
+    // Registration order is the worst case (provenance-only first, security
+    // surface last) so the list can only be right if it comes from the SCAN
+    // order — which is what makes it feedable straight back as `objects` on a
+    // second run.
+    const reads: string[] = [];
+    const port = budgetPort([note, task, binding]);
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
+
+    const out = await auditDanglingReferences(port, { maxRows: 1 });
+
+    expect(reads).toEqual(['sys_position_permission_set']);   // budget bought one table
+    expect(out.scanned).toBe(1);
+    // …and the report SAYS the other two were never opened, instead of leaving
+    // them inside an empty `dangling`.
+    expect(out.unscannedObjects).toEqual(['showcase_task', 'showcase_note']);
+    expect(out.dangling).toEqual([]);
+  });
+
+  it('a run that reached everything says so explicitly — `[]`, never absent', async () => {
+    // Same reason `aborted: false` is explicit: `undefined` must never be the
+    // consumer's only clue, because it cannot tell "complete" from "a report
+    // shape that predates the key".
+    const port = budgetPort([binding, task, note]);
+
+    const out = await auditDanglingReferences(port);
+
+    expect(out.unscannedObjects).toEqual([]);
+    expect('unscannedObjects' in out).toBe(true);
+  });
+
+  it('an object with NO reference field is not listed — its silence was already proven', async () => {
+    // Nothing referential can break on it, so `prioritise` drops it before the
+    // loop and the audit reads zero rows of it by design. Filing it as
+    // "unscanned" would report a table that has nothing to find as a gap.
+    const plain: AuditableObject = {
+      name: 'plain', fields: { id: { type: 'text' }, n: { type: 'number' } },
+    };
+    const port = budgetPort([binding, plain, task]);
+
+    const out = await auditDanglingReferences(port, { maxRows: 1 });
+
+    expect(out.unscannedObjects).toEqual(['showcase_task']);
+    expect(out.unscannedObjects).not.toContain('plain');
+  });
+
+  it('an object the CALLER excluded is not listed — that narrowing is not the audit missing it', async () => {
+    const port = budgetPort([binding, task, note]);
+
+    const out = await auditDanglingReferences(port, {
+      maxRows: 1,
+      objects: ['sys_position_permission_set', 'showcase_task'],
+    });
+
+    // `showcase_note` was never on this run's list, so it is not something the
+    // run failed to reach; `showcase_task` was, and the budget ate it.
+    expect(out.unscannedObjects).toEqual(['showcase_task']);
+  });
+
+  it('a zero budget reads nothing and names EVERYTHING — the whole report is "not looked at"', async () => {
+    const reads: string[] = [];
+    const port = budgetPort([binding, task, note]);
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
+
+    const out = await auditDanglingReferences(port, { maxRows: 0 });
+
+    expect(reads).toEqual([]);
+    expect(out.scanned).toBe(0);
+    expect(out.dangling).toEqual([]);   // …and this says NOTHING, which is the point
+    expect(out.unscannedObjects).toEqual([
+      'sys_position_permission_set', 'showcase_task', 'showcase_note',
+    ]);
+  });
+
+  it('a called-off run names what it never reached too, so empty keeps meaning "reached"', async () => {
+    // The bucket would be a liar otherwise: `unscannedObjects: []` next to
+    // `aborted: true` reads as "stopped early, but missed nothing". The object
+    // whose listing the teardown cut off is in the list as well — its rows were
+    // never examined either (#4747 keeps it out of `unreadableObjects`, which
+    // is a different fact: the datasource refused).
+    const signal = { aborted: false };
+    const port = makePort({
+      objects: [binding, task, note],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
+      unreadable: new Set(['showcase_task']),
+    });
+    const findSpy = port.find.bind(port);
+    port.find = async (o, opts) => {
+      if (o === 'showcase_task') signal.aborted = true;   // the pool closes mid-query
+      return findSpy(o, opts);
+    };
+
+    const out = await auditDanglingReferences(port, { signal });
+
+    expect(out.aborted).toBe(true);
+    expect(out.unreadableObjects).toEqual([]);
+    expect(out.unscannedObjects).toEqual(['showcase_task', 'showcase_note']);
+    // The finding made before the teardown is untouched by any of this.
+    expect(out.dangling).toHaveLength(1);
+  });
+
+  it('called off MID-object lists what is BEHIND it, not the object it was inside', async () => {
+    // The `i` vs `i + 1` distinction, pinned: this object was opened and partly
+    // examined — its findings so far are real and `aborted` is what says the
+    // rest of it is unreliable. Listing it as "never reached" would be a
+    // different lie from the one #5718 fixes.
+    const signal = { aborted: false };
+    const port = makePort({
+      objects: [binding, task, note],
+      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
+      // The probe blows up because the pool went away under it — the #4747
+      // race, which is what makes the answer "withdrawn" rather than a verdict.
+      throwingTargets: new Set(['sys_permission_set']),
+    });
+    const probeSpy = port.probe.bind(port);
+    port.probe = async (target, id) => { signal.aborted = true; return probeSpy(target, id); };
+
+    const out = await auditDanglingReferences(port, { signal });
+
+    expect(out.aborted).toBe(true);
+    expect(out.unscannedObjects).toEqual(['showcase_task', 'showcase_note']);
+    expect(out.unscannedObjects).not.toContain('sys_position_permission_set');
+  });
+
+  it('called off BEFORE the registry was enumerated: `aborted` carries it, the list is empty', async () => {
+    // The one boundary of "empty means reached", pinned rather than left to be
+    // discovered: this run never asked which objects exist, so it has no names
+    // to give. Completeness is read from `aborted === false` AND an empty list,
+    // exactly as `truncatedObjects` / `unreadableObjects` are already composed.
+    const port = budgetPort([binding, task, note]);
+
+    const out = await auditDanglingReferences(port, { signal: { aborted: true } });
+
+    expect(out.aborted).toBe(true);
+    expect(out.unscannedObjects).toEqual([]);
+  });
+
+  it('a truncated run and an unscanned run are DIFFERENT reports', async () => {
+    // The distinction this bucket exists for: `truncatedObjects` = "this table
+    // was sampled", `unscannedObjects` = "this table was not opened". Before
+    // #5718 the second case had no field of its own and borrowed nothing —
+    // it simply vanished.
+    const port = makePort({
+      objects: [task, note],
+      rows: {
+        showcase_task: [
+          { id: 't1', title: 'A', project: 'proj_real' },
+          { id: 't2', title: 'B', project: 'proj_real' },
+        ],
+        showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_alive' }],
+      },
+      existing: new Set(['showcase_project proj_real', 'sys_user usr_alive']),
+    });
+
+    // Budget of 2 rows: `showcase_task` is read to its budget (sampled), and
+    // `showcase_note` never comes up at all.
+    const out = await auditDanglingReferences(port, { maxRows: 2, rowsPerObject: 2 });
+
+    expect(out.truncatedObjects).toEqual(['showcase_task']);
+    expect(out.unscannedObjects).toEqual(['showcase_note']);
+  });
+
+  it('rides along in the warning payload, and does NOT raise the line on its own', async () => {
+    // Same judgement as `truncatedObjects` and as #4743's provenance bucket: a
+    // large database exhausts a finite budget on EVERY healthy run, so an alarm
+    // fired by this alone would be #4747's broken alarm — the reader would be
+    // trained straight past the run that had a real finding in it.
+    const quiet = budgetPort([binding, task, note]);
+    await auditDanglingReferences(quiet, { maxRows: 1 });
+    expect(quiet.warnings).toEqual([]);   // budget exhausted, nothing found, silence
+
+    const loud = makePort({
+      objects: [binding, task, note],
+      rows: {
+        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+        showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
+        showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }],
+      },
+    });
+    await auditDanglingReferences(loud, { maxRows: 1 });
+
+    const summary = loud.warnings.find((w) => w[0].includes('#4551'));
+    expect(summary).toBeDefined();
+    const meta = summary![1] as Record<string, unknown>;
+    // Itemised, not merely counted: object-scale, and a reader who has to act
+    // on it needs the names to re-run them.
+    expect(meta.unscannedObjects).toEqual(['showcase_task', 'showcase_note']);
   });
 });

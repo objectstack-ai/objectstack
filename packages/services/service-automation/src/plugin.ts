@@ -1304,6 +1304,12 @@ export class AutomationServicePlugin implements Plugin {
      * Measured on a 13-line interpolated ZodError dump: 1 line retained (the
      * head line, ending at Zod's `[`) and 12 dropped outright. That is cloud#971
      * in its original form, not merely a hard-to-parse record.
+     *
+     * #5660 — there is a THIRD record on this path, and it is the one that fires
+     * first and on the default branch: `registerDegradedConnector`'s own `warn`,
+     * inside the engine, on the `try` above SUCCEEDING. It carried the same
+     * interpolated `reason`; the fix lives in `engine.ts` and is why `info.cause`
+     * is now forwarded into that call as well.
      */
     private degradeConnectorInstance(
         engine: AutomationEngine,
@@ -1319,7 +1325,11 @@ export class AutomationServicePlugin implements Plugin {
              * provider's own message, kept verbatim for human readers.
              */
             reason: string;
-            /** The thrown value, for the log record's structured `meta` (#5636). */
+            /**
+             * The thrown value, for the structured `meta` of every record on
+             * this path — the two here (#5636) and the engine's own degrade
+             * registration `warn` (#5660), which this hands it to.
+             */
             cause: unknown;
         },
     ): void {
@@ -1329,10 +1339,17 @@ export class AutomationServicePlugin implements Plugin {
 
         if (!info.hasLive) {
             try {
+                // #5660 — `cause` is passed too, for the engine's OWN record.
+                // That `warn` fires on the success path of this call (every
+                // first degrade), before either record below, and it used to
+                // interpolate `reason` into its message; the engine now renders
+                // the thrown value as `meta`. `reason` still travels separately
+                // because it is what the husk STORES (`degradedReason`).
                 engine.registerDegradedConnector(
                     this.buildDegradedHuskDef(info.name, info.entry),
                     info.reason,
                     'declarative',
+                    info.cause,
                 );
             } catch (err) {
                 // Can't even register the husk (e.g. the entry's def no longer

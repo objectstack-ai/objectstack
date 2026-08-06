@@ -8,6 +8,7 @@ import {
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+  FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
 } from './validate-flow-trigger-readiness.js';
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
@@ -353,11 +354,17 @@ describe('validateFlowTriggerReadiness', () => {
     it('says nothing about a non-object timeRelative — the engine does not route it here', () => {
       // `AutomationEngine`'s trigger resolution requires `typeof … === 'object'`,
       // so `timeRelative: 'daily'` never reaches the time-relative trigger and no
-      // descriptor verdict applies to it. Whatever that flow's defect is, it is
-      // not this rule's, and guessing here would make the rule speak for flows
-      // the engine hands somewhere else.
+      // descriptor SHAPE verdict applies to it. Guessing here would make this rule
+      // speak for flows the engine hands somewhere else.
+      //
+      // #5647 answered the question this test used to leave open ("whatever that
+      // flow's defect is, it is not this rule's") — it is 1e's, a different id.
+      // So the assertion is now two-sided: the shape rule stays out, AND the
+      // unroutable rule steps in. One-sided, it would have kept passing even if
+      // the scalar had gone back to being reported by nobody at all.
       const findings = validateFlowTriggerReadiness(timeRelativeStack('daily'));
       expect(findings.some((f) => f.rule === FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID)).toBe(false);
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE]);
     });
 
     it('is inert on flows that declare no timeRelative at all', () => {
@@ -376,6 +383,229 @@ describe('validateFlowTriggerReadiness', () => {
         FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
         FLOW_DRAFT_STATUS_AMBIGUOUS,
       ]);
+    });
+
+    // ── #5647 — the descriptor is not an OBJECT ─────────────────────────────
+    //
+    // The complement of everything above, and the case with no runtime channel
+    // at all: `timeRelative: 'daily'` is not routed by the engine, so the
+    // trigger never safeParses it, so there is not even the one bind-time warn
+    // that the object-but-invalid case gets. Verified against `origin/main`
+    // before this rule existed: `validateFlowTriggerReadiness` and
+    // `lintFlowPatterns` both returned `[]`, `FlowSchema.safeParse` ACCEPTED the
+    // scalar (a node `config` is an open slot, ADR-0018), and `os validate` on a
+    // real example app printed byte-identical output with and without it.
+    describe('config.timeRelative is not an object (#5647)', () => {
+      /** A start node with nothing but the offending descriptor — the issue's flow. */
+      function scalarOnlyStack(timeRelative: unknown) {
+        const stack = timeRelativeStack(timeRelative);
+        // `autolaunched`, so `type: 'schedule'` is not silently supplying a
+        // trigger the engine would fall back to. This is the never-fires case.
+        (stack.flows[0] as Record<string, unknown>).type = 'autolaunched';
+        return stack;
+      }
+
+      it('flags the scalar from the issue, and names the value, the type and the consequence', () => {
+        const findings = validateFlowTriggerReadiness(scalarOnlyStack('daily'));
+        expect(findings).toHaveLength(1);
+        const [f] = findings;
+        expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
+        expect(f.severity).toBe('warning');
+        expect(f.path).toBe('flows[0].nodes[0].config.timeRelative');
+        expect(f.where).toBe('flow "task_due_reminder" › start node');
+        // The value the author wrote AND why it is not a descriptor.
+        expect(f.message).toContain('"daily"');
+        expect(f.message).toContain('(a string)');
+        expect(f.message).toContain('config.timeRelative');
+        // The consequence chain, which is the whole reason this is not a nit:
+        // never routed → sweep never installed → this flow never fires at all,
+        // and no layer says so.
+        expect(f.message).toMatch(/never routed/);
+        expect(f.message).toMatch(/sweep is never\s+installed/);
+        expect(f.message).toMatch(/binds to NOTHING and\s+never fires/);
+        expect(f.message).toMatch(/zero diagnostics at any layer/);
+        // Single-line, like every other finding this rule emits (the CLI prints
+        // `• where: message` on one line).
+        expect(f.message).not.toContain('\n');
+        expect(f.hint).not.toContain('\n');
+      });
+
+      it("names the cadence-vs-descriptor confusion the scalar actually is", () => {
+        // The reason `'daily'` is the specimen: the author has fused "how often
+        // the sweep runs" with "which records it sweeps". The hint has to
+        // separate them or it does not help — the cadence key is a SIBLING.
+        const [f] = validateFlowTriggerReadiness(scalarOnlyStack('daily'));
+        expect(f.hint).toContain('config.schedule');
+        expect(f.hint).toMatch(/sibling/);
+        expect(f.hint).toContain('dateField');
+        expect(f.hint).toMatch(/withinDays \| offsetDays/);
+        expect(f.hint).toContain('TimeRelativeTriggerSchema');
+      });
+
+      it('flags every non-object shape, each rendered as itself', () => {
+        const cases: Array<[unknown, string]> = [
+          ['daily', '"daily" (a string)'],
+          ['', '"" (a string)'],
+          [7, '7 (a number)'],
+          [0, '0 (a number)'],
+          [true, 'true (a boolean)'],
+          [false, 'false (a boolean)'],
+        ];
+        for (const [value, rendered] of cases) {
+          const findings = validateFlowTriggerReadiness(scalarOnlyStack(value));
+          expect(findings.map((f) => f.rule), rendered).toEqual([
+            FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+          ]);
+          expect(findings[0].message, rendered).toContain(rendered);
+        }
+      });
+
+      it('reports a function or symbol without claiming it is undefined', () => {
+        // `JSON.stringify` returns the VALUE `undefined` for both, so a naive
+        // renderer would print a message about a value being "undefined" when it
+        // is very much present. Only reachable from a TS-authored stack, but a
+        // diagnostic that misreports its own subject is worse than a vague one.
+        for (const [value, rendered] of [
+          [() => 'daily', 'a function'],
+          [Symbol('daily'), 'a symbol'],
+        ] as Array<[unknown, string]>) {
+          const findings = validateFlowTriggerReadiness(scalarOnlyStack(value));
+          expect(findings.map((f) => f.rule)).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE]);
+          expect(findings[0].message).toContain(rendered);
+          expect(findings[0].message).not.toContain('undefined');
+        }
+      });
+
+      it('says the flow still binds — not that it never fires — when a sibling trigger exists', () => {
+        // Truthfulness of the consequence clause. `resolveTriggerBinding` falls
+        // THROUGH the time-relative branch for a scalar and keeps going, so a
+        // start node that also declares a trigger the engine recognizes does bind
+        // and does fire — on that trigger's terms, with the descriptor silently
+        // dropped (once per firing, no record on the context). Claiming "never
+        // fires" about such a flow would be a false diagnostic.
+        const withSchedule = scalarOnlyStack('daily');
+        (
+          (withSchedule.flows[0] as Record<string, unknown>).nodes as Array<Record<string, unknown>>
+        )[0].config = { timeRelative: 'daily', schedule: { type: 'cron', expression: '0 8 * * *' } };
+        const [f] = validateFlowTriggerReadiness(withSchedule);
+        expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
+        expect(f.message).toContain('config.schedule');
+        expect(f.message).toMatch(/silently DROPPED/);
+        expect(f.message).not.toMatch(/never fires/);
+        // …and the certain half is still stated.
+        expect(f.message).toMatch(/never routed/);
+      });
+
+      it('names each fallback the engine would actually reach', () => {
+        const fallbackOf = (config: Record<string, unknown>, flowPatch: Record<string, unknown> = {}) => {
+          const stack = scalarOnlyStack('daily');
+          const flow = stack.flows[0] as Record<string, unknown>;
+          Object.assign(flow, flowPatch);
+          (flow.nodes as Array<Record<string, unknown>>)[0].config = {
+            timeRelative: 'daily',
+            ...config,
+          };
+          return validateFlowTriggerReadiness(stack).find(
+            (f) => f.rule === FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+          )!.message;
+        };
+        // Same order as `resolveTriggerBinding` checks them.
+        expect(fallbackOf({ triggerType: 'record-after-update', objectName: 'task' }))
+          .toContain('record-change trigger');
+        expect(fallbackOf({ triggerType: ['record-after-create'], objectName: 'task' }))
+          .toContain('record-change trigger');
+        expect(fallbackOf({ schedule: { type: 'cron', expression: '0 8 * * *' } }))
+          .toContain('config.schedule');
+        expect(fallbackOf({}, { type: 'schedule' })).toContain('config.schedule');
+        expect(fallbackOf({ triggerType: 'api' })).toContain('api trigger');
+        expect(fallbackOf({}, { type: 'api' })).toContain('api trigger');
+      });
+
+      it('partitions the key with the shape rule — never both, never neither', () => {
+        // The two ids split the non-null values of `config.timeRelative` along the
+        // ENGINE's routing predicate, so exactly one can speak about any given
+        // descriptor. This is the assertion that keeps 1e from becoming a second
+        // opinion on flows 1b-ii already covers (and vice versa).
+        const routed: unknown[] = [
+          { object: 'task', dateField: 'due_at', withinDays: 3 }, // valid  → neither
+          { object: 'task', field: 'due_at' }, // invalid object → INVALID
+          [{ object: 'task' }], // array is typeof 'object' → INVALID
+          new Date('2026-01-01T00:00:00Z'), // Date is typeof 'object' → INVALID
+        ];
+        const unrouted: unknown[] = ['daily', 7, true, ''];
+
+        for (const v of routed) {
+          const rules = validateFlowTriggerReadiness(scalarOnlyStack(v)).map((f) => f.rule);
+          expect(rules, `routed: ${String(v)}`).not.toContain(
+            FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+          );
+        }
+        for (const v of unrouted) {
+          const rules = validateFlowTriggerReadiness(scalarOnlyStack(v)).map((f) => f.rule);
+          expect(rules, `unrouted: ${String(v)}`).toContain(
+            FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+          );
+          expect(rules, `unrouted: ${String(v)}`).not.toContain(
+            FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+          );
+        }
+      });
+
+      it('is silent when the key is absent or null — those declare no descriptor at all', () => {
+        // `null` is on the far side of the engine's `!= null` too, so it is not
+        // "a descriptor of the wrong type" — it is no descriptor. A flow with no
+        // trigger at all is a different (pre-existing) gap, not this rule's.
+        for (const v of [null, undefined]) {
+          const stack = scalarOnlyStack(v);
+          expect(
+            validateFlowTriggerReadiness(stack).map((f) => f.rule),
+            `${String(v)} must not be treated as a descriptor`,
+          ).not.toContain(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
+        }
+        // The contrast, in the same test and on the same fixture builder. Without
+        // it this case is a bare negative: it would keep passing if the criterion
+        // were deleted outright and NOTHING were reported — green because nothing
+        // is produced rather than because the boundary is where it should be.
+        expect(validateFlowTriggerReadiness(scalarOnlyStack('')).map((f) => f.rule)).toContain(
+          FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+        );
+      });
+
+      it('leaves `isTimeRelative` — and the two rules it feeds — exactly as they were', () => {
+        // The boundary this PR promised not to cross. `isTimeRelative` also feeds
+        // `isAutoTriggered`, so widening it to cover scalars would have changed
+        // `flow-draft-status-ambiguous`'s coverage as a side effect. It is not
+        // widened, so a DRAFT flow whose only trigger key is a scalar still does
+        // not get the draft warning — deliberately unchanged behaviour, pinned
+        // here so a later edit to `isTimeRelative` has to come past this test.
+        const stack = scalarOnlyStack('daily');
+        delete (stack.flows[0] as Record<string, unknown>).status;
+        const rules = validateFlowTriggerReadiness(stack).map((f) => f.rule);
+        expect(rules).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE]);
+        expect(rules).not.toContain(FLOW_DRAFT_STATUS_AMBIGUOUS);
+
+        // The object-shaped control, to show the omission above is about the
+        // scalar and not about the draft rule having stopped working.
+        const objectStack = timeRelativeStack({ object: 'task', dateField: 'due_at', withinDays: 3 });
+        delete (objectStack.flows[0] as Record<string, unknown>).status;
+        expect(validateFlowTriggerReadiness(objectStack).map((f) => f.rule)).toEqual([
+          FLOW_DRAFT_STATUS_AMBIGUOUS,
+        ]);
+      });
+
+      it('is reachable from the published barrel under its own value', () => {
+        // The id lands in every finding's `f.rule` and therefore in
+        // `os lint --json` and `suppressWarnings: ['<id>']`, so a consumer needs
+        // the constant rather than the literal (#5648). The package-wide gate in
+        // `rule-id-barrel-exports.test.ts` proves this for every id; this line is
+        // the local statement of the same fact.
+        expect(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE).toBe(
+          'flow-time-relative-descriptor-unroutable',
+        );
+        expect(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE).not.toBe(
+          FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+        );
+      });
     });
   });
 

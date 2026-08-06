@@ -120,6 +120,30 @@ import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
  * {@link DanglingReferenceReport.provenanceUndetermined}, on its own side of
  * the same line.
  *
+ * ## …and NEVER-REACHED is the last incompleteness (#5718)
+ *
+ * `truncatedObjects` says the budget ran out INSIDE a table. The overall budget
+ * ({@link DanglingReferenceAuditOptions.maxRows}) also runs out BETWEEN tables:
+ * the object loop simply stops, and before #5718 every object behind that stop
+ * left no trace in the report at all. `dangling: []` covered them exactly as it
+ * covered the tables that WERE read and found clean — which is precisely the
+ * reading this whole file is written to prevent.
+ * {@link DanglingReferenceReport.unscannedObjects} names them, so the report
+ * keeps saying "not looked at" wherever it cannot say "looked at and clean".
+ *
+ * #4743 did not cause this, it made it easy to reach: admitting the provenance
+ * family means nearly every object now has an auditable field, so a bounded run
+ * spreads the same budget over far more tables and hits the stop sooner. Note
+ * that `prioritise` and this bucket answer different questions — the tiers
+ * decide WHO gets a finite budget, the bucket reports who did not get any. A
+ * scan order cannot make a bounded run complete; only saying what it missed
+ * can make it honest.
+ *
+ * Like `truncatedObjects`, it does **not** raise the summary warning by itself.
+ * A large database exhausts the default 5 000-row budget on every healthy run,
+ * and an alarm that always fires is #4747's broken alarm again. It rides along
+ * in the warning payload and is always present in the returned report.
+ *
  * ## Scope — the same judgments #4441 already made, not new ones
  *
  * - **Which fields are references** is `referenceTargetOf` — the single
@@ -210,6 +234,45 @@ export interface DanglingReferenceReport {
    * disguised as a fact about the audited data.
    */
   provenanceUndetermined?: number;
+  /**
+   * [#5718] Objects this run never reached — the overall row budget
+   * ({@link DanglingReferenceAuditOptions.maxRows}) was gone before their turn,
+   * or the run was called off first. **Not one of their rows was read**, so the
+   * report holds no verdict about them whatsoever.
+   *
+   * The sibling of `truncatedObjects`, one level up: that one says "this table
+   * was sampled", this one says "this table was not opened". The two together
+   * are what keeps `dangling: []` from ever meaning more than "clean among what
+   * was read" — the difference between them is only whether the budget ran out
+   * inside a table or before it.
+   *
+   * Names are in **scan order** (the `prioritise` tiers), so a caller that
+   * wants the rest of the picture can feed them straight back as
+   * {@link DanglingReferenceAuditOptions.objects} on a second run.
+   *
+   * Two things are deliberately NOT in here, because neither is something this
+   * run failed to look at:
+   *
+   * - **Objects with no reference field at all.** Nothing referential can
+   *   break on them, so their absence from `dangling` is proven rather than
+   *   assumed — `prioritise` drops them before the loop ever sees them.
+   * - **Objects the caller excluded** via
+   *   {@link DanglingReferenceAuditOptions.objects}. Those were never asked
+   *   for; filing them would report the caller's own narrowing back to it as
+   *   an incompleteness of the audit.
+   *
+   * Empty means every object this run had queued was reached — with one
+   * boundary that {@link DanglingReferenceReport.aborted} covers instead: a run
+   * called off before it enumerated the registry has no list to give, so a
+   * consumer reads completeness from `aborted === false` AND this being empty,
+   * the same way it already composes `truncatedObjects` and `unreadableObjects`.
+   *
+   * Optional in the type only, like {@link DanglingReferenceReport.aborted} and
+   * for the same reason (a hand-written report literal predates the key); every
+   * report this module produces sets it explicitly — `[]` on a run that reached
+   * everything, never absent, so `undefined` cannot be misread as "complete".
+   */
+  unscannedObjects?: string[];
 }
 
 /** Minimal object shape the audit reads — duck-typed so tests need no registry. */
@@ -379,9 +442,11 @@ export async function auditDanglingReferences(
   // predate them); every report this function produces sets them, so the local
   // view of it requires them and no call site below has to guard.
   const report: DanglingReferenceReport &
-    Required<Pick<DanglingReferenceReport, 'provenance' | 'provenanceUndetermined'>> = {
+    Required<Pick<DanglingReferenceReport,
+      'provenance' | 'provenanceUndetermined' | 'unscannedObjects'>> = {
     scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [],
     provenance: [], provenanceUndetermined: 0,
+    unscannedObjects: [],
     aborted: false,
   };
 
@@ -440,11 +505,34 @@ export async function auditDanglingReferences(
     return answer;
   };
 
-  objects: for (const { obj, refFields } of prioritise(all)) {
-    if (report.scanned >= maxRows) break;
+  // Materialised rather than iterated inline (#5718): once the loop stops early
+  // the report has to name what is BEHIND the stop, which needs the queue and
+  // the position in it, not just the current element.
+  const targets = prioritise(all);
+  /**
+   * [#5718] File every object from `from` onward as never-reached. Applies the
+   * caller's `only` narrowing for the same reason the loop does: an object the
+   * caller excluded was not missed by this run, it was never on its list.
+   */
+  const fileUnscanned = (from: number): void => {
+    for (let i = from; i < targets.length; i++) {
+      const n = targets[i]?.obj?.name;
+      if (!n || (only && !only.has(n))) continue;
+      report.unscannedObjects.push(n);
+    }
+  };
+
+  objects: for (let i = 0; i < targets.length; i++) {
+    const { obj, refFields } = targets[i]!;
+    // Budget gone BETWEEN objects. This one and everything behind it is never
+    // opened, and `dangling: []` about a table nobody read is not a verdict —
+    // so the run names them instead of stopping in silence (#5718).
+    if (report.scanned >= maxRows) { fileUnscanned(i); break; }
     // Called off before this object was read: it was never attempted, so it is
     // not a finding about the object — the run reports that it stopped instead.
-    if (calledOff()) { report.aborted = true; break; }
+    // The objects behind the stop are just as unread as a budget stop leaves
+    // them, so they are filed the same way; `aborted` records WHY it stopped.
+    if (calledOff()) { report.aborted = true; fileUnscanned(i); break; }
     const name = obj?.name;
     if (!name || (only && !only.has(name))) continue;
 
@@ -460,8 +548,9 @@ export async function auditDanglingReferences(
       // A read that failed because the run was called off underneath it is not
       // evidence about the datasource — the pool was closed on purpose. Filing
       // it would put a non-finding in the one bucket that must only ever hold
-      // findings (#4747).
-      if (calledOff()) { report.aborted = true; break; }
+      // findings (#4747). Its rows were never examined either, so THIS object
+      // is filed as unreached too — `from = i`, not `i + 1` (#5718).
+      if (calledOff()) { report.aborted = true; fileUnscanned(i); break; }
       // Unreadable ⇒ unknown. Recorded so the report cannot be mistaken for a
       // clean bill of health on an object nothing could look at.
       report.unreadableObjects.push(name);
@@ -483,7 +572,13 @@ export async function auditDanglingReferences(
           // An expanded record in the slot is a read shape, not an id write.
           if (typeof v === 'object') continue;
           const answer = await exists(target, v);
-          if (answer === 'called-off') { report.aborted = true; break objects; }
+          // Called off mid-object: this one WAS opened and partly examined, so
+          // it is not unreached — only the objects behind it are (#5718).
+          if (answer === 'called-off') {
+            report.aborted = true;
+            fileUnscanned(i + 1);
+            break objects;
+          }
           // [#4743] Both verdicts are routed by the field's class, not merged:
           // a provenance answer never lands in a bucket a business reference
           // shares, in EITHER direction (absent or unknown).
@@ -518,6 +613,12 @@ export async function auditDanglingReferences(
       undetermined: report.undetermined,
       unreadableObjects: report.unreadableObjects,
       truncatedObjects: report.truncatedObjects,
+      // [#5718] Itemised like `truncatedObjects` and for the same reason: this
+      // is object-scale, not row-scale, and a reader who has to act on it needs
+      // the names to re-run them. It does not appear in the condition above —
+      // a bounded run on a large database exhausts its budget every time, and
+      // an alarm that always fires is #4747's broken alarm.
+      unscannedObjects: report.unscannedObjects,
       // Carried into the log line too: findings from a run that stopped early
       // are real, but its silence about everything else is not a verdict.
       aborted: report.aborted,

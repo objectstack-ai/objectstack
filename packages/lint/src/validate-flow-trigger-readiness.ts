@@ -31,6 +31,17 @@
 //      all in `os validate`. The judgement is not re-implemented here: the rule
 //      runs that schema and forwards its issue list verbatim.
 //
+//   4. A `config.timeRelative` that is not an OBJECT at all — `timeRelative:
+//      'daily'` (#5647). One step worse than 3, and it needs its own criterion
+//      because it falls on the far side of the engine's routing predicate: the
+//      engine hands a flow to the time-relative trigger only when
+//      `typeof config.timeRelative === 'object'`, so a scalar is never routed,
+//      the trigger never safeParses it, and rule 3 — which deliberately speaks
+//      only for routed flows — cannot see it either. Nothing anywhere says a
+//      word: not the schema (the node `config` slot is open by design,
+//      ADR-0018, so the scalar parses fine), not `os validate`, and not even
+//      the one bind-time warn rule 3's case gets.
+//
 // The spec import is deliberate and is what makes rule 3 possible without a
 // second copy of the descriptor's shape living in this file. It stays inside the
 // package's stated dependency direction — lint → `@objectstack/spec`, never onto
@@ -65,6 +76,23 @@ export const FLOW_TRIGGER_UNKNOWN_EVENT = 'flow-trigger-unknown-event';
  * authoring time. `flow-<descriptor>-<verdict>` is the shape the next one takes.
  */
 export const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID = 'flow-time-relative-descriptor-invalid';
+/**
+ * #5647 — `config.timeRelative` is present but is not an object, so the engine
+ * never routes the flow to the time-relative trigger at all.
+ *
+ * The second id in the `flow-<descriptor>-<verdict>` family, and a DIFFERENT
+ * verdict from `…-INVALID` rather than a widening of it. The two partition the
+ * non-null values of one key along the engine's own routing predicate, so
+ * exactly one of them can ever fire on a given descriptor:
+ *
+ *   - `typeof === 'object'` (including arrays and `Date`) — the engine ROUTES
+ *     it, `TimeRelativeTriggerSchema` gets a verdict, and a bad shape is
+ *     `…-INVALID`. That path has a bind-time warn; the rule moves it earlier.
+ *   - anything else (`'daily'`, `7`, `true`, a function) — the engine routes it
+ *     NOWHERE, so no schema and no trigger ever sees it. That is this id, and
+ *     there is no runtime channel at all for it to be moved earlier from.
+ */
+export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-descriptor-unroutable';
 
 type AnyRec = Record<string, unknown>;
 
@@ -89,6 +117,24 @@ function asArray(v: unknown): AnyRec[] {
     }));
   }
   return [];
+}
+
+/**
+ * Render a non-object `config.timeRelative` for the 1e message: the value AND
+ * its type, because both halves of the mistake are informative — `'daily'` shows
+ * what the author meant, `string` shows why it is not a descriptor.
+ *
+ * `JSON.stringify` is not enough on its own: it returns `undefined` (the value,
+ * not the string) for a function or a symbol, which would interpolate the word
+ * "undefined" into a message about a value that is very much present. Those
+ * arrive only from a TS-authored stack, never from stored JSON, but a diagnostic
+ * that misreports its own subject is worse than a vague one.
+ */
+function renderNonObject(v: unknown): string {
+  const t = typeof v;
+  if (t === 'string' || t === 'number' || t === 'boolean') return `${JSON.stringify(v)} (a ${t})`;
+  if (t === 'bigint') return `${String(v)}n (a bigint)`;
+  return `a ${t}`;
 }
 
 /** The start node of a flow definition, if any. */
@@ -175,7 +221,12 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     predicate, character for character (`AutomationEngine`'s trigger
     //     resolution: `config.timeRelative != null && typeof … === 'object'`).
     //     This rule therefore speaks for exactly the flows the engine hands to
-    //     the time-relative trigger, and stays silent about the ones it does not.
+    //     the time-relative trigger, and stays silent about the ones it does not
+    //     — which is why the flows on the OTHER side of that predicate need
+    //     their own criterion, in 1e below (#5647). Widening this guard was the
+    //     alternative and was rejected: `isTimeRelative` also feeds
+    //     `isAutoTriggered`, so it would have moved two already-published rules'
+    //     coverage as a side effect of adding a third.
     if (isTimeRelative && start) {
       const tr = config.timeRelative as AnyRec;
 
@@ -276,6 +327,79 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         hint:
           `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events, #3427). ` +
           `For any other combination, author one flow per event — multi-event arrays are deferred (#3457).`,
+      });
+    }
+
+    // 1e. `config.timeRelative` present but NOT an object (#5647) — the exact
+    //     complement of 1b's guard, and the reason it has to be a separate
+    //     criterion instead of a wider 1b.
+    //
+    //     `timeRelative: 'daily'` is the specimen: an author who has the cadence
+    //     concept and the descriptor concept fused writes the cadence into the
+    //     descriptor slot. Every layer then says nothing at all:
+    //
+    //       - the schema parses it. A node's `config` is an OPEN slot (ADR-0018),
+    //         so `FlowSchema.safeParse` / `defineFlow` accept the scalar happily;
+    //         no outer gate looks inside.
+    //       - the engine does not route it. Its predicate is
+    //         `timeRelative != null && typeof … === 'object'`, so the flow falls
+    //         THROUGH the time-relative branch — the sweep is never installed and
+    //         `TimeRelativeTriggerSchema` is never asked, which is also why 1b-ii
+    //         cannot reach this case.
+    //       - so there is no bind-time warn either. An object-but-unparseable
+    //         descriptor at least produces one line in a server log (that is what
+    //         1b-ii moves earlier). A scalar produces zero output at every layer
+    //         — the same "folds to no trigger, invisible everywhere" shape #3481
+    //         found for a non-string `triggerType`, one key over, and 1d exists
+    //         for that one on the same reasoning.
+    //
+    //     Arrays and `Date` are deliberately NOT here: `typeof` says 'object' for
+    //     both, so the engine DOES route them and 1b-ii already reports them off
+    //     the schema's own verdict. The two criteria partition the key's non-null
+    //     values, so they can never both speak about one descriptor.
+    if (start && config.timeRelative != null && typeof config.timeRelative !== 'object') {
+      // What the engine would fall through TO. A scalar `timeRelative` alone
+      // resolves to no binding at all (`resolveTriggerBinding` returns undefined
+      // and `activateFlowTrigger` returns silently) — the issue's case, and the
+      // worse one. But if the same start node also declares a trigger the engine
+      // recognizes, the flow does bind: it fires on THAT trigger's terms while
+      // the descriptor is silently dropped. Both are defects and both are this
+      // rule's, so the consequence clause is reported per flow rather than
+      // asserted uniformly — a message that claimed "never fires" about a flow
+      // whose sibling `schedule` fires it daily would be false, and a false
+      // diagnostic is worth less than none.
+      const fallback =
+        isRecordTriggered || isArrayRecordTriggered
+          ? 'its record-change trigger'
+          : config.schedule != null || flow.type === 'schedule'
+            ? 'its plain `config.schedule` cadence'
+            : triggerType === 'api' || flow.type === 'api'
+              ? 'its api trigger'
+              : undefined;
+      const consequence = fallback
+        ? `The flow still binds through ${fallback}, so the descriptor is silently DROPPED — it fires on ` +
+          `that trigger's terms (once per firing, with no record on the context) instead of once per ` +
+          `matching record, and nothing anywhere reports the difference.`
+        : `Nothing else on this start node declares a trigger either, so the flow binds to NOTHING and ` +
+          `never fires — with zero diagnostics at any layer, not even the one bind-time warn a ` +
+          `descriptor that IS an object gets when the trigger refuses it.`;
+      findings.push({
+        severity: 'warning',
+        rule: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+        where: `flow "${flowName}" › start node`,
+        path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,
+        message:
+          `has config.timeRelative = ${renderNonObject(config.timeRelative)}, which is not the descriptor ` +
+          `OBJECT this slot takes — the engine routes a flow to the time-relative sweep only when ` +
+          `config.timeRelative is an object, so this one is never routed there and the sweep is never ` +
+          `installed. ${consequence}`,
+        hint:
+          `config.timeRelative describes WHICH records to sweep — an object: ` +
+          `{ object, dateField, and exactly one of withinDays | offsetDays } (plus optional filter / ` +
+          `maxRecords). A cadence like 'daily' is not a descriptor: HOW OFTEN the sweep runs is the ` +
+          `sibling key config.schedule on the same start node (it defaults to daily, so it is usually ` +
+          `omitted). See TimeRelativeTriggerSchema and ` +
+          `content/docs/references/automation/time-relative-trigger.mdx.`,
       });
     }
 

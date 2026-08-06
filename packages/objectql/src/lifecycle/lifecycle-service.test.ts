@@ -361,23 +361,35 @@ describe('LifecycleService.sweep — reap guard', () => {
     expect(report.errors).toEqual([{ object: 'sys_file', error: 'storage unreachable' }]);
   });
 
-  it('a guard on one object never changes the blind reap of others (regression pin)', async () => {
-    const { engine, deletes } = captureEngine(
+  it('a guard on one object is never consulted for the reap of others (regression pin)', async () => {
+    // [#5194] This pin used to read "sys_job_run: classic blind reap" and
+    // assert the unbounded `multi: true` DELETE — the exact limb #5194 removed,
+    // so keeping the assertion would have kept it passing on an empty result.
+    // The property it exists for is untouched and now sharper: an UNGUARDED
+    // object runs the same batched machinery with an empty guard list, so
+    // "can another object's guard reach this reap?" is a live question rather
+    // than a moot one. It must not, and it is never even consulted.
+    const guard = vi.fn(async () => []);
+    const { engine, deletes, finds } = captureEngine(
       [
         ...guarded,
         { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
       ],
-      { findImpl: () => [] },
+      { findImpl: (object) => (object === 'sys_job_run' ? [{ id: 'j1' }] : []) },
     );
     const svc = service(engine);
-    svc.registerReapGuard('sys_file', async () => []);
+    svc.registerReapGuard('sys_file', guard);
 
     const report = await svc.sweep();
 
-    // sys_file: no candidates → no delete. sys_job_run: classic blind reap.
-    expect(deletes).toHaveLength(1);
-    expect(deletes[0].object).toBe('sys_job_run');
-    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('30d') } });
+    // sys_file: no candidates → nothing to confirm, nothing deleted.
+    expect(guard).not.toHaveBeenCalled();
+    // sys_job_run: read on its own cutoff, deleted by id, guard-free.
+    expect(finds.map((f) => f.object)).toEqual(['sys_file', 'sys_job_run']);
+    expect(finds[1].where).toEqual({ created_at: { $lt: isoCutoff('30d') } });
+    expect(deletes).toEqual([
+      { object: 'sys_job_run', where: { id: 'j1' }, multi: true, context: { isSystem: true, positions: [], permissions: [] } },
+    ]);
     expect(report.errors).toEqual([]);
   });
 
@@ -625,6 +637,141 @@ describe('LifecycleService.sweep — reap guard composition', () => {
   });
 });
 
+describe('LifecycleService.sweep — unguarded reap batching (#5194)', () => {
+  /** An ordinary lifecycle object: retention declared, NO reap guard. */
+  const plain: LifecycleObjectLike[] = [
+    { name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } },
+  ];
+
+  /**
+   * An engine whose rows really disappear, so "what one sweep did" and "what
+   * the next sweep still finds" are both observable. Deletion is by id through
+   * a Map (O(1)) — the ceiling case drives 10k deletes and an array scan per
+   * delete would make this test quadratic.
+   */
+  function storeEngine(objects: LifecycleObjectLike[], rowCount: number) {
+    const store = new Map<string, Record<string, unknown>>();
+    for (let i = 0; i < rowCount; i++) store.set(`r${i}`, { id: `r${i}`, created_at: '2020-01-01T00:00:00Z' });
+    const captured = captureEngine(objects, {
+      findImpl: (_object, options) => {
+        const limit = (options?.limit as number) ?? store.size;
+        const page: Array<Record<string, unknown>> = [];
+        for (const row of store.values()) {
+          if (page.length >= limit) break;
+          page.push(row);
+        }
+        return page;
+      },
+      deleteImpl: (_object, options) => {
+        const id = options?.where?.id as string | undefined;
+        const existed = id !== undefined && store.delete(id);
+        return { deletedCount: existed ? 1 : 0 };
+      },
+    });
+    return { ...captured, store };
+  }
+
+  it('bounds the FIRST sweep over a large backlog, and drains the rest on later sweeps', async () => {
+    // The #5194 scenario: retention declared on a table that already holds
+    // history. Before this change that first sweep was ONE unbounded DELETE
+    // over every historical row — a long write transaction (SQLite locks the
+    // whole database for it). It is now 20 pages of 500, by id, and the
+    // remainder waits for the next sweep.
+    const CEILING = 500 * 20;
+    const { engine, deletes, finds, store } = storeEngine(plain, CEILING + 7);
+    const svc = service(engine);
+
+    const first = await svc.sweep();
+
+    expect(finds).toHaveLength(20);                       // exactly the per-sweep page budget
+    expect(finds.every((f) => f.limit === 500)).toBe(true);
+    expect(deletes).toHaveLength(CEILING);                // …and not one row more
+    expect(first.swept[0].deleted).toBe(CEILING);         // the report says what really happened
+    expect(store.size).toBe(7);                           // backlog left standing, not lost
+
+    // Every delete named ONE row by scalar id — never a predicate, so each is a
+    // short transaction and each gets the by-id cascade path.
+    expect(deletes.every((d) => typeof d.where?.id === 'string')).toBe(true);
+    expect(deletes.every((d) => Object.keys(d.where).length === 1)).toBe(true);
+
+    const second = await svc.sweep();
+
+    expect(second.swept[0].deleted).toBe(7);              // the remainder drains next sweep
+    expect(store.size).toBe(0);
+    expect(finds).toHaveLength(21);                       // 20 + one short page, which ends the pass
+  });
+
+  it('leaves the steady state alone: a small increment is one page and one report line', async () => {
+    const { engine, deletes, finds, store } = storeEngine(plain, 3);
+
+    const report = await service(engine).sweep();
+
+    expect(finds).toHaveLength(1);                        // short page ⇒ no second read
+    expect(finds[0].where).toEqual({ created_at: { $lt: isoCutoff('30d') } });
+    expect(finds[0].context).toEqual({ isSystem: true, positions: [], permissions: [] });
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'r0' }, { id: 'r1' }, { id: 'r2' }]);
+    expect(store.size).toBe(0);
+    expect(report.swept).toEqual([
+      { object: 'sys_job_run', class: 'telemetry', policy: 'retention', cutoff: isoCutoff('30d'), deleted: 3 },
+    ]);
+    expect(report.errors).toEqual([]);
+  });
+
+  it('still honours retention.onlyWhen — the predicate moves to the candidate READ', async () => {
+    const onlyWhen: LifecycleObjectLike[] = [
+      {
+        name: 'sys_automation_run',
+        lifecycle: {
+          class: 'telemetry',
+          retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } },
+        } as unknown as LifecycleObjectLike['lifecycle'],
+      },
+    ];
+    const { engine, finds, deletes } = storeEngine(onlyWhen, 2);
+
+    await service(engine).sweep();
+
+    // The scope narrows which rows are CANDIDATES; it is not silently dropped
+    // now that the delete addresses rows by id.
+    expect(finds[0].where).toEqual({
+      created_at: { $lt: isoCutoff('30d') },
+      status: { $in: ['completed', 'failed'] },
+    });
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'r0' }, { id: 'r1' }]);
+  });
+
+  it('an engine that cannot read rows keeps the single bulk DELETE — retention never just stops', async () => {
+    // `find` is optional on LifecycleEngineLike. Batching needs it; enforcement
+    // does not. An engine without it degrades to the pre-#5194 unbounded delete
+    // rather than losing the policy — the fail-safe for guards (skip) would be
+    // the wrong trade here, because no guard is waiting to confirm anything.
+    const { engine, deletes } = captureEngine(plain); // no findImpl → no engine.find
+
+    const report = await service(engine).sweep();
+
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].multi).toBe(true);
+    expect(deletes[0].where).toEqual({ created_at: { $lt: isoCutoff('30d') } });
+    expect(report.skipped).toEqual([]);
+    expect(report.swept[0].deleted).toBe(3); // whatever the driver reported
+  });
+
+  it('never turns an id-less row into a predicate delete', async () => {
+    // `where: { id: undefined }` + `multi: true` is NOT a by-id delete: the
+    // engine finds no scalar id, routes to deleteMany, and runs the batch's
+    // whole cutoff predicate. With zero guards nothing else narrows the page,
+    // so this is the one place that invariant can be enforced.
+    const { engine, deletes } = captureEngine(plain, {
+      findImpl: () => [{ id: 'r0' }, { id: null }, { created_at: '2020-01-01T00:00:00Z' }],
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'r0' }]);
+    expect(report.swept[0].deleted).toBe(1);
+  });
+});
+
 describe('LifecycleService.sweep — Archiver (P3)', () => {
   const AUDIT_OBJ: LifecycleObjectLike = {
     name: 'sys_audit_log',
@@ -816,9 +963,15 @@ describe('LifecycleService.sweep — governance (P4)', () => {
   });
 
   it('tenant-scoped overrides sweep each tenant on its own window and everyone else globally', async () => {
-    const { engine, deletes } = captureEngine([TELEMETRY_OBJ]);
-    (engine as any).find = async (object: string) =>
-      object === 'sys_organization' ? [{ id: 'org_reg' }, { id: 'org_plain' }] : [];
+    // [#5194] One candidate row per pass, so each pass is observable both in
+    // the predicate it reads with and in the by-id delete it then issues.
+    const { engine, deletes, finds } = captureEngine([TELEMETRY_OBJ], {
+      findImpl: (object, options) => {
+        if (object === 'sys_organization') return [{ id: 'org_reg' }, { id: 'org_plain' }];
+        const org = (options?.where as Record<string, unknown> | undefined)?.organization_id;
+        return [{ id: org === 'org_reg' ? 'tenant_row' : 'global_row' }];
+      },
+    });
     const settings = fakeSettings(
       {},
       { org_reg: { retention_overrides: { sys_job_run: { maxAge: '2y' } } } },
@@ -826,31 +979,42 @@ describe('LifecycleService.sweep — governance (P4)', () => {
 
     await service(engine, { getSettings: () => settings }).sweep();
 
-    // One tenant-scoped delete on the regulated tenant's 2y window…
-    expect(deletes[0].where).toEqual({
+    // The per-pass predicate is carried by the candidate READ now — the passes
+    // themselves, and their windows, are unchanged.
+    const reaps = finds.filter((f) => f.object === 'sys_job_run');
+    // One tenant-scoped pass on the regulated tenant's 2y window…
+    expect(reaps[0].where).toEqual({
       created_at: { $lt: isoCutoff('2y') },
       organization_id: 'org_reg',
     });
     // …then the global 30d pass excluding it but INCLUDING NULL-org rows.
-    expect(deletes[1].where).toEqual({
+    expect(reaps[1].where).toEqual({
       created_at: { $lt: isoCutoff('30d') },
       $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
     });
-    expect(deletes).toHaveLength(2);
+    expect(reaps).toHaveLength(2);
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'tenant_row' }, { id: 'global_row' }]);
   });
 
   it('retention.onlyWhen survives tenant-scoped overrides on every pass', async () => {
-    const { engine, deletes } = captureEngine([
+    const { engine, deletes, finds } = captureEngine(
+      [
+        {
+          name: 'sys_automation_run',
+          lifecycle: {
+            class: 'telemetry',
+            retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } },
+          } as any,
+        },
+      ],
       {
-        name: 'sys_automation_run',
-        lifecycle: {
-          class: 'telemetry',
-          retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } },
-        } as any,
+        findImpl: (object, options) => {
+          if (object === 'sys_organization') return [{ id: 'org_reg' }];
+          const org = (options?.where as Record<string, unknown> | undefined)?.organization_id;
+          return [{ id: org === 'org_reg' ? 'tenant_row' : 'global_row' }];
+        },
       },
-    ]);
-    (engine as any).find = async (object: string) =>
-      object === 'sys_organization' ? [{ id: 'org_reg' }] : [];
+    );
     const settings = fakeSettings(
       {},
       { org_reg: { retention_overrides: { sys_automation_run: { maxAge: '2y' } } } },
@@ -858,18 +1022,23 @@ describe('LifecycleService.sweep — governance (P4)', () => {
 
     await service(engine, { getSettings: () => settings }).sweep();
 
+    // [#5194] `onlyWhen` narrows which rows are CANDIDATES; it rides the read
+    // that selects them, on every pass, and is not dropped now that the delete
+    // addresses rows by id.
     const predicate = { status: { $in: ['completed', 'failed'] } };
-    expect(deletes[0].where).toEqual({
+    const reaps = finds.filter((f) => f.object === 'sys_automation_run');
+    expect(reaps[0].where).toEqual({
       created_at: { $lt: isoCutoff('2y') },
       organization_id: 'org_reg',
       ...predicate,
     });
-    expect(deletes[1].where).toEqual({
+    expect(reaps[1].where).toEqual({
       created_at: { $lt: isoCutoff('30d') },
       $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
       ...predicate,
     });
-    expect(deletes).toHaveLength(2);
+    expect(reaps).toHaveLength(2);
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'tenant_row' }, { id: 'global_row' }]);
   });
 
   it('raises quota and growth alerts (observe-only — no extra deletes)', async () => {
@@ -1035,9 +1204,9 @@ describe('LifecycleService — retention floors (#5195)', () => {
   });
 
   it('floors a TENANT-scoped override too — the same door one scope down', async () => {
-    const { engine, deletes } = captureEngine([QUEUE_LIKE]);
-    (engine as any).find = async (object: string) =>
-      object === 'sys_organization' ? [{ id: 'org_fast' }] : [];
+    const { engine, finds } = captureEngine([QUEUE_LIKE], {
+      findImpl: (object) => (object === 'sys_organization' ? [{ id: 'org_fast' }] : []),
+    });
     const settings = fakeSettings(
       {},
       { org_fast: { retention_overrides: { app_work_queue: { maxAge: '1h' } } } },
@@ -1049,7 +1218,9 @@ describe('LifecycleService — retention floors (#5195)', () => {
 
     // The tenant pass falls back to the window that DID pass the floor (7d),
     // so no tenant can shorten its way past another package's contract.
-    expect(deletes[0].where).toEqual({
+    // [#5194] The floored window is observable on the candidate read.
+    const reaps = finds.filter((f) => f.object === 'app_work_queue');
+    expect(reaps[0].where).toEqual({
       created_at: { $lt: isoCutoff('7d') },
       organization_id: 'org_fast',
       status: 'done',
@@ -1395,6 +1566,50 @@ describe('LifecycleService teardown (#4747)', () => {
 
     expect(signalDuringAudit!.aborted).toBe(true);
     expect(report.danglingReferences?.aborted).toBe(true);
+  });
+
+  it('stop() mid-reap ends the paging loop instead of running out the page budget', async () => {
+    // [#5194] `sweep()` checks the abort bit between OBJECTS. That used to be
+    // the whole story for an unguarded reap, which was a single `await` between
+    // two such checks; it is now up to 20 pages of reads and deletes, so the
+    // loop has to check too — otherwise teardown keeps pushing writes at a
+    // datasource the host is closing, which is the #4747 defect itself.
+    const store = new Map<string, Record<string, unknown>>();
+    for (let i = 0; i < 5000; i++) store.set(`r${i}`, { id: `r${i}`, created_at: '2020-01-01T00:00:00Z' });
+    const { engine, deletes } = captureEngine(
+      [{ name: 'sys_job_run', lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } }],
+      {
+        findImpl: (_object, options) => {
+          const limit = (options?.limit as number) ?? store.size;
+          const page: Array<Record<string, unknown>> = [];
+          for (const row of store.values()) {
+            if (page.length >= limit) break;
+            page.push(row);
+          }
+          return page;
+        },
+        deleteImpl: (_object, options) => {
+          const id = options?.where?.id as string | undefined;
+          if (id !== undefined) store.delete(id);
+          return { deletedCount: 1 };
+        },
+      },
+    );
+    const svc = service(engine);
+    // Teardown lands while the first page is being deleted.
+    const original = engine.delete.bind(engine);
+    engine.delete = async (object: string, options: unknown) => {
+      svc.stop();
+      return original(object, options);
+    };
+
+    await svc.sweep();
+
+    // The page in flight finishes (it is already confirmed work), and the loop
+    // stops there rather than reading and deleting 19 more pages.
+    expect(deletes).toHaveLength(500);
+    expect(store.size).toBe(4500);
+    expect(svc.stopped).toBe(true);
   });
 
   it('stop() then start() re-arms the service — teardown is not one-way', async () => {
