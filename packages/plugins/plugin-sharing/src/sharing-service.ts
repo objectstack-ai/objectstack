@@ -92,6 +92,39 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
   return 'private';
 }
 
+/**
+ * [#5859 / #5852] The caller's ACTIVE ORGANIZATION as carried by an execution
+ * context — the value `HierarchyScopeContext.organizationId` (the authoritative
+ * tenancy field since #5858 / PR #5973) must be filled with.
+ *
+ * Every transport puts it on `tenantId`: both HTTP entry points build their
+ * context from the ONE shared authorization resolver
+ * (`resolveAuthzContext`, `@objectstack/core`), which resolves
+ * `tenantId = session.activeOrganizationId` on the session path and
+ * `sys_api_key.organization_id` on the API-key path, and `ExecutionContext`
+ * documents the field as exactly that ("Current organization/tenant ID
+ * (resolved from `session.activeOrganizationId`)"). NOTHING sets
+ * `organizationId` on an execution context — which is why reading that key
+ * here produced a structural `null` on every real request, and every
+ * hierarchy resolver ran with no organization to scope by (#5852: an ordinary
+ * member `POST`ing a share on a SIBLING organization's record got 201).
+ *
+ * This is the PRODUCER speaking the contract's authoritative name — not a
+ * consumer-side `?? tenantId` tolerance, which #5858 explicitly rules out for
+ * resolvers. The identical mapping already backs the Layer-0 tenant wall in
+ * `@objectstack/plugin-security` (`computeTenantLayer0Filter({ organizationId:
+ * context?.tenantId })`), so the two enforcement layers now scope by the same
+ * value from the same field.
+ *
+ * Returns `null` — never `undefined`, and never a blank string — for "no active
+ * organization": the contract types the field as `string | null`, and `null` is
+ * the value a resolver's fail-closed obligation is written against.
+ */
+function activeOrganizationId(context: SharingExecutionContext): string | null {
+  const org = (context as any)?.tenantId;
+  return typeof org === 'string' && org.trim() !== '' ? org : null;
+}
+
 function hasOwnerField(schema: any): boolean {
   return Boolean(schema?.fields && OWNER_FIELD in schema.fields);
 }
@@ -862,6 +895,31 @@ export class SharingService implements ISharingService {
    * only by `@objectstack/security-enterprise`). The open edition has none, so
    * this fails CLOSED to owner-only — a hierarchy scope NEVER widens without the
    * enterprise resolver (the spec gate also refuses to compile such a grant).
+   *
+   * [#5859 / #5852] The PRODUCER side of {@link HierarchyScopeContext}: the
+   * authoritative `organizationId` is filled from the execution context's
+   * active organization ({@link activeOrganizationId}). The read this replaced
+   * (`(context as any).organizationId`) named a key NO transport ever sets, so
+   * the field was structurally `null` on every real request and every resolver
+   * ran with no organization to scope by.
+   *
+   * `null` is passed through HONESTLY when the caller has no active
+   * organization — never papered over with the deprecated `tenantId` alias, and
+   * never turned into a blank-string org that would match nothing. What a
+   * resolver must then do is ITS contract:
+   * `IHierarchyScopeResolver.resolveOwnerIds` — "**Fail CLOSED on a missing
+   * organization** … 'no org' is not 'every org'. Return owner-only (or throw,
+   * which the sharing layer treats the same way); never widen."
+   *
+   * An additional REFUSAL here (not consulting the resolver at all on a null
+   * org) is deliberately NOT implemented yet: "no active organization" is the
+   * normal state of the supported pure-single-tenant deployment — the verify
+   * harness boots exactly that shape on purpose (`autoDefaultOrganization:
+   * false`) and the ADR-0057 D1 dogfood proofs pin hierarchy DEPTH working in
+   * it. Whether the open edition should refuse there is a tenancy-posture
+   * question (ADR-0105 D1: `single` → no wall; `isolated`/`group` → a missing
+   * org denies, cf. `computeTenantLayer0Filter`), and the sharing service holds
+   * no posture today — see #5859 for the open decision.
    */
   private async resolveOwnerScopeIds(
     context: SharingExecutionContext,
@@ -871,17 +929,32 @@ export class SharingService implements ISharingService {
     if (!scope || scope === 'own' || scope === 'org') return [me];
     const resolver = this.hierarchyResolver?.();
     if (!resolver) return [me];
+
+    const organizationId = activeOrganizationId(context);
     try {
       const ids = await resolver.resolveOwnerIds(
         {
           userId: me,
-          organizationId: (context as any).organizationId ?? null,
+          // AUTHORITATIVE (#5858 / PR #5973). Never `(context as any).organizationId`:
+          // no execution context in this repo carries that key.
+          organizationId,
+          // The @deprecated compatibility alias, carried through unchanged for
+          // resolvers that still read it. It is NOT the authority — a resolver
+          // reading it alone is the shape #5858 ruled out.
           tenantId: (context as any).tenantId ?? null,
         },
         scope,
       );
       return Array.isArray(ids) && ids.length > 0 ? ids : [me];
-    } catch {
+    } catch (err: any) {
+      // A throwing resolver is treated exactly like an empty answer (the
+      // contract says so) — but say it out loud: a silently-swallowed resolver
+      // failure is indistinguishable from "the hierarchy legitimately covers
+      // nobody else", which is how #5852 stayed invisible for so long.
+      this.logger?.warn?.(
+        '[sharing] hierarchy scope resolver failed — falling back to owner-only (fail closed)',
+        { userId: me, scope, organizationId, error: err?.message },
+      );
       return [me];
     }
   }

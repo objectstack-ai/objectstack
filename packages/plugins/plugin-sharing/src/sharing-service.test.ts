@@ -1,9 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
+import { bootRequestContext } from './exec-context-seam.testkit.js';
 
 // ─────────────────────────────────────────────────────────────────────
 // In-memory fake engine
@@ -841,6 +842,12 @@ describe('[ADR-0111 D1] SharingService.canManageShares', () => {
   // ── [ADR-0111 D1 DEPTH] hierarchy-manager authority ──────────────────
   // a1 is owned by alice. bob is alice's manager (own_and_reports covers alice);
   // carol is an unrelated peer. The enterprise resolver is stubbed.
+  //
+  // [#5859] These two contexts come from the SEAM (`bootRequestContext`), not
+  // from an object literal. The stubs below ignore the organization, so the
+  // verdicts do not change — what changes is that the DEPTH branch is now
+  // exercised with the context shape the runtime actually produces (an active
+  // org included), instead of one no transport ever emits.
   it('a hierarchy manager whose write DEPTH covers the owner may manage the record', async () => {
     const svc = new SharingService({
       engine,
@@ -853,7 +860,8 @@ describe('[ADR-0111 D1] SharingService.canManageShares', () => {
         resolveOwnerIds: async (ctx: any) => ctx.userId === 'bob' ? ['bob', 'alice'] : [ctx.userId],
       }),
     });
-    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(true);
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(true);
   });
 
   it('a peer with the same DEPTH scope but NOT covering the owner is denied', async () => {
@@ -867,7 +875,8 @@ describe('[ADR-0111 D1] SharingService.canManageShares', () => {
         resolveOwnerIds: async (ctx: any) => [ctx.userId], // carol's unit owner-set excludes alice
       }),
     });
-    expect(await svc.canManageShares('account', 'a1', { userId: 'carol' })).toBe(false);
+    const carol = await bootRequestContext({ userId: 'carol', activeOrganizationId: 'org_a' });
+    expect(await svc.canManageShares('account', 'a1', carol)).toBe(false);
   });
 
   it("a probe reporting 'org' does NOT widen management (fail-open guard — only Modify All via hasWriteBypass grants org)", async () => {
@@ -905,7 +914,11 @@ describe('[ADR-0111 D1] SharingService.canManageShares', () => {
       // No hierarchyResolver → resolveOwnerScopeIds fails closed to [me], which
       // excludes alice, so bob cannot manage alice's record.
     });
-    expect(await svc.canManageShares('account', 'a1', { userId: 'bob' })).toBe(false);
+    // [#5859] A seam context WITH an active organization, so the missing
+    // resolver is unambiguously the only thing standing between bob and
+    // alice's record.
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(false);
   });
 });
 
@@ -1144,5 +1157,203 @@ describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
         { $or: [{ recipient_id: 'bob' }, { granted_by: 'bob' }] },
       ],
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// [#5859 / #5852] The hierarchy resolver's tenancy authority.
+//
+// `HierarchyScopeContext.organizationId` is the AUTHORITATIVE tenancy field
+// (#5858 / PR #5973) and the only one an enterprise resolver scopes its owner
+// query by. This producer used to fill it from `(context as any).organizationId`
+// — a key NO transport ever sets — so every resolver ran unscoped and the whole
+// DEPTH tenant isolation was inert: in #5852 an ordinary member of org_a
+// `POST`ed a share onto a SIBLING organization's record and got 201.
+//
+// Every context below is produced by the seam (`bootRequestContext` →
+// `resolveAuthzContext`, the one resolver both HTTP entry points delegate to).
+// No test in this block names a tenancy field on a context — the org enters
+// the way a real login carries it (`session.activeOrganizationId`) and the
+// resolver decides which field it lands on. That is the whole point: the old
+// unit tests hand-wrote `{ userId, organizationId }`, a shape the runtime never
+// produces, which is exactly how this defect stayed green.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', () => {
+  const MANAGER_PROBE = {
+    hasWriteBypass: async () => false,
+    resolveWriteScope: async () => 'unit_and_below' as const,
+  };
+
+  /**
+   * A reference resolver shaped like the enterprise one: it scopes its owner
+   * set by `context.organizationId` and — this is the measured #5852 shape —
+   * runs the query UNSCOPED when it gets no organization, returning every user
+   * it can see. Fixing the producer is what stops it ever being asked that way;
+   * the resolver's own fail-closed duty (contract doc) is cloud#1148's half.
+   */
+  const ORG_MEMBERS: Record<string, string[]> = {
+    org_a: ['alice', 'bob'],
+    org_b: ['dana'],
+  };
+  function orgScopedResolver(seen: any[]) {
+    return () => ({
+      async resolveOwnerIds(ctx: any): Promise<string[]> {
+        seen.push(ctx);
+        if (ctx.organizationId == null) return Object.values(ORG_MEMBERS).flat();
+        return ORG_MEMBERS[String(ctx.organizationId)] ?? [String(ctx.userId)];
+      },
+    });
+  }
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  beforeEach(() => {
+    engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    engine._tables.account = [
+      { id: 'a1', name: 'Acme (org_a)', owner_id: 'alice' },
+      { id: 'b1', name: 'Beta (org_b)', owner_id: 'dana' },
+    ];
+  });
+
+  it('the seam carries the active org on ONE field, and it is not the authoritative one', async () => {
+    const ctx = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    // Measured, not assumed: `resolveAuthzContext` resolves
+    // `session.activeOrganizationId` onto `tenantId` (and `ExecutionContext`
+    // documents it as exactly that). Nothing sets `organizationId` — so a
+    // producer reading that key reads `undefined` on every real request, which
+    // is the defect this issue closes.
+    expect((ctx as any).tenantId).toBe('org_a');
+    expect(Object.keys(ctx as any)).not.toContain('organizationId');
+    expect((ctx as any).organizationId).toBeUndefined();
+  });
+
+  it('hands the resolver a NON-EMPTY organizationId equal to the caller active org', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+    });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].organizationId).not.toBeNull();
+    expect(seen[0].organizationId).toBe('org_a');
+    expect(seen[0].userId).toBe('bob');
+    // The @deprecated alias keeps carrying what it always carried — it is not
+    // the authority, and the producer never substitutes one for the other.
+    expect(seen[0].tenantId).toBe('org_a');
+  });
+
+  it('#5852 flip: a member cannot manage shares on a SIBLING organization record', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+    });
+    const bob = await bootRequestContext({
+      userId: 'bob',
+      // A `group`-posture member of BOTH orgs, active in org_a — the #5852
+      // posture. Membership is read reach; it is NOT hierarchy-scope reach.
+      activeOrganizationId: 'org_a',
+      memberships: [{ organization_id: 'org_a' }, { organization_id: 'org_b' }],
+    });
+
+    // Same org → the DEPTH branch still grants (no over-closing).
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(true);
+    // Sibling org → denied. Before the fix the resolver got no organization,
+    // answered with every user it could see, dana was in the owner set, and the
+    // real HTTP probe returned 201 on `POST /data/account/b1/shares`.
+    expect(await svc.canManageShares('account', 'b1', bob)).toBe(false);
+    expect(seen.every((c) => c.organizationId === 'org_a')).toBe(true);
+  });
+
+  it('write radius: cross-org edit / delete / bulk-write filter all stay closed', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      hierarchyResolver: orgScopedResolver(seen),
+      // NO securityService: no `modifyAllRecords` bypass, and no owner-only RLS
+      // anywhere — the sharing service is the ONLY gate in this fixture, which
+      // is the deployment shape #5852 named as unprotected (the probe app was
+      // masked by a `member_default` owner_only_writes rule keyed on
+      // `created_by`).
+    });
+    const base = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    // `__writeScope` is stamped by plugin-security's middleware onto a spread of
+    // the request context (security-plugin.ts) — mirrored here exactly.
+    const bob: any = { ...base, __writeScope: 'unit_and_below' };
+
+    expect(await svc.canEdit('account', 'a1', bob)).toBe(true);   // alice, org_a
+    expect(await svc.canEdit('account', 'b1', bob)).toBe(false);  // dana, org_b
+    expect(await svc.canDelete('account', 'a1', bob)).toBe(true);
+    expect(await svc.canDelete('account', 'b1', bob)).toBe(false);
+
+    // The bulk path reads the same owner set — dana must not be in it.
+    const filter: any = await svc.buildWriteFilter('account', bob, 'update');
+    expect(filter).toEqual({ owner_id: { $in: ['alice', 'bob'] } });
+  });
+
+  it('no active organization is reported as an HONEST null — never the deprecated alias, never a stand-in', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+    });
+    // A session with no active organization — the supported pure-single-tenant
+    // shape (the verify harness boots it deliberately: `autoDefaultOrganization:
+    // false`), not an anomaly this layer invents a verdict for.
+    const orgless = await bootRequestContext({ userId: 'bob', activeOrganizationId: null });
+    expect((orgless as any).tenantId).toBeUndefined();
+
+    await svc.canManageShares('account', 'a1', orgless);
+    expect(seen).toHaveLength(1);
+    // `string | null` per the contract: the producer states the absence rather
+    // than omitting the key (which is what let #5852's resolver read
+    // `undefined` and query unscoped without anyone noticing).
+    expect(seen[0]).toHaveProperty('organizationId');
+    expect(seen[0].organizationId).toBeNull();
+    // What the resolver must DO with that null is its own contract obligation
+    // ("Fail CLOSED on a missing organization … 'no org' is not 'every org'",
+    // IHierarchyScopeResolver.resolveOwnerIds) — cloud#1148's half. Whether the
+    // OPEN edition should additionally refuse to consult it is the open
+    // tenancy-posture question on #5859; deliberately not decided here.
+  });
+
+  it('fail closed: a THROWING resolver falls back to owner-only and SAYS so', async () => {
+    const warn = vi.fn();
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: () => ({
+        async resolveOwnerIds(): Promise<string[]> { throw new Error('resolver exploded'); },
+      }),
+      logger: { warn },
+    });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    // Unchanged verdict (owner-only), newly AUDIBLE: a swallowed resolver
+    // failure and "the hierarchy legitimately covers nobody else" used to look
+    // identical from outside, which is a large part of why #5852 went unseen.
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls[0][1]).toMatchObject({ organizationId: 'org_a', error: 'resolver exploded' });
+  });
+
+  it('a blank organization normalizes to null rather than travelling as a junk id', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+    });
+    const blank = await bootRequestContext({ userId: 'bob', activeOrganizationId: '   ' });
+    await svc.canManageShares('account', 'a1', blank);
+    expect(seen).toHaveLength(1);
+    // A whitespace org is not an organization: it must not reach a resolver as
+    // a literal that silently matches no rows and reads as "scoped" in a log.
+    expect(seen[0].organizationId).toBeNull();
   });
 });
