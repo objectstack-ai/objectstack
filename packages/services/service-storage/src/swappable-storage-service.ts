@@ -71,12 +71,10 @@ export class SwappableStorageService implements IStorageService {
     return this.inner.getInfo(key);
   }
 
-  list(prefix: string): Promise<StorageFileInfo[]> {
-    if (typeof this.inner.list !== 'function') {
-      return Promise.reject(new Error('Active storage adapter does not support list()'));
-    }
-    return this.inner.list(prefix);
-  }
+  // `list(prefix)` was removed from IStorageService in #5540 (ADR-0049
+  // enforce-or-remove; analysis #5266), so there is no contract member left to
+  // forward to. The adapters' own `list` implementations are retired
+  // separately in #5541.
 
   getSignedUrl(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string> {
     if (typeof this.inner.getSignedUrl !== 'function') {

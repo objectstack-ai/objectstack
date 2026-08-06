@@ -143,6 +143,68 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
   return true;
 }
 
+/**
+ * [#5298] Evaluate the whole `FilterCondition` the strategy hands the engine,
+ * not just its `stage` entry.
+ *
+ * `$notContains` is NULL-safe now, so the strategy emits it as
+ * `{$or: [{stage: null}, {stage: {$notContains: …}}]}` and the condition no
+ * longer has `stage` at the top level. Reading `filter.stage` alone therefore
+ * found `undefined`, handed {@link matchesLikeFamily} an EMPTY operator object,
+ * and every row passed the empty loop — the whole fixture came back and the
+ * assertion below would have been green for a filter that matched nothing in
+ * particular. A stand-in engine that cannot read the shape under test measures
+ * the stand-in, so it walks the tree.
+ */
+function matchesCondition(row: (typeof FIXTURE)[number], cond: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(cond)) {
+    if (key === '$and') {
+      if (!(value as Record<string, unknown>[]).every((c) => matchesCondition(row, c))) return false;
+      continue;
+    }
+    if (key === '$or') {
+      if (!(value as Record<string, unknown>[]).some((c) => matchesCondition(row, c))) return false;
+      continue;
+    }
+    if (key !== 'stage') throw new Error(`[test] this face only scopes "stage", got "${key}"`);
+    // A bare `null` comparand is the null PREDICATE — the guard's own disjunct,
+    // and the spelling every driver reads as IS NULL.
+    if (value === null) {
+      if (row.stage !== null) return false;
+      continue;
+    }
+    if (!matchesLikeFamily(row, value as Record<string, unknown>)) return false;
+  }
+  return true;
+}
+
+/**
+ * Every operator key the condition carries for `stage`, at any depth.
+ *
+ * [#5298] Also a tree walk, for the same reason {@link matchesCondition} is: the
+ * NULL-safe guard moves the operator object one level down, and a lookup that
+ * stopped at `filter.stage` reported ZERO operators — which the "is it declared"
+ * assertion would have passed vacuously had it not also demanded a non-empty
+ * set. That non-empty demand is why this file caught the shape change instead
+ * of quietly asserting nothing.
+ */
+function stageOperators(cond: Record<string, unknown>): string[] {
+  const found: string[] = [];
+  const walk = (node: Record<string, unknown>): void => {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === '$and' || key === '$or') {
+        for (const child of value as Record<string, unknown>[]) walk(child);
+        continue;
+      }
+      // `{stage: null}` is the null predicate, not an operator object.
+      if (value === null || typeof value !== 'object') continue;
+      found.push(...Object.keys(value as Record<string, unknown>));
+    }
+  };
+  walk(cond);
+  return found;
+}
+
 /** Point sql.js at the `.wasm` shipped inside its own package (Node-safe). */
 async function locateWasm(): Promise<((file: string) => string) | undefined> {
   try {
@@ -189,8 +251,12 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
     });
 
     it('the three siblings are unchanged — the family is uniform now', async () => {
+      // [#5298] `$notContains` is NULL-safe, so it reaches the engine wrapped in
+      // the null-predicate disjunct. What THIS case asserts is unaffected and
+      // still exact: the operator key is the declared `$notContains` and the
+      // comparand is the author's literal `'a.b'`, not a `$regex` pattern.
       expect(await engineFilter({ stage: { $notContains: 'a.b' } })).toEqual({
-        stage: { $notContains: 'a.b' },
+        $and: [{ $or: [{ stage: null }, { stage: { $notContains: 'a.b' } }] }],
       });
       expect(await engineFilter({ stage: { $startsWith: 'a.b' } })).toEqual({
         stage: { $startsWith: 'a.b' },
@@ -213,7 +279,7 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
         ['$endsWith', 'a.b'],
       ] as const) {
         const filter = await engineFilter({ stage: { [op]: comparand } });
-        const emitted = Object.keys((filter.stage ?? {}) as Record<string, unknown>);
+        const emitted = stageOperators(filter);
         expect(emitted.length, `${op} emitted no operator`).toBeGreaterThan(0);
         for (const key of emitted) {
           expect(declared.has(key), `${op} emitted undeclared operator "${key}"`).toBe(true);
@@ -237,9 +303,8 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
           _object: string,
           options: { filter?: Record<string, unknown> },
         ) => {
-          const cond = ((options.filter ?? {}) as Record<string, unknown>).stage;
-          const pred = (cond ?? {}) as Record<string, unknown>;
-          return FIXTURE.filter((r) => matchesLikeFamily(r, pred)).map((r) => ({
+          const cond = (options.filter ?? {}) as Record<string, unknown>;
+          return FIXTURE.filter((r) => matchesCondition(r, cond)).map((r) => ({
             id: r.id,
             total: 1,
           }));
@@ -271,9 +336,12 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
     it('the anchored siblings stay anchored on the same fixture', async () => {
       expect(await ids({ stage: { $startsWith: 'a.' } })).toEqual(['1']);
       expect(await ids({ stage: { $endsWith: '.b' } })).toEqual(['1']);
-      // NULL `stage` (row 5) satisfies neither direction on this face — a
-      // non-string value fails every LIKE arm, matcher included.
-      expect(await ids({ stage: { $notContains: 'a.b' } })).toEqual(['2', '3', '4']);
+      // [#5298] Row 5 has no `stage`, and "has no value" now satisfies "does not
+      // contain a.b" — the JS family's answer, reached here through the guard's
+      // null-predicate disjunct rather than through the matcher, whose LIKE arms
+      // still reject a non-string. The anchored pair above is the control: they
+      // are positive-polarity, take no guard, and row 5 stays out of both.
+      expect(await ids({ stage: { $notContains: 'a.b' } })).toEqual(['2', '3', '4', '5']);
     });
   });
 

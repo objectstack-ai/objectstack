@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#5697] The action-body `ctx.session` consistency pin — what
+ * [#5697 / #5613] The action-body `ctx.session` consistency pin — what
  * `buildActionSession()` BUILDS against what `ActionSessionSchema`
  * (`@objectstack/spec/ui`) DECLARES.
  *
@@ -11,6 +11,15 @@
  * reached no schema and no gate), so the declaration arrives with the test that
  * runs the real producer — the `hook-input-shape-contract.test.ts` shape from
  * #5668, one surface over.
+ *
+ * Phase 2 has now landed on both sides: the spec half (#5779) added the
+ * canonical `positions` key and demoted `roles` to a deprecated alias of it,
+ * and the runtime half (#5613) made the producer DUAL-EMIT them. So the key-set
+ * assertions below are no longer "what the builder happens to do" — they are
+ * the deprecation window itself, pinned: both keys, same array, for exactly as
+ * long as the ADR-0087 semantic migration `action-session-roles-to-positions`
+ * says. When that window closes, `roles` comes out of the expectations here in
+ * the same change that stops producing it.
  *
  * It lives in `packages/runtime` for the same reason that one lives in
  * `packages/objectql`: the pin must EXECUTE the producer, and `packages/spec`
@@ -37,16 +46,30 @@ const build = (ec: unknown) => buildActionSession(deps, ec as any);
 
 describe('#5697 — action `ctx.session` matches its declared contract', () => {
     it('builds exactly the declared keys, and the declaration covers all of them', () => {
-        const built = build({ userId: 'u_1', tenantId: 'org_acme', positions: ['sales_rep', 'org_admin'] });
+        const positions = ['sales_rep', 'org_admin'];
+        const built = build({ userId: 'u_1', tenantId: 'org_acme', positions });
 
-        // `roles`, not `positions` — the deprecated spelling is what the
-        // builder emits today and what the contract therefore declares. This
-        // assertion is the one #5613 phase 2 flips.
-        expect(Object.keys(built!).sort()).toEqual(['organizationId', 'roles', 'userId']);
+        // FLIPPED by #5613's runtime half. Before it, the builder emitted only
+        // the deprecated `roles`; it now emits the canonical `positions` too,
+        // which is what opens the migration window the spec half (#5779)
+        // declared. Both keys, or this is not a window.
+        expect(Object.keys(built!).sort()).toEqual(['organizationId', 'positions', 'roles', 'userId']);
+
+        // The window's load-bearing property: SAME VALUE under both spellings,
+        // so migrating a body from `roles` to `positions` is a change of key
+        // and nothing else. Asserted against `ec.positions` on both sides
+        // rather than just key-to-key, so a builder that started deriving one
+        // of them from something else could not satisfy it.
+        expect((built as { positions?: string[] }).positions).toEqual(positions);
+        expect((built as { roles?: string[] }).roles).toEqual(positions);
+        expect((built as { roles?: string[] }).roles).toEqual((built as { positions?: string[] }).positions);
 
         // Non-strict parse: an UNDECLARED key would be silently stripped here,
         // so deep equality — not `.success` — is what proves the contract
-        // covers everything the producer emits.
+        // covers everything the producer emits. This is also what proves the
+        // spec half is actually in: before #5779 declared `positions`, a
+        // dual-emitting builder would fail HERE (key stripped) rather than on
+        // the key-set assertion above.
         expect(ActionSessionSchema.parse(built)).toEqual(built);
         expect(ActionSessionSchema.safeParse(built).success).toBe(true);
     });
@@ -66,14 +89,32 @@ describe('#5697 — action `ctx.session` matches its declared contract', () => {
         expect('tenantId' in built!).toBe(false);
     });
 
-    it('carries `ec.positions` verbatim under the deprecated `roles` spelling', () => {
+    it('carries `ec.positions` verbatim under BOTH the canonical and the deprecated spelling', () => {
         const positions = ['sales_rep', 'org_admin'];
         const built = build({ userId: 'u_1', positions });
-        // Phase 2 (#5613) renames the KEY; this pins that the VALUE is, and
+        // Phase 2 (#5613) renamed the KEY; this pins that the VALUE is, and
         // stays, the ADR-0090 D3 vocabulary — so the rename is a rename and
         // not a semantic change smuggled inside one.
+        expect((built as { positions?: string[] }).positions).toEqual(positions);
         expect((built as { roles?: string[] }).roles).toEqual(positions);
         expect(ActionSessionSchema.safeParse(built).success).toBe(true);
+    });
+
+    it('emits the alias only alongside the canonical key — never `roles` on its own', () => {
+        // The direction that matters when the window CLOSES: the removal
+        // deletes `roles` from the producer and from the expectation above,
+        // and this assertion is what says the canonical key was never the
+        // thing that could go missing. A builder that regressed to alias-only
+        // would satisfy the value assertions and fail here.
+        for (const ec of [
+            { userId: 'u_1', positions: ['org_admin'] },
+            { tenantId: 'org_acme', positions: ['org_admin'] },
+            { userId: 'u_1', tenantId: 'org_acme', positions: ['org_admin'] },
+        ]) {
+            const keys = Object.keys(build(ec)!);
+            expect(keys).toContain('positions');
+            expect(keys).toContain('roles');
+        }
     });
 });
 
@@ -94,15 +135,22 @@ describe('#5697 — conditional-spread semantics: absent means the KEY is absent
     it('omits `userId` entirely for an org-scoped call with no user', () => {
         const built = build({ tenantId: 'org_acme', positions: ['org_admin'] });
         expect('userId' in built!).toBe(false);
-        expect(Object.keys(built!).sort()).toEqual(['organizationId', 'roles']);
+        expect(Object.keys(built!).sort()).toEqual(['organizationId', 'positions', 'roles']);
     });
 
-    it('omits `roles` for an empty or absent positions array', () => {
+    it('omits BOTH position spellings for an empty or absent positions array', () => {
+        // The dual emission is one conditional spread, so the "non-empty only"
+        // semantics is identical for the canonical key and the alias — neither
+        // appears as an empty array, and `'positions' in ctx.session` answers
+        // false exactly when `'roles' in ctx.session` does.
         expect(Object.keys(build({ userId: 'u_1', positions: [] })!)).toEqual(['userId']);
         expect(Object.keys(build({ userId: 'u_1' })!)).toEqual(['userId']);
         // A non-array `positions` is ignored rather than passed through — the
         // declared `string[]` would otherwise be a lie the parse catches.
         expect(Object.keys(build({ userId: 'u_1', positions: 'org_admin' })!)).toEqual(['userId']);
+        for (const ec of [{ userId: 'u_1', positions: [] }, { userId: 'u_1' }, { userId: 'u_1', positions: 'org_admin' }]) {
+            expect(ActionSessionSchema.parse(build(ec))).toEqual(build(ec));
+        }
     });
 });
 
@@ -114,9 +162,9 @@ describe('#5697 — no identity envelope yields NO session, never an empty one',
     ])('%s → undefined', (_label, ec) => {
         // #3712's distinction, on the action side: a body can tell "no identity
         // envelope at all" from "an anonymous caller" only because this is
-        // `undefined` rather than `{}`. The third row is why `roles` can never
-        // appear alone — positions without a user and without an org produce no
-        // session for it to appear on.
+        // `undefined` rather than `{}`. The third row is why neither position
+        // spelling can ever appear alone — positions without a user and without
+        // an org produce no session for them to appear on.
         expect(build(ec)).toBeUndefined();
     });
 });

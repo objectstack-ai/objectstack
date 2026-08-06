@@ -1822,6 +1822,25 @@ RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
 isolation axes as hooks — `organization_id` row-scoping vs environment /
 database-per-tenant; see the objectstack-data hooks reference.)
 
+The caller's position names are on `ctx.session.positions` — the ADR-0090 D3
+spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
+sharing service use:
+
+```typescript
+// ✅ Canonical since #5613
+const positions = ctx.session?.positions ?? [];
+```
+
+> The key is **absent** (not empty) when the caller holds no positions, and the
+> whole `ctx.session` is `undefined` for a call with no identity envelope. The
+> pre-ADR-0090 alias of this same array is still emitted for one migration
+> window and then removed — see `action-session-*-to-positions` in the protocol
+> upgrade guide for the prescription. Migrate the READ to `positions`; do not
+> migrate an access check by renaming it. **This array is not an authorization
+> input**: `positions.includes('admin')` is the same defect under a blessed
+> name. Ask the security service for privilege (capability grants, placements,
+> derived posture — ADR-0095).
+
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
 There are **two** mechanisms here. Pick by whether the URL is static or computed:

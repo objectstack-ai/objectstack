@@ -555,11 +555,20 @@ jobs:
       # this job one at a time, each with a comment saying the filter had failed
       # it; these four finish the migration and retire the duplicate ledger.
       #
-      # Affordable because the work was already being done here: `check:docs`
-      # below runs `gen:schema` — the same scripts/build-schemas.ts that backs
-      # `check:authorable-surface` — and that whole step measures 4s in CI. All
-      # four read source via tsx and need no build, so they run before the
-      # workspace build, as the gates below already do.
+      # Affordable because the work was already being done here: one run of
+      # scripts/build-schemas.ts serves both `check:authorable-surface` and the
+      # `check:docs` gate below, and that whole step measures 4s in CI. All four
+      # read source via tsx and need no build, so they run before the workspace
+      # build, as the gates below already do.
+      #
+      # It used to be `check:docs` that ran `gen:schema`, and that is the half
+      # #4723 removed: `gen:schema` is a generator, so a step named `check:` was
+      # rewriting two TRACKED files (json-schema.manifest.json,
+      # authorable-surface.json) whenever they were behind — silently repairing
+      # locally what it was supposed to report, and running the same ~1600-schema
+      # generation twice per job. The generation now happens once, in the
+      # `check:authorable-surface` step below, whose `--check` mode writes the
+      # gitignored json-schema/ tree and refuses to touch a tracked file (#4711).
       - name: Check skill docs are generated from SKILL.md frontmatter
         run: pnpm --filter @objectstack/spec check:skill-docs
 
@@ -576,6 +585,14 @@ jobs:
       # key added to or removed from a schema. #3883 removed three authorable keys
       # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
       # this gate until a narrowing actually slipped both — it has.
+      #
+      # ⚠ ORDER: this step must stay ABOVE the `check:docs` step below. Its
+      # `--check` run of scripts/build-schemas.ts writes the gitignored
+      # packages/spec/json-schema/ tree that `check:docs` renders from — the
+      # explicit generation that replaced the `gen:schema` `check:docs` used to run
+      # itself (#4723). Nothing here silently depends on that: `build-docs.ts`
+      # refuses on a missing or stale tree, so a reordering fails loudly with the
+      # prescription rather than reporting on last run's schemas.
       - name: Check the authorable key surface is recorded and nothing vanished
         run: pnpm --filter @objectstack/spec check:authorable-surface
 
@@ -591,6 +608,11 @@ jobs:
       # job has no paths filter and is a required status check, so the gate cannot go
       # dormant. It reads src/ + json-schema/ via tsx and needs no build, so it runs
       # before the workspace build and fails in ~2s.
+      #
+      # It CONSUMES the json-schema/ tree the `check:authorable-surface` step above
+      # generated; it no longer generates one itself (#4723). Two things came off
+      # this step with that: the duplicate ~1600-schema generation, and the tracked
+      # files a `check:` script had no business writing.
       - name: Check generated reference docs are in sync with the spec
         run: pnpm --filter @objectstack/spec check:docs
 

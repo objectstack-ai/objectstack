@@ -189,7 +189,7 @@
     "gen:authorable-surface-base": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --update-base",
     "gen:openapi": "tsx scripts/build-openapi.ts",
     "gen:docs": "tsx scripts/build-docs.ts",
-    "check:docs": "pnpm gen:schema && tsx scripts/build-docs.ts --check",
+    "check:docs": "tsx scripts/build-docs.ts --check",
     "check:generated": "tsx scripts/check-generated.ts",
     "gen:skill-refs": "tsx scripts/build-skill-references.ts",
     "check:skill-refs": "tsx scripts/build-skill-references.ts --check",

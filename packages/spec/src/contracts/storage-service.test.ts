@@ -29,11 +29,9 @@ describe('Storage Service Contract', () => {
       delete: async () => {},
       exists: async () => false,
       getInfo: async (key) => ({ key, size: 0, lastModified: new Date() }),
-      list: async (_prefix) => [],
       getSignedUrl: async (_key, _expiresIn) => 'https://example.com/signed',
     };
 
-    expect(storage.list).toBeDefined();
     expect(storage.getSignedUrl).toBeDefined();
   });
 
@@ -110,26 +108,52 @@ describe('Storage Service Contract', () => {
     expect(info.metadata?.uploadedBy).toBe('user-1');
   });
 
-  it('should list files by prefix', async () => {
+  // ---------------------------------------------------------------------
+  // Retirement pin — `list?(prefix)` removed in #5540 (ADR-0049
+  // enforce-or-remove; the two-dialect analysis is #5266).
+  //
+  // `IStorageService` is a pure TypeScript contract: nothing parses it, so
+  // this retirement has no `retiredKey()` tombstone and no parse-time
+  // prescription to assert (spec-property-retirement §2, "nothing parses it"
+  // route). tsc is the only channel the removal has — and `tsconfig.test.json`
+  // puts this file in front of tsc (#5286), so the two `@ts-expect-error`
+  // directives below are real checks that go red the day the member returns,
+  // not phantom ones. Restoring `list?()` to the interface turns both into
+  // "unused '@ts-expect-error' directive".
+  //
+  // The test these replaced exercised the removed member itself; keeping it
+  // green would have meant keeping the member.
+  // ---------------------------------------------------------------------
+  it('no longer declares list(prefix) — reading it is a type error', () => {
     const storage: IStorageService = {
       upload: async () => {},
       download: async () => Buffer.from(''),
       delete: async () => {},
       exists: async () => true,
       getInfo: async (key) => ({ key, size: 0, lastModified: new Date() }),
-      list: async (prefix) => {
-        const allFiles: StorageFileInfo[] = [
-          { key: 'docs/a.txt', size: 100, lastModified: new Date() },
-          { key: 'docs/b.txt', size: 200, lastModified: new Date() },
-          { key: 'images/c.png', size: 300, lastModified: new Date() },
-        ];
-        return allFiles.filter((f) => f.key.startsWith(prefix));
-      },
     };
 
-    const docs = await storage.list!('docs/');
-    expect(docs).toHaveLength(2);
-    expect(docs[0].key).toBe('docs/a.txt');
+    // @ts-expect-error — `list` was removed from IStorageService (#5540).
+    // Prefix enumeration returns cursor-shaped when a caller needs it:
+    // `list(prefix, { cursor, limit })`. It is not on the contract today.
+    const retired = storage.list;
+
+    expect(retired).toBeUndefined();
+  });
+
+  it('no longer accepts an implementation that declares list(prefix)', () => {
+    const storage: IStorageService = {
+      upload: async () => {},
+      download: async () => Buffer.from(''),
+      delete: async () => {},
+      exists: async () => true,
+      getInfo: async (key) => ({ key, size: 0, lastModified: new Date() }),
+      // @ts-expect-error — excess property: the contract has no `list` member,
+      // so an adapter can no longer advertise one through it (#5540).
+      list: async (_prefix: string): Promise<StorageFileInfo[]> => [],
+    };
+
+    expect(typeof storage.getInfo).toBe('function');
   });
 
   it('should generate signed URLs', async () => {

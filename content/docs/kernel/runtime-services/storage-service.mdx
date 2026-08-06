@@ -16,7 +16,6 @@ services.storage.download(key: string): Promise<Buffer>
 services.storage.delete(key: string): Promise<void>
 services.storage.exists(key: string): Promise<boolean>
 services.storage.getInfo(key: string): Promise<StorageFileInfo>
-services.storage.list?(prefix: string): Promise<StorageFileInfo[]>
 services.storage.getSignedUrl?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string>
 ```
 
@@ -30,6 +29,16 @@ services.storage.uploadChunk?(uploadId: string, partNumber: number, data: Buffer
 services.storage.completeChunkedUpload?(uploadId: string, parts: Array<{ partNumber: number; eTag: string }>): Promise<string>
 services.storage.abortChunkedUpload?(uploadId: string): Promise<void>
 ```
+
+## Removed
+
+`services.storage.list?(prefix)` was removed in `@objectstack/spec` 5.x — the contract
+has no prefix-enumeration method. It had no consumer, and the two shipped adapters gave
+the same call two different, silently-incomplete answers (local: one level, directories
+reported as files; S3: recursive, truncated at 1000 objects). Query the file records you
+wrote rather than the bucket; a future enumeration returns cursor-shaped
+(`list(prefix, { cursor, limit })`). See the
+[contract reference](/docs/kernel/contracts/storage-service).
 
 ## Typical Errors
 
