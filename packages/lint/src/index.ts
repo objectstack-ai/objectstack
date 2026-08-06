@@ -20,6 +20,8 @@ export {
   CHART_CONFIG_MISSING,
   TABLE_COUNT_ONLY,
   MEASURE_AGGREGATE_INCOHERENT,
+  WIDGET_LEGACY_ANALYTICS_SHAPE,
+  WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
@@ -53,6 +55,7 @@ export {
   validateFlowTriggerReadiness,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
+  FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
 } from './validate-flow-trigger-readiness.js';
 export type {
@@ -101,6 +104,7 @@ export {
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
+  REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
@@ -118,6 +122,7 @@ export {
   validateSemanticRoles,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
+  FIELD_GROUP_SHADOWED,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
 } from './validate-semantic-roles.js';
 export type { SemanticRoleFinding, SemanticRoleSeverity } from './validate-semantic-roles.js';
@@ -152,6 +157,7 @@ export {
   APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
   APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
+  APPROVAL_APPROVER_TYPE_UNSUPPORTED,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
   APPROVAL_EXPRESSION_INVALID,
@@ -184,6 +190,7 @@ export {
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_MASTER_DETAIL_UNGRANTED,
+  SECURITY_FLS_UNQUALIFIED_KEY,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
 } from './validate-security-posture.js';
