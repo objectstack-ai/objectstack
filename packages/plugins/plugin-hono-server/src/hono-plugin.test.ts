@@ -41,6 +41,11 @@ vi.mock('./adapter', async (importOriginal) => ({
             // against the REAL adapter in `notfound-405.test.ts` and
             // `fallback-seam.test.ts`; here it only has to exist.
             installNotFoundSeam: vi.fn(),
+            // [#5848] init() hands the adapter `ctx.logger` so a throw escaping
+            // a route handler lands in the HOST's log pipeline. What the
+            // adapter then does with it is covered against the REAL adapter in
+            // `handler-throw-logging.test.ts`; here only the wiring is pinned.
+            setLogger: vi.fn(),
             getRawApp: vi.fn().mockReturnValue({
                 get: vi.fn(),
                 use: vi.fn(),
@@ -93,6 +98,17 @@ describe('HonoServerPlugin', () => {
         
         expect(context.registerService).toHaveBeenCalledWith('http-server', expect.any(Object));
         expect(HonoHttpServer).toHaveBeenCalled();
+    });
+
+    it('hands the adapter the host logger on init (#5848)', async () => {
+        // Without this wiring the adapter falls back to its own default
+        // logger, and an escaped handler throw is reported outside whatever
+        // pipeline the host actually reads.
+        const plugin = new HonoServerPlugin();
+        await plugin.init(context as PluginContext);
+
+        const server = (HonoHttpServer as unknown as ReturnType<typeof vi.fn>).mock.results[0]!.value;
+        expect(server.setLogger).toHaveBeenCalledWith(logger);
     });
 
     it('should register IHttpServer service on init', async () => {
