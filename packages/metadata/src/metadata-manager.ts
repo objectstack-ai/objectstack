@@ -79,27 +79,73 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 
 /**
- * [#5276] The registration gate's message for a loader that declares it can be
- * written to but cannot be deleted from.
+ * [#5654] The two methods `capabilities.write` promises on a `datasource:`
+ * loader, in the order an item meets them: written by
+ * {@link MetadataManager.register}, taken back out by
+ * {@link MetadataManager.unregister}. Both are `?` on {@link MetadataLoader}
+ * because the other protocols legitimately have neither.
+ */
+export type WritableLoaderMethod = 'save' | 'delete';
+
+const WRITABLE_LOADER_METHODS: readonly WritableLoaderMethod[] = ['save', 'delete'];
+
+/** How the message names each method, and what the author has to write. */
+const WRITABLE_LOADER_METHOD_SIGNATURE: Record<WritableLoaderMethod, string> = {
+  save: 'save(type: string, name: string, data: any, options?: MetadataSaveOptions): Promise<MetadataSaveResult>',
+  delete: 'delete(type: string, name: string): Promise<void>',
+};
+
+/**
+ * [#5276, #5654] The registration gate's message for a loader that declares it
+ * can be written to but cannot actually carry out one (or both) halves of that
+ * write.
  *
  * Built here rather than inline so the gate and its tests quote one text, in the
  * shape AGENTS.md → "Degradation log levels" asks of a loud failure: the
  * **consequence** (concretely, and that the system keeps looking healthy) and
  * the **fix** (both ways out, so the author does not have to guess which one
  * their loader wants).
+ *
+ * `missing` is the subset of {@link WRITABLE_LOADER_METHODS} the loader does not
+ * implement; each one contributes its own consequence sentence, because the two
+ * failures are durability failures in opposite directions — a `save`-less loader
+ * loses the row that was never written, a `delete`-less one keeps the row that
+ * was supposed to go.
  */
-export function buildWritableLoaderMissingDeleteMessage(loaderName: string): string {
+export function buildWritableLoaderMissingMethodsMessage(
+  loaderName: string,
+  missing: readonly WritableLoaderMethod[],
+): string {
+  const missingPhrase =
+    missing.length === 2
+      ? 'implements neither a `save()` nor a `delete()` method'
+      : `implements no \`${missing[0]}()\` method`;
+
+  const consequences = missing.map((method) =>
+    method === 'save'
+      ? 'Registered as-is, every write would be a silent lie: `register()` skips a loader that cannot save, then ' +
+        'writes the in-memory registry, invalidates the list cache, announces a `created`/`updated` event and ' +
+        'notifies watchers, so the caller (Studio/Setup, REST PUT, the CLI, a package publish) is told the write ' +
+        `succeeded while nothing ever reaches \`${loaderName}\` — the item reads back correctly for the life of ` +
+        'this process and is gone at the next restart, with nothing to retry it. '
+      : 'Registered as-is, every deletion would be a silent lie: `unregister()` skips a loader that cannot delete, ' +
+        'then drops the registry entry, invalidates the list cache and announces a `deleted` event, so the caller ' +
+        '(Studio/Setup, REST DELETE, the CLI, a package teardown) is told the delete succeeded while the row stays ' +
+        `in \`${loaderName}\` and is read straight back out by the very next \`list()\`/\`get()\` — across ` +
+        'restarts, with nothing to retry it. ',
+  );
+
+  const repair = missing
+    .map((method) => `\`${WRITABLE_LOADER_METHOD_SIGNATURE[method]}\``)
+    .join(' and ');
+
   return (
     `[MetadataManager] Refusing to register metadata loader \`${loaderName}\`: it declares ` +
-    "`protocol: 'datasource:'` with `capabilities.write: true` but implements no `delete()` method. " +
+    `\`protocol: 'datasource:'\` with \`capabilities.write: true\` but ${missingPhrase}. ` +
     'A write-capable datasource loader is written to AND deleted from — `register()` persists every item into it, ' +
     'and `unregister()` has to take those rows back out again. ' +
-    'Registered as-is, every deletion would be a silent lie: `unregister()` skips a loader that cannot delete, then ' +
-    'drops the registry entry, invalidates the list cache and announces a `deleted` event, so the caller ' +
-    '(Studio/Setup, REST DELETE, the CLI, a package teardown) is told the delete succeeded while the row stays in ' +
-    `\`${loaderName}\` and is read straight back out by the very next \`list()\`/\`get()\` — across restarts, with ` +
-    'nothing to retry it. ' +
-    `Fix: either implement \`delete(type: string, name: string): Promise<void>\` on \`${loaderName}\` ` +
+    consequences.join('') +
+    `Fix: either implement ${repair} on \`${loaderName}\` ` +
     '(`DatabaseLoader` in this package is the reference implementation), or, if the loader is genuinely read-only, ' +
     "declare `capabilities.write: false` — a read-only `datasource:` loader registers without complaint and is " +
     'never written to in the first place.'
@@ -107,30 +153,36 @@ export function buildWritableLoaderMissingDeleteMessage(loaderName: string): str
 }
 
 /**
- * [#5276] Registration gate: a `datasource:` loader that declares
- * `capabilities.write` MUST implement `delete()`.
+ * [#5276, #5654] Registration gate: a `datasource:` loader that declares
+ * `capabilities.write` MUST implement **both** `save()` and `delete()`.
  *
- * `capabilities.write` used to mean two different things at the two ends of an
- * item's life — "persist into me" to {@link MetadataManager.register}, and
- * nothing at all to {@link MetadataManager.unregister}, which duck-typed
- * `delete` at the call site and **silently skipped** a loader that had none
- * before announcing the deletion anyway. That is the declared ≠ enforced shape
- * (Prime Directive #10), and the cure it prescribes is to enforce the
- * declaration, not to tolerate the gap: the loader is rejected at registration,
- * where the author is standing, instead of losing a row at delete time in a
- * deployment nobody is watching.
+ * `capabilities.write` used to mean three different things at the three places
+ * it is read — "persist into me" to {@link MetadataManager.register}, which
+ * duck-typed `save` and **silently skipped** a loader that had none; nothing at
+ * all to {@link MetadataManager.unregister}, which did the same with `delete`;
+ * and, on the contract, a flat promise that the store can be written. That is
+ * the declared ≠ enforced shape (Prime Directive #10), and the cure it
+ * prescribes is to enforce the declaration, not to tolerate the gap: the loader
+ * is rejected at registration, where the author is standing, instead of losing a
+ * row at write or delete time in a deployment nobody is watching.
  *
- * Scope is deliberately exactly the combination `unregister()` acts on. Other
- * protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to by the
- * manager at runtime — `register()` filters on `datasource:` too — so they have
- * no deletion of their own to take back and are not gated. A `datasource:`
- * loader with `capabilities.write: false` is likewise untouched by both paths.
+ * #5276 closed the `delete` half; #5654 closed the `save` half, which was the
+ * same shape one direction over — and leaving it open meant one declaration was
+ * binding at one end of an item's life and decorative at the other.
+ *
+ * Scope is deliberately exactly the combination `register()`/`unregister()` act
+ * on. Other protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to
+ * by the manager at runtime — both loops filter on `datasource:` too — so they
+ * have neither a write nor a deletion of their own to lose and are not gated. A
+ * `datasource:` loader with `capabilities.write: false` is likewise untouched by
+ * both paths.
  */
-function assertWritableLoaderCanDelete(loader: MetadataLoader): void {
+function assertWritableLoaderContract(loader: MetadataLoader): void {
   const { name, protocol, capabilities } = loader.contract;
   if (protocol !== 'datasource:' || capabilities.write !== true) return;
-  if (typeof loader.delete === 'function') return;
-  throw new Error(buildWritableLoaderMissingDeleteMessage(name));
+  const missing = WRITABLE_LOADER_METHODS.filter((method) => typeof loader[method] !== 'function');
+  if (missing.length === 0) return;
+  throw new Error(buildWritableLoaderMissingMethodsMessage(name, missing));
 }
 
 /**
@@ -600,14 +652,15 @@ export class MetadataManager implements IMetadataService {
   /**
    * Register a new metadata loader (data source)
    *
-   * [#5276] Rejects — loudly, before the loader is stored — a `datasource:`
-   * loader that declares `capabilities.write` without implementing `delete()`.
-   * This is the **only** way into `this.loaders` (the constructor's
-   * `config.loaders` come through here too), which is what lets every later
-   * delete-capability guard be defensive rather than load-bearing.
+   * [#5276, #5654] Rejects — loudly, before the loader is stored — a
+   * `datasource:` loader that declares `capabilities.write` without
+   * implementing `save()` **and** `delete()`. This is the **only** way into
+   * `this.loaders` (the constructor's `config.loaders` come through here too),
+   * which is what lets every later write-capability guard be defensive rather
+   * than load-bearing.
    */
   registerLoader(loader: MetadataLoader) {
-    assertWritableLoaderCanDelete(loader);
+    assertWritableLoaderContract(loader);
     this.loaders.set(loader.contract.name, loader);
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
@@ -662,9 +715,18 @@ export class MetadataManager implements IMetadataService {
     // FilesystemLoader is read-only at runtime — writing to it can crash in
     // read-only environments (e.g. serverless, containerized deployments).
     for (const loader of this.loaders.values()) {
-      if (loader.save && loader.contract.protocol === 'datasource:' && loader.contract.capabilities.write) {
-        await loader.save(type, name, data);
-      }
+      if (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;
+      // [#5654] Defensive only — unreachable for a registered loader, and read
+      // in this order on purpose: the protocol/capability test is the policy,
+      // the method test is the type narrowing. This exact combination
+      // (`datasource:` + `capabilities.write`, no `save`) is rejected by
+      // `registerLoader()`, the sole writer of `this.loaders`, so reaching this
+      // `continue` would mean a loader entered the map without passing the
+      // gate. Kept because the alternative is a TypeError on the line below,
+      // and because `save?` stays optional on the interface for the protocols
+      // the gate does not cover. Mirrors the same guard in `unregister()`.
+      if (typeof loader.save !== 'function') continue;
+      await loader.save(type, name, data);
     }
 
     // Publish metadata.{type}.created / .updated event to realtime service.

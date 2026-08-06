@@ -35,6 +35,14 @@
  *      register without a `delete`, because the manager never writes to them;
  *   5. `DatabaseLoader`, the repo's only real `datasource:` loader, passes the
  *      gate unchanged.
+ *
+ * [#5654] The gate this file pins has since been widened — it is
+ * `assertWritableLoaderContract` now, and `capabilities.write` requires `save()`
+ * as well, because `register()` had the identical silent skip one direction
+ * over. Everything below still holds verbatim: these loaders all implement
+ * `save`, so `delete` is the only thing missing and the message is unchanged.
+ * The `save` half is pinned next door in
+ * `metadata-manager-loader-save-contract.test.ts`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

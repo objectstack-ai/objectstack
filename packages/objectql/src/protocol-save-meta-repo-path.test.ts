@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 /**
  * Repository write-path coverage (post PR-10d.6).
@@ -65,6 +66,11 @@ function makeStubEngine() {
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+            // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate, the
+            // twin of the delete pin below and on the same argument: this file
+            // could bind one write verb to the producer and not the other only
+            // because `update` had no shared predicate to bind to.
+            assertEngineUpdateDispatch(data, opts);
             const found = findRow(opts.where);
             if (!found) return { id: null };
             rows.set(found.key, { ...found.row, ...(data as any) });

@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { SeedLoaderConfigSchema } from '@objectstack/spec/data';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 /**
  * Harness whose business object declares `organization_id` as the engine
@@ -39,7 +40,15 @@ function harness() {
       inserted.push({ object, record });
       return { id: `${object}_${inserted.length}` };
     },
-    update: async () => ({}),
+    update: async (_o: string, data: any, opts?: any) => {
+      // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+      // the delete pin, on the same argument: a double looser than the engine it
+      // stands in for is how #4434 shipped a REST route that 500'd for every
+      // caller with its suite green, and a predicate update is no less
+      // destructive than a predicate delete.
+      assertEngineUpdateDispatch(data, opts);
+      return {};
+    },
   };
   const metadata = {
     getObject: async (name: string) => ({

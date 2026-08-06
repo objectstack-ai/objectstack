@@ -73,7 +73,27 @@ export interface MetadataLoader {
   list(type: string): Promise<string[]>;
 
   /**
-   * Save metadata item
+   * Save metadata item into this loader's store.
+   *
+   * [#5654] Optional on the interface, **mandatory for a `datasource:` loader
+   * that declares `capabilities.write`** — `MetadataManager.registerLoader()`
+   * refuses to register such a loader when this method is missing, so the
+   * combination "declared writable, cannot persist" never reaches the runtime.
+   *
+   * The reason it is enforced at registration rather than tolerated at the write
+   * site: `MetadataManager.register()` persists into every writable
+   * `datasource:` loader, and it used to read `loader.save &&` first — a loader
+   * that declares it can be written to but has no `save()` made every write a
+   * silent lie. `register()` would skip it, then write the in-memory registry,
+   * invalidate the list cache, announce a `created`/`updated` event and notify
+   * watchers, so the caller is told the write succeeded; the item reads back
+   * correctly for the life of the process and is **gone at the next restart**,
+   * with nothing to retry it.
+   *
+   * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
+   * gated: `MetadataManager` never persists to them at runtime — `register()`
+   * filters on `datasource:` — so a missing `save()` there loses nothing.
+   *
    * @param type The metadata type
    * @param name The item name
    * @param data The data to save
@@ -89,8 +109,8 @@ export interface MetadataLoader {
   /**
    * Delete a metadata item from this loader's store.
    *
-   * [#5276] Optional on the interface, **mandatory for a `datasource:` loader
-   * that declares `capabilities.write`** — `MetadataManager.registerLoader()`
+   * [#5276, #5654] Optional on the interface, **mandatory for a `datasource:`
+   * loader that declares `capabilities.write`** — `MetadataManager.registerLoader()`
    * refuses to register such a loader when this method is missing, so the
    * combination "declared writable, cannot delete" never reaches the runtime.
    *
@@ -104,6 +124,12 @@ export interface MetadataLoader {
    * back out of this loader by the next `list()`/`get()`. `capabilities.write`
    * therefore means *both* directions of the write, on both ends of the item's
    * life — declared = enforced.
+   *
+   * One gate covers both halves: `assertWritableLoaderContract` in
+   * `metadata-manager.ts` requires `save()` **and** `delete()` for this
+   * combination and names whichever is missing. #5276 built it for `delete`;
+   * #5654 widened it to `save`, which had the identical silent skip in
+   * `register()` — see the note on `save?` above.
    *
    * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
    * gated: `MetadataManager` never writes to them at runtime, so it never has a
