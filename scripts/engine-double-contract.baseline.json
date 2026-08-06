@@ -1019,6 +1019,14 @@
       "closes": "open the fake's delete with assertEngineDeleteDispatch(opts) and run the package's suite — the devDependency is already declared"
     },
     {
+      "file": "packages/services/service-automation/src/plugin-startup-log-cause.test.ts",
+      "verb": "update",
+      "unguarded": 1,
+      "kind": "DEBT",
+      "why": "MEASURED (#5480), and the one entry in this batch that is NOT part of the one-act landing the other update entries describe: this file did not exist when the update slice was measured. It arrived on main in #5738 (from #5661) AFTER this branch's measurement window and while main still had no update slice, so its own CI could not have flagged it and this ledger could not have recorded it — a base crossing, not a regression on either side. Re-measured on the merge with origin/main: 1 unguarded engine double, discovered at line 170 (the `fakeDataEngine` helper, whose `update` writes the row straight into the fixture Map and returns it, consulting nothing). The package already depends on @objectstack/objectql (`devDependencies`), so this is a one-line pin — but the file lives under `packages/services/**`, which #5480 is scoped out of, so it belongs to the services lane's own batch alongside the `crud-bulk-intent.test.ts` upgrade that #5480 step 3 leaves to it. WHAT THIS ENTRY DOES NOT CLAIM: like every other update entry and unlike the #5629 delete batch, it carries NO per-file dormancy probe. Nothing here says the looseness is unexercised — only that the double is structurally free to be looser than ObjectQL.update on the shape a hand-written guard always drops (`where: { id: { $in: [...] } }` looks like an id and is a multi-row predicate) and stricter on the one it invents (`data.id`, which the producer takes verbatim when truthy, ahead of both `where` and `multi`).",
+      "closes": "open the fake's update with assertEngineUpdateDispatch(data, options) and run the package's suite"
+    },
+    {
       "file": "packages/services/service-automation/src/plugin-suspended-run-wiring.test.ts",
       "verb": "delete",
       "unguarded": 1,
