@@ -7944,9 +7944,37 @@ export class ObjectStackProtocolImplementation implements
                 // once the spec declared `state` as the closed set it has always
                 // emitted. Type-only: the value is unchanged.
                 state: (mode === 'draft' ? 'draft' : 'active') as 'draft' | 'active',
-                message: orgId
-                    ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
-                    : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+                // #5265 — the receipt says only what this write path already
+                // KNOWS. `artifactBacked` (computed above, and the same fact
+                // `intent` is derived from) is exactly the difference between
+                // the two things a save can be:
+                //
+                //   • override-artifact — a code-shipped artifact exists under
+                //     this (type, name), so the row we just wrote customizes
+                //     it. "customization overlay" is literally true; the
+                //     sentence is unchanged, verbatim, on purpose.
+                //   • runtime-only — nothing is being overlaid. The row IS the
+                //     item. Seven registry types declare `supportsOverlay:
+                //     false` yet are writable at runtime by design (`object`,
+                //     `field`, `hook`, `seed`, `mapping`, `flow`, `action`),
+                //     and every one of them used to be told it had "saved a
+                //     customization overlay" of nothing.
+                //
+                // Deliberately NOT split further into created-vs-updated. The
+                // available fact is `parentVersion === null`, and that is
+                // scoped to (state, packageId): the first DRAFT of an item
+                // that already has a live active row reads as "no parent", so
+                // a `Created …` receipt derived from it would swap one false
+                // claim for another. Distinguishing it honestly needs a read
+                // this path does not already make, and a receipt is not worth
+                // a query — so the verb stays the neutral, true "Saved".
+                message: artifactBacked
+                    ? (orgId
+                        ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
+                        : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`)
+                    : (orgId
+                        ? `Saved ${singularTypeForRepo} '${request.name}' (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`
+                        : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`),
             };
         } catch (err: any) {
             if (err instanceof ConflictError) {
