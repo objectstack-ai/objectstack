@@ -311,17 +311,46 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Input Parameters (Mutable)
    * Modify this to change the behavior of the operation.
    *
+   * These shapes are exactly what the engine BUILDS — `packages/objectql`'s
+   * `engine.ts` is the only producer of a `HookContext`. A key this table
+   * lists but no producer sets reads back `undefined` at every call site, and
+   * a contract statement is the one place that cannot be discovered as false:
+   * #5273 was three such keys (`ast` on both bulk writes, `doc` on insert)
+   * standing in the table long after the engine had stopped agreeing. Pinned
+   * against the real engine in
+   * `packages/objectql/src/hook-input-shape-contract.test.ts` — the assertions
+   * live there because only objectql can execute a dispatch, and spec must not
+   * depend on it.
+   *
    * - find (also fires for findOne): { ast: QueryAST, options: DriverOptions }
-   * - insert: { doc: Record, options: DriverOptions }
+   * - insert (one context per row, batch inserts included): { data: Record, options: DriverOptions }
    * - update (single id): { id: ID, data: Record, options: DriverOptions }
-   * - update (bulk, multi:true): { ast: QueryAST, data: Record, options: DriverOptions }
+   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: DriverOptions }
+   * - update (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, data: Record, options: DriverOptions }
    * - delete (single id): { id: ID, options: DriverOptions }
-   * - delete (bulk, multi:true): { ast: QueryAST, options: DriverOptions }
+   * - delete (bulk, multi:true) — before: { id: undefined, options: DriverOptions }
+   * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
    *
    * A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/
-   * `beforeDelete` events as a single-id write — the row-scoping predicate is
-   * carried in `input.ast` (no per-row `id`). There is no separate `*Many`
-   * event.
+   * `beforeDelete` events as a single-id write, ONCE for the whole batch;
+   * there is no separate `*Many` event. `input.id` is present but `undefined`
+   * there — binding it is precisely the test the engine dispatches on, so a
+   * `before*` handler that sets it REROUTES the write onto the single-id path.
+   *
+   * The row-scoping predicate is NOT reachable from `input` at all. It lives
+   * on the engine-internal `OperationContext.ast` (#2982) so that the filters
+   * middleware composes onto it — RLS write policies, the sharing plugin's
+   * editable-rows filter — bind the driver call itself, where no handler can
+   * widen them. A bulk write therefore hands hooks no queryable predicate:
+   * scope the batch through `options.where` at the CALLER, or work per row on
+   * the `after*` events below.
+   *
+   * Since #5038 (ADR-0058's bulk-write addendum) the `after*` events on a bulk
+   * write dispatch ONCE PER MATCHED ROW, each on a single-record-shaped
+   * context — `input.id` names that row, `previous` is its pre-image and
+   * `result` its post-state — so a handler written for a single-id write needs
+   * no bulk-aware branch of its own. The batch-level context keeps the
+   * affected COUNT as `result` and is what the call itself resolves (#4639).
    */
   input: z.record(z.string(), z.unknown()).describe('Mutable input parameters'),
 

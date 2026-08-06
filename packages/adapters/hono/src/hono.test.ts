@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 
 // Mock dispatcher instance accessible across tests
 const mockDispatcher = {
-  getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', endpoints: [] }),
+  getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', routes: {} }),
   handleAuth: vi.fn().mockResolvedValue({ handled: true, response: { body: { ok: true }, status: 200 } }),
   handleGraphQL: vi.fn().mockResolvedValue({ data: {} }),
   dispatch: vi.fn().mockResolvedValue({ handled: true, response: { body: { success: true }, status: 200 } }),

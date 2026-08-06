@@ -21,8 +21,9 @@ The **HTTP API** defines how ObjectStack maps data operations to RESTful HTTP en
 
 Before making any API calls, clients should request a discovery endpoint to learn about
 available services. **Two endpoints answer that question, and in a stack that mounts
-`@objectstack/rest` they do not return the same shape** — they are built by different
-packages. Read the one that matches your composition; do not mix their fields.
+`@objectstack/rest` they are built by different packages** — so they carry different
+values (and different envelopes), even though both now satisfy the same `DiscoverySchema`
+(#4828). Read the one that matches your composition.
 
 ### `GET /api/v1` (and `GET /api/v1/discovery`)
 
@@ -43,10 +44,17 @@ Host: api.acme.com
 ```json
 {
   "version": "v1",
+  "name": "ObjectStack API",
   "apiName": "ObjectStack API",
+  "environment": "development",
   "routes": {
     "data": "/api/v1/data",
     "metadata": "/api/v1/meta"
+  },
+  "locale": {
+    "default": "en",
+    "supported": ["en"],
+    "timezone": "UTC"
   },
   "services": {
     "metadata": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/meta", "provider": "objectql" },
@@ -68,24 +76,32 @@ Host: api.acme.com
 }
 ```
 
-Three things about this body are worth stating explicitly, because they are what the
-`/.well-known/objectstack` document below does *not* share:
+Three things about this body are worth stating explicitly:
 
 - **`version` is the configured API version, not a product version.** The handler
   overwrites the protocol's value with `api.version` — the same string that forms the
   path segment (`"v1"`). It is never a semantic version like `2.1.0`.
-- **There is no `name`, `environment` or `locale` here.** Those are dispatcher fields
-  (see below). A client that initialises i18n from `locale` must read
-  `/.well-known/objectstack`, not this response.
+- **`name` is canonical; `apiName` is a deprecated alias with the same value.** Both are
+  emitted today so clients pinned to the old spelling keep working; `apiName` is removed
+  in **protocol 18** (#4828). Read `name`.
 - **`scoping` is added by the REST server**, so clients can detect dual-mode routing;
   `environmentId` is present only on the environment-scoped mount
   (`/api/v1/environments/:environmentId/...`).
 
+<Callout type="info">
+**Both discovery documents now satisfy one schema (#4828).** They used to diverge on the
+required identity fields — this response omitted `name` / `environment` / `locale`
+entirely, and the dispatcher document below spelled the capability map `features` while
+this one spelled it `capabilities`. Both producers are now checked against
+`DiscoverySchema` in CI, so a client can read the same keys from either. `environment` is
+always one of `production` / `sandbox` / `development` — never a raw `NODE_ENV`.
+</Callout>
+
 Disabled/uninstalled route keys are omitted from `routes` entirely rather than set to
 `null`; check `services` to tell "not installed" apart from "installed but not yet mounted
-here." `capabilities` is a flat map of platform feature flags (`comments`, `automation`,
-`cron`, `search`, `export`, `chunkedUpload`, `transactionalBatch`), each derived from what
-is actually registered — never hardcoded. See
+here." `capabilities` maps each platform capability (`comments`, `automation`, `cron`,
+`search`, `export`, `chunkedUpload`, `transactionalBatch`) to a `{ "enabled": … }`
+descriptor, each derived from what is actually registered — never hardcoded. See
 [API → Discovery](/docs/api#discovery) for the field-by-field reference.
 
 ### `GET /.well-known/objectstack`
@@ -119,14 +135,14 @@ Host: api.acme.com
       "ui": "/api/v1/ui",
       "i18n": "/api/v1/i18n"
     },
-    "features": {
-      "search": false,
-      "websockets": false,
-      "files": false,
-      "analytics": false,
-      "ai": false,
-      "notifications": false,
-      "i18n": true
+    "capabilities": {
+      "search": { "enabled": false },
+      "websockets": { "enabled": false },
+      "files": { "enabled": false },
+      "analytics": { "enabled": false },
+      "ai": { "enabled": false },
+      "notifications": { "enabled": false },
+      "i18n": { "enabled": true }
     },
     "services": {
       "metadata": { "enabled": true, "status": "available", "handlerReady": true, "route": "/api/v1/meta", "provider": "kernel" },
@@ -144,12 +160,31 @@ Host: api.acme.com
 ```
 
 `name` and `version` are the dispatcher's own build identity, not your app's name — they
-are fixed strings, so do not display them as the deployment's title. `environment` is the
-process `NODE_ENV`. `locale` is derived from the registered i18n service (`getDefaultLocale()`
-/ `getLocales()`); with no i18n service it degrades to `{ "default": "en", "supported":
-["en"], "timezone": "UTC" }`. The body also repeats `routes` under an `endpoints` key as a
-backward-compatibility alias, and carries **no** `capabilities` map — that one exists only
-on the REST-served response above.
+are fixed strings, so do not display them as the deployment's title. `locale` is derived
+from the registered i18n service (`getDefaultLocale()` / `getLocales()`); with no i18n
+service it degrades to `{ "default": "en", "supported": ["en"], "timezone": "UTC" }`.
+
+`environment` is **derived from** `NODE_ENV`, not the raw value — the field is an enum
+(`production` / `sandbox` / `development`), so out-of-enum spellings are mapped rather
+than advertised verbatim (#4828):
+
+| `NODE_ENV` | advertised `environment` |
+|:---|:---|
+| `production`, `prod` | `production` |
+| `sandbox` | `sandbox` |
+| `staging` | `sandbox` — pre-production and production-like |
+| `development`, `dev` | `development` |
+| `test` | `development` — an ephemeral developer-class run |
+| unset / anything else | `development` — never claims production on a guess |
+
+<Callout type="warn">
+**Retired in protocol 17 (#4828):** this document used to carry a top-level `features`
+map and an `endpoints` key that duplicated `routes` verbatim. Neither was ever declared
+in `DiscoverySchema`. `features` is now the canonical `capabilities` (same flags, in the
+declared `{ "enabled": … }` shape, so it matches the REST-served response); `endpoints`
+was removed outright after a consumer census across `objectstack`, `objectui` and `cloud`
+found no reader — use `routes`.
+</Callout>
 
 <Callout type="warn">
 **"Both paths return the same document" holds only in a REST-less composition.** There, the
@@ -157,8 +192,9 @@ dispatcher owns `/api/v1/discovery` as the fallback registrant, so that path and
 `/.well-known/objectstack` both answer with the dispatcher payload above (the bare
 `/api/v1` is registered by `@objectstack/rest` alone and is not served at all). As soon as
 `@objectstack/rest` is mounted it takes `/api/v1/discovery` under the single-owner rule
-(ADR-0076 D11) and the two paths answer different shapes. Never write a client that reads
-`locale` or `environment` off `/api/v1/discovery`.
+(ADR-0076 D11) and the two paths answer different *documents* — same schema, different
+producers, so the envelope (`{ "data": … }` here, bare there) and the values differ even
+though the key set no longer does.
 </Callout>
 
 **Why discovery matters:**

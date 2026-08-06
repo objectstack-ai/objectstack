@@ -7,7 +7,7 @@ import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE 
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
-import { readServiceSelfInfo, DispatcherErrorCode } from '@objectstack/spec/api';
+import { readServiceSelfInfo, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
@@ -1274,20 +1274,51 @@ export class HttpDispatcher {
         return {
             name: 'ObjectOS',
             version: '1.0.0',
-            environment: getEnv('NODE_ENV', 'development'),
+            // [#4828] Mapped, not passed through. `DiscoverySchema.environment`
+            // is an ENUM (`production|sandbox|development`) and this used to be
+            // `getEnv('NODE_ENV', 'development')` raw — so `NODE_ENV=test` (what
+            // vitest sets) or `staging` advertised a value outside the declared
+            // enum on a machine-readable surface. The mapping table and the
+            // reasoning per row live with the enum, in `@objectstack/spec/api`,
+            // so both discovery producers answer identically.
+            environment: resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'development')),
             routes,
-            endpoints: routes, // Alias for backward compatibility with some clients
-            features: {
-                search: hasSearch,
+            // [#4828] `endpoints` (a verbatim duplicate of `routes`, commented
+            // "Alias for backward compatibility with some clients") and the
+            // top-level `features` map are GONE. Neither was ever declared in
+            // `DiscoverySchema`; both survived only because the one schema the
+            // protocol layer referenced (`GetDiscoveryResponseSchema`) strips
+            // unknown keys. Per ADR-0049 enforce-or-remove and the 2026-08-05
+            // ruling on #4828:
+            //
+            // * `endpoints` — REMOVED. A consumer census across `objectstack`,
+            //   `objectui` and `cloud` (2026-08-05) found NO reader: this repo's
+            //   own SDK resolves routes via `discoveryInfo.routes`
+            //   (`packages/client/src/index.ts`), and objectui's only
+            //   `.endpoints` reads are its hand-written `SERVICE_ENDPOINT_CATALOG`
+            //   (`apps/console/.../useApiDiscovery.ts`), not this payload.
+            //   `routes` is the declared, canonical spelling.
+            // * `features` — RENAMED to the canonical `capabilities`, which
+            //   `DiscoverySchema` has always declared and which this producer
+            //   never emitted. That split is the bug: the SDK's
+            //   `client.capabilities` getter reads `discoveryInfo.capabilities`,
+            //   so against a dispatcher-served host it returned `undefined` for
+            //   every flag while the answers sat one key away under `features`.
+            //
+            // The hierarchical `{ enabled }` shape is what `capabilities`
+            // declares (and what the `getDiscovery()` producer already emits),
+            // so a client reads ONE shape from either producer.
+            capabilities: {
+                search: { enabled: hasSearch },
                 // No WS/HTTP realtime surface is mounted anywhere — a mere
                 // in-process realtime service must not advertise websockets
                 // (ADR-0076 D12, #2462).
-                websockets: false,
-                files: hasFiles,
-                analytics: hasAnalytics,
-                ai: hasAi,
-                notifications: hasNotification,
-                i18n: hasI18n,
+                websockets: { enabled: false },
+                files: { enabled: hasFiles },
+                analytics: { enabled: hasAnalytics },
+                ai: { enabled: hasAi },
+                notifications: { enabled: hasNotification },
+                i18n: { enabled: hasI18n },
             },
             services: {
                 // Kernel-provided (always served by the protocol implementation)
