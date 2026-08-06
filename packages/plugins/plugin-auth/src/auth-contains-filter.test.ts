@@ -29,6 +29,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { InMemoryDriver } from '@objectstack/driver-memory';
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import type { QueryAST } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/core';
 import { createObjectQLAdapterFactory } from './objectql-adapter';
 
@@ -50,10 +51,13 @@ const silentLogger = {
  * (`check:engine-double-contract`, #4550).
  */
 function memoryReadEngine(driver: InMemoryDriver): IDataEngine {
+  // The query bag is forwarded with its declared driver-side type and no `any`
+  // erasure: `query-options/no-any-erasure` (#4674/#4918) counts a test-side
+  // `find(obj, … as any)` too, and nothing here needs to be off-contract.
   return {
-    find: (object: string, query?: any) => driver.find(object, (query ?? {}) as any),
-    findOne: (object: string, query?: any) => driver.findOne(object, (query ?? {}) as any),
-    count: (object: string, query?: any) => driver.count(object, (query ?? {}) as any),
+    find: (object: string, query: QueryAST) => driver.find(object, query),
+    findOne: (object: string, query: QueryAST) => driver.findOne(object, query),
+    count: (object: string, query?: QueryAST) => driver.count(object, query),
   } as unknown as IDataEngine;
 }
 
