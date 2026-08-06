@@ -48,6 +48,7 @@ const crmApp = defineApp({
 | `active` | `boolean` | optional | Is app active (default: `true`) |
 | `isDefault` | `boolean` | optional | Is default app |
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
+| `areas` | `NavigationArea[]` | optional | Partition navigation by business domain — see [Areas](#areas) |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
 
@@ -212,6 +213,202 @@ rejected — a divider has nothing to label, gate, or badge.)
 | `requiredPermissions` | `string[]` | Permissions required to see/access this item |
 | `requiresObject` | `string` | Hide/disable unless the named object is registered |
 | `requiresService` | `string` | Hide/disable unless the named kernel service is registered |
+
+## Areas
+
+An **area** partitions one app's navigation by business domain — Sales, Service,
+Settings — and each area carries its own independent navigation tree. The active
+area's tree is what the sidebar renders; the shell offers a switcher above it
+once more than one area is visible.
+
+### When to use an area instead of a top-level group
+
+Both split a long sidebar, but they split it differently, and the choice is
+about whether the user needs to see the partitions *at the same time*:
+
+- A **`group` item** keeps everything on screen — a collapsible section inside
+  one tree, with every sibling group still visible beside it. Reach for this
+  first; most apps never need anything else.
+- An **area** *replaces* the sidebar. Only the active area's items are listed;
+  the rest are reached by switching. That is the right shape when a Service rep
+  and a Sales rep share one app but never work in the other's tree, and the
+  wrong shape when the two sets are browsed together.
+
+So: simple apps use `navigation` alone. `areas[]` is for apps large enough that
+a single tree would be unusable, and where the domains are contexts a user
+switches between rather than sections they scan.
+
+### Area properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `string` | ✅ | Unique area identifier (`snake_case`) — the switcher's identity and active-area state key |
+| `label` | `string` | ✅ | Area display label |
+| `icon` | `string` | optional | Area icon (Lucide) |
+| `description` | `string` | optional | Authoring annotation only — no surface renders it today |
+| `navigation` | `NavigationItem[]` | ✅ | The area's own navigation tree |
+
+That is the whole key set: `NavigationAreaSchema` is **strict**, so any other
+key fails the parse — see [Retired area-level keys](#retired-area-level-keys)
+for the three that used to be accepted here.
+
+### How `areas[].navigation` relates to the top-level tree
+
+Both trees hold the same `NavigationItem` shape, and every item property means
+the same thing in either one. What differs is which tree the shell renders:
+
+- **Areas take precedence.** With areas declared, the active area's
+  `navigation` is what the sidebar renders; the top-level `navigation` is the
+  fallback, rendered when no area is visible to this user.
+- **Declaration order is display order.** Both the sidebar and
+  `AppSchemaRenderer` iterate the `areas` array exactly as authored — nothing
+  sorts areas. To rearrange them, reorder the array itself.
+- **The first visible area is the initial one**, and the switcher appears only
+  when *more than one* area is visible. A single-area app renders as an ordinary
+  sidebar with no switcher chrome.
+- **Area visibility is derived, never authored.** An area is offered if and only
+  if at least one item inside it survives the item-level gates below. An area
+  whose every item is gated away disappears from the switcher instead of
+  stranding the user on an empty tree, and it is never auto-activated.
+
+### Server-side and client-side gates are not symmetric
+
+<Callout type="warn">
+  **Anything that must never reach the browser goes in `requiredPermissions`,
+  never in `visible`.**
+</Callout>
+
+An area carries no gate of its own — gating lives on the items inside it, and
+the two item-level mechanisms are enforced in *different places*:
+
+| Item property | Enforced where | What it actually does |
+| :--- | :--- | :--- |
+| `requiredPermissions`, `requiresService` | **Server**, in both trees — then re-checked in the shell | The entry is never served: it is absent from the `/meta` body |
+| `visible` (CEL), `requiresObject` | **Client only**, at every level | Hides an entry the browser has already received |
+
+Since #4722 the authoritative server-side filter (`filterAppForUser`) runs the
+**same** item filter over the app's top-level `navigation` *and* over every
+`areas[].navigation`, so an item's `requiredPermissions` / `requiresService` is
+enforced identically in both trees: a gated entry — with its `objectName` /
+`pageName` / `componentRef` target — never leaves the server. An area emptied
+**by** the gate is dropped from the response, mirroring how an emptied `group`
+collapses; an area *authored* empty is passed through untouched, because
+filtering reports what the caller may not see rather than tidying the metadata.
+
+`visible` did **not** move server-side with them, and that asymmetry is
+deliberate: CEL is evaluated in the browser because server-side evaluation needs
+a bound `user` context the read layer does not have. So `visible` is a
+decluttering affordance — it hides an entry the response already contains, and
+reading the JSON defeats it. Use it to reduce noise, never to keep a secret. The
+same holds for `requiresObject`.
+
+### Retired area-level keys
+
+<Callout type="warn">
+  `areas[].order`, `areas[].visible` and `areas[].requiredPermissions` were
+  removed in `@objectstack/spec` 17.0.0 (ADR-0049 enforce-or-remove) and are now
+  **refused at parse time** rather than ignored, so one leftover key fails the
+  whole save. Run `os migrate meta --from 16` to rewrite existing sources
+  automatically.
+
+  - `order` (#4667) — no renderer ever sorted areas, so declaration order
+    already *was* display order and an author who set `order` saw nothing move.
+    Delete the key and reorder the `areas` array. Note the neighbour that
+    behaves differently: a navigation **item's** `order` is genuinely sorted,
+    and this removal does not touch it.
+  - `visible` and `requiredPermissions` (#4651) — these were not merely unread
+    keys, they were **fail-open gates**. No layer read them, so an area "hidden"
+    by one, or restricted to `['sales.admin']`, was served to and rendered for
+    *every* user: the author got a clean parse, a stored value, and no gate at
+    all. Removing a gate that never gated is strictly safer than shipping one
+    that looks like it works. Gate the items **inside** the area instead — an
+    item's `visible` takes the same CEL expression, and its
+    `requiredPermissions` is the server-enforced one — or gate the whole app
+    with the app-level `requiredPermissions`, which *is* checked server-side.
+
+  The removals do not read back onto the items: item-level gating inside an area
+  is fully supported, and since #4722 it is server-enforced.
+</Callout>
+
+### Complete Example
+
+Two areas for one field-service app, showing both gate kinds side by side:
+
+{/* os:check */}
+```typescript
+import { defineApp } from '@objectstack/spec';
+
+const fieldServiceApp = defineApp({
+  name: 'field_service',
+  label: 'Field Service',
+  description: 'Dispatch, work orders, and service analytics',
+  icon: 'wrench',
+  active: true,
+
+  branding: {
+    primaryColor: '#0f766e',
+    logo: '/assets/fs-logo.svg',
+  },
+
+  // Declaration order IS display order — areas carry no `order` key.
+  areas: [
+    {
+      id: 'area_dispatch',
+      label: 'Dispatch',
+      icon: 'calendar-clock',
+      navigation: [
+        { id: 'nav_board', type: 'page', label: 'Dispatch Board', pageName: 'dispatch_board', icon: 'layout-dashboard' },
+        { id: 'nav_work_orders', type: 'object', label: 'Work Orders', objectName: 'work_order', icon: 'clipboard-list', viewName: 'open_work_orders' },
+        {
+          id: 'nav_my_jobs',
+          type: 'object',
+          label: 'My Jobs',
+          objectName: 'work_order',
+          icon: 'user-check',
+          filters: { technician_id: '{current_user_id}', status: 'scheduled' },
+        },
+      ],
+    },
+    {
+      id: 'area_analytics',
+      label: 'Analytics',
+      icon: 'bar-chart',
+      navigation: [
+        { id: 'nav_sla', type: 'dashboard', label: 'SLA Overview', dashboardName: 'service_sla', icon: 'gauge' },
+        {
+          id: 'nav_job_margin',
+          type: 'report',
+          label: 'Job Margin',
+          reportName: 'job_margin',
+          icon: 'file-bar-chart',
+          // SERVER-enforced in both trees: a caller without this permission
+          // never receives this entry, so its `reportName` is not readable
+          // from the /meta body either.
+          requiredPermissions: ['service.finance'],
+        },
+        {
+          id: 'nav_forecast_beta',
+          type: 'dashboard',
+          label: 'Forecast (beta)',
+          dashboardName: 'service_forecast',
+          icon: 'trending-up',
+          // CLIENT-only: this entry IS sent and then hidden. Decluttering,
+          // not access control — never put a secret behind `visible`.
+          visible: "'service_beta' in current_user.positions",
+        },
+      ],
+    },
+  ],
+
+  // The fallback tree: rendered only when NO area is visible to the caller
+  // (every area's items gated away, or the areas list filtered empty).
+  navigation: [
+    { id: 'nav_handbook', type: 'url', label: 'Service Handbook', url: 'https://help.example.com/service', icon: 'book-open', target: '_blank' },
+  ],
+
+  requiredPermissions: ['service_access'],
+});
+```
 
 ## Branding
 
