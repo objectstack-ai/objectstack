@@ -140,6 +140,30 @@ function zodLikeRejection(): Error {
  * (out of this issue's scope, filed separately). Narrowing the fixture to the
  * probe keeps these assertions about the seam they name instead of measuring
  * someone else's record.
+ *
+ * ## No `delete` on purpose (#4550 / #5629)
+ *
+ * `SuspendedRunStoreEngine` declares `delete?` optional, and this double omits
+ * it. `check:engine-double-contract` flagged an earlier draft that carried a
+ * bare `async delete() { return true; }`: an engine double whose `delete` does
+ * not route through `assertEngineDeleteDispatch` may accept a call the real
+ * `ObjectQL.delete` refuses, which is how #4434 shipped a dead REST route with
+ * its suite green.
+ *
+ * Removing it was the right remedy here rather than pinning it, and the reason
+ * is measured, not assumed — the ledger's own standard. Injecting an
+ * `appendFileSync` marker as the first statement of that `delete` and running
+ * this file printed it **0** times; the control, the same injection in `find`,
+ * printed **11** times in the same run, so the silence is evidence and not a
+ * broken probe. Nothing here deletes a suspended run: these seams exercise
+ * `probe()`, `list()` and the boot flow pull only. So the method modelled
+ * nothing — and its body was the second kind of looseness besides, answering
+ * success while removing no row. A pin would have certified that.
+ *
+ * A future case that does need deletion writes a real one and
+ * `check:engine-double-contract` will require the predicate then; and the store
+ * itself warns when the engine has no `delete()`, which the byte-exact
+ * assertions below would surface immediately.
  */
 function fakeDataEngine(opts: { failProbe?: string } = {}) {
     const rows = new Map<string, any>();
@@ -153,7 +177,6 @@ function fakeDataEngine(opts: { failProbe?: string } = {}) {
         },
         async insert(_object, data) { rows.set(String(data.id), { ...data }); return data; },
         async update(_object, data) { rows.set(String(data.id), { ...data }); return data; },
-        async delete() { return true; },
     };
     return engine;
 }
