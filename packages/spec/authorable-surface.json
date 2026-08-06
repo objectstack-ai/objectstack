@@ -7703,6 +7703,7 @@
     "ui/RecordDetailsProps:aria",
     "ui/RecordDetailsProps:columns",
     "ui/RecordDetailsProps:fields",
+    "ui/RecordDetailsProps:hideFields",
     "ui/RecordDetailsProps:layout",
     "ui/RecordDetailsProps:sections",
     "ui/RecordHighlightsProps:aria",

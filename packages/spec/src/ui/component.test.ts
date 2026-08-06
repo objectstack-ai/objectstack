@@ -149,13 +149,87 @@ describe('RecordDetailsProps', () => {
     expect(result.sections).toBeUndefined();
   });
 
-  it('should accept custom layout with sections', () => {
-    const details = { columns: '3' as const, layout: 'custom' as const, sections: ['sec-1', 'sec-2'] };
-    expect(() => RecordDetailsProps.parse(details)).not.toThrow();
-  });
-
   it('should reject invalid column value', () => {
     expect(() => RecordDetailsProps.parse({ columns: '5' })).toThrow();
+  });
+
+  // #5611: `sections` is the OBJECT form — the only form any page authors and
+  // the only form any renderer reads. These fixtures are lifted verbatim from
+  // the real pages so the schema is pinned to authored reality, not to a shape
+  // invented here. Before this change every one of them was an `invalid_type`
+  // rejection at `sections[0]` (the old `z.array(z.string())`), and the whole
+  // `hideFields` key was silently stripped.
+  it('accepts the showcase section shape verbatim (project-detail.page.ts:49)', () => {
+    const details = {
+      layout: 'custom' as const,
+      sections: [
+        { label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },
+        { label: 'Financials', columns: 2, fields: ['budget', 'spent'] },
+        { label: 'Timeline', columns: 2, fields: ['start_date', 'end_date'] },
+      ],
+    };
+    const result = RecordDetailsProps.parse(details);
+    expect(result.sections).toHaveLength(3);
+    expect(result.sections?.[0]).toEqual({
+      label: 'Overview',
+      columns: 2,
+      fields: ['name', 'account', 'owner', 'status'],
+    });
+    // `columns: 1` is authored too (task-detail.page.ts:76).
+    expect(() =>
+      RecordDetailsProps.parse({ sections: [{ label: 'Details', columns: 1, fields: ['notes'] }] }),
+    ).not.toThrow();
+  });
+
+  it('accepts a section with no columns (sys-user.page.ts:118)', () => {
+    const result = RecordDetailsProps.parse({
+      sections: [{ label: 'Identity', fields: ['name', 'image'] }],
+    });
+    expect(result.sections?.[0].columns).toBeUndefined();
+    expect(result.sections?.[0].fields).toEqual(['name', 'image']);
+  });
+
+  it('accepts an untitled section and a `name`-anchored one', () => {
+    // No label: the renderer draws it borderless. No name: it is untranslatable
+    // by construction, which is what `translation-section-name-missing` reports.
+    expect(() => RecordDetailsProps.parse({ sections: [{ fields: ['notes'] }] })).not.toThrow();
+    // `name` is the i18n anchor a lint rule tells authors to add, so the schema
+    // must accept it — the rule and the schema cannot disagree.
+    const named = RecordDetailsProps.parse({
+      sections: [{ name: 'identity', label: 'Identity', fields: ['name'] }],
+    });
+    expect(named.sections?.[0].name).toBe('identity');
+  });
+
+  it('requires `fields` on every section', () => {
+    const r = RecordDetailsProps.safeParse({ sections: [{ label: 'Empty' }] });
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0, 'fields']);
+  });
+
+  it('rejects the retired ID-list form rather than silently half-reading it', () => {
+    const r = RecordDetailsProps.safeParse({ layout: 'custom', sections: ['overview'] });
+    expect(r.success).toBe(false);
+    expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
+    expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0]);
+  });
+
+  it('rejects an out-of-range section column count', () => {
+    expect(() =>
+      RecordDetailsProps.parse({ sections: [{ label: 'Wide', columns: 5, fields: ['a'] }] }),
+    ).toThrow();
+  });
+
+  it('preserves hideFields verbatim (sys-user.page.ts:106)', () => {
+    // Undeclared until #5611, so a non-strict `z.object` dropped it on the
+    // floor: the platform page's hidden-field list survived only because
+    // nothing ever parsed these props.
+    const hideFields = ['id', 'banned', 'ban_reason', 'ban_expires', 'email', 'role'];
+    const result = RecordDetailsProps.parse({
+      hideFields,
+      sections: [{ label: 'Audit', fields: ['created_at', 'updated_at'] }],
+    });
+    expect(result.hideFields).toEqual(hideFields);
   });
 });
 

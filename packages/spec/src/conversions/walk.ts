@@ -14,6 +14,7 @@
  */
 
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
+import { deepEqualAuthored } from '../shared/deep-equal.js';
 
 type Dict = Record<string, unknown>;
 
@@ -266,27 +267,71 @@ export function mapCollection(
 }
 
 /**
- * Rename `dict[from]` → `dict[to]`, immutably, only when `from` is present
- * (non-null) and the canonical `to` is absent. Returns `null` when there is
- * nothing to do — the caller keeps the original reference.
+ * Rename `dict[from]` → `dict[to]`, immutably. Returns `null` when there is
+ * nothing to do — the caller keeps the original reference and emits no notice.
+ *
+ * Three cases, and the third is the one #4923 ruled on:
+ *
+ * 1. **`from` absent (or null)** → `null`. Nothing to convert.
+ * 2. **`from` present, `to` absent** → the plain rename. The value moves to the
+ *    canonical key and the old spelling is deleted.
+ * 3. **BOTH present** — the author wrote two names for one slot — splits *by
+ *    value*, because the two halves are genuinely different facts:
+ *    - **values structurally equal** → the alias carries nothing the canonical
+ *      key does not already carry, so deleting it is **lossless hygiene** and
+ *      squarely inside the D2 contract ("the runtime only ever sees the
+ *      canonical shape"). The alias is dropped and the caller emits its notice,
+ *      so the rewrite stays loud.
+ *    - **values differ** → `null`, and BOTH spellings survive. This is real
+ *      author ambiguity, and an upgrade tool that picked the canonical one
+ *      would be editing a configuration the customer never agreed to. The
+ *      surviving pair is what lets the strict node-config gates refuse with a
+ *      prescription that NAMES BOTH KEYS (`builtin-node-config.zod.ts` and
+ *      friends) instead of the platform choosing silently.
+ *
+ * Before #4923 case 3 was uniformly "leave the alias shadowed", which is why
+ * every `renameFlowConfigAliases` entry's fixture used to pin a retired
+ * spelling surviving in its `after` half. Case 3's equal branch also makes the
+ * transform **idempotent in both shape and notices**: once the twin is gone,
+ * a replay hits case 1.
+ *
+ * Structural equality (not `===`) is the right test because these values are
+ * authored data, not identities: two separately-written `{ status: 'stale' }`
+ * filters are the same declaration. It is the same predicate the composer uses
+ * for "same value composes fine" (#5005) — deliberately one definition, so the
+ * two surfaces cannot disagree about whether a pair of values is "the same".
  */
 export function renameKey(dict: Dict, from: string, to: string): Dict | null {
+  // A pair that renames a key to itself has no work to do, and the equal-value
+  // branch below would otherwise read it as "a twin identical to the canonical
+  // key" and delete the only copy. No registry pair is written that way today;
+  // this is here so one added later fails to convert instead of erasing data.
+  if (from === to) return null;
   if (!(from in dict) || dict[from] == null) return null;
-  if (dict[to] != null) return null; // canonical already wins — nothing to do
   const next: Dict = { ...dict };
+  if (dict[to] != null) {
+    // Both spellings present (#4923). Only a redundant twin may be removed.
+    if (!deepEqualAuthored(dict[from], dict[to])) return null;
+    delete next[from];
+    return next;
+  }
   next[to] = next[from];
   delete next[from];
   return next;
 }
 
-/** Rename `config[from]` → `config[to]` on a node dict, immutably, only if `to` is absent. */
+/**
+ * Rename `config[from]` → `config[to]` on a node dict, immutably.
+ *
+ * A thin positional wrapper over {@link renameKey} — deliberately delegating
+ * rather than re-implementing, so the shadowed-alias rule #4923 settled has
+ * exactly one definition and a flow node's `config` cannot drift from every
+ * other dict the conversion layer rewrites.
+ */
 export function renameConfigKey(node: Dict, from: string, to: string): Dict | null {
   const config = node.config;
   if (!isDict(config)) return null;
-  if (!(from in config) || config[from] == null) return null;
-  if (config[to] != null) return null; // canonical already wins — nothing to do
-  const nextConfig: Dict = { ...config };
-  nextConfig[to] = nextConfig[from];
-  delete nextConfig[from];
+  const nextConfig = renameKey(config, from, to);
+  if (!nextConfig) return null;
   return { ...node, config: nextConfig };
 }

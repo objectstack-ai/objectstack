@@ -16,6 +16,10 @@ import { CubeRegistry } from './cube-registry.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
+// [#5669] The `where` source-field gate reads the filter tree through the SAME
+// pair the strategies compile it with, so "the field the gate saw" and "the
+// column that reached SQL" cannot be two different things.
+import { normalizeAnalyticsFilterTree, collectFilterLeaves } from './strategies/filter-normalizer.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
 import {
@@ -137,6 +141,87 @@ function missingSourceRelation(err: unknown): string | undefined {
  * single field — such measures pass the source-field gate untouched.
  */
 const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
+
+/**
+ * The `cube.dimensions` / `cube.measures` KEY a member resolves to, mirroring
+ * the strategies' own `lookupMember` — including its deliberate LAST case: a
+ * dotted member that matches no declared key is a synthetic relation traversal
+ * handed to the JOIN machinery, which the source-field gates must not judge
+ * (hence `undefined`, read as "nothing to check" rather than "undeclared bare
+ * column").
+ *
+ * `kind` is which bags to consult, and it is NOT cosmetic — it is the difference
+ * between the two callers' real resolution rules:
+ *
+ * - `'dimension'` — {@link AnalyticsService.assertDimensionFields}, matching
+ *   `NativeSQLStrategy.resolveDimensionSql` / `ObjectQLStrategy.resolveFieldName
+ *   (…, 'dimension')`, which look in `cube.dimensions` only.
+ * - `'any'` — {@link AnalyticsService.assertWhereFields}, matching the FILTER
+ *   member resolution in `NativeSQLStrategy.resolveFieldSql` and
+ *   `ObjectQLStrategy.resolveFieldName(…, 'any')`, which fall through to
+ *   `cube.measures`. Consulting dimensions only would have made the where gate
+ *   reject a query that works on both strategies today: a cube declaring
+ *   `measures.revenue = {sql: 'annual_revenue'}` answers
+ *   `where: {revenue: {$gt: 100}}` as `annual_revenue > ?`, and a
+ *   dimensions-only lookup would have called `revenue` a missing column.
+ *
+ * Extracted from #5520's gate so #5669's second caller reads the tree the same
+ * way — two open-coded copies of `lookupMember` in one file is exactly how
+ * "what the gate sees" and "what reaches SQL" drift apart.
+ */
+function declaredMemberEntry(
+  cube: Cube,
+  member: string,
+  kind: 'dimension' | 'any',
+): { key: string; sql?: unknown } | undefined {
+  const bags: Array<Record<string, { sql?: unknown } | undefined>> =
+    kind === 'dimension'
+      ? [cube.dimensions as Record<string, { sql?: unknown } | undefined>]
+      : [
+          cube.dimensions as Record<string, { sql?: unknown } | undefined>,
+          cube.measures as Record<string, { sql?: unknown } | undefined>,
+        ];
+  // `key` is spread LAST in every arm: it is the bag key this member RESOLVED
+  // to, and a `key` property on the cube entry itself must not shadow it.
+  for (const bag of bags) {
+    if (bag[member]) return { ...bag[member], key: member };
+    if (member.includes('.')) {
+      const [first, ...rest] = member.split('.');
+      const tail = rest.join('.');
+      if (first === cube.name && bag[tail]) return { ...bag[tail], key: tail };
+      if (bag[tail]) return { ...bag[tail], key: tail };
+      const flat = member.replace(/\./g, '_');
+      if (bag[flat]) return { ...bag[flat], key: flat };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The cube KEY a member resolves to (for the rejection's suggestion list) and
+ * the bare COLUMN it compiles to — `source: null` meaning "nothing this gate can
+ * check", which covers every deliberate stand-down at member level: an
+ * expression `sql` (`CASE WHEN …`, `*`), and a dotted relation traversal whose
+ * join target the gate cannot see.
+ *
+ * Shared by the dimension gate (#5520) and the `where` gate (#5669) — see
+ * {@link declaredMemberEntry} for why `kind` differs between them.
+ */
+function resolveMemberSource(
+  cube: Cube,
+  member: string,
+  kind: 'dimension' | 'any',
+): { key: string; source: string | null } {
+  const entry = declaredMemberEntry(cube, member, kind);
+  if (entry) {
+    const source = typeof entry.sql === 'string' ? entry.sql.trim() : '';
+    return { key: entry.key, source: source && BARE_IDENTIFIER.test(source) ? source : null };
+  }
+  // Undeclared. A dotted spelling is the relation traversal above; a bare one IS
+  // the column the strategies will emit.
+  if (member.includes('.')) return { key: member, source: null };
+  return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
+}
 
 /**
  * Configuration for AnalyticsService.
@@ -291,6 +376,12 @@ export interface AnalyticsServiceConfig {
    * measure half, so the identical typo one key over — `dimensions:
    * ['bogus_dim']` — still reached the driver as a `GROUP BY` column and came
    * back as the same 500. One probe, one answer, both member kinds.
+   *
+   * [#5669] …and for the `where` members ({@link AnalyticsService.assertWhereFields}),
+   * the third and last request key that carries a field name. `where:
+   * {bogus_col: 'x'}` compiled straight into `WHERE bogus_col = $1` for exactly
+   * as long as #4437 and #5520 had each closed only their own key. One probe now
+   * answers for all three.
    *
    * Same tiering as {@link isRegisteredObject}: absence means "skip the check"
    * (registry-less hosts, engine doubles, external datasources whose columns
@@ -995,12 +1086,18 @@ export class AnalyticsService implements IAnalyticsService {
    *   widget translators), inject suffix-inferred Metric entries so the
    *   strategies pick the right aggregation function and field.
    *
-   * It is also where the two SOURCE-FIELD gates run, on every path out of this
+   * It is also where the three SOURCE-FIELD gates run, on every path out of this
    * method and always BEFORE the (possibly augmented) cube is registered:
-   * {@link assertMeasureFields} (#4437) and {@link assertDimensionFields}
-   * (#5520). Both answer the same question — does the object actually have the
-   * column this member resolves to — and both must answer it here, because from
-   * the strategy onwards the answer is the driver's `no such column`.
+   * {@link assertMeasureFields} (#4437), {@link assertDimensionFields} (#5520)
+   * and {@link assertWhereFields} (#5669) — one per request key that can carry a
+   * field name. All three answer the same question — does the object actually
+   * have the column this member resolves to — and all three must answer it here,
+   * because from the strategy onwards the answer is the driver's `no such
+   * column`.
+   *
+   * They run in request-key order (measures → dimensions/timeDimensions →
+   * where), so a query that gets several wrong is answered about one at a time,
+   * naming a real mistake either way.
    */
   private ensureCube(query: AnalyticsQuery): void {
     const name = query.cube!;
@@ -1025,6 +1122,11 @@ export class AnalyticsService implements IAnalyticsService {
       // spelling is in there — which is why the suggestion list is computed by
       // subtraction inside the gate rather than echoed verbatim.
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      // [#5669] …and the `where`'s, third and last of the three request keys that
+      // carry a field name. Its members are read from the filter TREE, not from
+      // `cube.dimensions` — which on this path was minted from this very query,
+      // bogus spelling included.
+      this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
       this.cubeRegistry.register(cube);
       // A scalar query — only measures, no grouping (no `dimensions`/
       // `timeDimensions`) — is the first-class "metric over an object" path
@@ -1069,6 +1171,11 @@ export class AnalyticsService implements IAnalyticsService {
       // authored/compiled list IS the vocabulary a caller may name — and the one
       // the rejection suggests.
       this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
+      // [#5669] The `where` gate resolves a filter member through dimensions AND
+      // measures (that is what the strategies do for a filter member), so it is
+      // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
+      // measure must be judged against the same bag the strategy will read.
+      this.assertWhereFields(query, augmented, Object.keys(cube.dimensions));
       this.cubeRegistry.register(augmented);
       this.logger.debug(
         `[Analytics] Augmented cube "${name}" with inferred measures: ${Object.keys(extraMeasures).join(',')}`,
@@ -1078,6 +1185,7 @@ export class AnalyticsService implements IAnalyticsService {
       // authored cube can declare a measure over a field the object dropped.
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
   }
 
@@ -1215,9 +1323,9 @@ export class AnalyticsService implements IAnalyticsService {
    * - `id` / `created_at` / `updated_at` are admitted unconditionally, matching
    *   the data path's `resolveQueryFields`.
    *
-   * Runs after the measure gate on each `ensureCube` path, so a query that gets
-   * both wrong is answered about its measure first — one rejection at a time,
-   * naming a real mistake either way.
+   * Runs after the measure gate and before the `where` gate on each `ensureCube`
+   * path, so a query that gets several wrong is answered about its measure
+   * first — one rejection at a time, naming a real mistake either way.
    */
   private assertDimensionFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
     const probe = this.getObjectFieldNames;
@@ -1236,42 +1344,16 @@ export class AnalyticsService implements IAnalyticsService {
     const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
 
     /**
-     * The `cube.dimensions` KEY a member resolves to, mirroring the strategies'
-     * `lookupMember` — including its deliberate LAST case: a dotted member that
-     * matches no declared key is a synthetic relation traversal handed to the
-     * JOIN machinery, which this gate must not judge (hence `undefined`, read as
-     * "nothing to check" rather than "undeclared bare column").
-     */
-    const declaredKeyOf = (member: string): string | undefined => {
-      const bag = cube.dimensions as Record<string, { sql?: unknown } | undefined>;
-      if (bag[member]) return member;
-      if (member.includes('.')) {
-        const [first, ...rest] = member.split('.');
-        const tail = rest.join('.');
-        if (first === cube.name && bag[tail]) return tail;
-        if (bag[tail]) return tail;
-        const flat = member.replace(/\./g, '_');
-        if (bag[flat]) return flat;
-      }
-      return undefined;
-    };
-
-    /**
      * The `cube.dimensions` key a member resolves to (for the suggestion list)
      * and the column it groups by — `source: null` meaning "nothing to check".
+     *
+     * [#5669] The body moved to the module-level {@link resolveMemberSource},
+     * shared with the `where` gate. `'dimension'` keeps this call site's
+     * resolution exactly as #5520 wrote it: `cube.dimensions` only, matching
+     * `resolveDimensionSql` / `resolveFieldName(…, 'dimension')`.
      */
-    const resolve = (member: string): { key: string; source: string | null } => {
-      const key = declaredKeyOf(member);
-      if (key !== undefined) {
-        const dim = (cube.dimensions as Record<string, { sql?: unknown }>)[key];
-        const source = typeof dim.sql === 'string' ? dim.sql.trim() : '';
-        return { key, source: source && BARE_IDENTIFIER.test(source) ? source : null };
-      }
-      // Undeclared. A dotted spelling is the relation traversal above; a bare one
-      // IS the column the strategies will emit.
-      if (member.includes('.')) return { key: member, source: null };
-      return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
-    };
+    const resolve = (member: string): { key: string; source: string | null } =>
+      resolveMemberSource(cube, member, 'dimension');
 
     // Two passes, for the reason the measure gate has two: on the auto-inference
     // path `cube.dimensions` was minted from this very query, so echoing its keys
@@ -1304,6 +1386,128 @@ export class AnalyticsService implements IAnalyticsService {
       err.object = object;
       err.param = param;
       err.dimension = member;
+      throw err;
+    }
+  }
+
+  /**
+   * [#5669] Reject a `where` member whose source field the backing object does
+   * not have, BEFORE the strategy compiles it into `WHERE`.
+   *
+   * The third and last param of one defect. #4437 gated `measures`, #5520 gated
+   * `dimensions`/`timeDimensions`, and the filter face — the request key that
+   * most often carries a hand-typed field name — had no gate at all:
+   *
+   * ```
+   * POST /analytics/query {"cube":"crm_account","measures":["count"],"where":{"bogus_col":"x"}}
+   * → SELECT COUNT(*) AS "count" FROM "crm_account" WHERE bogus_col = $1
+   * → 500 {"code":"SQLITE_ERROR","message":"Internal server error"}
+   * ```
+   *
+   * Same envelope as its two siblings (`INVALID_FIELD`/400 + `field`/`object`/
+   * `param`), because "the query names a field the object does not have" is ONE
+   * mistake whichever request key carried it, and the DATA route has answered it
+   * that way since #4315/#4254 (`resolveQueryFields`).
+   *
+   * # Where the field names come from: the SQL producer's own reader
+   *
+   * The members are collected through `normalizeAnalyticsFilterTree` +
+   * `collectFilterLeaves` — the SAME pair both strategies call to build the
+   * predicate. This is deliberate and is the whole reason this gate is not a
+   * second filter-tree walker: a hand-rolled walk would have to re-derive
+   * `$and`/`$or`/`$not` recursion, `$`-prefixed operator keys, `$between`
+   * lowering, the nested-relation dot flattening (`{owner: {region: 'NA'}}` →
+   * member `owner.region`) and the #5334 array lowering, and every divergence
+   * would show up as "the field the gate saw" not being "the column that reached
+   * SQL" — in either direction (a phantom rejection, or a hole).
+   * `collectFilterLeaves` discards structure, which is exactly right here:
+   * whether a predicate sits under an `$or` changes nothing about whether its
+   * column exists. (Its doc's warning — never rebuild a predicate from this list
+   * — does not apply; this gate builds nothing.)
+   *
+   * # Three stand-downs at query level, plus the per-member ones
+   *
+   * - No {@link AnalyticsServiceConfig.getObjectFieldNames}, cube `sql` that is
+   *   not a bare object name, or a probe that cannot answer for the object — the
+   *   same three tiers as the measure and dimension gates, for the same reasons.
+   * - A `where` the normalizer REFUSES (an unknown operator, a non-array
+   *   `$and`, an unlowerable filter array) is not judged here: this gate stands
+   *   down and lets the refusal happen where it already does. Those inputs
+   *   already answer `INVALID_FILTER`/400 from the strategy (#5352/#5367's
+   *   geography, not this gate's), and pulling them forward into `ensureCube`
+   *   would newly refuse them on the draft-preview path too, whose
+   *   `matchesWhere` never consults the normalizer at all. A field gate that
+   *   cannot read the tree has nothing to say about it.
+   * - Per member, {@link resolveMemberSource} stands down on an expression `sql`
+   *   and on a dotted relation traversal — for the dimension gate's reasons.
+   *
+   * # Array `where` IS gated, and that is not #5353's territory
+   *
+   * `inferCubeFromQuery` still skips an array `where` when minting the ad-hoc
+   * cube's `dimensions` (the stale `!Array.isArray` guard #5353 records). That
+   * skip is about the cube's dimension VOCABULARY. It says nothing about which
+   * columns reach the driver: since #5334 an array `where` is lowered by
+   * `normalizeAnalyticsFilterTree` and compiles to the identical predicate — a
+   * measured fact, `where: [['bogus_col','=','x']]` and
+   * `where: {bogus_col: 'x'}` both produce `WHERE bogus_col = $1` and hand
+   * `executeAggregate` the same `{bogus_col: 'x'}`. Gating one spelling and not
+   * the other would answer one mistake two ways, which is the split this whole
+   * gate family exists to close. Nothing here changes `inferCubeFromQuery`, so
+   * #5353 is untouched — and because this gate reads leaves rather than
+   * `cube.dimensions`, #5353's fix cannot change its verdicts either.
+   */
+  private assertWhereFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
+    const probe = this.getObjectFieldNames;
+    if (!probe) return;
+    const where = (query as { where?: unknown }).where;
+    if (!where || typeof where !== 'object') return;
+
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    const fieldNames = probe(object);
+    if (!fieldNames || fieldNames.length === 0) return;
+    const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
+
+    /** Every member the compiled predicate will bind against, structure discarded. */
+    let members: string[];
+    try {
+      members = collectFilterLeaves(normalizeAnalyticsFilterTree(query)).map((leaf) => leaf.member);
+    } catch {
+      // A `where` this layer refuses outright — see the stand-down note above.
+      return;
+    }
+    if (members.length === 0) return;
+
+    // Two passes, for the reason the measure and dimension gates have two: on the
+    // auto-inference path `inferCubeFromQuery` mints the `where`'s own top-level
+    // keys into `cube.dimensions`, so echoing that bag verbatim would offer the
+    // caller their own typo back as a valid filter member.
+    const invalid = new Set<string>();
+    for (const member of members) {
+      const { key, source } = resolveMemberSource(cube, member, 'any');
+      if (source && !known.has(source)) invalid.add(key);
+    }
+    if (invalid.size === 0) return;
+    const usable = declaredDimensions.filter((d) => !invalid.has(d));
+
+    for (const member of members) {
+      const { source } = resolveMemberSource(cube, member, 'any');
+      if (!source || known.has(source)) continue;
+
+      const err = new Error(
+        `Filter member '${member}' in 'where' on cube '${cube.name}' constrains field ` +
+          `'${source}', which object '${object}' does not have. ` +
+          `Valid filter members: ${usable.join(', ') || '(none)'}. ` +
+          `Any of the object's OWN fields may also be filtered on without the cube ` +
+          `declaring it, so check the spelling of ` +
+          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
+      ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; member?: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = source;
+      err.object = object;
+      err.param = 'where';
+      err.member = member;
       throw err;
     }
   }
@@ -1374,6 +1578,12 @@ export class AnalyticsService implements IAnalyticsService {
       // Canonical FilterCondition: top-level keys (excluding logical
       // combinators) are field names. We only need them to seed an
       // ad-hoc cube definition for free-form queries.
+      //
+      // The `!Array.isArray` guard predates #5334 and is stale — an array `where`
+      // IS a filter now, and its fields do not get seeded here. That is #5353,
+      // deliberately left alone. It does NOT weaken #5669's `where` gate, which
+      // reads the lowered filter TREE rather than this bag, so both spellings are
+      // judged identically today and #5353's eventual fix cannot change that.
       for (const key of Object.keys(query.where as Record<string, unknown>)) {
         if (key.startsWith('$')) continue;
         const stripped = stripPrefix(key);

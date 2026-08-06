@@ -10,6 +10,7 @@ import { TranslationBundleSchema, TranslationConfigSchema } from './system/trans
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
+import { deepEqualAuthored } from './shared/deep-equal';
 import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
 import { formatUnknownAuthoringKey } from './data/authoring-key-lint';
@@ -1446,34 +1447,6 @@ const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof Obj
   .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
 
 /**
- * Structural deep equality for the "same value composes fine" rule (#5005).
- *
- * Deliberately strict and deliberately small: it decides only whether two
- * authored declarations are the SAME, never how to reconcile two different
- * ones. Keys explicitly set to `undefined` are treated as absent, matching how
- * the composer reads a declaration in the first place. Callables compare by
- * reference (`Object.is`) — two distinct closures are two distinct
- * declarations, which is the honest answer for a config value.
- * @internal
- */
-function deepEqualDeclarations(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-
-  if (Array.isArray(a) && Array.isArray(b)) {
-    return a.length === b.length && a.every((item, i) => deepEqualDeclarations(item, b[i]));
-  }
-
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const leftKeys = Object.keys(left).filter((k) => left[k] !== undefined);
-  const rightKeys = Object.keys(right).filter((k) => right[k] !== undefined);
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((k) => deepEqualDeclarations(left[k], right[k]));
-}
-
-/**
  * Name a stack the way its author would recognise it (#5005).
  *
  * A composition error is only actionable if it says WHICH stacks disagree, and
@@ -1512,7 +1485,7 @@ function composeSingleValue(
       continue;
     }
     const held = (stacks[holder] as Record<string, unknown>)[key];
-    if (deepEqualDeclarations(held, value)) continue;
+    if (deepEqualAuthored(held, value)) continue;
 
     throw new Error(
       `composeStacks conflict: top-level key '${key}' is declared with different values by ` +

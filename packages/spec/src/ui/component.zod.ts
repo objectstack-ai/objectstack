@@ -76,10 +76,13 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // gate, not to close schemas nobody calls — filed as #5068, which also
 // records the two constraints that stop it being a drive-by: `type` is an open
 // union (unregistered types like `record:line_items` are authored in the wild),
-// and real pages already author shapes these schemas do not declare
-// (`record:details` `sections[].fields[]` / `hideFields[]`, the record picker's
-// `labelField` — see `packages/lint/src/validate-page-field-bindings.ts`, which
-// has documented the untyped bag all along).
+// and real pages already author shapes these schemas do not declare (the record
+// picker's `labelField` — see `packages/lint/src/validate-page-field-bindings.ts`,
+// which has documented the untyped bag all along). `record:details`
+// `sections[]` / `hideFields[]` WAS the largest such divergence and is now
+// closed: #5611 re-declared `sections` in the object form every page actually
+// authors and declared `hideFields`, so wiring the gate no longer turns three
+// showcase pages and the `sys_user` platform page into hard parse errors.
 //
 // When #5068 lands, this file becomes `authorable` and the ratchet applies. The
 // verdict is pinned in `component.test.ts` and in the `ui/` tables of
@@ -157,8 +160,56 @@ export const PageCardProps = z.object({
 export const RecordDetailsProps = z.object({
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
   layout: z.enum(['auto', 'custom']).default('auto').describe('Layout mode: auto uses object highlightFields, custom uses explicit sections'),
-  sections: z.array(z.string()).optional().describe('Section IDs to show (required when layout is "custom")'),
+  /**
+   * Field groups rendered as the detail body, IN ORDER.
+   *
+   * Declared as the object form because that is the only form anything
+   * delivers or authors (#5611). Until 17.x this key was `z.array(z.string())`
+   * — "section IDs" — which no page in this repo, and no read path in
+   * `objectui`, has ever used: `RecordDetailsRenderer` maps every entry as an
+   * object (`s.name` / `s.label` / `s.fields`) with no string branch anywhere,
+   * `@object-ui/types`' `RecordDetailsComponentProps` mirror declares the
+   * object form, and the Studio block designer can only author
+   * `{label, columns, fields}`. The ID-list spelling was a declaration with no
+   * producer and no consumer, so it is gone rather than unioned in: one shape,
+   * not two de-facto contracts (Prime Directive #12).
+   */
+  sections: z.array(z.object({
+    /**
+     * Stable section identifier, snake_case. This is the i18n anchor: the
+     * heading resolves through `objects.<object>._sections.<name>.label`, so a
+     * section WITHOUT a name renders its authored `label` in every locale.
+     * `packages/lint`'s `translation-section-name-missing` rule exists to tell
+     * authors to add it, which is why it is declared here — a key one rule
+     * demands must not be a key the schema rejects.
+     */
+    name: z.string().optional().describe('Stable section identifier for i18n lookup (snake_case) — resolves `objects.<object>._sections.<name>.label`; a nameless section renders its authored label in every locale'),
+    /** Heading text. Omit for an untitled section, which renders borderless. */
+    label: I18nLabelSchema.optional().describe('Section heading (omit for an untitled, borderless section)'),
+    /**
+     * Field-grid width for THIS section; falls back to the renderer's own
+     * derivation when omitted.
+     *
+     * An int range rather than `z.union([z.literal(1), …])` — same accepted set
+     * (1-4), but the docs generator renders numeric literals as QUOTED strings
+     * (`'1' | '2'`, see `FormSectionSchema.columns` in `references/ui/view.mdx`),
+     * which would tell an author to write `columns: '2'` where this key requires
+     * `2`. Shipping a reference that misdocuments the key is the exact harm
+     * #5611 is fixing, so the shape that documents itself truthfully wins.
+     */
+    columns: z.number().int().min(1).max(4).optional().describe('Field-grid columns for this section (1-4). Omitted → the renderer derives the width.'),
+    /** Field names shown in this section, in order. */
+    fields: z.array(z.string()).describe('Field names rendered in this section, in order'),
+  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
+  /**
+   * Field names to omit from the body, applied to both `fields` and every
+   * section's `fields`. Authored by the published `sys_user` platform page and
+   * read by `RecordDetailsRenderer`; it was simply never declared, so the
+   * (unvalidated) props bag carried it. Declared now so the enforcement to come
+   * does not silently strip a live platform page's hidden-field list.
+   */
+  hideFields: z.array(z.string()).optional().describe('Field names to omit from the body — applied to `fields` and to every section\'s `fields` (used to dedupe fields already shown in `record:highlights` or as the page title)'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });

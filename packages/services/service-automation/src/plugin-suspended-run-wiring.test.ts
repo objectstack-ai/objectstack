@@ -51,12 +51,31 @@ function recordingManifest() {
     return { registered, register(m: any) { registered.push(m); } };
 }
 
-type LogLine = { level: string; msg: string };
+type LogLine = { level: string; msg: string; meta?: Record<string, any> };
 
+/**
+ * #5661 — the sink now keeps `meta` as well as the message.
+ *
+ * It used to record `String(msg)` only, which was enough while every cause was
+ * interpolated INTO the message. Once the probe seam moved its cause to the
+ * logger's structured argument, a message-only sink could no longer tell "the
+ * cause was reported in meta" from "the cause was lost" — both read as an
+ * absent match. The two levels take it in different slots, per the `Logger`
+ * contract: `warn(message, meta?)` and `error(message, error?, meta?)`.
+ */
 function capturingLogger(sink: LogLine[]): any {
-    const log = (level: string) => (msg: any) => sink.push({ level, msg: String(msg) });
+    const metaLevel = (level: string) => (msg: any, meta?: Record<string, any>) =>
+        sink.push({ level, msg: String(msg), meta });
+    const errorLike = (level: string) =>
+        (msg: any, errorOrMeta?: unknown, meta?: Record<string, any>) =>
+            sink.push({
+                level,
+                msg: String(msg),
+                meta: meta ?? (errorOrMeta instanceof Error ? undefined : (errorOrMeta as any)),
+            });
     return {
-        info: log('info'), warn: log('warn'), error: log('error'), debug: log('debug'),
+        info: metaLevel('info'), warn: metaLevel('warn'),
+        error: errorLike('error'), debug: metaLevel('debug'),
         child() { return capturingLogger(sink); },
     };
 }
@@ -151,6 +170,16 @@ async function runLifecycle(opts: {
         manifest, logs,
         engine: services.get('automation') as AutomationEngine,
         errors: () => logs.filter(l => l.level === 'error').map(l => l.msg).join('\n'),
+        /**
+         * One `error` record, picked by a prefix of its message (#5661).
+         *
+         * Needed because an unreadable table trips TWO seams — this plugin's
+         * boot probe and, further down, `wait-node.ts`'s own `[wait] … re-arm
+         * ABORTED` record, which still interpolates its cause. Asserting over
+         * the joined text cannot tell which seam a match came from.
+         */
+        errorRecord: (prefix: string) =>
+            logs.find(l => l.level === 'error' && l.msg.startsWith(prefix)),
         registeredObjects: () =>
             manifest.registered.flatMap(m => m.objects ?? []).map((o: any) => o.name),
     };
@@ -207,7 +236,15 @@ describe('durable suspended-run wiring (#4420)', () => {
         const h = await runLifecycle({ manifestPhase: 'init', data });
 
         expect(h.errors()).toMatch(/could not be read at startup/);
-        expect(h.errors()).toMatch(/no such table: sys_automation_run/);
+        // #5661 — the driver's text is still reported, but through the logger's
+        // structured slot rather than spliced into the message. Asserted in BOTH
+        // directions on the probe's OWN record: a message-only assertion would
+        // keep passing if the cause were dropped entirely.
+        const probe = h.errorRecord('[Automation] sys_automation_run could not be read at startup');
+        expect(probe, 'the probe reported').toBeDefined();
+        expect(probe!.msg).not.toContain('\n');
+        expect(probe!.msg).not.toMatch(/no such table: sys_automation_run/);
+        expect(probe!.meta?.error).toBe('no such table: sys_automation_run');
         expect((h.engine as any).store, 'store still attached').toBeTruthy();
     });
 

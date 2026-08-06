@@ -64,7 +64,7 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
     ['url', '/task/1', '`actionUrl`'],
     ['source', { object: 'showcase_task', id: '1' }, '`sourceObject` + `sourceId`'],
   ] as ReadonlyArray<[string, unknown, string]>)(
-    'names the canonical key AND the dead-twin case for the retired `%s` alias',
+    'names the canonical key AND the disagreeing-pair case for the retired `%s` alias',
     (key, value, canonical) => {
       const message = unknownKeyMessage(NotifyConfigSchema, {
         recipients: ['u1'], title: 'hi', [key]: value,
@@ -72,12 +72,15 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       expect(message).toContain(canonical);
       // Both readings must be served: the ADR-0087 conversion rewrites this
       // key at load, so a config that still carries it at PARSE time also
-      // carries the canonical key — `renameConfigKey` leaves a shadowed alias
-      // in place rather than clobbering the winner. Without this half the
-      // prescription ("rename it") is wrong for the population that actually
-      // reaches this error.
+      // carries the canonical key — and since #4923 it carries one holding a
+      // DIFFERENT value, because an identical twin is deleted by the
+      // conversion. Without this half the prescription ("rename it") is wrong
+      // for the population that actually reaches this error.
       expect(message).toContain('flow-node-notify-config-aliases');
-      expect(message).toMatch(/delete/i);
+      expect(message).toMatch(/delete|reconcile/i);
+      // The reconciliation reading has to name the OTHER key too, or the
+      // author cannot see which two spellings disagree.
+      expect(message).toMatch(/DIFFERENT|differ/i);
     },
   );
 

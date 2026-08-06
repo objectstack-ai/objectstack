@@ -84,11 +84,23 @@ const BUILTIN_NODE_CONFIG_HISTORY =
  * The two ADR-0087 D2 aliases every CRUD node shares.
  *
  * Both are retired SPELLINGS rather than typos, and both are rewritten at load
- * (`flow-node-crud-object-alias`, `flow-node-crud-filter-alias`), so a config
- * still carrying one at parse time carries the canonical key too —
- * `renameConfigKey` leaves a shadowed alias in place instead of clobbering the
- * winner. Hence each prescription answers both readings: the rename, and
- * "delete the dead twin".
+ * (`flow-node-crud-object-alias`, `flow-node-crud-filter-alias`). So each
+ * prescription has to answer two different readers, and since #4923 the split
+ * between them is exact:
+ *
+ *  - whoever **parses this contract directly** (never went through the load
+ *    path) wrote the retired spelling on its own → the fix is the rename;
+ *  - whoever **came through the load path** still has the alias only because
+ *    the conversion refused to resolve it, and it refuses in exactly one
+ *    situation: the canonical key is ALSO present and carries a DIFFERENT
+ *    value. An identical twin is deleted by the conversion now, so it can no
+ *    longer reach this parse.
+ *
+ * That second reader is why the prescription names BOTH keys and asks for a
+ * decision rather than a deletion. Telling them "the canonical one already won,
+ * delete yours" — true while a shadowed alias was left in place — would now be
+ * advice to discard the one value the platform deliberately declined to discard
+ * on their behalf.
  *
  * `object` also earns its entry on distance alone: `object` → `objectName` is
  * four edits against a threshold of two, so the suggester would say nothing at
@@ -97,13 +109,17 @@ const BUILTIN_NODE_CONFIG_HISTORY =
 const CRUD_ALIAS_GUIDANCE = {
   object:
     'The object slot is `objectName`. `object` was the last tenant of the `readAliasedConfig` executor shim; it '
-    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias` (#3796), which rewrites it at load — '
-    + 'so a surviving `object` means `objectName` already won and this key is dead. Delete it.',
+    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias` (#3796), which rewrites it at load. '
+    + 'If `objectName` is also present, this node names two different objects and the conversion left both keys '
+    + 'alone rather than picking for you (#4923) — decide which object this node acts on, put it on `objectName`, '
+    + 'and delete `object`.',
   filters:
     'The match map is `filter` (singular). `filters` was a consumer-side executor fallback that graduated into the '
     + 'ADR-0087 D2 conversion `flow-node-crud-filter-alias`, which rewrites it at load; delete it once `filter` '
-    + 'carries the pairs. Beware the half-migrated shape: an empty `filter` next to a populated `filters` is what '
-    + 'made this alias dangerous enough to declare (#3810 — a match-everything write).',
+    + 'carries the pairs. If `filter` is also present, the two carry DIFFERENT match maps and the conversion kept '
+    + 'both rather than choosing (#4923) — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
+    + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare (#3810 — a '
+    + 'match-everything write).',
 } as const;
 
 /**
@@ -457,7 +473,9 @@ export const MapConfigSchema = lazySchema(() => strictObject({
     flow:
       'The per-item subflow is named by `flowName`. `flow` was an undeclared executor fallback no schema or form '
       + 'described; it graduated into the ADR-0087 D2 conversion `flow-node-map-flow-alias` (#4045), which rewrites '
-      + 'it at load — so a surviving `flow` means `flowName` already won and this key is dead. Delete it.',
+      + 'it at load. If `flowName` is also present, the two name DIFFERENT subflows and the conversion kept both '
+      + 'rather than picking one to run per item (#4923) — decide which flow this is, put it on `flowName`, and '
+      + 'delete `flow`.',
   },
 }, {
   /** The collection — a `{token}` template / bare variable name, or an inline array. */

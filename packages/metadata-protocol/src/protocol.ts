@@ -6889,6 +6889,18 @@ export class ObjectStackProtocolImplementation implements
      * case. Safe to call when `environmentId` is undefined (control-
      * plane bootstrap) — the lock check is only meaningful in tenant
      * scope and the caller is expected to also gate on `environmentId`.
+     *
+     * `'none'` is a VERDICT, not a default: both callers turn it into
+     * "allow". So it is returned only when the absence of a lock was
+     * actually established. When the overlay row cannot be read this
+     * method THROWS (#5706) rather than answering "unlocked" — see the
+     * `catch` below and {@link rethrowUnlessMetadataStoreUnprovisioned}.
+     *
+     * @throws {@link metadataStoreUnavailableError} — 503 /
+     *         `SERVICE_UNAVAILABLE`, when the lock state could not be
+     *         determined. The one non-throwing failure is an
+     *         unprovisioned `sys_metadata`, where "no overlay row" is
+     *         the truth rather than an unknown.
      */
     private async getEffectiveLock(
         type: string,
@@ -6925,8 +6937,45 @@ export class ObjectStackProtocolImplementation implements
                     return { lock: p.lock, lockReason: p.lockReason, lockSource: 'overlay' };
                 }
             }
-        } catch {
-            // DB unavailable — fall through to 'none'.
+        } catch (error) {
+            // #5706 — A LOCK GATE MUST NOT FAIL OPEN. This `catch` used to
+            // swallow every read failure and fall through to `'none'`, and
+            // `'none'` is not a neutral value here: it is the verdict "the
+            // author declared no protection", which `evaluateLockForWrite` /
+            // `evaluateLockForDelete` turn straight into "allow". So an
+            // unreadable `sys_metadata` silently converted a write that had to
+            // be refused into a write that was performed — measured on
+            // `origin/main`: with the overlay row declaring `_lock:
+            // 'no-overlay'` and only the read above failing, `saveMetaItem`
+            // returned `success: true` after an `update` on `sys_metadata`
+            // (and `deleteMetaItem` the same, on `_lock: 'no-delete'`).
+            //
+            // Note what that also costs the audit trail: the allowed path
+            // writes its ordinary `outcome: 'allowed'` row, so nothing
+            // afterwards records that this write should have been denied.
+            //
+            // The window is not "the metadata store is down" — a fully dead
+            // store fails the write too. It is "the READ failed and the write
+            // still succeeded": a transient error, a single timed-out query, a
+            // read-replica fault, partial pool exhaustion. Narrow, but the
+            // shape is wrong at any width, and it is the inverse of ADR-0049's
+            // fail-closed direction.
+            //
+            // The discrimination is the same one #5532 / PR #5705 installed for
+            // the overlay READS in this file, reused verbatim rather than
+            // reinvented: an unprovisioned `sys_metadata` genuinely has no
+            // overlay row, so `'none'` IS the truth and first boot must not
+            // explode; every other error is an outage and becomes a 503, whose
+            // `cause` carries the driver error. ADR-0010 §3.3 is the decision
+            // this defends; ADR-0110 D3 is the rule it was breaking — a miss
+            // and an outage are different facts, and here reading one as the
+            // other disarmed a protection gate.
+            //
+            // Consequence, deliberate and wire-visible: `save` / `publish` /
+            // `rollback` / `delete` now fail with 503 when the lock state
+            // cannot be read, instead of proceeding as if unlocked. Refusing
+            // one uncertain write beats performing one that had to be refused.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
         return { lock: 'none', lockReason: undefined, lockSource: undefined };
     }
