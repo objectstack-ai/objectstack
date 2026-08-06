@@ -399,6 +399,24 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # ADR-0122 type-alias convention gate (#5551). `packages/spec` spelled the
+      # same idea two ways for its whole life — 1384 bare aliases meaning the
+      # PARSED state, 86 meaning the AUTHOR state — and three first-hand sources
+      # each called the 8-file minority "the house convention". ADR-0122 settles
+      # it (bare = author state, `XParsed` = parsed state) and lands phase 1
+      # additively: an `XParsed` wherever the parsed state is a distinct type, so
+      # the major-window flip of the bare names has a migration target everywhere
+      # it changes meaning. This gate is what stops that coverage from decaying —
+      # a new bare `z.infer` alias must either declare its `XParsed` or be pinned
+      # isomorphic in `packages/spec/src/type-alias-convention.pin.test.ts`, where
+      # tsc proves the exemption rather than a comment asserting it. Static text
+      # scan, no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while every alias is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family).
+      - name: Spec type-alias convention gate (ADR-0122)
+        run: pnpm check:spec-parsed-alias
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest

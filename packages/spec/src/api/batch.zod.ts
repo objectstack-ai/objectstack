@@ -98,6 +98,8 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
 }));
 
 export type BatchOptions = z.infer<typeof BatchOptionsSchema>;
+/** Post-parse shape of {@link BatchOptions} — defaults applied, transforms run (ADR-0122). */
+export type BatchOptionsParsed = z.infer<typeof BatchOptionsSchema>;
 
 /**
  * Batch Update Request Schema
@@ -203,6 +205,8 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
 }));
 
 export type BatchOperationResult = z.infer<typeof BatchOperationResultSchema>;
+/** Post-parse shape of {@link BatchOperationResult} — defaults applied, transforms run (ADR-0122). */
+export type BatchOperationResultParsed = z.infer<typeof BatchOperationResultSchema>;
 
 /**
  * Batch Update Response Schema
@@ -254,6 +258,8 @@ export const BatchUpdateResponseSchema = lazySchema(() => BaseResponseSchema.ext
 }));
 
 export type BatchUpdateResponse = z.infer<typeof BatchUpdateResponseSchema>;
+/** Post-parse shape of {@link BatchUpdateResponse} — defaults applied, transforms run (ADR-0122). */
+export type BatchUpdateResponseParsed = z.infer<typeof BatchUpdateResponseSchema>;
 
 // ==========================================
 // Batch Delete Schemas
@@ -280,6 +286,8 @@ export const DeleteManyRequestSchema = lazySchema(() => z.object({
 }));
 
 export type DeleteManyRequest = z.infer<typeof DeleteManyRequestSchema>;
+/** Post-parse shape of {@link DeleteManyRequest} — defaults applied, transforms run (ADR-0122). */
+export type DeleteManyRequestParsed = z.infer<typeof DeleteManyRequestSchema>;
 
 // ==========================================
 // API Contract Exports
@@ -321,6 +329,8 @@ export const BatchConfigSchema = lazySchema(() => z.object({
 }).passthrough()); // Allow additional properties
 
 export type BatchConfig = z.infer<typeof BatchConfigSchema>;
+/** Post-parse shape of {@link BatchConfig} — defaults applied, transforms run (ADR-0122). */
+export type BatchConfigParsed = z.infer<typeof BatchConfigSchema>;
 
 // ==========================================
 // Cross-Object Transactional Batch (issue #1604)

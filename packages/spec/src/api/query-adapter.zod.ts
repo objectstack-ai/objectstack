@@ -106,6 +106,8 @@ export const RestQueryAdapterSchema = lazySchema(() => z.object({
 }));
 
 export type RestQueryAdapter = z.infer<typeof RestQueryAdapterSchema>;
+/** Post-parse shape of {@link RestQueryAdapter} — defaults applied, transforms run (ADR-0122). */
+export type RestQueryAdapterParsed = z.infer<typeof RestQueryAdapterSchema>;
 export type RestQueryAdapterInput = z.input<typeof RestQueryAdapterSchema>;
 
 // ==========================================
@@ -149,6 +151,8 @@ export const ODataQueryAdapterSchema = lazySchema(() => z.object({
 }));
 
 export type ODataQueryAdapter = z.infer<typeof ODataQueryAdapterSchema>;
+/** Post-parse shape of {@link ODataQueryAdapter} — defaults applied, transforms run (ADR-0122). */
+export type ODataQueryAdapterParsed = z.infer<typeof ODataQueryAdapterSchema>;
 export type ODataQueryAdapterInput = z.input<typeof ODataQueryAdapterSchema>;
 
 // ==========================================
@@ -174,4 +178,6 @@ export const QueryAdapterConfigSchema = lazySchema(() => z.object({
 }));
 
 export type QueryAdapterConfig = z.infer<typeof QueryAdapterConfigSchema>;
+/** Post-parse shape of {@link QueryAdapterConfig} — defaults applied, transforms run (ADR-0122). */
+export type QueryAdapterConfigParsed = z.infer<typeof QueryAdapterConfigSchema>;
 export type QueryAdapterConfigInput = z.input<typeof QueryAdapterConfigSchema>;

@@ -163,3 +163,5 @@ export const MongoDriverSpec = {
  * Derived Types
  */
 export type MongoConfig = z.infer<typeof MongoConfigSchema>;
+/** Post-parse shape of {@link MongoConfig} — defaults applied, transforms run (ADR-0122). */
+export type MongoConfigParsed = z.infer<typeof MongoConfigSchema>;

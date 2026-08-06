@@ -223,6 +223,8 @@ export const ScriptBodySchema = z.object({
   memoryMb: z.number().int().positive().max(256).optional().describe('Per-invocation memory cap (MB)'),
 }, { error: scriptBodyUnknownKeyError }).strict().describe('L2 sandboxed JS body — runs inside an isolated VM with declared capabilities');
 export type ScriptBody = z.infer<typeof ScriptBodySchema>;
+/** Post-parse shape of {@link ScriptBody} — defaults applied, transforms run (ADR-0122). */
+export type ScriptBodyParsed = z.infer<typeof ScriptBodySchema>;
 
 /**
  * Hook / Action body — discriminated by `language`.
@@ -242,3 +244,5 @@ export const HookBodySchema = z.discriminatedUnion('language', [
   ScriptBodySchema,
 ]).describe('Hook/Action body — expression (L1) or sandboxed JS (L2)');
 export type HookBody = z.infer<typeof HookBodySchema>;
+/** Post-parse shape of {@link HookBody} — defaults applied, transforms run (ADR-0122). */
+export type HookBodyParsed = z.infer<typeof HookBodySchema>;

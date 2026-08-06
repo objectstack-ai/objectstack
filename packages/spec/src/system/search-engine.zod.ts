@@ -43,6 +43,8 @@ export const SearchIndexConfigSchema = lazySchema(() => z.object({
 }).describe('Search index definition mapping an ObjectQL object to a search engine index'));
 
 export type SearchIndexConfig = z.infer<typeof SearchIndexConfigSchema>;
+/** Post-parse shape of {@link SearchIndexConfig} — defaults applied, transforms run (ADR-0122). */
+export type SearchIndexConfigParsed = z.infer<typeof SearchIndexConfigSchema>;
 
 export const FacetConfigSchema = lazySchema(() => z.object({
   field: z.string().describe('Field name to generate facets from'),
@@ -51,6 +53,8 @@ export const FacetConfigSchema = lazySchema(() => z.object({
 }).describe('Faceted search configuration for a single field'));
 
 export type FacetConfig = z.infer<typeof FacetConfigSchema>;
+/** Post-parse shape of {@link FacetConfig} — defaults applied, transforms run (ADR-0122). */
+export type FacetConfigParsed = z.infer<typeof FacetConfigSchema>;
 
 export const SearchConfigSchema = lazySchema(() => z.object({
   provider: SearchProviderSchema.describe('Search engine backend provider'),
@@ -63,3 +67,5 @@ export const SearchConfigSchema = lazySchema(() => z.object({
 }).describe('Top-level full-text search engine configuration'));
 
 export type SearchConfig = z.infer<typeof SearchConfigSchema>;
+/** Post-parse shape of {@link SearchConfig} — defaults applied, transforms run (ADR-0122). */
+export type SearchConfigParsed = z.infer<typeof SearchConfigSchema>;

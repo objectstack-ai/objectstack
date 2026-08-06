@@ -159,3 +159,5 @@ export const InvitationSchema = lazySchema(() => z.object({
 }));
 
 export type Invitation = z.infer<typeof InvitationSchema>;
+/** Post-parse shape of {@link Invitation} — defaults applied, transforms run (ADR-0122). */
+export type InvitationParsed = z.infer<typeof InvitationSchema>;

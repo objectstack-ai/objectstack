@@ -61,6 +61,8 @@ export const AppManifestSchema = lazySchema(() => z.object({
 }).describe('App manifest for marketplace installation'));
 
 export type AppManifest = z.infer<typeof AppManifestSchema>;
+/** Post-parse shape of {@link AppManifest} — defaults applied, transforms run (ADR-0122). */
+export type AppManifestParsed = z.infer<typeof AppManifestSchema>;
 
 // ==========================================================================
 // 2. Compatibility Check
@@ -90,6 +92,8 @@ export const AppCompatibilityCheckSchema = lazySchema(() => z.object({
 }).describe('App compatibility check result'));
 
 export type AppCompatibilityCheck = z.infer<typeof AppCompatibilityCheckSchema>;
+/** Post-parse shape of {@link AppCompatibilityCheck} — defaults applied, transforms run (ADR-0122). */
+export type AppCompatibilityCheckParsed = z.infer<typeof AppCompatibilityCheckSchema>;
 
 // ==========================================================================
 // 3. Install Request & Result
@@ -113,6 +117,8 @@ export const AppInstallRequestSchema = lazySchema(() => z.object({
 }).describe('App install request'));
 
 export type AppInstallRequest = z.infer<typeof AppInstallRequestSchema>;
+/** Post-parse shape of {@link AppInstallRequest} — defaults applied, transforms run (ADR-0122). */
+export type AppInstallRequestParsed = z.infer<typeof AppInstallRequestSchema>;
 
 /**
  * App Install Result.
@@ -144,3 +150,5 @@ export const AppInstallResultSchema = lazySchema(() => z.object({
 }).describe('App install result'));
 
 export type AppInstallResult = z.infer<typeof AppInstallResultSchema>;
+/** Post-parse shape of {@link AppInstallResult} — defaults applied, transforms run (ADR-0122). */
+export type AppInstallResultParsed = z.infer<typeof AppInstallResultSchema>;

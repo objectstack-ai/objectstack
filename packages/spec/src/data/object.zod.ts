@@ -901,6 +901,8 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectFieldGroup = z.infer<typeof ObjectFieldGroupSchema>;
+/** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
+export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
 export type ObjectFieldGroupInput = z.input<typeof ObjectFieldGroupSchema>;
 
 /**
@@ -987,6 +989,8 @@ export const ObjectExternalBindingSchema = strictObject({
 }).describe('External datasource binding (ADR-0015)');
 
 export type ObjectExternalBinding = z.infer<typeof ObjectExternalBindingSchema>;
+/** Post-parse shape of {@link ObjectExternalBinding} — defaults applied, transforms run (ADR-0122). */
+export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSchema>;
 
 /**
  * Object form of a `userActions.edit` / `userActions.delete` override —
@@ -1022,6 +1026,8 @@ export const RowCrudActionOverrideSchema = z.object({
   ),
 }).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
 export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
+/** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
+export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
 export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
 
 /**
@@ -2166,11 +2172,19 @@ export const ObjectSchema = lazySchema(() => {
 });
 
 export type ServiceObject = z.infer<typeof ObjectSchemaBase>;
+/** Post-parse shape of {@link ServiceObject} — defaults applied, transforms run (ADR-0122). */
+export type ServiceObjectParsed = z.infer<typeof ObjectSchemaBase>;
 export type ServiceObjectInput = z.input<typeof ObjectSchemaBase>;
 export type ObjectCapabilities = z.infer<typeof ObjectCapabilities>;
+/** Post-parse shape of {@link ObjectCapabilities} — defaults applied, transforms run (ADR-0122). */
+export type ObjectCapabilitiesParsed = z.infer<typeof ObjectCapabilities>;
 export type ObjectIndex = z.infer<typeof IndexSchema>;
+/** Post-parse shape of {@link ObjectIndex} — defaults applied, transforms run (ADR-0122). */
+export type ObjectIndexParsed = z.infer<typeof IndexSchema>;
 export type TenancyConfig = z.infer<typeof TenancyConfigSchema>;
 export type ObjectAccessConfig = z.infer<typeof ObjectAccessConfigSchema>;
+/** Post-parse shape of {@link ObjectAccessConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectAccessConfigParsed = z.infer<typeof ObjectAccessConfigSchema>;
 export type LifecycleClass = z.infer<typeof LifecycleClassSchema>;
 export type Lifecycle = z.infer<typeof LifecycleSchema>;
 
@@ -2404,6 +2418,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectExtension = z.infer<typeof ObjectExtensionSchema>;
+/** Post-parse shape of {@link ObjectExtension} — defaults applied, transforms run (ADR-0122). */
+export type ObjectExtensionParsed = z.infer<typeof ObjectExtensionSchema>;
 /** Authoring input for {@link ObjectExtension} — defaulted fields are optional. */
 export type ObjectExtensionInput = z.input<typeof ObjectExtensionSchema>;
 

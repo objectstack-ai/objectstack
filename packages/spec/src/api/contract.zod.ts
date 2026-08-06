@@ -317,18 +317,42 @@ export const QueryOptimizationConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+/** Post-parse shape of {@link ApiError} — defaults applied, transforms run (ADR-0122). */
+export type ApiErrorParsed = z.infer<typeof ApiErrorSchema>;
 export type BaseResponse = z.infer<typeof BaseResponseSchema>;
+/** Post-parse shape of {@link BaseResponse} — defaults applied, transforms run (ADR-0122). */
+export type BaseResponseParsed = z.infer<typeof BaseResponseSchema>;
 export type RecordData = z.infer<typeof RecordDataSchema>;
 export type CreateRequest = z.infer<typeof CreateRequestSchema>;
 export type UpdateRequest = z.infer<typeof UpdateRequestSchema>;
 export type BulkRequest = z.infer<typeof BulkRequestSchema>;
+/** Post-parse shape of {@link BulkRequest} — defaults applied, transforms run (ADR-0122). */
+export type BulkRequestParsed = z.infer<typeof BulkRequestSchema>;
 export type ExportRequest = z.infer<typeof ExportRequestSchema>;
+/** Post-parse shape of {@link ExportRequest} — defaults applied, transforms run (ADR-0122). */
+export type ExportRequestParsed = z.infer<typeof ExportRequestSchema>;
 export type SingleRecordResponse = z.infer<typeof SingleRecordResponseSchema>;
+/** Post-parse shape of {@link SingleRecordResponse} — defaults applied, transforms run (ADR-0122). */
+export type SingleRecordResponseParsed = z.infer<typeof SingleRecordResponseSchema>;
 export type ListRecordResponse = z.infer<typeof ListRecordResponseSchema>;
+/** Post-parse shape of {@link ListRecordResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListRecordResponseParsed = z.infer<typeof ListRecordResponseSchema>;
 export type IdRequest = z.infer<typeof IdRequestSchema>;
 export type ModificationResult = z.infer<typeof ModificationResultSchema>;
+/** Post-parse shape of {@link ModificationResult} — defaults applied, transforms run (ADR-0122). */
+export type ModificationResultParsed = z.infer<typeof ModificationResultSchema>;
 export type BulkResponse = z.infer<typeof BulkResponseSchema>;
+/** Post-parse shape of {@link BulkResponse} — defaults applied, transforms run (ADR-0122). */
+export type BulkResponseParsed = z.infer<typeof BulkResponseSchema>;
 export type DeleteResponse = z.infer<typeof DeleteResponseSchema>;
+/** Post-parse shape of {@link DeleteResponse} — defaults applied, transforms run (ADR-0122). */
+export type DeleteResponseParsed = z.infer<typeof DeleteResponseSchema>;
 export type DataLoaderConfig = z.infer<typeof DataLoaderConfigSchema>;
+/** Post-parse shape of {@link DataLoaderConfig} — defaults applied, transforms run (ADR-0122). */
+export type DataLoaderConfigParsed = z.infer<typeof DataLoaderConfigSchema>;
 export type BatchLoadingStrategy = z.infer<typeof BatchLoadingStrategySchema>;
+/** Post-parse shape of {@link BatchLoadingStrategy} — defaults applied, transforms run (ADR-0122). */
+export type BatchLoadingStrategyParsed = z.infer<typeof BatchLoadingStrategySchema>;
 export type QueryOptimizationConfig = z.infer<typeof QueryOptimizationConfigSchema>;
+/** Post-parse shape of {@link QueryOptimizationConfig} — defaults applied, transforms run (ADR-0122). */
+export type QueryOptimizationConfigParsed = z.infer<typeof QueryOptimizationConfigSchema>;

@@ -176,6 +176,8 @@ export const ORSetElementSchema = lazySchema(() => z.object({
 }));
 
 export type ORSetElement = z.infer<typeof ORSetElementSchema>;
+/** Post-parse shape of {@link ORSetElement} — defaults applied, transforms run (ADR-0122). */
+export type ORSetElementParsed = z.infer<typeof ORSetElementSchema>;
 
 /**
  * OR-Set Schema
@@ -187,6 +189,8 @@ export const ORSetSchema = lazySchema(() => z.object({
 }));
 
 export type ORSet = z.infer<typeof ORSetSchema>;
+/** Post-parse shape of {@link ORSet} — defaults applied, transforms run (ADR-0122). */
+export type ORSetParsed = z.infer<typeof ORSetSchema>;
 
 /**
  * Text CRDT Operation Schema
@@ -232,6 +236,8 @@ export const CRDTStateSchema = lazySchema(() => z.discriminatedUnion('type', [
 ]));
 
 export type CRDTState = z.infer<typeof CRDTStateSchema>;
+/** Post-parse shape of {@link CRDTState} — defaults applied, transforms run (ADR-0122). */
+export type CRDTStateParsed = z.infer<typeof CRDTStateSchema>;
 
 /**
  * CRDT Merge Schema
@@ -247,6 +253,8 @@ export const CRDTMergeResultSchema = lazySchema(() => z.object({
 }));
 
 export type CRDTMergeResult = z.infer<typeof CRDTMergeResultSchema>;
+/** Post-parse shape of {@link CRDTMergeResult} — defaults applied, transforms run (ADR-0122). */
+export type CRDTMergeResultParsed = z.infer<typeof CRDTMergeResultSchema>;
 
 // ==========================================
 // Cursor Sharing
@@ -284,6 +292,8 @@ export const CursorStyleSchema = lazySchema(() => z.object({
 }));
 
 export type CursorStyle = z.infer<typeof CursorStyleSchema>;
+/** Post-parse shape of {@link CursorStyle} — defaults applied, transforms run (ADR-0122). */
+export type CursorStyleParsed = z.infer<typeof CursorStyleSchema>;
 
 /**
  * Cursor Selection Schema
@@ -324,6 +334,8 @@ export const CollaborativeCursorSchema = lazySchema(() => z.object({
 }));
 
 export type CollaborativeCursor = z.infer<typeof CollaborativeCursorSchema>;
+/** Post-parse shape of {@link CollaborativeCursor} — defaults applied, transforms run (ADR-0122). */
+export type CollaborativeCursorParsed = z.infer<typeof CollaborativeCursorSchema>;
 
 /**
  * Cursor Update Schema
@@ -464,6 +476,8 @@ export const CollaborationSessionConfigSchema = lazySchema(() => z.object({
 }));
 
 export type CollaborationSessionConfig = z.infer<typeof CollaborationSessionConfigSchema>;
+/** Post-parse shape of {@link CollaborationSessionConfig} — defaults applied, transforms run (ADR-0122). */
+export type CollaborationSessionConfigParsed = z.infer<typeof CollaborationSessionConfigSchema>;
 
 /**
  * Collaboration Session Schema
@@ -483,3 +497,5 @@ export const CollaborationSessionSchema = lazySchema(() => z.object({
 }));
 
 export type CollaborationSession = z.infer<typeof CollaborationSessionSchema>;
+/** Post-parse shape of {@link CollaborationSession} — defaults applied, transforms run (ADR-0122). */
+export type CollaborationSessionParsed = z.infer<typeof CollaborationSessionSchema>;

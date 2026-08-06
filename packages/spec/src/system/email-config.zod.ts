@@ -215,3 +215,5 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
     ),
 }));
 export type EmailServiceConfig = z.infer<typeof EmailServiceConfigSchema>;
+/** Post-parse shape of {@link EmailServiceConfig} — defaults applied, transforms run (ADR-0122). */
+export type EmailServiceConfigParsed = z.infer<typeof EmailServiceConfigSchema>;

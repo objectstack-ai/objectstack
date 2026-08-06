@@ -414,8 +414,14 @@ export type JoinedReportBlockInput = z.input<typeof JoinedReportBlockSchema>;
  * which allow optional fields with defaults to be omitted.
  */
 export type Report = z.infer<typeof ReportSchema>;
+/** Post-parse shape of {@link Report} — defaults applied, transforms run (ADR-0122). */
+export type ReportParsed = z.infer<typeof ReportSchema>;
 export type ReportChart = z.infer<typeof ReportChartSchema>;
+/** Post-parse shape of {@link ReportChart} — defaults applied, transforms run (ADR-0122). */
+export type ReportChartParsed = z.infer<typeof ReportChartSchema>;
 export type ReportSort = z.infer<typeof ReportSortSchema>;
+/** Post-parse shape of {@link ReportSort} — defaults applied, transforms run (ADR-0122). */
+export type ReportSortParsed = z.infer<typeof ReportSortSchema>;
 
 /**
  * Input Types for Report Configuration

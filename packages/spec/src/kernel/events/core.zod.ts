@@ -100,6 +100,8 @@ export const EventTypeDefinitionSchema = lazySchema(() => z.object({
 }));
 
 export type EventTypeDefinition = z.infer<typeof EventTypeDefinitionSchema>;
+/** Post-parse shape of {@link EventTypeDefinition} — defaults applied, transforms run (ADR-0122). */
+export type EventTypeDefinitionParsed = z.infer<typeof EventTypeDefinitionSchema>;
 
 /**
  * Event Schema
@@ -131,3 +133,5 @@ export const EventSchema = lazySchema(() => z.object({
 }));
 
 export type Event = z.infer<typeof EventSchema>;
+/** Post-parse shape of {@link Event} — defaults applied, transforms run (ADR-0122). */
+export type EventParsed = z.infer<typeof EventSchema>;

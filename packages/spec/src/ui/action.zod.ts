@@ -536,6 +536,8 @@ export const ActionAiSchema = strictObject({
 });
 
 export type ActionAi = z.infer<typeof ActionAiSchema>;
+/** Post-parse shape of {@link ActionAi} — defaults applied, transforms run (ADR-0122). */
+export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.
@@ -1024,7 +1026,11 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.infer<typeof ActionSchema>;
+/** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */
+export type ActionParsed = z.infer<typeof ActionSchema>;
 export type ActionParam = z.infer<typeof ActionParamSchema>;
+/** Post-parse shape of {@link ActionParam} — defaults applied, transforms run (ADR-0122). */
+export type ActionParamParsed = z.infer<typeof ActionParamSchema>;
 export type ActionInput = z.input<typeof ActionSchema>;
 
 /**
@@ -1115,6 +1121,8 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
 ));
 
 export type InlineAction = z.infer<typeof InlineActionSchema>;
+/** Post-parse shape of {@link InlineAction} — defaults applied, transforms run (ADR-0122). */
+export type InlineActionParsed = z.infer<typeof InlineActionSchema>;
 export type InlineActionInput = z.input<typeof InlineActionSchema>;
 
 /**

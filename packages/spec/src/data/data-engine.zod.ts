@@ -737,6 +737,8 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
  */
 export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
 export type EngineQueryOptions = z.infer<typeof EngineQueryOptionsSchema>;
+/** Post-parse shape of {@link EngineQueryOptions} — defaults applied, transforms run (ADR-0122). */
+export type EngineQueryOptionsParsed = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.infer<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.infer<typeof DroppedFieldsEventSchema>;
 export type EngineDeleteOptions = z.infer<typeof EngineDeleteOptionsSchema>;
@@ -747,8 +749,12 @@ export type EngineCountOptions = z.infer<typeof EngineCountOptionsSchema>;
 export type DataEngineFilter = z.infer<typeof DataEngineFilterSchema>;
 /** @deprecated Use standard `SortNode[]` from QueryAST instead. */
 export type DataEngineSort = z.infer<typeof DataEngineSortSchema>;
+/** Post-parse shape of {@link DataEngineSort} — defaults applied, transforms run (ADR-0122). */
+export type DataEngineSortParsed = z.infer<typeof DataEngineSortSchema>;
 /** @deprecated Use `EngineQueryOptions` instead. */
 export type DataEngineQueryOptions = z.infer<typeof DataEngineQueryOptionsSchema>;
+/** Post-parse shape of {@link DataEngineQueryOptions} — defaults applied, transforms run (ADR-0122). */
+export type DataEngineQueryOptionsParsed = z.infer<typeof DataEngineQueryOptionsSchema>;
 export type DataEngineInsertOptions = z.infer<typeof DataEngineInsertOptionsSchema>;
 /** @deprecated Use `EngineUpdateOptions` instead. */
 export type DataEngineUpdateOptions = z.infer<typeof DataEngineUpdateOptionsSchema>;
@@ -759,3 +765,5 @@ export type DataEngineAggregateOptions = z.infer<typeof DataEngineAggregateOptio
 /** @deprecated Use `EngineCountOptions` instead. */
 export type DataEngineCountOptions = z.infer<typeof DataEngineCountOptionsSchema>;
 export type DataEngineRequest = z.infer<typeof DataEngineRequestSchema>;
+/** Post-parse shape of {@link DataEngineRequest} — defaults applied, transforms run (ADR-0122). */
+export type DataEngineRequestParsed = z.infer<typeof DataEngineRequestSchema>;

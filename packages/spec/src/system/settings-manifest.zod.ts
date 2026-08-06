@@ -108,6 +108,8 @@ export const SpecifierHandlerSchema = lazySchema(() => z.discriminatedUnion('kin
   }),
 ]));
 export type SpecifierHandler = z.infer<typeof SpecifierHandlerSchema>;
+/** Post-parse shape of {@link SpecifierHandler} — defaults applied, transforms run (ADR-0122). */
+export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
 
 /**
  * Scope of a specifier value.
@@ -328,6 +330,8 @@ export const SpecifierSchema = lazySchema(() => z.object({
   }
 }));
 export type Specifier = z.infer<typeof SpecifierSchema>;
+/** Post-parse shape of {@link Specifier} — defaults applied, transforms run (ADR-0122). */
+export type SpecifierParsed = z.infer<typeof SpecifierSchema>;
 
 // ---------------------------------------------------------------------------
 // Settings manifest (the unit a plugin exports)
@@ -442,6 +446,8 @@ export const SettingsManifestSchema = lazySchema(() => z.object({
   });
 }));
 export type SettingsManifest = z.infer<typeof SettingsManifestSchema>;
+/** Post-parse shape of {@link SettingsManifest} — defaults applied, transforms run (ADR-0122). */
+export type SettingsManifestParsed = z.infer<typeof SettingsManifestSchema>;
 
 // ---------------------------------------------------------------------------
 // Resolved value (returned by SettingsService.get / REST GET)
@@ -508,6 +514,8 @@ export const SettingsNamespacePayloadSchema = lazySchema(() => z.object({
   values: z.record(z.string(), ResolvedSettingValueSchema).describe('Effective values keyed by specifier.key'),
 }));
 export type SettingsNamespacePayload = z.infer<typeof SettingsNamespacePayloadSchema>;
+/** Post-parse shape of {@link SettingsNamespacePayload} — defaults applied, transforms run (ADR-0122). */
+export type SettingsNamespacePayloadParsed = z.infer<typeof SettingsNamespacePayloadSchema>;
 
 /**
  * Action result returned by `POST /api/settings/:namespace/:actionId`.

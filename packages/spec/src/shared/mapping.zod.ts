@@ -78,6 +78,8 @@ export const FieldMappingTransformSchema = lazySchema(() => z.discriminatedUnion
 ]));
 
 export type FieldMappingTransform = z.infer<typeof FieldMappingTransformSchema>;
+/** Post-parse shape of {@link FieldMappingTransform} — defaults applied, transforms run (ADR-0122). */
+export type FieldMappingTransformParsed = z.infer<typeof FieldMappingTransformSchema>;
 
 /**
  * Field Mapping Schema
@@ -121,3 +123,5 @@ export const FieldMappingSchema = lazySchema(() => z.object({
 }));
 
 export type FieldMapping = z.infer<typeof FieldMappingSchema>;
+/** Post-parse shape of {@link FieldMapping} — defaults applied, transforms run (ADR-0122). */
+export type FieldMappingParsed = z.infer<typeof FieldMappingSchema>;

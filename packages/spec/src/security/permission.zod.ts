@@ -274,6 +274,8 @@ export const AdminScopeSchema = lazySchema(() => z.object({
 }, { error: adminScopeUnknownKeyError }).strict());
 
 export type AdminScope = z.infer<typeof AdminScopeSchema>;
+/** Post-parse shape of {@link AdminScope} — defaults applied, transforms run (ADR-0122). */
+export type AdminScopeParsed = z.infer<typeof AdminScopeSchema>;
 /** Authoring input for {@link AdminScope} — defaulted fields are optional. */
 export type AdminScopeInput = z.input<typeof AdminScopeSchema>;
 
@@ -545,10 +547,16 @@ export const PermissionSetSchema = lazySchema(() => z.object({
 }, { error: permissionSetUnknownKeyError }).strict());
 
 export type PermissionSet = z.infer<typeof PermissionSetSchema>;
+/** Post-parse shape of {@link PermissionSet} — defaults applied, transforms run (ADR-0122). */
+export type PermissionSetParsed = z.infer<typeof PermissionSetSchema>;
 /** Authoring input for {@link PermissionSet} — defaulted fields are optional. */
 export type PermissionSetInput = z.input<typeof PermissionSetSchema>;
 export type ObjectPermission = z.infer<typeof ObjectPermissionSchema>;
+/** Post-parse shape of {@link ObjectPermission} — defaults applied, transforms run (ADR-0122). */
+export type ObjectPermissionParsed = z.infer<typeof ObjectPermissionSchema>;
 export type FieldPermission = z.infer<typeof FieldPermissionSchema>;
+/** Post-parse shape of {@link FieldPermission} — defaults applied, transforms run (ADR-0122). */
+export type FieldPermissionParsed = z.infer<typeof FieldPermissionSchema>;
 
 /**
  * Type-safe factory for a permission set. Validates at authoring time via

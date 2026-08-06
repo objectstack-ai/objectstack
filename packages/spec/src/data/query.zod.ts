@@ -334,6 +334,8 @@ export const FullTextSearchSchema = lazySchema(() => z.object({
 }));
 
 export type FullTextSearch = z.infer<typeof FullTextSearchSchema>;
+/** Post-parse shape of {@link FullTextSearch} — defaults applied, transforms run (ADR-0122). */
+export type FullTextSearchParsed = z.infer<typeof FullTextSearchSchema>;
 
 /**
  * Query AST Schema
@@ -494,6 +496,8 @@ export const QuerySchema: z.ZodType<QueryAST, QueryInput> = lazySchema(() => Bas
 }));
 
 export type SortNode = z.infer<typeof SortNodeSchema>;
+/** Post-parse shape of {@link SortNode} — defaults applied, transforms run (ADR-0122). */
+export type SortNodeParsed = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.infer<typeof AggregationNodeSchema>;
 export type GroupByNode = z.infer<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.infer<typeof DateGranularity>;

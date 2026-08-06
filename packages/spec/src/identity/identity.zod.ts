@@ -55,6 +55,8 @@ export const UserSchema = lazySchema(() => z.object({
 }));
 
 export type User = z.infer<typeof UserSchema>;
+/** Post-parse shape of {@link User} — defaults applied, transforms run (ADR-0122). */
+export type UserParsed = z.infer<typeof UserSchema>;
 
 /**
  * Account Schema
@@ -300,3 +302,5 @@ export const ApiKeySchema = lazySchema(() => z.object({
 }));
 
 export type ApiKey = z.infer<typeof ApiKeySchema>;
+/** Post-parse shape of {@link ApiKey} — defaults applied, transforms run (ADR-0122). */
+export type ApiKeyParsed = z.infer<typeof ApiKeySchema>;

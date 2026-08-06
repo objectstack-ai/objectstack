@@ -101,6 +101,8 @@ export const TaskRetryPolicySchema = lazySchema(() => z.object({
 }));
 
 export type TaskRetryPolicy = z.infer<typeof TaskRetryPolicySchema>;
+/** Post-parse shape of {@link TaskRetryPolicy} — defaults applied, transforms run (ADR-0122). */
+export type TaskRetryPolicyParsed = z.infer<typeof TaskRetryPolicySchema>;
 export type TaskRetryPolicyInput = z.input<typeof TaskRetryPolicySchema>;
 
 /**
@@ -183,6 +185,8 @@ export const TaskSchema = lazySchema(() => z.object({
 }));
 
 export type Task = z.infer<typeof TaskSchema>;
+/** Post-parse shape of {@link Task} — defaults applied, transforms run (ADR-0122). */
+export type TaskParsed = z.infer<typeof TaskSchema>;
 export type TaskInput = z.input<typeof TaskSchema>;
 
 // ==========================================
@@ -303,6 +307,8 @@ export const QueueConfigSchema = lazySchema(() => z.object({
 }));
 
 export type QueueConfig = z.infer<typeof QueueConfigSchema>;
+/** Post-parse shape of {@link QueueConfig} — defaults applied, transforms run (ADR-0122). */
+export type QueueConfigParsed = z.infer<typeof QueueConfigSchema>;
 export type QueueConfigInput = z.input<typeof QueueConfigSchema>;
 
 // ==========================================
@@ -384,6 +390,8 @@ export const BatchTaskSchema = lazySchema(() => z.object({
 }));
 
 export type BatchTask = z.infer<typeof BatchTaskSchema>;
+/** Post-parse shape of {@link BatchTask} — defaults applied, transforms run (ADR-0122). */
+export type BatchTaskParsed = z.infer<typeof BatchTaskSchema>;
 export type BatchTaskInput = z.input<typeof BatchTaskSchema>;
 
 /**
@@ -434,6 +442,8 @@ export const BatchProgressSchema = lazySchema(() => z.object({
 }));
 
 export type BatchProgress = z.infer<typeof BatchProgressSchema>;
+/** Post-parse shape of {@link BatchProgress} — defaults applied, transforms run (ADR-0122). */
+export type BatchProgressParsed = z.infer<typeof BatchProgressSchema>;
 export type BatchProgressInput = z.input<typeof BatchProgressSchema>;
 
 // ==========================================
@@ -489,6 +499,8 @@ export const WorkerConfigSchema = lazySchema(() => z.object({
 }));
 
 export type WorkerConfig = z.infer<typeof WorkerConfigSchema>;
+/** Post-parse shape of {@link WorkerConfig} — defaults applied, transforms run (ADR-0122). */
+export type WorkerConfigParsed = z.infer<typeof WorkerConfigSchema>;
 export type WorkerConfigInput = z.input<typeof WorkerConfigSchema>;
 
 // ==========================================

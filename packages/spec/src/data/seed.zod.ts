@@ -108,6 +108,8 @@ export const SeedSchema = lazySchema(() => strictObject({
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
 export type Seed = z.infer<typeof SeedSchema>;
+/** Post-parse shape of {@link Seed} — defaults applied, transforms run (ADR-0122). */
+export type SeedParsed = z.infer<typeof SeedSchema>;
 
 /** Input type — fields with defaults (env, mode, externalId) are optional */
 export type SeedInput = z.input<typeof SeedSchema>;
