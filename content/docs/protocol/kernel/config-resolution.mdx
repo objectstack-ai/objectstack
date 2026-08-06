@@ -1,23 +1,26 @@
 ---
 title: Configuration Resolution
-description: Hierarchical config merging, precedence rules, environment overrides, and tenant isolation
+description: How a setting resolves — the env → global → tenant → user → default cascade, its storage, and the SettingsService API
 ---
-
-import { Settings, Layers, Lock, Users, FileCode, Shield } from 'lucide-react';
 
 # Configuration Resolution
 
-<Callout type="warn">
-**Protocol spec, partial implementation.** This page describes ObjectStack's target
-configuration model: hierarchical sources, tenant isolation, secret stores.
-The merge / precedence logic is implemented; the richer nested shapes shown in
-code samples below (e.g. `database`, `http`, `secrets.provider`) are
-illustrative of intent — today they live as env-vars, service-level options,
-and the `datasources` / `plugins` keys on `defineStack`. Treat the snippets
-as design intent, not paste-ready code.
+<Callout type="info">
+**This page describes the shipped contract.** Every symbol below exists in the
+repository today: the resolver is `SettingsService`
+(`@objectstack/service-settings`, ADR-0007), the store is the `sys_setting`
+object, and the authoring surface is the `SettingsManifest` schema
+(generated reference: [Settings Manifest](/docs/references/system/settings-manifest)).
+Anything the platform does **not** do is listed once, plainly, in
+[Outside this contract](#outside-this-contract) — it is not described as a
+roadmap.
 </Callout>
 
-ObjectStack uses a **hierarchical configuration system** that merges settings from multiple sources with clear **precedence rules**. This enables environment-specific overrides, tenant isolation, and user preferences—all from a single unified API.
+ObjectStack resolves a setting through a **declared cascade**: an `OS_*`
+environment variable, then rows in a single K/V table at global / tenant / user
+scope, then the default declared by the plugin that owns the setting. One
+resolver serves every namespace, so "where did this value come from" always has
+one answer — and the read API returns that answer with the value.
 
 ## The Configuration Problem
 
@@ -25,879 +28,333 @@ Traditional applications struggle with configuration management:
 
 ```javascript
 // Where does apiKey come from? 🤷
-const apiKey = 
+const apiKey =
   process.env.API_KEY ||              // Environment variable?
   config.stripe.apiKey ||             // Config file?
   tenantSettings.apiKey ||            // Database?
   userPrefs.apiKey ||                 // User override?
   'fallback-key';                     // Hardcoded default?
-
-// Which value wins if multiple sources define it?
-// How do you handle tenant-specific overrides?
-// How do you validate that the value is correct?
 ```
 
-**Result:** Configuration chaos. Developers spend hours debugging "works on my machine" issues caused by conflicting config sources.
+Each source is read by a different line of code, the precedence is whatever the
+`||` chain happens to spell, and nothing can tell an operator which source won.
+ObjectStack replaces the chain with one resolver and one declared order.
 
-## Configuration Sources
+## Resolution Order
 
-ObjectStack defines **six configuration sources** with strict precedence:
+`SettingsService.get()` walks exactly five layers, highest first:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. RUNTIME                                                  │
-│    Programmatic overrides (context.config.set())            │
-│    Highest priority, temporary                              │
+│ 1. ENV        process.env.OS_<NAMESPACE>_<KEY>              │
+│               Present ⇒ wins AND locks (source='env')       │
 └─────────────────────────────────────────────────────────────┘
-                          ↓ overrides
+                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. ENVIRONMENT                                              │
-│    Environment variables (OS_*, NODE_ENV, etc.)             │
-│    Set by deployment platform (Kubernetes, Docker)          │
-│    Pins the value (locked) when present                     │
+│ 2. GLOBAL     sys_setting WHERE scope='global'              │
+│               Platform-wide row (user_id = null)            │
 └─────────────────────────────────────────────────────────────┘
-                          ↓ overrides
+                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. TENANT                                                   │
-│    Multi-tenant overrides (per-customer config)             │
-│    Stored in database, tenant-scoped                        │
+│ 3. TENANT     sys_setting WHERE scope='tenant'              │
+│               Scoped to the caller's organization           │
 └─────────────────────────────────────────────────────────────┘
-                          ↓ overrides
+                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. USER PREFERENCES                                         │
-│    Per-user settings (language, theme, etc.)                │
-│    Stored in database, user-specific                        │
+│ 4. USER       sys_setting WHERE scope='user'                │
+│               Pinned to ctx.userId                          │
 └─────────────────────────────────────────────────────────────┘
-                          ↓ overrides
+                          ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. FILE                                                     │
-│    Configuration files (objectstack.config.yml)             │
-│    Checked into Git, environment-specific                   │
-└─────────────────────────────────────────────────────────────┘
-                          ↓ overrides
-┌─────────────────────────────────────────────────────────────┐
-│ 6. PLUGIN DEFAULTS                                          │
-│    Default values from plugin manifests                     │
-│    Lowest priority, fallback values                         │
+│ 5. DEFAULT    the specifier's `default` in the manifest      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Precedence Rule:** Higher source **always wins** when same key is defined.
+Two rules follow from the walk, and both are enforced in `SettingsService`:
 
-## Configuration API
+- **First non-null entry wins.** Values are *not* merged — no deep merge, no
+  array concatenation. A row at a higher scope replaces the layer below it
+  wholesale.
+- **A lock anywhere up the chain locks the effective value.** An `OS_*`
+  override always locks; a row may additionally carry `locked=true`, and then a
+  write against any *lower* scope is rejected with `SETTINGS_LOCKED`.
 
-### Reading Configuration
+How far down the cascade a key is even eligible to travel is **declared, not
+chosen by the caller** — see [Scope is declared](#scope-is-declared).
 
-```typescript
-// Access configuration via context
-const config = context.config;
+## Declaring a Setting
 
-// Get single value
-const apiKey = config.get('stripe.apiKey');
-// Returns: Value from highest-priority source that defines 'stripe.apiKey'
+A plugin does not create a table. It registers a `SettingsManifest`, and every
+value in it persists in the shared `sys_setting` store.
 
-// Get with default
-const timeout = config.get('http.timeout', 30_000);
-// Returns: 30000 if 'http.timeout' not defined in any source
-
-// Get typed value (with Zod schema)
-const stripeConfig = config.get('stripe', stripeConfigSchema);
-// Returns: Validated and typed value
-// Throws: ZodError if value doesn't match schema
-
-// Get required value (throw if missing)
-const requiredKey = config.require('stripe.apiKey');
-// Throws: ConfigError if 'stripe.apiKey' not defined in any source
-
-// Get all config for namespace
-const allStripeConfig = config.getNamespace('stripe');
-// Returns: { apiKey: '...', webhookSecret: '...', ... }
-
-// Check if key exists
-if (config.has('stripe.apiKey')) {
-  // Key is defined in at least one source
-}
-```
-
-### Writing Configuration
-
-```typescript
-// Set runtime value (highest priority, temporary)
-config.set('feature.newUI', true);
-
-// Set user preference (persisted to database)
-await config.setUserPreference('theme', 'dark');
-
-// Set tenant config (multi-tenant SaaS)
-await config.setTenant('stripe.apiKey', 'sk_test_tenant123');
-
-// Batch set
-config.merge({
-  'stripe.apiKey': 'sk_test_...',
-  'stripe.webhookSecret': 'whsec_...',
-});
-```
-
-## Source Details
-
-### 1. Runtime (Programmatic)
-
-**Use Case:** Temporary overrides for testing, feature flags toggled at runtime.
-
-```typescript
-// Example: Enable feature for A/B test
-context.config.set('feature.newCheckout', true);
-
-// Config is ephemeral (not persisted)
-// Lost on server restart
-```
-
-**Storage:** In-memory Map (per-request context)
-
-### 2. Environment Variables
-
-**Use Case:** Deployment-specific config (API keys, database URLs, feature flags).
-
-When an `OS_*` env var is present, it **pins (locks)** the value — no
-database scope (tenant or user) can override it.
-
-```bash
-# .env.production
-OS_STRIPE_APIKEY=sk_live_...
-OS_DATABASE_URL=postgresql://prod-db:5432/objectstack
-OS_FEATURE_NEWUI=true
-NODE_ENV=production
-```
-
-**Naming Convention** (see `envKeyOf` in `service-settings`):
-- Prefix with `OS_`
-- Form the key from `{namespace}_{key}`, then uppercase it
-- Dots and hyphens become underscores: `stripe.apiKey` → `OS_STRIPE_APIKEY`
-
-```typescript
-// Environment variables are auto-loaded at boot
-const apiKey = config.get('stripe.apiKey');
-// Reads from: process.env.OS_STRIPE_APIKEY
-
-const dbUrl = config.get('database.url');
-// Reads from: process.env.OS_DATABASE_URL
-```
-
-### 3. Tenant (Multi-Tenant)
-
-**Use Case:** Customer-specific configuration in multi-tenant SaaS.
-
-```typescript
-// Tenant "acme-corp" has custom Stripe key
-await context.config.setTenant('stripe.apiKey', 'sk_live_acme...', {
-  tenantId: 'acme-corp',
-});
-
-// Request from Acme Corp user
-const apiKey = context.config.get('stripe.apiKey');
-// Returns: 'sk_live_acme...' (tenant-specific)
-
-// Request from different tenant
-// Returns: Default Stripe key (from lower-priority source)
-```
-
-**Storage:** Database table
-
-```sql
-CREATE TABLE objectstack_tenant_config (
-  tenant_id UUID NOT NULL,
-  key TEXT NOT NULL,
-  value JSONB NOT NULL,
-  updated_at TIMESTAMP NOT NULL,
-  PRIMARY KEY (tenant_id, key)
-);
-```
-
-**Isolation:** Tenant config is **automatically scoped** to current tenant in request context.
-
-### 4. User Preferences
-
-**Use Case:** Per-user settings (language, timezone, UI theme).
-
-```typescript
-// User changes language preference
-await context.config.setUserPreference('locale', 'de');
-
-// Next request from this user
-const locale = context.config.get('locale');
-// Returns: 'de' (from user preferences)
-```
-
-**Storage:** Database table
-
-```sql
-CREATE TABLE objectstack_user_preferences (
-  user_id UUID NOT NULL,
-  key TEXT NOT NULL,
-  value JSONB NOT NULL,
-  updated_at TIMESTAMP NOT NULL,
-  PRIMARY KEY (user_id, key)
-);
-```
-
-**Type Coercion** is driven by the type of the setting's default value
-(`coerceEnvValue` in `service-settings`):
-```bash
-OS_HTTP_TIMEOUT=30000              # default is number → 30000
-OS_FEATURE_NEWUI=true              # default is boolean → true ('1'/'yes' also truthy)
-OS_ALLOWED_ORIGINS=["a","b","c"]   # default is array/object → JSON.parse → ['a','b','c']
-```
-If the raw value can't be parsed for the expected type, it falls back to the
-raw string.
-
-### 5. Configuration Files
-
-**Use Case:** Environment-specific defaults checked into Git.
-
-#### File Locations
-
-ObjectStack loads config files in this order:
-
-```
-1. objectstack.config.ts          (TypeScript, recommended)
-2. objectstack.config.js           (JavaScript)
-3. objectstack.config.yml          (YAML)
-4. objectstack.config.json         (JSON)
-
-5. objectstack.config.{env}.ts     (Environment-specific)
-   - objectstack.config.production.ts
-   - objectstack.config.staging.ts
-   - objectstack.config.development.ts
-```
-
-#### TypeScript Config (Recommended)
-
-```typescript
-// objectstack.config.ts
-import { defineStack } from '@objectstack/spec';
-
-export default defineStack({
-  // Database
-  database: {
-    url: 'postgresql://localhost:5432/objectstack',
-    pool: {
-      min: 2,
-      max: 10,
-    },
-  },
-  
-  // Plugins
-  plugins: {
-    enabled: [
-      '@objectstack/core',
-      '@mycompany/crm',
-    ],
-  },
-  
-  // HTTP server
-  http: {
-    port: 3000,
-    cors: {
-      origins: ['http://localhost:3000'],
-    },
-  },
-  
-  // Feature flags
-  features: {
-    newUI: false,
-    aiAssistant: true,
-  },
-  
-  // Plugin-specific config
-  stripe: {
-    apiKey: process.env.STRIPE_API_KEY,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-  },
-});
-```
-
-#### Environment-Specific Config
-
-```typescript
-// objectstack.config.production.ts
-import { defineStack } from '@objectstack/spec';
-
-export default defineStack({
-  database: {
-    url: process.env.DATABASE_URL,
-    pool: {
-      min: 10,
-      max: 50,
-    },
-  },
-  
-  http: {
-    port: process.env.PORT || 8080,
-    cors: {
-      origins: ['https://app.mycompany.com'],
-    },
-  },
-  
-  features: {
-    newUI: true,  // Enabled in production
-  },
-});
-```
-
-**File Selection:** Based on `NODE_ENV`:
-```bash
-NODE_ENV=production  → loads objectstack.config.production.ts
-NODE_ENV=staging     → loads objectstack.config.staging.ts
-NODE_ENV=development → loads objectstack.config.development.ts
-```
-
-#### YAML Config (Alternative)
-
-```yaml
-# objectstack.config.yml
-database:
-  url: postgresql://localhost:5432/objectstack
-  pool:
-    min: 2
-    max: 10
-
-plugins:
-  enabled:
-    - '@objectstack/core'
-    - '@mycompany/crm'
-
-http:
-  port: 3000
-  cors:
-    origins:
-      - http://localhost:3000
-
-features:
-  newUI: false
-  aiAssistant: true
-```
-
-### 6. Plugin Defaults
-
-**Use Case:** Default values defined by plugin authors.
-
-```typescript
-// @mycompany/crm plugin — default config values.
-// NOTE: there is no `definePlugin()` helper. A plugin is an object
-// implementing the `Plugin` interface; default settings ship via a
-// settings manifest whose specifiers each declare a `default`.
-export const crmConfigDefaults = {
-  maxAccountsPerUser: 1000,
-  enableScoring: true,
-  syncInterval: 'daily',
-};
-
-// In application code (no config set)
-const maxAccounts = config.get('crm.maxAccountsPerUser');
-// Returns: 1000 (from plugin defaults)
-```
-
-**Storage:** In-memory (loaded from plugin manifest at boot)
-
-## Merge Strategies
-
-When multiple sources define the same key, ObjectStack uses **deep merge** for objects and **replace** for primitives.
-
-### Replace (Primitives)
-
-```typescript
-// Plugin defaults
-{ stripe: { apiKey: 'sk_test_default' } }
-
-// File config
-{ stripe: { apiKey: 'sk_test_file' } }
-
-// Environment variable
-OS_STRIPE_APIKEY=sk_test_env
-
-// Result
-config.get('stripe.apiKey')
-// Returns: 'sk_test_env' (highest priority source)
-```
-
-### Deep Merge (Objects)
-
-```typescript
-// Plugin defaults
-{
-  http: {
-    port: 3000,
-    timeout: 30000,
-    cors: {
-      origins: ['*'],
-      credentials: false,
-    },
-  },
-}
-
-// File config
-{
-  http: {
-    port: 8080,
-    cors: {
-      origins: ['https://app.example.com'],
-    },
-  },
-}
-
-// Result (deep merge)
-config.get('http')
-// Returns:
-{
-  port: 8080,              // From file (overrides default)
-  timeout: 30000,          // From defaults (not overridden)
-  cors: {
-    origins: ['https://app.example.com'],  // From file
-    credentials: false,    // From defaults (not overridden)
-  },
-}
-```
-
-### Array Merge (Replace, Not Concat)
-
-Arrays are **replaced**, not concatenated:
-
-```typescript
-// Defaults
-{ plugins: { enabled: ['@objectstack/core', '@mycompany/base'] } }
-
-// File config
-{ plugins: { enabled: ['@objectstack/core', '@mycompany/crm'] } }
-
-// Result
-config.get('plugins.enabled')
-// Returns: ['@objectstack/core', '@mycompany/crm']
-// (File config replaces defaults, does NOT concat)
-```
-
-## Tenant Isolation
-
-In multi-tenant SaaS, each tenant can have **isolated configuration**.
-
-### Automatic Scoping
-
-```typescript
-// Request from Tenant A
-context.tenantId = 'tenant-a';
-const apiKey = context.config.get('stripe.apiKey');
-// Checks: tenant-a config → env → file → defaults
-
-// Request from Tenant B
-context.tenantId = 'tenant-b';
-const apiKey = context.config.get('stripe.apiKey');
-// Checks: tenant-b config → env → file → defaults
-```
-
-### Setting Tenant Config
-
-```typescript
-// Admin API: Set tenant-specific config
-await admin.setTenantConfig('tenant-a', {
-  'stripe.apiKey': 'sk_live_tenantA...',
-  'features.newUI': true,
-});
-
-await admin.setTenantConfig('tenant-b', {
-  'stripe.apiKey': 'sk_live_tenantB...',
-  'features.newUI': false,
-});
-```
-
-### Tenant Config UI
-
-```typescript
-// ObjectUI admin panel for tenant config
-export default defineView({
-  name: 'tenant_config',
-  type: 'form',
-  
-  fields: [
-    {
-      name: 'stripe.apiKey',
-      label: 'Stripe API Key',
-      type: 'text',
-      secret: true,
-    },
-    {
-      name: 'features.newUI',
-      label: 'Enable New UI',
-      type: 'boolean',
-    },
-  ],
-  
-  onSave: async ({ values, context }) => {
-    await context.config.setTenant(values, {
-      tenantId: context.tenantId,
-    });
-  },
-});
-```
-
-## Secrets Management
-
-Sensitive configuration (API keys, passwords) requires special handling.
-
-### Marking Secrets
-
-```typescript
-// Plugin config schema
-export const configSchema = z.object({
-  apiKey: z.string()
-    .describe('Stripe API Key')
-    .meta({ secret: true }),  // ← Mark as secret
-  
-  webhookSecret: z.string()
-    .describe('Webhook Secret')
-    .meta({ secret: true }),
-});
-```
-
-### Secret Storage
-
-**Secrets are encrypted at rest** using AES-256-GCM:
-
-```sql
-CREATE TABLE objectstack_secrets (
-  key TEXT PRIMARY KEY,
-  encrypted_value BYTEA NOT NULL,
-  encryption_key_id UUID NOT NULL,
-  created_at TIMESTAMP NOT NULL
-);
-```
-
-### Secret Access
-
-```typescript
-// Secrets are automatically decrypted when accessed
-const apiKey = config.get('stripe.apiKey');
-// ObjectStack decrypts value transparently
-
-// Secrets are redacted in logs
-logger.info('Config loaded', { config: config.getAll() });
-// Output: { stripe: { apiKey: '[REDACTED]', ... } }
-```
-
-### External Secret Stores
-
-ObjectStack integrates with external secret managers:
-
-```typescript
-// objectstack.config.ts
-export default defineStack({
-  secrets: {
-    provider: 'aws-secrets-manager',
-    
-    // Map config keys to secret ARNs
-    mappings: {
-      'stripe.apiKey': 'arn:aws:secretsmanager:us-east-1:123:secret:stripe-key',
-      'database.password': 'arn:aws:secretsmanager:us-east-1:123:secret:db-pass',
-    },
-  },
-});
-
-// Access works the same
-const apiKey = config.get('stripe.apiKey');
-// ObjectStack fetches from AWS Secrets Manager transparently
-```
-
-**Supported Providers:**
-- AWS Secrets Manager
-- Google Cloud Secret Manager
-- Azure Key Vault
-- HashiCorp Vault
-- Environment variables (fallback)
-
-## Configuration Validation
-
-ObjectStack validates configuration against **Zod schemas** at boot.
-
-### Schema Definition
-
-```typescript
-// Plugin defines config schema
-export const configSchema = z.object({
-  maxAccountsPerUser: z.number()
-    .min(1)
-    .max(10000)
-    .default(1000),
-  
-  enableScoring: z.boolean()
-    .default(true),
-  
-  syncInterval: z.enum(['hourly', 'daily', 'weekly'])
-    .default('daily'),
-  
-  apiKey: z.string()
-    .min(1)
-    .describe('API Key is required')
-    .meta({ secret: true }),
-});
-```
-
-### Boot-Time Validation
-
-```typescript
-// ObjectStack validates config during boot
-export async function onBoot({ context }) {
-  // Get and validate config
-  const config = context.config.get('crm', configSchema);
-  // If config is invalid, ObjectStack throws ZodError with details
-}
-```
-
-### Validation Error Example
-
-```
-ConfigValidationError: Invalid configuration for plugin @mycompany/crm
-
-Errors:
-  - crm.apiKey: Required
-  - crm.maxAccountsPerUser: Expected number, received string
-  - crm.syncInterval: Invalid enum value. Expected 'hourly' | 'daily' | 'weekly', received 'monthly'
-
-Fix these errors in:
-  1. Environment variable: OS_CRM_APIKEY
-  2. Config file: objectstack.config.ts
-  3. Plugin defaults: @mycompany/crm/plugin.manifest.ts
-```
-
-## Configuration Inspection
-
-### CLI Commands
-
-<Callout type="warn">
-A dedicated `config` topic on the `os` CLI is **not yet implemented** — the
-commands below are illustrative of the intended surface. Today, configuration
-is validated as part of `os validate` and inspected via `os info` / `os doctor`.
-</Callout>
-
-```bash
-# (planned) Show all configuration (merged result)
-os config show
-
-# (planned) Show config for specific namespace
-os config show stripe
-
-# (planned) Show which source provides each value
-os config sources
-
-# (planned) Validate configuration
-os config validate
-
-# (planned) Export configuration (for backup)
-os config export > backup.json
-
-# (planned) Import configuration
-os config import backup.json
-```
-
-### Programmatic Inspection
-
-```typescript
-// Get config with source attribution
-const configWithSources = config.inspect('stripe.apiKey');
-// Returns:
-{
-  value: 'sk_live_...',
-  source: 'environment',  // Which source provided the value
-  sources: {
-    runtime: undefined,
-    user: undefined,
-    tenant: undefined,
-    environment: 'sk_live_...',
-    file: 'sk_test_...',
-    defaults: 'sk_test_default',
-  },
-}
-
-// List all config keys
-const allKeys = config.keys();
-// Returns: ['stripe.apiKey', 'stripe.webhookSecret', ...]
-
-// Get config schema
-const schema = config.getSchema('stripe');
-// Returns: Zod schema for 'stripe' namespace
-```
-
-## Real-World Examples
-
-### Example 1: Feature Flags
-
-```typescript
-// Plugin defaults (features disabled by default)
-{
-  features: {
-    newUI: false,
-    aiAssistant: false,
-  },
-}
-
-// File config (enable in staging)
-// objectstack.config.staging.ts
-{
-  features: {
-    newUI: true,  // Test in staging
-  },
-}
-
-// Tenant override (enable for specific customer)
-await admin.setTenantConfig('beta-customer', {
-  'features.aiAssistant': true,
-});
-
-// User preference (user opts into beta)
-await context.config.setUserPreference('features.newUI', true);
-
-// In application code
-if (config.get('features.newUI')) {
-  return <NewUIComponent />;
-}
-```
-
-### Example 2: Multi-Region Deployment
-
-```typescript
-// Base config (shared)
-// objectstack.config.ts
-{
-  database: {
-    pool: { min: 2, max: 10 },
-  },
-}
-
-// US region
-// objectstack.config.us.ts
-{
-  database: {
-    url: process.env.DATABASE_URL_US,
-  },
-  stripe: {
-    apiKey: process.env.STRIPE_KEY_US,
-  },
-}
-
-// EU region
-// objectstack.config.eu.ts
-{
-  database: {
-    url: process.env.DATABASE_URL_EU,
-  },
-  stripe: {
-    apiKey: process.env.STRIPE_KEY_EU,
-  },
-}
-
-// Deploy with region-specific config
-NODE_ENV=us node server.js   # Loads objectstack.config.us.ts
-NODE_ENV=eu node server.js   # Loads objectstack.config.eu.ts
-```
-
-### Example 3: Development Overrides
-
-```typescript
-// Production config
-// objectstack.config.ts
-{
-  stripe: {
-    apiKey: process.env.STRIPE_API_KEY,  // Live key
-  },
-  email: {
-    provider: 'resend',                   // 'log' | 'resend' | 'postmark'
-    apiKey: process.env.RESEND_API_KEY,   // Required by every non-'log' provider
-    defaultFrom: { name: 'Acme', address: 'noreply@company.com' },
-  },
-}
-
-// Development override
-// objectstack.config.development.ts
-{
-  stripe: {
-    apiKey: 'sk_test_...',  // Test key
-  },
-  email: {
-    provider: 'log',  // Print emails to stdout instead of sending
-  },
-}
-
-// Developer can further override with .env.local — ENVIRONMENT beats both
-// files. Merging is per key (deep merge, see above): the development file
-// only replaces `provider`, so `apiKey` / `defaultFrom` are still inherited
-// from the production config until something names them too.
-OS_EMAIL_PROVIDER=log                       # Force the log transport
-OS_EMAIL_FROM=Dev Mailer <dev@example.com>  # ...and now defaultFrom, too
-```
-
-## Best Practices
-
-### 1. Never Hardcode Secrets
-```typescript
-// ✗ BAD: Hardcoded API key
-const apiKey = 'sk_live_abc123';
-
-// ✓ GOOD: Load from config
-const apiKey = config.require('stripe.apiKey');
-```
-
-### 2. Use Environment-Specific Files
-```typescript
-// ✓ GOOD: Separate configs for each environment
-objectstack.config.production.ts   # Production settings
-objectstack.config.staging.ts      # Staging settings
-objectstack.config.development.ts  # Development settings
-```
-
-### 3. Validate Early
-```typescript
-// ✓ GOOD: Validate during boot, not at runtime
-export async function onBoot({ context }) {
-  const config = context.config.get('myPlugin', myConfigSchema);
-  // Throws clear error if invalid
-}
-
-// ✗ BAD: Validate on first use (fails in production)
-export async function someHandler({ context }) {
-  const config = context.config.get('myPlugin', myConfigSchema);
-  // Error only occurs when handler is called!
-}
-```
-
-### 4. Provide Sensible Defaults
 {/* os:check */}
 ```typescript
-// ✓ GOOD: Plugin works out-of-box with defaults.
-// (Defaults ship as `default` on the plugin's settings-manifest
-//  specifiers; there is no `definePlugin()` helper.)
-export const myPluginDefaults = {
-  maxRetries: 3,
-  timeout: 30000,
+import type { SettingsManifest } from '@objectstack/spec/system';
+
+export const crmSettingsManifest: SettingsManifest = {
+  namespace: 'crm',
+  version: 1,
+  label: 'CRM',
+  description: 'Account and scoring options for the CRM package.',
+  // Default scope for every specifier below; individual keys may narrow it.
+  scope: 'tenant',
+  readPermission: 'setup.access',
+  writePermission: 'setup.write',
+  specifiers: [
+    {
+      type: 'number',
+      key: 'max_accounts_per_user',
+      label: 'Max accounts per user',
+      required: false,
+      default: 1000,
+    },
+    {
+      type: 'toggle',
+      key: 'enable_scoring',
+      label: 'Enable scoring',
+      required: false,
+      default: true,
+    },
+    {
+      type: 'select',
+      key: 'sync_interval',
+      label: 'Sync interval',
+      required: false,
+      default: 'daily',
+      options: [
+        { label: 'Hourly', value: 'hourly' },
+        { label: 'Daily', value: 'daily' },
+        { label: 'Weekly', value: 'weekly' },
+      ],
+    },
+    {
+      type: 'password',
+      key: 'api_key',
+      label: 'API key',
+      required: true,
+      // `password` implies encrypted: true — the value never lands in
+      // sys_setting.value, only a handle into sys_secret.
+    },
+  ],
 };
 ```
 
-### 5. Document Configuration
+Register it once at boot:
+
 ```typescript
-// ✓ GOOD: Use Zod descriptions
-export const configSchema = z.object({
-  apiKey: z.string()
-    .describe('API key from Stripe Dashboard > Developers > API Keys'),
-  
-  webhookSecret: z.string()
-    .describe('Webhook signing secret for verifying webhook payloads'),
-});
+const settings = ctx.getService('settings');
+settings.registerManifest(crmSettingsManifest);
 ```
+
+Keys are `snake_case` storage paths inside the namespace — `(namespace, key)`,
+not a dotted global path. The full specifier vocabulary (19 types, visibility
+expressions, action buttons, per-key permissions) is documented in the
+[Settings Manifest reference](/docs/references/system/settings-manifest).
+
+## Reading Configuration
+
+```typescript
+const settings = ctx.getService('settings');
+
+// Resolve one key. Returns the value AND where it came from.
+const resolved = await settings.get('crm', 'max_accounts_per_user', {
+  userId: session.userId,
+});
+// {
+//   value: 1000,
+//   source: 'default',        // 'env' | 'global' | 'tenant' | 'user' | 'default'
+//   locked: false,
+//   cascadeChain: [ { scope: 'default', value: 1000, effective: true } ],
+// }
+
+// Resolve a whole namespace — manifest + every effective value.
+const payload = await settings.getNamespace('crm', { userId: session.userId });
+// { manifest: SettingsManifest, values: Record< string, ResolvedSettingValue > }
+```
+
+`cascadeChain` is the source-attribution surface: it carries one entry per layer
+that contributed, in declared order, with the winning entry flagged
+`effective: true` and any lock reason attached. That is what the Setup UI renders
+as "Inherited from Global" / "Locked by Global" badges, and what an operator
+reads when a value is not what they expected.
+
+For code that reads the same namespace repeatedly, `createClient()` keeps a
+snapshot that refreshes on every `settings:changed` event:
+
+```typescript
+const client = await settings.createClient('crm', { ctx: { userId } });
+client.get('enable_scoring');   // synchronous read off the snapshot
+client.onChange(() => { /* re-render */ });
+client.dispose();
+```
+
+Reading an unregistered namespace throws `UnknownNamespaceError`
+(`SETTINGS_UNKNOWN_NAMESPACE`); reading a key the manifest never declared throws
+`UnknownKeyError` (`SETTINGS_UNKNOWN_KEY`). There is no "read anything" mode —
+a key that no manifest declares does not resolve.
+
+## Writing Configuration
+
+```typescript
+// One key.
+await settings.set('crm', 'enable_scoring', false, { userId: session.userId });
+
+// A batch — validated and locked-checked as a unit before anything is written.
+await settings.setMany('crm', {
+  max_accounts_per_user: 500,
+  sync_interval: 'weekly',
+}, { userId: session.userId });
+
+// Clear every stored row in the namespace; the cascade falls back to defaults.
+await settings.resetNamespace('crm', { userId: session.userId });
+```
+
+Writes fail loudly rather than silently degrading:
+
+| Condition | Thrown | Code |
+| :--- | :--- | :--- |
+| An `OS_*` override is in force for the key | `SettingsLockedError` | `SETTINGS_LOCKED` |
+| A row at an upper scope has `locked=true` | `SettingsLockedError` | `SETTINGS_LOCKED` (`locked-by-<scope>`) |
+| Key not declared by the manifest | `UnknownKeyError` | `SETTINGS_UNKNOWN_KEY` |
+| Namespace has no manifest | `UnknownNamespaceError` | `SETTINGS_UNKNOWN_NAMESPACE` |
+| Patch would leave a visible required field empty, or violates a declared constraint | `SettingsValidationError` | per-key `FieldError` list (ADR-0114) |
+
+### Scope is declared
+
+There is no `setTenant()` and no `setUserPreference()`, by design. The scope a
+write lands at comes from the **manifest**, not from the caller:
+`specifier.scope` (falling back to the manifest's `scope`, which itself defaults
+to `'tenant'`). `set()` looks the scope up and writes there.
+
+That is the property that makes the cascade auditable. If callers picked the
+scope per write, the same key could acquire rows at three scopes from three code
+paths and no reader could tell which layer was authoritative. Narrow a key
+further with `availableScopes` — e.g. `['global']` for a platform-only knob, so
+the UI hides tenant and user override affordances entirely.
+
+## The Environment Layer
+
+An `OS_*` variable is the deployment-owned top of the cascade. Its name is
+derived mechanically from `(namespace, key)` by `envKeyOf`: uppercase, `.` and
+`-` replaced with `_`, prefixed `OS_`.
+
+```bash
+# namespace 'crm', key 'api_key'
+OS_CRM_API_KEY=sk_live_...
+
+# namespace 'feature_flags', key 'ai-enabled'
+OS_FEATURE_FLAGS_AI_ENABLED=true
+```
+
+The raw string is coerced by the **type of the specifier's default**
+(`coerceEnvValue`):
+
+```bash
+OS_HTTP_TIMEOUT=30000              # default is a number  → 30000
+OS_FEATURE_NEWUI=true              # default is a boolean → true ('1' / 'yes' also truthy)
+OS_ALLOWED_ORIGINS=["a","b","c"]   # default is array/object → JSON.parse
+```
+
+If the raw value cannot be parsed for the expected type, the raw string is used.
+
+**A value outside a declared option table is ignored, not repaired.** When the
+specifier declares `options` and the env value matches none of them, the env
+layer contributes nothing at all — no value and no `cascadeChain` entry — and
+the service logs one `error` line naming the variable and the rejected value.
+Guessing which option a typo meant would be worse than not applying it, and an
+`env` entry claiming `locked: true` while supplying no value would misreport the
+cascade to every caller.
+
+## Tenant and User Scope
+
+Both live in the same table. Row identity is
+`(namespace, key, scope, user_id)`, enforced by a composite unique index:
+
+- `scope='global'` — platform-wide; `user_id` is null.
+- `scope='tenant'` — the caller's tenant; `user_id` is null. The tenant is
+  resolved by the engine's tenant scoping from the caller's session, not by a
+  column the caller supplies.
+- `scope='user'` — `user_id` is pinned from `ctx.userId`, a lookup to `sys_user`.
+
+`sys_setting` carries **no tenant column of its own**. Platform-wide, the tenant
+identity is the **organization**: a session carries `organizationId`, and where
+an object does declare a driver-layer `tenant_id` column the engine stamps it
+from that session value on insert — `sys_audit_log.tenant_id`, for instance, is
+`Field.lookup('sys_organization', …)`. There is no free-form tenant slug and no
+per-namespace tenant-config table; plugins MUST NOT define one
+(`sys_mail_config` and friends are exactly the anti-pattern `sys_setting`
+exists to prevent).
+
+## Secrets
+
+A specifier marked `encrypted` (implicit for `type: 'password'`) never stores
+plaintext. `SettingsService.set()` hands the value to the configured
+`ICryptoProvider`, persists the ciphertext as a `sys_secret` row, and keeps only
+the opaque handle in `sys_setting.value_enc` — `sys_setting.value` stays null.
+Audit rows and history snapshots record a digest and an `'<encrypted>'`
+placeholder, never the plaintext.
+
+The default provider is `LocalCryptoProvider`: AES-256-GCM keyed off
+`OS_SECRET_KEY` (or a persisted dev key outside production), which **fails loud
+in production** rather than minting an ephemeral key that would silently orphan
+every stored secret on restart.
+
+`ICryptoProvider` is the swap point for managed key custody — a host supplies a
+KMS- or Vault-backed implementation through `SettingsServiceOptions` and
+`SettingsService` is untouched. `CryptoHandle` carries `kmsKeyId`, `alg` and a
+monotonic `version` so `rotateKey()` can re-wrap under a new key; the audit trail
+records the rotation. ObjectStack bundles no cloud provider implementation — see
+[Outside this contract](#outside-this-contract).
+
+## HTTP Surface
+
+`registerSettingsRoutes()` mounts the resolver under `/api/settings`
+(override via `basePath`):
+
+| Method | Path | Returns |
+| :--- | :--- | :--- |
+| `GET` | `/api/settings` | Manifests visible to the caller |
+| `GET` | `/api/settings/:namespace` | `{ manifest, values }` |
+| `PUT` | `/api/settings/:namespace` | Batch upsert, same semantics as `setMany` |
+| `POST` | `/api/settings/:namespace/:actionId` | Invoke a declared `action_button` handler |
+
+Requests that arrive across this boundary are marked `enforced`, which makes the
+service check the manifest's `readPermission` / `writePermission` instead of the
+trusted in-process pass-through. An in-process caller
+(`kernel.getService('settings')` at boot or seed time) keeps full access.
+
+The `sys_setting` object also exposes `get` / `list` through the data API for the
+admin grid in Setup. That grid is **diagnostic only** — writes must go through
+`/api/settings/:namespace` so the resolver, validation and audit hooks fire.
+
+## Outside this contract
+
+These are not features awaiting a release note; they are simply not part of how
+ObjectStack resolves configuration today:
+
+- **Config files are not a settings layer.** `objectstack.config.{ts,js,mjs}` is
+  loaded by the CLI and declares *metadata* (`objects`, `apps`, `views`,
+  `datasources`, `plugins`, …). It is not read by `SettingsService`, there is no
+  YAML or JSON config file, and there is no `NODE_ENV`-selected
+  `objectstack.config.<env>.ts`. Keys `defineStack()` does not declare are warned
+  about and dropped.
+- **No merge semantics.** The cascade selects one layer's value; it does not deep
+  merge objects. (Stack *composition* is a different operation with different
+  rules — there, array collections concatenate.)
+- **No `os config` CLI topic.** Configuration is validated as part of
+  `os validate` and inspected via `os info` / `os doctor`.
+- **No bundled external secret manager.** AWS / GCP / Azure / Vault custody is
+  reached by implementing `ICryptoProvider`; no provider ships in the box and
+  there is no `secrets` key on `defineStack()`.
 
 ## Summary
 
-ObjectStack configuration resolution:
-- **Six sources** with clear precedence (runtime > environment > tenant > user > file > defaults)
-- **Deep merge** for objects, **replace** for primitives
-- **Tenant isolation** for multi-tenant SaaS
-- **Secret encryption** with external secret store integration
-- **Boot-time validation** using Zod schemas
-- **Inspection tools** for debugging config issues
+- **Five layers**, walked highest-first: env → global → tenant → user → default.
+- **First non-null wins.** No merging; a lock above pins the value below.
+- **Scope is declared** by the manifest, never chosen at the call site.
+- **One store** (`sys_setting`) for every namespace; encrypted values indirect
+  through `sys_secret`.
+- **Source attribution is part of the read** — `cascadeChain` says which layer
+  won and why.
 
 **Next:** Learn about internationalization in [i18n Standard](/docs/protocol/kernel/i18n-standard).
