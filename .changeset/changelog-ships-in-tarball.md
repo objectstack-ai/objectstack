@@ -66,7 +66,6 @@
 "@objectstack/types": patch
 "@objectstack/verify": patch
 "create-objectstack": patch
-"objectstack-vscode": patch
 ---
 
 chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)

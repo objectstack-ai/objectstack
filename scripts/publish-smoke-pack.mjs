@@ -28,8 +28,7 @@ const execFileP = promisify(execFile);
 // Not consumed as npm dependencies by a scaffolded project:
 //   create-objectstack — the scaffolder itself; the smoke runs it straight
 //     from the repo's built bin, and no @objectstack/* manifest depends on it.
-//   objectstack-vscode — a VS Code extension (vsce-packaged), not an npm lib.
-const EXCLUDE = new Set(['create-objectstack', 'objectstack-vscode']);
+const EXCLUDE = new Set(['create-objectstack']);
 
 const CONCURRENCY = 8;
 
