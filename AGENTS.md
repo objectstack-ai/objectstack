@@ -399,6 +399,20 @@ signal: it rewrites artifacts whose staleness you never saw, so a real semantic 
 lands silently inside a mechanical diff. Let the check tell you which are stale, then
 regenerate those.
 
+**No `check:` script regenerates anything — that is the point of the split, not an
+oversight.** `check:docs` used to begin with `pnpm gen:schema`, which rewrites two
+*tracked* files (`json-schema.manifest.json`, `authorable-surface.json`) whenever they
+are behind: running the gate edited your working tree and reported nothing, so a
+`check:generated` run on a stale manifest printed a red `check:authorable-surface`
+over a file the gate two lines below had already quietly fixed (#4711, #4723). The
+generation belongs to the **caller** now — `pnpm build`, or the
+`check:authorable-surface` gate that runs before `check:docs` in both CI and
+`check:generated`, whose `--check` mode writes the gitignored `json-schema/` tree and
+refuses to touch a tracked one. Consequence for you: **`check:docs` is not
+self-sufficient**. Run the `build` line above first (it is already required for the
+`dist` caveat below) — `build-docs.ts` refuses on a missing or stale tree and names
+the command, so the failure is loud, never a wrong verdict.
+
 The script carries its own ledger of gate → generator and **reconciles it against
 `package.json` on every run**, in both directions. A new `check:`/`gen:` script that
 nobody classified fails the run rather than quietly dropping out of coverage — the
