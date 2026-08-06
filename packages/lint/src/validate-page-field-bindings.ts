@@ -164,8 +164,11 @@ export interface ComponentFieldSpec {
 
 export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>> = {
   'record:highlights': { props: ['fields'] },
-  // `sections`/`hideFields` are not in RecordDetailsProps, but every real page
-  // authors them (they survive because `properties` is unvalidated).
+  // `sections` (object form) and `hideFields` are what every real page authors,
+  // and since #5611 they are what `RecordDetailsProps` declares — this model and
+  // the spec agree. (Before that, `sections` was declared as an ID `string[]`
+  // and `hideFields` not at all; both survived only because `properties` is
+  // unvalidated.)
   'record:details': { props: ['fields', 'hideFields'], nestedSections: ['sections'] },
   'record:path': { props: ['statusField'] },
   'element:number': { props: ['field'] },
@@ -208,9 +211,11 @@ export function componentFieldRefs(
     const sections = Array.isArray(props[key]) ? (props[key] as unknown[]) : [];
     for (let si = 0; si < sections.length; si++) {
       const section = sections[si];
-      // A `sections` that is a plain `string[]` (the shape `RecordDetailsProps`
-      // actually declares — section IDs) yields nothing here, which is right:
-      // those are not field names.
+      // A non-object entry yields nothing here, which is right: lint runs on
+      // unvalidated `properties`, so it must survive off-spec input rather than
+      // throw on it. (Until #5611 the ID `string[]` this skips was the shape
+      // `RecordDetailsProps` declared; it declares the object form now, so this
+      // is a defensive guard rather than a divergence from the spec.)
       if (!isRec(section)) continue;
       refs.push(...fieldRefsFrom(section.fields, `${basePath}${sep}${key}[${si}].fields`));
     }

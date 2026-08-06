@@ -291,8 +291,9 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | ✅ | Number of columns for field layout (1-4) |
 | **layout** | `Enum<'auto' \| 'custom'>` | ✅ | Layout mode: auto uses object highlightFields, custom uses explicit sections |
-| **sections** | `string[]` | optional | Section IDs to show (required when layout is "custom") |
+| **sections** | `{ name?: string; label?: string; columns?: integer; fields: string[] }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
+| **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

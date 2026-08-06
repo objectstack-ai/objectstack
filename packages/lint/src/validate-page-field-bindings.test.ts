@@ -84,8 +84,9 @@ describe('validatePageFieldBindings — highlights / KPI cards', () => {
 });
 
 describe('validatePageFieldBindings — record:details real authored shape', () => {
-  // Real pages author `sections: [{ label, fields }]`, which RecordDetailsProps
-  // does not describe (it survives because `properties` is unvalidated).
+  // Real pages author `sections: [{ label, fields }]` — the shape
+  // `RecordDetailsProps` now declares too (#5611; it used to declare an ID
+  // `string[]` that no page and no renderer ever used).
   it('walks sections[].fields[]', () => {
     const findings = validatePageFieldBindings({
       ...baseStack(),
