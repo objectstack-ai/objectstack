@@ -286,7 +286,16 @@ export type DateGranularityValue = NonNullable<DatasetSelection['dateGranularity
  *
  * The unit of precedence is the GRANULARITY, not the entry: a `timeDimensions`
  * entry carrying only a `dateRange` (what `compareTo` needs) states a WINDOW,
- * not a bucket size, and must not suppress bucketing.
+ * not a bucket size, and so cannot VETO a bucket size stated elsewhere for a
+ * dimension that is being grouped.
+ *
+ * This answers "how big is the bucket", never "is this dimension bucketed at
+ * all" — a separate question, decided per query by `buildQuery`'s
+ * `bucketsUnstatedEntry` (#5688), because a window-only entry for a dimension
+ * nobody grouped must stay a filter. Every caller here is already past that
+ * question: `buildQuery` asks it first, and the post-processing sites in
+ * `analytics-service` iterate `selection.dimensions`, which are grouped by
+ * definition.
  *
  * **Why this is exported.** The bucket size chosen here decides three things
  * that MUST agree: the `GROUP BY` the query compiles to, the humanized label
@@ -927,23 +936,77 @@ export class DatasetExecutor {
     //      `dateGranularity` to a single-entry `granularities`; the 5-entry
     //      "all granularities" list means the dataset stated no default).
     //
-    // Note the unit of precedence is the GRANULARITY, not the entry. A
-    // `timeDimensions` entry that only carries a `dateRange` (which is exactly
-    // what `compareTo` needs) states a WINDOW, not a bucket size — letting its
-    // mere presence suppress bucketing left the compared pass grouping raw
-    // timestamps while the primary pass grouped months, so the two grids shared
-    // no dimension key and every `__compare` column came back empty.
+    // Note the unit of precedence is the GRANULARITY, not the entry: a stated
+    // `granularity` is never overridden, and an entry that states none does not
+    // veto a bucket size the selection or the dataset supplies for a dimension
+    // that IS being grouped. That is `resolveDimensionGranularity`'s job, and it
+    // is unchanged — see `granularityFor` below.
+    //
+    // What an entry that carries only a `dateRange` decides is something else:
+    // whether the dimension is grouped AT ALL (#5688). It is a WINDOW — a
+    // filter, and a dashboard date-range picker is the usual source. A filter
+    // removes rows; it does not add a grid column or split rows. Backfilling the
+    // dataset's default bucket size onto such an entry turned "by Owner, this
+    // quarter" into "by Owner × month": one extra column nobody selected, and
+    // one row per owner PER MONTH, with a KPI card then reading the first of
+    // them. So the backfill is scoped by {@link bucketsUnstatedEntry} to the
+    // entries that are genuinely asking for a bucket.
+    //
+    // `compareTo` alignment survives that narrowing BY CONSTRUCTION, and this is
+    // the pairing to keep in mind before widening or narrowing it again
+    // (#3588/#4870 vs #5688 — the two demands meet exactly here):
+    //
+    //   - the comparison pass re-enters this method through `runMeasurePass`
+    //     with the SAME `opts.dimensions` and the same `selection.dateGranularity`,
+    //     differing only in the shifted `dateRange`. Both passes therefore reach
+    //     the same verdict for the same entry, so the two grids are bucketed
+    //     alike or not at all — never one of each, which is the state #4870
+    //     fixed (a month-bucketed primary grid merged against raw-timestamp
+    //     comparison rows shared no dimension key, and every `__compare` column
+    //     came back empty);
+    //   - an anchor that IS grouped (listed in `dimensions`, or carrying its own
+    //     `granularity`) keeps its bucket on both passes — #3588/#4870 intact;
+    //   - an anchor used only as a window is grouped on NEITHER pass, so it is
+    //     not a column on either side and the two grids align on the dimensions
+    //     `mergeByDimensions` actually keys by. That merge has always keyed on
+    //     `dimensions` alone, so the bucket column the backfill added was never
+    //     part of the key: with several month-split rows per group the
+    //     comparison value landed on whichever one the index happened to hold
+    //     last and the rest read a confident `0`. Not bucketing the window
+    //     restores the alignment rather than weakening it.
     const selTimeDims = opts.selection.timeDimensions ?? [];
     const selDims = new Set(selTimeDims.map((t) => t.dimension));
+    const groupedDims = new Set(opts.dimensions);
     const granularityFor = (name: string): string | undefined => {
       const cd = compiled.cube.dimensions[name];
       if (cd?.type !== 'time') return undefined;
       const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
       return resolveDimensionGranularity(opts.selection, name, datasetDefault);
     };
-    // Fill in a bucket size for caller-supplied entries that named none.
+    /**
+     * Does a caller-supplied entry that stated NO granularity get one filled in?
+     *
+     * Only when something in the request says this date is being bucketed:
+     *   - the dimension is one of the grid dimensions this query groups by (so
+     *     it is a column regardless, and leaving it unbucketed would group raw
+     *     timestamps — one bucket per row, the #3588 defect); or
+     *   - `selection.dateGranularity` is set, which is the presentation stating
+     *     a bucket size for its date axes.
+     * An entry carrying its own `granularity` never reaches here (nothing to
+     * fill in), and stays grouped.
+     *
+     * The dataset dimension's own `dateGranularity` is deliberately NOT such a
+     * signal on its own: it is how this date renders WHEN grouped, not a request
+     * to group by it. Reading it as one is what made a date-range filter behave
+     * like a second GROUP BY.
+     */
+    const bucketsUnstatedEntry = (dimension: string): boolean =>
+      groupedDims.has(dimension) || opts.selection.dateGranularity != null;
+    // Fill in a bucket size for caller-supplied entries that named none — for
+    // the entries that are asking to be bucketed at all.
     const resolvedTimeDims = selTimeDims.map((t) => {
       if (t.granularity) return t;
+      if (!bucketsUnstatedEntry(t.dimension)) return t;
       const granularity = granularityFor(t.dimension);
       return granularity ? { ...t, granularity } : t;
     });

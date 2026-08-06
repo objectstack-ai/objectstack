@@ -66,6 +66,35 @@ export function distIsStale(specDir = SPEC_DIR) {
   return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) > dist;
 }
 
+/**
+ * The same question for the OTHER build artifact a gate reads: is
+ * `packages/spec/json-schema` older than the sources it was generated from?
+ *
+ * `build-docs.ts` reads that tree — it is the input the reference docs are
+ * rendered from — and the tree is gitignored, so nothing in a checkout carries
+ * it. Until #4723 the question could not arise: `check:docs` ran `gen:schema` as
+ * its first step, so the tree was regenerated on every run. That is also what
+ * made `check:docs` a "check" that WROTE two tracked files (json-schema.manifest.json
+ * and authorable-surface.json, whenever they were behind), which is the defect
+ * #4711 removed from `--check` and #4723 removed from this composition. With the
+ * generation gone, the freshness it silently guaranteed has to be ASSERTED, or
+ * `check:docs` reports a verdict about a tree that predates the edit under test —
+ * a FALSE GREEN on exactly the change (`.describe()` added, key renamed) the gate
+ * exists to catch. Same trap, same conservative direction, as `readsDist` above.
+ *
+ * Two deliberate differences from `distIsStale`:
+ *   - `.test.ts` is excluded from the source side. Test files are not inputs to
+ *     `build-schemas.ts` (it imports the namespace barrels), so counting them
+ *     would send every test-only spec PR to a `gen:schema` it does not need —
+ *     and a guard that cries wolf is a guard someone deletes.
+ *   - the artifact side matches `.json`, the tree's only content.
+ */
+export function schemaTreeIsStale(specDir = SPEC_DIR) {
+  const tree = newestMtime(join(specDir, 'json-schema'), (n) => n.endsWith('.json'));
+  if (!tree) return true;
+  return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) > tree;
+}
+
 function markerPath() {
   const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
   return join(gitDir, PENDING_MARKER);
@@ -118,6 +147,20 @@ function main() {
       );
       continue;
     }
+    // Same shape one artifact over (#4723). The gate would refuse on its own —
+    // `build-docs.ts` carries the guard, so every caller is covered, not just
+    // this one — but running it here would spend the spawn only to reprint a
+    // message this hook can state with the merge context already in hand.
+    if (entry.readsSchemaTree && schemaTreeIsStale()) {
+      blocked++;
+      console.error(
+        `  ✗ ${paths.join(', ')}\n`
+          + `      ${check} reads packages/spec/json-schema/, which is missing or older than src —\n`
+          + `      NOT running it. That tree is gitignored, so a merge never brings it with them.\n`
+          + `      pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec ${entry.gen}`,
+      );
+      continue;
+    }
     const { ok, output } = runCheck(check);
     if (ok) {
       console.error(`  ✓ ${paths.join(', ')} — current`);
@@ -155,10 +198,13 @@ const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLT
 
 if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
-    // Touches no repo state: the interesting logic is the staleness rule, and its
-    // dangerous direction is "says fresh when stale".
-    const ok = distIsStale(join(REPO_ROOT, 'scripts')) === true;
-    console.log(`${ok ? '✓' : '✗'} a directory with no dist/ reads as STALE (conservative default)`);
+    // Touches no repo state: the interesting logic is the staleness rules, and
+    // their dangerous direction is "says fresh when stale".
+    const noDist = distIsStale(join(REPO_ROOT, 'scripts')) === true;
+    console.log(`${noDist ? '✓' : '✗'} a directory with no dist/ reads as STALE (conservative default)`);
+    const noTree = schemaTreeIsStale(join(REPO_ROOT, 'scripts')) === true;
+    console.log(`${noTree ? '✓' : '✗'} a directory with no json-schema/ reads as STALE (conservative default)`);
+    const ok = noDist && noTree;
     console.log(ok ? '\n✓ check-regen-pending self-test passed.' : '\n✗ self-test failed.');
     process.exit(ok ? 0 : 1);
   }

@@ -22,6 +22,13 @@
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
+import {
+  backfillRemoteCanonicalColumns,
+  type RemoteBackfillClient,
+  type RemoteBackfillColumn,
+  type RemoteCanonicalBackfillOptions,
+  type RemoteCanonicalBackfillReport,
+} from './remote-canonical-backfill.js';
 
 // ── Transport Mode ───────────────────────────────────────────────────────────
 
@@ -833,6 +840,108 @@ export class TursoDriver extends SqlDriver {
     }
   }
 
+  /**
+   * Converge this driver's REMOTE `Field.datetime` / `Field.time` columns on the
+   * canonical storage form and mark the ones that are PROVED converged, so their
+   * filters stop compiling to the unindexable repair expression
+   * (objectstack#5770, cloud#1005 后果 A; the maintainer's 2026-08-03 方案 1).
+   *
+   * The remote-mode counterpart of `SqlDriver.backfillCanonicalDatetimes` /
+   * `backfillCanonicalTimes`, which are Knex paths and therefore never ran here.
+   * Same semantics, same expression, same consumption point: this marks
+   * `canonicalDatetimeFields` / `canonicalTimeFields`, which is exactly what
+   * `needsLegacyDatetimeRepair` / `needsLegacyTimeRepair` read to drop the
+   * repair — so remote and local reach the indexable form through one rule
+   * rather than two. It additionally recovers the TEXT-affinity numeric epochs
+   * only a remote table can hold (后果 B); see `remote-canonical-backfill.ts`
+   * for why that limb is safe HERE and was rejected in the shared expression.
+   *
+   * Called automatically after remote schema sync, and public so an operator can
+   * drive a large table to completion with a bigger budget:
+   *
+   * ```typescript
+   * await driver.backfillRemoteCanonicalTemporal({ batchSize: 2000, maxBatches: 5000 });
+   * ```
+   *
+   * Never throws and never marks on anything but measured evidence. A column
+   * that errors, or that a batch budget stopped short, stays unmarked and keeps
+   * its read-side repair — correct answers, just unindexed. Nothing in any read
+   * or write path may depend on this having run (ADR-0053 D-B3 / cloud#1003).
+   *
+   * A no-op outside remote mode: local and replica reach the same state through
+   * the inherited Knex backfill during `initObjects`.
+   */
+  async backfillRemoteCanonicalTemporal(
+    options?: RemoteCanonicalBackfillOptions,
+  ): Promise<RemoteCanonicalBackfillReport> {
+    if (!this.isRemote) return { columns: [] };
+    const client = this.remoteTransport?.getClient() as RemoteBackfillClient | null | undefined;
+    if (!client) return { columns: [] };
+
+    // Only tables this driver synced remotely, and only columns not already
+    // marked — re-running is cheap by design, but skipping a proved column
+    // makes it free.
+    const columns: RemoteBackfillColumn[] = [];
+    for (const table of this.remoteManagedObjects) {
+      for (const field of this.datetimeFields[table] ?? []) {
+        if (this.canonicalDatetimeFields[table]?.has(field)) continue;
+        columns.push({ table, field, kind: 'datetime' });
+      }
+      for (const field of this.timeFields[table] ?? []) {
+        if (this.canonicalTimeFields[table]?.has(field)) continue;
+        columns.push({ table, field, kind: 'time' });
+      }
+    }
+    if (columns.length === 0) return { columns: [] };
+
+    const report = await backfillRemoteCanonicalColumns(
+      client,
+      columns,
+      // The driver's OWN repair expression — handed over, never copied, so the
+      // backfill cannot drift from the read path it is retiring.
+      (kind, columnSql) =>
+        kind === 'datetime'
+          ? this.sqliteCanonicalDatetimeSql(columnSql)
+          : this.sqliteCanonicalTimeSql(columnSql),
+      options,
+      this.logger,
+    );
+
+    for (const column of report.columns) {
+      if (!column.canonical) continue;
+      const marks =
+        column.kind === 'datetime'
+          ? (this.canonicalDatetimeFields[column.table] ??= new Set<string>())
+          : (this.canonicalTimeFields[column.table] ??= new Set<string>());
+      marks.add(column.field);
+    }
+
+    return report;
+  }
+
+  /**
+   * Run {@link backfillRemoteCanonicalTemporal} off the back of a remote schema
+   * sync, swallowing everything.
+   *
+   * The local twin is invoked from inside `SqlDriver.initObjects` for the same
+   * reason and with the same posture: schema sync is the moment the driver knows
+   * which columns are temporal, and a migration must never be able to fail a
+   * boot. `backfillRemoteCanonicalTemporal` already reports rather than throws;
+   * this catch covers the paths that could still reject (a client lost between
+   * the sync and here).
+   */
+  private async backfillRemoteCanonicalTemporalQuietly(): Promise<void> {
+    try {
+      await this.backfillRemoteCanonicalTemporal();
+    } catch (err) {
+      this.logger.warn(
+        `[driver-turso] remote canonical temporal backfill failed; ` +
+        `queries stay correct via the read-side repair`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
+  }
+
   // ===================================
   // Bulk Operations (remote mode overrides)
   // ===================================
@@ -911,6 +1020,10 @@ export class TursoDriver extends SqlDriver {
       // Key strictly by `object` (what find()/formatOutput look up) — never let a
       // stray `schema.name` shadow it.
       this.registerRemoteFieldMetadata({ ...(schema as Record<string, any>), name: object });
+      // #5770: the remote twin of the `backfillCanonicalDatetimes` call
+      // `SqlDriver.initObjects` makes at exactly this point. Must run AFTER the
+      // registration above — that is what tells it which columns are temporal.
+      await this.backfillRemoteCanonicalTemporalQuietly();
       return;
     }
     return super.syncSchema(object, schema, options);
@@ -942,6 +1055,11 @@ export class TursoDriver extends SqlDriver {
       // a boolean reads back as raw 0/1, JSON as a string, dates as raw text.
       // (Root cause of the 2026-07-06 case_escalation `1 != true` incident.)
       for (const obj of objects) this.registerRemoteFieldMetadata(obj);
+      // #5770: the remote twin of the `backfillCanonicalDatetimes` /
+      // `backfillCanonicalTimes` calls `SqlDriver.initObjects` makes per table.
+      // One batched probe covers every column synced here, so the steady state
+      // (nothing to converge) costs a single round-trip for the whole boot.
+      await this.backfillRemoteCanonicalTemporalQuietly();
       return;
     }
     return super.initObjects(objects);

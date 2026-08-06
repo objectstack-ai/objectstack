@@ -59,7 +59,15 @@ export const REGEN_ARTIFACTS = Object.freeze([
     check: 'check:api-surface',
     readsDist: true,
   },
-  { path: 'content/docs/references/**', gen: 'gen:docs', check: 'check:docs' },
+  // `readsSchemaTree` is the `readsDist` above, one artifact over (#4723). Both
+  // `gen:docs` and `check:docs` render from `packages/spec/json-schema/`, which is
+  // GITIGNORED — a merge therefore never delivers it, and a leftover tree from
+  // before the merge describes the sources as they were on one side of it. Until
+  // #4723 `check:docs` began with `gen:schema`, so the tree was always rebuilt (at
+  // the cost of a "check" that wrote two tracked files whenever they were behind).
+  // With that step gone, the freshness is asserted instead: every path that would
+  // run either script refuses unless the tree is newer than the sources.
+  { path: 'content/docs/references/**', gen: 'gen:docs', check: 'check:docs', readsSchemaTree: true },
   // #5107. Unlike its neighbours this one is derived from the AST *plus* a
   // hand-written column (the ledger's `Class` verdicts feed the per-class
   // subtotals), which is exactly why it belongs here rather than in the ledger:
