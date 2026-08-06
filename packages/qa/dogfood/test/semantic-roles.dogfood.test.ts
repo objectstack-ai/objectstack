@@ -25,11 +25,28 @@ import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 let stack: VerifyStack;
 let token: string;
 
+/**
+ * The object document as `GET /meta/objects/:name` really serves it.
+ *
+ * Two envelopes are peeled here and they are different things. The outer
+ * `{ success, data }` is the DISPATCHER's transport envelope, which the REST
+ * server does not add — hence `?? body`. The inner `{ type, name, item }` is
+ * the metadata response envelope `packages/spec` declares for this route, and
+ * since #5563 EVERY read path answers it (before that, the default cached path
+ * served the bare document and this helper read it directly). The assertions
+ * below are about the document, so the document is what this returns — but the
+ * envelope is checked on the way through, so a regression to the bare shape
+ * fails here, by name, instead of surfacing as four `undefined` field reads.
+ */
 async function servedObject(name: string): Promise<Record<string, any>> {
   const res = await stack.apiAs(token, 'GET', `/meta/objects/${name}`);
   expect(res.status).toBe(200);
   const body = await res.json();
-  return (body as any).data ?? body;
+  const envelope = ((body as any).data ?? body) as Record<string, any>;
+  expect(envelope).toMatchObject({ type: 'object', name });
+  expect(envelope.item, 'GET /meta/objects/:name must answer the { type, name, item } envelope (#5563)')
+    .toBeTypeOf('object');
+  return envelope.item as Record<string, any>;
 }
 
 beforeAll(async () => {
