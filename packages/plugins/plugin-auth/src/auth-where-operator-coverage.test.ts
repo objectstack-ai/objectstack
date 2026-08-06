@@ -321,7 +321,13 @@ describe('[#5813] the predicates really filter on a real backend', () => {
       where: [{ field: 'name', value: 'zed', operator: 'starts_with', connector: 'AND' }],
     } as any);
 
-    const left = await driver.find('sys_user', { fields: ['id'] } as any);
+    // Read back through the driver with a TYPED query bag — an `as any` here
+    // would be counted by `check:query-options-erasure` (#4674/#4918), and
+    // nothing about this read is off-contract.
+    const left = await driver.find('sys_user', {
+      object: 'sys_user',
+      fields: ['id'],
+    } satisfies QueryAST);
     expect(left.map((r: any) => r.id).sort()).toEqual(['u_abc1', 'u_abcz', 'u_xabc']);
   });
 });
