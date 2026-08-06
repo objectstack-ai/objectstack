@@ -83,19 +83,12 @@ describe('SwappableStorageService', () => {
 
   it('rejects optional methods when the active adapter omits them', async () => {
     const proxy = new SwappableStorageService(new MinimalAdapter());
-    await expect(proxy.list('p')).rejects.toThrow(/does not support list/);
     await expect(proxy.getSignedUrl('k', 60)).rejects.toThrow(/does not support getSignedUrl/);
     await expect(proxy.getPresignedUpload('k', 60)).rejects.toThrow(/does not support getPresignedUpload/);
     await expect(proxy.initiateChunkedUpload('k')).rejects.toThrow(/does not support initiateChunkedUpload/);
   });
 
-  it('forwards list() to the active adapter when supported', async () => {
-    const a = new FakeAdapter('A');
-    await a.upload('p/1', Buffer.from('1'));
-    await a.upload('p/2', Buffer.from('22'));
-    await a.upload('q/3', Buffer.from('333'));
-    const proxy = new SwappableStorageService(a);
-    const out = await proxy.list('p/');
-    expect(out.map((i) => i.key).sort()).toEqual(['p/1', 'p/2']);
-  });
+  // The `forwards list() to the active adapter when supported` case was
+  // deleted with the proxy method it exercised (#5540): IStorageService no
+  // longer declares `list`, so there is nothing for the proxy to forward.
 });
