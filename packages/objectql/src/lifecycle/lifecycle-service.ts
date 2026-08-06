@@ -1045,6 +1045,19 @@ export class LifecycleService {
     const cutoff = new Date(this.now() - parseLifecycleDuration(archive.after)).toISOString();
     let archived = 0;
     for (let batch = 0; batch < ARCHIVE_MAX_BATCHES_PER_SWEEP; batch++) {
+      // [#4747] Leg boundary, per batch — the same check the reap loop makes
+      // (see {@link batchedReap}). `sweep()` checks the abort bit between
+      // OBJECTS, which leaves one archive round as up to 20 pages of reads and
+      // writes across TWO datasources (a hot page read, a cold upsert per row,
+      // a hot bulk delete), i.e. ~10k operations issued at stores the host may
+      // already be closing — precisely what #4747 stopped.
+      //
+      // Breaking BETWEEN batches keeps the Archiver's safety rule intact
+      // ("hot-delete only what the cold store has taken"): a batch already in
+      // flight finishes its upsert → bulkDelete pair, and batches not yet begun
+      // are simply left for the next sweep, which re-reads them from the hot
+      // store unchanged.
+      if (this.abort.aborted) break;
       const rows = await hot.find(object, {
         where: { created_at: { $lt: cutoff } },
         limit: ARCHIVE_BATCH_SIZE,
