@@ -108,8 +108,9 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   source:
     'The click-through target is the flat PAIR `sourceObject` + `sourceId`, never a nested `source: { object, id }`. '
     + '`flow-node-notify-config-aliases` lifts the nested shape at load and drops it once every part is accounted '
-    + 'for, so a surviving `source` means a part of it DISAGREES with the flat key already holding that slot, and '
-    + 'the conversion declined to pick (#4923) — reconcile onto `sourceObject` / `sourceId` and delete `source`. '
+    + 'for, so a surviving `source` means a part of it holds a DIFFERENT value from the flat `sourceObject` / '
+    + '`sourceId` already in that slot, and the conversion declined to pick (#4923) — reconcile onto the flat pair '
+    + 'and delete `source`. '
     + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
     + 'dead link.',
 };

@@ -11,6 +11,7 @@ import { PageSchema } from '../ui/page.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
+import { renameConfigKey, renameKey } from './walk.js';
 import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
 
 describe('conversion layer (ADR-0087 D2)', () => {
@@ -250,6 +251,16 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(configOf(stack)).toEqual({ objectName: 'task', filter: { a: 1 }, filters: { a: 2 } });
       expect(notices).toHaveLength(1);
       expect(notices[0]!.from).toBe('object');
+    });
+
+    it('never deletes the only copy when a pair renames a key to itself', () => {
+      // Guard on the new equal-value branch: `from === to` would compare the
+      // value against itself, call it a redundant twin, and delete it. No
+      // registry pair is written that way; this pins that one added later
+      // converts nothing instead of erasing the key.
+      const dict = { objectName: 'task' };
+      expect(renameKey(dict, 'objectName', 'objectName')).toBeNull();
+      expect(renameConfigKey({ config: { ...dict } }, 'objectName', 'objectName')).toBeNull();
     });
 
     it('applies the same rule one level up, on a plain dict rename (page header)', () => {

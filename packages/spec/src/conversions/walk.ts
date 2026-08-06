@@ -302,6 +302,11 @@ export function mapCollection(
  * two surfaces cannot disagree about whether a pair of values is "the same".
  */
 export function renameKey(dict: Dict, from: string, to: string): Dict | null {
+  // A pair that renames a key to itself has no work to do, and the equal-value
+  // branch below would otherwise read it as "a twin identical to the canonical
+  // key" and delete the only copy. No registry pair is written that way today;
+  // this is here so one added later fails to convert instead of erasing data.
+  if (from === to) return null;
   if (!(from in dict) || dict[from] == null) return null;
   const next: Dict = { ...dict };
   if (dict[to] != null) {
