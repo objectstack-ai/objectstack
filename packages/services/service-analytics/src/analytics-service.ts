@@ -1022,9 +1022,31 @@ export class AnalyticsService implements IAnalyticsService {
     // entry in `fields` for this pass to enrich. Fixed where the grid is
     // assembled (see that method's #5537 note), which is also the only place
     // that knows what the active strategy actually projected.
-    if (result.fields?.length && selectedDims.length) {
-      const dimByName = new Map(selectedDims.map((d) => [d.name, d]));
-      const dimByField = new Map(selectedDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
+    //
+    // #5688 — the set to describe FROM is wider than `selection.dimensions`. A
+    // `timeDimensions` entry that resolves a granularity is GROUPED BY, so it is
+    // a result column even when the caller never listed it under `dimensions`
+    // (#4033's `projectedDimensions`) — and reading `selection.dimensions` alone
+    // left exactly that column carrying a `type` and no `label`, the blind spot
+    // #5537's PR pinned as a control case. Widening the LOOKUP is not the same
+    // as widening the projection: the loop still enriches only entries
+    // `result.fields` already carries, so an entry that stays a pure window
+    // contributes no column and receives no descriptor.
+    //
+    // Kept out of `selectedDims` deliberately. Drill metadata and row-value
+    // label resolution above answer a different question — which dimensions the
+    // caller GROUPED THE GRID BY, i.e. what a click can be turned back into
+    // records — and widening those would change drill payloads and row values,
+    // not table headers.
+    const describableDims = [...selectedDims];
+    for (const t of selection.timeDimensions ?? []) {
+      if (describableDims.some((d) => d.name === t.dimension)) continue;
+      const d = dataset.dimensions?.find((x) => x.name === t.dimension);
+      if (d) describableDims.push(d);
+    }
+    if (result.fields?.length && describableDims.length) {
+      const dimByName = new Map(describableDims.map((d) => [d.name, d]));
+      const dimByField = new Map(describableDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
       for (const f of result.fields) {
         if (f.label != null) continue;
         // Result fields may be keyed by the dataset dimension NAME or the
