@@ -53,9 +53,9 @@ export type { TenancyPosture };
 export interface TenancyService {
   /**
    * The posture actually IN FORCE. Equals {@link requestedPosture} whenever the
-   * request can be enforced; an `isolated` request that cannot be (the
-   * enterprise package is absent) resolves to `single` — the deployment behaves
-   * single-org-like because nothing isolates its data — and sets
+   * request can be enforced; a walled request that cannot be — `group` or
+   * `isolated` alike (ADR-0105 D12) — resolves to `single`, because the
+   * deployment behaves single-org-like when nothing isolates its data, and sets
    * {@link degraded}.
    */
   readonly posture: TenancyPosture;
@@ -71,8 +71,12 @@ export interface TenancyService {
    * ADR-0093 D5); when it boots anyway, this flag brands the deployment
    * everywhere an operator looks (`/auth/config`, Setup dashboard).
    *
-   * Only reachable for `isolated` — `group` is enforced by the open engine, so
-   * it has no missing dependency to degrade against.
+   * Reachable for BOTH walled postures. `group` probes the enterprise
+   * `org-scoping` runtime exactly like `isolated` does (ADR-0105 D12) — the
+   * wall's CODE is open, but ACTIVATING a multi-organization posture is an
+   * entitlement. So either posture degrades when that runtime is absent, and
+   * also when it is installed but declares (`supportedPostures`) that it does
+   * not entitle the posture requested.
    */
   readonly degraded: boolean;
   /**

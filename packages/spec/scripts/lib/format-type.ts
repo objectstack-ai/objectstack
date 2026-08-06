@@ -48,28 +48,32 @@ export const anchorFor = (schemaName: string) => `#${schemaName.toLowerCase()}`;
 const INLINE_KEY_LIMIT = 4;
 
 /**
- * Does this rendered type carry a top-level `&`, i.e. would suffixing `[]`
- * re-associate it?
+ * Does this rendered type carry a top-level `&` or `|`, i.e. would suffixing
+ * `[]` re-associate it?
  *
- * `A & B[]` is `A & (B[])` in TypeScript, not `(A & B)[]` — so an array whose
- * element is an intersection MUST be parenthesized or the cell states a
- * different type than the schema. Depth is tracked across `{}`, `<>`, `[]` and
- * `()` so operators nested inside a shape, a `Record<…>` type argument, an
- * `Enum<'a' | 'b'>` or a markdown link target are correctly ignored.
+ * `[]` binds tighter than both operators: `A & B[]` is `A & (B[])` and
+ * `A | B[]` is `A | (B[])`, never `(A & B)[]` / `(A | B)[]`. So an array whose
+ * element renders as a top-level intersection OR union MUST be parenthesized,
+ * or the cell states a different type than the schema — `string | number[]`
+ * reads as "a string, or an array of numbers", while the schema said "an array
+ * whose elements are string or number". Depth is tracked across `{}`, `<>`,
+ * `[]` and `()` so operators nested inside a shape, a `Record<…>` type
+ * argument, an `Enum<'a' | 'b'>` or a markdown link target are correctly
+ * ignored.
  *
- * Scoped to `&` deliberately. Arrays whose element is a top-level UNION have
- * the identical defect (`string | number[]` for an array of `string | number`)
- * on 164 sites, but that one PREDATES this renderer change and is filed as
- * #5338 — bundling its ~170-line regeneration in here would bury the #4912 fix
- * this function exists for. Widening to `|` is the whole of that fix; the depth
- * scan below already ignores nested operators correctly.
+ * The `&` half arrived with #4912, which had *introduced* intersection
+ * elements (`{ declared keys } & Record<string, any>`) and so fixed only what
+ * it caused. The `|` half is the older defect, filed separately as #5338 and
+ * fixed here: it predated that renderer change and its regeneration diff would
+ * have buried the passthrough fix. Both halves are one rule — `[]` is not
+ * distributive over either operator — so they share one scan.
  */
-function hasTopLevelIntersection(rendered: string): boolean {
+function hasTopLevelUnionOrIntersection(rendered: string): boolean {
   let depth = 0;
   for (const ch of rendered) {
     if (ch === '{' || ch === '<' || ch === '[' || ch === '(') depth++;
     else if (ch === '}' || ch === '>' || ch === ']' || ch === ')') depth--;
-    else if (depth === 0 && ch === '&') return true;
+    else if (depth === 0 && (ch === '&' || ch === '|')) return true;
   }
   return false;
 }
@@ -102,9 +106,10 @@ export function formatType(prop: any, ctx?: TypeContext): string {
 
   if (prop.type === 'array') {
     const element = formatType(prop.items, ctx);
-    // An open object element renders as an intersection, which `[]` would
-    // re-associate — parenthesize so the cell keeps meaning "array of that".
-    return hasTopLevelIntersection(element) ? `(${element})[]` : `${element}[]`;
+    // An open object element renders as an intersection and a multi-variant
+    // element as a union — `[]` would re-associate either — so parenthesize
+    // and the cell keeps meaning "array of that".
+    return hasTopLevelUnionOrIntersection(element) ? `(${element})[]` : `${element}[]`;
   }
 
   if (prop.enum) {

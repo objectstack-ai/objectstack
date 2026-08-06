@@ -298,6 +298,7 @@ os start \
   --port 8080
 
 # Remote artifact + Turso/libSQL backing store
+# (needs the optional driver package: npm install @objectstack/driver-turso)
 os start \
   --artifact https://cdn.example.com/app.json \
   --database libsql://my-db.turso.io \
@@ -351,7 +352,7 @@ The fall-through applies to the **conventional** locations only. Remote
 **What it boots:**
 - Reads the artifact's `manifest`, `objects`, `views`, `flows`, …
 - Auto-registers the platform services declared in `requires: [...]` (e.g. `ai`, `automation`, `analytics`, `auth`, `ui`). Declaring a **service** capability (`automation`, `analytics`, `ai`, `audit`, …) is a *requirement*: if its provider package isn't installed, boot **fails fast** with a clear error instead of silently starting without a capability you asked for. (`auth` and `ui` are tier-gated with their own opt-in rules — `auth`'s secret-gated skip is described below.)
-- Auto-detects the driver from the database URL scheme (`memory://` → in-memory, `libsql://`/`https://` → Turso, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite)
+- Auto-detects the driver from the database URL scheme (`memory://` → in-memory, `libsql://`/`https://*.turso.*` → Turso — via the optional `@objectstack/driver-turso` package, and a loud failure with the install command when it is missing rather than a fallback to sqlite —, `postgres[ql]://`/`pg://` → pg, `mongodb[+srv]://` → MongoDB, otherwise sqlite)
 - Runs standalone boot mode with one active environment.
 
 **Authentication:**

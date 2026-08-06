@@ -27,6 +27,11 @@ import type { z } from 'zod';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import type { MetadataValidationResult } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+// [#5598] The READ path's share of the #5364 expansion. `zodIssuesToMetadataIssues`
+// is the ONE ranking this package speaks; the save path's 422 calls the same
+// function, so a document's verdict cannot depend on whether it was being saved
+// or being opened. See the note above the `.safeParse()` below.
+import { zodIssuesToMetadataIssues } from './protocol.js';
 
 /**
  * Re-export the canonical validation-result type so callers in this
@@ -74,11 +79,25 @@ export function computeMetadataDiagnostics(
         return { valid: true };
     }
 
-    const errors = parsed.error.issues.map((issue) => ({
-        path: issue.path.map(String).join('.'),
-        message: issue.message,
-        code: issue.code as string,
-    }));
+    // [#5598] NOT `parsed.error.issues.map(…)`. Zod folds every branch of a
+    // failed `z.union` into ONE top-level issue whose path is `''` and whose
+    // message is the literal `"Invalid input"`; a plain `.map()` therefore put
+    // exactly that on `_diagnostics` and dropped the branch that says WHICH key
+    // is wrong. `ViewMetadataSchema` IS a top-level union, so EVERY stored view
+    // with a defect degraded to one rootless line and Studio's inline field
+    // errors had nothing to highlight — the read-path twin of the save-path
+    // defect #5364 fixed, and the fifth consumer of one mechanism (#4971,
+    // #5014, #5341, #5364).
+    //
+    // Reusing `zodIssuesToMetadataIssues` rather than re-deriving the policy is
+    // the point: branch selection (drop the branches that only mismatch a root
+    // KIND, fewest-issues wins, `unrecognized_keys` breaks the tie, ties all
+    // emitted under a cap, nested unions recursed with absolute paths) is
+    // defined once, so opening a broken document and saving it give the author
+    // the same words. The expansion is strictly additive — the union's own
+    // entry is still first, so any consumer reading `errors[0]` today reads the
+    // same entry after this change.
+    const errors = zodIssuesToMetadataIssues(parsed.error.issues);
 
     return { valid: false, errors };
 }

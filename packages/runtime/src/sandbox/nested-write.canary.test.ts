@@ -55,7 +55,7 @@ const child = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -128,7 +128,7 @@ describe('#3259 flake canary — nested writes stay green at the stock 250ms CPU
 
   async function rollupChain(n: number) {
     const engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     for (const o of [parent, child]) engine.registry.registerObject(o as any);

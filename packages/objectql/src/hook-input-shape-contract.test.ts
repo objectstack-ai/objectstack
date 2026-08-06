@@ -251,7 +251,7 @@ describe('[#5273] a metadata-declared hook reads the same shape', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Harness — a memory driver just wide enough for the dispatch paths above.
+ * Harness — a stub driver just wide enough for the dispatch paths above.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 async function seedTasks(engine: ObjectQL, rows: Record<string, unknown>[]): Promise<any[]> {
@@ -259,7 +259,7 @@ async function seedTasks(engine: ObjectQL, rows: Record<string, unknown>[]): Pro
   return Array.isArray(written) ? written : [written];
 }
 
-function makeMemoryDriver(): any {
+function makeStubDriver(): any {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -316,7 +316,7 @@ function makeMemoryDriver(): any {
 
 async function boot(): Promise<{ engine: ObjectQL; driver: any }> {
   const engine = new ObjectQL();
-  const driver = makeMemoryDriver();
+  const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(taskObject as any);

@@ -18,7 +18,6 @@
     "builtin-node-config",
     "flow-function",
     "io-node-config",
-    "retry-policy",
     "schemaless-node-config"
   ]
 }

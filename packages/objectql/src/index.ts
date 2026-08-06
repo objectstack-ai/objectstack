@@ -87,6 +87,25 @@ export type {
   EngineDeleteDispatchCase,
 } from './engine-delete-dispatch.js';
 
+// [#5480] The update-dispatch contract, on exactly the same terms — `update`
+// has the same three-way dispatch, and a predicate write is no less
+// destructive than a predicate delete (it rewrites every matching row's
+// fields). Until this existed, a double could be bound to the producer for one
+// write verb and structurally could not be for the other (#5393).
+export {
+  resolveEngineUpdateDispatch,
+  assertEngineUpdateDispatch,
+  scalarUpdateId,
+  ENGINE_UPDATE_REJECT_MESSAGE,
+  ENGINE_UPDATE_DISPATCH_CASES,
+} from './engine-update-dispatch.js';
+export type {
+  EngineUpdateDispatch,
+  EngineUpdateDispatchInput,
+  EngineUpdateDispatchData,
+  EngineUpdateDispatchCase,
+} from './engine-update-dispatch.js';
+
 // Export in-memory aggregation fallback (used by engine.aggregate when the
 // driver lacks native groupBy/aggregations support; also useful for tests).
 export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';

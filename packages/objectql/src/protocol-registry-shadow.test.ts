@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
 import { SchemaRegistry } from './registry.js';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 const PKG = 'com.objectstack.test-pkg';
 
@@ -67,8 +68,8 @@ const sysMetadataHistoryObject = {
     },
 };
 
-/** Equality-only in-memory driver — same shape as the PR-10d.4 suite. */
-function makeMemoryDriver() {
+/** Equality-only stub driver — same shape as the PR-10d.4 suite. */
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -170,7 +171,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject as any);
@@ -257,7 +258,15 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
             find: async () => [],
             findOne: async () => null,
             insert: async () => ({ id: 'x' }),
-            update: async () => ({ id: 'x' }),
+            update: async (_o: string, data: any, opts?: any) => {
+                // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+                // the delete pin, on the same argument: a double looser than the engine it
+                // stands in for is how #4434 shipped a REST route that 500'd for every
+                // caller with its suite green, and a predicate update is no less
+                // destructive than a predicate delete.
+                assertEngineUpdateDispatch(data, opts);
+                return { id: 'x' };
+            },
             delete: async () => ({ deleted: 1 }),
         };
         const protocol = new ObjectStackProtocolImplementation(

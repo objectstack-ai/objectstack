@@ -71,6 +71,19 @@ describe('check:generated --reconcile-only', () => {
     expect(output).toContain('all classified');
   });
 
+  it('covers the explicit, manual-only anchor generator (#5358)', () => {
+    // `gen:authorable-surface-base` is the third classification this ledger
+    // carries, and the one most likely to be mis-filed by a later change:
+    // UNGATED_GENERATORS would claim nothing verifies its artifact (false —
+    // check:authorable-surface proves the anchor authentic), while a GATED entry
+    // would put it in reach of `--fix`, which is the side effect #5358 removed.
+    expect(scripts['gen:authorable-surface-base']).toBeDefined();
+    expect(scripts['gen:authorable-surface-base']).toContain('--update-base');
+    const { status, output } = runReconcile();
+    expect(status, output).toBe(0);
+    expect(output).toContain('1 explicit manual-only generators');
+  });
+
   it('covers the test-layer typecheck gate and its writer (#5286)', () => {
     // The specific pair that failed CI on this branch. Named here so a later
     // change that drops either script also has to come back through this file.

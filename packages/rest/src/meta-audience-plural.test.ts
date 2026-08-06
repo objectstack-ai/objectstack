@@ -30,7 +30,7 @@ function makeRes() {
 
 function setup() {
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     // The real implementation normalizes singular↔plural, so BOTH spellings
     // resolve to the same items.

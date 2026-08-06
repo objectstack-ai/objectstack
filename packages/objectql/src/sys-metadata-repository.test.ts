@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ConflictError, hashSpec } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from '@objectstack/metadata-protocol';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 interface Row {
     id: string;
@@ -114,6 +115,12 @@ function makeFakeEngine() {
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+            // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+            // the delete pin, on the same argument: a double looser than the engine it
+            // stands in for is how #4434 shipped a REST route that 500'd for every
+            // caller with its suite green, and a predicate update is no less
+            // destructive than a predicate delete.
+            assertEngineUpdateDispatch(data, opts);
             const found = findRow(opts.where);
             if (!found) throw new Error('not found');
             rows.set(found.key, { ...found.row, ...(data as any) });

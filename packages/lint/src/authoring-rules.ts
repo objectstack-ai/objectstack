@@ -105,6 +105,7 @@ import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { validateComponentProps } from './validate-component-props.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
@@ -453,6 +454,42 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
     run: (stack) => validateReferenceIntegrity(stack),
+  },
+  // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
+  // is `z.record(z.string(), z.unknown())` and ADR-0089 D3a strictness does not
+  // recurse into it, so until this entry existed the 31 typed prop schemas in
+  // `ComponentPropsMap` were parsed by NOTHING (#4001 批 17's `no gate`
+  // verdict): an undeclared or wrongly-typed prop parsed clean, was retained,
+  // and reached objectui's renderer to be ignored there. This dispatches on
+  // `type` and judges the bag; unregistered types are skipped, which is a
+  // required semantic (`type` is an open union — the example corpus authors 87
+  // nodes of 10 types this map does not carry).
+  //
+  // `normalized` for a reason worth stating, since the props bag survives the
+  // Zod parse UNCHANGED and both tiers would otherwise carry the same data: the
+  // ADR-0087 conversion layer runs inside `normalizeStackInput`, so a converted
+  // alias (`page-header-subtitle-alias` rewrites `properties.description` →
+  // `subtitle`) is already canonical here and is never reported as undeclared —
+  // while a schema error elsewhere in the stack cannot take these findings down
+  // with it.
+  //
+  // Advisory, deliberately, and this is the whole shape of #5068's first step:
+  // wiring the parse is the precondition for enforcement, not the enforcement
+  // (#5020, one surface over). The live corpus violates the declarations in two
+  // places that are open contract questions — inline i18n label maps on three
+  // published platform pages (#5728) and the record picker's declared-but-unread
+  // `displayField` (#5775) — so gating today would fail the platform's own pages
+  // to enforce declarations the platform does not keep. The error upgrade is a
+  // separate step, once the warning-period inventory is empty.
+  {
+    name: 'validateComponentProps',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-component-props.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateComponentProps(stack),
   },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.

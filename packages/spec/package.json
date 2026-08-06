@@ -186,6 +186,7 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "gen:schema": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts",
+    "gen:authorable-surface-base": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --update-base",
     "gen:openapi": "tsx scripts/build-openapi.ts",
     "gen:docs": "tsx scripts/build-docs.ts",
     "check:docs": "pnpm gen:schema && tsx scripts/build-docs.ts --check",

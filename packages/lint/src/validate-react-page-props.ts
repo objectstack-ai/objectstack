@@ -59,6 +59,9 @@ import {
   type FieldRef,
   type PageFieldFinding,
 } from './validate-page-field-bindings.js';
+// #5020's zod-rejection renderer, shared with the SDUI component-props gate
+// since #5068 — see `zod-issue-format.ts` for why one copy matters here.
+import { describeIssue } from './zod-issue-format.js';
 
 import { SYSTEM_FIELDS } from './system-fields.js';
 
@@ -385,103 +388,6 @@ function checkChartAggregate(
     );
   }
 }
-
-/**
- * One rejected value's issue, rendered so an author can act on it.
- *
- * Two things zod 4 does not do for us, both measured against this schema rather
- * than assumed:
- *
- * 1. **Union arms collapse.** A union's arm failures never reach
- *    `error.issues` — the whole union is reported as ONE `invalid_union` whose
- *    own `message` is the bare string `"Invalid input"`, with the named arm
- *    messages tucked inside `issue.errors` (one array per arm). Reporting it
- *    verbatim would tell an author only that *something* about `groupBy` is
- *    wrong, which is precisely the class of unhelpful diagnostic this gate
- *    exists to replace. `aggregate.groupBy` is a union
- *    (`ChartGroupBySchema` — bare field name or `{ field, dateGranularity?,
- *    alias? }`), so this is the common path, and it matters more after #5583:
- *    an `unrecognized_keys` raised inside the object arm collapses exactly the
- *    same way, so the unpacking is what will carry the strict rejection's
- *    named surface + rename suggestion to the author.
- * 2. **The offending value is dropped.** `Invalid option: expected one of
- *    "count"|"sum"|…` never echoes what was actually written, and the
- *    hand-rolled check it replaces did (`aggregate.function "median" is not an
- *    aggregation…`). It is recovered from the INPUT by path — generic, and no
- *    contract knowledge restated here to do it.
- */
-function describeIssue(issue: LintZodIssue, root: unknown, depth = 0): string {
-  const value = depth === 0 ? valueAtPath(root, issue.path) : undefined;
-  // Suppressed in the two cases where it would only repeat what the message
-  // already says: a `custom` refinement names the missing key itself, and zod's
-  // `invalid_type` text ends in `received <type>` of its own accord. What is
-  // left is where the value genuinely is missing from the diagnostic — the enum
-  // rejections and the collapsed `invalid_union` (whose message is just
-  // "Invalid input").
-  const seen =
-    depth > 0 || issue.code === 'custom' || issue.message.includes('received ')
-      ? ''
-      : value === undefined
-        ? ' (nothing is set there)'
-        : ` (received ${preview(value)})`;
-
-  // Deliberately NOT `Array.isArray(issue.errors)`: that narrows a
-  // `ReadonlyArray<…>` to `any[]` and silently drops the element type, which is
-  // the TS7006 trap AGENTS.md names — the arms below would then be `any`.
-  const armIssues = issue.code === 'invalid_union' ? issue.errors : undefined;
-  if (!armIssues || armIssues.length === 0) {
-    return `${issue.message}${seen}`;
-  }
-
-  const arms = armIssues
-    .map((arm) =>
-      arm
-        .map((inner) => {
-          const where = inner.path.length ? `${inner.path.join('.')} — ` : '';
-          return `${where}${describeIssue(inner, root, depth + 1)}`;
-        })
-        .join('; '),
-    )
-    .filter((text) => text.length > 0);
-  if (arms.length === 0) return `${issue.message}${seen}`;
-  return (
-    `${issue.message}${seen} — no accepted form matched: ` +
-    arms.map((text, i) => `(${i + 1}) ${text}`).join(' ')
-  );
-}
-
-/**
- * The subset of a zod issue this file reads. Declared structurally rather than
- * imported as `z.core.$ZodIssue` so `packages/lint` keeps its single spec
- * dependency and does not take a direct zod one for two field reads.
- */
-interface LintZodIssue {
-  readonly code: string;
-  readonly message: string;
-  readonly path: ReadonlyArray<PropertyKey>;
-  /** Present on `invalid_union` only: the arms' own issues, one array each. */
-  readonly errors?: ReadonlyArray<ReadonlyArray<LintZodIssue>>;
-}
-
-const valueAtPath = (root: unknown, path: ReadonlyArray<PropertyKey>): unknown => {
-  let cur: unknown = root;
-  for (const key of path) {
-    if (!isRec(cur) && !Array.isArray(cur)) return undefined;
-    cur = (cur as Record<PropertyKey, unknown>)[key];
-  }
-  return cur;
-};
-
-/** The author's own value, short enough to sit inside a diagnostic. */
-const preview = (value: unknown): string => {
-  let text: string;
-  try {
-    text = JSON.stringify(value) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-};
 
 const isRec = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);

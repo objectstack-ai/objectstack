@@ -295,6 +295,7 @@ export const ERROR_CODE_LEDGER = {
     'CUBE_NOT_FOUND',
     'DATASET_INVALID',             // [#5367] dataset/selection refusal raised by `dataset-refusal.ts`
     'RAW_SQL_UNSUPPORTED',
+    'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service

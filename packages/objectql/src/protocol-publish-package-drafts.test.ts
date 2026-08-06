@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 /**
  * ADR-0033 / ADR-0067 D2 — `publishPackageDrafts` promotes every pending
@@ -349,7 +350,15 @@ describe('protocol.applySeedBodies — real loader smoke test', () => {
         inserted.push({ object, record: data });
         return { id: `${object}_${inserted.length}` };
       },
-      update: async () => ({}),
+      update: async (_o: string, data: any, opts?: any) => {
+        // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+        // the delete pin, on the same argument: a double looser than the engine it
+        // stands in for is how #4434 shipped a REST route that 500'd for every
+        // caller with its suite green, and a predicate update is no less
+        // destructive than a predicate delete.
+        assertEngineUpdateDispatch(data, opts);
+        return {};
+      },
     };
     (protocol as any).getMetaItem = async ({ name }: any) => ({
       item: { name, fields: { name: { type: 'text' } } },

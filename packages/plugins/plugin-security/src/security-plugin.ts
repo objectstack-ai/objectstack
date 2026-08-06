@@ -2298,6 +2298,7 @@ export class SecurityPlugin implements Plugin {
   private async resolveSharingReadFilter(
     object: string,
     context: any,
+    resolvedSets?: PermissionSet[],
   ): Promise<Record<string, unknown> | null> {
     const sharing = this.resolveKernelService?.('sharing') as
       | { buildReadFilter?: (o: string, c: any) => Promise<unknown | null> }
@@ -2306,9 +2307,12 @@ export class SecurityPlugin implements Plugin {
     // Mirror the middleware's ADR-0057 D1 depth stash. `getEffectiveScope`
     // needs the resolved sets and the object's posture — the same two inputs
     // the middleware feeds it — so the owner-match widens identically here.
+    // [#5386] `resolvedSets` lets an in-middleware caller (the
+    // controlled_by_parent derivation) pass the sets it already resolved for
+    // THIS identity, instead of re-resolving them from the context.
     let readScope: string | undefined;
     try {
-      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
       if (permissionSets.length > 0) {
         const meta = await this.getObjectSecurityMeta(object);
         readScope = this.permissionEvaluator.getEffectiveScope(
@@ -2329,6 +2333,69 @@ export class SecurityPlugin implements Plugin {
       ...(readScope ? { __readScope: readScope } : {}),
     });
     return (filter ?? null) as Record<string, unknown> | null;
+  }
+
+  /**
+   * [#5386] The OWD / record-sharing half of a SINGLE-RECORD write gate — the
+   * write analogue of {@link resolveSharingReadFilter}.
+   *
+   * plugin-sharing's own middleware gates a by-id `update` on `canEdit(object,
+   * id, ctx)` (ownership widened by write DEPTH, an `edit`-level
+   * `sys_record_share` grant, or the `modifyAllRecords` bypass). This resolves
+   * exactly that gate through the late-bound `sharing` service, so a derived
+   * check ("may this caller edit the MASTER?") answers with the same predicate a
+   * direct write of the master would face, instead of a hand-rolled copy that
+   * drifts.
+   *
+   * Returns `true` when the sharing layer imposes nothing — no plugin-sharing in
+   * the deployment, a bypass/public object, an object with no owner field.
+   * `canEdit` answers all of those itself. FAILS CLOSED (`false`) when the probe
+   * throws: a dropped record-share gate is the leak, not the denial.
+   */
+  private async resolveSharingCanEdit(
+    object: string,
+    recordId: string,
+    context: any,
+    resolvedSets?: PermissionSet[],
+  ): Promise<boolean> {
+    const sharing = this.resolveKernelService?.('sharing') as
+      | { canEdit?: (o: string, id: string, c: any) => Promise<boolean> }
+      | undefined;
+    if (!sharing || typeof sharing.canEdit !== 'function') return true;
+    // ADR-0057 D1 depth stash, resolved for THIS object — the context may still
+    // carry the DETAIL's `__writeScope` from the middleware, and the master's
+    // own grant is what widens the master's owner-match. Always written (even as
+    // undefined) so the detail's value can never leak in through the spread.
+    let writeScope: string | undefined;
+    try {
+      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
+      if (permissionSets.length > 0) {
+        const meta = await this.getObjectSecurityMeta(object);
+        writeScope = this.permissionEvaluator.getEffectiveScope(
+          'write',
+          object,
+          permissionSets,
+          { isPrivate: meta.isPrivate },
+        );
+      }
+    } catch {
+      // Depth is a WIDENING input: unresolved leaves the owner-match at its
+      // narrowest ('own'), the safe direction. The gate below still runs.
+      writeScope = undefined;
+    }
+    try {
+      return (
+        (await sharing.canEdit(object, recordId, { ...context, __writeScope: writeScope })) === true
+      );
+    } catch (e) {
+      this.logger.error?.(
+        `[security] controlled_by_parent write gate could not resolve the sharing (OWD) edit ` +
+          `check for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — ` +
+          `denying (fail-closed, #5386)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
   }
 
   async getReadFilter(
@@ -3200,17 +3267,33 @@ export class SecurityPlugin implements Plugin {
    *
    * For an object whose `sharingModel` is `controlled_by_parent`, access is
    * derived from the master: return a filter `masterFK IN (<master ids this user
-   * can read>)`. The id set is resolved by running the MASTER's own read RLS
-   * (reused via `computeRlsFilter`) under a system context — no middleware
-   * re-entry, so no recursion. An empty set yields `{ masterFK: { $in: [] } }`,
-   * which matches no rows (fail closed). A misconfigured object (no
-   * master_detail/lookup to derive from) denies all reads (defense-in-depth;
-   * spec validation should prevent authoring it). Returns null when the object is
-   * not controlled_by_parent.
+   * can read>)`. The id set is resolved under a system context — no middleware
+   * re-entry, so no recursion — against BOTH halves of the master's own read
+   * scope, the same two the engine ANDs into a direct `find` of the master:
+   *
+   *   1. the master's read RLS (`computeRlsFilter` — tenant Layer 0 + policies), and
+   *   2. plugin-sharing's OWD / record-share visibility filter
+   *      (`resolveSharingReadFilter` — the owner-match widened by READ depth,
+   *      OR-ed with the caller's `sys_record_share` grants).
+   *
+   * [#5386] Half 2 used to be missing, and its absence was not a narrow gap: an
+   * app that authors NO `rowLevelSecurity` on the master got an UNRESTRICTED
+   * master id set, so the declared narrowing restricted nothing at all — every
+   * detail row was readable by any holder of object-level read. Authoring RLS on
+   * the master was no workaround either, since RLS is ANDed with (not OR-ed
+   * into) the sharing filter and so cuts off the very rows a grant shared in.
+   * Which half applies is decided by the MASTER's own effective sharing model —
+   * `buildReadFilter` returns null for a non-`private` master — so the derived
+   * set stays point-for-point equal to what a direct find of the master returns.
+   *
+   * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
+   * closed), as does a failure to resolve the sharing half. A misconfigured
+   * object (no master_detail/lookup to derive from) denies all reads
+   * (defense-in-depth; spec validation should prevent authoring it). Returns null
+   * when the object is not controlled_by_parent.
    *
    * v1 scope (ADR-0055): single level — the master's OWN controlled_by_parent is
-   * not traversed transitively; master accessibility is the master's RLS filter
-   * (sharing-service grants on the master are not folded in).
+   * NOT traversed transitively.
    */
   private async computeControlledByParentFilter(
     permissionSets: PermissionSet[],
@@ -3225,7 +3308,24 @@ export class SecurityPlugin implements Plugin {
     const rel = this.resolveCbpRelation(object);
     if (!rel) return { ...RLS_DENY_FILTER };
 
-    const masterFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
+    const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
+    // [#5386] The OWD / record-share half, resolved through the SAME helper
+    // `getReadFilter` uses, so the derived path and the direct path cannot
+    // drift. A resolution failure denies (empty master set) rather than
+    // silently widening the children back to everyone.
+    let masterSharingFilter: Record<string, unknown> | null;
+    try {
+      masterSharingFilter = await this.resolveSharingReadFilter(rel.master, context, permissionSets);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation could not resolve the sharing (OWD) read ` +
+          `scope of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
+          `— denying (fail-closed, #5386)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    const masterFilter = andComposeLayers(masterRlsFilter, masterSharingFilter);
     let masterIds: string[] = [];
     try {
       const rows = await this.ql.find(rel.master, {
@@ -3247,11 +3347,24 @@ export class SecurityPlugin implements Plugin {
    *
    * A by-id write (insert/update/delete) to a controlled_by_parent detail
    * requires EDIT access to its master: the caller must hold CRUD `update` on the
-   * master object AND the master row must be visible under the master's write RLS.
+   * master object AND the master row must be reachable under BOTH halves of the
+   * master's own record-level write gate —
+   *
+   *   1. the master's write RLS (`computeRlsFilter(master, 'update')`), and
+   *   2. plugin-sharing's per-record edit gate (`resolveSharingCanEdit` →
+   *      `canEdit`: ownership widened by write DEPTH, an `edit`-level
+   *      `sys_record_share` grant, or the `modifyAllRecords` bypass).
+   *
    * This is the write-side companion to the read derivation — the RLS read filter
    * never applies to a by-id write (the #1994 class), so without this a member
    * could mutate a detail under a master they cannot edit. Throws on denial;
    * no-op when the object is not controlled_by_parent.
+   *
+   * [#5386] Half 2 used to be missing, and half 1 is CONDITIONAL: a master with
+   * no authored write RLS compiles to a null filter, which skipped the row check
+   * entirely — so any holder of object-level `update` on the master could write
+   * details under masters they could neither read nor edit. The sharing gate is
+   * therefore asked UNCONDITIONALLY, not only when half 1 produced a filter.
    *
    * v1 scope: single-id writes. Bulk writes flow through the AST and are already
    * scoped by the controlled-by-parent READ filter (to readable masters).
@@ -3292,8 +3405,8 @@ export class SecurityPlugin implements Plugin {
     }
     if (masterId == null) deny('detail record has no master reference');
 
-    // Master edit access = CRUD update on the master AND master row visible under
-    // the master's write RLS.
+    // Master edit access = CRUD update on the master AND the master row reachable
+    // under BOTH halves of its own write gate (write RLS + record sharing).
     if (!this.permissionEvaluator.checkObjectPermission('update', rel!.master, permissionSets)) {
       deny(`no edit permission on master '${rel!.master}'`, masterId);
     }
@@ -3309,6 +3422,12 @@ export class SecurityPlugin implements Plugin {
         visible = null;
       }
       if (!visible) deny(`master '${rel!.master}' not editable by this user (row-level security)`, masterId);
+    }
+    // [#5386] The OWD / record-share half — asked UNCONDITIONALLY, because the
+    // RLS half above is skipped whole when the master authors no write policy,
+    // which is exactly the common case this closes.
+    if (!(await this.resolveSharingCanEdit(rel!.master, String(masterId), context, permissionSets))) {
+      deny(`master '${rel!.master}' not editable by this user (record sharing)`, masterId);
     }
   }
 

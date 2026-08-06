@@ -36,7 +36,7 @@ function makeRes() {
 /** Secure-by-default: `requireAuth` is ON for every case below. */
 function setup() {
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: any) => {
       const t = RestServerTypes.singular(String(type ?? ''));

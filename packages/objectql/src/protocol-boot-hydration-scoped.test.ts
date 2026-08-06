@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 const PKG_A = 'com.acme.a';
 const PKG_B = 'com.acme.b';
@@ -65,7 +66,15 @@ function makeEngine(registry: SchemaRegistry, rows: Row[]) {
             return rows.find((r) => matches(r, opts.where)) ?? null;
         },
         async insert() { return { id: 'x' }; },
-        async update() { return { id: 'x' }; },
+        async update(_t: string, data: Record<string, unknown>, opts?: Record<string, unknown>) {
+            // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+            // the delete pin, on the same argument: a double looser than the engine it
+            // stands in for is how #4434 shipped a REST route that 500'd for every
+            // caller with its suite green, and a predicate update is no less
+            // destructive than a predicate delete.
+            assertEngineUpdateDispatch(data, opts);
+            return { id: 'x' };
+        },
         async delete() { return { deleted: 0 }; },
     };
     return engine;

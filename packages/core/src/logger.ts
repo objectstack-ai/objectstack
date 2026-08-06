@@ -29,6 +29,145 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 const RESET = '\x1b[0m';
 
 /**
+ * Split a field name into lowercase words on camelCase, `snake_case`,
+ * `kebab-case`, dot and letter/digit boundaries.
+ *
+ * `apiKey` / `api_key` / `API_KEY` / `x-api-key` all tokenize to
+ * `['api','key']`, while `monkey`, `keyword` and `tokenizer` stay a single
+ * word. That difference is the whole point: it is what makes the redactor a
+ * **word-boundary** matcher instead of the substring matcher it used to be
+ * (#5573) — a plain `keys` field no longer reads as a secret.
+ */
+function tokenizeFieldName(name: string): string[] {
+    return name
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // apiKey  -> api Key
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2') // APIKey  -> API Key
+        .replace(/([a-zA-Z])([0-9])/g, '$1 $2') // key2    -> key 2
+        .split(/[^A-Za-z0-9]+/) // _ - . / space
+        .filter(Boolean)
+        .map((word) => word.toLowerCase());
+}
+
+/**
+ * Singular form of the plural spellings the redact vocabulary actually meets
+ * (`keys`, `tokens`, `secrets`, `passwords`, `passes`). Deliberately not a
+ * general inflector — it only has to be right for words that end up next to a
+ * redact word, and it must never turn `address`/`status` into a new word.
+ */
+function singularizeWord(word: string): string {
+    if (/(?:ss|us|is)$/.test(word)) return word; // address / status / axis
+    if (/(?:ch|sh|s|x|z)es$/.test(word)) return word.slice(0, -2); // passes / boxes
+    if (/[a-z0-9]s$/.test(word)) return word.slice(0, -1); // keys / tokens
+    return word;
+}
+
+/**
+ * Words that mark the *secret* sense of a redact word when they are glued to
+ * it with no boundary to split on: `apikey`, `accesstoken`, `clientsecret`.
+ *
+ * Word-boundary matching covers every field name spelled the way this repo
+ * spells names (camelCase config keys / snake_case machine names — Prime
+ * Directive #3), but an all-lowercase concatenation has no boundary at all, so
+ * `apikey` would tokenize to one word and stop being redacted. A bare
+ * "ends with `key`" rule cannot be used to rescue it, because `monkey`,
+ * `turkey` and `whiskey` end with `key` too — the exact false positives #5573
+ * exists to remove. So the rescue is scoped to this explicit qualifier list:
+ * `<qualifier><redact word>` is a secret, anything else glued to a redact word
+ * is not.
+ *
+ * Consequences, on purpose:
+ *   - Only a **suffix** concatenation counts. `secretary` and `keyword` start
+ *     with a redact word and stay clear.
+ *   - An unlisted qualifier (`foobarkey`) is not redacted. The fix is to spell
+ *     the field `fooBarKey` / `foo_bar_key`, which matches generically — or to
+ *     add the word here.
+ */
+const CONCATENATED_SECRET_QUALIFIERS = new Set([
+    'access',
+    'account',
+    'admin',
+    'api',
+    'app',
+    'auth',
+    'bearer',
+    'client',
+    'csrf',
+    'db',
+    'database',
+    'encryption',
+    'id',
+    'jwt',
+    'master',
+    'oauth',
+    'private',
+    'public',
+    'refresh',
+    'root',
+    'secret',
+    'service',
+    'session',
+    'shared',
+    'sign',
+    'signing',
+    'ssh',
+    'token',
+    'user',
+    'webhook',
+    'xsrf',
+]);
+
+/** `apikey`/`apikeys` vs `key` — see {@link CONCATENATED_SECRET_QUALIFIERS}. */
+function isQualifiedConcatenation(word: string, redactWord: string): boolean {
+    for (const base of [word, singularizeWord(word)]) {
+        if (base.length <= redactWord.length || !base.endsWith(redactWord)) continue;
+        if (CONCATENATED_SECRET_QUALIFIERS.has(base.slice(0, base.length - redactWord.length))) return true;
+    }
+    return false;
+}
+
+/** Does `words` contain `run` as a consecutive sub-sequence? */
+function containsWordRun(words: string[], run: string[]): boolean {
+    for (let i = 0; i + run.length <= words.length; i++) {
+        if (run.every((word, offset) => words[i + offset] === word)) return true;
+    }
+    return false;
+}
+
+/**
+ * Word-boundary match of one configured redact pattern against one field name,
+ * both already tokenized by {@link tokenizeFieldName}.
+ *
+ * The plural rule is the one subtlety, and it is the maintainer's ruling on
+ * #5573 made consistent with itself: a **bare** plural names a collection or a
+ * count, not a secret (`keys` on a Zod `unrecognized_keys` issue, `tokens` on
+ * an LLM usage record), so it is left alone; a plural **inside a compound**
+ * still names the secret (`apiKeys: ['sk-…']`, `refresh_tokens`) and is
+ * redacted. Singular words match everywhere, compound or not.
+ */
+function fieldWordsMatchPattern(nameWords: string[], patternWords: string[]): boolean {
+    if (patternWords.length === 0 || nameWords.length === 0) return false;
+
+    // A multi-word pattern (`apiKey`, `api_key`) matches a consecutive run of
+    // the same words, or those words written as one concatenated token.
+    if (patternWords.length > 1) {
+        const glued = patternWords.join('');
+        return (
+            containsWordRun(nameWords, patternWords) ||
+            nameWords.some((word) => word === glued || singularizeWord(word) === glued)
+        );
+    }
+
+    const redactWord = patternWords[0];
+    const isCompound = nameWords.filter((word) => /[a-z]/.test(word)).length > 1;
+    return nameWords.some(
+        (word) =>
+            word === redactWord ||
+            (isCompound && singularizeWord(word) === redactWord) ||
+            isQualifiedConcatenation(word, redactWord),
+    );
+}
+
+/**
  * Whether ANSI color may be written to the given stream.
  *
  * Follows the https://no-color.org convention: a non-empty `NO_COLOR` env var
@@ -84,6 +223,8 @@ export class ObjectLogger implements Logger {
         name?: string;
     };
     private bindings: Record<string, any>;
+    /** `config.redact`, tokenized once — see {@link fieldWordsMatchPattern}. */
+    private redactPatterns: string[][];
     private fileStream?: any;
     /** Only the logger that opened the stream may close it — children share it. */
     private ownsFileStream = false;
@@ -100,6 +241,7 @@ export class ObjectLogger implements Logger {
             rotation: config.rotation ?? { maxSize: '10m', maxFiles: 5 },
         };
         this.bindings = bindings;
+        this.redactPatterns = this.config.redact.map(tokenizeFieldName).filter((words) => words.length > 0);
 
         if (this.config.file && typeof process !== 'undefined') {
             this.openFileStream(this.config.file);
@@ -156,12 +298,26 @@ export class ObjectLogger implements Logger {
         return LEVEL_ORDER[level] >= LEVEL_ORDER[this.config.level];
     }
 
+    /**
+     * Whether a meta field name names one of the configured secrets.
+     *
+     * Until #5573 this was `lower.includes(pattern)`, which redacted every
+     * field whose name merely *contained* a redact word — `keys`, `keyword`,
+     * `tokens`, `monkey`, `secretary` — and replaced its value with
+     * `***REDACTED***`, so the reader lost the fact AND was told a secret had
+     * been withheld. Matching is now on word boundaries: `key` matches
+     * `apiKey` / `api_key`, not `keys` / `monkey` / `keyword`.
+     */
+    private isRedactedFieldName(key: string): boolean {
+        const nameWords = tokenizeFieldName(key);
+        return this.redactPatterns.some((pattern) => fieldWordsMatchPattern(nameWords, pattern));
+    }
+
     private redactSensitive(obj: any): any {
         if (!obj || typeof obj !== 'object') return obj;
         const redacted = Array.isArray(obj) ? [...obj] : { ...obj };
         for (const key in redacted) {
-            const lower = key.toLowerCase();
-            if (this.config.redact.some((p: string) => lower.includes(p.toLowerCase()))) {
+            if (this.isRedactedFieldName(key)) {
                 redacted[key] = '***REDACTED***';
             } else if (typeof redacted[key] === 'object' && redacted[key] !== null) {
                 redacted[key] = this.redactSensitive(redacted[key]);

@@ -2,7 +2,7 @@
 
 /**
  * Secret-field channel — end-to-end against a REAL {@link ObjectQL} engine + a
- * minimal in-memory driver. Verifies the core encryption chain:
+ * minimal stub driver. Verifies the core encryption chain:
  *  - encrypt-on-write: plaintext → sys_secret ciphertext + opaque ref on the row
  *  - mask-on-read: the generic read path never returns plaintext or the ref
  *  - resolveSecret: privileged dereference round-trips back to plaintext
@@ -15,8 +15,8 @@ import { ObjectQL } from './engine.js';
 import { SECRET_MASK, isSecretRef } from './secret-fields.js';
 import type { ICryptoProvider, CryptoHandle, CryptoContext } from '@objectstack/spec/contracts';
 
-// ---- minimal in-memory driver (equality-only WHERE) -----------------------
-function makeMemoryDriver() {
+// ---- minimal stub driver (equality-only WHERE) ----------------------------
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -130,7 +130,7 @@ const dsObject = {
 
 async function buildEngine(withCrypto: boolean) {
   const engine = new ObjectQL();
-  const { driver, stores } = makeMemoryDriver();
+  const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(sysSecretObject as any);
@@ -216,7 +216,7 @@ describe('objectql secret-field channel', () => {
   it('non-secret objects are untouched (no crypto cost)', async () => {
     engineWithoutSecretField: {
       const engine = new ObjectQL();
-      const { driver, stores } = makeMemoryDriver();
+      const { driver, stores } = makeStubDriver();
       engine.registerDriver(driver, true);
       await engine.init();
       engine.registry.registerObject({
@@ -256,7 +256,7 @@ const authUserObject = {
 async function buildPasswordEngine() {
   // Deliberately NO CryptoProvider — a password field must not require one.
   const engine = new ObjectQL();
-  const { driver, stores } = makeMemoryDriver();
+  const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(deviceObject as any);

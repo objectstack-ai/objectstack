@@ -39,6 +39,12 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import {
+  ANONYMOUS_DENY_BODY,
+  ANONYMOUS_DENY_CODE,
+  ANONYMOUS_DENY_MESSAGE,
+  ANONYMOUS_DENY_STATUS,
+} from '@objectstack/core';
 import { getSharedShowcase } from './shared-showcase.js';
 
 const OBJ = '/data/showcase_private_note';
@@ -54,6 +60,89 @@ const ACTION = '/actions/showcase_task/showcase_mark_done/anon-probe-id';
 // A real showcase flow declaration, so the deregister case names something that
 // genuinely exists in the app's metadata.
 const FLOW = 'showcase_reassign_wizard';
+
+// ── #5632 — the TWO declared anonymous-401 envelopes, as executable rules ───
+//
+// `ANONYMOUS_DENY_BODY`'s docstring in `@objectstack/core` used to call itself
+// "the single 401 body shape every seam returns". It never was: it is the REST
+// seam's shape, and the five dispatcher-mounted domains answer their own
+// wrapper. #5632 narrowed that docstring; the declarations here are the
+// executable half of the same statement, so the narrowed comment cannot rot
+// back into a lie without CI saying so.
+//
+// ── Division of labour with the #5631 slice at the bottom of this file ─────
+//
+// That case reads EACH FAMILY in its own declared shape and pins the code and
+// message the two share, spelled as string literals. Two things it cannot fail
+// on, by construction:
+//   1. a body that satisfies NEITHER declared envelope yet still survives —
+//      `toMatchObject` ignores unknown keys, so a re-nested or hybrid third
+//      dialect can pass it as long as the matched subset is still in there;
+//   2. drift between the literals spelled in this file and the constants
+//      `@objectstack/core` actually exports — the literals would just go stale.
+//
+// The cases added below close exactly those two and nothing else: every
+// anonymous 401 body is classified into EXACTLY ONE of the two declared
+// families by mutually exclusive predicates, that family is checked against a
+// declared seam→owner map, and only then are the code and message read —
+// through THAT family's own reader — and compared to the exported constants.
+// Deliberately NO `??` chain across the families: a tolerant cross-family read
+// is the very shape #5632 exists to keep out of this codebase.
+
+type DenyFamily = 'rest-flat' | 'dispatcher-wrapper';
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * The REST seam's envelope — `@objectstack/rest` `enforceAuth` writing
+ * `ANONYMOUS_DENY_BODY` verbatim. The machine code IS the top-level `error`
+ * value; there is no wrapper around it and no `success` flag.
+ */
+const isRestFlatDeny = (body: unknown): boolean =>
+  isRecord(body)
+  && typeof body.error === 'string'
+  && typeof body.message === 'string'
+  && !('success' in body);
+
+/**
+ * The dispatcher's envelope — what `deps.error(msg, status, { code })` writes
+ * in `domains/{ai,meta,security,actions,automation}.ts`. The code lives one
+ * level down under `error.code` and the status is restated in the body.
+ */
+const isDispatcherWrapperDeny = (body: unknown): boolean => {
+  if (!isRecord(body) || body.success !== false || 'message' in body) return false;
+  const err = body.error;
+  return isRecord(err)
+    && typeof err.code === 'string'
+    && typeof err.message === 'string'
+    && typeof err.httpStatus === 'number';
+};
+
+// The closed world. The two predicates are mutually exclusive where it counts:
+// `error` is a STRING in one and an OBJECT in the other, and each rejects the
+// other's discriminating key. Anything else on the wire matches neither.
+const DENY_ENVELOPES: Record<DenyFamily, (body: unknown) => boolean> = {
+  'rest-flat': isRestFlatDeny,
+  'dispatcher-wrapper': isDispatcherWrapperDeny,
+};
+
+/**
+ * Every declared envelope a body satisfies. The contract is EXACTLY ONE entry:
+ * an empty result means a third dialect reached the wire, two entries would
+ * mean the declarations stopped being mutually exclusive, and the wrong single
+ * entry means that seam changed family.
+ */
+const declaredFamiliesOf = (body: unknown): DenyFamily[] =>
+  (Object.keys(DENY_ENVELOPES) as DenyFamily[]).filter((family) => DENY_ENVELOPES[family](body));
+
+/** Read code + message with the family's OWN reader. Never a cross-family `??`. */
+const readDenial = (family: DenyFamily, body: unknown): { code: unknown; message: unknown } => {
+  if (!isRecord(body)) return { code: undefined, message: undefined };
+  if (family === 'rest-flat') return { code: body.error, message: body.message };
+  const err: Record<string, unknown> = isRecord(body.error) ? body.error : {};
+  return { code: err.code, message: err.message };
+};
 
 describe('showcase: anonymous posture is uniform across surfaces (#2567)', () => {
   let stack: VerifyStack;
@@ -199,5 +288,79 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     ]);
     expect([...codes]).toEqual(['UNAUTHENTICATED']);
     expect([...messages]).toEqual(['Authentication is required to access this endpoint.']);
+  });
+
+  // ── #5632: every 401 body is IN, and only in, one declared envelope ──────
+  //
+  // The ownership map. `owner` names the producer, so a failure reads as "this
+  // seam changed family" rather than "some assertion moved".
+  //
+  // Coverage, stated as measured rather than as assumed: five dispatcher
+  // domains hold an anonymous gate (ai / meta / security / actions /
+  // automation) and only the last two are drivable on THIS boot — probed on
+  // the same shared showcase stack these cases use:
+  //   - `GET /ai/status` answers 501 `NOT_IMPLEMENTED` (no
+  //     `@objectstack/service-ai` ships in the open framework, and that
+  //     domain's gate sits BEHIND its route match, so it never runs here);
+  //   - `GET /security/permissions` answers 404 (the showcase registration
+  //     path mounts no `/security`);
+  //   - `/meta` on this stack is served by `@objectstack/rest`, so it exercises
+  //     the flat family, not the dispatcher's meta domain.
+  // The wrapper family is therefore represented by actions + automation. Adding
+  // a row is the whole change needed the day another domain becomes reachable.
+  const DENIED_SEAMS: Array<{
+    seam: string;
+    owner: string;
+    family: DenyFamily;
+    call: () => Promise<Response>;
+  }> = [
+    { seam: 'GET /meta', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', '/meta') },
+    { seam: `GET ${OBJ}`, owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', OBJ) },
+    { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
+    { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
+    { seam: 'GET /automation', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation') },
+    { seam: 'DELETE /automation/:name', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('DELETE', `/automation/${FLOW}`) },
+  ];
+
+  it.each(DENIED_SEAMS)(
+    'anonymous $seam denies in exactly one declared envelope — $family, the one $owner writes (#5632)',
+    async ({ seam, family, call }) => {
+      const res = await call();
+      expect(res.status, `${seam}: anonymous must be denied with the shared status`).toBe(ANONYMOUS_DENY_STATUS);
+
+      const body = await res.json();
+
+      // ∈ the two declared shapes, and in ONLY one of them. No match at all =
+      // a third dialect reached the wire; the other family = this seam swapped
+      // wrappers. Both are red, and the message carries the body that did it.
+      expect(
+        declaredFamiliesOf(body),
+        `${seam}: body must satisfy the ${family} envelope and no other — got ${JSON.stringify(body)}`,
+      ).toEqual([family]);
+
+      // Only now the values, read through THAT family's own reader and compared
+      // to the exported constants themselves — so this pin follows the constants
+      // if they ever move, instead of quietly disagreeing with them.
+      const { code, message } = readDenial(family, body);
+      expect(code, `${seam}: machine code must be ANONYMOUS_DENY_CODE`).toBe(ANONYMOUS_DENY_CODE);
+      expect(message, `${seam}: message must be ANONYMOUS_DENY_MESSAGE`).toBe(ANONYMOUS_DENY_MESSAGE);
+    },
+  );
+
+  it('`ANONYMOUS_DENY_BODY` is the REST seam body, and NOT the dispatcher one (#5632)', async () => {
+    const flat = await anon('GET', '/meta').then((r) => r.json());
+    const wrapped = await anon('GET', '/automation').then((r) => r.json());
+
+    // The narrowed docstring's positive claim, on the wire: the exported
+    // constant IS what the REST seam writes, whole.
+    expect(flat, 'the REST seam must write ANONYMOUS_DENY_BODY verbatim').toEqual(ANONYMOUS_DENY_BODY);
+
+    // ...and its negative half, which is the part that was missing. If the
+    // envelope-convergence line (#3843 family) ever lands and the dispatcher
+    // adopts the flat body, THIS is the case that goes red and says the comment
+    // above `ANONYMOUS_DENY_BODY` is due for a rewrite — the constant would
+    // have become platform-wide, which is exactly what it must not claim today.
+    expect(wrapped, 'a dispatcher seam must NOT be writing the REST constant').not.toEqual(ANONYMOUS_DENY_BODY);
+    expect(declaredFamiliesOf(wrapped)).toEqual(['dispatcher-wrapper']);
   });
 });

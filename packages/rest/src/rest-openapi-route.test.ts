@@ -1,12 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `GET {basePath}/openapi.json` at the route level (#5040 E6, #5078).
+ * `GET {basePath}/openapi.json` at the route level (#5040 E6, #5078, #5588).
  *
- * The pure enrichment is unit-tested in `openapi-endpoints.test.ts`; what this
- * file covers is the part only the server can answer — that the handler really
- * asks the protocol for `api` items alongside `object` items, and that with the
- * empty set the world's response is unchanged.
+ * The pure enrichment is unit-tested in `openapi-endpoints.test.ts` and the
+ * pure built-in section in `openapi-builtin-paths.test.ts`; what this file
+ * covers is the part only the server can answer — that the handler really asks
+ * the protocol for `api` items alongside `object` items, that with the empty
+ * set the world's response is unchanged, and (since #5588) that the built-in
+ * section the document publishes is THIS server's route table rather than the
+ * static artifact's stale one.
  *
  * This route has ONE owner. #5078 established it with a real boot after a
  * shadow `generateOpenApi` branch in the dispatcher had spent months looking
@@ -16,6 +19,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+import { toTemplatePath } from './openapi-builtin-paths';
 
 function makeServer() {
   return {
@@ -39,11 +43,27 @@ function makeProtocol(items: Record<string, unknown[]>) {
   return { protocol, asked };
 }
 
+/**
+ * A server with its REAL route surface mounted.
+ *
+ * `registerRoutes()` rather than the private `registerOpenApiEndpoints` alone:
+ * since #5588 the document's built-in section IS the route table, so a server
+ * with only the openapi route mounted would be answering a different question
+ * than the one production asks.
+ */
+function makeRest(protocol: any, config: Record<string, unknown> = {}) {
+  const rest = new RestServer(
+    makeServer(),
+    protocol,
+    { api: { requireAuth: false, version: 'v1', ...config } } as any,
+  );
+  rest.registerRoutes();
+  return rest;
+}
+
 /** Drive the registered `GET {base}/openapi.json` handler and read the body. */
-async function serveOpenApi(protocol: any) {
-  const rest = new RestServer(makeServer(), protocol, { api: { requireAuth: false, version: 'v1' } } as any);
-  (rest as any).registerOpenApiEndpoints('/api/v1');
-  const entry = (rest as any).routeManager.get('GET', '/api/v1/openapi.json');
+async function serveOpenApiFrom(rest: RestServer, base = '/api/v1') {
+  const entry = (rest as any).routeManager.get('GET', `${base}/openapi.json`);
   expect(entry, 'the openapi.json route must be registered by this package').toBeDefined();
 
   let status = 200;
@@ -54,8 +74,12 @@ async function serveOpenApi(protocol: any) {
     setHeader: () => {},
     send: () => {},
   };
-  await entry.handler({ headers: { host: 'example.test' }, params: {}, path: '/api/v1/openapi.json' }, res);
+  await entry.handler({ headers: { host: 'example.test' }, params: {}, path: `${base}/openapi.json` }, res);
   return { status, body };
+}
+
+async function serveOpenApi(protocol: any) {
+  return serveOpenApiFrom(makeRest(protocol));
 }
 
 const TASKS_ENDPOINT = {
@@ -121,7 +145,151 @@ describe('GET /api/v1/openapi.json — endpoint enrichment', () => {
     const { body } = await serveOpenApi(protocol);
     const expanded = Object.keys(body.paths).filter((p) => p.includes('showcase_task'));
     expect(expanded.length).toBeGreaterThan(0);
-    // The template row survives, marked, exactly as before.
-    expect(body.paths['/api/{object}']['x-template']).toBe(true);
+    // The template row survives, marked, exactly as before — but it is now the
+    // template of a route that EXISTS. Before #5588 this assertion read
+    // `body.paths['/api/{object}']`, a path the server 404s (0/10 of the old
+    // section's operations were reachable); the expansion machinery is
+    // unchanged, what it expands is finally real.
+    expect(body.paths['/api/v1/data/{object}']['x-template']).toBe(true);
+    expect(body.paths['/api/v1/data/showcase_task']).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #5588 — the built-in section is this server's route table
+// ---------------------------------------------------------------------------
+
+/** Paths the OLD, spec-authored built-in section published. All 10 404'd. */
+const PHANTOM_PATHS = [
+  '/api/{object}',
+  '/api/{object}/{id}',
+  '/api/meta',
+  '/api/meta/types',
+  '/api/meta/{type}',
+  '/api/meta/{type}/{name}',
+  '/api/.well-known/objectstack',
+];
+
+describe('#5588 — built-in routes come from rest, not from the static artifact', () => {
+  it('publishes no path the server does not mount', async () => {
+    // The converse of the bug, asserted as a set relation rather than by
+    // example: every documented path must be a mounted route (modulo the
+    // `{object}` expansion, whose concrete copies are derived from a template
+    // that is itself mounted). This is what makes a phantom row impossible to
+    // add without failing here.
+    const { protocol } = makeProtocol({ object: [], api: [] });
+    const rest = makeRest(protocol);
+    const { body } = await serveOpenApiFrom(rest);
+
+    const mounted = new Set(rest.getRoutes().map((r: any) => toTemplatePath(r.path)));
+    for (const path of Object.keys(body.paths)) {
+      expect(mounted.has(path), `documented path '${path}' is not a mounted route`).toBe(true);
+    }
+    // …and the other direction: nothing mounted is silently dropped.
+    expect(Object.keys(body.paths).length).toBe(mounted.size);
+    expect(mounted.size).toBeGreaterThan(50);
+  });
+
+  it('describes none of the seven phantom paths the old section published', async () => {
+    const { protocol } = makeProtocol({ object: [{ name: 'showcase_task' }], api: [] });
+    const { body } = await serveOpenApi(protocol);
+    for (const phantom of PHANTOM_PATHS) {
+      expect(body.paths[phantom], `'${phantom}' is served by nothing`).toBeUndefined();
+    }
+    // `/api/meta/types` and `/api/.well-known/objectstack` had no route on ANY
+    // prefix — the first exists nowhere in the repo, the second is the runtime
+    // dispatcher's, mounted on the root. Neither may come back under `/api/v1`.
+    expect(body.paths['/api/v1/meta/types']).toBeUndefined();
+    expect(body.paths['/api/v1/.well-known/objectstack']).toBeUndefined();
+    expect(body.paths['/.well-known/objectstack']).toBeUndefined();
+  });
+
+  it('documents the real CRUD surface, with the real verbs', async () => {
+    const { protocol } = makeProtocol({ object: [], api: [] });
+    const { body } = await serveOpenApi(protocol);
+
+    const collection = body.paths['/api/v1/data/{object}'];
+    expect(collection).toBeDefined();
+    expect(Object.keys(collection).sort()).toEqual(['get', 'post']);
+
+    const single = body.paths['/api/v1/data/{object}/{id}'];
+    expect(single).toBeDefined();
+    // PATCH, not PUT. The old document said `PUT {object}/{id}`; the server
+    // answers 405 to a PUT there.
+    expect(single.patch).toBeDefined();
+    expect(single.put, 'PUT on a record 405s — it must not be documented').toBeUndefined();
+    expect(Object.keys(single).sort()).toEqual(['delete', 'get', 'patch']);
+
+    expect(body.paths['/api/v1/meta'].get).toBeDefined();
+    expect(body.paths['/api/v1/discovery'].get).toBeDefined();
+    expect(body.paths['/api/v1/openapi.json'].get).toBeDefined();
+  });
+
+  it('carries the registration summary and path parameters into each operation', async () => {
+    const { protocol } = makeProtocol({ object: [], api: [] });
+    const { body } = await serveOpenApi(protocol);
+
+    const get = body.paths['/api/v1/data/{object}/{id}'].get;
+    expect(get.operationId).toBe('getDataByObjectById');
+    expect(get.summary).toBe('Get record by ID');
+    expect(get.tags).toEqual(['data', 'crud']);
+    expect(get.parameters.map((p: any) => p.name)).toEqual(['object', 'id']);
+    expect(get.parameters.every((p: any) => p.in === 'path' && p.required === true)).toBe(true);
+
+    // A route registered `public` says so; everything else inherits the
+    // document's requirement rather than claiming to be open.
+    expect(body.paths['/api/v1/forms/{slug}'].get.security).toEqual([]);
+    expect(get.security).toBeUndefined();
+  });
+
+  it('follows the configured apiPath instead of a hardcoded prefix', async () => {
+    // The reason a static artifact could never be right: `apiPath` is
+    // deployment configuration (`api.apiPath ?? basePath + '/' + version`).
+    const { protocol } = makeProtocol({ object: [], api: [] });
+    const rest = makeRest(protocol, { apiPath: '/backend/api/v9' });
+    const { body } = await serveOpenApiFrom(rest, '/backend/api/v9');
+
+    expect(body.paths['/backend/api/v9/data/{object}']).toBeDefined();
+    expect(body.paths['/api/v1/data/{object}']).toBeUndefined();
+    for (const path of Object.keys(body.paths)) {
+      expect(path.startsWith('/backend/api/v9')).toBe(true);
+    }
+  });
+
+  it('gives the project-scoped mirror its own document, not a doubled one', async () => {
+    const { protocol } = makeProtocol({ object: [], api: [] });
+    const rest = makeRest(protocol, { enableProjectScoping: true, projectResolution: 'auto' });
+
+    const unscoped = await serveOpenApiFrom(rest, '/api/v1');
+    const scoped = await serveOpenApiFrom(rest, '/api/v1/environments/:environmentId');
+
+    for (const path of Object.keys(unscoped.body.paths)) {
+      expect(path.startsWith('/api/v1/environments/'), `'${path}' belongs to the scoped document`).toBe(false);
+    }
+    expect(scoped.body.paths['/api/v1/environments/{environmentId}/data/{object}']).toBeDefined();
+    // The scoped base's own parameter is declared like any other.
+    const names = scoped.body.paths['/api/v1/environments/{environmentId}/data/{object}'].get.parameters
+      .map((p: any) => p.name);
+    expect(names).toEqual(['environmentId', 'object']);
+  });
+
+  it('discards the static artifact section even though spec still emits it', async () => {
+    // Leg 2 (#5744) removes the spec-side generation. Until it lands, the
+    // bundled artifact really does carry `/api/{object}` & co — so the serve
+    // path has to DISCARD, not merge. Proven against the artifact this
+    // runtime actually loads.
+    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
+    const artifact = await (rest as any).loadOpenApiSpec();
+    expect(artifact, 'the bundled artifact must be loadable for this pin to mean anything').toBeTruthy();
+    const stale = Object.keys(artifact.paths ?? {});
+
+    const { body } = await serveOpenApiFrom(rest);
+    for (const path of stale) {
+      expect(body.paths[path], `stale artifact path '${path}' leaked into the served document`).toBeUndefined();
+    }
+    // What spec genuinely owns survives untouched.
+    expect(Object.keys(body.components.schemas)).toEqual(Object.keys(artifact.components.schemas));
+    expect(body.components.securitySchemes).toEqual(artifact.components.securitySchemes);
+    expect(body.info.title).toBe(artifact.info.title);
   });
 });
