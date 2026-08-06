@@ -39,10 +39,13 @@ function setup() {
       if (t === 'book' || t === 'books') return [PUBLIC_BOOK, GATED_BOOK];
       return [];
     }),
-    getMetaItem: vi.fn(async ({ name }: any) => {
-      if (name === PUBLIC_BOOK.name) return PUBLIC_BOOK;
-      if (name === GATED_BOOK.name) return GATED_BOOK;
-      return {};
+    // `getMetaItem` answers the `{ type, name, item }` envelope on every read
+    // path (#5563); the audience gate reads `audience` off the document under
+    // `item`, so a double that flattened it would test nothing.
+    getMetaItem: vi.fn(async ({ type, name }: any) => {
+      if (name === PUBLIC_BOOK.name) return { type, name, item: PUBLIC_BOOK };
+      if (name === GATED_BOOK.name) return { type, name, item: GATED_BOOK };
+      return { type, name };
     }),
     findData: vi.fn().mockResolvedValue([]),
   };

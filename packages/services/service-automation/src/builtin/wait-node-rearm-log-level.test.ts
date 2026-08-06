@@ -22,18 +22,37 @@ import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
 import { registerWaitNode, rearmSuspendedWaitTimers } from './wait-node.js';
 import type { IJobService } from '@objectstack/spec/contracts';
 
-type Line = { level: 'info' | 'warn' | 'error'; msg: string };
+type Line = { level: 'info' | 'warn' | 'error'; msg: string; meta?: Record<string, unknown> };
 
+/**
+ * Captures the `Logger` contract's slots separately, because #5737 moved every
+ * foreign cause on this path out of the MESSAGE and into the structured one:
+ * `warn(message, meta?)` carries it second, `error(message, error?, meta?)`
+ * third. The level assertions below are unchanged — what this file pins is
+ * #4632, and a cause that moved slots is still a cause that was reported.
+ */
 function capturingLogger() {
   const lines: Line[] = [];
-  const at = (level: Line['level']) => (msg: string) => void lines.push({ level, msg: String(msg) });
-  const logger: any = { info: at('info'), warn: at('warn'), error: at('error'), debug() {} };
+  const logger: any = {
+    info: (msg: string) => void lines.push({ level: 'info', msg: String(msg) }),
+    warn: (msg: string, meta?: Record<string, unknown>) => void lines.push({ level: 'warn', msg: String(msg), meta }),
+    error: (msg: string, _error?: unknown, meta?: Record<string, unknown>) =>
+      void lines.push({ level: 'error', msg: String(msg), meta }),
+    debug() {},
+  };
   logger.child = () => logger;
   return {
     logger,
     lines,
     text(level: Line['level']) {
       return lines.filter((l) => l.level === level).map((l) => l.msg).join('\n');
+    },
+    /** The `error` field of each record's meta at `level` — where the cause lives now. */
+    causes(level: Line['level']) {
+      return lines
+        .filter((l) => l.level === level)
+        .map((l) => String((l.meta as { error?: unknown } | undefined)?.error ?? ''))
+        .join('\n');
     },
   };
 }
@@ -103,7 +122,10 @@ describe('rearmSuspendedWaitTimers — durability degradations are errors (#4632
     // FIX — both the repair and the manual escape hatch.
     expect(cap.text('error')).toMatch(/restart to re-attempt/);
     expect(cap.text('error')).toMatch(/resume\(runId\)/);
-    expect(cap.text('error')).toContain('no such table: sys_automation_run');
+    // CAUSE — reported, but in the record's meta since #5737, not spliced into
+    // the message where a multi-line driver error would shred the record.
+    expect(cap.causes('error')).toContain('no such table: sys_automation_run');
+    expect(cap.text('error')).not.toContain('no such table: sys_automation_run');
     // The level is the point: this must not be discoverable only at warn.
     expect(cap.text('warn')).toBe('');
   });
@@ -128,7 +150,8 @@ describe('rearmSuspendedWaitTimers — durability degradations are errors (#4632
     expect(cap.text('error')).toMatch(/could NOT be re-scheduled/);
     expect(cap.text('error')).toMatch(/hang past that deadline/);
     expect(cap.text('error')).toMatch(/resume\('/);
-    expect(cap.text('error')).toContain('scheduler backend unreachable');
+    expect(cap.causes('error')).toContain('scheduler backend unreachable');
+    expect(cap.text('error')).not.toContain('scheduler backend unreachable');
     // The run itself is untouched — persisted, and still resumable by hand.
     expect(await store.list()).toHaveLength(1);
   });
@@ -156,7 +179,8 @@ describe('rearmSuspendedWaitTimers — durability degradations are errors (#4632
     expect(cap.text('error')).toMatch(/is OVERDUE and could not be resumed/);
     expect(cap.text('error')).toMatch(/nothing will\s+wake it again/);
     expect(cap.text('error')).toMatch(/resume\('/);
-    expect(cap.text('error')).toContain('datasource connection lost mid-resume');
+    expect(cap.causes('error')).toContain('datasource connection lost mid-resume');
+    expect(cap.text('error')).not.toContain('datasource connection lost mid-resume');
   });
 });
 

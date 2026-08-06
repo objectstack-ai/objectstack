@@ -1569,20 +1569,65 @@ export class AnalyticsService implements IAnalyticsService {
     const measures: Record<string, any> = {};
     const dimensions: Record<string, any> = {};
 
-    const stripPrefix = (m: string) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);
+    // [#5739] Strip the `<cube>.` QUALIFIER, and nothing else.
+    //
+    // The predecessor (`stripPrefix`) dropped the first segment of ANY dotted
+    // member, which conflated two different facts wearing the same punctuation:
+    //
+    //   `deal.stage`   — the canonical analytics QUALIFIER. `getMeta` hands
+    //                    members out cube-prefixed and callers echo them back,
+    //                    so the prefix is noise and stripping it is right.
+    //   `owner.region` — a relation TRAVERSAL. Stripping it minted
+    //                    `dimensions.region = {sql: 'region'}`, a BASE-TABLE
+    //                    column, and `lookupMember`'s "plain second-segment"
+    //                    tier then found it BEFORE its synthetic-traversal tier
+    //                    could hand the dotted path to the JOIN machinery. Where
+    //                    the base table happened to carry a same-named column
+    //                    that filtered/grouped the WRONG column with no error to
+    //                    read; where it did not, the 400 named `region` for a
+    //                    caller who wrote `owner.region`.
+    //
+    // Only the first is a qualifier, and only the first is stripped. Everything
+    // else is minted VERBATIM (`{sql: 'owner.region'}`), which is precisely what
+    // `lookupMember`'s synthetic tier already hands the strategies for an
+    // undeclared dotted member — so the ad-hoc path now compiles the traversal
+    // the array `where` spelling has compiled all along, and the two spellings
+    // converge instead of disagreeing. Maintainer ruling, 2026-08-06 (#5739).
+    //
+    // Scope, measured rather than assumed: this governs the DIMENSION-shaped
+    // mints (`dimensions`, the `where`'s field keys, `timeDimensions`) and NOT
+    // `measures`, which keeps the old blanket strip below. See that loop.
+    const stripCubeQualifier = (m: string): string => {
+      const dot = m.indexOf('.');
+      if (dot < 0) return m;
+      return m.slice(0, dot) === cubeName ? m.slice(dot + 1) : m;
+    };
 
     // Always provide a default `count` measure
     measures.count = { name: 'count', label: 'Count', type: 'count', sql: '*' };
 
     for (const m of query.measures || []) {
-      const key = stripPrefix(m);
+      // [#5739] MEASURES keep the blanket strip, deliberately and on measurement.
+      // `lookupMember`'s synthetic relation-traversal tier is DIMENSION-ONLY
+      // (`if (kind === 'dimension')`), so a dotted measure has no traversal
+      // answer to converge with — minting `measures['total.sum']` verbatim does
+      // not join anything, it only re-routes the member into ObjectQL's
+      // "cannot evaluate a cross-object measure" throw, which carries no
+      // `code`/`status`. Measured on this tree: `measures: ['total.sum']` (a
+      // `total_sum` typo, not a traversal) would go from #4437's
+      // `400 INVALID_FIELD` naming `sum` to that uncoded 5xx-class error. A
+      // worse envelope and a wrong diagnosis, for a spelling that is not what
+      // this issue is about — so the strip stays until a dotted MEASURE is ruled
+      // on in its own right. Its own residue (`owner.region_count_distinct`
+      // silently aggregating the BASE `region`, measured) is filed as #5918.
+      const key = m.includes('.') ? m.split('.').slice(1).join('.') : m;
       if (measures[key]) continue;
       const inferred = inferMeasure(key);
       measures[key] = inferred;
     }
 
     for (const d of query.dimensions || []) {
-      const key = stripPrefix(d);
+      const key = stripCubeQualifier(d);
       if (dimensions[key]) continue;
       dimensions[key] = { name: key, label: key, type: 'string', sql: key };
     }
@@ -1621,57 +1666,23 @@ export class AnalyticsService implements IAnalyticsService {
       // genuinely differ — `{stage: {$in: []}}` lowers to the boolean constant
       // FALSE, binding nothing while still naming `stage`.
       for (const key of conjunctFieldKeys(lowered)) {
-        // BARE keys only — a dotted one is a relation traversal, and #5353 cannot
-        // unify those. See the residue loop below for why, and for the ONE case
-        // that still answers per-spelling.
-        if (key.includes('.')) continue;
-        if (dimensions[key] || measures[key]) continue;
-        dimensions[key] = { name: key, label: key, type: 'string', sql: key };
-      }
-    }
-
-    // ── #5739 residue: dotted keys, still answered per SPELLING ───────────────
-    //
-    // A dotted key names a relation traversal, and an ad-hoc single-table cube
-    // has nothing to declare it as. `stripPrefix` mints the TAIL as a BASE-TABLE
-    // dimension, which is #5739's mis-cast, and today only the OBJECT spelling
-    // reaches that mint. #5353 can go neither way on its own:
-    //
-    //   - PROPAGATE it to the array spelling (`stripPrefix` in the loop above) is
-    //     a measured REGRESSION. On cube `deal`, filter `owner.region = 'NA'`:
-    //       {'owner.region': 'NA'}      → WHERE region = $1            (both, after)
-    //       [['owner.region','=','NA']] → LEFT JOIN "owner" ON "deal"."owner" =
-    //                                     "owner"."id" WHERE "owner"."region" = $1
-    //                                                                  (before)
-    //     …i.e. a working traversal becomes a different-rows base-column filter —
-    //     and where the base has no `region` column, a 400 INVALID_FIELD, because
-    //     `declaredMemberEntry`'s dotted tail lookup resolves `owner.region` to
-    //     the minted dimension and hands #5669's gate a column that is absent.
-    //   - WITHDRAW it from the object spelling (skip dotted keys entirely) breaks
-    //     an invariant #5740 pinned deliberately: one dotted member gets one
-    //     answer across the `where` and `dimensions` request keys, sharing
-    //     `resolveMemberSource`, and "if that reading is ever judged wrong it must
-    //     change for BOTH keys at once". Withdrawing here alone would leave
-    //     `where: {'owner.region': …}` standing down while
-    //     `dimensions: ['owner.region']` still 400s on `region`.
-    //
-    // Both directions are #5739's to choose, so this loop reproduces `origin/main`
-    // verbatim — the OBJECT `where`'s own top-level dotted keys, `stripPrefix`ed —
-    // and the asymmetry #5353 is about survives for dotted keys alone. Delete the
-    // loop (or fold it into the one above) when #5739 rules; the parity test names
-    // the case that then flips.
-    const rawWhere = (query as { where?: unknown }).where;
-    if (rawWhere && typeof rawWhere === 'object' && !Array.isArray(rawWhere)) {
-      for (const key of Object.keys(rawWhere as Record<string, unknown>)) {
-        if (key.startsWith('$') || !key.includes('.')) continue;
-        const stripped = stripPrefix(key);
-        if (dimensions[stripped] || measures[stripped]) continue;
-        dimensions[stripped] = { name: stripped, label: stripped, type: 'string', sql: stripped };
+        // [#5739] Dotted keys ride this loop too, and that is the FOLD #5353 left
+        // for this issue. Until the ruling, a dotted key was skipped here and
+        // re-minted from the RAW object `where` by a separate residue loop —
+        // stripped to its tail, so one filter got one answer per spelling: the
+        // object spelling mis-cast `owner.region` to base `region`, the array
+        // spelling minted nothing and compiled the traversal. One loop over the
+        // LOWERED condition mints both spellings identically, and
+        // `stripCubeQualifier` keeps them a traversal instead of a base column,
+        // so the cube AND the compiled SQL now match on either spelling.
+        const minted = stripCubeQualifier(key);
+        if (dimensions[minted] || measures[minted]) continue;
+        dimensions[minted] = { name: minted, label: minted, type: 'string', sql: minted };
       }
     }
 
     for (const td of query.timeDimensions || []) {
-      const key = stripPrefix(td.dimension);
+      const key = stripCubeQualifier(td.dimension);
       if (dimensions[key]) continue;
       dimensions[key] = {
         name: key, label: key, type: 'time', sql: key,

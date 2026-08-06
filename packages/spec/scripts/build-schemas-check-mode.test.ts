@@ -56,7 +56,7 @@ import { fileURLToPath } from 'node:url';
 
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
+import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -71,6 +71,8 @@ const REAL_MANIFEST = path.join(PKG, 'json-schema.manifest.json');
  */
 const SPAWN_TIMEOUT_MS = 180_000;
 
+/** The mark `authorable-surface.json` puts on a tombstoned key (build-schemas.ts). */
+const RETIRED_MARK = ' [RETIRED]';
 /** A schema key the committed manifest carries; dropping it fakes "one addition pending". */
 const KNOWN_KEY = 'ui/View';
 /** A key no build can emit — the `missing` (disappearance) ratchet's input. */
@@ -1215,6 +1217,292 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
       expect(output).toContain(tip.slice(0, 12));
       expect(output).not.toContain('#5370');
       expect(readSurfaceBase()).toBe(anchorAtTip);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4659 — check (b) registers a tombstone by its EXACT key, not by its leaf.
+//
+// Until this change, "live → retired must be registered" was satisfied by
+// matching the key's LEAF against every ' / '-separated conversion/migration
+// `surface` in the ADR-0087 registries — `endsWith('.' + name)`, across all
+// majors, ignoring which def the key belonged to. So any unrelated registration
+// ending in the same leaf registered a tombstone for free. #4658 measured it:
+// tombstoning `automation/Event:type` passed silently because protocol 11's
+// `flow-node-http-callout-rename` had registered `flow.node.type`. #5509 widened
+// the leaf vocabulary to `.description`, one of the most common keys on
+// authorable shapes, and the exposure grew with every conversion.
+//
+// The registration now lives in its own table — RETIRED_KEYS_BY_MAJOR in
+// src/migrations/registry.ts, values the literal `${defKey}:${name}` — and
+// check (b) is exact set membership over it. Conversion `surface` prose is
+// untouched: it addresses authors in the shape they write metadata
+// (`flow.nodes[].outputSchema`) and no rule can map that back onto a def key.
+//
+// ── Why a SECOND sandbox ──────────────────────────────────────────────────
+// These tests need the gate to read a registry that differs per case, and the
+// sandbox above symlinks `src/`, so writing one there would write the repo's
+// tracked registry. This one COPIES `src/` instead (10 MB, ~40 ms) so its
+// `src/migrations/registry.ts` is a fixture. Nothing else changes: the gate
+// under test is the same copied `scripts/build-schemas.ts`, reading a byte-equal
+// spec source, and no test-only seam is added to it — the substituted table is
+// fixture data exactly as the fabricated `refs/remotes/origin/main` is.
+//
+// ── Why the green cases still exit 1 ──────────────────────────────────────
+// A live → retired transition exists only when the committed baseline disagrees
+// with the emitted contract, so every fixture here is, by construction, a
+// baseline the generated-form reporter at the end of the script will call stale.
+// That reporter is a different failure with a different remedy, and the
+// assertions below discriminate on the message, never on the exit code alone.
+
+/** Retired keys whose ONLY registered clause names a DIFFERENT def — the defect. */
+const LEAF_COLLIDER_A = 'api/HttpFindQueryParams:distinct';
+/** …matched by this clause, which registers `data/Query`'s key, not this one. */
+const LEAF_COLLIDER_A_CLAUSE = 'data.query.distinct';
+/** The issue's own `.type` shape: an index type dated by a flow node rename. */
+const LEAF_COLLIDER_B = 'data/Index:type';
+/** …registered at protocol 11 by `flow-node-http-callout-rename`. Unrelated. */
+const LEAF_COLLIDER_B_CLAUSE = 'flow.node.type';
+/** A key no author has ever been able to lose — the (b2) "still LIVE" fixture. */
+const STILL_LIVE_KEY = 'data/Object:name';
+/** A key no build emits: the aged-out steady state a stale entry decays into. */
+const AGED_OUT_KEY = 'data/Object:zzAgedOutTombstone4659';
+
+/**
+ * The pre-#4659 matcher, reproduced ONLY to prove the fixtures still model the
+ * defect: every registered clause whose leaf would have registered `key`. If
+ * this ever returns nothing for a fixture, the fixture stopped being a
+ * collision and the test below asserts something weaker than it claims.
+ */
+function clausesMatchingLeafOf(key: string): string[] {
+  const leaf = key.slice(key.indexOf(':') + 1);
+  const out: string[] = [];
+  const consider = (surface: string): void => {
+    for (const clause of surface.split(' / ')) if (clause.endsWith('.' + leaf)) out.push(clause);
+  };
+  for (const list of Object.values(CONVERSIONS_BY_MAJOR)) for (const c of list) consider(c.surface);
+  for (const step of Object.values(MIGRATIONS_BY_MAJOR)) {
+    for (const sem of step.semantic ?? []) consider(sem.surface);
+  }
+  return out;
+}
+
+describe('build-schemas.ts — check (b) matches the exact retired key, not its leaf (#4659)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxSurface: string;
+  let boxRegistry: string;
+  let pristineRegistry: string;
+
+  const boxGit = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
+      { cwd: box, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    return (r.stdout ?? '').trim();
+  };
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Untombstone keys in the sandbox baseline: the gate then sees live → retired. */
+  const untombstone = (...keys: string[]): void => {
+    const doc = JSON.parse(pristineSurface) as { description: string; keys: string[] };
+    doc.keys = doc.keys.map((e) => (keys.includes(e.replace(RETIRED_MARK, '')) ? e.replace(RETIRED_MARK, '') : e));
+    fs.writeFileSync(boxSurface, JSON.stringify(doc, null, 2) + '\n');
+  };
+
+  /** Substitute RETIRED_KEYS_BY_MAJOR in the sandbox's own copy of the registry. */
+  const seedRetiredKeys = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_KEYS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_KEYS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  const CHECK_B = 'key(s) were tombstoned with no registered retirement';
+
+  beforeAll(() => {
+    // Fixture validity, loud: both keys must still be leaf-collisions (they are
+    // the defect), and neither may be registered in the real table (they are
+    // NOT retirements this repo made under the new gate).
+    expect(clausesMatchingLeafOf(LEAF_COLLIDER_A)).toContain(LEAF_COLLIDER_A_CLAUSE);
+    expect(clausesMatchingLeafOf(LEAF_COLLIDER_B)).toContain(LEAF_COLLIDER_B_CLAUSE);
+    const declared = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
+    for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
+      expect(declared, `${k} is now registered for real — pick an unregistered fixture`).not.toContain(k);
+    }
+    const baselineKeys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
+      expect(baselineKeys, `${k} is no longer tombstoned — re-pick`).toContain(k + RETIRED_MARK);
+    }
+    expect(baselineKeys, `${STILL_LIVE_KEY} is no longer a live authorable key`).toContain(STILL_LIVE_KEY);
+    expect(baselineKeys.some((k) => k.startsWith(AGED_OUT_KEY))).toBe(false);
+
+    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-retired-keys-'));
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    fs.writeFileSync(path.join(box, 'json-schema.manifest.json'), pristine);
+    fs.writeFileSync(path.join(box, 'authorable-surface.json'), pristineSurface);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxSurface = path.join(box, 'authorable-surface.json');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+
+    boxGit('init', '-q', '-b', 'main', '.');
+    boxGit('add', 'authorable-surface.json');
+    boxGit('commit', '-q', '-m', 'baseline: committed authorable-surface.json');
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        {
+          description: surfaceBaseDescription,
+          baseRev: boxGit('rev-parse', 'HEAD'),
+          keys: (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    boxGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(box, { recursive: true, force: true });
+  });
+
+  it(
+    'a tombstone whose leaf collides with an unrelated registered surface is NOT registered (#4658)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The repro, in the shape #4658 recorded it: two keys tombstoned, no entry
+      // written for either, and both leaves already spoken for by conversions
+      // belonging to other defs. Before this change the gate said nothing at all
+      // about them and the run fell through to the staleness reporter.
+      seedRetiredKeys({});
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`2 ${CHECK_B}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_A}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_B}`);
+      // The prescription IS the contract: the exact line to paste, and where.
+      expect(output).toContain(`        '${LEAF_COLLIDER_A}',`);
+      expect(output).toContain(`        '${LEAF_COLLIDER_B}',`);
+      expect(output).toContain('RETIRED_KEYS_BY_MAJOR');
+      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // The D2 conversion is still asked for — the table did not replace it.
+      expect(output).toContain('src/conversions/registry.ts');
+    },
+  );
+
+  it(
+    'registering one key registers exactly that key — its neighbour with the same leaf still fails',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // `data.query.distinct` covered A only by leaf; now even a REAL entry for
+      // B cannot cover A. This is the whole change in one run: membership is per
+      // key, and nothing radiates from one registration to another.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [LEAF_COLLIDER_B] });
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_A}`);
+      expect(output).not.toContain(`     - ${LEAF_COLLIDER_B}`);
+    },
+  );
+
+  it(
+    'both keys registered by exact name: check (b) is silent (the run then only owes the regenerated baseline)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedRetiredKeys({ [CURRENT_MAJOR]: [LEAF_COLLIDER_A, LEAF_COLLIDER_B] });
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B);
+      expect(output).not.toContain('still LIVE');
+      expect(output).not.toContain('deleted without proof');
+      // Intrinsic to the fixture, not a residue of the gate: a live → retired
+      // transition IS a baseline that has not been regenerated yet, so the run
+      // still owes `gen:schema`. Asserted rather than papered over.
+      expect(status).toBe(1);
+      expect(output).toContain('authorable-surface.json is out of date (2 key(s) not recorded)');
+      expect(output).toContain(`+ ${LEAF_COLLIDER_A}${RETIRED_MARK}`);
+    },
+  );
+
+  it(
+    'an entry naming a key that is still LIVE fails: a registration nothing consumed (b2)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The mirror defect. Without this, an author could pre-register the key
+      // they intend to retire, and the tombstone would then land — months later,
+      // in someone else's PR — with check (b) already satisfied and nobody
+      // writing anything down.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [STILL_LIVE_KEY] });
+      untombstone(); // baseline pristine: nothing is newly retired
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE');
+      expect(output).toContain(`     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain('retiredKey(');
+      expect(output).not.toContain(CHECK_B);
+    },
+  );
+
+  it(
+    'an entry naming a key this build no longer emits is the aged-out steady state, not an error',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // A tombstone ages out after TOMBSTONE_AGE_MAJORS and check (c) lets its
+      // baseline line go; the entry here stays and then names nothing. Pinned
+      // because the opposite ruling — "an entry must always resolve" — would
+      // force every aged-out retirement to be un-declared to keep the gate
+      // green, which is the record deleting itself.
+      seedRetiredKeys({ 11: [AGED_OUT_KEY] });
+      untombstone();
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain('still LIVE');
+      expect(output).not.toContain(CHECK_B);
+      expect(output).not.toContain('deleted without proof');
+      expect(status).toBe(0);
     },
   );
 });

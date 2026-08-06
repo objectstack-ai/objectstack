@@ -1,6 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+// [#5855] The fake engine's `update` routes through the producer's OWN dispatch
+// predicate (#5480), so this double cannot accept a call `ObjectQL.update`
+// refuses. Imported from `@objectstack/metadata-core` (already a `dependencies`
+// entry here) and not from `@objectstack/objectql`, which depends on this
+// package — that import would close a dependency cycle turbo rejects, and is
+// why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
+// the predicate into a package that depends on neither side.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PlatformObjectsPlugin } from './plugin.js';
 import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
 
@@ -101,7 +109,14 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
         rows.push({ ...data });
         return data;
       },
-      update: async () => ({}),
+      // `attestFreshDatastore` never overwrites an existing flag row, so no
+      // path this suite drives reaches `update` — the assert comes first
+      // anyway, so the day one does, the double refuses what a real server
+      // refuses instead of silently accepting it (#4434).
+      update: async (_object: string, data: any, options?: Record<string, unknown>) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      },
       rows,
     };
     if (createdFromEmpty !== undefined) {
