@@ -182,13 +182,19 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
     });
 
     it('version / seq / state are required because no reachable success return omits them', async () => {
-        // The one shape in `saveMetaItem` that carries none of the three is its
-        // legacy raw-engine return, and it is unreachable: the code-only gate
-        // rejects exactly the types that would reach it (neither
-        // `allowOrgOverride` nor `allowRuntimeCreate` — `agent`, `job`), which is
-        // the complement of the condition selecting the repository write path.
-        // If that gate is ever relaxed, the legacy shape becomes reachable and
-        // the three fields must move back to optional — this case is the tripwire.
+        // `saveMetaItem` now has exactly ONE success return — the repository
+        // write path — and it always sets all three. The shape that carried
+        // none of them was the legacy raw-engine return, deleted in #5264 /
+        // PR #5782 after being proved unreachable; the gate that made it
+        // unreachable is the one exercised here, and it is still what keeps a
+        // second, receipt-less write path from appearing. A type declaring
+        // neither `allowOrgOverride` nor `allowRuntimeCreate` (`agent`, `job`)
+        // is refused outright rather than persisted without a receipt.
+        //
+        // This is the tripwire for the `required` decision: if that gate is
+        // ever relaxed so such a type is written some other way, whatever
+        // receipt that path returns has to be re-measured before these three
+        // fields can stay required.
         const p = await makeProtocol();
         await expect(
             p.saveMetaItem({ type: 'agent', name: 'helper', organizationId: 'org_x', item: { name: 'helper' } }),

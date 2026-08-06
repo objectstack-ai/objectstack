@@ -44,11 +44,11 @@ type level. Now they survive the parse and are typed:
   be live must check `projectionApplied.success` rather than trust the 200.
 
 The three required fields are required because measurement says the producer
-always emits them, not by assumption: `saveMetaItem`'s only reachable success
-return is the repository write path, and the REST route hands that object to
-`res.json()` verbatim. Its other return — a legacy raw-engine shape carrying
-none of the three — is unreachable, because the code-only gate above it rejects
-exactly the types that would reach it.
+always emits them, not by assumption: `saveMetaItem` has a single success
+return — the repository write path — and the REST route hands that object to
+`res.json()` verbatim. A second, receipt-less legacy return would have forced
+all three to be optional; it was proved unreachable and deleted in #5264 /
+PR #5782, which is what makes `required` safe to state here.
 
 No runtime behaviour changes: the route already returned these fields, and
 nothing parsed the response through this schema. `client.meta.saveItem`'s

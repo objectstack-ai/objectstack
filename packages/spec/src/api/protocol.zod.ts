@@ -261,14 +261,14 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
  * wire with no contract behind it.
  *
  * Presence was measured against `origin/main`, not assumed: the sole producer is
- * `ObjectStackProtocolImplementation.saveMetaItem`, whose only reachable success
- * return is the repository write path, and the REST route hands that object to
+ * `ObjectStackProtocolImplementation.saveMetaItem`, whose single success return
+ * is the repository write path, and the REST route hands that object to
  * `res.json()` verbatim. That path always sets `version` / `seq` / `state`, so
- * the three are REQUIRED here; `projectionApplied` is conditional on a mutation
- * projector being registered for the type, so it alone is optional. (The
- * function's second return — a legacy raw-engine shape carrying neither — is
- * unreachable: the code-only gate above it throws on exactly the complement of
- * the condition that selects the repository path.)
+ * the three are REQUIRED here; `projectionApplied` is conditional on an
+ * ADR-0094 mutation projector being registered for the type, so it alone is
+ * optional. (A second, receipt-less legacy return used to exist and would have
+ * forced all three to be optional — it was proved unreachable and deleted in
+ * #5264 / PR #5782, which is why `required` is safe to state.)
  */
 export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
