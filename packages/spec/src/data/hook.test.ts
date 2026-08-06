@@ -975,3 +975,170 @@ describe('session.roles retirement (#5050, ADR-0049)', () => {
     expect(built.userId).toBe('user_123');
   });
 });
+
+/**
+ * `HookContext.session.positions` / `.preserveAudit` declaration (#5605,
+ * maintainer ruling A of 2026-08-06).
+ *
+ * The MIRROR of the retirement above, and the reason both blocks live in this
+ * file: `roles` was declared-never-produced (delete it), these two are
+ * produced-never-declared (declare them). Same `session` object, opposite
+ * drift, opposite fix — which is why #5605 was filed apart from #5050 rather
+ * than folded into it.
+ *
+ * What was actually broken before the declaration, on `origin/main`:
+ *
+ *   - PARSE — `HookContextSchema` is deliberately non-strict (see the
+ *     `hook.zod.ts` header), so both keys were silently STRIPPED. Measured
+ *     before the change: parsing a session of
+ *     `{ userId, positions, preserveAudit }` returned `{"userId":"u1"}`. That
+ *     is not hypothetical: the generated reference page documents
+ *     `HookContextSchema.parse(data)` as the way to consume a context, so a
+ *     consumer following the docs dropped the caller's positions on the floor.
+ *   - TSC — a handler typed the way `content/docs/automation/index.mdx` teaches,
+ *     `(ctx: HookContext)`, could not read either key: two TS2339s, on
+ *     `ctx.session?.positions` and `ctx.session?.preserveAudit`. The two
+ *     `runtime-services` pages that teach `positions: ctx.session?.positions`
+ *     only look fine because they annotate `ctx` as `any` — copy the code AND
+ *     the documented annotation and it did not compile.
+ *
+ * REVERSE VERIFICATION, direction predicted first: delete either declaration
+ * from `hook.zod.ts` and this block fails BOTH ways — the parse assertions go
+ * red (the key is stripped, so `toHaveProperty` fails), and
+ * `pnpm --filter @objectstack/spec typecheck` reports TS2339 on the typed
+ * reads below. No `@ts-expect-error` is involved here and none should be
+ * added: the fact under test is that documented code COMPILES, so the pin is
+ * a positive typed read, and its failure mode on revert is a hard type error
+ * rather than an unused-directive TS2578.
+ *
+ * Boundary, restated because it is the whole reason the ruling needed a
+ * maintainer: `positions` is readable context, NOT an authorization input.
+ * The `.describe()` says so and the assertion below pins that it keeps saying
+ * so — the next author (or the next AI) reaching for
+ * `session.positions.includes(...)` as an access check is exactly what the
+ * `roles` tombstone above was written to stop.
+ */
+describe('session.positions / session.preserveAudit declaration (#5605)', () => {
+  it('PRESERVES `positions` through a parse instead of stripping it', () => {
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeUpdate',
+      input: {},
+      session: { userId: 'user_123', positions: ['sales_manager', 'org_admin'] },
+      ql: {},
+    });
+
+    expect(context.session).toHaveProperty('positions');
+    expect(context.session?.positions).toEqual(['sales_manager', 'org_admin']);
+  });
+
+  it('PRESERVES `preserveAudit` through a parse (#3493 has a live consumer)', () => {
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: { userId: 'user_123', preserveAudit: true },
+      ql: {},
+    });
+
+    expect(context.session).toHaveProperty('preserveAudit');
+    expect(context.session?.preserveAudit).toBe(true);
+  });
+
+  it('keeps both OPTIONAL — a normal write produces neither', () => {
+    // `buildSession()` writes `preserveAudit` only under the historical-import
+    // opt-in, and `positions` is absent whenever the execution context carried
+    // none. Declaring them must not start requiring them.
+    //
+    // ⚠️ HONEST NOTE — this one is a COMPANION, not a pin. It asserts absence,
+    // and absence is also what a stripped (undeclared) key produces, so it
+    // stayed green under the reverse verification while its four siblings went
+    // red. It is kept because "declaring them did not make them required" is a
+    // real regression it would catch (a missing `.optional()` turns it red),
+    // but it is not evidence that the declaration exists — do not read it as
+    // such. The pins are the two preserve tests, the `buildSession()` shape,
+    // and the tsc read below.
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: { userId: 'user_123' },
+      ql: {},
+    });
+
+    expect(context.session?.positions).toBeUndefined();
+    expect(context.session?.preserveAudit).toBeUndefined();
+  });
+
+  it('accepts the exact session shape `buildSession()` builds', () => {
+    // Field-for-field the object ObjectQL assembles (engine.ts `buildSession`)
+    // for a historical import by an authenticated caller. Before #5605 this
+    // parse quietly returned a session two keys shorter than the one the
+    // engine handed the handler.
+    const built = {
+      userId: 'user_123',
+      organizationId: 'org_456',
+      positions: ['sales_manager'],
+      accessToken: 'token_abc123',
+      isSystem: true,
+      actor: 'svc:flow:import_history',
+      skipTriggers: true,
+      skipAutomations: true,
+      preserveAudit: true,
+    };
+
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      session: built,
+      ql: {},
+    });
+
+    expect(context.session).toEqual(built);
+  });
+
+  it('type-checks the code the docs teach — `(ctx: HookContext)` reading both keys', () => {
+    // The TSC channel. Both reads were TS2339 before the declaration; this is
+    // `content/docs/kernel/runtime-services/sharing-service.mdx`'s snippet with
+    // the `any` annotation removed, which is what made the omission invisible
+    // there. Explicit annotations, so a widened or renamed declaration fails
+    // here too rather than being absorbed by inference.
+    const readCallerContext = (ctx: HookContext) => {
+      const positions: string[] | undefined = ctx.session?.positions;
+      const preserveAudit: boolean | undefined = ctx.session?.preserveAudit;
+      return { positions, preserveAudit };
+    };
+
+    // ...and the PRODUCER side: the literal `buildSession()` returns must be
+    // assignable to the declared session type.
+    const session: NonNullable<HookContext['session']> = {
+      userId: 'user_123',
+      positions: ['sales_manager'],
+      preserveAudit: true,
+    };
+
+    expect(readCallerContext({
+      object: 'account',
+      event: 'beforeUpdate',
+      input: {},
+      session,
+      ql: {},
+    })).toEqual({ positions: ['sales_manager'], preserveAudit: true });
+  });
+
+  it('carries the "not an authorization input" boundary in the `.describe()`', () => {
+    // The ruling's wording is load-bearing, not decoration: it is the only
+    // thing standing between this key and the next author using it as an
+    // access check. A `.describe()` reaches the generated reference page and
+    // every schema-driven surface, so pin that the boundary survives edits.
+    const sessionShape = HookContextSchema.shape.session.unwrap().shape;
+
+    const positionsDoc = sessionShape.positions.description ?? '';
+    expect(positionsDoc).toMatch(/security service/i);
+    expect(positionsDoc).toMatch(/not an authorization input/i);
+
+    const preserveAuditDoc = sessionShape.preserveAudit.description ?? '';
+    expect(preserveAuditDoc).toMatch(/not an authorization input/i);
+  });
+});
