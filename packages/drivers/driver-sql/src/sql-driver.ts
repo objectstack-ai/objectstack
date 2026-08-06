@@ -837,6 +837,43 @@ function unknownLogicalOperatorError(key: string, path: string): Error {
  * "exists" means for a null-valued key is #5299's open question), and #5347
  * ruled on `$null`. Filed separately rather than settled as a rider.
  */
+/**
+ * [#5369, applying #5347's ruling A] `$exists` whose comparand is not a boolean.
+ *
+ * The symmetric twin of {@link nonBooleanNullComparandError}, and deliberately
+ * a copy of its disposition rather than a fresh judgement: `FieldOperatorsSchema`
+ * declares `$exists: z.boolean()` exactly as it declares `$null`, nothing between
+ * an authored `where` and this driver validates against it, and the backends
+ * split the same way on a third value — this emitter's `opValue === false`
+ * identity reads anything but `false` as IS NOT NULL, while the `=== true`
+ * spelling used elsewhere reads anything but `true` as IS NULL. Two complements,
+ * neither a rule anyone wrote down.
+ *
+ * #5347 ruled that shape REFUSED for `$null`; #5369 asked whether the same
+ * applies here and the 2026-08-06 ruling on #5298 said yes, "照 #5347-A". So the
+ * gate lands beside `$null`'s in {@link reduceFilterKey}, not in the emitter —
+ * same evaluation-order reason, same `INVALID_FILTER` envelope.
+ *
+ * Note what does NOT change with it: the emitter's `opValue === false` arm and
+ * {@link nullValueSatisfiesOperator}'s `value === false` arm stay exactly as
+ * they are. Once the gate holds, `true` and `false` are the only comparands that
+ * reach either, so both tests are already exhaustive two-way choices — the
+ * lenient-vs-strict question #5347 had to answer for `$null` does not arise
+ * here, because both spellings agree on the two surviving values.
+ */
+function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
+      `than coerced for the same reason $null is (#5347): a non-boolean lands on whichever side ` +
+      `the backend's two-branch conditional happens to default to, and those defaults point in ` +
+      `OPPOSITE directions — this driver's \`=== false\` test compiles IS NOT NULL for anything ` +
+      `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the ` +
+      `STRING is truthy, so it lands on the side opposite the false it was written to mean (#5369).`,
+  );
+}
+
 function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
   return unsupportedFilterError(
     `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
@@ -973,6 +1010,20 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
   }
 
+  // [#5369] `$exists`'s comparand is a boolean by the same declaration, refused
+  // on the same walk, for the same evaluation-order reason. Kept as a separate
+  // `if` rather than folded into a loop over a two-name list: each operator gets
+  // its own message naming its own emitter's default direction, and a shared
+  // loop would be the start of the second vocabulary gate the block above warns
+  // about (#3948).
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$exists') &&
+    typeof value.$exists !== 'boolean'
+  ) {
+    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
   // A field key always contributes a predicate.
   return 'clause';
 }
@@ -1021,12 +1072,20 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     // The strict spelling cannot — it is the same "declared = enforced" reflex
     // the refusal itself is.
     case '$null': return value === true;
-    // `$exists` keeps its lenient identity read: unlike `$null` it has NO
-    // comparand gate (#5347 ruled on `$null` only), so a non-boolean still
-    // reaches this table, and the guard must keep answering it the same way the
-    // emitter's `opValue === false` arm does or the two can disagree about a
-    // row. Tightening this one without the matching refusal would be the
-    // divergence, not the fix — filed separately.
+    // [#5369] The gate this arm's old comment said was missing now EXISTS:
+    // `reduceFilterKey` refuses a non-boolean `$exists` comparand beside the
+    // `$null` one, so `true` and `false` are the only values that reach here.
+    //
+    // The line itself is deliberately unchanged, and #5369's suggestion to
+    // "tighten it to `value === true`" is not applied — it points the wrong way.
+    // This table answers "does a NULL column SATISFY the operator", and a NULL
+    // column satisfies `$exists` exactly when the caller asked for `false`
+    // ("no value"). `$null: true` and `$exists: false` are the same question, so
+    // their arms are correctly each other's mirror, not each other's copy. With
+    // the gate holding, `value === false` is already an exhaustive two-way
+    // choice over the declared domain — the lenient-vs-strict distinction that
+    // made #5347 rewrite the `$null` arm does not exist here, because both
+    // spellings agree on both surviving values.
     case '$exists': return value === false;
     // Negative-polarity set/substring tests: "not among" / "does not contain"
     // hold vacuously for a value that is absent.
@@ -1126,9 +1185,15 @@ function nullGuardForFieldSpec(spec: unknown): NullGuard {
  * paying for (#2704, #5134). So each leaf is guarded in the direction its own
  * operator answers, per {@link nullValueSatisfiesOperator}.
  *
- * The rewrite only ever runs INSIDE a `$not`; a plain comparison's SQL is
- * untouched, so `{ a: 1 }` still compiles to `a = 1` and nothing outside a
- * negation changes shape or loses an index.
+ * This rewrite only ever runs INSIDE a `$not`, and a POSITIVE comparison's SQL is
+ * untouched by it or by anything else — `{ a: 1 }` still compiles to `a = 1`.
+ *
+ * [#5298] What changed since is the other half: the three operators that carry
+ * their own negation (`$ne`, `$nin`, `$notContains`) are NULL-safe outside a
+ * `$not` too, emitted directly by {@link SqlDriver.applyNullSafeNegative} rather
+ * than through this rewrite. Both paths read the same polarity table and reach
+ * the same answer; they stay separate because this one has to compose through De
+ * Morgan over a whole operand tree, while that one guards a single leaf.
  *
  * A nested `$not` is deliberately left alone: its own branch totalises its
  * operand, and `NOT <total>` is itself total, so recursing into it here would
@@ -6092,17 +6157,38 @@ export class SqlDriver implements IDataDriver {
     value: unknown,
   ): boolean {
     const raw = join === 'or' ? 'orWhereRaw' : 'whereRaw';
-    const binary = (sqlOp: string): boolean => {
+    /**
+     * [#5298] Wrap a value test so a row whose column has no value SATISFIES it:
+     * `(<expr> IS NULL OR <test>)`.
+     *
+     * `expr.sql` is a storage-normalising expression over ONE column
+     * ({@link filterColumnExpr}), and every dialect's `datetime()` / `CASE`
+     * form answers NULL for a NULL input — so testing the expression is the
+     * same question as testing the raw column, and keeps the whole predicate
+     * readable as one unit. `expr.bindings` is repeated because `expr.sql`
+     * appears twice.
+     */
+    const nullSafe = (testSql: string, testBindings: any[]): void => {
+      builder[raw](`(${expr.sql} IS NULL OR ${testSql})`, [...expr.bindings, ...testBindings]);
+    };
+    const binary = (sqlOp: string, negative = false): boolean => {
       // A null comparand is a null PREDICATE, not a comparison — hand it back so
       // the caller compiles `IS NULL` / `IS NOT NULL` as it always has.
       if (value == null) return false;
-      builder[raw](`${expr.sql} ${sqlOp} ?`, [...expr.bindings, value]);
+      const sql = `${expr.sql} ${sqlOp} ?`;
+      const bindings = [...expr.bindings, value];
+      if (negative) nullSafe(sql, bindings);
+      else builder[raw](sql, bindings);
       return true;
     };
     const list = (sqlOp: 'in' | 'not in'): boolean => {
       if (!Array.isArray(value) || value.length === 0) return false;
       const placeholders = value.map(() => '?').join(', ');
-      builder[raw](`${expr.sql} ${sqlOp} (${placeholders})`, [...expr.bindings, ...value]);
+      const sql = `${expr.sql} ${sqlOp} (${placeholders})`;
+      const bindings = [...expr.bindings, ...value];
+      // [#5298] Only `not in` is negative-polarity; `in` stays a bare test.
+      if (sqlOp === 'not in') nullSafe(sql, bindings);
+      else builder[raw](sql, bindings);
       return true;
     };
 
@@ -6110,7 +6196,8 @@ export class SqlDriver implements IDataDriver {
       case '=': case '==': case '$eq':
         return binary('=');
       case '!=': case '<>': case '$ne':
-        return binary('<>');
+        // [#5298] NULL-safe — the same ruling the plain-column arm below follows.
+        return binary('<>', true);
       case '>': case '$gt':
         return binary('>');
       case '>=': case '$gte':
@@ -6271,6 +6358,57 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#5298] Emit a NEGATIVE-polarity value test so a row whose column is NULL
+   * satisfies it: `(col IS NULL OR <test>)`.
+   *
+   * # Why the non-negated operators need this at all
+   *
+   * SQL is three-valued and a `WHERE` keeps only TRUE, so `d <> 'v1'` is
+   * UNKNOWN — and therefore dropped — for every row where `d` is NULL, while
+   * `driver-memory` and `formula` evaluate the same filter in two-valued JS
+   * (`undefined !== 'v1'` is simply true) and return those rows. #5146 ruled
+   * that divergence for `$not`; #5298 ruled it the same way for the three
+   * operators that carry their negation in the operator itself — `$ne`,
+   * `$nin`, `$notContains`. "The column has no value" satisfies a test for
+   * "not this value", on every backend.
+   *
+   * It is a security fix as much as a consistency one: one RLS rule is
+   * evaluated by the read-side SQL lowering AND the write-side `check`
+   * evaluator, so a per-backend answer here means one permission rule admitting
+   * two different row sets (`read-scope-sql.ts` carries the same change).
+   *
+   * # Why OR-expansion and not a dialect equivalent
+   *
+   * `IS DISTINCT FROM` (Postgres) / `IS NOT` (SQLite) / `<=>` (MySQL) each
+   * express this in one operator, and all three were rejected: `NOT LIKE` has
+   * no such form at all, so `$notContains` would need the OR shape anyway and
+   * the driver would carry two shapes for one ruling; the SQLite spelling
+   * depends on an engine version this repo does not pin (sql.js / libSQL move
+   * independently); and measured `EXPLAIN QUERY PLAN` output is identical
+   * either way — `<>`, `NOT IN` and `NOT LIKE` were already full scans before
+   * this change, so there is no index to lose and none to win back. One shape,
+   * every dialect.
+   *
+   * # Why a group and not a raw string
+   *
+   * The callback form keeps the predicate ONE unit for the enclosing builder,
+   * so an `$or` branch attaches it as a single clause and the wrapping
+   * parentheses are Knex's, not hand-built — the `IS NULL OR` must never
+   * escape its own conjunct and widen a sibling.
+   */
+  private applyNullSafeNegative(
+    builder: any,
+    method: string,
+    field: string,
+    emitValueTest: (qb: any) => void,
+  ): void {
+    (builder as any)[method]((qb: any) => {
+      qb.whereNull(field);
+      emitValueTest(qb);
+    });
+  }
+
+  /**
    * Parameterized `LIKE`/`NOT LIKE` match with the LIKE metacharacters `%` / `_`
    * (and the escape char `\`) escaped in the user value so they match literally
    * — otherwise a value of `%` matches every row (a filter-bypass, P0). Binds an
@@ -6345,13 +6483,18 @@ export class SqlDriver implements IDataDriver {
    * `applyFilters` path refused it and the two JS backends answered FALSE. One
    * declared shape, three answers; see {@link emptyFieldConstraintError}.
    *
-   * # NULL-safe negation (#5146)
+   * # NULL-safe negation (#5146 `$not`, #5298 the negative operators)
    *
    * `$not` negates a predicate that {@link nullSafeNegationOperand} has first
    * made TOTAL, because SQL's `NOT UNKNOWN` is UNKNOWN and a `WHERE` drops it —
    * which used to hide every row whose compared column was NULL, while
-   * `driver-memory` and `formula` returned those same rows. Only the `$not`
-   * path is rewritten; an ordinary comparison compiles exactly as before.
+   * `driver-memory` and `formula` returned those same rows.
+   *
+   * #5298 extended the same ruling to the non-negated path: `$ne`, `$nin` and
+   * `$notContains` emit `(col IS NULL OR <test>)` via
+   * {@link SqlDriver.applyNullSafeNegative}. A POSITIVE comparison is still
+   * compiled exactly as it always was — `{ a: 1 }` is `a = 1`, `$in` is `in (…)`
+   * — so nothing on the majority path changed shape.
    */
   protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
     if (!condition || typeof condition !== 'object') return;
@@ -6477,8 +6620,11 @@ export class SqlDriver implements IDataDriver {
               break;
             case '$ne':
               // `<> NULL` matches nothing; a null comparand means "has any value".
+              // UNCHANGED by #5298: `IS NOT NULL` is already total, and both
+              // sides of the ruling agree a row with no value does NOT have
+              // "any value". Only the value COMPARISON below becomes NULL-safe.
               if (coerced == null) (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
-              else (builder as any)[method](field, '<>', coerced);
+              else this.applyNullSafeNegative(builder, method, field, (qb) => qb.orWhere(field, '<>', coerced));
               break;
             case '$gt':
               (builder as any)[method](field, '>', coerced);
@@ -6498,8 +6644,11 @@ export class SqlDriver implements IDataDriver {
               break;
             }
             case '$nin': {
-              const mNotIn = logicalOp === 'or' ? 'orWhereNotIn' : 'whereNotIn';
-              (builder as any)[mNotIn](field, coerced as any[]);
+              // [#5298] NULL-safe: "not among this list" holds vacuously for a
+              // value that is not there, which is what every JS backend answers.
+              this.applyNullSafeNegative(builder, method, field, (qb) =>
+                qb.orWhereNotIn(field, coerced as any[]),
+              );
               break;
             }
             case '$contains':
@@ -6512,7 +6661,11 @@ export class SqlDriver implements IDataDriver {
               this.applyContainsLike(builder, method, field, opValue);
               break;
             case '$notContains':
-              this.applyLike(builder, method, field, opValue, 'contains', true);
+              // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
+              // "does not contain" is true of a value that is not there.
+              this.applyNullSafeNegative(builder, method, field, (qb) =>
+                this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+              );
               break;
             case '$startsWith':
               this.applyLike(builder, method, field, opValue, 'starts');

@@ -196,7 +196,18 @@ const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
  * follow-up, not a formality.
  */
 const UNGATED_GENERATORS: ReadonlyArray<{ gen: string; why: string }> = [
-  { gen: 'gen:openapi', why: 'the OpenAPI document is generated but no check gate compares it to the routes' },
+  // The `why` used to read "no check gate compares it to the routes". Since
+  // #5744 that names a reconciliation with no second party: the document
+  // carries no route section at all — built-in routes are produced at serve
+  // time by the package that mounts them (#5588 ruling C, #5078, ADR-0076), so
+  // there is nothing here to compare against a route table. What IS still
+  // ungated is staleness against `src/api`: nothing fails when a contract
+  // schema changes and the artifact is not regenerated. Coherence is covered
+  // (the generator self-checks before writing, #5168) — currency is not.
+  {
+    gen: 'gen:openapi',
+    why: 'the OpenAPI document is generated but nothing compares its components.schemas against src/api — a stale artifact fails nothing (it IS self-checked for coherence at write time, #5168, and since #5744 it describes no routes to reconcile)',
+  },
   { gen: 'gen:sbom', why: 'the SBOM is a release artifact, regenerated at publish time rather than checked in' },
 ];
 

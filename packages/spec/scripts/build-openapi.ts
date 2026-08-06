@@ -14,227 +14,44 @@ const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'
 const SPEC_VERSION = pkg.version;
 
 /**
- * Generates an OpenAPI 3.1 specification from the ObjectStack REST API protocol schemas.
- * This auto-generates documentation for all CRUD operations and platform endpoints.
+ * Generates the OpenAPI 3.1 **contract half** of `GET {apiPath}/openapi.json`
+ * from this package's REST API protocol schemas: `components.schemas`, `info`,
+ * `securitySchemes`, the document-level `security` requirement, and a fallback
+ * `servers` entry. That is the whole artifact, and the whole of what
+ * `packages/spec` owns.
+ *
+ * ## It deliberately describes NO routes (#5588 ruling C, #5744)
+ *
+ * This generator used to hand-write a built-in route section —
+ * `generateCrudPaths` / `generateMetadataPaths` / `generateDiscoveryPaths`,
+ * 7 paths and 10 operations under a literal `basePath = '/api'`. A real boot
+ * probed it row by row and matched **0 of 10**: every path was missing `/v1`
+ * (CRUD also missing `/data`), `PUT {object}/{id}` named a verb the server
+ * answers 405 to, `/api/meta/types` exists nowhere in the repo, and
+ * `/api/.well-known/objectstack` is the runtime dispatcher's route, served at
+ * the ROOT rather than under the API base.
+ *
+ * It could not be written correctly from this seat, either: `apiPath` is
+ * per-deployment configuration (`api.apiPath ?? api.basePath + '/' + version`),
+ * so no statically published JSON can spell the prefix right for every
+ * deployment. A route section can only be produced by the package that MOUNTS
+ * the routes — ADR-0076 (one route, one owner), with `packages/rest` confirmed
+ * as this document's owner by the real boot in #5078.
+ *
+ * So the section has one producer, and it is not here: since #5821 the REST
+ * server builds it at serve time from `routeManager.getAll()` — the same table
+ * the router matches requests against — and DISCARDS whatever `paths` the
+ * static artifact carries. #5744 (this change) removes the emission, which is
+ * why the removal is a zero-behaviour-change cleanup rather than a regression:
+ * the served document's route section was already rest's, byte for byte.
+ *
+ * `paths` is therefore ABSENT from the emitted document rather than present
+ * and empty. OpenAPI 3.1 makes `paths` optional (a document is valid with any
+ * one of `paths` / `components` / `webhooks`), and the two spellings say
+ * different things: `paths: {}` asserts "this API serves nothing", which is
+ * false, while an absent key asserts nothing about routes, which is exactly
+ * the claim this artifact is entitled to make.
  */
-
-interface OpenApiPath {
-  [method: string]: {
-    summary: string;
-    description?: string;
-    tags: string[];
-    operationId: string;
-    parameters?: Array<{
-      name: string;
-      in: string;
-      required: boolean;
-      schema: Record<string, unknown>;
-      description?: string;
-    }>;
-    requestBody?: {
-      required: boolean;
-      content: Record<string, { schema: Record<string, unknown> }>;
-    };
-    responses: Record<string, {
-      description: string;
-      content?: Record<string, { schema: Record<string, unknown> }>;
-    }>;
-  };
-}
-
-function generateCrudPaths(basePath: string): Record<string, OpenApiPath> {
-  const paths: Record<string, OpenApiPath> = {};
-
-  // List records
-  paths[`${basePath}/{object}`] = {
-    get: {
-      summary: 'List records',
-      description: 'Query records with filtering, sorting, and pagination',
-      tags: ['CRUD'],
-      operationId: 'listRecords',
-      parameters: [
-        { name: 'object', in: 'path', required: true, schema: { type: 'string' }, description: 'Object name (snake_case)' },
-        { name: 'top', in: 'query', required: false, schema: { type: 'integer', default: 25 }, description: 'Page size' },
-        { name: 'skip', in: 'query', required: false, schema: { type: 'integer', default: 0 }, description: 'Offset' },
-        { name: 'sort', in: 'query', required: false, schema: { type: 'string' }, description: 'Sort field (prefix with - for desc)' },
-        { name: 'fields', in: 'query', required: false, schema: { type: 'string' }, description: 'Comma-separated field list' },
-      ],
-      responses: {
-        '200': {
-          description: 'List of records',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/ListRecordResponse' } } },
-        },
-        '400': { description: 'Invalid query', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-        '401': { description: 'Unauthorized' },
-      },
-    },
-    post: {
-      summary: 'Create a record',
-      description: 'Create a new record in the specified object',
-      tags: ['CRUD'],
-      operationId: 'createRecord',
-      parameters: [
-        { name: 'object', in: 'path', required: true, schema: { type: 'string' }, description: 'Object name (snake_case)' },
-      ],
-      requestBody: {
-        required: true,
-        content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateRequest' } } },
-      },
-      responses: {
-        '201': {
-          description: 'Record created',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/SingleRecordResponse' } } },
-        },
-        '400': { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } } },
-        '401': { description: 'Unauthorized' },
-      },
-    },
-  };
-
-  // Single record operations
-  paths[`${basePath}/{object}/{id}`] = {
-    get: {
-      summary: 'Get a record',
-      description: 'Retrieve a single record by ID',
-      tags: ['CRUD'],
-      operationId: 'getRecord',
-      parameters: [
-        { name: 'object', in: 'path', required: true, schema: { type: 'string' }, description: 'Object name' },
-        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Record ID' },
-      ],
-      responses: {
-        '200': {
-          description: 'Record found',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/SingleRecordResponse' } } },
-        },
-        '404': { description: 'Record not found' },
-        '401': { description: 'Unauthorized' },
-      },
-    },
-    put: {
-      summary: 'Update a record',
-      description: 'Update an existing record by ID',
-      tags: ['CRUD'],
-      operationId: 'updateRecord',
-      parameters: [
-        { name: 'object', in: 'path', required: true, schema: { type: 'string' }, description: 'Object name' },
-        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Record ID' },
-      ],
-      requestBody: {
-        required: true,
-        content: { 'application/json': { schema: { $ref: '#/components/schemas/UpdateRequest' } } },
-      },
-      responses: {
-        '200': {
-          description: 'Record updated',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/SingleRecordResponse' } } },
-        },
-        '400': { description: 'Validation error' },
-        '404': { description: 'Record not found' },
-        '401': { description: 'Unauthorized' },
-      },
-    },
-    delete: {
-      summary: 'Delete a record',
-      description: 'Delete a record by ID',
-      tags: ['CRUD'],
-      operationId: 'deleteRecord',
-      parameters: [
-        { name: 'object', in: 'path', required: true, schema: { type: 'string' }, description: 'Object name' },
-        { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Record ID' },
-      ],
-      responses: {
-        '200': {
-          description: 'Record deleted',
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/DeleteResponse' } } },
-        },
-        '404': { description: 'Record not found' },
-        '401': { description: 'Unauthorized' },
-      },
-    },
-  };
-
-  return paths;
-}
-
-function generateMetadataPaths(basePath: string): Record<string, OpenApiPath> {
-  const paths: Record<string, OpenApiPath> = {};
-
-  paths[`${basePath}/meta`] = {
-    get: {
-      summary: 'Get platform metadata',
-      description: 'Returns platform-level metadata including registered types and capabilities',
-      tags: ['Metadata'],
-      operationId: 'getMetadata',
-      responses: {
-        '200': { description: 'Platform metadata' },
-      },
-    },
-  };
-
-  paths[`${basePath}/meta/types`] = {
-    get: {
-      summary: 'List metadata types',
-      description: 'Returns all registered metadata type names',
-      tags: ['Metadata'],
-      operationId: 'listMetadataTypes',
-      responses: {
-        '200': { description: 'List of metadata type names' },
-      },
-    },
-  };
-
-  paths[`${basePath}/meta/{type}`] = {
-    get: {
-      summary: 'List metadata by type',
-      description: 'Returns all metadata entries for the specified type',
-      tags: ['Metadata'],
-      operationId: 'listMetadataByType',
-      parameters: [
-        { name: 'type', in: 'path', required: true, schema: { type: 'string' }, description: 'Metadata type (e.g., object, view, flow)' },
-      ],
-      responses: {
-        '200': { description: 'List of metadata entries' },
-        '404': { description: 'Unknown metadata type' },
-      },
-    },
-  };
-
-  paths[`${basePath}/meta/{type}/{name}`] = {
-    get: {
-      summary: 'Get metadata by type and name',
-      description: 'Returns a single metadata entry by type and name',
-      tags: ['Metadata'],
-      operationId: 'getMetadataByName',
-      parameters: [
-        { name: 'type', in: 'path', required: true, schema: { type: 'string' }, description: 'Metadata type' },
-        { name: 'name', in: 'path', required: true, schema: { type: 'string' }, description: 'Metadata name' },
-      ],
-      responses: {
-        '200': { description: 'Metadata entry' },
-        '404': { description: 'Metadata not found' },
-      },
-    },
-  };
-
-  return paths;
-}
-
-function generateDiscoveryPaths(basePath: string): Record<string, OpenApiPath> {
-  return {
-    [`${basePath}/.well-known/objectstack`]: {
-      get: {
-        summary: 'Platform discovery',
-        description: 'Returns ObjectStack platform discovery information including available services and capabilities',
-        tags: ['Discovery'],
-        operationId: 'discover',
-        responses: {
-          '200': { description: 'Discovery response with platform info, services, and capabilities' },
-        },
-      },
-    },
-  };
-}
 
 function generateComponentSchemas(): Record<string, Record<string, unknown>> {
   const schemas: Record<string, Record<string, unknown>> = {};
@@ -282,8 +99,6 @@ function generateComponentSchemas(): Record<string, Record<string, unknown>> {
 
 // ─── Build OpenAPI Spec ──────────────────────────────────────────────
 
-const basePath = '/api';
-
 const openapi: Record<string, unknown> = {
   openapi: '3.1.0',
   info: {
@@ -299,19 +114,16 @@ const openapi: Record<string, unknown> = {
       url: 'https://www.apache.org/licenses/LICENSE-2.0',
     },
   },
+  // Kept: the REST server prepends the live request origin and keeps this as a
+  // trailing fallback entry, so dropping it would change the SERVED document —
+  // and this change is meant to be invisible there.
   servers: [
     { url: 'http://localhost:3000', description: 'Local development' },
   ],
-  tags: [
-    { name: 'CRUD', description: 'Data record operations' },
-    { name: 'Metadata', description: 'Platform metadata and introspection' },
-    { name: 'Discovery', description: 'Service discovery and capabilities' },
-  ],
-  paths: {
-    ...generateCrudPaths(basePath),
-    ...generateMetadataPaths(basePath),
-    ...generateDiscoveryPaths(basePath),
-  },
+  // No `tags`. The three that used to sit here (`CRUD` / `Metadata` /
+  // `Discovery`) existed only to name the removed route sections; no operation
+  // in any document carries them, and the served document's tag list is
+  // produced with its route section, from the tags the routes register.
   components: {
     schemas: generateComponentSchemas(),
     securitySchemes: {
@@ -335,10 +147,27 @@ const openapi: Record<string, unknown> = {
 // ─── Self-consistency gate (#5168) ───────────────────────────────────
 //
 // Runs BEFORE the write, so a document whose `$ref`s do not resolve is never
-// emitted at all. `gen:openapi` has no staleness gate (`check:generated`
+// emitted at all. `gen:openapi` still has no staleness gate (`check:generated`
 // reports it as one of the two ungated generators), so this is the only thing
-// standing between a silently-broken collector and the published
-// `GET /api/v1/openapi.json`. Throwing exits non-zero and fails the build.
+// standing between a silently-broken collector and the published artifact.
+// Throwing exits non-zero and fails the build.
+//
+// Since #5744 removed the hand-written route section, the emitted document
+// happens to carry ZERO `$ref`s — every one of the nine lived in a path
+// operation's request/response body. Be honest about what that means: on
+// today's document this call is VACUOUS, and it is retained for a reason that
+// is about tomorrow's, not a reason to feel covered by it now.
+//
+// The live hazard it guards is `$defs`. `z.toJSONSchema` emits reused and
+// recursive subschemas into a `$defs` block at the root of the schema it
+// RETURNS, pointing at them with root-relative `#/$defs/…` pointers. Each of
+// the nine is converted independently and then parked at
+// `components.schemas[Name]`, so the moment any contract schema becomes
+// recursive or shares a subschema, the pointer means `#/$defs/…` of the whole
+// OpenAPI document — which has no `$defs` — and every consumer that resolves it
+// gets nothing. None of the nine is in that shape today; `findDanglingRefs`
+// resolves by JSON Pointer rather than by a `#/components/schemas/` prefix
+// precisely so that day costs nobody a debugging session.
 assertRefsResolve(openapi);
 
 // Write output
@@ -350,5 +179,8 @@ const outPath = path.join(OUT_DIR, 'openapi.json');
 fs.writeFileSync(outPath, JSON.stringify(openapi, null, 2));
 console.log(`✅ Generated OpenAPI spec: ${outPath}`);
 console.log(`   Version: ${SPEC_VERSION}`);
-console.log(`   Paths: ${Object.keys(openapi.paths as object).length}`);
+// No `Paths:` line — the document has no `paths`, and a `Paths: 0` would read
+// as "the collector produced nothing" rather than "this artifact does not
+// describe routes". The route section is served by @objectstack/rest (#5588).
 console.log(`   Components: ${Object.keys((openapi.components as any).schemas).length}`);
+console.log(`   Route sections: none — served by @objectstack/rest (#5588, ADR-0076)`);

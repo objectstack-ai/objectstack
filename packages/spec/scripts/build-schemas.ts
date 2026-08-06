@@ -12,7 +12,11 @@ import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
+import {
+  MIGRATIONS_BY_MAJOR,
+  RETIRED_DEFS_BY_MAJOR,
+  RETIRED_KEYS_BY_MAJOR,
+} from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
@@ -419,6 +423,21 @@ interface SchemaManifest {
   schemas: string[];
 }
 
+/**
+ * The manifest's own description — the procedure a reader who opens the file to
+ * delete a line follows. Until #4725 it ended "remove a key ONLY for a
+ * deliberate retirement", which was the entire requirement and was checked by
+ * nothing; it now names the gate and the table that answer for a removal.
+ */
+const MANIFEST_DESCRIPTION =
+  'Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. ' +
+  'Auto-appended when new schemas are added (commit the change). A listed schema that a ' +
+  'build no longer emits fails gen:schema. DELETING a key is gated too (#4725): the removal ' +
+  'is measured against this file at the merge base with origin/main — which the commit under ' +
+  'test cannot rewrite — and every def that leaves the published set must be declared in ' +
+  'RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts), or in RENAMED_DEFS ' +
+  '(scripts/lib/renamed-defs.ts) when it is a rename rather than a removal. See #2978, #4725.';
+
 let manifest: SchemaManifest | null = null;
 try {
   manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as SchemaManifest;
@@ -460,8 +479,10 @@ if (missing.length > 0) {
     `   Zod change made it unrepresentable (e.g. an added .transform in "output" AND "input"\n` +
     `   io modes) or an export was renamed/removed. Fix the schema, or — if the removal is\n` +
     `   deliberate — delete the key(s) from packages/spec/json-schema.manifest.json in the\n` +
-    `   same PR. Silently unpublishing a schema deletes its reference docs on the next\n` +
-    `   gen:docs run (see #2978).`,
+    `   same PR AND declare each one in RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts),\n` +
+    `   which the manifest deletion gate below requires (#4725). Deleting the line alone\n` +
+    `   used to be the whole procedure, and nothing checked it. Silently unpublishing a\n` +
+    `   schema deletes its reference docs on the next gen:docs run (see #2978).`,
   );
   process.exit(1);
 }
@@ -472,7 +493,15 @@ const added = [...generatedKeys].filter((key) => !(manifest?.schemas ?? []).incl
 // existed. Without this the stale key would sit in the manifest forever, kept
 // alive only by its RENAMED_DEFS entry.
 const renamedAway = (manifest?.schemas ?? []).filter((key) => key in RENAMED_DEFS);
-const manifestChanged = !manifest || added.length > 0 || renamedAway.length > 0;
+// The file's own description states the procedure for deleting a key, and #4725
+// changed that procedure from "do it deliberately" to "declare it in
+// RETIRED_DEFS_BY_MAJOR". A generated file that documents a superseded procedure
+// is read by whoever opens it to delete a line — precisely the reader the gate
+// exists for — so the text is part of the artifact and drifting from it is
+// staleness like any other. Reported separately below: "0 schema(s) not
+// recorded" would be a confusing way to say the prose moved.
+const descriptionStale = !!manifest && manifest.description !== MANIFEST_DESCRIPTION;
+const manifestChanged = !manifest || added.length > 0 || renamedAway.length > 0 || descriptionStale;
 if (manifestChanged && CHECK) {
   // Removals already exited above; reaching here in check mode means the manifest
   // is behind on ADDITIONS (or still lists a def that RENAMED_DEFS moved away).
@@ -483,11 +512,14 @@ if (manifestChanged && CHECK) {
   // generated artifact of eight that can never go red in CI — "stale ⇒ rewrite it
   // for you" instead of "stale ⇒ run the generator" (#4711). Same split as the
   // authorable-surface ratchet below.
+  const onlyDescription = manifest && added.length === 0 && renamedAway.length === 0;
   console.error(
-    manifest
-      ? `\n❌ json-schema.manifest.json is out of date (${added.length} schema(s) not recorded` +
-          `${renamedAway.length > 0 ? `, ${renamedAway.length} renamed-away key(s) still listed` : ''}).`
-      : `\n❌ json-schema.manifest.json is missing (${generatedKeys.size} schema(s) unrecorded).`,
+    !manifest
+      ? `\n❌ json-schema.manifest.json is missing (${generatedKeys.size} schema(s) unrecorded).`
+      : onlyDescription
+        ? `\n❌ json-schema.manifest.json carries a stale description (the key set is current).`
+        : `\n❌ json-schema.manifest.json is out of date (${added.length} schema(s) not recorded` +
+            `${renamedAway.length > 0 ? `, ${renamedAway.length} renamed-away key(s) still listed` : ''}).`,
   );
   for (const key of added.slice(0, 20)) console.error(`     + json-schema/${key}.json`);
   if (added.length > 20) console.error(`     … and ${added.length - 20} more`);
@@ -501,16 +533,16 @@ if (manifestChanged && CHECK) {
 }
 if (manifestChanged && !CHECK) {
   const updated: SchemaManifest = {
-    description:
-      'Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. ' +
-      'Auto-appended when new schemas are added (commit the change). A listed schema that a ' +
-      'build no longer emits fails gen:schema — remove a key ONLY for a deliberate retirement. See #2978.',
+    description: MANIFEST_DESCRIPTION,
     schemas: [...generatedKeys].sort(),
   };
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(updated, null, 2) + '\n');
-  console.log(
-    `\n📒 json-schema.manifest.json ${manifest ? `updated (+${added.length} schema(s))` : `created (${generatedKeys.size} schemas)`} — commit it.`,
-  );
+  const what = !manifest
+    ? `created (${generatedKeys.size} schemas)`
+    : added.length > 0 || renamedAway.length > 0
+      ? `updated (+${added.length} schema(s))`
+      : 'description refreshed (key set unchanged)';
+  console.log(`\n📒 json-schema.manifest.json ${what} — commit it.`);
 }
 
 // ─── Authorable-surface ratchet (#3855 follow-up) ────────────────────
@@ -767,8 +799,13 @@ if (surfaceDoc) {
 //      license to change the schema (plugin manifests, connector configs and
 //      other non-metadata authoring go through their own gates);
 //   3. the whole def is no longer emitted — whole-schema removals are
-//      adjudicated by the json-schema.manifest.json ratchet (#2978) and
-//      check:api-surface, not by this per-key ratchet.
+//      adjudicated by the json-schema.manifest.json ratchet (#2978), not by
+//      this per-key ratchet. Until #4725 that deferral was to nothing: the
+//      ratchet's `missing` set was computed from the same-commit manifest, so
+//      deleting the line deleted the evidence, exactly as hand-editing this
+//      file did before #4650. The manifest deletion gate below now anchors that
+//      comparison on the merge base and demands a declared removal, and it runs
+//      BEFORE this check so the deferral resolves to a real verdict.
 
 /** A tombstone may be deleted once its registration is this many majors old. */
 const TOMBSTONE_AGE_MAJORS = 2;
@@ -1369,8 +1406,179 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
   process.exit(1);
 }
 
+// ─── The manifest deletion gate (#4725) ───────────────────────────────
+//
+// #4650 closed the hand-edit shortcut one level down, for authorable KEYS. It
+// left the whole-def case to the #2978 manifest ratchet, and route 3 of check
+// (c) still says so in as many words: "whole-schema removals are adjudicated by
+// json-schema.manifest.json". They were not. That ratchet's `missing` set is
+// `manifest − emitted` with the manifest read from THIS commit — the same
+// same-commit-evidence defect #4650 exists for — so a PR that deleted the
+// export, the manifest line and the baseline lines together produced an empty
+// `missing`, a check (c) that waived every key under the now-gone def, and an
+// `api-surface` diff that a regeneration turns green. Three gates, nothing said.
+//
+// Measured on #4725, by deleting ONE barrel re-export (`export * from
+// './validation.zod'` in src/data/index.ts, whose defs ObjectSchema imports
+// directly and therefore keeps parsing metadata with): 7 defs and 116 authorable
+// keys left the published contract with `gen:schema`, `check:authorable-surface`
+// and `check:api-surface` all exiting 0.
+//
+// So the removal is re-anchored the way #4650 re-anchored key deletions: against
+// json-schema.manifest.json at the merge base with origin/main, which the commit
+// under test cannot rewrite. The proof demanded there is a DECLARATION —
+// RETIRED_DEFS_BY_MAJOR — and deliberately not reachability, which #4650 uses
+// per key. Reachability is keyed by `zodByDefKey`, populated only for defs this
+// build EMITS, so `reachableVia()` answers `null` ("unreachable", i.e. waived)
+// for every def that just stopped being emitted — a green light aimed exactly at
+// the removals this gate is for. That is not a bug to fix by widening the BFS:
+// the def is gone from the source, so there is no schema left to walk.
+
+/** The manifest file, by name — what every message here points the reader at. */
+const MANIFEST_FILE_NAME = path.basename(MANIFEST_PATH);
+
+/**
+ * Every def the ADR-0087 registries declare as unpublished, by exact
+ * `${category}/${SchemaName}`, mapped to the earliest major that declared it.
+ *
+ * No rename carry (cf. `carryAuthorableKey` above): a renamed def is not
+ * retired, and `RENAMED_DEFS` is consulted separately by the gate. A def cannot
+ * be in both tables — `checkRenameTable` rejects a rename whose target this
+ * build no longer emits.
+ */
+function registeredRetiredDefs(): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [major, defs] of Object.entries(RETIRED_DEFS_BY_MAJOR)) {
+    for (const def of defs) {
+      const prev = out.get(def);
+      if (prev === undefined || Number(major) < prev) out.set(def, Number(major));
+    }
+  }
+  return out;
+}
+
+/**
+ * Adjudicate whole-schema removals against the merge-base manifest.
+ *
+ * `baseRev` is the git-resolved baseline — the same rev the #4650 key gate
+ * anchors on — or null when this build could not resolve origin/main at all.
+ *
+ * Offline posture, following #5235 rather than inventing a third one: the
+ * REGISTRATION MIRROR below is git-free and always runs, while the removal
+ * comparison is a verification that has no baseline offline and therefore says
+ * so and skips — the same call `verifyCommittedSurfaceBase` makes when it cannot
+ * fetch the commit it would check. It is not a bypass a PR can reach for: the
+ * environments without a route to GitHub are immutable already-merged trees
+ * (image-build stages, air-gapped builds, forks, historical tags), where "what
+ * did this PR delete relative to main" is not a question that exists. Unlike the
+ * key gate, no in-tree anchor is needed to keep them building, because a skipped
+ * comparison fails nothing.
+ */
+function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
+  const registered = registeredRetiredDefs();
+
+  // The (b2) mirror, one level up: an entry that pre-approves a removal nobody
+  // performed. Left unchecked it would let the real removal land later, in
+  // someone else's PR, with this gate already satisfied and nothing written down
+  // at the time it happened.
+  const stillPublished = [...registered.entries()].filter(([def]) => generatedKeys.has(def));
+  if (stillPublished.length > 0) {
+    console.error(
+      `\n❌ ${stillPublished.length} RETIRED_DEFS_BY_MAJOR entr(ies) name a schema this build still publishes:`,
+    );
+    for (const [def, major] of stillPublished) {
+      console.error(`     - ${def}  (registered at major ${major})`);
+    }
+    console.error(
+      `\n   RETIRED_DEFS_BY_MAJOR records defs that HAVE left the published set — no\n` +
+        `   json-schema/<def>.json, no line in ${MANIFEST_FILE_NAME}. These are still emitted,\n` +
+        `   so the entry registers a removal nobody performed, and the gate below would accept\n` +
+        `   the real one later without it ever being declared.\n\n` +
+        `   Either remove the export (and its ${MANIFEST_FILE_NAME} line) in this PR, or delete\n` +
+        `   the entry from packages/spec/src/migrations/registry.ts.`,
+    );
+    process.exit(1);
+  }
+
+  if (baseRev === null) {
+    console.log(
+      `ℹ️  ${MANIFEST_FILE_NAME} removal check: no git-resolved baseline in this build\n` +
+        `   environment, so whole-schema removals are not compared here (#4725, offline posture\n` +
+        `   of #5235). Every environment that can reach origin/main runs it.`,
+    );
+    return;
+  }
+
+  const short = baseRev.slice(0, 12);
+  const show = git('show', `${baseRev}:./${MANIFEST_FILE_NAME}`);
+  if (show.status !== 0) {
+    if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
+      console.log(
+        `ℹ️  ${MANIFEST_FILE_NAME} removal check: no ${MANIFEST_FILE_NAME} at base ${short} — nothing to compare.`,
+      );
+      return;
+    }
+    console.error(`\n❌ Failed to read ${MANIFEST_FILE_NAME} at base ${short} (#4725):\n${show.stderr}`);
+    process.exit(1);
+  }
+  let baseSchemas: string[];
+  try {
+    baseSchemas = (JSON.parse(show.stdout) as SchemaManifest).schemas ?? [];
+  } catch (error) {
+    console.error(`\n❌ ${MANIFEST_FILE_NAME} at base ${short} is not valid JSON (#4725): ${error}`);
+    process.exit(1);
+  }
+
+  // Measured against what this build EMITS, never against the manifest file in
+  // the tree: the file is what the PR can rewrite, and rewriting it is the
+  // bypass. A base key still listed in the tree's manifest but no longer emitted
+  // has already exited above, in the disappearance ratchet.
+  const removed = baseSchemas.filter((key) => !generatedKeys.has(key) && !(key in RENAMED_DEFS));
+  const unregistered = removed.filter((key) => !registered.has(key));
+  const declared = removed.filter((key) => registered.has(key));
+  if (declared.length > 0) {
+    console.log(`\nℹ️  ${declared.length} schema(s) left the published set since ${short}, each declared (#4725):`);
+    for (const def of declared) {
+      console.log(`     - json-schema/${def}.json — RETIRED_DEFS_BY_MAJOR, major ${registered.get(def)}.`);
+    }
+  }
+  if (unregistered.length === 0) return;
+
+  console.error(
+    `\n❌ ${unregistered.length} schema(s) left the published set with no registered removal (#4725):`,
+  );
+  for (const def of unregistered) console.error(`     - json-schema/${def}.json`);
+  console.error(
+    `\n   ${MANIFEST_FILE_NAME} is the committed record of every schema this repo has ever\n` +
+      `   published — the \`$id\` URLs under schema.objectstack.io, IDE validation, gen:docs\n` +
+      `   input. Its disappearance ratchet reads that file from THIS commit, so deleting the\n` +
+      `   export and the manifest line in one PR left nothing to detect, and the #4650 key gate\n` +
+      `   waived every baseline line under the vanished def on the grounds that this file would\n` +
+      `   adjudicate it. Removals are therefore compared against ${MANIFEST_FILE_NAME} at the\n` +
+      `   merge base ${short} with origin/main, which this commit cannot rewrite.\n\n` +
+      `   1. Declare each removal by its EXACT def key in RETIRED_DEFS_BY_MAJOR\n` +
+      `      (packages/spec/src/migrations/registry.ts) — copy these lines in:\n\n` +
+      unregistered.map((def) => `        '${def}',\n`).join('') +
+      `\n      under \`${CURRENT_MAJOR}: [ … ]\` (create the major's array if it is the first).\n\n` +
+      `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
+      `      chain step referencing it) plus a \`major\` changeset, so the removal reaches\n` +
+      `      spec-changes.json, the upgrade guide and \`os migrate meta\` — the table is the\n` +
+      `      proof it was declared, the conversion is the prescription a consumer follows.\n\n` +
+      `   If the schema was not meant to disappear at all, this is not the fix: an added\n` +
+      `   \`.transform\` can make a schema unrepresentable in BOTH io modes and silently\n` +
+      `   unpublish it (#2967). And a def published under a NEW name is a rename — declare it\n` +
+      `   in RENAMED_DEFS (scripts/lib/renamed-defs.ts), which carries its authorable keys\n` +
+      `   across; an entry here would falsely claim the contract shrank.`,
+  );
+  process.exit(1);
+}
+
 {
   const base = resolveSurfaceBase();
+  // Whole defs first: check (c) below waives every baseline line under a def this
+  // build stopped emitting, on the grounds that this gate adjudicates it. Running
+  // it first is what makes that deferral true rather than circular.
+  checkManifestRemovals(gitInPackage, gitResolvedAnchor?.rev ?? null);
   if (base) {
     // Carry base keys through declared def renames first — same discipline as
     // the snapshot carry above — so a rename is never misread as a deletion.
@@ -1440,7 +1648,9 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
       for (const [defKey, keyCount] of goneDefs) {
         allowed.push(
           `${defKey}:* (${keyCount} line(s)) — def no longer emitted by this build; whole-schema\n` +
-            `       removals are adjudicated by json-schema.manifest.json (#2978) and check:api-surface.`,
+            `       removals are adjudicated by json-schema.manifest.json (#2978) — since #4725 by the\n` +
+            `       manifest deletion gate that ran above, which required a declared removal for it\n` +
+            `       (until then this deferral pointed at a ratchet that said nothing).`,
         );
       }
       if (allowed.length > 0) {
@@ -1462,7 +1672,9 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
             `        AND that registration is ≥ ${TOMBSTONE_AGE_MAJORS} majors old (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}); or\n` +
             `     2. its def is not reachable from the metadata-type roots — this gate computes\n` +
             `        that itself (it would have said so above); or\n` +
-            `     3. its whole def stopped being emitted (adjudicated by the manifest ratchet).\n\n` +
+            `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
+            `        gate above (#4725), which demands the removal be declared in\n` +
+            `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts).\n\n` +
             `   Restore the line(s) — \`pnpm --filter @objectstack/spec gen:schema\` regenerates\n` +
             `   the file — or complete the retirement route (#4650, ADR-0104, and the\n` +
             `   spec-property-retirement skill in .claude/skills/).`,

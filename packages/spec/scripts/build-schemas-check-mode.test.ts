@@ -56,7 +56,11 @@ import { fileURLToPath } from 'node:url';
 
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
+import {
+  MIGRATIONS_BY_MAJOR,
+  RETIRED_DEFS_BY_MAJOR,
+  RETIRED_KEYS_BY_MAJOR,
+} from '../src/migrations/registry';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -1503,6 +1507,425 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       expect(output).not.toContain(CHECK_B);
       expect(output).not.toContain('deleted without proof');
       expect(status).toBe(0);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4725 — a deleted json-schema.manifest.json key must prove itself too.
+//
+// #4650 closed the hand-edit shortcut for authorable KEYS and left whole-DEF
+// removals to the #2978 manifest ratchet — check (c) route 3 says so verbatim:
+// "whole-schema removals are adjudicated by json-schema.manifest.json". They
+// were not. That ratchet's `missing` set is `manifest − emitted` with the
+// manifest read from the SAME commit, so a PR deleting the export, the manifest
+// line and the baseline lines together produced an empty `missing`, a check (c)
+// that waived every key under the now-gone def, and an `api-surface` diff a
+// regeneration turns green. Three gates, nothing said — the same shape #4650
+// closed one level down, with the two gates deferring to each other.
+//
+// Measured before the fix, by deleting ONE barrel line (`export * from
+// './validation.zod'` in src/data/index.ts, whose defs ObjectSchema imports
+// DIRECTLY and so keeps parsing `object` metadata with): 7 defs and 116
+// authorable keys left the published contract, `gen:schema` and
+// `check:authorable-surface` both exiting 0. The last case in this block is that
+// repro, run for real against the copied `src/`.
+//
+// ── Why declaration, and not reachability ─────────────────────────────────
+// The issue proposed reusing the #4650 BFS ("the def is unreachable from the
+// metadata roots"). It cannot be reused in this direction, and the failure is
+// silent: `reachableVia()` looks the def up in `zodByDefKey`, which is populated
+// only for defs the build EMITS, so a def that just stopped being emitted
+// answers `null` — "unreachable", i.e. waived — for exactly the removals the
+// gate exists to catch. Widening the BFS cannot fix that: the def is gone from
+// the source, so there is no schema left to walk. The proof is therefore a
+// DECLARATION, RETIRED_DEFS_BY_MAJOR, following #4659's exact-key precedent one
+// level up. The `zzOverCollectedFamily` fixture below is deliberately a def the
+// build never emitted, so it would answer "unreachable" too — a gate that
+// consulted reachability would let it through, and this block would be green.
+//
+// ── Why a THIRD sandbox ───────────────────────────────────────────────────
+// Two reasons, both structural. The gate reads the manifest AT THE MERGE BASE,
+// so `json-schema.manifest.json` has to be a TRACKED file whose committed
+// content differs from the worktree's — the first sandbox commits only the
+// authorable surface, and tracking the manifest there would make every
+// `seedManifest()` dirty the tree that the #5358 block asserts is clean. And the
+// registry table has to differ per case, which needs a copied `src/` (the first
+// sandbox symlinks it). Same discipline as the #4659 box: production code path
+// byte-for-byte, fixture data only.
+
+/** Planted in the BASE manifest, emitted by no build: a def that "left". */
+const REMOVED_DEF = 'ui/ZzzOverCollectedFamily4725';
+/** A second one, so the prescription is pinned in the plural. */
+const REMOVED_DEF_2 = 'ui/ZzzOverCollectedFamily4725Sibling';
+/** A def every build publishes — the mirror's fixture. */
+const STILL_PUBLISHED_DEF = 'ui/View';
+/** The barrel line whose removal unpublishes a REACHABLE def family. */
+const BARREL_LINE = "export * from './validation.zod';\n";
+/** The defs that line publishes; `ObjectSchema` imports them directly, so every
+ *  one of them stays reachable from the `object` metadata root after it goes. */
+const UNPUBLISHED_FAMILY = [
+  'data/ConditionalValidation',
+  'data/CrossFieldValidation',
+  'data/FormatValidation',
+  'data/JSONValidation',
+  'data/ScriptValidation',
+  'data/StateMachineValidation',
+  'data/ValidationRule',
+];
+
+describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxManifest: string;
+  let boxSurface: string;
+  let boxRegistry: string;
+  let boxBarrel: string;
+  let pristineRegistry: string;
+  let pristineBarrel: string;
+  let head: string;
+
+  const boxGit = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
+      { cwd: box, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    return (r.stdout ?? '').trim();
+  };
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Write the box's worktree manifest from the committed one. */
+  const writeManifest = (mutate: (schemas: string[]) => string[]): void => {
+    const doc = JSON.parse(pristine) as { description?: string; schemas: string[] };
+    doc.schemas = mutate(doc.schemas);
+    fs.writeFileSync(boxManifest, JSON.stringify(doc, null, 2) + '\n');
+  };
+
+  /**
+   * Commit a BASE variant of the manifest and point origin/main at it, then
+   * restore the worktree manifest to the canonical one. Set-wise identical to
+   * the real removal — a key present at the merge base and absent from what this
+   * build emits — without needing the source that emitted it.
+   */
+  const seedBaseManifest = (mutate: (schemas: string[]) => string[]): void => {
+    writeManifest(mutate);
+    boxGit('add', 'json-schema.manifest.json');
+    boxGit('commit', '-q', '--allow-empty', '-m', 'base manifest variant');
+    head = boxGit('rev-parse', 'HEAD');
+    boxGit('update-ref', 'refs/remotes/origin/main', head);
+    writeManifest((s) => s);
+  };
+
+  /** Substitute RETIRED_DEFS_BY_MAJOR in the box's own copy of the registry. */
+  const seedRetiredDefs = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_DEFS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_DEFS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  const NO_REGISTERED_REMOVAL = 'schema(s) left the published set with no registered removal (#4725)';
+
+  beforeAll(() => {
+    // Fixture validity, loud rather than silently stale.
+    const manifestKeys = (JSON.parse(pristine) as { schemas: string[] }).schemas;
+    for (const def of [REMOVED_DEF, REMOVED_DEF_2]) {
+      expect(manifestKeys, `${def} is a real published def — pick a phantom`).not.toContain(def);
+    }
+    expect(manifestKeys, `${STILL_PUBLISHED_DEF} is no longer published — pick another`).toContain(
+      STILL_PUBLISHED_DEF,
+    );
+    for (const def of UNPUBLISHED_FAMILY) {
+      expect(manifestKeys, `${def} is no longer published — the end-to-end repro needs a new family`).toContain(def);
+    }
+    const declared = Object.values(RETIRED_DEFS_BY_MAJOR).flat();
+    for (const def of [REMOVED_DEF, REMOVED_DEF_2, STILL_PUBLISHED_DEF, ...UNPUBLISHED_FAMILY]) {
+      expect(declared, `${def} is now registered for real — pick an unregistered fixture`).not.toContain(def);
+    }
+
+    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-manifest-removal-'));
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxManifest = path.join(box, 'json-schema.manifest.json');
+    boxSurface = path.join(box, 'authorable-surface.json');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    boxBarrel = path.join(box, 'src', 'data', 'index.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+    pristineBarrel = fs.readFileSync(boxBarrel, 'utf8');
+    expect(
+      pristineBarrel.includes(BARREL_LINE),
+      'src/data/index.ts no longer re-exports ./validation.zod — the end-to-end repro needs a new family',
+    ).toBe(true);
+
+    fs.writeFileSync(boxManifest, pristine);
+    fs.writeFileSync(boxSurface, pristineSurface);
+    boxGit('init', '-q', '-b', 'main', '.');
+    // BOTH artifacts tracked here: the merge-base manifest is what this gate
+    // reads, and the surface baseline keeps the #4650 gate honest alongside it.
+    boxGit('add', 'json-schema.manifest.json', 'authorable-surface.json');
+    boxGit('commit', '-q', '-m', 'baseline: committed manifest + authorable surface');
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        {
+          description: surfaceBaseDescription,
+          baseRev: boxGit('rev-parse', 'HEAD'),
+          keys: (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    head = boxGit('rev-parse', 'HEAD');
+    boxGit('update-ref', 'refs/remotes/origin/main', head);
+  });
+
+  beforeEach(() => {
+    // A clean, current base every time — including the merge-base MANIFEST,
+    // which each fixture below mutates and which would otherwise leak the
+    // previous case's planted removal into the next one's count.
+    seedRetiredDefs({});
+    fs.writeFileSync(boxSurface, pristineSurface);
+    fs.writeFileSync(boxBarrel, pristineBarrel);
+    seedBaseManifest((s) => s);
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(box, { recursive: true, force: true });
+  });
+
+  it(
+    'is silent when nothing left the published set — the new failure is the removal, not the gate',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Negative control. Without it, "always red" would satisfy every assertion
+      // below while breaking `check:authorable-surface` for everyone.
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).not.toContain('left the published set since');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'the bypass repro: a def gone from the build AND from the manifest is red, naming it',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The #4725 shape, set-wise: two defs present in the manifest at the merge
+      // base, emitted by no build, and absent from the manifest this commit
+      // carries. Before the fix `missing` was empty and every gate exited 0.
+      seedBaseManifest((s) => [...s, REMOVED_DEF, REMOVED_DEF_2].sort());
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`2 ${NO_REGISTERED_REMOVAL}`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF}.json`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF_2}.json`);
+      // The prescription IS the contract: the exact lines to paste, and where.
+      expect(output).toContain(`        '${REMOVED_DEF}',`);
+      expect(output).toContain(`        '${REMOVED_DEF_2}',`);
+      expect(output).toContain('RETIRED_DEFS_BY_MAJOR');
+      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // …and the two other routes a reader might actually need are named.
+      expect(output).toContain('RENAMED_DEFS');
+      expect(output).toContain('src/conversions/registry.ts');
+      // Anchored on the merge base, which is the half a hand-edit cannot reach.
+      expect(output).toContain(`merge base ${head.slice(0, 12)}`);
+    },
+  );
+
+  it(
+    'write mode refuses identically — regenerating cannot bless a removal either',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      const before = fs.readFileSync(boxManifest, 'utf8');
+
+      const { status, output } = runBox([]);
+
+      expect(status).toBe(1);
+      expect(output).toContain(NO_REGISTERED_REMOVAL);
+      expect(output).toContain(REMOVED_DEF);
+      expect(fs.readFileSync(boxManifest, 'utf8')).toBe(before);
+    },
+  );
+
+  it(
+    'a declared removal passes, and the run says which major declared it',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      seedRetiredDefs({ [CURRENT_MAJOR]: [REMOVED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).toContain('1 schema(s) left the published set since');
+      expect(output).toContain(`json-schema/${REMOVED_DEF}.json — RETIRED_DEFS_BY_MAJOR, major ${CURRENT_MAJOR}`);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'registration is per DEF: declaring one does not cover its sibling',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The #4659 lesson, inherited rather than re-learned: nothing radiates
+      // from one entry to another, and no name is matched by prefix or leaf.
+      seedBaseManifest((s) => [...s, REMOVED_DEF, REMOVED_DEF_2].sort());
+      seedRetiredDefs({ [CURRENT_MAJOR]: [REMOVED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${NO_REGISTERED_REMOVAL}`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF_2}.json`);
+      // The declared one appears only in the ℹ️ notice, never in the fatal list.
+      // Matched with its trailing newline, because the notice's line opens with
+      // the same path and then goes on to name the major.
+      expect(output).toContain(
+        `json-schema/${REMOVED_DEF}.json — RETIRED_DEFS_BY_MAJOR, major ${CURRENT_MAJOR}`,
+      );
+      expect(output).not.toContain(`     - json-schema/${REMOVED_DEF}.json\n`);
+    },
+  );
+
+  it(
+    'an entry naming a schema this build still publishes is red: a registration nothing consumed',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The mirror of check (b2), one level up. Without it an author could
+      // pre-register the def they intend to unpublish, and the real removal
+      // would land later — in someone else's PR — with this gate already
+      // satisfied and nobody writing anything down at the time it happened.
+      seedRetiredDefs({ [CURRENT_MAJOR]: [STILL_PUBLISHED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('RETIRED_DEFS_BY_MAJOR entr(ies) name a schema this build still publishes');
+      expect(output).toContain(`     - ${STILL_PUBLISHED_DEF}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+    },
+  );
+
+  it(
+    'a declared def rename is not a removal — RENAMED_DEFS is consulted before the table',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const [renamedSource] = Object.keys(RENAMED_DEFS);
+      expect(renamedSource, 'RENAMED_DEFS is empty — this test exercises nothing').toBeTruthy();
+      // The source def is gone from the build by construction (checkRenameTable
+      // rejects a table whose source is still emitted), so at the merge base it
+      // is a manifest key this build does not emit — a removal in every respect
+      // except the one that matters.
+      seedBaseManifest((s) => [...s, renamedSource!].sort());
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).not.toContain('left the published set since');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'offline: the comparison says so and skips, while the registration mirror still runs',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // #5235's posture, not a third one. The comparison has no baseline with
+      // origin/main out of reach, so it reports that and skips — those trees are
+      // immutable, already-merged builds (image stages, air-gapped, forks,
+      // historical tags) where "what did this PR delete relative to main" is not
+      // a question that exists. The mirror needs no git and therefore keeps
+      // running: an entry that pre-approves a removal is wrong everywhere.
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      boxGit('update-ref', '-d', 'refs/remotes/origin/main');
+      try {
+        const skipped = runBox(['--check']);
+        expect(skipped.status).toBe(0);
+        expect(skipped.output).toContain('json-schema.manifest.json removal check');
+        expect(skipped.output).toContain('no git-resolved baseline');
+        expect(skipped.output).not.toContain(NO_REGISTERED_REMOVAL);
+
+        seedRetiredDefs({ [CURRENT_MAJOR]: [STILL_PUBLISHED_DEF] });
+        const mirrored = runBox(['--check']);
+        expect(mirrored.status).toBe(1);
+        expect(mirrored.output).toContain('name a schema this build still publishes');
+      } finally {
+        boxGit('update-ref', 'refs/remotes/origin/main', head);
+      }
+    },
+  );
+
+  it(
+    'end to end: unpublishing a REACHABLE def family is red, where every gate used to be green',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // The measured repro, run against real source rather than modelled. The
+      // barrel line goes; `ObjectSchema` still imports ValidationRuleSchema from
+      // './validation.zod', so all 7 defs stay reachable from the `object`
+      // metadata root and every one of their 116 keys stays authorable — only
+      // their JSON Schemas, their manifest lines and the ratchet's record of
+      // them disappear. Then the two hand-edits the old procedure sanctioned:
+      // delete the manifest lines ("a deliberate retirement") and the baseline
+      // lines (without which check (a) fires first).
+      fs.writeFileSync(boxBarrel, pristineBarrel.replace(BARREL_LINE, ''));
+      writeManifest((s) => s.filter((k) => !UNPUBLISHED_FAMILY.includes(k)));
+      const surface = JSON.parse(pristineSurface) as { description: string; keys: string[] };
+      const kept = surface.keys.filter(
+        (k) => !UNPUBLISHED_FAMILY.some((d) => k.startsWith(d + ':')),
+      );
+      expect(
+        surface.keys.length - kept.length,
+        'the family stopped carrying authorable keys — re-measure the repro',
+      ).toBeGreaterThan(0);
+      surface.keys = kept;
+      fs.writeFileSync(boxSurface, JSON.stringify(surface, null, 2) + '\n');
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`${UNPUBLISHED_FAMILY.length} ${NO_REGISTERED_REMOVAL}`);
+      for (const def of UNPUBLISHED_FAMILY) {
+        expect(output).toContain(`     - json-schema/${def}.json`);
+        expect(output).toContain(`        '${def}',`);
+      }
+      // The old verdict, in full: check (c) waived all 116 lines as "def no
+      // longer emitted", the manifest ratchet said nothing, and the run exited
+      // 0. The gate now exits before check (c) reaches that branch at all.
+      expect(output).not.toContain('carry their own proof');
+      expect(output).not.toContain('baseline deletion(s) since');
     },
   );
 });

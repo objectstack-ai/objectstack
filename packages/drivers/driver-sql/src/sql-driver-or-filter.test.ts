@@ -86,6 +86,9 @@ function declareFilterLogicSweep(cell: DialectCell): void {
         t.string('a');
         t.string('b');
         t.string('c');
+        // [#5298] Nullable (knex's default) — rows 3-4 of the fixture have no `d`,
+        // and the null cases measure nothing against a NOT NULL column.
+        t.string('d');
         t.string('owner');
         t.string('status');
         t.string('parent_object');
