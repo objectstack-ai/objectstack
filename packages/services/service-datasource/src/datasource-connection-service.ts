@@ -39,6 +39,10 @@ import {
   type DatasourceConnectContext,
   type DatasourceConnectDecision,
 } from './contracts/connect-policy.js';
+import {
+  assertDatasourcePoolSupported,
+  unsupportedPoolIssue,
+} from './datasource-pool-support.js';
 import type { Logger } from './logger.js';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
@@ -315,6 +319,7 @@ export class DatasourceConnectionService {
   }): Promise<ConnectResult[]> {
     const objects = input.objects ?? [];
     const mappedObjects = input.mappedObjects ?? {};
+    this.assertDeclaredPoolsAreHonoured(input.datasources);
     const results: ConnectResult[] = [];
     const fatal: Error[] = [];
     for (const ds of input.datasources) {
@@ -346,6 +351,46 @@ export class DatasourceConnectionService {
       );
     }
     return results;
+  }
+
+  /**
+   * Reject every declared `pool` block the datasource's driver cannot honour,
+   * BEFORE a single connection is attempted (#5714).
+   *
+   * Three deliberate properties:
+   *
+   *  - **It is an authoring verdict, not a connect failure.** It never goes
+   *    through {@link handleFailure}, so the D5 degradation policy and its
+   *    `OS_ALLOW_DRIVER_CONNECT_FAILURE` escape hatch do not apply and are not
+   *    suggested: that hatch exists for a database that is unreachable — a fact
+   *    about the world, which may resolve itself. A `pool` the driver cannot
+   *    read is a fact about the metadata, and no env var should boot past it.
+   *  - **Every declared datasource is judged, not just the connected ones.**
+   *    The ADR-0062 D2 gate leaves a managed, unrouted datasource unconnected;
+   *    its `pool` block is exactly as dropped as a connected one's, and
+   *    `examples/app-crm`'s specimen was of precisely that shape.
+   *  - **`active: false` is skipped.** That flag is the operator's way to take
+   *    a misconfigured datasource out of service; a boot that refuses to start
+   *    over a datasource already switched off would break the remedy itself.
+   *
+   * All offenders are reported in one throw, mirroring the aggregate connect
+   * failure below: one boot names everything to fix, not one per restart.
+   */
+  private assertDeclaredPoolsAreHonoured(datasources: readonly ConnectableDatasource[]): void {
+    const issues: string[] = [];
+    for (const ds of datasources) {
+      if (!ds?.name || ds.active === false) continue;
+      const issue = unsupportedPoolIssue({ driver: ds.driver, pool: ds.pool, name: ds.name });
+      if (issue) issues.push(issue);
+    }
+    if (issues.length === 1) throw new Error(issues[0]);
+    if (issues.length > 1) {
+      throw new Error(
+        `${issues.length} declared datasource(s) declare a \`pool\` block their driver cannot ` +
+        `honour — refusing to boot.\n` +
+        issues.map((m) => `  • ${m}`).join('\n'),
+      );
+    }
   }
 
   /**
@@ -449,6 +494,17 @@ export class DatasourceConnectionService {
     } else if (engine?.getDriverByName?.(name)) {
       return { name, status: 'already-registered' };
     }
+
+    // From here on THIS service is the thing that would build the driver, so it
+    // refuses to build from a declaration it cannot honour (#5714). Placed
+    // after the idempotency guard — a driver someone else already registered
+    // (the D8 `onEnable` escape hatch) is not this path's to re-judge — and
+    // before the policy gate, because an unhonourable `pool` is a property of
+    // the declaration rather than of the host's connect decision. Boot-declared
+    // datasources have already been judged in bulk by
+    // {@link assertDeclaredPoolsAreHonoured}; this covers the runtime-admin
+    // (`registerPool`) path and any host calling `connect()` directly.
+    assertDatasourcePoolSupported({ driver: record.driver, pool: record.pool, name });
 
     // Policy gate (fail-closed on throw).
     let decision: DatasourceConnectDecision;

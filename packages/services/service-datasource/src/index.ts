@@ -75,6 +75,18 @@ export type {
   SecretBinder,
 } from './datasource-admin-plugin.js';
 
+// Which driver arms read `datasource.pool`, and the loud rejection for the ones
+// that do not (#5714) — exported so a host that injects its OWN driver factory
+// can hold the same contract instead of re-deriving (or silently dropping) it.
+export {
+  POOL_UNSUPPORTED_DRIVER_IDS,
+  driverReadsDeclaredPool,
+  unsupportedPoolIssue,
+  unsupportedPoolMessage,
+  assertDatasourcePoolSupported,
+} from './datasource-pool-support.js';
+export type { PoolUnsupportedDriverId } from './datasource-pool-support.js';
+
 // Host glue: dev driver factory + fail-closed secret binder.
 export { createDefaultDatasourceDriverFactory } from './default-datasource-driver-factory.js';
 // The "adopt a host-built driver instance" seam (ADR-0062 D1, #3826) — for
