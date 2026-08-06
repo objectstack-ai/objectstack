@@ -318,3 +318,200 @@ describe('formatType — the shapes that were already right stay right', () => {
     expect(rendered).toBe('[Field](/docs/references/data/field#field)');
   });
 });
+
+/**
+ * The `retiredKey()` tombstone node, verbatim as `z.toJSONSchema` emits it.
+ *
+ * Probed against the real converter (`z.toJSONSchema(z.object({ heading:
+ * retiredKey('…') }), { target: 'draft-2020-12' })`) rather than guessed: the
+ * node is `{ description, not: {} }` in BOTH the `output` and the `io: 'input'`
+ * direction `build-schemas.ts` falls back to. No `type`, no `$ref`, no `enum` —
+ * which is precisely why it used to reach the `prop.type || 'any'` tail.
+ */
+const tombstone = (guidance: string) => ({ description: `[REMOVED] ${guidance}`, not: {} });
+
+/** The real `Typography.fontFamily` node — one live key, two tombstones (#5021). */
+const THEME_FONT_FAMILY = {
+  type: 'object',
+  properties: {
+    base: { type: 'string', description: 'Base font family (default: system fonts)' },
+    heading: tombstone('`theme.typography.fontFamily.heading` was removed in …'),
+    mono: tombstone('`theme.typography.fontFamily.mono` was removed in …'),
+  },
+  additionalProperties: false,
+};
+
+/**
+ * The five `Theme`/`Typography` tombstones that DO own a table row (#5021).
+ * Their description column keeps the prescription; the type cell said `any`.
+ */
+const THEME_TOMBSTONES = {
+  type: 'object',
+  properties: {
+    animation: tombstone('`theme.animation` was removed in …'),
+    zIndex: tombstone('`theme.zIndex` was removed in …'),
+    fontSize: tombstone('`theme.typography.fontSize` was removed in …'),
+    fontWeight: tombstone('`theme.typography.fontWeight` was removed in …'),
+    lineHeight: tombstone('`theme.typography.lineHeight` was removed in …'),
+  },
+  additionalProperties: false,
+} as { type: string; properties: Record<string, any>; additionalProperties: boolean };
+
+/** The real `ObjectSchema.indexes` element — three live keys, two tombstones (#5248). */
+const INDEX_SCHEMA = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      name: { type: 'string' },
+      fields: { type: 'array', items: { type: 'string' } },
+      unique: { anyOf: [{ type: 'boolean' }, { const: 'global' }, { const: 'organization' }] },
+      type: tombstone('`indexes[].type` was removed in …'),
+      partial: tombstone('`indexes[].partial` was removed in …'),
+    },
+    required: ['fields'],
+    additionalProperties: false,
+  },
+};
+
+/**
+ * Pin for how the renderer prints a `retiredKey()` tombstone — #5606.
+ *
+ * `retiredKey()` (`src/shared/retired-key.ts`) is `z.never()`, which
+ * `z.toJSONSchema` emits as `{ "not": {} }`. That node carries no `type`, no
+ * `$ref` and no `enum`, so it fell through every branch of `formatType` to the
+ * `prop.type || 'any'` tail and the reference pages printed **`any`**. That is
+ * the worst available rendering for a removed key: to an author — very often an
+ * AI one (ADR-0033), for whom these pages are the primary input — `heading?:
+ * any` does not read "deleted", it reads "this slot exists and nothing
+ * validates it", i.e. MORE inviting than the `heading?: string` it replaced.
+ *
+ * A top-level tombstone at least got its `[REMOVED]` prescription in the
+ * description column of its own table row. A tombstone nested inside an inline
+ * shape summary got nothing: the summary prints `k?: type` and has no
+ * description column at all. `content/docs/references/ui/theme.mdx` carried
+ * `{ base?: string; heading?: any; mono?: any }` with the two prescriptions
+ * appearing NOWHERE on the page.
+ *
+ * Two halves, both pinned below:
+ *
+ *   1. `{ not: {} }` → `never`. Accurate TypeScript (the key's `z.input` type
+ *      IS `never`) and self-evident in a summary cell.
+ *   2. Tombstones are filtered out of the inline summary BEFORE
+ *      `INLINE_KEY_LIMIT` counts. #5248 is why this is not cosmetic: it retired
+ *      `IndexSchema` down to three live keys, so with a limit of four the first
+ *      tombstone is mathematically guaranteed into the summary — the #5050
+ *      workaround of "move the tombstone to the bottom of the shape" cannot
+ *      work once live keys < the limit.
+ *
+ * MEASURED (reverse verification), run one half at a time. The direction is the
+ * ordinary one for both — restore the defect, the new pins go red — because
+ * these assert a POSITIVE rendering the fix produces, not the absence of a
+ * finding:
+ *
+ *   - Commenting out the `isNeverNode` early return: **3 failed | 24 passed**.
+ *     The three reds are this block's `never` assertions, each reporting
+ *     `expected 'any' to be 'never'` (and `'any[]' to be 'never[]'`). The
+ *     fourth case here stays green ON PURPOSE — it asserts a NON-`never`
+ *     rendering, so it is the over-reach guard, not a dead pin. The whole
+ *     second block also stays green, which is the honest signal that the two
+ *     halves are independent: filtering a tombstone out of a summary does not
+ *     care how it would have rendered.
+ *   - Restoring the early return and reverting the summary to an unfiltered
+ *     `Object.keys(prop.properties)`: **4 failed | 23 passed**, all four in the
+ *     second block, reporting the halfway state the `never` branch ALONE would
+ *     have shipped — `{ base?: string; heading?: never; mono?: never }`,
+ *     `{ dead1?: never; a: string; dead2?: never; b?: string; … }`,
+ *     `{ x?: never; y?: never }`. Safer than `any`, still spending the reader's
+ *     four slots on keys nobody may write.
+ */
+describe('formatType — `retiredKey()` tombstones render as `never`, not `any` (#5606)', () => {
+  it('renders a bare tombstone node as `never`', () => {
+    expect(formatType(tombstone('`x` was removed in …'), ctx())).toBe('never');
+    // The `description` is incidental — the node is `never` with or without it.
+    expect(formatType({ not: {} }, ctx())).toBe('never');
+  });
+
+  it('renders the top-level table-row nodes as `never` (the theme.mdx specimens)', () => {
+    // `Theme.animation` / `Theme.zIndex` / `Typography.fontSize` … DO have their
+    // own row, so the `[REMOVED]` prescription survives in the description
+    // column — but `build-docs.ts` builds the type cell by calling `formatType`
+    // on exactly these nodes, and every one of them printed `any`.
+    for (const key of ['animation', 'zIndex', 'fontSize', 'fontWeight', 'lineHeight']) {
+      expect(formatType(THEME_TOMBSTONES.properties[key], ctx())).toBe('never');
+    }
+  });
+
+  it('recurses consistently — `never` survives the array and union branches', () => {
+    // Not live specimens (no schema writes `z.array(z.never())` today); these
+    // pin that the tombstone check stays AHEAD of the structural branches, so a
+    // future nesting cannot reopen the `any` hole one level down.
+    expect(formatType({ type: 'array', items: tombstone('`x` …') }, ctx())).toBe('never[]');
+    expect(formatType({ anyOf: [{ type: 'string' }, tombstone('`x` …')] }, ctx()))
+      .toBe('string | never');
+  });
+
+  it('does NOT match a non-empty `not` — that is a negation constraint, not `never`', () => {
+    expect(formatType({ type: 'string', not: { const: 'reserved' } }, ctx())).toBe('string');
+    expect(formatType({ not: { type: 'string' } }, ctx())).toBe('any');
+    // `not: null` must not throw on the `Object.keys` probe.
+    expect(formatType({ type: 'number', not: null }, ctx())).toBe('number');
+  });
+});
+
+describe('formatType — tombstones leave the inline summary to the live keys (#5606)', () => {
+  it('drops the two tombstones from `Typography.fontFamily` (the theme.mdx specimen)', () => {
+    // Was: `{ base?: string; heading?: any; mono?: any }`, with the two
+    // `[REMOVED]` prescriptions appearing nowhere on the page.
+    expect(formatType(THEME_FONT_FAMILY, ctx())).toBe('{ base?: string }');
+  });
+
+  it('shows all three live `IndexSchema` keys — the #5248 boundary the workaround cannot reach', () => {
+    // Was: `{ name?: string; fields: string[]; unique?: …; type?: any; … }[]`.
+    // Three live keys < INLINE_KEY_LIMIT, so the summary is now COMPLETE: no
+    // `…`, and the cell's promise "these are all the keys" is true.
+    const rendered = formatType(INDEX_SCHEMA, ctx());
+    expect(rendered).toBe(
+      "{ name?: string; fields: string[]; unique?: boolean | 'global' | 'organization' }[]",
+    );
+    expect(rendered).not.toContain('…');
+    expect(rendered).not.toContain('type?');
+    expect(rendered).not.toContain('partial?');
+  });
+
+  it('spends the limit on live keys only — a tombstone never elides a live key', () => {
+    const rendered = formatType(
+      {
+        type: 'object',
+        properties: {
+          dead1: tombstone('`dead1` …'),
+          a: { type: 'string' },
+          dead2: tombstone('`dead2` …'),
+          b: { type: 'string' },
+          c: { type: 'string' },
+          d: { type: 'string' },
+          e: { type: 'string' },
+        },
+        required: ['a'],
+        additionalProperties: false,
+      },
+      ctx(),
+    );
+    // Four LIVE keys shown, `…` for the fifth live one. Before the filter, two
+    // of the four slots went to removed keys and `c`/`d`/`e` were all elided.
+    expect(rendered).toBe('{ a: string; b?: string; c?: string; d?: string; … }');
+  });
+
+  it('renders a shape whose every key is a tombstone as no shape at all', () => {
+    const allDead = {
+      type: 'object',
+      properties: { x: tombstone('`x` …'), y: tombstone('`y` …') },
+      additionalProperties: false,
+    };
+    // Nothing authorable is left, which is the same fact `z.object({})` states.
+    expect(formatType(allDead, ctx())).toBe('{  }');
+    // …and with a catchall, the record rendering wins rather than printing
+    // `{  } & Record<…>` — the pre-existing rule, unchanged.
+    expect(formatType({ ...allDead, additionalProperties: {} }, ctx())).toBe('Record<string, any>');
+  });
+});
