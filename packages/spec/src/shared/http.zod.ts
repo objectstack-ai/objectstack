@@ -14,29 +14,57 @@ import { z } from 'zod';
 // ==========================================
 
 /**
- * HTTP Method Enum
+ * HTTP Method Enum — the full method vocabulary of the routing contract.
+ *
+ * This is the one `api/*` routes are declared with (`ApiEndpointSchema.method`,
+ * `RestServerConfig` routes, `plugin-rest-api.zod.ts`, `RouterConfig`), so it is
+ * the online contract and it keeps the bare published name `shared/HttpMethod`.
+ *
+ * [#5832] It shares this file with a NARROWER five-method enum, and until #5832
+ * the two published under the same def key: `schemaNameFromExportKey` strips the
+ * `Schema` suffix, so `HttpMethod` and `HttpMethodSchema` both resolved to
+ * `shared/HttpMethod` and `build-schemas.ts` wrote the second over the first.
+ * `json-schema/shared/HttpMethod.json`, the bundled `$defs['shared/HttpMethod']`
+ * and `references/shared/http#httpmethod` therefore described the FIVE-value
+ * subset, so every downstream that validates against the published schema —
+ * IDE completion, codegen, an AI metadata author — was told `HEAD` and
+ * `OPTIONS` are illegal on routes that accept them. The subset now publishes
+ * under its own name (`HttpMethodSubset`), and `findDefKeyCollisions()` in
+ * `scripts/lib/def-key-collisions.ts` fails the build on the next collision of
+ * this shape.
  */
 import { lazySchema } from './lazy-schema';
 export const HttpMethod = z.enum([
-  'GET', 
-  'POST', 
-  'PUT', 
-  'DELETE', 
-  'PATCH', 
-  'HEAD', 
+  'GET',
+  'POST',
+  'PUT',
+  'DELETE',
+  'PATCH',
+  'HEAD',
   'OPTIONS'
-]);
+]).describe('HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request.');
 
 export type HttpMethod = z.infer<typeof HttpMethod>;
 
 /**
- * HTTP Method Schema (subset for UI/View data sources)
- * Common HTTP methods used in view data source configurations.
- * Migrated from ui/view.zod.ts to shared for reuse across modules.
+ * HTTP Method Subset — the five methods a VIEW DATA SOURCE may request.
+ *
+ * A strict subset of `HttpMethod`: no `HEAD`, no `OPTIONS`. Consumed by
+ * `HttpRequestSchema.method` (and through it by `ui/view.zod.ts`'s API data
+ * sources), which is the only place the narrowing is enforced.
+ *
+ * [#5832] Named `HttpMethodSchema` until #5832, which published it under
+ * `shared/HttpMethod` — the SAME def key as the seven-value enum above, last
+ * writer winning. The rename follows #4684's `RateLimitConfig` precedent and
+ * ADR-0112 D9's rule that one name means one thing; the type alias moved with
+ * it (`HttpMethodType` -> `HttpMethodSubset`) so the published def, the schema
+ * const and the type alias are the one name this package's `<Name>Schema` /
+ * `<Name>` convention (and `lib/docs-import-surface.ts`) require them to be.
  */
-export const HttpMethodSchema = lazySchema(() => z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']));
+export const HttpMethodSubsetSchema = lazySchema(() => z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+  .describe('HTTP methods a view data source may request — the subset of `HttpMethod` without `HEAD`/`OPTIONS`.'));
 
-export type HttpMethodType = z.infer<typeof HttpMethodSchema>;
+export type HttpMethodSubset = z.infer<typeof HttpMethodSubsetSchema>;
 
 /**
  * HTTP Request Configuration Schema
@@ -45,7 +73,7 @@ export type HttpMethodType = z.infer<typeof HttpMethodSchema>;
  */
 export const HttpRequestSchema = lazySchema(() => z.object({
   url: z.string().describe('API endpoint URL'),
-  method: HttpMethodSchema.optional().default('GET').describe('HTTP method'),
+  method: HttpMethodSubsetSchema.optional().default('GET').describe('HTTP method'),
   headers: z.record(z.string(), z.string()).optional().describe('Custom HTTP headers'),
   params: z.record(z.string(), z.unknown()).optional().describe('Query parameters'),
   body: z.unknown().optional().describe('Request body for POST/PUT/PATCH'),

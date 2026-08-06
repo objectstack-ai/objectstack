@@ -18,7 +18,7 @@ import { BulkActionDefSchema } from './bulk-action.zod';
  * HTTP Method Enum & HTTP Request Schema
  * Migrated to shared/http.zod.ts. Re-exported here for backward compatibility.
  */
-import { HttpMethodSchema, HttpRequestSchema } from '../shared/http.zod';
+import { HttpMethodSubsetSchema, HttpRequestSchema } from '../shared/http.zod';
 import { lazySchema } from '../shared/lazy-schema';
 
 /**
@@ -34,7 +34,7 @@ const VIEW_HISTORY =
   'Until #4001 closed these shapes an unknown key was dropped silently — the view still '
   + 'rendered, without whatever the key was meant to configure.';
 
-export { HttpMethodSchema, HttpRequestSchema };
+export { HttpMethodSubsetSchema, HttpRequestSchema };
 
 /**
  * [#4688] `HttpRequest` is RE-EXPORTED from its one declaration in
@@ -54,8 +54,9 @@ export { HttpMethodSchema, HttpRequestSchema };
 export type { HttpRequest } from '../shared/http.zod';
 
 /**
- * [#4691] The type of `HttpMethodSchema` is `HttpMethodType`, RE-EXPORTED from
- * its one declaration in `shared/http.zod.ts`.
+ * [#4691, renamed at #5832] The type of `HttpMethodSubsetSchema` is
+ * `HttpMethodSubset`, RE-EXPORTED from its one declaration in
+ * `shared/http.zod.ts`.
  *
  * `./ui` used to export that same 5-value type under the name `HttpMethod`
  * (`export type HttpMethod = z.infer< typeof HttpMethodSchema >`, in the alias
@@ -68,18 +69,24 @@ export type { HttpRequest } from '../shared/http.zod';
  * Converging by re-exporting `./shared`'s `HttpMethod` here — the fix #4688
  * used for `HttpRequest` — would have been WRONG: it silently widens `./ui`'s
  * type from 5 values to 7 while `HttpRequestSchema.method` still validates
- * against the 5-value `HttpMethodSchema`. `method: 'HEAD'` would type-check and
- * then throw at `.parse()` — the type would start lying about the runtime. So
- * the NAME is dropped from `./ui` instead, and the honest 5-value type keeps
- * the name it already carries in `./shared`.
+ * against the 5-value subset. `method: 'HEAD'` would type-check and then throw
+ * at `.parse()` — the type would start lying about the runtime. So the NAME is
+ * dropped from `./ui` instead, and the 5-value type carries a name of its own.
+ *
+ * #4691 spelled that name `HttpMethodType`, which was merely the name left
+ * over once `HttpMethod` was taken. #5832 renamed the whole trio to
+ * `HttpMethodSubsetSchema` / `HttpMethodSubset` / `<category>/HttpMethodSubset`
+ * because the CONST still collided one layer down: `schemaNameFromExportKey`
+ * strips the `Schema` suffix, so `HttpMethodSchema` published as
+ * `shared/HttpMethod` and overwrote the 7-value enum's own def.
  *
  * Re-exported here (rather than only left in `./shared`) so the shortest fix
  * for `import type { HttpMethod } from '@objectstack/spec/ui'` is also the
- * CORRECT one: TypeScript's "did you mean" points at `HttpMethodType` in the
+ * CORRECT one: TypeScript's "did you mean" points at `HttpMethodSubset` in the
  * same entry point, instead of tempting a path swap to `./shared`, where the
  * name `HttpMethod` does still exist and means the wider 7-value enum.
  */
-export type { HttpMethodType } from '../shared/http.zod';
+export type { HttpMethodSubset } from '../shared/http.zod';
 
 /**
  * View Data Source Configuration
@@ -2649,7 +2656,8 @@ export type ViewData = z.infer<typeof ViewDataSchema>;
 // 7-value declaration under that same name. Re-exporting theirs would widen
 // this entry's type past what `HttpRequestSchema.method` actually validates, so
 // the name was dropped instead; the 5-value type is re-exported as
-// `HttpMethodType` at the top of this file, where the full rationale lives.
+// `HttpMethodSubset` at the top of this file (`HttpMethodType` until #5832),
+// where the full rationale lives.
 export type ColumnSummary = z.infer<typeof ColumnSummarySchema>;
 export type ColumnSummaryConfig = z.infer<typeof ColumnSummaryConfigSchema>;
 export type ColumnPrefix = z.infer<typeof ColumnPrefixSchema>;

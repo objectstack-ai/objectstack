@@ -121,6 +121,12 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   jobs: 'job',
   positions: 'position',
   permissions: 'permission',
+  // [ADR-0066 D1, #5870] Package-declared authorization capabilities. The
+  // singular form is what `bootstrapDeclaredCapabilities` reads back
+  // (`readDeclared(ql, 'capability')`) and what `AppPlugin` already registers
+  // under; without the mapping the registration seam stored them as
+  // `'capabilities'`, a store nothing reads.
+  capabilities: 'capability',
   sharingRules: 'sharing_rule',
   apis: 'api',
   webhooks: 'webhook',

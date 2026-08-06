@@ -2209,8 +2209,17 @@ export class ObjectQL implements IObjectQLEngine {
         // Automation Protocol
         'flows', 'workflows', 'approvals', 'webhooks',
         'jobs',
-        // Security Protocol
-        'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+        // Security Protocol — `capabilities` is here for the same reason as
+        // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
+        // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
+        // collection missing from this list reaches no registry with a
+        // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
+        // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+        // sat outside this list the first half could never be satisfied and
+        // `readDeclared(ql, 'capability')` returned nothing, which made the
+        // author-side `packageId` — documented as the FALLBACK — mandatory,
+        // and its omission a silent, unenforced authorization declaration.
+        'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
         // AI Protocol
         'agents', 'tools', 'skills', 'ragPipelines',
         // API Protocol
@@ -2374,7 +2383,11 @@ export class ObjectQL implements IObjectQLEngine {
       const metadataArrayKeys = [
           'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
           'flows', 'workflows', 'approvals', 'webhooks',
-          'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+          // `capabilities` per #5870 — same stamping seam, one level down: a
+          // nested plugin's declarations must carry the parent package's
+          // provenance too, or the same declared-≠-enforced hole reopens for
+          // packages that ship their capabilities from a nested plugin.
+          'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
           'agents', 'ragPipelines', 'apis',
           'hooks', 'mappings', 'analyticsCubes', 'connectors',
           'docs', 'books',

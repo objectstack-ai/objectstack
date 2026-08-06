@@ -262,7 +262,7 @@ const TEST_DEBT = {
   '@objectstack/platform-objects': { tests: 8, errors: 3, note: 'TS2339 x2, TS7006 x1.' },
   '@objectstack/plugin-sharing': { tests: 11, errors: 3, note: 'TS6133 x2, TS18048 x1.' },
   '@objectstack/http-conformance': { tests: 2, errors: 1, note: 'TS2740 x1.' },
-  '@objectstack/service-sms': { tests: 3, errors: 1, note: 'TS2493 x1.' },
+  '@objectstack/service-sms': { tests: 4, errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured at 4 files in #5773, which added sms-manifest-providers.contract.test.ts: the count moved, the error did not — the new file is type-clean with the exclusion lifted.' },
   '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1.' },
 };
 
