@@ -127,17 +127,35 @@ describe('RemoteTransport $not (#1076)', () => {
       expect(call.args).toEqual(['won', 10]);
     });
 
-    it('compiles the issue\'s `$not: { $eq: "won" }` as a negation of what the caller wrote', async () => {
-      // Pre-fix: `WHERE "$not" = ?`. `$not` is now the operator it is declared
-      // to be; the residual `"$eq"` column is the CALLER's malformed inner
-      // condition (a field operator written one level too high) and is compiled
-      // byte-identically by the local `SqlDriver`, which also hands a
-      // condition-level `$eq` to Knex as a column name. Tightening that is
-      // #1077, deliberately not this fix — doing it here would diverge remote
-      // from local at a second key while closing the first.
-      const call = await compile({ $not: { $eq: 'won' } });
-      expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT ("$eq" = ?)`);
-      expect(call.args).toEqual(['won']);
+    it('refuses the issue\'s `$not: { $eq: "won" }` at the INNER key, not as a field named $not', async () => {
+      // Two fixes, read in order.
+      //
+      // #1076 (this file): `$not` stopped being a column. Pre-#1076 this whole
+      // filter compiled to `WHERE "$not" = ?`.
+      //
+      // #5769 (the successor this case was written to anticipate): the residual
+      // `"$eq"` column — the CALLER's malformed inner condition, a field
+      // operator written one level too high — is refused rather than compiled.
+      // This assertion USED to pin `WHERE NOT ("$eq" = ?)`, on the reasoning
+      // that the local `SqlDriver` handed a condition-level `$eq` to Knex as a
+      // column name too, so tightening it here alone would fork remote from
+      // local. That reasoning expired: objectstack#5348 / PR #5368 put the gate
+      // on `SqlDriver`'s validation walk, local went strict, and remote became
+      // the last face — which is what objectstack#5769 closed.
+      //
+      // What the case still proves is what it always proved: the key named in
+      // the refusal is the INNER `$eq`, at `where.$not.$eq`. `$not` is the
+      // operator it is declared to be, all the way down.
+      const err = (await compile({ $not: { $eq: 'won' } }).catch((e) => e)) as Error & {
+        code?: string;
+        status?: number;
+      };
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('"$eq"');
+      expect(err.message).toContain('where.$not.$eq');
+      expect(err.message).not.toContain(`'deal.$not'`);
     });
   });
 
