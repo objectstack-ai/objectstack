@@ -29,6 +29,13 @@ import {
 import { escapeMdxDescription } from './lib/escape-mdx';
 import { anchorFor, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
+import {
+  buildSchemaIndex,
+  formatConflicts,
+  resolveSchemaPage,
+  type SchemaIndex,
+  type ZodFileInput,
+} from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
@@ -66,14 +73,8 @@ const CATEGORIES = fs.readdirSync(SRC_DIR)
     return acc;
   }, {} as Record<string, string>);
 
-// Map SchemaName -> Category (e.g. 'Object' -> 'data')
-const schemaCategoryMap = new Map<string, string>();
-// Map SchemaName -> Zod file (e.g. 'Object' -> 'object')
-const schemaZodFileMap = new Map<string, string>();
 // Track all zod files per category
 const categoryZodFiles = new Map<string, Set<string>>();
-// Track Zod File collisions
-const zodFileCounts = new Map<string, number>();
 /**
  * Page slug -> its real path under `packages/spec/src/<category>/`.
  *
@@ -111,7 +112,9 @@ function collectZodFiles(dir: string, prefix = ''): Array<{ slug: string; rel: s
 }
 
 // Scan source files to build maps
-function scanCategories() {
+function scanCategories(): SchemaIndex {
+  const files: ZodFileInput[] = [];
+
   Object.keys(CATEGORIES).forEach(category => {
     const dir = path.join(SRC_DIR, category);
     if (!fs.existsSync(dir)) return;
@@ -121,27 +124,29 @@ function scanCategories() {
     for (const { slug, rel } of collectZodFiles(dir)) {
       zodFiles.add(slug);
       zodFileSourceRel.set(`${category}/${slug}`, rel);
-
-      const count = zodFileCounts.get(slug) || 0;
-      zodFileCounts.set(slug, count + 1);
-
-      const content = fs.readFileSync(path.join(dir, rel), 'utf-8');
-
-      // Match export const Name = ... OR export const Name: Type = ...
-      const regex = /export const (\w+)\s*(?:[:=])/g;
-
-      let match;
-      while ((match = regex.exec(content)) !== null) {
-        const rawName = match[1];
-        // Suffix-only strip — shared with build-schemas.ts; see lib/schema-name.ts (#4592).
-        const finalName = schemaNameFromExportKey(rawName);
-        schemaCategoryMap.set(finalName, category);
-        schemaZodFileMap.set(finalName, slug);
-      }
+      files.push({
+        category,
+        slug,
+        rel,
+        source: fs.readFileSync(path.join(dir, rel), 'utf-8'),
+      });
     }
 
     categoryZodFiles.set(category, zodFiles);
   });
+
+  // Suffix-only strip — shared with build-schemas.ts; see lib/schema-name.ts (#4592).
+  const index = buildSchemaIndex(files, schemaNameFromExportKey);
+
+  // Two files in one category laying equal claim to a name is not a state this
+  // generator may resolve: whichever it picked, the loser's schema would be
+  // written onto a page named after a file that does not contain it. Stop.
+  if (index.conflicts.length > 0) {
+    console.error(`\n✗ ${formatConflicts(index.conflicts)}`);
+    process.exit(1);
+  }
+
+  return index;
 }
 
 /**
@@ -154,7 +159,14 @@ function sourcePathFor(category: string, zodFile: string): string | undefined {
   return rel ? `packages/spec/src/${category}/${rel}` : undefined;
 }
 
-scanCategories();
+/**
+ * `<category>/<SchemaName>` -> the page that documents it, plus the link rules
+ * over it. Keyed by category on purpose: `build-schemas.ts` publishes
+ * `json-schema/<category>/<Name>.json`, so the same name under two categories
+ * is two published schemas and must be two index entries (#4696). See
+ * `lib/schema-index.ts` for why a re-export counts and which file wins.
+ */
+const schemaIndex = scanCategories();
 
 // ── Import examples: the package's real export surface ───────────────────────
 // `api-surface.json` is the committed record of every `name (kind)` per public
@@ -183,15 +195,21 @@ const IMPORT_BASELINE_COMMENT =
   'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
 
 /**
- * Resolve a schema name to its page. Returns null when the schema isn't one we
- * generate a page for — callers then render the type without a link rather than
- * emitting a 404.
+ * Resolve a schema name to its page, AS SEEN FROM the category being rendered.
+ * Returns null when the schema isn't one we generate a page for, or when the
+ * name alone does not identify one — callers then render the type without a
+ * link rather than emitting a 404 or a confident link to the wrong schema.
+ *
+ * The `fromCategory` argument is the whole point: a bare name is not a schema
+ * identity (#4696). `ServiceStatus` is an `api` enum AND a `system` object, and
+ * a single global lookup answered both with whichever the directory walk
+ * reached last.
  */
-function schemaHref(name: string): string | null {
-  const category = schemaCategoryMap.get(name);
-  const zodFile = schemaZodFileMap.get(name);
-  if (!category || !zodFile) return null;
-  return `/docs/references/${category}/${zodFile}${anchorFor(name)}`;
+function schemaHrefFrom(fromCategory: string): (name: string) => string | null {
+  return (name: string) => {
+    const page = resolveSchemaPage(schemaIndex, fromCategory, name);
+    return page ? `/docs/references/${page.category}/${page.slug}${anchorFor(name)}` : null;
+  };
 }
 
 
@@ -266,7 +284,7 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
     md += `${escapeMdxDescription(mainDef.description)}\n\n`;
   }
 
-  const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref };
+  const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref: schemaHrefFrom(category) };
 
   const renderProperties = (props: any, required: Set<string> = new Set()) => {
       let t = `### Properties\n\n`;
@@ -408,10 +426,17 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Knowledge & RAG', pages: ['knowledge-document', 'knowledge-source', 'embedding'] },
     { section: 'Models & Runtime', pages: ['model-registry', 'conversation', 'usage'] },
   ],
+  // `http` / `core-services` / `package-registry` left this category at #4696:
+  // all three were pages `api/` never had a `.zod.ts` for — the bare-name index
+  // borrowed another category's slug for a re-exported or same-named schema.
+  // Their sections moved to the api file that really exports them (`router`,
+  // `discovery`, `protocol`). `buildCategoryPages` filters by what was emitted,
+  // so leaving the names here would have been silently harmless — which is why
+  // they are removed deliberately instead (same discipline as #4988 below).
   api: [
     { section: 'Contract & Routing', pages: ['protocol', 'contract', 'endpoint', 'router', 'registry', 'discovery', 'documentation', 'versioning', 'errors', 'batch'] },
-    { section: 'Transport & Realtime', pages: ['http', 'http-cache', 'rest-server', 'websocket', 'realtime', 'realtime-shared', 'odata', 'query-adapter', 'dispatcher'] },
-    { section: 'Service APIs', pages: ['core-services', 'auth', 'auth-endpoints', 'identity', 'metadata', 'metadata-plugin', 'automation-api', 'analytics', 'export', 'storage', 'notification', 'events', 'connector', 'package-api', 'package-registry', 'plugin-rest-api'] },
+    { section: 'Transport & Realtime', pages: ['http-cache', 'rest-server', 'websocket', 'realtime', 'realtime-shared', 'odata', 'query-adapter', 'dispatcher'] },
+    { section: 'Service APIs', pages: ['auth', 'auth-endpoints', 'identity', 'metadata', 'metadata-plugin', 'automation-api', 'analytics', 'export', 'storage', 'notification', 'events', 'connector', 'package-api', 'plugin-rest-api'] },
   ],
   automation: [
     { section: 'Flow & Execution', pages: ['flow', 'control-flow', 'execution', 'node-executor', 'state-machine', 'time-relative-trigger'] },
@@ -430,7 +455,10 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Documents & Seed', pages: ['document', 'seed', 'seed-loader', 'feed'] },
   ],
   integration: [
-    { section: 'Connectors', pages: ['connector', 'connector-auth', 'mapping', 'translation'] },
+    // `connector-auth` removed at #4696 — `integration/` has no such file; the
+    // five `ConnectorInstance*Auth` schemas reach this entry point through
+    // `integration/connector.zod.ts`, and are documented there now.
+    { section: 'Connectors', pages: ['connector', 'mapping', 'translation'] },
     { section: 'Transport & Storage', pages: ['http', 'message-queue', 'object-storage', 'offline'] },
     { section: 'Tenancy', pages: ['tenant', 'misc'] },
   ],
@@ -442,7 +470,10 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   ],
   system: [
     { section: 'Config & Settings', pages: ['settings-manifest', 'settings-client', 'registry-config', 'auth-config', 'email-config', 'email-template', 'license', 'migration', 'deploy-bundle', 'environment-artifact', 'app-install', 'provisioning', 'tenant'] },
-    { section: 'Services & Infrastructure', pages: ['core-services', 'http-server', 'cache', 'message-queue', 'object-storage', 'search-engine', 'worker', 'job', 'notification', 'translation', 'metadata-loader', 'metadata-persistence'] },
+    // `metadata-loader` removed at #4696 — that file lives in `kernel/`, and the
+    // two schemas `system/` re-exports from it are documented on
+    // `system/metadata-persistence`, the file that re-exports them.
+    { section: 'Services & Infrastructure', pages: ['core-services', 'http-server', 'cache', 'message-queue', 'object-storage', 'search-engine', 'worker', 'job', 'notification', 'translation', 'metadata-persistence'] },
     { section: 'Observability', pages: ['logging', 'metrics', 'tracing', 'audit'] },
     { section: 'Security & Compliance', pages: ['encryption', 'security-context', 'incident-response', 'supplier-security', 'disaster-recovery', 'change-management', 'training'] },
     { section: 'Content & Collaboration', pages: ['doc', 'book', 'collaboration'] },
@@ -461,7 +492,11 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     // leaving the names here would have been silently harmless — which is why
     // they are removed deliberately instead.
     { section: 'Interaction & Layout', pages: ['responsive', 'theme'] },
-    { section: 'Platform', pages: ['i18n', 'notification', 'sharing', 'http'] },
+    // `http` removed at #4696 — `ui/` has no `http.zod.ts`; `HttpMethod` and
+    // `HttpRequest` reach this entry point through `ui/view.zod.ts`, whose own
+    // file comment already says so ("Migrated to shared/http.zod.ts.
+    // Re-exported here…"), and are documented on `ui/view` now.
+    { section: 'Platform', pages: ['i18n', 'notification', 'sharing'] },
   ],
 };
 
@@ -548,7 +583,12 @@ Object.keys(CATEGORIES).forEach(category => {
     const schemaName = file.replace('.json', '');
     const schemaPath = path.join(categorySchemaDir, file);
     const content = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-    const zodFile = schemaZodFileMap.get(schemaName) || 'misc';
+    // Category-scoped: the page is owned by the file in THIS category that puts
+    // the name on its export surface — declaration or re-export. `misc` stays
+    // the catch-all for a published schema no `.zod.ts` here accounts for
+    // (`security/*` declares two in plain `.ts` files), and it is honest about
+    // it: `sourcePathFor` finds no file, so the page prints no "Source:" line.
+    const zodFile = schemaIndex.pageFor(category, schemaName) || 'misc';
     
     if (!zodFileSchemas.has(zodFile)) {
       zodFileSchemas.set(zodFile, []);

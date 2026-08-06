@@ -15,7 +15,7 @@
  * Each pair below is the SAME write with and without a realtime service
  * attached, so the delta is exactly the event-publishing work: uuid generation,
  * schema validation, envelope construction, and the (no-op) publish. The
- * in-memory driver keeps driver cost near zero, which flatters the event cost —
+ * stub driver keeps driver cost near zero, which flatters the event cost —
  * i.e. the relative overhead measured here is an upper bound on what a real
  * SQL/HTTP driver would show.
  */
@@ -34,7 +34,7 @@ const task = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -102,7 +102,7 @@ const nullRealtime: IRealtimeService = {
 
 async function makeEngine(withRealtime: boolean): Promise<ObjectQL> {
   const engine = new ObjectQL();
-  engine.registerDriver(makeMemoryDriver(), true);
+  engine.registerDriver(makeStubDriver(), true);
   await engine.init();
   engine.registry.registerObject(task as any, 'bench');
   if (withRealtime) engine.setRealtimeService(nullRealtime);

@@ -72,7 +72,7 @@ function makeCreateData(ql: any, opts: { readonlyFields?: string[] } = {}) {
 function buildServer(opts: { ql?: any; objects?: any[]; readonlyFields?: string[] } = {}) {
   const server = mockServer();
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue(opts.objects ?? []),
     createData: opts.ql

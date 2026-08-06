@@ -38,10 +38,11 @@ names* are genuinely enforced one level up and one level down:
   from the app's top-level `navigation` tree, and re-checked in the shell;
   item-level `visible` is a real CEL gate in the shell.
 
-Three layers, of which the middle one was theatre — `filterAppForUser` reads the
-app's `requiredPermissions` and then walks **only** `item.navigation`; it never
-touches `item.areas`, and the client renders every area in the switcher. ADR-0078
-false compliance, the same shape as `capabilities.readOnly` (#4583).
+Three layers, of which the middle one was theatre — at the time of the
+retirement `filterAppForUser` read the app's `requiredPermissions` and then
+walked **only** `item.navigation`; it never touched `item.areas`, and the client
+rendered every area in the switcher. ADR-0078 false compliance, the same shape as
+`capabilities.readOnly` (#4583).
 
 **Removed rather than enforced (ADR-0049), deliberately.** Enforcing area gates
 is not wrong, it is unscoped: it needs semantics settled first — when an area is
@@ -51,8 +52,21 @@ not invent an authorization mechanism. Removing a gate that never gated is
 strictly safer than shipping a major with it still declared, which would have
 kept authors writing it for all of 17.x.
 
-**One caveat the prescription carries rather than hides:** per-item gating
-*inside* an area is enforced by the shell only, because the server does not walk
-`areas`. Anything that must never reach the browser belongs in the app's
-top-level `navigation` tree, or in its own app. Trading one false belief for a
-weaker one would have repeated the defect this removal exists to end.
+**The caveat this prescription used to carry is closed — in this same major.**
+It read: per-item gating *inside* an area is enforced by the shell only, because
+the server does not walk `areas`. #4722 landed inside the 17.0.0 window and made
+that false: `filterAppForUser` now runs the **same** `filterNav` over every
+`areas[].navigation`, so an **item**'s `requiredPermissions` / `requiresService`
+is stripped server-side in **both** trees and a gated entry never ships in the
+`/meta` body. So the retirement kit's advice needs no navigation restructuring —
+gating the items of the area you already have is server-enforced.
+
+Read that as the boundary closing, **not** as the area-level keys coming back.
+They stay retired; #4722 gave an area no gate of its own, it enforces the items
+inside one. And the other half of the asymmetry is unchanged, which is why
+`requiredPermissions` is the key to reach for: `visible` (CEL) and
+`requiresObject` are still evaluated client-side **only** at every level —
+server-side CEL needs a bound `user` context the read layer does not have. So
+anything that must never reach the browser goes in `requiredPermissions`, never
+in `visible`. Trading one false belief for a weaker one would have repeated the
+defect this removal exists to end.

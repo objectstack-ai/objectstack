@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
 
 /**
@@ -83,9 +84,88 @@ import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
  * admitting rows the policy did not is over-reach, not a degraded filter. Note
  * the file was fail-closed everywhere else — the LIKE family was the one place an
  * author's literal was silently reinterpreted rather than refused.
+ *
+ * ## Every refusal here is a SERVER fault, and says so (#5367, maintainer ruling 2026-08-06)
+ *
+ * The ten fail-closed refusals below were bare `throw new Error(…)`, and
+ * `/analytics/dataset/query` classified them by matching `read-scope-sql` in the
+ * message text — the last surviving entry of the hardcoded substring list #5352
+ * introduced. It answered `400 DATASET_INVALID`, which was wrong twice:
+ *
+ *   - **Wrong attribution.** Neither input is the caller's. `filter` is the RLS
+ *     `FilterCondition` the security service compiles from an ADMIN-authored
+ *     sharing rule / permission set; `alias` is a join alias the DATASET COMPILER
+ *     generated. The caller's own predicate travels a different road entirely
+ *     (`filter-normalizer.ts`, `INVALID_FILTER` / 400 since #5352). So the two
+ *     things that can land here are an administrator's broken policy and drift
+ *     between two of OUR components (#5557's `$regex` was exactly the second) —
+ *     and for the caller of this request both are a server fault. `400` told them
+ *     to fix a request that was never the problem, and hid the fault from the 5xx
+ *     alerting that should have seen it.
+ *   - **Wrong disclosure.** A 400 echoed the message verbatim, so
+ *     `unsafe field identifier "…"` / `unsupported operator "$x" on "owner"`
+ *     handed the caller the FIELD NAMES AND COMPARANDS OF THE RLS POLICY — the
+ *     one document a tenant must not be able to read out of an error body.
+ *
+ * {@link readScopeCompileError} is now the only way this module refuses:
+ * `READ_SCOPE_COMPILE_FAILED` / **500**. The status is what makes the retirement
+ * safe — `rest-server.ts`'s envelope branch is 4xx-only, so a declared 5xx falls
+ * through to the `ANALYTICS_QUERY_FAILED` envelope BY DECLARATION rather than by
+ * nothing having been declared, and that route withholds the message of any
+ * producer that declares a server fault (the full text goes to `logError`).
+ *
+ * ⚠️ The withhold is NOT inherited from `looksLikeInternalErrorLeak`. That
+ * predicate is a heuristic over SQL/driver PHRASING, and measured, every message
+ * below returns FALSE from it — so retiring the route's message list on its own
+ * would have moved the policy content from a 400 body into a 500 body instead of
+ * out of the response. Teaching the heuristic to recognise `[read-scope-sql]`
+ * would have been more message sniffing, which is the mechanism #5367 exists to
+ * remove; the route keys on the DECLARATION instead.
+ *
+ * The code is what a machine reads: `dispatcher-plugin.errorResponseBase`, the
+ * sibling `/analytics/query` exit, puts a thrown `err.code` in
+ * `error.details.code` (#3842), so `READ_SCOPE_COMPILE_FAILED` is legible there
+ * without anyone parsing prose.
+ *
+ * ⚠️ Deliberately NOT a 4xx of any flavour, including a 422. Option A on the
+ * decision card was `READ_SCOPE_INVALID` / 422 ("not your fault, not a crash");
+ * it was rejected because no consumer reads a code on this path (so a new
+ * vocabulary had no measured pull), because a 4xx cannot be fixed by the client
+ * and therefore misreports the condition, and because 422 would have left the
+ * disclosure question to be re-decided message by message.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
+
+/**
+ * `READ_SCOPE_COMPILE_FAILED`, pinned against the ADR-0112 D3 ledger.
+ *
+ * Typed as `RegisteredErrorCode` so dropping the ledger row (or misspelling the
+ * code here) fails `tsc` instead of shipping a code `ApiErrorSchema` rejects.
+ */
+const READ_SCOPE_COMPILE_FAILED: RegisteredErrorCode = 'READ_SCOPE_COMPILE_FAILED';
+
+/**
+ * [#5367] A read-scope lowering failure in the ADR-0112 envelope —
+ * `READ_SCOPE_COMPILE_FAILED` / 500.
+ *
+ * ⛔ **The only way this module refuses.** Module-local for the same reason
+ * `filter-normalizer.ts`'s `invalidFilterError` is: every refusing site lives in
+ * this one file, so a shared module would buy nothing and a second spelling
+ * would cost the invariant. A bare `throw new Error` added below is the defect
+ * returning — and a half-enveloped module is indistinguishable from an
+ * unenveloped one at the HTTP boundary (the lesson #5352 paid for when seven of
+ * `filter-normalizer.ts`'s nine sites stayed bare).
+ *
+ * The message stays whatever the refusing site says: it is for the operator's
+ * log, which after #5367 is its only destination.
+ */
+function readScopeCompileError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = READ_SCOPE_COMPILE_FAILED;
+  err.status = 500;
+  return err;
+}
 
 /**
  * The FALSE constant. `''` is this compiler's TRUE, so FALSE needs a spelling of
@@ -101,7 +181,7 @@ function isFilterNode(v: unknown): v is Record<string, unknown> {
 
 function quoteIdent(name: string, kind: string): string {
   if (typeof name !== 'string' || !IDENT.test(name)) {
-    throw new Error(`[read-scope-sql] unsafe ${kind} identifier "${String(name)}" — refusing to build read scope (fail-closed).`);
+    throw readScopeCompileError(`[read-scope-sql] unsafe ${kind} identifier "${String(name)}" — refusing to build read scope (fail-closed).`);
   }
   return `"${name}"`;
 }
@@ -135,13 +215,13 @@ function compileSub(node: unknown, qAlias: string): { sql: string; params: unkno
 /** Compile a filter node into a boolean SQL expression ('' = TRUE, no constraint). */
 function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
   if (!isFilterNode(node)) {
-    throw new Error('[read-scope-sql] read scope must be a filter object (fail-closed).');
+    throw readScopeCompileError('[read-scope-sql] read scope must be a filter object (fail-closed).');
   }
   const clauses: string[] = [];
   for (const [key, value] of Object.entries(node)) {
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(value)) {
-        throw new Error(`[read-scope-sql] "${key}" requires an array (fail-closed).`);
+        throw readScopeCompileError(`[read-scope-sql] "${key}" requires an array (fail-closed).`);
       }
       if (value.length === 0) {
         // Boolean identity (#5322 ruling, 2026-08-04): the empty `$and` is the
@@ -187,7 +267,7 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
         clauses.push(`NOT (${inner.sql})`);
       }
     } else if (key.startsWith('$')) {
-      throw new Error(`[read-scope-sql] unsupported top-level operator "${key}" (fail-closed).`);
+      throw readScopeCompileError(`[read-scope-sql] unsupported top-level operator "${key}" (fail-closed).`);
     } else {
       clauses.push(compileField(key, value, qAlias, params));
     }
@@ -206,7 +286,7 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
     return `${col} = ?`;
   }
   if (Array.isArray(value)) {
-    throw new Error(`[read-scope-sql] bare array value for "${field}" — use { $in: [...] } (fail-closed).`);
+    throw readScopeCompileError(`[read-scope-sql] bare array value for "${field}" — use { $in: [...] } (fail-closed).`);
   }
 
   const ops = value as Record<string, unknown>;
@@ -214,7 +294,7 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // A value object must be ALL operators; a non-$ key means a nested relation,
   // which a flat read scope cannot join — fail closed.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) {
-    throw new Error(`[read-scope-sql] "${field}" has a nested/relation value which is not supported in a read scope (fail-closed).`);
+    throw readScopeCompileError(`[read-scope-sql] "${field}" has a nested/relation value which is not supported in a read scope (fail-closed).`);
   }
 
   const parts: string[] = [];
@@ -259,17 +339,17 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$lt': return `${col} < ${bind(params, val)}`;
     case '$lte': return `${col} <= ${bind(params, val)}`;
     case '$in': {
-      if (!Array.isArray(val)) throw new Error(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
+      if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
       return `${col} IN (${val.map((v) => bind(params, v)).join(', ')})`;
     }
     case '$nin': {
-      if (!Array.isArray(val)) throw new Error(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
+      if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return '1 = 1'; // NOT IN () excludes nothing
       return `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`;
     }
     case '$between': {
-      if (!Array.isArray(val) || val.length !== 2) throw new Error(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
+      if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
       return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
@@ -281,7 +361,7 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val ? `${col} IS NOT NULL` : `${col} IS NULL`;
     default:
-      throw new Error(`[read-scope-sql] unsupported operator "${op}" on "${field}" (fail-closed).`);
+      throw readScopeCompileError(`[read-scope-sql] unsupported operator "${op}" on "${field}" (fail-closed).`);
   }
 }
 

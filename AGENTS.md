@@ -302,7 +302,6 @@ packages/
   client-react/   # ⚛️ React hooks
   cli/            # 🖥️ CLI
   create-objectstack/  # 🚀 Scaffolding
-  vscode-objectstack/  # 🧩 VS Code extension
   adapters/       # 🔌 express/fastify/hono/nestjs/nextjs/nuxt/sveltekit
   plugins/        # 🧱 Official plugins & drivers
   services/       # 🔧 Kernel-managed services

@@ -458,7 +458,7 @@ describe('[#4775] a condition that does not compile aborts too', () => {
  * Real-engine harness
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function makeMemoryDriver(): any {
+function makeStubDriver(): any {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -508,7 +508,7 @@ function makeMemoryDriver(): any {
 
 async function bootEngine(hooks: Hook[]): Promise<ObjectQL> {
   const engine = new ObjectQL();
-  engine.registerDriver(makeMemoryDriver(), true);
+  engine.registerDriver(makeStubDriver(), true);
   await engine.init();
   engine.registry.registerObject(taskObject as any);
   bindHooksToEngine(engine, hooks, { packageId: 'app:test', logger: silentLogger });

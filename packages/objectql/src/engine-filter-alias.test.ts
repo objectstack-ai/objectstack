@@ -2,7 +2,7 @@
 
 /**
  * #4346 — the `filter` → `where` alias folds on EVERY engine entry point, not
- * just `find()`, with a REAL {@link ObjectQL} engine + in-memory driver.
+ * just `find()`, with a REAL {@link ObjectQL} engine + stub driver.
  *
  * Regression: the DataEngine contract (`DataEngine*OptionsSchema`) declares
  * `filter` as a legitimate option on every read and write method, but only
@@ -37,7 +37,7 @@ const task = {
     },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (o: string) => { let s = stores.get(o); if (!s) { s = new Map(); stores.set(o, s); } return s; };
     let nextId = 0;
@@ -99,9 +99,9 @@ describe('filter → where folds on every engine method (#4346)', () => {
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const mem = makeMemoryDriver();
-        stores = mem.stores;
-        engine.registerDriver(mem.driver, true);
+        const stub = makeStubDriver();
+        stores = stub.stores;
+        engine.registerDriver(stub.driver, true);
         await engine.init();
         engine.registry.registerObject(task as any);
         // The issue's repro set: one open row, two done rows.

@@ -28,18 +28,34 @@
  *    no identity with its base but DOES share the base's per-property schema
  *    instances, so a bridge over shared property defs is genuinely needed. The
  *    bridge as first written fired when **any one** property matched under the
- *    same name — and zod's `.describe()` returns a clone that shares the
- *    original `_zod.def` OBJECT, which makes every described
- *    `SnakeCaseIdentifierSchema` / `I18nLabelSchema` def-identical across the
- *    whole spec. Two unrelated shapes that both declare `name` and `label` (i.e.
- *    almost every authorable shape here) therefore bridged, and
- *    `WidgetManifestSchema` — a file nothing imports — measured as REACHABLE.
- *    The error is one-directional: it can only produce a false door, i.e. it can
- *    only cause a batch to tighten something dead.
+ *    same name — and zod's `.describe()` returns a clone that reuses the
+ *    `_zod.def` OBJECT **of the instance it was called on**. Because this repo
+ *    funnels dozens of shapes through a handful of SHARED leaf instances, every
+ *    `SnakeCaseIdentifierSchema.describe(…)` in the spec is def-identical to
+ *    every other one, and likewise `I18nLabelSchema`. Two unrelated shapes that
+ *    both declare `name` and `label` (i.e. almost every authorable shape here)
+ *    therefore bridged, and `WidgetManifestSchema` — a file nothing imports —
+ *    measured as REACHABLE. The error is one-directional: it can only produce a
+ *    false door, i.e. it can only cause a batch to tighten something dead.
+ *
+ *    ⚠️ Sharing follows the **receiver instance**, not the shape: two separate
+ *    `z.string()` calls build two separate defs and share nothing. #5056's issue
+ *    body spelled the fact the other way; the corrected, measured statement and
+ *    every builder's verdict are pinned in `door-reachability.testkit.test.ts`,
+ *    so a zod upgrade that changes `clone()` semantics goes red rather than
+ *    silently changing what this bridge means.
  *
  *    The fix is to ask how much of the shape is shared rather than whether
  *    anything is: a real derived clone carries nearly all of its base's
  *    properties, while a coincidence carries one or two out of twenty.
+ *
+ *    **Residual bound (#5828), measured and pinned, not latent:** the ratio is
+ *    taken over the CANDIDATE's own keys, so a shape whose keys are *all* shared
+ *    leaves scores 1.0 however few they are, and still bridges. No threshold in
+ *    (0, 1] excludes it, because a genuine `.strip()` scores 1.0 too. It costs
+ *    nothing today (the real `no door` shapes measured so far sit far below the
+ *    threshold — `WidgetManifestSchema` at 2/19), but read `cloneOverlap` and
+ *    the key count before trusting a `derived-clone` verdict on a SMALL shape.
  */
 
 import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../kernel/metadata-type-schemas';
@@ -97,11 +113,19 @@ export interface DoorMeasurement {
  * its own shape, by property def identity under the same name, with one visited
  * object node.
  *
- * Chosen against both ends of the measured range rather than by taste: 批 15's
- * real derivation (`ChartConfigSchema` reached through `ReportChartSchema`,
- * which re-narrows two of its keys) sits far above it, and 批 16's false
- * positive (`WidgetManifestSchema`, 2 shared keys of 20 — `name` and `label`,
- * both shared LEAVES rather than shared structure) sits far below.
+ * Chosen against both ends of the measured range rather than by taste: real
+ * derivations sit far above it (`PageSchema.extend(…)` at 0.96,
+ * `ObjectListViewSchema.strip()` at 1.0 — both pinned as the bridge's positive
+ * control), and 批 16's false positive sits far below (`WidgetManifestSchema`,
+ * 2 shared keys of 19 — `name` and `label`, both shared LEAVES rather than
+ * shared structure, measured 0.105).
+ *
+ * Note the chart family this bridge was originally written for measures
+ * `direct`, not `derived-clone`: `ChartConfigSchema` is in the graph outright.
+ * So `chart.test.ts` does not exercise this limb at all, and neither does any
+ * other consumer — which is why the testkit's own test file owns the positive
+ * control for it. Without that, narrowing the bridge to "never fires" would
+ * leave every consumer green.
  */
 const DERIVED_CLONE_MIN_OVERLAP = 0.5;
 

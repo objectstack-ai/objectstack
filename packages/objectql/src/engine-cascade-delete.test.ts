@@ -2,7 +2,7 @@
 
 /**
  * Cascade-on-delete behavior for parent→child foreign keys, with a REAL
- * {@link ObjectQL} engine + in-memory driver.
+ * {@link ObjectQL} engine + stub driver.
  *
  * Regression: deleting a parent whose child has a *required* lookup FK used to
  * default to `set_null`, issuing an UPDATE that cleared the required FK — which
@@ -56,7 +56,7 @@ const taskCascade = {
     },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (o: string) => { let s = stores.get(o); if (!s) { s = new Map(); stores.set(o, s); } return s; };
     let nextId = 0;
@@ -96,7 +96,7 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         for (const o of [acct, oppRequired, noteOptional, taskCascade]) engine.registry.registerObject(o as any);

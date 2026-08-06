@@ -41,7 +41,7 @@ function setup() {
     success: true, operation: 'delete', total: 1, succeeded: 1, failed: 0, results: [],
   });
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([
       { name: 'open' },

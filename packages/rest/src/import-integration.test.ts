@@ -3,74 +3,50 @@
 /**
  * End-to-end import integration: the REAL `POST /data/:object/import` route
  * driven by a REAL {@link ObjectQL} engine + {@link ObjectStackProtocolImplementation},
- * an in-memory driver, and real registered objects — no protocol mocks.
+ * a REAL sqlite `:memory:` driver, and real registered objects — no protocol
+ * mocks and, since #5704 批次 3 / #5785, no hand-written storage either.
  *
  * Mirrors `export-integration.test.ts`. It proves the server-side coercion +
  * upsert pipeline against the SAME metadata accessor (`getMetaItem`) and write
  * path (`createData`/`updateData`) a deployed server runs: human cells
  * (是→true, 高→high, name→id) become storage values, and writeMode routes each
  * row to create / update / skip.
+ *
+ * Backend note (#5704 批次 3 / #5785): the store was a hand-written Map until
+ * this file moved to `@objectstack/driver-sql` + better-sqlite3 `:memory:`.
+ * "Human cell becomes a storage value" is the whole claim of this file, and a
+ * Map stores whatever JavaScript value it is handed — `true` stays `true`,
+ * `['u1','u2']` stays an array, a number stays a number, no column ever
+ * disagrees. The point of the migration is that the round trip now goes through
+ * real column types: 是 is coerced to a boolean, written as SQLite's integer 1,
+ * and read back as `true`.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 
 // ---------------------------------------------------------------------------
-// In-memory driver — equality + `$in` (what matchFields / $expand issue).
+// The real backend: better-sqlite3 `:memory:`, constructed the canonical way
+// (`examples/app-crm`, `cli db clean`, PR #5715's `makeDefaultDriver()`).
 // ---------------------------------------------------------------------------
-function makeMemoryDriver() {
-  const stores = new Map<string, Map<string, Record<string, unknown>>>();
-  const storeFor = (o: string) => {
-    let s = stores.get(o);
-    if (!s) { s = new Map(); stores.set(o, s); }
-    return s;
-  };
-  let nextId = 0;
-  const matchOne = (cell: unknown, cond: unknown): boolean => {
-    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
-      const c = cond as Record<string, unknown>;
-      if ('$in' in c) return Array.isArray(c.$in) && c.$in.some((x) => (cell ?? null) === (x ?? null));
-      if ('$eq' in c) return (cell ?? null) === ((c.$eq as unknown) ?? null);
-      if ('$ne' in c) return (cell ?? null) !== ((c.$ne as unknown) ?? null);
-    }
-    return (cell ?? null) === ((cond as unknown) ?? null);
-  };
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    for (const [k, v] of Object.entries(where)) {
-      if (k.startsWith('$')) continue;
-      if (!matchOne(row[k], v)) return false;
-    }
-    return true;
-  };
-  const driver: any = {
-    name: 'memory', version: '0.0.0', supports: {},
-    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(o: string, ast: any) {
-      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
-      const skip = Number(ast?.skip ?? ast?.offset ?? 0) || 0;
-      const limit = ast?.limit ?? ast?.top;
-      return limit != null ? rows.slice(skip, skip + Number(limit)) : rows.slice(skip);
-    },
-    async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
-    async create(o: string, data: Record<string, unknown>) {
-      nextId += 1; const id = (data.id as string) ?? `r_${nextId}`; const row = { ...data, id }; storeFor(o).set(id, row); return row;
-    },
-    async update(o: string, id: string, data: Record<string, unknown>) {
-      const s = storeFor(o); const cur = s.get(id); if (!cur) throw new Error(`nf ${o}/${id}`);
-      const up = { ...cur, ...data, id }; s.set(id, up); return up;
-    },
-    async upsert(o: string, data: Record<string, unknown>) { const id = data.id as string | undefined; return id && storeFor(o).has(id) ? this.update(o, id, data) : this.create(o, data); },
-    async delete(o: string, id: string) { return storeFor(o).delete(id); },
-    async count(o: string, ast: any) { return (await this.find(o, ast)).length; },
-    async bulkCreate(o: string, rows: Record<string, unknown>[]) { return Promise.all(rows.map((r) => this.create(o, r))); },
-    async bulkUpdate() { return []; }, async bulkDelete() {},
-    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; }, async commit() {}, async rollback() {},
-  };
-  return { driver, stores };
+function makeSqliteDriver() {
+  return new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
 }
+
+/** Engines booted by this file, torn down (and their `:memory:` DBs closed) per test. */
+const liveEngines: ObjectQL[] = [];
+afterEach(async () => {
+  while (liveEngines.length) {
+    try { await liveEngines.pop()?.destroy(); } catch { /* noop */ }
+  }
+});
 
 const USER = {
   name: 'user', label: 'User', systemFields: false,
@@ -146,13 +122,16 @@ function makeRes() {
 }
 
 async function boot() {
-  const { driver } = makeMemoryDriver();
   const engine = new ObjectQL();
-  engine.registerDriver(driver, true);
+  liveEngines.push(engine);
+  engine.registerDriver(makeSqliteDriver(), true);
   await engine.init();
   engine.registry.registerObject(USER as any);
   engine.registry.registerObject(TASK as any);
   engine.registry.registerObject(MEMBER as any);
+  // Real DDL — the NOT NULL / column types the importer's dry run claims to
+  // predict are now physically there to be violated.
+  await engine.syncSchemas();
   await engine.insert('user', { id: 'u1', name: '张三', email: 'zhang@x.com' });
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 

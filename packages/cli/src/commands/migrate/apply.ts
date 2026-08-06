@@ -161,9 +161,9 @@ export default class MigrateApply extends Command {
       if (!flags.json) {
         printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
         console.log('');
-        renderPendingSchemaWork(pending);
+        await renderPendingSchemaWork(pending);
         renderPlan(drift);
-        if (pending.length > 0) printInfo(summarizePendingSchemaWork(pending));
+        if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
         printInfo(summarize(drift));
         if (deferred.length > 0) {
           printWarning(`${deferred.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
@@ -211,7 +211,7 @@ export default class MigrateApply extends Command {
 
       console.log('');
       if (created.length > 0) {
-        printSuccess(`Created/extended ${created.length} table(s): ${summarizePendingSchemaWork(created)}.`);
+        printSuccess(`Created/extended ${created.length} table(s): ${await summarizePendingSchemaWork(created)}.`);
       }
       printSuccess(`Applied ${applied.length} change(s).`);
       if (skipped.length > 0) {

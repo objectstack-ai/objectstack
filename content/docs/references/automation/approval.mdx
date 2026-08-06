@@ -81,7 +81,7 @@ const result = ApprovalDecision.parse(data);
 | **lockRecord** | `boolean` | ✅ | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
 | **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | ✅ | Behavior when no concrete approver resolves at node entry |
-| **decisionOutputs** | `string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … }[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
+| **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
 | **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | ✅ | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 

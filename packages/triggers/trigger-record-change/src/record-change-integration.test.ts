@@ -9,85 +9,67 @@
  * the trigger binding to an ObjectQL lifecycle hook on `kernel:ready`, an actual
  * insert firing that hook, and the flow's `update_record` writing back through
  * the live data engine. This test boots a real kernel (ObjectQL + automation +
- * record-change trigger + in-memory driver) and asserts the full chain — in BOTH
- * registration orderings, since the engine relies on re-activating already-pulled
- * flows when the trigger registers later.
+ * record-change trigger + a real sqlite `:memory:` driver) and asserts the full
+ * chain — in BOTH registration orderings, since the engine relies on
+ * re-activating already-pulled flows when the trigger registers later.
+ *
+ * Backend note (#5704 批次 3 / #5785): the driver was a hand-written Map store
+ * until this file was migrated to `@objectstack/driver-sql` + better-sqlite3
+ * `:memory:`. #1491 was precisely a chain that "worked" in every unit test
+ * because a fake sat where the real component belonged, so leaving the storage
+ * hop faked was the one shortcut this file could least afford. The concrete
+ * fidelity it buys here: a column that was never written now reads back as SQL
+ * NULL out of a table whose DDL really ran, instead of `undefined` out of a Map
+ * that only ever held keys somebody set.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { RecordChangeTriggerPlugin } from './plugin.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * A tiny equality-WHERE in-memory driver — enough to exercise the real engine's
- * insert/update/find path without pulling a driver package as a dependency
- * (mirrors objectql's own real-engine test helper). One record store per object.
+ * The real backend: better-sqlite3 `:memory:` through `@objectstack/driver-sql`,
+ * built the canonical way (`examples/app-crm`, `cli db clean`, PR #5715). The
+ * database lives and dies inside the process, so every `it` below gets a fresh
+ * empty schema without touching the host filesystem.
  */
-function makeMemoryDriver(): any {
-  const stores = new Map<string, Map<string, Record<string, unknown>>>();
-  const storeFor = (obj: string) => {
-    let s = stores.get(obj);
-    if (!s) { s = new Map(); stores.set(obj, s); }
-    return s;
-  };
-  let nextId = 0;
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    if (Array.isArray(where.$and)) return where.$and.every((w: any) => matches(row, w));
-    if (Array.isArray(where.$or)) return where.$or.some((w: any) => matches(row, w));
-    for (const [k, v] of Object.entries(where)) {
-      if (k.startsWith('$')) continue;
-      const expected = v && typeof v === 'object' && '$eq' in (v as any) ? (v as any).$eq : v;
-      const a = row[k] === undefined ? null : row[k];
-      const b = expected === undefined ? null : expected;
-      if (a !== b) return false;
-    }
-    return true;
-  };
-  return {
-    name: 'memory', version: '0.0.0', supports: {},
-    async connect() {}, async disconnect() {}, async checkHealth() { return true; },
-    async execute() { return null; }, async syncSchema() {},
-    async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
-    },
-    async findOne(object: string, ast: any) {
-      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
-      return null;
-    },
-    async create(object: string, data: Record<string, unknown>) {
-      nextId += 1;
-      const id = (data.id as string) ?? `r_${nextId}`;
-      const row = { ...data, id };
-      storeFor(object).set(id, row);
-      return row;
-    },
-    async update(object: string, id: string, data: Record<string, unknown>) {
-      const s = storeFor(object);
-      const cur = s.get(id);
-      if (!cur) throw new Error(`not found: ${object}/${id}`);
-      const updated = { ...cur, ...data, id };
-      s.set(id, updated);
-      return updated;
-    },
-    async upsert(object: string, data: Record<string, unknown>) {
-      const id = data.id as string | undefined;
-      if (id && storeFor(object).has(id)) return this.update(object, id, data);
-      return this.create(object, data);
-    },
-    async delete(object: string, id: string) { return storeFor(object).delete(id); },
-    async count(object: string, ast: any) { return (await this.find(object, ast)).length; },
-    async bulkCreate(object: string, rows: Record<string, unknown>[]) {
-      return Promise.all(rows.map((r) => this.create(object, r)));
-    },
-    async bulkUpdate() { return []; }, async bulkDelete() {},
-    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
-    async commit() {}, async rollback() {},
-  };
+function makeSqliteDriver(): any {
+  return new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+}
+
+/** Every `:memory:` database opened by a test, closed when that test ends. */
+const openDrivers: any[] = [];
+afterEach(async () => {
+  while (openDrivers.length) {
+    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
+  }
+});
+
+/**
+ * Register the driver on an engine whose own `init()` already ran during
+ * `kernel.bootstrap()` (that is what "the driver arrives late" means here), so
+ * the connect the engine would have performed happens here instead. Each caller
+ * then registers its objects and calls `syncSchemas()`.
+ *
+ * `syncSchemas()` is the production route for objects that become live after
+ * boot; the Map store needed no counterpart because a collection materialised on
+ * first write, which is exactly the difference this migration is buying.
+ */
+async function attachSqlite(objectql: any): Promise<any> {
+  const driver = makeSqliteDriver();
+  await driver.connect();
+  objectql.registerDriver(driver, true);
+  openDrivers.push(driver);
+  return driver;
 }
 
 /** A flow that stamps `stamp: 'done'` on the just-created record of `object`. */
@@ -208,8 +190,9 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
     const data = kernel.getService('data') as any;
     const automation = kernel.getService<AutomationEngine>('automation');
 
-    objectql.registerDriver(makeMemoryDriver(), true);
+    await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('sysw'), 'test', 'test');
+    await objectql.syncSchemas();
     // No `runAs` — the spec default 'user'. This is the shape an author (very
     // often an AI) writes without realising it can run without a user.
     automation.registerFlow('sysw_stamp', stampFlow('sysw_stamp', 'sysw') as any);
@@ -229,8 +212,16 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
 
     // The flow's update_record must NOT have landed. Before #3760 `stamp` was
     // 'done' here — written by a run with no principal at all.
+    //
+    // "Never written" reads as SQL NULL, not `undefined`: the column exists
+    // because the DDL declared it, and only a write puts a value in it. The Map
+    // store had no column concept, so an unwritten key was simply absent — the
+    // one place this migration changes the SHAPE of the answer rather than the
+    // answer. The property under test is unchanged and is asserted exactly, not
+    // loosened to `toBeFalsy()`: no value landed, and in particular not 'done'.
     const row = await data.findOne('sysw', { where: { id } });
-    expect(row?.stamp, 'a user-less run wrote to the record — the fail-open is back').toBeUndefined();
+    expect(row, 'the record itself must exist — only the flow write is refused').toBeTruthy();
+    expect(row?.stamp ?? null, 'a user-less run wrote to the record — the fail-open is back').toBeNull();
   }, 15000);
 
   it('the same flow still works normally when a real user made the write', async () => {
@@ -244,8 +235,9 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
     const data = kernel.getService('data') as any;
     const automation = kernel.getService<AutomationEngine>('automation');
 
-    objectql.registerDriver(makeMemoryDriver(), true);
+    await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('sysw2'), 'test', 'test');
+    await objectql.syncSchemas();
     automation.registerFlow('sysw2_stamp', stampFlow('sysw2_stamp', 'sysw2') as any);
 
     const created = await data.insert('sysw2', { status: 'new' }, { context: { userId: 'u_trigger' } });
@@ -271,8 +263,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     const data = kernel.getService('data') as any;
     const automation = kernel.getService<AutomationEngine>('automation');
 
-    objectql.registerDriver(makeMemoryDriver(), true);
+    await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid'), 'test', 'test');
+    await objectql.syncSchemas();
     automation.registerFlow('stamp_flow', stampFlow('stamp_flow', 'wid') as any);
 
     // The flow bound to the trigger…
@@ -304,9 +297,10 @@ describe('record-change trigger — end-to-end (#1491)', () => {
       async init() {},
       async start(ctx: any) {
         const ql = ctx.getService('objectql');
-        ql.registerDriver(makeMemoryDriver(), true);
+        await attachSqlite(ql);
         ql.registry.registerObject(objectDef('wid2'), 'test', 'test');
         ql.registry.registerItem('flow', flowDef, 'name', 'test');
+        await ql.syncSchemas();
       },
     };
 
@@ -345,8 +339,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     const data = kernel.getService('data') as any;
     const automation = kernel.getService<AutomationEngine>('automation');
 
-    objectql.registerDriver(makeMemoryDriver(), true);
+    await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid3'), 'test', 'test');
+    await objectql.syncSchemas();
     automation.registerFlow('mirror_write', mirrorWriteFlow('mirror_write', 'wid3') as any);
 
     expect((automation as any).getActiveTriggerBindings()).toContainEqual({
@@ -378,8 +373,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     const data = kernel.getService('data') as any;
     const automation = kernel.getService<AutomationEngine>('automation');
 
-    objectql.registerDriver(makeMemoryDriver(), true);
+    await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid5'), 'test', 'test');
+    await objectql.syncSchemas();
     automation.registerFlow('urgent_alert', urgentAlertFlow('urgent_alert', 'wid5') as any);
 
     // Create leg — a brand-new URGENT record: `previous == null` makes the

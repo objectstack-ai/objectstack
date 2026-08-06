@@ -15,25 +15,52 @@
  */
 import type { Hook, HookContext } from '@objectstack/spec/data';
 import type { Expression } from '@objectstack/spec';
+import type { Logger } from '@objectstack/spec/contracts';
 import type { HookHandler } from './engine.js';
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 
+/**
+ * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
+ * (`@objectstack/spec/contracts`), narrowed to the four levels this layer uses.
+ *
+ * ## Why this is a `Pick` of the contract and not a local shape (#5637)
+ *
+ * Both hook modules used to declare their own four-method logger shape, and
+ * that local shape spelled `error` as `(msg, meta?)` — the OPPOSITE of the
+ * contract, whose second parameter is an `Error` and whose `meta` is THIRD.
+ * The contract's type satisfies the local shape structurally (a function of
+ * fewer parameters is assignable, and `any` is compatible in both directions),
+ * so `tsc` never said a word: the conflict lived only at runtime.
+ *
+ * It stayed invisible because the injected implementation happened to be
+ * `ObjectLogger`, which dispatches its second argument BY SHAPE
+ * (`errorOrMeta instanceof Error`) and so recorded a meta object in the `Error`
+ * slot anyway. The contract's other two implementations —
+ * `ConsoleLogger` / `JsonLogger` in `@objectstack/observability` — follow the
+ * contract literally: the meta object lands in the `error` slot, `error.message`
+ * and `error.stack` read `undefined`, `meta` IS `undefined`, and every field of
+ * the diagnostic disappears, leaving a bare sentence. The symptom ("the log
+ * lost its fields") is close to unattributable at the host that first hits it.
+ *
+ * So the shape is taken from the contract rather than re-typed here (Prime
+ * Directive #12: one contract, no consumer-side dialects) — a `Pick` of exactly
+ * what this layer calls, so a caller owes these four methods and nothing more.
+ * A full `Logger` satisfies it unchanged, which is what every production caller
+ * passes (`ctx.logger` / `engine.logger`).
+ */
+export type HookDiagnosticsLogger = Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
+
 export interface WrapDeclarativeOptions {
   /** Logger for declarative-layer diagnostics (timeouts, retries, swallowed errors). */
-  logger?: {
-    debug: (msg: string, meta?: any) => void;
-    info: (msg: string, meta?: any) => void;
-    warn: (msg: string, meta?: any) => void;
-    error: (msg: string, meta?: any) => void;
-  };
+  logger?: HookDiagnosticsLogger;
   /** Optional per-execution metrics sink. Defaults to no-op. */
   metrics?: HookMetricsRecorder;
 }
 
-const noopLogger = {
+const noopLogger: HookDiagnosticsLogger = {
   debug: () => {},
   info: () => {},
   warn: () => {},
@@ -269,7 +296,11 @@ export function wrapDeclarativeHook(
         conditionFn = (ctx: HookContext) => {
           throw uncompilableConditionError(meta, ctx, source, fault);
         };
-        logger.error('[hook] condition formula failed to compile; every operation on this hook\'s object will be rejected until it is fixed', {
+        // Contract arg order (#5637): `error(message, error?: Error, meta?)`.
+        // The fault in hand is a `CelFault` (`{ kind, message }`), not an
+        // `Error`, so the Error slot is genuinely empty and the diagnostic
+        // travels as meta — where every implementation of the contract reads it.
+        logger.error('[hook] condition formula failed to compile; every operation on this hook\'s object will be rejected until it is fixed', undefined, {
           hook: meta.name,
           condition: source,
           error: check.error.message,
@@ -338,7 +369,10 @@ export function wrapDeclarativeHook(
       await runWithRetry(ctx);
     } catch (err) {
       if (onError === 'log') {
-        logger.error('[hook] handler failed (onError=log; suppressing)', {
+        // Contract arg order (#5637). `err` is `unknown` — a hook handler may
+        // throw anything — so it is not put in the `Error` slot; its message
+        // is already carried in the meta bag, which is the third parameter.
+        logger.error('[hook] handler failed (onError=log; suppressing)', undefined, {
           hook: meta.name,
           object: ctx.object,
           event: ctx.event,
@@ -391,7 +425,8 @@ export function wrapDeclarativeHook(
           .then(() => recordOutcome())
           .catch((err) => {
             recordOutcome(err);
-            logger.error('[hook] async handler error (fire-and-forget)', {
+            // Contract arg order (#5637) — see the `onError=log` site above.
+            logger.error('[hook] async handler error (fire-and-forget)', undefined, {
               hook: meta.name,
               error: (err as any)?.message,
             });

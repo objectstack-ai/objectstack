@@ -125,7 +125,7 @@ const MEMO = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -154,14 +154,15 @@ function makeMemoryDriver() {
     async disconnect() {},
     async checkHealth() { return true; },
     async execute() { return null; },
-    // Shallow COPIES, never live references into the backing table — the
-    // contract `driver-memory` states in as many words, and the SQL driver gets
-    // for free from knex. It is load-bearing for this file specifically: the
-    // READ path hydrates formulas by mutating the rows a driver hands back, so
-    // a harness leaking references would write `display_title` into its own
-    // store on the first GET and every later write response would echo it —
-    // these tests would then pass with the write-path hydration deleted, which
-    // is the "green because nothing is produced" failure mode, inverted.
+    // Shallow COPIES, never live references into the backing table — the shape
+    // every real backend hands back (a SQL driver gets it for free from knex; an
+    // in-process store has to copy explicitly). It is load-bearing for this
+    // file specifically: the READ path hydrates formulas by mutating the rows a
+    // driver hands back, so a harness leaking references would write
+    // `display_title` into its own store on the first GET and every later
+    // write response would echo it — these tests would then pass with the
+    // write-path hydration deleted, which is the "green because nothing is
+    // produced" failure mode, inverted.
     async find(object: string, ast: { where?: unknown }) {
       return Array.from(storeFor(object).values())
         .filter((r) => matchesWhere(r, ast?.where))
@@ -222,7 +223,7 @@ function makeMemoryDriver() {
 
 async function makeEngine() {
   const engine = new ObjectQL();
-  const rig = makeMemoryDriver();
+  const rig = makeStubDriver();
   engine.registerDriver(rig.driver as never, true);
   await engine.init();
   for (const obj of [ACCOUNT, FORECAST, PLAIN, MEMO]) {

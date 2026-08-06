@@ -268,11 +268,11 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Through a REAL engine, over an in-memory driver that — like a SQL driver —
+ * Through a REAL engine, over a stub driver that — like a SQL driver —
  * stores only the columns a write actually touched.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   /** Every read the engine performs, so "no extra fetch" is measurable. */
   const reads = { findOne: 0, find: 0 };
@@ -355,9 +355,9 @@ describe('[#4784] transition condition over a real engine', () => {
 
   async function boot(hooks: Hook[]) {
     engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    reads = mem.reads;
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    reads = stub.reads;
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
 
@@ -439,22 +439,29 @@ describe('[#4784] transition condition over a real engine', () => {
 
 describe('[#4784] a condition that never mentions `previous` costs zero extra fetches', () => {
   /**
-   * The demand-driven prior fetch (`engine.ts`, the `needsPriorRecord(...) ||
-   * afterUpdate hooks exist` gate) is the ONE mechanism that decides whether a
-   * prior row is read; #4784 adds no second one. These two pins are what a
-   * future narrowing of that gate has to keep true.
+   * The demand-driven prior fetch (`engine.ts`, the `wantsPriorRecord` gate) is
+   * the ONE mechanism that decides whether a prior row is read; #4784 adds no
+   * second one. These two pins are what a narrowing of that gate has to keep
+   * true — and #5284 has since narrowed it, from "ANY object has an afterUpdate
+   * hook" to "THIS object does (or its schema needs a prior row, or a roll-up
+   * aggregates it)". Both pins still hold, and the first one carries more
+   * weight than it did: the object it drives has a `beforeUpdate` hook, which
+   * the narrowed gate deliberately does not count (a `beforeUpdate` hook is
+   * dispatched before the read and observes no `previous` on this path, so
+   * counting it would buy a read with no reader — see
+   * `engine-update-prior-read-scope.test.ts`, which measures exactly that).
    */
   async function bootWith(hooks: Hook[]) {
     const engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:pin',
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     });
-    return { engine, reads: mem.reads };
+    return { engine, reads: stub.reads };
   }
 
   it('reads no prior row at all for a before-hook condition over `record` only', async () => {
@@ -518,8 +525,8 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
 describe('[#5272] a single-record delete binds `previous` through the real engine', () => {
   async function bootDelete(hooks: Hook[]) {
     const engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
     const warn = vi.fn();
@@ -529,7 +536,7 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     });
     return {
       engine,
-      reads: mem.reads,
+      reads: stub.reads,
       conditionWarnings: () =>
         warn.mock.calls.filter(([msg]) => String(msg).includes('condition evaluation failed')),
     };

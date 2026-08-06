@@ -4,7 +4,7 @@
  * [#4447] `created_at` is engine-owned: a client-supplied value on an ordinary
  * write is DROPPED, not persisted.
  *
- * Reproduction harness: a REAL {@link ObjectQL} engine over a minimal in-memory
+ * Reproduction harness: a REAL {@link ObjectQL} engine over a minimal stub
  * driver whose `update` lets incoming data win (`{...cur, ...data}`) — the same
  * shape driver-sql has, which is why a value that survives the engine's strip
  * reaches the row.
@@ -23,7 +23,7 @@ const taskObject = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -106,7 +106,7 @@ describe('[#4447] created_at is engine-owned on an ordinary write', () => {
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
@@ -252,7 +252,7 @@ describe('[#4447] a declared audit field cannot loosen the platform posture', ()
   let engine: ObjectQL;
   beforeEach(async () => {
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(shadowed as any);

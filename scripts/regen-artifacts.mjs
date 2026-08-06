@@ -23,14 +23,26 @@ export const REGEN_ARTIFACTS = Object.freeze([
   { path: 'packages/spec/spec-changes.json', gen: 'gen:spec-changes', check: 'check:spec-changes' },
   { path: 'docs/protocol-upgrade-guide.md', gen: 'gen:upgrade-guide', check: 'check:upgrade-guide' },
   { path: 'packages/spec/authorable-surface.json', gen: 'gen:schema', check: 'check:authorable-surface' },
-  // The deletion gate's in-tree anchor (#5235). Same generator, same sorted-array
-  // shape, same conflict — two branches that each refreshed it differ on the
-  // `baseRev` header and on whatever main added in between, and the resolution is
-  // always "recompute from the merged tree's merge base", never a text merge.
-  // Unlike its neighbours a stale copy of this one is NOT an error (on `main` the
-  // merge base is HEAD, so the file necessarily trails its own surface by one
-  // PR) — `check:authorable-surface` proves it AUTHENTIC rather than current, and
-  // `gen:schema` is still what restores it.
+  // The deletion gate's in-tree anchor (#5235). Same sorted-array shape, same
+  // conflict — two branches that each re-anchored it differ on the `baseRev`
+  // header and on whatever main added in between, and a text merge of that is
+  // never right, so it stays driver-managed.
+  //
+  // But it is the one path here with NOTHING TO REGENERATE after a merge. A stale
+  // copy is not an error (on `main` the merge base is HEAD, so the file
+  // necessarily trails its own surface by one PR): `check:authorable-surface`
+  // proves it AUTHENTIC — `baseRev` on origin/main, keys matching that commit —
+  // never current. Either side of the conflict is an authentic upstream snapshot,
+  // so the driver keeping OURS is already the resolution, and the pre-commit gate
+  // passes on it as-is.
+  //
+  // `gen` therefore still names `gen:schema` — correct for this file's two
+  // neighbours, which a merge defers alongside it, and a harmless no-op for this
+  // one since #5358 took the anchor out of every build. It deliberately does NOT
+  // name the re-anchoring command (`gen:authorable-surface-base`): that mid-merge
+  // is exactly #5370, where `merge-base(HEAD, origin/main)` still resolves to the
+  // branch's OLD fork point and the anchor moves BACKWARDS — authentically, so no
+  // gate objects. Re-anchor after the merge is committed, or not at all.
   { path: 'packages/spec/authorable-surface.base.json', gen: 'gen:schema', check: 'check:authorable-surface' },
   { path: 'packages/spec/json-schema.manifest.json', gen: 'gen:schema', check: 'check:authorable-surface' },
   // `gen:api-surface` reads the BUILT `dist/*.d.ts`, never the source. On a

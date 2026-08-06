@@ -13,7 +13,7 @@ function mockServer() {
   };
 }
 function mockProtocol() {
-  return { getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }), getMetaTypes: vi.fn().mockResolvedValue([]), getMetaItems: vi.fn().mockResolvedValue([]) };
+  return { getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }), getMetaTypes: vi.fn().mockResolvedValue([]), getMetaItems: vi.fn().mockResolvedValue([]) };
 }
 function mockRes() {
   const res: any = { statusCode: 200, body: undefined };
