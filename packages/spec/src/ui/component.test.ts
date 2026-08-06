@@ -982,19 +982,30 @@ describe('ComponentPropsMap record:chatter', () => {
 });
 
 /**
- * ── #4001 批 17: the `no gate` verdict, pinned ──────────────────────────────
+ * ── 批 17's `no gate` verdict, and what #5068 changed about it ──────────────
  *
- * These schemas are NOT a pending `.strict()` batch. Nothing parses them, so
- * closing them would enforce nothing (#4583). The full measurement and the
- * reasoning live in `component.zod.ts`'s file header and in the `ui/` tables of
- * `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+ * 批 17 measured that nothing parsed these schemas, so closing them would have
+ * enforced nothing (#4583). **#5068 wired the parse** — on the LINT side, per
+ * the maintainer's direction-A ruling — so the class is `authorable` again and
+ * the ratchet is ordinary strictness work. The full measurement and the three
+ * things the flip did not do live in `component.zod.ts`'s header and in the
+ * `ui/` tables of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+ *
+ * **Every assertion below still holds, and that is the point rather than an
+ * oversight.** Direction B (a discriminated `properties` on the carrier) was
+ * DECLINED as breaking against an open `type` union, so the schema path is
+ * untouched: the carrier is still an open record, an unknown key still survives
+ * `PageSchema.parse()`, and all 31 entries still strip. Measured against the
+ * landed gate, not assumed — `packages/lint`'s `validate-component-props.test.ts`
+ * holds the other half (the gate reports what these three assertions show the
+ * schema still accepts).
  *
  * This block exists so the verdict cannot outlive its truth. Each assertion is
  * written to go RED the day the world changes underneath it — at which point the
  * correct response is to update all three places together, not to relax the test.
  */
-describe('#4001 批 17 — component props are `no gate` (carrier live, parse absent)', () => {
-  it('the carrier is still an OPEN bag — goes red the day `properties` gets a typed dispatch', () => {
+describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the lint side', () => {
+  it('the carrier is still an OPEN bag — direction B (a typed `properties`) was declined, so this stays green', () => {
     // `PageComponentSchema` is `.strict().transform(…)`, so unwrap the pipe to
     // reach the object shape.
     const def = (PageComponentSchema as any)._zod.def;
@@ -1003,12 +1014,21 @@ describe('#4001 批 17 — component props are `no gate` (carrier live, parse ab
     let node = shape.properties;
     while (node?._zod?.def?.innerType) node = node._zod.def.innerType;
     expect(node._zod.def.type).toBe('record');
-    // The value type must still be the fully-open `unknown`. A dispatch on
-    // `type` (the #5068 fix) replaces this, and that is the signal to reclassify
-    // this file back to `authorable` and schedule the ratchet.
+    // The value type must still be the fully-open `unknown`. #5068 dispatches
+    // `ComponentPropsMap` by `type` at the AUTHORING GATE
+    // (`packages/lint/src/validate-component-props.ts`), not here — the carrier
+    // keeps this shape by decision, because `type` is an open union and a
+    // discriminated `properties` would reject the unregistered types real pages
+    // author. If this ever DOES go red, the carrier itself was reshaped: that is
+    // a protocol change (direction B), not a lint change.
     expect(node._zod.def.valueType._zod.def.type).toBe('unknown');
   });
 
+  // Still true after #5068, and it is the sentence that keeps the gate honest:
+  // the SCHEMA accepts and retains the key; what changed is that the authoring
+  // gate now REPORTS it (at `warning`). A reader who mistakes the gate for a
+  // closed door would be wrong in the direction that matters — the storage path
+  // (`saveMetaItem` / REST `/meta`) runs no such gate at all.
   it('an unknown key inside `properties` survives the LIVE page parse — with the strict sibling as negative control', () => {
     const page = {
       name: 'batch17_probe',
@@ -1034,7 +1054,7 @@ describe('#4001 批 17 — component props are `no gate` (carrier live, parse ab
     expect(PageSchema.safeParse(outside).success).toBe(false);
   });
 
-  it('every ComponentPropsMap entry is still non-strict — a sweep that closes them without wiring #5068 fails here', () => {
+  it('every ComponentPropsMap entry is still non-strict — #5068 wired the parse, it did not close them', () => {
     const stillOpen: string[] = [];
     for (const [type, schema] of Object.entries(ComponentPropsMap)) {
       const def = (schema as any)._zod.def;
@@ -1043,9 +1063,15 @@ describe('#4001 批 17 — component props are `no gate` (carrier live, parse ab
       if (def.catchall?._zod?.def?.type === 'never') continue;
       stillOpen.push(type);
     }
-    // All 31 registered component types are open. When #5068 wires the parse and
-    // a later batch closes them, this expectation flips — update the verdict in
-    // component.zod.ts and the ledger in the same PR.
+    // All 31 registered component types are open. #5068 wired the parse without
+    // touching the posture — deliberately, because the live corpus violates
+    // these declarations in places that are open contract questions (#5728's
+    // inline i18n label maps) and closing them in the same step would turn a
+    // warning inventory into a wall of hard rejections. When a later batch DOES
+    // close them, this expectation flips — update the verdict in
+    // component.zod.ts and the ledger in the same PR. The coverage survives the
+    // flip: the gate's unknown-key half goes quiet on a strict node and its
+    // `safeParse` half reports `unrecognized_keys` under the same rule id.
     expect(stillOpen.length).toBe(Object.keys(ComponentPropsMap).length);
   });
 });

@@ -8,14 +8,26 @@ import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
 // ---------------------------------------------------------------------------
-// NOT CLOSED AGAINST UNKNOWN KEYS -- AND THAT IS THE MEASURED VERDICT
-// (#4001 batch 17 / 批 17, ADR-0078). Read this before "finishing" the file.
+// NOT CLOSED AGAINST UNKNOWN KEYS -- and until #5068 that was the whole
+// verdict (#4001 batch 17 / 批 17, ADR-0078). Read this before "finishing" the
+// file.
 //
 // SDUI component prop schemas: the declarative shape of every `page:*`,
 // `record:*`, `element:*`, `nav:*` and `ai:*` node a page can carry.
 //
-// These 29 object sites are `no gate` -- carrier live, parse absent -- NOT a
-// pending `.strict()` batch. Do not sweep `strictObject` across this file.
+// ⚠️ STATUS AS OF #5068: the `no gate` verdict below is SPENT -- a parse now
+// exists -- and this file is `authorable` again. What that does and does not
+// mean is spelled out in the "#5068: the gate is wired" section at the end;
+// read it before scheduling the ratchet, because the gate is on the LINT side
+// and the carrier's own shape is deliberately unchanged.
+//
+// The measurement that produced the verdict is kept verbatim below: it is the
+// evidence base for the ratchet, and every sentence of it is still true of the
+// SCHEMA path.
+//
+// These 29 object sites were `no gate` -- carrier live, parse absent -- NOT a
+// pending `.strict()` batch. Do not sweep `strictObject` across this file
+// without reading the #5068 section first.
 //
 // It was scheduled as the #4001 campaign's largest remaining `ui/` block and
 // the measurement came back NEGATIVE: nothing parses these schemas, so
@@ -84,8 +96,43 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // authors and declared `hideFields`, so wiring the gate no longer turns three
 // showcase pages and the `sys_user` platform page into hard parse errors.
 //
-// When #5068 lands, this file becomes `authorable` and the ratchet applies. The
-// verdict is pinned in `component.test.ts` and in the `ui/` tables of
+// ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
+//
+// `packages/lint/src/validate-component-props.ts` dispatches on the component's
+// `type` and judges `properties` against the entry below it: undeclared keys
+// through the same walker every metadata collection uses
+// (`lintUnknownKeysAgainstSchema`), values through `safeParse`. It runs on
+// `os validate` / `os build` / `os lint` from the shared authoring registry.
+// So these schemas ARE parsed now, and this file is `authorable`.
+//
+// Three things that flip did NOT do, each of which someone will otherwise
+// assume:
+//
+//  1. **The carrier is unchanged, on purpose.** `PageComponentSchema.properties`
+//     is still `z.record(z.string(), z.unknown())`. The maintainer's 2026-08-05
+//     ruling took direction A (gate at the authoring door) and DECLINED
+//     direction B (a discriminated `properties`) as breaking against an open
+//     `type` union. So the three standing assertions in `component.test.ts`
+//     stay GREEN — measured, not assumed — and their prose was updated to say
+//     which dispatch actually landed.
+//  2. **Nothing here became strict.** All 31 entries still STRIP. The gate
+//     reports an undeclared key because the walker reads a strip-mode object;
+//     converting these sites to `strictObject` moves that same report into the
+//     gate's `safeParse` half (`unrecognized_keys`, routed to the same rule id)
+//     — which is what makes the ratchet meaningful rather than cosmetic, and it
+//     is ordinary strictness work again.
+//  3. **The storage path is still open.** The gate is an AUTHORING door. A
+//     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
+//     (#4463's fourth wall). That is recorded, not fixed, by #5068.
+//
+// The gate is WARNING-level in this first step. The live corpus violates these
+// declarations in places that are open contract questions rather than authoring
+// mistakes — inline `{ en, 'zh-CN' }` label maps on three published platform
+// pages against an `I18nLabelSchema` that is a plain `z.string()` (#5728), and
+// keys objectui's renderers honour that this file does not declare. The
+// warning-period inventory is the acceptance baseline for the error upgrade.
+//
+// The verdict is pinned in `component.test.ts` and in the `ui/` tables of
 // `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
 // together or none.
 // ---------------------------------------------------------------------------
