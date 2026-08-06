@@ -268,5 +268,5 @@ directory rather than per file.
 | `integration/` | 10 |
 | `kernel/` | 319 |
 | `qa/` | 6 |
-| `shared/` | 25 |
+| `shared/` | 20 |
 | `system/` | 366 |

@@ -35,38 +35,18 @@ import { retiredKey } from './retired-key';
  * ## What is NOT here any more: `transform` (#5552, protocol 17)
  *
  * This schema used to carry a `transform` key typed by a five-member
- * discriminated union (`FieldMappingTransformSchema`: `constant` / `cast` /
- * `lookup` / `javascript` / `map`). The whole union was retired under ADR-0049
- * enforce-or-remove; the tombstone below carries the prescription.
+ * discriminated union — `constant` / `cast` / `lookup` / `javascript` / `map`.
+ * No runtime ever executed one of the five, so the whole union was retired
+ * under ADR-0049 enforce-or-remove; the tombstone below carries the
+ * prescription, and the measurement behind it is written up on the
+ * `field-mapping-transform-removed` conversion in `src/conversions/registry.ts`.
  *
- * The measurement that decided it (2026-08-06, against `origin/main`): **no
- * runtime anywhere reads a `transform` off a field mapping.** `fieldMappings`
- * is spelled only inside `packages/spec` itself — its own schemas and their
- * tests — and the two schemas that extend this one
- * (`integration/ConnectorFieldMapping`, `data/ExternalFieldMapping`) reach a
- * real `.parse()` (`AutomationEngine.registerConnector` →
- * `ConnectorSchema.parse`) but no executor. Five declared transforms, zero
- * engines: the union was `declared ≠ enforced` in full (Prime Directive #10),
- * not merely in its `javascript` member.
- *
- * The `javascript` member is why #5552 was filed and is the sharpest evidence:
- * its `.describe()` recommended `dialect="js"`, a dialect `ExpressionDialect`
- * retired in #3278 (ADR-0058 addendum). An author following that line was
- * rejected by the enum; the only spelling that parsed was the bare-string
- * shorthand, which `ExpressionInputSchema` wraps as `dialect: 'cel'` — so the
- * member named `javascript` could only ever hold CEL, and its own example
- * (`value.toUpperCase()`) is not valid CEL either. Three surfaces disagreeing
- * over a capability nothing implemented.
- *
- * **The transform pipeline that IS enforced** is a different schema with a
- * different shape, and it stays: `data/mapping.zod.ts`'s
+ * **Where transforms actually run:** `data/mapping.zod.ts`'s
  * `ImportFieldMappingSchema.transform` — a flat string enum steering a `params`
- * bag, applied row by row by the REST import path
- * (`packages/rest/src/import-mapping.ts:115-167`) and recorded live, key by
- * key, in `packages/spec/liveness/mapping.json`. Notably it does not pretend
- * about JS either: its `javascript` value is REJECTED with a 400 because there
- * is no server sandbox. Same word, opposite disposition — one surface runs and
- * says so, the other never ran.
+ * bag, applied row by row by the REST import path and recorded live, key by
+ * key, in `packages/spec/liveness/mapping.json`. Same word, opposite
+ * disposition: that one runs, and rejects its own `javascript` value with a 400
+ * rather than pretending to.
  */
 
 import { lazySchema } from './lazy-schema';
