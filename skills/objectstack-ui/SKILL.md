@@ -16,10 +16,10 @@ description: >
   ships with the platform). CEL expressions in
   visibility/conditional rules: load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: ui
   tags: view, app, page, dashboard, report, chart, action, widget, doc
 ---

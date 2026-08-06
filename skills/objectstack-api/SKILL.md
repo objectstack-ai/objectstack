@@ -11,10 +11,10 @@ description: >
   syntax (see objectstack-query). CEL expressions in route guards or auth
   predicates: load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.3"
+  version: "1.4"
   domain: api
   tags: rest, graphql, endpoint, auth, realtime, server
 ---
