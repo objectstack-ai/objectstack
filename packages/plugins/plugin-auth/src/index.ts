@@ -20,6 +20,12 @@ export * from './admin-user-endpoints.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';
 export * from './identity-write-guard.js';
+// [cloud ADR-0024 D5.2 / #5892] The break-glass ban guard. Exported for the
+// same reason its ADR-0092 neighbour above is: a host that stands up its own
+// ObjectQL engine (the cloud control plane, an embedding that skips this
+// plugin's `kernel:ready` wiring) has to be able to register the invariant
+// itself rather than ship an environment that can ban its last administrator.
+export * from './last-admin-ban-guard.js';
 export * from './sys-user-writable-fields.js';
 export * from './otp-send-guard.js';
 // ADR-0069 D2 / #4772 — the cross-node rate-limit counter store (kernel cache,
