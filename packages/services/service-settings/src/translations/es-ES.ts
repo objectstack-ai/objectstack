@@ -213,6 +213,7 @@ export const esES: TranslationData = {
         provider: { title: 'Proveedor', description: 'Elige cómo envía este espacio de trabajo los SMS salientes.' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
+        limits: { title: 'Límites de gasto', description: 'Limita el volumen de SMS salientes del despliegue. El SMS es un canal de pago y cada envío cuesta dinero real.' },
       },
       keys: {
         provider: {
@@ -233,6 +234,10 @@ export const esES: TranslationData = {
           help: 'Remitente en formato E.164, p. ej. +15005550006. Se necesita esto o un Messaging Service SID.',
         },
         twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+        daily_quota: {
+          label: 'Límite de envíos diarios',
+          help: 'Número máximo de SMS que este despliegue puede enviar por día UTC, contando inicio de sesión con OTP, invitaciones y notificaciones. 0 significa sin límite. Los envíos que superen el límite se rechazan hasta las 00:00 UTC.',
+        },
       },
       actions: { test: { label: 'Enviar SMS de prueba' } },
     },
