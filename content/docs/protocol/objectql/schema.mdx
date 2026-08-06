@@ -708,24 +708,54 @@ full_name:
 
 ### Multi-Tenant Schemas
 
-Isolate data by tenant:
+Row-level isolation runs on **one platform column**: `organization_id`, a lookup to
+`sys_organization`. The registry injects it into every registered object that has not
+opted out (`hidden`, `readonly`, `required: false` — it is server-populated on insert
+and stays NULL where no organization context exists), so a tenant-scoped object
+declares **nothing** about tenancy:
 
 ```yaml
 name: customer
-tenancy:
-  enabled: true       # Automatically filter by the tenant field (row-level isolation)
-  tenantField: tenant_id
 fields:
-  tenant_id:
-    type: lookup
-    reference: tenant
+  name:
+    type: text
     required: true
 ```
 
-When the kernel runs in multi-tenant mode (`OS_MULTI_ORG_ENABLED=true`), the registry also
-auto-injects an `organization_id` lookup on every user object, and the default
-`tenant_isolation` RLS policy scopes reads/writes to the caller's tenant — so a user in
-Tenant A cannot see Tenant B's records.
+The column's existence does not depend on the deployment's tenancy posture — only its
+*index* does, since nothing filters by organization on a single-organization stack. An
+object opts **out** by declaring `tenancy.enabled: false`
+(or `systemFields.tenant: false`), which withholds both the column and the tenant
+filter — the posture for a platform-global catalog that must stay readable across
+organizations:
+
+```yaml
+name: currency_rate
+tenancy:
+  enabled: false      # platform-global: no organization_id, never tenant-scoped
+fields:
+  code:
+    type: text
+    required: true
+```
+
+`tenantField` is not part of the normal path and carries **no default** — leave it
+undeclared and the driver scopes by `organization_id`, the same column the RLS
+predicates and `RLS.tenantPolicy()` assume. Declare it only for an object whose tenant
+column genuinely is not `organization_id` (`tenantField: workspace_id`), and only when
+the object really carries that field: a declared name for a column that does not exist
+is ignored and the `organization_id` fallback applies.
+
+Enforcement is not a per-object RLS policy. The organization wall is **Layer 0** of the
+authorization kernel — its own code path, always first, AND-composed ahead of and
+independently of business RLS, so no permissive policy, sharing rule or
+`viewAllRecords` / `modifyAllRecords` superuser bit can widen it (ADR-0095 D1). What it
+filters is decided by the deployment's tenancy posture, selected with
+`OS_TENANCY_POSTURE` (ADR-0105 D1): `single` leaves the layer inert, `group` scopes to
+`organization_id IN accessible_org_ids`, `isolated` to
+`organization_id = <active organization>` — so under either walled posture a user in
+organization A cannot see organization B's records. See
+[Tenancy Postures & Membership](/docs/deployment/tenancy-modes).
 
 ## Schema Versioning
 

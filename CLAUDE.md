@@ -34,11 +34,14 @@ git worktree add ../<repo>-<task> -b <branch> main && cd ../<repo>-<task> && pnp
 ```
 
 Then make all edits there. This applies **per repo**: if a task spans `framework` and
-`objectui`, create a worktree in *each*. A PreToolUse hook
-(`.claude/hooks/guard-main-checkout.sh`) enforces this — it blocks `Edit`/`Write`/
-`NotebookEdit` unless the edited file is in a linked worktree, and it checks the edited
-file's own repo (so sibling repos are covered). Deliberate non-task exception:
-`OS_ALLOW_MAIN_EDITS=1`. Follow the rule because it's correct, not because the hook fires.
+`objectui`, create a worktree in *each*. Two PreToolUse hooks enforce this, and both check
+the target file's **own** repo (so sibling repos are covered): `guard-main-checkout.sh`
+blocks `Edit`/`Write`/`NotebookEdit`, and `guard-main-checkout-bash.sh` blocks the same
+write expressed as a **Bash** command (`>`/`>>`, `sed -i`, `perl -i`, `tee`, `cp`, `mv`,
+`rm`, `touch`) — reads are never blocked, and anything it cannot parse with confidence is
+allowed through, so the rule still outranks the hook. Deliberate non-task exception (both
+hooks, one switch): `OS_ALLOW_MAIN_EDITS=1`. Follow the rule because it's correct, not
+because the hook fires.
 
 ## ⛔ Never edit `content/docs/releases/` in a code PR
 

@@ -4,7 +4,7 @@
  * Tests the client's ability to discover and connect to an ObjectStack server.
  * These tests require a running server instance.
  * 
- * @see CLIENT_SERVER_INTEGRATION_TESTS.md for full test specification
+ * @see ./README.md for what integration coverage exists and what is still unwritten
  */
 
 import { describe, test, expect } from 'vitest';
