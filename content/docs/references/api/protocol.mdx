@@ -652,7 +652,7 @@ Enable package response
 | **routes** | `{ data: string; metadata: string; discovery?: string; ui?: string; … }` | optional |  |
 | **locale** | `{ default: string; supported: string[]; timezone: string }` | optional |  |
 | **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | optional | Per-service availability map keyed by CoreServiceName |
-| **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
+| **capabilities** | `{ comments: object; automation: object; cron: object; search: object; … }` | optional | Hierarchical capability descriptors — the full WellKnownCapabilities vocabulary, every key present |
 | **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **scoping** | `{ enabled: boolean; resolution: Enum<'required' \| 'optional' \| 'auto'>; scoped: boolean; environmentId?: string }` | optional | Environment-scoping posture, added by the REST discovery endpoint |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
