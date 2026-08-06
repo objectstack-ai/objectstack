@@ -126,9 +126,18 @@ export interface ISharingService {
 
   /**
    * Return `true` when the principal in `context` may UPDATE the record
-   * `(object, recordId)`. Ownership (widened by write DEPTH) OR a write-level
-   * ({@link ShareAccessLevel} `edit`) share. Always true for system context,
+   * `(object, recordId)`. Ownership (widened by write DEPTH), a write-level
+   * ({@link ShareAccessLevel} `edit`) share, OR — [#4647] — the
+   * `modifyAllRecords` super-user bypass. Always true for system context,
    * `public` objects, and objects with no owner field.
+   *
+   * The bypass is the same `ISecurityService.hasWriteBypass` predicate
+   * {@link canDelete} and {@link canManageShares} consult, so the three write
+   * gates cannot drift from each other or from what `security/explain`
+   * reports. It is asked LAST — after ownership and shares — so an ordinary
+   * write costs no extra resolution, and it **fails CLOSED** (ADR-0111 D2):
+   * no security service, a throwing probe, or a principal-less /
+   * on-behalf-of context leaves the answer at owner-plus-share only.
    */
   canEdit(
     object: string,
