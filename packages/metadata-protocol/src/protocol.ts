@@ -2798,7 +2798,18 @@ export class ObjectStackProtocolImplementation implements
             cron: registeredServices.has('job'),
             search: registeredServices.has('search'),
             export: registeredServices.has('automation') || registeredServices.has('queue'),
-            chunkedUpload: registeredServices.has('file-storage'),
+            // [#5672] Serveability-gated, was presence-only. Two reasons, and
+            // the second is the binding one:
+            //   1. `declared === enforced` — a self-declared stub file-storage
+            //      mounts no HTTP surface, so this builder already withholds
+            //      `routes.storage` from it; advertising chunked upload anyway
+            //      promised an upload endpoint that cannot exist.
+            //   2. the runtime dispatcher answers this key `hasFiles`, i.e.
+            //      `isServiceServeable(filesSvc)`. Leaving this one on presence
+            //      would make the two producers give the SAME host opposite
+            //      answers for the SAME key — a new dialect inside the
+            //      vocabulary this issue exists to unify.
+            chunkedUpload: capabilityServed('file-storage'),
             // Atomic cross-object batch (#3298 / #1604 / ADR-0034 item 4): the
             // REST /batch endpoint runs its ops inside `engine.transaction()`,
             // which only opens a real (all-or-nothing) transaction when the
