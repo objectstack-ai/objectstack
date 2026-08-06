@@ -25,11 +25,24 @@ import type {
  *
  * Design constraints (ADR-0057 §3.3):
  *   - One implementation, owned here — not N per-plugin sweepers.
- *   - Sweeps run under a system context (cross-tenant operator policy) and
- *     use bulk `multi: true` deletes, so at most ONE afterDelete hook fires
- *     per object per sweep — audit sees an aggregate, never per-row noise
- *     (telemetry-class sys_* objects are additionally in the audit writer's
- *     SKIP_OBJECTS, so they produce no audit rows at all).
+ *   - Sweeps run under a system context (cross-tenant operator policy).
+ *   - [#5194] Every reap is BOUNDED. Candidates are read a page at a time and
+ *     deleted by id — at most {@link REAP_BATCH_SIZE} ×
+ *     {@link REAP_MAX_BATCHES_PER_SWEEP} rows per object per sweep, with the
+ *     remainder draining across later sweeps. Unguarded objects used to issue
+ *     one `multi: true` DELETE with no limit instead: invisible in the steady
+ *     state (hourly sweeps delete a small increment), and a table-scanning long
+ *     write transaction exactly once per table — the first sweep after a
+ *     retention is declared on an already-large table. SQLite holds the whole
+ *     database's write lock for the duration of that one statement; Postgres
+ *     takes it as autovacuum debt.
+ *
+ *     Stated plainly because it is the cost of that bound: a reap now fires one
+ *     afterDelete hook PER REAPED ROW, not one per object per sweep. That is
+ *     free for today's population — every lifecycle-declaring platform object
+ *     is in the audit writer's SKIP_OBJECTS (telemetry/transient plumbing), so
+ *     it produces no audit rows either way, and `sys_file`, the one that is
+ *     audited, already reaped per id because it carries reap guards.
  *   - A sweep failure is logged and isolated; it never throws into the
  *     scheduler and never blocks other objects' policies.
  */
@@ -300,10 +313,16 @@ interface ArchiveCapableDriver {
 const ARCHIVE_BATCH_SIZE = 500;
 const ARCHIVE_MAX_BATCHES_PER_SWEEP = 20;
 
-/** Guarded reap batching — same posture as the Archiver: bound one sweep's
- * work, drain the backlog across sweeps. */
-const REAP_GUARD_BATCH_SIZE = 500;
-const REAP_GUARD_MAX_BATCHES_PER_SWEEP = 20;
+/**
+ * Reap batching — same posture as the Archiver: bound one sweep's work, drain
+ * the backlog across sweeps.
+ *
+ * [#5194] These govern EVERY reap, not just guarded ones. The reasoning the
+ * Archiver's constants carry ("bound one sweep's work") never depended on a
+ * guard being registered; the unguarded path simply had not had it applied.
+ */
+const REAP_BATCH_SIZE = 500;
+const REAP_MAX_BATCHES_PER_SWEEP = 20;
 
 /**
  * Reap guard (ADR-0057 amendment): a domain callback consulted by the Reaper
@@ -1071,7 +1090,8 @@ export class LifecycleService {
     // A guarded object is NEVER blind-deleted: without row reads the guard
     // cannot confirm, so the reap is skipped (fail-safe), not degraded.
     const guards = this.reapGuardsFor(object);
-    if (guards.length > 0 && typeof engine.find !== 'function') {
+    const canReadRows = typeof engine.find === 'function';
+    if (guards.length > 0 && !canReadRows) {
       if (!report.skipped.some((s) => s.object === object && s.reason === 'reap-guard-unsupported')) {
         report.skipped.push({ object, reason: 'reap-guard-unsupported' });
       }
@@ -1083,9 +1103,21 @@ export class LifecycleService {
       if (n === undefined) total = undefined;
       else if (total !== undefined) total += n;
     };
+    // [#5194] One reap path for every object. Zero guards is not a different
+    // algorithm — it is the empty intersection, i.e. "every candidate row is
+    // confirmed" — so the batching, the per-sweep ceiling and the by-id deletes
+    // are identical either way, and there is exactly one place where a reap
+    // decides what to delete.
+    //
+    // The fallback below is NOT the unguarded path; it is the no-`find` path.
+    // `LifecycleEngineLike.find` is optional (a two-method test double is a
+    // legal engine here), and an engine that cannot read rows cannot page
+    // through them — so it keeps the pre-#5194 single unbounded DELETE rather
+    // than losing retention enforcement entirely. Every real engine has `find`
+    // (`ObjectQL.find`, wired in `plugin.ts`), so production always batches.
     const reapWhere = async (where: Record<string, unknown>): Promise<number | undefined> =>
-      guards.length > 0
-        ? this.guardedReap(engine, object, guards, where)
+      canReadRows
+        ? this.batchedReap(engine, object, guards, where)
         : countDeleted(await engine.delete(object, { where, multi: true, context: { ...SYSTEM_CTX } }));
 
     if (tenantWindows.length === 0) {
@@ -1126,13 +1158,24 @@ export class LifecycleService {
   }
 
   /**
-   * Guarded reap: fetch candidate rows in batches, let every guard confirm
-   * (after performing external cleanup) or veto each, delete only the ids
-   * ALL of them confirmed. A guard error propagates to the per-object handler
-   * in `sweep()` — an erroring guard must never fail open into deletion. A
-   * batch that isn't fully confirmed ends the pass: vetoed rows still match
-   * the cutoff filter and would be re-fetched forever; the next sweep retries
-   * them.
+   * Batched reap: fetch candidate rows a page at a time, let every registered
+   * guard confirm (after performing external cleanup) or veto each, delete
+   * only the ids ALL of them confirmed — by id, page after page, up to
+   * {@link REAP_MAX_BATCHES_PER_SWEEP} pages. A guard error propagates to the
+   * per-object handler in `sweep()` — an erroring guard must never fail open
+   * into deletion. A batch that isn't fully confirmed ends the pass: vetoed
+   * rows still match the cutoff filter and would be re-fetched forever; the
+   * next sweep retries them.
+   *
+   * [#5194] `guards` MAY BE EMPTY, and that is the ordinary case — an object
+   * with no guard registered is the empty intersection, which confirms every
+   * candidate. The guard loop then simply does not execute, and what remains is
+   * exactly the bound this method exists to impose: read ≤ {@link
+   * REAP_BATCH_SIZE} rows, delete them by id, stop after
+   * {@link REAP_MAX_BATCHES_PER_SWEEP} pages and let the next sweep continue.
+   * The alternative — a second, guard-free batching routine beside this one —
+   * would be two implementations of one policy, drifting apart at the first
+   * change to either.
    *
    * [#5535] The intersection is computed as a narrowing pipeline rather than
    * N independent verdicts unioned at the end, because a guard's confirmation
@@ -1143,21 +1186,38 @@ export class LifecycleService {
    * everything ends the batch before the rest are called at all. The delete
    * set is the same whatever the registration order.
    */
-  private async guardedReap(
+  private async batchedReap(
     engine: LifecycleEngineLike,
     object: string,
     guards: readonly LifecycleReapGuard[],
     where: Record<string, unknown>,
   ): Promise<number> {
     let total = 0;
-    for (let batch = 0; batch < REAP_GUARD_MAX_BATCHES_PER_SWEEP; batch++) {
+    for (let batch = 0; batch < REAP_MAX_BATCHES_PER_SWEEP; batch++) {
+      // [#4747] Leg boundary, per page. `sweep()` checks the abort bit between
+      // OBJECTS; before #5194 an unguarded reap was a single `await` between
+      // two such checks, so that was the whole story. A reap is now up to
+      // REAP_MAX_BATCHES_PER_SWEEP pages of reads and deletes, and pushing them
+      // at a datasource the host is closing is precisely what #4747 stopped.
+      if (this.abort.aborted) break;
       const rows = await engine.find!(object, {
         where,
-        limit: REAP_GUARD_BATCH_SIZE,
+        limit: REAP_BATCH_SIZE,
         context: { ...SYSTEM_CTX },
       });
       if (!rows?.length) break;
-      let confirmed = rows;
+      // [#5194] A row with no usable id is dropped before anything is asked
+      // about it or done to it. It cannot be deleted by id, and it must never
+      // reach the delete below: `where: { id: undefined }` with `multi: true`
+      // is not a by-id delete at all — the engine's dispatch reads no scalar
+      // id, routes to `deleteMany`, and the predicate it would run is the
+      // batch's whole cutoff filter. The guard intersection used to drop such
+      // rows as a side effect of matching ids (see {@link idKey}); with zero
+      // guards nothing narrows, so the invariant is stated here instead of
+      // being an emergent property of a loop that may not run. Dropping them
+      // pre-guard also keeps a guard from reclaiming bytes for a row that was
+      // never deletable — the same reason #5535 narrows before it asks.
+      let confirmed = rows.filter((row) => idKey(row?.id) !== undefined);
       for (const guard of guards) {
         const ids = new Set(
           (await guard(object, confirmed)).map(idKey).filter((k): k is string => k !== undefined),
@@ -1179,7 +1239,7 @@ export class LifecycleService {
         });
       }
       total += confirmed.length;
-      if (confirmed.length < rows.length || rows.length < REAP_GUARD_BATCH_SIZE) break;
+      if (confirmed.length < rows.length || rows.length < REAP_BATCH_SIZE) break;
     }
     return total;
   }
