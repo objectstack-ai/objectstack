@@ -84,9 +84,17 @@
  *  - **by-id** (`delete(obj, { where: { id } })` — what better-auth's adapter
  *    emits, and what every cascade recursion re-enters with): `input.id`
  *    carries the scalar id.
- *  - **predicate / `multi`**: `input.id` is unbound and the row-scoping
- *    predicate rides on `input.options.where` — the same shape #5273 pinned
- *    for update.
+ *  - **predicate / `multi`**: `input.id` is present-but-undefined, and the
+ *    CALLER's own options bag is still on `input.options`, predicate included
+ *    — `delete()` only rebuilds that slot into `DriverOptions` *after* the
+ *    `before*` hooks return. That is the same slot the ban half reads, and it
+ *    does not contradict the `HookContextSchema.input` contract table
+ *    (#5273 / #5899): what is unreachable from `input` is the composed
+ *    `ast` — the *effective* predicate, onto which the filters middleware may
+ *    add RLS / sharing scoping. Middleware can only NARROW it, so treating the
+ *    caller's predicate as the doomed set over-approximates it, which is the
+ *    fail-closed direction: this guard may refuse a delete that would have
+ *    removed fewer rows, and can never miss one that removes more.
  *  - `ctx.previous` (the engine's #5272 pre-image, and objectql's
  *    `sys_fetch_previous_delete` builtin — `object: '*'`, priority 5) is bound
  *    for the by-id shape ONLY; a batch dispatch names no single row, so it
@@ -341,8 +349,10 @@ export function registerLastAdminGuard(
    * Which `sys_user` rows this one write addresses — the same answer for both
    * halves. A scalar id when the engine dispatched by id (an update payload
    * also carries it in `data.id`; a delete's `input` has no `data` at all),
-   * and otherwise the row-scoping predicate on `input.options.where`: the
-   * shape #5273 pinned for update and the one measured on `beforeDelete`.
+   * and otherwise the caller's predicate, still on `input.options.where` while
+   * `before*` runs (see the header: the composed `ast` is the part hooks
+   * cannot read, and middleware may only narrow it — so this set is an
+   * over-approximation, the safe direction).
    */
   const resolveTargetIds = async (
     op: GuardedOp,
