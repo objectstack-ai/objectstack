@@ -300,12 +300,18 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
   /** A logger that keeps its `error` lines so the diagnostic can be asserted. */
   function capturingLogger() {
     const errors: string[] = [];
+    // Since #5737 the cause is in the record's meta — `error(message, error?,
+    // meta?)`, the `Logger` contract's third slot — so this captures it too.
+    const causes: string[] = [];
     const logger = {
       info() {}, warn() {}, debug() {},
-      error(msg: string) { errors.push(msg); },
+      error(msg: string, _error?: unknown, meta?: Record<string, unknown>) {
+        errors.push(msg);
+        causes.push(String((meta as { error?: unknown } | undefined)?.error ?? ''));
+      },
       child() { return logger; },
     } as any;
-    return { logger, errors };
+    return { logger, errors, causes };
   }
 
   /**
@@ -352,14 +358,14 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
     e2.setSuspendedRunStore(broken as any);
     e2.registerFlow('wait_flow', waitFlow(config));
 
-    const { logger, errors } = capturingLogger();
+    const { logger, errors, causes } = capturingLogger();
     const job = boot2.ctx.getService('job') as IJobService;
     // The deadline is +24h, so the re-arm re-schedules rather than resuming now.
     expect(await rearmSuspendedWaitTimers(e2, broken as any, job, logger)).toBe(1);
     expect(boot2.scheduled).toHaveLength(1);
     expect(boot2.cancelled).toEqual([]);
 
-    return { paused, inner, boot2, ran, errors, jobName: `flow-wait:${paused.runId}:pause` };
+    return { paused, inner, boot2, ran, errors, causes, jobName: `flow-wait:${paused.runId}:pause` };
   }
 
   it('re-arm path: a STORE_UNAVAILABLE shot leaves the one-shot ARMED', async () => {
@@ -378,7 +384,7 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
   });
 
   it('re-arm path: the failed shot is reported at error, naming the job and the run', async () => {
-    const { paused, boot2, errors, jobName } = await coldBootWithBrokenLoad();
+    const { paused, boot2, errors, causes, jobName } = await coldBootWithBrokenLoad();
     await boot2.scheduled[0].handler({ jobId: jobName });
 
     // Previously silent: the callback discarded the result without a single line.
@@ -389,7 +395,11 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
     expect(errors[0]).toMatch(/left ARMED on purpose/);
     expect(errors[0]).toMatch(new RegExp(`trigger\\('${jobName}'\\)`));
     expect(errors[0]).toMatch(new RegExp(`resume\\('${paused.runId}'\\)`));
-    expect(errors[0]).toContain('connection refused');
+    // The resume envelope's reason still reaches the record — in its meta since
+    // #5737, because the engine composes that envelope by interpolating the
+    // driver's own message into it and a driver's message can be multi-line.
+    expect(causes[0]).toContain('connection refused');
+    expect(errors[0]).not.toContain('connection refused');
   });
 
   it('re-arm path: a shot that DOES resume still disarms the one-shot (unchanged)', async () => {
