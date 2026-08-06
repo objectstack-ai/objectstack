@@ -137,7 +137,9 @@ async function rejection<T extends Error = Error & { code?: string }>(call: Prom
 }
 
 /** How a call settled: the error it rejected with, or `{}` when it resolved. */
-async function settle(call: Promise<unknown>): Promise<{ code?: string; message?: string }> {
+async function settle(
+    call: Promise<unknown>,
+): Promise<{ code?: string; message?: string; field?: string; member?: string; param?: string }> {
     try {
         await call;
         return {};
@@ -583,10 +585,19 @@ describe('#5669 — what the gate must NOT do', () => {
         // may well be a column of the RELATED object, and reporting it as missing
         // from `crm_account` would be a lie. Whether the query can run is the
         // strategy's call and the join allowlist's (ADR-0021 D-C); either way the
-        // answer must not be this gate's INVALID_FIELD. Measured on both
+        // answer must not be THIS GATE's verdict. Measured on both
         // strategies: NativeSQL joins it
         // (`LEFT JOIN "owner" … WHERE "owner"."region" = $1`), ObjectQL declines it
         // with its own cross-object message.
+        //
+        // [#5716] The assertion used to be `code !== 'INVALID_FIELD'`, which was a
+        // PROXY for "not this gate" — available only while the strategy's own
+        // refusal carried no code at all. It now carries `INVALID_FIELD` / 400 too
+        // (both name a member the request cannot be served with; one wire shape
+        // for one class of mistake), so the proxy is dead and is replaced by the
+        // facts it stood for: the message is the strategy's, and the gate's own
+        // `field` — the base column it reports as missing, set on every one of its
+        // three verdicts and on none of the strategies' — is absent.
         const joined: Cube = {
             name: 'joined_cube',
             title: 'Joined',
@@ -601,7 +612,14 @@ describe('#5669 — what the gate must NOT do', () => {
             service.query({ cube: 'joined_cube', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
         );
 
-        expect(settled.code).not.toBe('INVALID_FIELD');
+        expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
+        // The lie this case exists to prevent, asserted as itself.
+        expect(settled.message).not.toMatch(/constrains field 'region'/);
+        expect(settled.field).toBeUndefined();
+        // …and positively, the strategy's envelope: the member as the request
+        // spelled it, under the request key it was written on.
+        expect(settled.member).toBe('owner.region');
+        expect(settled.param).toBe('where');
     });
 
     it('reads a NESTED relation filter as the same dotted member the strategies do', async () => {
@@ -626,8 +644,14 @@ describe('#5669 — what the gate must NOT do', () => {
             service.query({ cube: 'joined_cube', measures: ['count'], where: { owner: { region: 'NA' } } } as any),
         );
 
-        expect(settled.code).not.toBe('INVALID_FIELD');
+        // [#5716] Same substitution as the case above: `code !== 'INVALID_FIELD'`
+        // no longer separates the two producers, `field` does.
         expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
+        expect(settled.message).not.toMatch(/constrains field 'owner'/);
+        expect(settled.field).toBeUndefined();
+        // Both spellings reach the SAME refusal, envelope included — which is the
+        // invariant this case is really about.
+        expect(settled.member).toBe('owner.region');
     });
 
     it('stands down for a dotted member on the INFERENCE path, exactly as the shipped dimension gate does', async () => {

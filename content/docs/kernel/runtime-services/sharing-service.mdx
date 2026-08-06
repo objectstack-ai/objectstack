@@ -56,15 +56,44 @@ mask AND-ed with object CRUD, not a fourth `access_level`.
 - `CONFLICT` (409) — `revoke` on a rule-materialised share (`source != 'manual'`); the next rule reconciliation would silently re-grant it. Deactivate or edit the sharing rule instead.
 - `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult (public sharing model, no `owner_id` field, a bypass object, or `controlled_by_parent`).
 
+## Enforcement is automatic — do not re-check it in a hook
+
+With `@objectstack/plugin-sharing` installed, the gates run **inside the engine**: its
+middleware picks the gate by verb — `canEdit` before a by-id update, `canDelete` before a
+delete — and throws `FORBIDDEN` before the hook chain could ask anything. A hook that
+re-checks adds nothing, and it cannot ask this service at all: a hook context is built key
+by key by the engine (`object` / `event` / `input` / `session` / `provenance` / `user` /
+`api` / `transaction` / `ql`) and carries **no `services` key**, so
+`ctx.services?.sharing?.canEdit(…)` is `undefined` there and `if (!ok) throw …` rejects
+every write ([#5720](https://github.com/objectstack-ai/objectstack/issues/5720)). A hook's
+own channel is `ctx.api` — use it for *business* rules
+([examples](/docs/kernel/runtime-services/examples)).
+
 ## Example
 
+Call `canEdit` only from code that **holds** the service — a plugin that resolved it from
+the kernel service registry, or a managed runtime's `services.sharing` binding — for
+example to pre-flight an affordance before offering it:
+
+{/* os:check */}
 ```ts
-const allowed = await services.sharing.canEdit('contract', ctx.input.id, {
-  userId: ctx.session?.userId,
-  // The hook exposes the caller's org as `organizationId` (the `session.tenantId`
-  // alias was removed in v11, #3290); it feeds the sharing context's `tenantId`.
-  tenantId: ctx.session?.organizationId,
-  positions: ctx.session?.positions,
-});
-if (!allowed) throw new Error('PERMISSION_DENIED');
+import type { ISharingService } from '@objectstack/spec/contracts';
+
+export async function mayEditContract(
+  sharing: ISharingService,
+  recordId: string,
+  session: { userId?: string; organizationId?: string; positions?: string[] },
+): Promise<boolean> {
+  return sharing.canEdit('contract', recordId, {
+    userId: session.userId,
+    // `SharingExecutionContext` names the org `tenantId`; a session exposes the
+    // same value as `organizationId` (the `session.tenantId` alias was removed in
+    // v11, #3290).
+    tenantId: session.organizationId,
+    positions: session.positions,
+  });
+}
 ```
+
+`canEdit` returns `false` rather than throwing, so a caller decides what a denial means —
+hiding a button, or raising its own error.

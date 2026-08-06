@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import type { IHttpServer } from '@objectstack/spec/contracts';
+import type { IExternalDatasourceService, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 
@@ -62,9 +62,18 @@ export function registerExternalDatasourceRoutes(
 ): void {
   const ext = `${basePath}/datasources/:name/external`;
 
-  const externalService = (): any => {
+  /**
+   * The `external-datasource` slot's occupant (ADR-0015 §4.5).
+   *
+   * [#4251 B4] `IExternalDatasourceService`, which `ExternalDatasourceService`
+   * declares `implements` — so the five method names and arities this module
+   * probes are checked against the contract rather than asserted. Returns
+   * `undefined` when federation is not wired into the host; every route below
+   * answers 503 in that case, which is why the lookup is allowed to fail.
+   */
+  const externalService = (): IExternalDatasourceService | undefined => {
     try {
-      return ctx.getService<any>('external-datasource');
+      return ctx.getService<IExternalDatasourceService>('external-datasource');
     } catch {
       return undefined;
     }
@@ -153,8 +162,8 @@ export function registerExternalDatasourceRoutes(
     if (!svc?.validateAll) return unavailable(res);
     try {
       const report = await svc.validateAll();
-      const results = (report.results ?? []).filter((r: any) => r.datasource === req.params.name);
-      sendOk(res, { ok: results.every((r: any) => r.ok), results });
+      const results = (report.results ?? []).filter((r) => r.datasource === req.params.name);
+      sendOk(res, { ok: results.every((r) => r.ok), results });
     } catch (err) {
       refused(res, err);
     }

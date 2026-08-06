@@ -306,9 +306,27 @@ function isObjectQLValidationError(
 }
 
 /**
+ * An engine-level POLICY refusal — a `beforeUpdate`/`beforeInsert` guard that
+ * refused the write itself, rather than a payload the validator disliked.
+ *
+ * Detected by the same duck-typing as above (`code`), and for the same reason:
+ * the guards live in this package but throw a plain engine-shaped error so that
+ * BOTH transports can map it — `mapDataError` gives the REST data routes a 403,
+ * this gives the auth pipeline one. The concrete case is the break-glass
+ * last-administrator ban guard (ADR-0024 D5.2, `last-admin-ban-guard.ts`):
+ * without this arm, an over-broad SCIM deprovision would be refused correctly
+ * and then reported to the IdP as an opaque 500, which is the one thing a guard
+ * whose whole product is an explanation must not do.
+ */
+function isEnginePolicyRefusal(err: unknown): err is { code?: string; message?: string } {
+  if (!err || typeof err !== 'object') return false;
+  return (err as { code?: unknown }).code === 'PERMISSION_DENIED';
+}
+
+/**
  * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
- * failure; otherwise re-throw it verbatim. Always throws — the return type is
- * `never`.
+ * failure or an engine policy refusal; otherwise re-throw it verbatim. Always
+ * throws — the return type is `never`.
  */
 async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
   if (isObjectQLValidationError(err)) {
@@ -323,14 +341,25 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
       ...(Array.isArray(fields) ? { fields } : {}),
     });
   }
+  if (isEnginePolicyRefusal(err)) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('FORBIDDEN', {
+      message:
+        typeof err.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Permission denied',
+      code: 'PERMISSION_DENIED',
+    });
+  }
   throw err;
 }
 
 /**
  * Wrap every function-valued method of a better-auth adapter so an ObjectQL
- * `ValidationError` thrown from the underlying engine surfaces as a 4xx
- * `APIError` instead of an opaque 500. Non-function properties pass through
- * untouched, and every non-validation error is re-thrown verbatim.
+ * `ValidationError` (400) or an engine policy refusal (403) thrown from the
+ * underlying engine surfaces as a 4xx `APIError` instead of an opaque 500.
+ * Non-function properties pass through untouched, and every error that carries
+ * neither signature is re-thrown verbatim.
  */
 export function withValidationErrorMapping<A extends Record<string, any>>(adapter: A): A {
   const out: Record<string, any> = {};

@@ -42,6 +42,36 @@
  * it is what makes an unregistered code a compile error instead of a string that
  * only fails when some route happens to parse its own response body.
  *
+ * ## [#5716] The second constructor, and how to choose between them
+ *
+ * #5352 named six refusal families and #5367 enveloped five of them. Reading
+ * every `throw` in this package afterwards turned up NINE more sites of exactly
+ * the same kind — caller- or author-shaped refusals that never entered the
+ * route's message list at all, so they were answering `500` with nobody's
+ * regex to rescue them — plus the `objectql-strategy.ts` `planCrossObject`
+ * family (PM ruling on #5716, 2026-08-06). What decides the CODE is not which
+ * file throws but what the refusal is a verdict ABOUT:
+ *
+ *   - {@link datasetInvalidError} — a verdict about the DATASET or the whole
+ *     SELECTION: an `include` path that cannot be joined, an aggregate v1 cannot
+ *     lower, a `compareTo` with no window to shift, a `dateRange` that is not a
+ *     date. The caller fixes the dataset definition or the selection.
+ *   - {@link invalidMemberError} — a verdict about ONE MEMBER the request named:
+ *     a measure the cube does not declare, a member this engine cannot join to.
+ *     The caller fixes (or drops) that member.
+ *
+ * The member family is `INVALID_FIELD` / 400 rather than a second
+ * `DATASET_INVALID` for two measured reasons. First, the three shipped analytics
+ * gates already answer `INVALID_FIELD` / 400 to the NEIGHBOURING member-level
+ * mistakes on the very same request keys — `measures` (#4437), `dimensions` /
+ * `timeDimensions` (#5520), `where` (#5669) — so a caller who mistypes a member
+ * and a caller who names one the engine cannot serve would otherwise get two
+ * wire shapes for one class of mistake, which is the defect ADR-0112 exists to
+ * remove. Second, these sites are NOT dataset-only: `planCrossObject` and the
+ * undeclared-measure refusal fire on `/analytics/query` too, where there is no
+ * dataset at all — `DATASET_INVALID` would name a document the caller never
+ * sent, while `INVALID_FIELD` reads correctly on both faces.
+ *
  * ## What deliberately does NOT go through here
  *
  * Not every `throw` in this package is the caller's mistake, and enveloping one
@@ -62,7 +92,16 @@
  *     has no aggregate", which the spec refinement already guarantees. An
  *     arrival there is our bug; an undeclared `500` is the honest answer, and
  *     staying bare keeps it readable in the response (#5667's tiering) instead of
- *     withheld like a declared server fault.
+ *     withheld like a declared server fault. [#5716] `native-sql-strategy.ts`'s
+ *     "measure … has unrecognised type" joins this bullet after measurement, and
+ *     against #5716's own list, which had it down as author-shaped: `Metric.type`
+ *     is the CLOSED `AggregationMetricType` enum, `metric-type-coverage.test.ts`
+ *     pins that every member of it is handled (its second case is literally "leaves
+ *     no metric type to the unrecognised-type throw"), the dataset compiler maps
+ *     only `SUPPORTED_AGGREGATES` into a cube, and `inferMeasure` mints six known
+ *     types. So no spec-valid cube can reach it — an arrival is our own drift or a
+ *     host registering an unparsed cube object, which is the same 500 tier as the
+ *     line above, not the author's 400.
  *   - **Producer/consumer drift between two of OUR tables** — the posture
  *     `objectql-strategy.ts`'s display-SQL renderer already states explicitly
  *     ("Deliberately NOT `invalidFilterError`'s 400 envelope: this is drift
@@ -74,7 +113,7 @@
  * refuses **the caller**.
  */
 
-import type { RegisteredErrorCode } from '@objectstack/spec/api';
+import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 
 /**
  * `DATASET_INVALID`, pinned against the ledger.
@@ -83,6 +122,21 @@ import type { RegisteredErrorCode } from '@objectstack/spec/api';
  * code here) fails `tsc` rather than shipping a code `ApiErrorSchema` rejects.
  */
 const DATASET_INVALID: RegisteredErrorCode = 'DATASET_INVALID';
+
+/**
+ * [#5716] `INVALID_FIELD`, pinned against the STANDARD catalog.
+ *
+ * Same load-bearing annotation as `DATASET_INVALID` above, one tier over: this
+ * code is platform-wide (`StandardErrorCode`), not registered per package, which
+ * is precisely why the member-level refusals use it — see the module header.
+ */
+const INVALID_FIELD: StandardErrorCode = 'INVALID_FIELD';
+
+/**
+ * [#5716] Which request key named the member — the analytics vocabulary, spelled
+ * exactly as the shipped source-field gates spell it in `err.param`.
+ */
+export type AnalyticsRequestKey = 'measures' | 'dimensions' | 'timeDimensions' | 'where';
 
 /**
  * A dataset refusal in the ADR-0112 envelope — `DATASET_INVALID` / 400.
@@ -97,5 +151,46 @@ export function datasetInvalidError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = DATASET_INVALID;
   err.status = 400;
+  return err;
+}
+
+/**
+ * [#5716] A refusal about ONE MEMBER the request named — `INVALID_FIELD` / 400.
+ *
+ * Use it when the verdict is about a single `measures` / `dimensions` /
+ * `timeDimensions` / `where` entry rather than about the dataset or the whole
+ * selection: a measure the cube does not declare (#4157), a member this engine
+ * cannot evaluate because it traverses a relationship the driver cannot join
+ * (`planCrossObject`). The message stays whatever the refusing site says — every
+ * one of these already names the member and how to fix it, and #5923's tests
+ * assert that wording.
+ *
+ * `member` is the entry AS THE REQUEST SPELLED IT — `revenue`, not the
+ * `account.balance` it resolved to — because that is the string the caller can
+ * find in the body they sent; the resolved form stays in the message, which is
+ * where the explanation lives. `member` / `param` / `cube` mirror the diagnostic
+ * fields the three shipped gates attach
+ * (`err.field`/`err.param`/`err.measure`…). `field` is deliberately
+ * NOT among them: those gates resolve a member to a base COLUMN and name the
+ * column that is missing, while here either there is no such column (an
+ * undeclared measure) or the column exists and is perfectly fine on another
+ * driver (a cross-object member). Naming one would be inventing a fact.
+ */
+export function invalidMemberError(
+  message: string,
+  meta: { member: string; param?: AnalyticsRequestKey; cube?: string },
+): Error {
+  const err = new Error(message) as Error & {
+    code?: string;
+    status?: number;
+    member?: string;
+    param?: string;
+    cube?: string;
+  };
+  err.code = INVALID_FIELD;
+  err.status = 400;
+  err.member = meta.member;
+  if (meta.param) err.param = meta.param;
+  if (meta.cube) err.cube = meta.cube;
   return err;
 }

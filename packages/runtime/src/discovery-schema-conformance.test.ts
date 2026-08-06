@@ -272,6 +272,50 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
       // …and the whole body still satisfies the schema with that value in place.
       expect(DiscoverySchema.safeParse(info).success).toBe(true);
     });
+
+    // [#5673] The pin for this issue, and the reason it is driven through the
+    // REAL producer rather than through `resolveDiscoveryEnvironment` alone:
+    // the UNSET default is decided at THIS call site (`getEnv`'s second
+    // argument), so a green mapper test in `packages/spec` cannot see it. The
+    // whole setup is deleting the variable — that is precisely the state of a
+    // production deployment whose operator never set it.
+    //
+    // Reverse verification, direction predicted BEFORE running: restore the old
+    // `getEnv('NODE_ENV', 'development')` and these two cases go RED (they read
+    // `development`), while every `it.each` row above stays green — the old
+    // default was only ever consulted when NODE_ENV was absent, so nothing that
+    // sets it can detect the change. Measured both ways.
+    it.each([
+      ['unset', undefined],
+      // `getEnv` collapses `''` to its default (`process.env[key] || default`),
+      // so `NODE_ENV=` is the same absence as never exporting it — and the same
+      // absence `doctorNodeEnv()` and `os serve` already read as production.
+      ['empty', ''],
+    ])('NODE_ENV %s advertises production — never development (#5673)', async (_label, raw) => {
+      if (raw === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = raw;
+
+      const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+      expect(info.environment).toBe('production');
+      expect(DiscoverySchema.safeParse(info).success).toBe(true);
+    });
+
+    // [#5673] The other half, stated as the invariant it is: absence claims
+    // production, a spelling this repo does not recognise never does. These are
+    // two different rules and #5673 deliberately moved only the first — #4828's
+    // "never CLAIM production on a guess" is untouched, and this case is the
+    // guard against a later simplification collapsing them back into one.
+    it.each(['qa', 'preview', 'uat', 'nonsense'])(
+      'NODE_ENV=%s is an unrecognised spelling — still development, never production (#4828)',
+      async (raw) => {
+        process.env.NODE_ENV = raw;
+
+        const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+        expect(info.environment).toBe('development');
+      },
+    );
   });
 
   it('emits the canonical `name`, never the deprecated `apiName` alias', async () => {

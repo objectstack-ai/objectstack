@@ -220,6 +220,34 @@
         "ADR-0117"
       ],
       "invariant": "`OWNING_BUSINESS_UNIT_ID` is ADR-0117 D1's record-level BU ownership stamp, RESERVED-BUT-NOT-INJECTED (#4611): open-core provisions no such column yet, so the entry looks like dead weight to anyone reading the table alone — and this repo actively hunts dead surface. It is a NAME registry, not the injected set (tenant_id / user_id / deleted_at are the standing precedents), and reserving the spelling early is what stops consumers minting `business_unit_id` / `bu_id` / `dept_id` — the drift cloud#982 paid for with `tenant_id`/`org_id`/`space`. The enum value `ownership: 'business_unit'` is deliberately NOT added alongside it: `applySystemFields`' `wantOwner` is a DENY-list (`registry.ts` — only 'org'/'none' opt out), so a fourth enum member would be stamped with `owner_id`, the exact inverse of D1's table and an ADR-0049 declare-without-enforce violation. Name first, value with its injection. The public-form denylist entry is fail-closed on purpose: an ownership anchor of the owner_id/organization_id forge class must be un-suppliable on the anonymous surface BEFORE the column exists, because adding the denial after it ships is a hole with a release in it."
+    },
+    {
+      "file": "packages/runtime/src/domain-handler-registry.ts",
+      "adrs": [
+        "ADR-0076"
+      ],
+      "invariant": "ADR-0076 D11's thin dispatcher registry — the framework-agnostic port a capability's routes enter through, as a NORMALIZED handler (`DomainRequest` to `HttpDispatcherResult`), never as framework-specific routes: registering Hono `app.route` from plugin space couples every plugin to Hono and forfeits the multi-adapter property `packages/qa/http-conformance` validates on a second, zero-dependency `node:http` adapter. Deliberately WITHOUT wildcards, params or middleware — routing power belongs to the adapters below the port, and growing it here re-grows the god implementation D11 decomposed. Registration stays dispatcher-owned because most slots are MULTI-PROVIDER (`i18n`: service-i18n OR the AppPlugin in-memory fallback; `analytics`: service-analytics OR the ObjectQLPlugin fallback), so a route bridges to a SLOT and not to a package — moving registration into one provider 404s every stack served by another; a package that owns its slot exclusively self-registers through `HttpDispatcher.registerDomainHandler`. `DomainHandlerDeps` is the WHOLE dependency contract of an extracted body, and every kernel-reading facility takes the request FIRST (#5155): one dispatcher instance serves every tenant, so a cached 'kernel of the request in flight' resolved a request that resumed after an await against whichever environment was most recent — one tenant reading another tenant's data source."
+    },
+    {
+      "file": "packages/runtime/src/http-dispatcher.ts",
+      "adrs": [
+        "ADR-0076"
+      ],
+      "invariant": "What is left of ADR-0076 D11's 'clean port with a god implementation' after step ③: a thin core (request scope, gates, discovery, registry seeding) whose domain bodies live under `./domains/` behind thin delegates. Two orderings inside `dispatch()` carry the decision and both read like removable overhead. (1) `resolveRequestScope` then the ADR-0069 auth gate then project-membership enforcement run BEFORE the domain registry is consulted — hoisting the registry resolve above them as a fast path for migrated domains un-gates every extracted domain at once and hands handlers a context whose per-request kernel was never resolved. The domains cannot compensate: they add their OWN authorization (`/ai`'s declared per-route `auth`, `/keys`' identity gate) but nothing downstream re-runs these two, which are the dispatcher's half of the D11 contract. (2) The registry is consulted before the legacy if-chain, which is now EMPTY of domains and must stay empty: a re-added `startsWith` branch either shadows a registered domain or re-implements a path another package already owns — the 'one route, one owner' hazard whose two specimens (`GET /openapi.json`, the `apis:` `handleApiEndpoint`) were DELETED rather than repaired (#5093, #4936) exactly because grep found them and the runtime never ran them. The service entries this file computes for discovery are D12's honesty rule (`svcAvailable` + `isServiceServeable`), never a slot-presence test."
+    },
+    {
+      "file": "packages/runtime/src/domains/data.ts",
+      "adrs": [
+        "ADR-0076"
+      ],
+      "invariant": "The `/data` body — D11 step ③'s terminal cut (PR-10) and the very handler ADR-0076 names when it describes the god implementation ('the dispatcher hardcodes a handler per domain: handleData / handleMcp / handleAnalytics / handleActions, each getService(...)'). It reaches dispatcher facilities ONLY through `DomainHandlerDeps`, and `HttpDispatcher.handleData` is a thin back-compat delegate: folding this module back into that delegate because 'the indirection buys nothing' re-couples the data plane to dispatcher state and restarts the ~3.8k-LOC accretion D11 decomposed. The multi-tenant refusal belongs to the BODY, not to an upstream gate — on a host with a registered KernelResolver, a data-plane request the resolver did not attach to an environment answers 428 and never falls through to the control-plane kernel (ADR-0006 Phase 5)."
+    },
+    {
+      "file": "packages/runtime/src/domains/i18n.ts",
+      "adrs": [
+        "ADR-0076"
+      ],
+      "invariant": "The concrete instance of D11's registration-ownership rule: the `i18n` slot is MULTI-PROVIDER — I18nServicePlugin when service-i18n is installed, else the AppPlugin in-memory fallback auto-registered for stacks that declare translation bundles — so the dispatcher registers this route, not the provider. Moving `/i18n` registration into service-i18n, the obvious-looking 'the owning package should own its route' cleanup, 404s every stack served by the other provider. The extracted body also keeps the legacy matching semantics deliberately (`match: 'prefix'`, so `/i18nxx` matches too, exactly as the old `startsWith` chain did): normalizing that edge is a behaviour change for the http-conformance suite to re-pin, not a tidy-up to slip into an unrelated diff. The 501 on an unserveable slot is D12's honest-capability rule and is narrow on purpose — both real in-memory providers self-declare `degraded` with `handlerReady: true` and keep serving, so the gate closes only on an occupant that would answer with invented strings."
     }
   ]
 }

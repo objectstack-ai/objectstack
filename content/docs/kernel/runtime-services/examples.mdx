@@ -5,42 +5,153 @@ description: Practical examples for flow nodes, hooks, and plugin event subscrip
 
 # Runtime Service Examples
 
-## 1) Flow custom node: read related records
+<Callout type="warn" title="Which data channel each surface actually gets">
+
+These pages document the `services.*` **contract surface** — the signatures, not a
+binding every surface receives (see the [binding note](/docs/kernel/runtime-services)).
+The examples below therefore use the channel each runtime surface is really handed:
+
+| Surface | Data channel |
+|:--|:--|
+| Data hook (`beforeInsert`, `beforeUpdate`, …) | `ctx.api` — the scoped cross-object API the engine binds per operation (`buildHookApi`, `packages/objectql/src/engine.ts`) |
+| Flow `script` function | none — a function is **pure** by contract (`handlerContract: 'pure'`), so its record I/O lives on the flow graph |
+| Plugin | the plugin context (`ctx.hook`, the kernel service registry) |
+
+A hook context is built key by key by the engine and carries **no `services` key**, so
+`ctx.services?.sharing?.canEdit(…)` there evaluates to `undefined` — and a guard written on
+it (`if (!ok) throw new Error('PERMISSION_DENIED')`) rejects **every** write instead of
+checking anything ([#5720](https://github.com/objectstack-ai/objectstack/issues/5720)).
+
+</Callout>
+
+## 1) Flow: read related records, then compute in a pure function
+
+The read is a declarative `get_record` node that binds its rows to a flow variable; the
+`script` node maps that variable into a registered function's `inputs`, and the function
+**returns** its result for a later declarative node to persist. A flow function is handed
+`input` / `variables` / `automation` / `logger` and **no data engine** — see
+[Flows](/docs/automation/flows) for why that purity rule keeps a run's record counts honest.
 
 {/* os:check */}
 ```ts
-export async function run(ctx: any) {
-  const { record: order } = await ctx.services.data.get('sales_order', ctx.input.orderId);
-  const lines = await ctx.services.data.find('sales_order_line', {
-    where: { sales_order_id: order.id },
-    orderBy: [{ field: 'line_no', order: 'asc' }],
-    limit: 200,
-  });
+import { defineFlow, defineStack } from '@objectstack/spec';
 
+interface OrderTotalsInput {
+  lines: Array<{ amount?: number }>;
+}
+
+/** Pure: it computes from its mapped `inputs` and returns — no data handle needed. */
+function orderTotals(ctx: { input: OrderTotalsInput }) {
+  const lines = ctx.input.lines ?? [];
   return {
-    order,
-    lines: lines.records ?? [],
+    line_count: lines.length,
+    total: lines.reduce((sum, line) => sum + (line.amount ?? 0), 0),
   };
 }
+
+export const stack = defineStack({
+  functions: { 'sales.orderTotals': orderTotals },
+});
+
+export const RollUpOrderTotals = defineFlow({
+  name: 'sales_order_roll_up_totals',
+  label: 'Roll up order line totals',
+  type: 'autolaunched',
+  status: 'active',
+  nodes: [
+    {
+      id: 'start',
+      type: 'start',
+      label: 'On Order Update',
+      config: { objectName: 'sales_order', triggerType: 'record-after-update' },
+    },
+    {
+      id: 'read_lines',
+      type: 'get_record',
+      label: 'Read the order lines',
+      config: {
+        objectName: 'sales_order_line',
+        filter: { sales_order_id: '{record.id}' },
+        fields: ['amount'],
+        limit: 200,
+        outputVariable: 'lines',
+      },
+    },
+    {
+      id: 'totals',
+      type: 'script',
+      label: 'Sum the lines',
+      config: {
+        function: 'sales.orderTotals',
+        inputs: { lines: '{lines}' },
+        outputVariable: 'totals',
+      },
+    },
+    {
+      id: 'apply',
+      type: 'update_record',
+      label: 'Write the totals back',
+      config: {
+        objectName: 'sales_order',
+        filter: { id: '{record.id}' },
+        fields: { line_count: '{totals.line_count}', amount_total: '{totals.total}' },
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'read_lines' },
+    { id: 'e2', source: 'read_lines', target: 'totals' },
+    { id: 'e3', source: 'totals', target: 'apply' },
+    { id: 'e4', source: 'apply', target: 'end' },
+  ],
+});
 ```
 
-## 2) Hook: check sharing permission before mutation
+## 2) Hook: validate a write against another object
+
+A `before*` hook reaches other objects through `ctx.api`, bound to the caller's execution
+context and transaction, and rejects the write by throwing.
+
+Record-level **sharing is not a hook's job**: when `@objectstack/plugin-sharing` is
+installed its engine middleware gates every by-id write itself — `canEdit` before an
+update, `canDelete` before a delete — and throws `FORBIDDEN` on denial, before any hook
+could re-ask ([`services.sharing`](/docs/kernel/runtime-services/sharing-service)). What a
+hook adds is the **business** rule the engine cannot know.
 
 {/* os:check */}
 ```ts
-export async function beforeUpdate(ctx: any) {
-  const ok = await ctx.services?.sharing?.canEdit('contract', ctx.input.id, {
-    userId: ctx.session?.userId,
-    // Read the caller's org under `organizationId` (the `session.tenantId` alias
-    // was removed in v11, #3290); it feeds the sharing context's `tenantId`.
-    tenantId: ctx.session?.organizationId,
-    positions: ctx.session?.positions,
-  });
+import { defineHook, type HookContext } from '@objectstack/spec/data';
 
-  if (!ok) {
-    throw new Error('PERMISSION_DENIED');
-  }
-}
+/**
+ * The one call this hook makes on `ctx.api`. The contract declares
+ * `HookContext.api` opaque (`api: unknown`) because the object the engine binds is
+ * ObjectQL's `ScopedContext`, so a typed handler names the slice it uses.
+ */
+type CrossObjectApi = {
+  object(name: string): {
+    findOne(query: { where: Record<string, unknown> }): Promise<{ credit_limit?: number } | null>;
+  };
+};
+
+export const ContractWithinCreditLimit = defineHook({
+  name: 'contract_within_credit_limit',
+  object: 'contract',
+  events: ['beforeInsert', 'beforeUpdate'],
+  handler: async (ctx: HookContext) => {
+    const accountId = ctx.input.account_id;
+    if (typeof accountId !== 'string') return;
+
+    const api = ctx.api as CrossObjectApi;
+    const account = await api.object('crm_account').findOne({ where: { id: accountId } });
+
+    const limit = account?.credit_limit ?? 0;
+    const amount = Number(ctx.input.amount ?? 0);
+    if (limit > 0 && amount > limit) {
+      throw new Error('VALIDATION_FAILED: contract amount exceeds the account credit limit');
+    }
+  },
+});
 ```
 
 ## 3) Plugin: subscribe to kernel lifecycle events

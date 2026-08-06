@@ -9,10 +9,10 @@ description: >
   predicate". Do not use for SQL fragments (driver-native), cron schedules
   (cron dialect), or L2 hook bodies (those belong in objectstack-data).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x and @objectstack/formula 16.x (CEL)
+compatibility: Requires @objectstack/spec 17.x and @objectstack/formula 17.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "1.1"
+  version: "1.2"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---

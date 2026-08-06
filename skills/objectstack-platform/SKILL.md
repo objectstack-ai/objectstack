@@ -12,10 +12,10 @@ description: >
   objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate)
   belong in objectstack-data — only kernel / service-level events live here.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x and @objectstack/core 16.x (Zod v4 schemas), Node 22+
+compatibility: Requires @objectstack/spec 17.x and @objectstack/core 17.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: platform
   tags: project, defineStack, driver, adapter, plugin, kernel, service, DI, lifecycle, cli, deploy, ops
 ---

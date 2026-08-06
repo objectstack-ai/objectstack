@@ -445,7 +445,11 @@ describe('withValidationErrorMapping – ObjectQL ValidationError → better-aut
     ]);
   });
 
-  it('re-throws non-validation errors verbatim (not remapped to an APIError)', async () => {
+  // "Unclassified" — an error carrying neither the validation envelope nor the
+  // `PERMISSION_DENIED` policy-refusal code the break-glass guards throw
+  // (ADR-0024 D5.2; the 403 arm is pinned in `last-admin-ban-guard.test.ts`).
+  // A driver fault is exactly that, and it must NOT be dressed up as a 4xx.
+  it('re-throws unclassified errors verbatim (not remapped to an APIError)', async () => {
     const boom = new Error('driver exploded');
     const adapter = withValidationErrorMapping({
       update: async () => {

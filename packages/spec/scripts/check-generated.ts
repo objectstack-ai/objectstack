@@ -27,7 +27,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -116,10 +116,6 @@ const GATED: ReadonlyArray<{
 const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
-  {
-    check: 'check:react-declaration-parity',
-    why: 'compares the spec schema props against the registry-declared inputs — two declarations, no artifact (and no renderer: #4472)',
-  },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
   // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
   // other, so `main` carried an unclassified script and this reconciliation was
@@ -149,6 +145,47 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   {
     check: 'check:dual-source-exports',
     why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
+  },
+];
+
+/**
+ * Source audits that CANNOT RUN from this repository at all, because the input
+ * they compare against does not exist here and cannot be produced here.
+ *
+ * A separate bucket from `NO_GENERATOR` because the two say different things to a
+ * reader, and #4690 is what conflating them cost. `NO_GENERATOR` means "runnable,
+ * deliberately not run in this aggregate — run it yourself and it will answer".
+ * This one means "you cannot run it here at all, and here is the input it wants
+ * and who produces it". Sitting in the first list, `check:react-declaration-parity`
+ * read as the former for the entire time it was the latter: it was wired into no
+ * workflow, and a manual run without `MANIFEST` printed a `⚠` and exited 0, so no
+ * path existed on which the gate could go red. Whoever read "deliberately not run"
+ * reasonably assumed someone, somewhere, was running it.
+ *
+ * Encoding WHY in the ledger follows EXPLICIT_GENERATORS (#5807/#5358): a
+ * classification that records only a name is a classification the next reader has
+ * to re-derive. `runBy` is what keeps this bucket honest rather than an escape
+ * hatch — it names the in-repo entry point that DOES run the gate with its input,
+ * and `reconcileLedger` fails if that file has stopped naming the check. "Cannot
+ * run here" is a statement about this aggregate; "runs nowhere" would be the defect
+ * this category is supposed to make visible, not hide.
+ */
+const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
+  check: string;
+  input: string;
+  runBy: string;
+  why: string;
+}> = [
+  {
+    check: 'check:react-declaration-parity',
+    input: 'MANIFEST=<sdui.manifest.json> — objectui\'s registry-inputs dump',
+    runBy: 'scripts/gen-sdui-manifest.sh',
+    why:
+      'compares the spec schema props against the registry-declared inputs (two declarations, no renderer: #4472). ' +
+      'The registry is a browser app, so its manifest exists only after objectui is built at .objectui-sha and ' +
+      'enumerated in a real browser — nothing in this repo (console dist is gitignored, the published console ships ' +
+      'no sdui.manifest.json) can hand it one. `pnpm sdui:manifest` produces it and runs the ratchet; without it the ' +
+      'gate now exits 1 rather than skipping (#4690)',
   },
 ];
 
@@ -203,7 +240,11 @@ const SELF = 'check:generated';
  */
 function reconcileLedger(scripts: Record<string, string>): void {
   const problems: string[] = [];
-  const declaredChecks = new Set([...GATED.map((g) => g.check), ...NO_GENERATOR.map((n) => n.check)]);
+  const declaredChecks = new Set([
+    ...GATED.map((g) => g.check),
+    ...NO_GENERATOR.map((n) => n.check),
+    ...EXTERNAL_INPUT_REQUIRED.map((e) => e.check),
+  ]);
   const declaredGens = new Set([
     ...GATED.map((g) => g.gen),
     ...UNGATED_GENERATORS.map((u) => u.gen),
@@ -213,8 +254,9 @@ function reconcileLedger(scripts: Record<string, string>): void {
   for (const name of Object.keys(scripts)) {
     if (name === SELF) continue;
     if (name.startsWith('check:') && !declaredChecks.has(name)) {
-      problems.push(`  \`${name}\` exists in package.json but is in neither GATED nor NO_GENERATOR.\n` +
-        `    Classify it: does it compare a checked-in artifact against a generator, or audit source?`);
+      problems.push(`  \`${name}\` exists in package.json but is in neither GATED nor NO_GENERATOR (nor EXTERNAL_INPUT_REQUIRED).\n` +
+        `    Classify it: does it compare a checked-in artifact against a generator, audit source,\n` +
+        `    or audit source against an input this repo cannot produce (name where it DOES run)?`);
     }
     if (name.startsWith('gen:') && !declaredGens.has(name)) {
       problems.push(`  \`${name}\` exists in package.json but no GATED entry names it and it is not in UNGATED_GENERATORS.\n` +
@@ -226,6 +268,30 @@ function reconcileLedger(scripts: Record<string, string>): void {
   for (const { check } of GATED) if (!scripts[check]) problems.push(`  GATED names \`${check}\`, which package.json no longer has.`);
   for (const { gen } of GATED) if (!scripts[gen]) problems.push(`  GATED names \`${gen}\`, which package.json no longer has.`);
   for (const { check } of NO_GENERATOR) if (!scripts[check]) problems.push(`  NO_GENERATOR names \`${check}\`, which package.json no longer has.`);
+  for (const { check, runBy } of EXTERNAL_INPUT_REQUIRED) {
+    if (!scripts[check]) problems.push(`  EXTERNAL_INPUT_REQUIRED names \`${check}\`, which package.json no longer has.`);
+    // The claim that makes this category honest rather than an escape hatch: the
+    // gate cannot run HERE, but it does run SOMEWHERE, and that somewhere is a file
+    // in this repo that still invokes it. A `runBy` that has stopped naming the
+    // check is #4690 all over again — a gate classified as "runs elsewhere" while
+    // running nowhere.
+    const runner = join(pkgRoot, '..', '..', runBy);
+    // Named on a line that RUNS it, not merely one that talks about it: these
+    // runners are shell scripts whose comments discuss the gate at length, and a
+    // surviving comment is exactly the evidence a deleted invocation leaves behind.
+    const invokes = existsSync(runner) &&
+      readFileSync(runner, 'utf8')
+        .split('\n')
+        .some((line) => line.includes(check) && !line.trim().startsWith('#'));
+    if (!existsSync(runner)) {
+      problems.push(`  EXTERNAL_INPUT_REQUIRED says \`${check}\` runs via \`${runBy}\`, which does not exist.`);
+    } else if (!invokes) {
+      problems.push(
+        `  EXTERNAL_INPUT_REQUIRED says \`${check}\` runs via \`${runBy}\`, which no longer invokes it.\n` +
+          `    Either restore the call or reclassify: a gate that runs nowhere is the hole this category records (#4690).`,
+      );
+    }
+  }
   for (const { gen } of UNGATED_GENERATORS) if (!scripts[gen]) problems.push(`  UNGATED_GENERATORS names \`${gen}\`, which package.json no longer has.`);
   for (const { gen, gatedBy } of EXPLICIT_GENERATORS) {
     if (!scripts[gen]) problems.push(`  EXPLICIT_GENERATORS names \`${gen}\`, which package.json no longer has.`);
@@ -277,8 +343,14 @@ if (reconcileOnly) {
   console.log(
     `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
       `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
+      `${EXTERNAL_INPUT_REQUIRED.length} needing an external input, ` +
       `${UNGATED_GENERATORS.length} ungated generators, ${EXPLICIT_GENERATORS.length} explicit ` +
       `manual-only generators, 1 aggregate).\n` +
+      // Named, not just counted: this bucket's whole reason for existing is that a
+      // bare count is what let #4690 read as "someone runs it".
+      EXTERNAL_INPUT_REQUIRED.map(
+        (e) => `  ⚠ cannot run here: ${e.check} — needs ${e.input}; runs in ${e.runBy}.\n`,
+      ).join('') +
       `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
   );
   process.exit(0);
@@ -306,6 +378,15 @@ for (const entry of GATED) {
 // Narrowing is never silent: say what was deliberately not run.
 console.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifact to regenerate): ` +
   NO_GENERATOR.map((n) => n.check).join(', '));
+// Narrowing is never silent, part three — and this one is a different sentence:
+// "deliberately not run" invites the reader to run it, which for these is not an
+// option from this repo. Say what the missing input is and who supplies it.
+if (EXTERNAL_INPUT_REQUIRED.length) {
+  console.log(`Cannot run here (${EXTERNAL_INPUT_REQUIRED.length} source audit(s) whose input this repo cannot produce):`);
+  for (const e of EXTERNAL_INPUT_REQUIRED) {
+    console.log(`  ${e.check} — needs ${e.input}\n    runs in ${e.runBy}; ${e.why}`);
+  }
+}
 if (UNGATED_GENERATORS.length) {
   console.log(`Generated but ungated (${UNGATED_GENERATORS.length}): ` +
     UNGATED_GENERATORS.map((u) => u.gen).join(', ') + ' — nothing verifies these are current.');

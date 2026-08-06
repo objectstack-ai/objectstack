@@ -112,16 +112,42 @@ describe('ObjectStackClient', () => {
             fetch: fetchMock
         });
 
-        const result = await client.meta.getItem('object', 'customer') as any;
+        const result = await client.meta.getItem('object', 'customer');
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/meta/object/customer', expect.any(Object));
-        // `meta.getItem` has no declared return type (unlike the `getItems`
-        // beside it — #5545), so its unwrapped payload is `unknown`. Asserted
-        // structurally rather than cast: same assertion strength, without
-        // pretending this surface is typed (#5449).
-        expect(result).toMatchObject({ type: 'object', name: 'customer' });
+        // #5545: `meta.getItem` now declares `Promise< GetMetaItemResponse >`,
+        // matching the `getItems` beside it. These are TYPED field reads, not a
+        // `toMatchObject` shape probe over an `unknown` payload — `result.type`
+        // and `result.name` compile only while the annotation is there, so
+        // removing it turns these two lines red (TS18046) instead of silently
+        // weakening the assertion. No cast: the `as any` this test carried
+        // (#5449) existed solely because the surface was untyped.
+        expect(result.type).toBe('object');
+        expect(result.name).toBe('customer');
         // Load-bearing: the document lives under `item`, not spread at the top
         // level. A regression to the bare shape fails HERE, not on a missing key.
-        expect(result.item).toMatchObject({ label: 'Customer' });
+        // `item` is `unknown` in the spec schema (the envelope is typed, the
+        // document it carries is not), so the document's own keys stay a
+        // structural assertion — that is the schema's shape, not a gap.
+        expect(result.item).toMatchObject({ name: 'customer', label: 'Customer' });
+    });
+
+    it('meta.saveItem surfaces the ADR-0008 OCC carriers the save response declares (#5545)', async () => {
+        // The real `PUT /api/v1/meta/:type/:name` body, as
+        // `SaveMetaItemResponseSchema` has declared it since #5745: `version`
+        // is the `If-Match` token the optimistic-concurrency chain runs on,
+        // and it is reachable from the SDK without a cast only because
+        // `saveItem` names that type.
+        const { client } = createMockClient({
+            success: true,
+            version: 'sha256:' + 'a'.repeat(64),
+            seq: 7,
+            state: 'active',
+        });
+        const saved = await client.meta.saveItem('object', 'customer', { name: 'customer' });
+        expect(saved.success).toBe(true);
+        expect(saved.version).toBe('sha256:' + 'a'.repeat(64));
+        expect(saved.seq).toBe(7);
+        expect(saved.state).toBe('active');
     });
 
     it('meta.getView speaks the path-param dialect both surfaces accept (#3611)', async () => {

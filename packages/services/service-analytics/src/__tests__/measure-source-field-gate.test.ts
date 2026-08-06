@@ -212,7 +212,14 @@ describe('#4437 — measure source-field gate', () => {
         // reported as a missing one. Whether the query can run at all is the
         // strategy's call (the ObjectQL aggregate path declines cross-object
         // measures outright) and the join allowlist's (ADR-0021 D-C); either
-        // way the answer must not be this gate's INVALID_FIELD.
+        // way the answer must not be THIS GATE's verdict.
+        //
+        // [#5716] `code !== 'INVALID_FIELD'` was a PROXY for "not this gate",
+        // usable only while the strategy's refusal carried no code. It now
+        // carries `INVALID_FIELD` / 400 as well — the same class of mistake, one
+        // wire shape — so the proxy is replaced by what it stood for: the
+        // strategy's own message and metadata, and the ABSENCE of the `field`
+        // this gate sets on every verdict it makes.
         const joined: Cube = {
             name: 'joined_cube',
             title: 'Joined',
@@ -227,13 +234,19 @@ describe('#4437 — measure source-field gate', () => {
 
         const err = await service
             .query({ cube: 'joined_cube', measures: ['remote_sum'] } as any)
-            .catch((e) => e as Error & { code?: string });
+            .catch((e) => e as Error & { code?: string; field?: string; member?: string; param?: string });
 
         expect(err).toBeInstanceOf(Error);
-        expect(err.code).not.toBe('INVALID_FIELD');
         // It got as far as the strategy — i.e. past this gate — and was declined
         // there for the strategy's own declared reason.
         expect(err.message).toMatch(/cannot evaluate a cross-object measure/);
+        // The lie this case prevents: `balance` reported as a missing column of
+        // `showcase_invoice`. This gate always names one in `field`; the strategy
+        // never does.
+        expect(err.message).not.toMatch(/does not have/);
+        expect(err.field).toBeUndefined();
+        expect(err.member).toBe('remote_sum');
+        expect(err.param).toBe('measures');
     });
 
     it('stands down when no field probe is configured — nothing to consult', async () => {

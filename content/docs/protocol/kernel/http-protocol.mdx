@@ -175,7 +175,30 @@ than advertised verbatim (#4828):
 | `staging` | `sandbox` — pre-production and production-like |
 | `development`, `dev` | `development` |
 | `test` | `development` — an ephemeral developer-class run |
-| unset / anything else | `development` — never claims production on a guess |
+| **unset** (absent, or `NODE_ENV=`) | `production` — the conservative reading of "the host did not say" (#5673) |
+| anything else | `development` — never claims production on a guess |
+
+The last two rows answer two different questions and were one row until #5673. **Unset is
+not a spelling**, it is the absence of one, and the rest of the platform already read that
+absence as production: `os start` forces `NODE_ENV=production` when it is unset, and both
+`os serve` and `os doctor` resolve the `.env*` cascade for `NODE_ENV || production`. This
+field is machine-readable — a client uses it to decide whether it is talking to production
+— so a real production deployment whose operator forgot the variable must not be told
+`development`. **An unrecognised spelling** (`qa`, `preview`, `uat`) is a different case: it
+is a guess, and this field never claims production on a guess.
+
+Local development is unaffected: `os dev` runs `serve --dev`, which sets
+`NODE_ENV=development` in-process before the runtime loads. Anything that boots the runtime
+*without* `os dev` — a bare `os serve`, an embedded host, a hand-written container entry
+point — must now set `NODE_ENV=development` explicitly to keep being advertised as such.
+
+<Callout type="warn">
+**The `@objectstack/rest`-served `/api/v1/discovery` document still reads an unset
+`NODE_ENV` as `development`.** #5673 landed on the dispatcher producer only; the second
+producer is tracked in [#5936](https://github.com/objectstack-ai/objectstack/issues/5936).
+Until it lands, the two documents agree on every *set* value and differ only when nothing
+is set.
+</Callout>
 
 <Callout type="warn">
 **Retired in protocol 17 (#4828):** this document used to carry a top-level `features`
