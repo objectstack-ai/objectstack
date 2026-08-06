@@ -188,7 +188,10 @@ const DEBT = {
   },
   '@objectstack/service-automation': {
     errors: 2,
-    note: 'code-tier 2 (TS2741: engine.test.ts misses resumeAuthority, the #4198 discovery that opened #4311).',
+    note: 'code-tier 2 (TS2741: engine.test.ts:2547/2577 build a descriptor literal missing a required '
+      + 'field, the #4198 discovery that opened #4311). The missing field TS names moved from '
+      + 'resumeAuthority to handlerContract in #5561, which made resumeAuthority optional; both literals '
+      + 'omit both, and TS reports one at a time. The count is unchanged by that.',
   },
   '@objectstack/service-cluster': {
     errors: 1,
