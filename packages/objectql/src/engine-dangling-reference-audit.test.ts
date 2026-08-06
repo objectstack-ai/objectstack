@@ -61,7 +61,7 @@ const history = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -140,9 +140,9 @@ describe('[#4551] the engine reports the dangling rows its own `isSystem` exempt
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    stores = mem.stores;
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    stores = stub.stores;
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(permissionSet as any);
     engine.registry.registerObject(binding as any);

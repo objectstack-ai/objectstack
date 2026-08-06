@@ -76,8 +76,8 @@ const sysMetadataHistoryObject = {
     },
 };
 
-/** Minimal in-memory driver; equality-only WHERE. */
-function makeMemoryDriver() {
+/** Minimal stub driver; equality-only WHERE. */
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -157,7 +157,7 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(sysUserObject as any);

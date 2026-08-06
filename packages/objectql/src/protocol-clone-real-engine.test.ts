@@ -2,7 +2,7 @@
 
 /**
  * Integration test for `protocol.cloneData` driving a REAL {@link ObjectQL}
- * engine + a minimal in-memory driver. The unit suite in
+ * engine + a minimal stub driver. The unit suite in
  * `protocol-data.test.ts` stubs the engine; this exercises the production
  * path — registry.getObject (enable.clone + field defs), engine.findOne for
  * the source, and engine.insert for the copy — so the strongest real-engine
@@ -39,7 +39,7 @@ const lockedObject = {
     },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -113,7 +113,7 @@ describe('cloneData — real ObjectQL engine', () => {
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(accountObject as any);

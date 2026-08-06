@@ -43,7 +43,7 @@ const task = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -118,7 +118,7 @@ describe('#4626 — engine writes publish true DataEvents', () => {
       unsubscribe: vi.fn(async () => undefined),
     };
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(task as any);
@@ -216,7 +216,7 @@ describe('#4626 — engine writes publish true DataEvents', () => {
 
   it('publishes nothing at all when no realtime service is configured', async () => {
     const bare = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     bare.registerDriver(driver, true);
     await bare.init();
     bare.registry.registerObject(task as any);
@@ -253,7 +253,7 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
       unsubscribe: vi.fn(async () => undefined),
     };
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(task as any);
@@ -351,7 +351,7 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
 
   it('publishes NOTHING when the driver breaks its count contract — and says so', async () => {
     const offContract = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     // `updateMany` is contracted to resolve the affected count. A driver that
     // resolves something else leaves `matched` unknowable, and `matched` is the
     // entire substance of a bulk event — so none is published.

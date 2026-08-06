@@ -468,7 +468,7 @@ async function seedTasks(engine: ObjectQL, rows: Record<string, unknown>[]): Pro
   return Array.isArray(written) ? written : [written];
 }
 
-function makeMemoryDriver(): any {
+function makeStubDriver(): any {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -528,7 +528,7 @@ function makeMemoryDriver(): any {
 
 async function boot(hooks: Hook[]): Promise<{ engine: ObjectQL; driver: any }> {
   const engine = new ObjectQL();
-  const driver = makeMemoryDriver();
+  const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
   engine.registry.registerObject(taskObject as any);

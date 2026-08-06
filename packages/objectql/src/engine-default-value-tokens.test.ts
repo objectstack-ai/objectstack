@@ -33,7 +33,7 @@ import { DEFAULT_VALUE_TOKEN_CURRENT_USER, DEFAULT_VALUE_TOKEN_NOW } from '@obje
 /** `YYYY-MM-DDTHH:MM:SS.sssZ` — the canonical stored instant (ADR-0053). */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -88,7 +88,7 @@ describe('[#4560] the `current_user` defaultValue token is engine-owned', () => 
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    engine.registerDriver(makeMemoryDriver().driver, true);
+    engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
     engine.registry.registerObject(owned as any);
   });
@@ -145,7 +145,7 @@ describe('[#4597] the `NOW()` defaultValue token is engine-owned too', () => {
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    engine.registerDriver(makeMemoryDriver().driver, true);
+    engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
     engine.registry.registerObject(stamped as any);
   });
@@ -154,7 +154,8 @@ describe('[#4597] the `NOW()` defaultValue token is engine-owned too', () => {
     // Before the fix this threw `ValidationError: seen_at must be a valid
     // datetime (ISO-8601)`: the engine filled the field with the literal
     // string 'NOW()' and its own validator then rejected the insert. The
-    // memory driver has no `formatInput` safety net to hide it behind.
+    // stub driver, like every non-SQL driver, has no `formatInput` safety net
+    // to hide it behind.
     const row: any = await engine.insert('probe_now', {}, { context: { isSystem: true } } as any);
     expect(row.seen_at).not.toBe('NOW()');
     expect(row.seen_at).toMatch(ISO_INSTANT);

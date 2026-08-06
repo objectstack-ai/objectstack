@@ -41,6 +41,35 @@
  * add the flat-input envelope to the thing under test.
  */
 
+/**
+ * ⚠️ `@objectstack/driver-memory` is imported here ON PURPOSE, and this is the
+ * ONLY place in the repository that still consumes it from a test. It is NOT a
+ * migration leftover — do not "finish the job" by deleting or replacing it.
+ *
+ * Why it has to stay: the whole point of this file is a PRODUCT divergence
+ * between two driver families — writing an undeclared field is rejected as a
+ * WHOLE statement by the SQL family, and accepted verbatim by the schemaless
+ * family. Pinning a divergence needs both arms. The SQL arm is `SqlDriver`; the
+ * schemaless arm needs a backend that has no schema to check the key against,
+ * and `InMemoryDriver` is the cheapest honest one (MongoDB behaves the same on
+ * the same `...data` spread, but would put a real database in CI's path).
+ * Delete this arm and the guardrail silently becomes a one-sided assertion
+ * about SQL — the divergence stops being pinned at all.
+ *
+ * Why the freeze does not forbid it: #5499 froze *investment* in driver-memory
+ * (defect fixes, feature work). Using it as a reference implementation is not
+ * investment, and nothing here fixes or extends it. Ruling: #5704, maintainer
+ * 2026-08-06, Q2 = B ("keep, in this one place, with a comment saying so").
+ * Consequence, also ruled there: `packages/runtime`'s `driver-memory` devDep
+ * stays for the long term — this import is its one and only consumer.
+ *
+ * Everything else that used to look like a driver-memory test consumer was a
+ * hand-written local stub whose NAME merely said "memory" — in packages that
+ * do not even depend on the driver. #5704/#5784 renamed them all to
+ * `makeStubDriver`, precisely so that grepping for the driver lands here, and
+ * only here.
+ */
+
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

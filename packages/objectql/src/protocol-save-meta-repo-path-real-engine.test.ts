@@ -2,7 +2,7 @@
 
 /**
  * PR-10d.4 — Integration test for the repository write path using a REAL
- * {@link ObjectQL} engine driving a minimal in-memory driver. The PR-10d.3
+ * {@link ObjectQL} engine driving a minimal stub driver. The PR-10d.3
  * unit suite uses a hand-rolled stub at the *engine* level; the rubber-duck
  * review flagged that as a drift risk because production semantics
  * (especially the strict `where: { id }` requirement for `engine.update`)
@@ -32,10 +32,10 @@ const sysMetadataObject = {
 };
 
 /**
- * Minimal in-memory driver covering only what `SysMetadataRepository`
+ * Minimal stub driver covering only what `SysMetadataRepository`
  * exercises. Equality-only WHERE evaluation; one record store per object.
  */
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -124,7 +124,7 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject as any);
@@ -224,7 +224,7 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject as any);
