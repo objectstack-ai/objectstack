@@ -49,8 +49,10 @@ const crmApp = defineApp({
 | `isDefault` | `boolean` | optional | Is default app |
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
 | `areas` | `NavigationArea[]` | optional | Partition navigation by business domain — see [Areas](#areas) |
+| `contextSelectors` | `AppContextSelector[]` | optional | Sidebar scope dropdowns whose value is injected into navigation items — see [Context Selectors](#context-selectors) |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
+| `defaultAgent` | `string` | optional | Platform agent bound to this app's ambient AI chat — see [Default Agent](#default-agent) |
 
 <Callout type="warn">
   **Older app samples no longer parse** — check yours before copying it forward.
@@ -410,6 +412,170 @@ const fieldServiceApp = defineApp({
 });
 ```
 
+## Context Selectors
+
+A **context selector** is an app-level *scope* dropdown — a Package filter, an
+Environment switcher, a Locale picker — rendered at the top of the sidebar,
+above the navigation tree. Its current value is published under the selector's
+own `id` and substituted into navigation items as `{<id>}`, so picking an option
+re-scopes every item below it without the value being wired into each item by
+hand.
+
+The substitution is the one already used by `{current_user_id}` /
+`{current_org_id}` (see [Object Navigation](#object-navigation)). The active
+value is injected into:
+
+- an object item's `recordId`, and each value in its `filters` map;
+- a `page` or `component` item's string `params` values.
+
+A variable with no active value resolves to nothing, and the entry it appears in
+is dropped from the resolved URL rather than emitted empty — an unscoped shell
+still produces well-formed links.
+
+### Selector properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `string` | ✅ | Selector id (`snake_case`) — **also the template-variable name**: `id: 'active_package'` is referenced as `{active_package}` |
+| `label` | `string` | ✅ | Dropdown label |
+| `icon` | `string` | optional | Icon name (Lucide) |
+| `optionsSource` | `object` | ✅ | Where the dropdown's options come from — see below |
+| `allValue` | `string` | optional | Sentinel meaning "nothing concrete is selected yet" (default: `''`) |
+| `persist` | `'query' \| 'session' \| 'none'` | optional | How the selection survives navigation (default: `'query'`) |
+
+`optionsSource` re-uses an existing REST surface instead of requiring a bespoke
+option API: the shell fetches `endpoint` and maps each returned row to one
+option.
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `endpoint` | `string` | ✅ | REST endpoint returning the option rows (e.g. `/api/v1/packages`) |
+| `valueKey` | `string` | optional | Row property used as the option value; dotted paths allowed (default: `id`) |
+| `labelKey` | `string` | optional | Row property used as the option label; dotted paths allowed (default: `name`) |
+| `filter` | `{ key, op, value }[]` | optional | Predicates (AND) a row must satisfy before it becomes an option |
+
+Each `filter` entry compares the dotted path `key` against `value` using `op` —
+`eq` (default), `ne`, `in` or `nin`. That is what keeps a shared endpoint
+generic while an individual selector narrows what it offers.
+
+### A selector is a mandatory scope
+
+There is no "All" row, and no key asks for one. A selector exists to scope a
+surface, so an "All" choice would clear the very thing it declares — on Studio's
+package scope that would mean listing the platform's own `system` / `cloud`
+kernel metadata to a developer who scoped to their own package. The shell
+instead **auto-selects the first option** as soon as the list resolves and
+nothing concrete is selected yet.
+
+That is what `allValue` names: the value the scope variable holds *before* a
+concrete pick — not an "All" option. Empty string is almost always right; set it
+only if a real option value would collide with `''`. To widen what a selector
+offers, widen `optionsSource.filter`.
+
+<Callout type="warn">
+  **One scope per app today.** `contextSelectors` is an array, but the shipped
+  shell tracks a single active scope: the selection is reflected onto the URL
+  under one fixed query key that *every* declared selector reads back, so a
+  second selector mirrors the first instead of scoping independently. Declare
+  one selector per app.
+</Callout>
+
+### Retired selector keys
+
+<Callout type="warn">
+  `contextSelectors[].includeAll` and `contextSelectors[].placement` were removed
+  in `@objectstack/spec` 17.0.0 (#4509, ADR-0049 enforce-or-remove) and are now
+  **refused at parse time** rather than ignored, so one leftover key fails the
+  whole save. Run `os migrate meta --from 16` to rewrite existing sources
+  automatically.
+
+  - `includeAll` — not merely unread, deliberately **disobeyed**, for the reason
+    above: the renderer never offered an "All" row regardless of the flag, so
+    `includeAll: false` hardened nothing and `includeAll: true` unlocked nothing.
+    Delete the key; widen `optionsSource.filter` to widen the choices.
+  - `placement` — no renderer ever read it. Selectors always render in the
+    sidebar header block, and `'topbar'` placed nothing in the topbar. Delete
+    the key.
+
+  Both carried schema **defaults**, which is why removal was the only channel
+  that could reach an author: a default materialises at parse time, so no lint
+  could tell an authored value from one the schema supplied.
+</Callout>
+
+### Example — a package scope
+
+The platform's own Studio app is the shipped example: one selector scopes every
+metadata surface in its sidebar to the selected package.
+
+{/* os:check */}
+```typescript
+import { defineApp } from '@objectstack/spec';
+
+const studioApp = defineApp({
+  name: 'studio',
+  label: 'Studio',
+  icon: 'hammer',
+
+  contextSelectors: [
+    {
+      // Referenced below as `{active_package}`.
+      id: 'active_package',
+      label: 'Package',
+      icon: 'package',
+      optionsSource: {
+        endpoint: '/api/v1/packages',
+        valueKey: 'manifest.id',
+        labelKey: 'manifest.name',
+        // Keep the platform's own kernel packages out of a developer-facing
+        // scope: only project-scoped packages are selectable.
+        filter: [{ key: 'manifest.scope', op: 'nin', value: ['system', 'cloud'] }],
+      },
+      allValue: '',
+      persist: 'query',
+    },
+  ],
+
+  navigation: [
+    // One entry, scoped to whichever package the dropdown has active.
+    {
+      id: 'nav_objects',
+      type: 'component',
+      label: 'Objects',
+      icon: 'database',
+      componentRef: 'metadata:resource',
+      params: { type: 'object', package: '{active_package}' },
+    },
+  ],
+
+  requiredPermissions: ['studio.access'],
+});
+```
+
+## Default Agent
+
+`defaultAgent` binds this app's **ambient AI chat** — the assistant the shell
+opens inside the app — to one platform agent, so the user never picks from a
+roster. It is a surface-binding knob, not a custom-agent slot:
+
+- **Omit it** on a data app. `ask` is the implicit default for every app that
+  does not pin one, which is what an ordinary data surface wants.
+- **Set `'build'`** on an *authoring* surface (Studio is the built-in example),
+  so the app opens the metadata-authoring assistant instead.
+
+Those two platform agents are the whole resolvable set. Tenant and app-package
+custom agents were withdrawn in ADR-0063, so a name outside it — `sales_copilot`,
+say — parses and then binds nothing: the chat surface falls back to the platform
+default at resolution time. Give an app deeper AI capability by authoring
+**skills**, which attach to the platform agents by surface affinity — see
+[AI Agents](/docs/ai/agents).
+
+<Callout type="info">
+  The in-product chat runtime this key binds ships in **ObjectOS**, not in the
+  open-source framework, which reaches your metadata over MCP (BYO-AI) instead.
+  The key is authorable either way — in the open edition there is simply no
+  in-product chat surface for it to bind.
+</Callout>
+
 ## Branding
 
 Customize the visual appearance of the app:
@@ -500,3 +666,4 @@ const projectApp = defineApp({
 - [Dashboard Metadata](/docs/ui/dashboards) — Dashboards referenced from navigation
 - [View Metadata](/docs/ui/views) — Views displayed within navigation items
 - [Permission Metadata](/docs/permissions/permission-metadata) — Access control for apps
+- [AI Agents](/docs/ai/agents) — The two platform agents `defaultAgent` binds
