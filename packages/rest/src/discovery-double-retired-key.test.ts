@@ -55,6 +55,18 @@ import { fileURLToPath } from 'node:url';
 
 const SRC_DIR = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * This file is excluded from its own scan, EXPLICITLY.
+ *
+ * The docblock above quotes the defective double verbatim — that is the point
+ * of it — so the scanner does match a "double" here. It happens to escape the
+ * key check only because a docblock line prefixes the key with `* `, which the
+ * `[{,]\s*` lead-in does not accept. Depending on that is depending on comment
+ * formatting: re-wrap the docblock and this pin fails on its own prose. Name
+ * the exclusion instead of inheriting the luck.
+ */
+const SELF = 'discovery-double-retired-key.test.ts';
+
 /** Matches an `endpoints` key at the start of a line or after `{` / `,`. */
 const ENDPOINTS_KEY = /(^|[{,])\s*endpoints\s*:/;
 
@@ -94,13 +106,15 @@ function collectDoubles(file: string, source: string): Double[] {
 }
 
 const DOUBLES: Double[] = readdirSync(SRC_DIR)
-    .filter((f) => f.endsWith('.test.ts'))
+    .filter((f) => f.endsWith('.test.ts') && f !== SELF)
     .flatMap((f) => collectDoubles(f, readFileSync(join(SRC_DIR, f), 'utf8')));
 
 describe('[#5674] getDiscovery doubles carry the producer key, not the retired one', () => {
     it('finds the doubles it claims to police (anti-vacuity)', () => {
-        // 26 doubles across 25 files when this pin was written. The floor is
-        // deliberately slack — it exists so a scanner that matches NOTHING
+        // 27 doubles across 26 files when this pin was written (the 26 #5674
+        // corrected, plus `rest-route-ledger.conformance.test.ts`, which
+        // resolves to a bare `{}` and never spelled the retired key). The floor
+        // is deliberately slack — it exists so a scanner that matches NOTHING
         // fails instead of reporting a clean sweep of an empty set.
         expect(
             DOUBLES.length,
