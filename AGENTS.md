@@ -417,7 +417,7 @@ regenerate those.
 
 **No `check:` script regenerates anything — that is the point of the split, not an
 oversight.** `check:docs` used to begin with `pnpm gen:schema`, which rewrites two
-*tracked* files (`json-schema.manifest.json`, `authorable-surface.json`) whenever they
+*tracked* files (`json-schema.manifest/`, `authorable-surface/`) whenever they
 are behind: running the gate edited your working tree and reported nothing, so a
 `check:generated` run on a stale manifest printed a red `check:authorable-surface`
 over a file the gate two lines below had already quietly fixed (#4711, #4723). The

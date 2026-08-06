@@ -73,7 +73,7 @@ const UPDATE_IMPORT_BASELINE = process.argv.includes('--update-import-baseline')
 // Until #4723 the question could not come up: `check:docs` was
 // `pnpm gen:schema && tsx scripts/build-docs.ts --check`, so the tree was rebuilt
 // on every run. That first step is what made a script called `check:` WRITE two
-// TRACKED files — `json-schema.manifest.json` and `authorable-surface.json` are
+// TRACKED files — `json-schema.manifest/` and `authorable-surface/` are
 // projections `gen:schema` repairs whenever they are behind — so running the gate
 // silently edited the tree of whoever ran it and left the staleness unreported.
 // #4711 removed exactly that from `--check`; this was the same defect at a

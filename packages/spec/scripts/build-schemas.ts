@@ -614,12 +614,12 @@ if (manifestChanged && !CHECK) {
 // inside them — and for a metadata-driven platform those keys ARE the
 // third-party API: what an author (very often an AI, ADR-0033) may write.
 //
-// Both existing witnesses look elsewhere. `api-surface.json` records exported
+// Both existing witnesses look elsewhere. `api-surface/` records exported
 // `name (kind)`, and `api-surface-signatures.json` hashes each `defineX`
 // factory's type as TypeScript PRINTS it — a reference (`z.input<typeof
 // ActionSchema>`), never structurally expanded, so member-level narrowing does
 // not reach the hash. `spec-changes.json` inherits the same blind spot: its
-// added/removed arrays are a diff of `api-surface.json`. So #3883 removed three
+// added/removed arrays are a diff of `api-surface/`. So #3883 removed three
 // authorable keys with all three witnesses green, and #3733 did the same by
 // ACCIDENT — `dataQuality` / `cached` outlived their keys and were silently
 // stripped. ADR-0059 §5 deferred this gate "until a narrowing actually slips
