@@ -8,10 +8,10 @@ description: >
   resolving missing-translation warnings. Do not use for general i18n
   library questions unrelated to ObjectStack bundles.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---

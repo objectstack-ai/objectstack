@@ -214,14 +214,38 @@ describe('refused declarations vs. the derived placeholder (#4967 Part 1)', () =
     });
   });
 
-  it('REVERSE: dropping that name from the list lets the derivation overwrite the admin row', async () => {
-    // Why the unowned path checks for an EXISTING row instead of always
-    // falling through: the derived defaults refresh label/description on any
-    // row they find.
+  it('SECOND LAYER (#5876): dropping that name from the list no longer overwrites the admin row', async () => {
+    // This pin was written by #5875 (as `REVERSE: dropping that name from the
+    // list lets the derivation overwrite the admin row`) to justify why the
+    // unowned path checks for an EXISTING row instead of always falling
+    // through: back then the derived defaults refreshed label/description on
+    // ANY row they found, so the skip list was the ONLY thing standing between
+    // an admin-authored row and a humanized placeholder. That fact is fixed —
+    // #5876 guards the derived reconcile by `managed_by`, so the write site
+    // now refuses the clobber even when the call site forgets to suppress it.
+    //
+    // The suppression list keeps its job (it is what states the boot-order
+    // contract, and it stops the derivation doing work on names another pass
+    // owns), but it is no longer load-bearing for THIS shape — which is the
+    // point of a second layer.
     const ql = makeQl([]);
     ql.rows.push({ id: 'cap_admin', name: 'showcase.export_data', label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin' });
     await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: [] });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')?.label).toBe('Showcase Export Data');
+    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
+      label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin',
+    });
+  });
+
+  it('DISCRIMINATION (#5876): with the name dropped, a PLATFORM placeholder is still refreshed', async () => {
+    // The guard above must not read as "the derivation stopped writing". Same
+    // fixture, same empty skip list, provenance flipped to the one the derived
+    // pass owns → the reconcile happens exactly as it always did.
+    const ql = makeQl([]);
+    ql.rows.push({ id: 'cap_derived', name: 'showcase.export_data', label: 'Stale Placeholder', description: 'Stale.', managed_by: 'platform' });
+    await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: [] });
+    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
+      label: 'Showcase Export Data', description: 'Capability showcase.export_data.', managed_by: 'platform',
+    });
   });
 
   it('FOREIGN owner: suppresses, because the other package authored that row', async () => {
