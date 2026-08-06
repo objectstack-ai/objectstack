@@ -58,7 +58,7 @@ function mockServer() {
 }
 function mockProtocol() {
   return {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([]),
   };

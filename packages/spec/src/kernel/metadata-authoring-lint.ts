@@ -359,13 +359,56 @@ export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKey
       const item = items[i];
       if (!isPlainRecord(item)) continue;
       const name = typeof item.name === 'string' && item.name ? item.name : String(i);
-      const basePath = `${collection}.${name}`;
-      if (posture.mode === 'strip') {
-        lintAuthoredRecordKeys(item, posture.keys, guidance, type, basePath, out);
-      }
-      descend(schema, item, basePath, '', type, guidance, out, 0);
+      out.push(...lintUnknownKeysAgainstSchema(schema, item, type, `${collection}.${name}`, guidance));
     }
   }
+  return out;
+}
+
+/**
+ * Report every key an authored VALUE sets — at its own level and at every
+ * strip-mode object below it — that `schema` does not declare.
+ *
+ * This is the body {@link lintUnknownAuthoringKeys} runs per metadata item,
+ * lifted so a caller holding its own (schema, value) pair can run the same walk
+ * without re-deriving the posture rules. The rules are subtle enough to be worth
+ * having exactly once: which wrapper nodes to peel (#4488/#5074's two opposite
+ * pipes), when a union may be descended, and the strip/strict/passthrough split
+ * that keeps this lint from becoming a second voice over a parse that already
+ * rejects loudly.
+ *
+ * The caller that needs it (#5068) is `@objectstack/lint`'s component-props
+ * gate: `PageComponent.properties` is `z.record(z.string(), z.unknown())`, so
+ * the walk above stops dead at the carrier and everything under it is
+ * unjudged — the props schema that DOES declare those keys
+ * (`ComponentPropsMap[type]`) is reachable only by dispatching on the sibling
+ * `type`, which no schema can express. The gate dispatches, then calls this.
+ *
+ * Pure and side-effect free. Runs on the authored (unparsed) value; after the
+ * parse the unknown keys no longer exist to report.
+ *
+ * @param schema The Zod schema that declares `value`'s shape.
+ * @param value The authored value.
+ * @param surface The name a finding reports under (a metadata type, or any
+ *   caller-chosen surface id such as a page-component type).
+ * @param basePath Dotted path of `value` itself; every finding's `path` extends it.
+ * @param guidance Optional curated rename/retirement table for this surface.
+ */
+export function lintUnknownKeysAgainstSchema(
+  schema: unknown,
+  value: unknown,
+  surface: string,
+  basePath: string,
+  guidance: Readonly<Record<string, { to?: string; why?: string }>> = EMPTY_GUIDANCE,
+): UnknownAuthoringKeyFinding[] {
+  const out: UnknownAuthoringKeyFinding[] = [];
+  if (!isPlainRecord(value)) return out;
+  const posture = keyPosture(schema);
+  if (!posture || posture.keys.size === 0) return out;
+  if (posture.mode === 'strip') {
+    lintAuthoredRecordKeys(value, posture.keys, guidance, surface, basePath, out);
+  }
+  descend(schema, value, basePath, '', surface, guidance, out, 0);
   return out;
 }
 

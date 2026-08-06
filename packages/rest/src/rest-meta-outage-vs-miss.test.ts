@@ -42,7 +42,7 @@ function makeRes() {
 function setup(protocolOverrides: Record<string, unknown> = {}) {
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({
-            version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },
+            version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
         }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn().mockResolvedValue([]),

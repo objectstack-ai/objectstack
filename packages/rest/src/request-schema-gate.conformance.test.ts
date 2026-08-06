@@ -60,7 +60,7 @@ function setup() {
     deleteManyData: vi.fn().mockResolvedValue({ success: true, total: 0, succeeded: 0, failed: 0, results: [] }),
   };
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([{ name: 'invoice' }]),
     getMetaItem: vi.fn().mockResolvedValue({}),

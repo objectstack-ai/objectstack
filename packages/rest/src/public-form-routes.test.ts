@@ -59,7 +59,7 @@ const ticketObject = {
 function buildServer(sections: any[]) {
   const createData = vi.fn().mockResolvedValue({ object: 'ticket', id: 'rec_1', record: {} });
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: { type: string }) => {
       if (type === 'view') return [formView(sections)];

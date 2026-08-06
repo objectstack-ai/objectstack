@@ -384,7 +384,7 @@ describe('[#5462] a real unknown object is still 404 OBJECT_NOT_FOUND, still sil
         // trace per request (#4886).
         const rest = mountRest({
             getDiscovery: vi.fn().mockResolvedValue({
-                version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },
+                version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
             }),
             getMetaTypes: vi.fn().mockResolvedValue([]),
             findData: vi.fn().mockRejectedValue(driverError('no such table: ghost')),
@@ -416,7 +416,7 @@ describe('[#5462] the declared-status band is untouched', () => {
         );
         const rest = mountRest({
             getDiscovery: vi.fn().mockResolvedValue({
-                version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },
+                version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
             }),
             getMetaTypes: vi.fn().mockResolvedValue([]),
             saveMetaItem: vi.fn().mockRejectedValue(err),
