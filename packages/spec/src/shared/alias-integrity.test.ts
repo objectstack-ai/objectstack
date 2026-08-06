@@ -577,6 +577,13 @@ describe('alias integrity — every table is a true claim about its schema', () 
  * surface — fails the target criterion and has to be argued for here. The
  * staleness test below is the other half: an entry nothing uses is deleted, so
  * this list cannot quietly outlive the tables it excuses.
+ *
+ * The seventh entry arrived by that route. #5555 fixed the defect this gate
+ * found — the four "start expanded" spellings redirecting to `expanded` on the
+ * eight variants that lack it — and the fix is precisely a demotion from bare
+ * key name to prose, so the tolerance that pinned it was deleted and this list
+ * grew by one. It is one string for four alias keys because they share a single
+ * answer: the key you want lives on `group`.
  */
 const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
   "type: 'object' (with objectName)",
@@ -585,6 +592,7 @@ const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
   "type: 'dashboard' (with dashboardName)",
   "type: 'report' (with reportName)",
   "type: 'component' (with componentRef)",
+  "type: 'group' (with expanded)",
 ]);
 
 /** The surface family the prose targets are allowed on, and nowhere else. */
@@ -593,38 +601,19 @@ const PROSE_TARGET_SURFACE = /^this `[a-z]+` navigation item$/;
 const isProseTarget = (surface: string, target: string): boolean =>
   PROSE_TARGET_SURFACE.test(surface) && PROSE_ALIAS_TARGETS.has(target);
 
-/**
- * A **defect this gate found**, pinned shrink-only rather than exempted: the
- * four spellings of "start expanded" that `NAV_ITEM_ALIASES` redirects to
- * `expanded` (#5555).
+/*
+ * The shrink-only tolerance that used to sit here (`isPinnedExpandedDefect`,
+ * 32 occurrences) is GONE, not relaxed: #5555 fixed the defect it pinned.
  *
- * `expanded` is declared on the `group` variant alone, but the shared alias
- * table is stamped into all nine, so on the other eight the redirect names a
- * key that variant also rejects — ledger finding 7's second rejection, from the
- * campaign built to end it. The mechanism is visible in the file: the six
- * CROSS-VARIANT payload keys immediately below get prose targets
- * (`type: 'object' (with objectName)`) precisely because a bare key name would
- * mislead; these four are cross-variant too, and were written in the shared
- * table where that was not apparent.
- *
- * Distinguished from {@link PROSE_ALIAS_TARGETS} on purpose. That list says
- * "this is right"; this one says "this is wrong, it is 32 occurrences of one
- * mistake, and the fix belongs to the schema rather than the gate" — the fix
- * rewrites author-facing message text in `ui/app.zod.ts`, which #5483's
- * transitional guard is explicitly not allowed to touch.
- *
- * Structural rather than a list of 32 strings, so the tolerance cannot widen by
- * accident: only this alias key, only this target, only this surface family.
- * The count below is the ratchet.
+ * It held the four "start expanded" spellings that `NAV_ITEM_ALIASES` redirected
+ * to `expanded` on all nine nav variants, while `expanded` is declared on `group`
+ * alone — so on the other eight the redirect named a key that variant also
+ * rejected (ledger finding 7's second rejection, from the campaign built to end
+ * it). The fix moved those four into the per-variant assembly: `group` keeps the
+ * bare key name, the other eight answer with prose, so the seventh entry in
+ * PROSE_ALIAS_TARGETS above is where this debt went. Claim 2 below now judges
+ * the family with no tolerance at all — a re-introduction lands in `broken`.
  */
-const EXPANDED_CROSS_VARIANT_KEYS: ReadonlySet<string> = new Set([
-  'defaultopen', 'open', 'collapsed', 'isopen',
-]);
-
-const isPinnedExpandedDefect = (surface: string, written: string, target: string): boolean =>
-  PROSE_TARGET_SURFACE.test(surface)
-  && target === 'expanded'
-  && EXPANDED_CROSS_VARIANT_KEYS.has(written);
 
 /**
  * Guidance filed once for a table stamped nine times, legal on two of them.
@@ -738,22 +727,17 @@ describe('alias integrity — direct `strictUnknownKeyError` tables (#5483)', ()
     // is declared but accepts nothing" is invisible until the call site
     // migrates (#5593).
     const broken: string[] = [];
-    const pinned: string[] = [];
     for (const d of DIRECT) {
       const known = new Set(d.options.knownKeys);
       for (const [written, target] of Object.entries(d.options.aliases ?? {})) {
         if (known.has(target) || isProseTarget(d.options.surface, target)) continue;
-        const report = `${directEntry(d, written, target)} — \`${target}\` is not a known key here`;
-        if (isPinnedExpandedDefect(d.options.surface, written, target)) pinned.push(report);
-        else broken.push(report);
+        broken.push(`${directEntry(d, written, target)} — \`${target}\` is not a known key here`);
       }
     }
+    // No tolerance: #5555 closed the last one (see the note above
+    // `VARIANT_LEGAL_GUIDANCE`), so every direct table answers this claim
+    // outright — including the nav family that used to carry the 32.
     expect(broken.sort()).toEqual([]);
-    // The known defect, ratcheted (#5555). Shrink-only: fixing a variant drops
-    // the number, and nothing else can raise it — `isPinnedExpandedDefect` is
-    // structural, so a new broken target anywhere (including a fifth spelling
-    // of "expanded" on this very family) lands in `broken` above instead.
-    expect(pinned.length, 'the pinned #5555 tolerance grew; it may only shrink').toBeLessThanOrEqual(32);
   });
 
   it('every prose-target exemption is still load-bearing', () => {

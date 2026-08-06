@@ -28,8 +28,8 @@ not been verified (may 501 at runtime).
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutesSchema, DiscoverySchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
-import type { ApiRoutes, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiRoutesSchema.parse(data);
@@ -69,13 +69,27 @@ const result = ApiRoutesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ |  |
 | **version** | `string` | ✅ |  |
-| **environment** | `Enum<'production' \| 'sandbox' \| 'development'>` | ✅ |  |
+| **environment** | `Enum<'production' \| 'sandbox' \| 'development'>` | ✅ | Deployment posture a discovery response advertises. Deliberately three coarse buckets — a client reads this to answer "am I talking to production?", not to identify a specific environment (that is `sys_environment` / EnvironmentTypeSchema, a richer 7-member taxonomy). |
 | **routes** | `{ data: string; metadata: string; discovery?: string; ui?: string; … }` | ✅ |  |
 | **locale** | `{ default: string; supported: string[]; timezone: string }` | ✅ |  |
 | **services** | `Record<string, { enabled: boolean; status: Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>; handlerReady?: boolean; route?: string; … }>` | ✅ | Per-service availability map keyed by CoreServiceName |
 | **capabilities** | `Record<string, { enabled: boolean; features?: Record<string, boolean>; description?: string }>` | optional | Hierarchical capability descriptors for frontend intelligent adaptation |
 | **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
+| **scoping** | `{ enabled: boolean; resolution: Enum<'required' \| 'optional' \| 'auto'>; scoped: boolean; environmentId?: string }` | optional | Environment-scoping posture, added by the REST discovery endpoint |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
+
+
+---
+
+## DiscoveryEnvironment
+
+Deployment posture a discovery response advertises. Deliberately three coarse buckets — a client reads this to answer "am I talking to production?", not to identify a specific environment (that is `sys_environment` / EnvironmentTypeSchema, a richer 7-member taxonomy).
+
+### Allowed Values
+
+* `production`
+* `sandbox`
+* `development`
 
 
 ---

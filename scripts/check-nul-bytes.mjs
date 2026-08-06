@@ -183,11 +183,41 @@
 // There is intentionally NO per-file exemption hatch. No tracked file in this
 // repo carries a legitimate raw control byte; if one ever genuinely needs to,
 // that is a decision to take in the open, not a line to add to a skip-list.
+//
+// ## The character class is written down once (#5646)
+//
+// The scanned set exists for two audiences: as the IS_SCANNED table below, which
+// is what the gate actually scans, and as a PCRE character class in the agent
+// instructions that tell an author to self-scan beyond the gate. The second was
+// a hand transcription of the first, and that transcription drifted twice in one
+// day: #5577 found the self-scan class missing `\x7f` months after #5460 put DEL
+// in the table, and #5579 found the harm argument next to it carrying only the
+// part that is true of NUL.
+//
+// #5579 fixed the prose side by making it CITE this header instead of restating
+// it. The class itself cannot be handled that way -- an author needs a command
+// line they can paste -- so it is handled the other way round: `scannedCharClass()`
+// DERIVES the class from the table, and `--self-test` asserts that every
+// registered reference spells it byte-for-byte identically. Drift is red at the
+// same gate that scans the tree.
+//
+// Deliberately an assertion and not codegen. The files that carry the class are
+// hand-written prompts; generating them would buy the same guarantee at the cost
+// of turning agent instructions into build output. An assertion leaves them
+// hand-written and merely refuses to let them be WRONG, and it names the exact
+// string to paste when they are.
+//
+// The registered set is an explicit ledger (see CHAR_CLASS_REFERENCES), like the
+// repo's other shrink-only gates: a new file spelling the class out has to be
+// added to it, and a file that stops spelling it out has to be removed from it
+// on purpose. Extraction failure is RED, never a silent skip -- the class
+// vanishing from a self-scan command is the same defect as it drifting.
 
 import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The scanned set as a 256-entry lookup: every ASCII control character except
@@ -211,6 +241,83 @@ IS_SCANNED[0x0d] = 0; // CR
 // "control character" agree -- C's `iscntrl` and the regex class \p{Cc} both
 // include it.
 IS_SCANNED[0x7f] = 1;
+
+/**
+ * The scanned set as a PCRE character class, e.g. the argument of
+ * `grep -naP '<class>'`, derived from the table above rather than written out.
+ *
+ * This is the spelling for HUMANS and for grep, as opposed to `escapeFor()`,
+ * which is the JS `\uNNNN` spelling an author should write in source. Both are
+ * built from byte values, never from a literal: this file is in its own scan
+ * surface (#5646, #4890).
+ *
+ * Runs of three or more bytes collapse to a range; a run of one or two is
+ * spelled out, because `\x0b-\x0c` is no shorter than `\x0b\x0c` and reads
+ * worse. That rule is a CONVENTION, not a semantic property -- both spellings
+ * match the same bytes -- and it is fixed here precisely because the reference
+ * check below demands byte equality: something has to be canonical, and it is
+ * this function. When a byte is added or removed, the emitted string changes and
+ * the self-test prints the new one to paste into every registered reference.
+ */
+export function scannedCharClass() {
+  const esc = (byteValue) => `\\x${byteValue.toString(16).padStart(2, '0')}`;
+  let out = '';
+  for (let b = 0; b < 256; b++) {
+    if (IS_SCANNED[b] !== 1) continue;
+    let end = b;
+    while (end + 1 < 256 && IS_SCANNED[end + 1] === 1) end++;
+    const run = end - b + 1;
+    out += run >= 3 ? `${esc(b)}-${esc(end)}` : Array.from({ length: run }, (_, i) => esc(b + i)).join('');
+    b = end;
+  }
+  return `[${out}]`;
+}
+
+/**
+ * Every file that spells the scanned set out as a character class, and how to
+ * find it there. `--self-test` asserts each extracted spelling equals
+ * `scannedCharClass()` byte for byte (#5646).
+ *
+ * `anchor` matches the SURROUNDINGS of the class and captures the class itself.
+ * It deliberately contains no part of the class: an anchor that did would stop
+ * matching on exactly the drift it exists to catch, turning a mismatch (which
+ * reports both spellings) into an extraction failure (which cannot).
+ *
+ * Registering a file makes its copy of the class immutable-except-in-step. Not
+ * registered, on purpose:
+ *
+ *   - `.changeset/control-byte-gate-scans-*.md` and the published CHANGELOGs.
+ *     Those are HISTORICAL RECORDS of one widening each, and one of them states
+ *     the pre-DEL set correctly for the change it describes. Forcing them to
+ *     equal today's set would falsify the record.
+ *   - The prose ENUMERATIONS of the same bytes -- this header's opening line and
+ *     the `.github/workflows/lint.yml` step comment. Those are sentences, not
+ *     pasteable classes; prose stays on the #5579 footing -- cite this header,
+ *     do not restate it. (Which is why this list names them rather than quoting
+ *     them: a ledger entry that spelled the bytes out would be one more copy.)
+ *   - The non-ASCII guard `[^\x00-\x7f]` quoted in the isLikelyEmail changeset
+ *     and the plugin-auth CHANGELOG: a different regex about input validation,
+ *     unrelated to this set.
+ */
+const CHAR_CLASS_REFERENCES = [
+  {
+    file: '.claude/agents/os-dev.md',
+    site: 'the byte-discipline self-scan command line',
+    // The single-quoted PCRE argument of `grep -naP`.
+    anchor: /grep -naP '([^']*)'/g,
+  },
+  {
+    file: 'scripts/check-nul-bytes.mjs',
+    site: "this header's own pasteable rendering of the scanned set",
+    // The backticked class on the line after the word "Equivalently".
+    anchor: /Equivalently\r?\n\/\/ `([^`]*)`/g,
+  },
+];
+
+/** The repo this script lives in -- resolved from the script, so cwd cannot lie. */
+function scriptRepoRoot() {
+  return join(dirname(fileURLToPath(import.meta.url)), '..');
+}
 
 /**
  * The escape an author should have written for a byte, as TEXT.
@@ -427,6 +534,57 @@ byte's name or the escape TEXT -- never the byte itself.`);
 // function main() calls -- over it. Every control byte below is produced at
 // runtime from a byte value; none is written as a literal, because this file is
 // in its own scan surface and a literal would make the guard fail on itself.
+
+/**
+ * Every registered reference spells the scanned set exactly as this script emits
+ * it (#5646). Reads the real files in the repo the script lives in -- the point
+ * is the checked-in text, so there is nothing to fixture.
+ *
+ * Three ways this goes red, all of them drift:
+ *   1. a registered file is unreadable -- de-registering is a decision, not a
+ *      side effect of deleting or renaming;
+ *   2. the anchor finds nothing -- the class disappearing from a self-scan
+ *      command line leaves the instruction useless, so a silent skip here would
+ *      be the #4690 anti-pattern applied to the gate that exists to stop it;
+ *   3. an extracted spelling differs from the emitted one, in any byte.
+ */
+function checkCharClassReferences(root, assert) {
+  const canonical = scannedCharClass();
+  assert(
+    CHAR_CLASS_REFERENCES.length > 0,
+    'the character-class reference ledger is empty -- with no registered file this check asserts nothing',
+  );
+
+  for (const ref of CHAR_CLASS_REFERENCES) {
+    let text = null;
+    try {
+      text = readFileSync(join(root, ref.file), 'utf8');
+    } catch {
+      // fall through to the assertion below, which reports it as drift
+    }
+    assert(
+      text !== null,
+      `${ref.file} is a registered character-class reference but could not be read -- restore it, or remove it from CHAR_CLASS_REFERENCES on purpose`,
+    );
+    if (text === null) continue;
+
+    const found = [...text.matchAll(ref.anchor)].map((m) => m[1]);
+    assert(
+      found.length > 0,
+      `${ref.file}: found no character class at the registered anchor (${ref.site}). Either the class was removed -- ` +
+        `then de-register it, since an instruction to self-scan without a class to scan for is worse than none -- or the ` +
+        `surrounding text moved, in which case update the anchor. Expected to find: ${canonical}`,
+    );
+    for (const spelling of found) {
+      assert(
+        spelling === canonical,
+        `${ref.file} (${ref.site}) spells the scanned set as ${spelling}, but this gate scans ${canonical}. ` +
+          `The IS_SCANNED table is authoritative: paste the gate's spelling into the reference (#5577 was this drift, ` +
+          `a self-scan class missing \\x7f for months after #5460 added DEL to the table).`,
+      );
+    }
+  }
+}
 
 function selfTest() {
   const failures = [];
@@ -685,9 +843,27 @@ function selfTest() {
     const expectedSet = [...Array(0x20).keys()].filter((b) => b !== 0x09 && b !== 0x0a && b !== 0x0d).concat(0x7f);
     assert(scannedSet.join() === expectedSet.join(), `the scanned set is C0-minus-tab/LF/CR plus DEL, got ${scannedSet.length} bytes`);
     assert(IS_SCANNED[0x20] === 0 && IS_SCANNED[0x7e] === 0, 'printable ASCII is never scanned');
+
+    // The emitted character class is what the reference check below compares
+    // against, so it has to be right as a REGEX and not merely stable as a
+    // string: compiled and run over all 256 byte values, it must select exactly
+    // the table's set. Without this, a broken emitter would happily hold every
+    // reference file byte-equal to a class that scans the wrong bytes.
+    const emittedClass = new RegExp(scannedCharClass());
+    const emittedSet = [...Array(256).keys()].filter((b) => emittedClass.test(String.fromCharCode(b)));
+    assert(
+      emittedSet.join() === scannedSet.join(),
+      `the emitted class ${scannedCharClass()} matches exactly the scanned set, got ${emittedSet.length} of ${scannedSet.length} bytes`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+
+  // ── #5646: the class is transcribed nowhere ────────────────────────────────
+  //
+  // Not a temp-repo fixture: the subject is the checked-in text of this repo's
+  // own instruction files, which is exactly what drifted in #5577.
+  checkCharClassReferences(scriptRepoRoot(), assert);
 
   if (failures.length) {
     console.error(`✗ check-nul-bytes --self-test -- ${failures.length} failure(s)\n`);
