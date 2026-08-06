@@ -293,6 +293,7 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',
+    'DATASET_INVALID',             // [#5367] dataset/selection refusal raised by `dataset-refusal.ts`
     'RAW_SQL_UNSUPPORTED',
   ],
   '@objectstack/service-datasource': [

@@ -4,6 +4,7 @@ import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@object
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { datasetInvalidError } from './dataset-refusal.js';
 
 /**
  * Dataset → Cube compiler (ADR-0021 D-A=(c), WS2).
@@ -134,7 +135,9 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
     throw new Error(`[dataset-compiler] non-derived measure "${m.name}" has no aggregate`);
   }
   if (UNSUPPORTED_AGGREGATES.has(m.aggregate)) {
-    throw new Error(
+    // [#5367] `DATASET_INVALID` / 400 — the aggregate is the dataset author's
+    // choice, and the message already names the ones that would work.
+    throw datasetInvalidError(
       `[dataset-compiler] measure "${m.name}" uses aggregate "${m.aggregate}" which is ` +
       `not supported by the v1 dataset runtime (supported: ${SUPPORTED_AGGREGATES.join(', ')}).`,
     );
@@ -302,7 +305,10 @@ export function compileDataset(
   const assertDeclared = (field: string, ownerKind: string, ownerName: string) => {
     const relPath = fieldRelationshipPath(field);
     if (relPath && !joins[joinAlias(relPath)]) {
-      throw new Error(
+      // [#5367] `DATASET_INVALID` / 400 — a dimension/measure traversing a
+      // relationship the same document never declared in `include` is the
+      // dataset author's mistake, and the fix is in the document they hold.
+      throw datasetInvalidError(
         `[dataset-compiler] ${ownerKind} "${ownerName}" references relationship path "${relPath}" ` +
         `via "${field}", but "${relPath}" is not declared in the dataset's \`include\`. ` +
         `Only fields along a declared relationship path are joinable.`,
