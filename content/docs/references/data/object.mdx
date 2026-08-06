@@ -312,7 +312,7 @@ Boolean-or-predicates override for a built-in row CRUD affordance.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable multi-tenancy for this object |
-| **tenantField** | `string` | ✅ | Field name for tenant identifier |
+| **tenantField** | `string` | optional | Column this object is tenant-scoped by. Omit it unless the tenant column genuinely is not the platform's: when undeclared the driver falls back to `organization_id`, the kernel-injected column the RLS predicates and `tenantPolicy()` also assume. A declared name is honoured only when the object really has that field — otherwise the same `organization_id` fallback applies. No default is materialized here on purpose (#5315). |
 
 
 ---

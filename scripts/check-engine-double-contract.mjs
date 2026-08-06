@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-engine-double-contract -- a fake ObjectQL engine's `delete` must be
+// check-engine-double-contract -- a fake ObjectQL engine's WRITE VERBS must be
 // pinned to the real engine's dispatch contract, not a looser hand-written
-// approximation of it (objectstack#4550, from objectstack#4434).
+// approximation of it (objectstack#4550, from objectstack#4434; the `update`
+// slice added by objectstack#5480).
 //
 //   node scripts/check-engine-double-contract.mjs
 //   node scripts/check-engine-double-contract.mjs --self-test
@@ -26,16 +27,30 @@
 // introduced for -- which are the paths that were hard to test, which are
 // usually the paths where the contract is densest.
 //
-// ## Slice: `delete` dispatch only, and only on ENGINE doubles
+// ## Slices: the WRITE-VERB dispatches, and only on ENGINE doubles
 //
-// #4550 lists four instances of the family. This gate takes exactly one of
-// them, the one whose criterion is mechanically decidable with no judgment
-// call: the engine's delete dispatch is a total function from an options bag to
-// one of three verdicts, so "is this double looser?" has a yes/no answer that
-// does not depend on reading the test's intent.
+// #4550 lists four instances of the family. This gate takes the ones whose
+// criterion is mechanically decidable with no judgment call: a write verb's
+// dispatch is a total function from a call to one of three verdicts, so "is
+// this double looser?" has a yes/no answer that does not depend on reading the
+// test's intent.
 //
-// Deliberately NOT covered, and why (each wants its own gate, not a vaguer
-// version of this one -- a gate whose scope is fuzzy is indistinguishable from
+//   - `delete` -- `assertEngineDeleteDispatch` / `resolveEngineDeleteDispatch`
+//     (#4550, from #4434).
+//   - `update` -- `assertEngineUpdateDispatch` / `resolveEngineUpdateDispatch`
+//     (#5480). Same three-way dispatch, same destructiveness: a predicate
+//     update rewrites every matching row's fields. It sat in the "not covered"
+//     list below until #5480 extracted the producer-side predicate it needed,
+//     which is the ONLY thing that was ever missing -- the criterion, the
+//     scanner and the ledger are shared verbatim.
+//
+// A slice is exactly two facts: which member of the double to look at, and
+// which producer-side predicate that member must reach. Everything else --
+// engine-vs-driver attribution, the one-helper-deep indirection, the ledger,
+// the both-directions reconciliation -- is one implementation serving both.
+//
+// Deliberately NOT covered, and why (each wants its own slice, not a vaguer
+// version of these -- a gate whose scope is fuzzy is indistinguishable from
 // no gate to everyone downstream of it):
 //
 //   - fixtures that disable a platform constraint in prose (`// FK enforcement
@@ -45,27 +60,34 @@
 //   - stubbing the very thing under assertion (objectui#3129) and missing
 //     counterparts (objectui#3134). Both live in the `objectui` repo, which
 //     this script cannot see, and #3134 names no double at all.
-//   - every other method a fake engine offers (`find` filter semantics,
-//     `update`'s twin dispatch, unknown-option rejection). Same family, but
-//     each needs its own producer-side predicate extracted first. `delete` had
-//     one available because #4434 already paid for it.
+//   - the READ side and the option surface (`find` filter semantics,
+//     unknown-option rejection). Same family, but each needs its own
+//     producer-side predicate extracted first -- the two write verbs have one
+//     because #4434 and #5480 paid for them.
 //
 // ## Invariants
+//
+// Each holds PER SLICE -- a green `delete` slice says nothing about `update`,
+// and the ledger is keyed on (file, verb) for the same reason.
 //
 //   DISCOVERED  the scan found engine doubles at all. Zero is not "a clean
 //               repo", it is a broken scan: PINNED iterates the discovered set,
 //               so a discovery that silently stops matching makes this script
 //               print OK while checking nothing -- the #4868 family, where a
 //               check runs, is green, and structurally cannot reach its subject.
-//   PINNED      every discovered engine double's `delete` routes through
-//               `assertEngineDeleteDispatch` / `resolveEngineDeleteDispatch`
-//               from `@objectstack/objectql` -- the predicate the real
-//               `ObjectQL.delete` itself uses -- or its file carries a measured
-//               baseline entry.
+//   PINNED      every discovered engine double's verb routes through that
+//               slice's `assert…Dispatch` / `resolve…Dispatch` from
+//               `@objectstack/objectql` -- the predicate the real
+//               `ObjectQL.<verb>` itself uses -- or its file carries a measured
+//               baseline entry for that verb.
 //   RECONCILED  in both directions. A baseline entry for a file with no
 //               unguarded doubles left, for a file that no longer exists, or
 //               whose count is now lower, is an error. A ratchet that can only
 //               accrete rots into a list nobody trusts.
+//   DECLARED    every baseline entry names a `verb` this script actually
+//               scans. Without it a typo'd or retired verb makes an entry
+//               unreachable -- it would reconcile against nothing, forever,
+//               and read as a live exemption.
 //
 // ## Why "routes through the shared predicate" and not "mirrors the guard"
 //
@@ -77,6 +99,13 @@
 // it. Requiring the producer's own function removes the class: a double that
 // imports the decision cannot be looser than the decision. Same reasoning as
 // objectstack#4455 -- the scan and the validator must answer with ONE predicate.
+//
+// `update` adds a second way a copy goes wrong, in the opposite direction: its
+// id also comes from the PAYLOAD (`data.id`, taken verbatim when truthy, ahead
+// of `where` and ahead of `multi`), so a copyist who "improves" the rule by
+// scalar-testing `data.id` writes a double STRICTER than the producer, which
+// fails calls a running server accepts. Looser hides bugs, stricter invents
+// them; importing the decision is the only spelling that does neither.
 //
 // ## What this deliberately does NOT claim
 //
@@ -95,23 +124,61 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
 const SCAN_ROOTS = ['packages', 'examples'];
 
-/** The producer-side predicate a double must route through. */
-const PINNED_SYMBOLS = new Set(['assertEngineDeleteDispatch', 'resolveEngineDeleteDispatch']);
-/** Where it may legitimately come from: the public export, or objectql's own relative path. */
-const PINNED_MODULES = [/^@objectstack\/objectql$/, /engine-delete-dispatch(\.js)?$/];
+/**
+ * The slices. Each names ONE member of an engine double and the producer-side
+ * predicate that member must reach; everything else in this file is shared.
+ *
+ * `symbols` is the pair the producer exports (`assert…` throws, `resolve…`
+ * classifies -- a double may legitimately use either), and `modules` is where
+ * they may come from: the public export, or objectql's own relative path for
+ * objectql's own tests.
+ */
+const SLICES = [
+  {
+    verb: 'delete',
+    producer: 'ObjectQL.delete',
+    symbols: new Set(['assertEngineDeleteDispatch', 'resolveEngineDeleteDispatch']),
+    modules: [/^@objectstack\/objectql$/, /engine-delete-dispatch(\.js)?$/],
+    pinCall: 'assertEngineDeleteDispatch(options)',
+    origin: '#4434',
+  },
+  {
+    verb: 'update',
+    producer: 'ObjectQL.update',
+    symbols: new Set(['assertEngineUpdateDispatch', 'resolveEngineUpdateDispatch']),
+    modules: [/^@objectstack\/objectql$/, /engine-update-dispatch(\.js)?$/],
+    pinCall: 'assertEngineUpdateDispatch(data, options)',
+    origin: '#5480',
+  },
+];
+
+/** The verbs the ledger may name -- see the DECLARED invariant. */
+const SCANNED_VERBS = new Set(SLICES.map((s) => s.verb));
 
 /**
  * Members that mark an object literal as standing in for the ENGINE.
  *
- * The engine and the driver both have `delete`, so the sibling set is what
+ * The engine and the driver share every name here, so the sibling set is what
  * separates them alongside the parameter test below: drivers speak
  * `create`/`bulkCreate`/`checkHealth`, the engine speaks `insert`/`findOne`.
+ *
+ * A slice never counts its OWN verb as a sibling (`scanSource` filters it),
+ * which is why `delete` can sit in this set without changing the delete
+ * slice's discovery by one file: it is evidence for the `update` slice --
+ * `{ find, update, delete }` is an engine-shaped trio -- and self-excluded
+ * for its own.
  */
 const ENGINE_SIBLINGS = new Set([
-  'find', 'findOne', 'insert', 'update', 'count', 'aggregate', 'getSchema', 'registry', 'insertMany',
+  'find', 'findOne', 'insert', 'update', 'delete', 'count', 'aggregate', 'getSchema', 'registry',
+  'insertMany',
 ]);
 
-/** Parameter names that mean "this is the DRIVER's delete(object, id, options)". */
+/**
+ * Parameter names that mean "this is the DRIVER's signature": the primary key
+ * sits in the second position for both write verbs -- `delete(object, id,
+ * options)` and `update(object, id, data, options)` -- where the engine takes
+ * an options bag and a payload respectively.
+ */
 const ID_PARAM = /^_*(id|recordId|ids|pk)$/i;
 
 /**
@@ -192,12 +259,17 @@ function memberName(member) {
 }
 
 /**
- * Is this `delete(a, b, …)` the ENGINE's shape (`object, options`) rather than
- * the DRIVER's (`object, id, options`)?
+ * Is this `<verb>(a, b, …)` the ENGINE's shape rather than the DRIVER's?
+ * (Named `isEngineDeleteShape` until #5480 made it serve both write verbs; the
+ * body never was delete-specific.)
  *
- * The second parameter is the whole question: the engine takes an options bag
- * there, the driver takes a primary key. Judged on the name first (the repo
- * writes `id` when it means one) and on a scalar type annotation second.
+ *   engine   `delete(object, options)`      `update(object, data, options)`
+ *   driver   `delete(object, id, options)`  `update(object, id, data, options)`
+ *
+ * The second parameter is the whole question for both: the engine takes an
+ * options bag / a payload there, the driver takes a primary key. Judged on the
+ * name first (the repo writes `id` when it means one) and on a scalar type
+ * annotation second.
  *
  * ## When there IS no second parameter (#5629)
  *
@@ -225,12 +297,27 @@ function memberName(member) {
  * the native-aggregate driver above, and "no driver members" alone admits any
  * `{ find, findOne, update, delete }` store mock that is neither contract.
  */
-function isEngineDeleteShape(fn, memberNames = new Set()) {
+function isEngineVerbShape(fn, memberNames = new Set()) {
   const params = fn.parameters ?? [];
+  // The DRIVER veto outranks everything, at every arity (#5480).
+  //
+  // It used to run only when arity could not answer. That was survivable while
+  // the only verb was `delete`, whose driver spelling puts a parameter the repo
+  // consistently names `id` in second position — but it does not survive
+  // `update`. `plugin.integration.test.ts` writes its fake DRIVERS as
+  // `update: async (_o: string, _i: any, d: any) => d`: `_i` IS the primary
+  // key, it just is not spelled `id`, so the parameter test reads the payload
+  // position as an options bag and admits 19 driver doubles in one file as
+  // engine doubles. A ledger that records false positives is worse than a
+  // narrow one — it teaches readers the gate does not know what it is looking
+  // at. Declaring `connect`/`create`/`syncSchema`/`updateMany` is positive
+  // evidence of the DRIVER contract at ANY arity (`IDataEngine` declares none
+  // of them), so it decides first. Same precedence the arity path always used,
+  // now applied uniformly.
+  for (const n of memberNames) if (DRIVER_ONLY_MEMBERS.has(n)) return false;
   if (params.length < 2) {
     let engineEvidence = false;
     for (const n of memberNames) {
-      if (DRIVER_ONLY_MEMBERS.has(n)) return false;
       if (ENGINE_ONLY_MEMBERS.has(n)) engineEvidence = true;
     }
     return engineEvidence;
@@ -259,25 +346,27 @@ function calleesIn(node) {
 }
 
 /**
- * LOCAL names in this file that are bound to one of the pinned predicates by an
- * import from the producer.
+ * LOCAL names in this file that are bound to THIS SLICE's pinned predicates by
+ * an import from the producer.
  *
  * Keyed on the local binding (so `import { assertEngineDeleteDispatch as guard }`
- * still counts) but only when the IMPORTED name is one of the pinned symbols —
+ * still counts) but only when the IMPORTED name is one of the slice's symbols —
  * a same-named local look-alike must not qualify, since the whole property is
- * that one predicate answers.
+ * that one predicate answers. Per slice, so a file that pins `delete` and not
+ * `update` is credited for exactly the one it pinned, which is the state most
+ * of this repo's doubles are in the day #5480 lands.
  */
-function pinnedImportsOf(sourceFile) {
+function pinnedImportsOf(sourceFile, slice) {
   const found = new Set();
   for (const st of sourceFile.statements) {
     if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
     const spec = st.moduleSpecifier.text;
-    if (!PINNED_MODULES.some((re) => re.test(spec))) continue;
+    if (!slice.modules.some((re) => re.test(spec))) continue;
     const named = st.importClause?.namedBindings;
     if (named && ts.isNamedImports(named)) {
       for (const el of named.elements) {
         const imported = (el.propertyName ?? el.name).text;
-        if (PINNED_SYMBOLS.has(imported)) found.add(el.name.text);
+        if (slice.symbols.has(imported)) found.add(el.name.text);
       }
     }
   }
@@ -304,16 +393,21 @@ function localFunctions(sourceFile) {
 }
 
 /**
- * Every engine double in one file, with a verdict on whether its `delete` is
- * pinned to the shared predicate.
+ * Every engine double in one file, with a verdict on whether the SLICE's verb
+ * is pinned to that slice's shared predicate.
  *
  * Pinning is accepted one level of indirection deep: a fake that opens with a
  * local `assertDeletable(opts)` helper which itself calls the shared predicate
  * is pinned. Two hops is not — at that point the gate would be guessing.
+ *
+ * One double may be pinned for one verb and not the other; the scan answers
+ * per slice and the ledger records per slice, because a fake bound to the
+ * producer on `delete` and hand-waving on `update` is exactly the asymmetry
+ * #5393 hit and #5480 removed the excuse for.
  */
-function scanSource(fileName, text) {
+function scanSource(fileName, text, slice = SLICES[0]) {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const pinnedNames = pinnedImportsOf(sf);
+  const pinnedNames = pinnedImportsOf(sf, slice);
   const locals = localFunctions(sf);
   const doubles = [];
 
@@ -331,19 +425,21 @@ function scanSource(fileName, text) {
 
   const consider = (members, node) => {
     const names = new Set();
-    let del = null;
+    let target = null;
     for (const m of members) {
       const n = memberName(m);
       if (!n) continue;
       names.add(n);
-      if (n === 'delete') del = implOf(m);
+      if (n === slice.verb) target = implOf(m);
     }
-    if (!del) return;
-    const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n));
+    if (!target) return;
+    // The verb under test is never its own sibling: `{ find, update }` is two
+    // pieces of engine evidence for the update slice, `{ update }` is none.
+    const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
     if (siblings.length < 2) return;
-    if (!isEngineDeleteShape(del, names)) return;
+    if (!isEngineVerbShape(target, names)) return;
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-    doubles.push({ line, siblings: siblings.sort(), pinned: bodyIsPinned(del) });
+    doubles.push({ line, siblings: siblings.sort(), pinned: bodyIsPinned(target) });
   };
 
   const visit = (n) => {
@@ -364,91 +460,128 @@ function readBaseline() {
 
 // ── Audit ───────────────────────────────────────────────────────────────────
 
-function audit() {
-  const baseline = readBaseline();
-  const byFile = new Map(baseline.entries.map((e) => [e.file, e]));
-  const errors = [];
+/** One slice's scan over the whole tree. */
+function scanSlice(slice) {
   const found = [];
-
   for (const abs of testFiles()) {
     const rel = relative(ROOT, abs).split(sep).join('/');
     const text = readFileSync(abs, 'utf8');
-    // Cheap pre-filter: no `delete` member, nothing to parse.
-    if (!/\bdelete\s*[(:]/.test(text)) continue;
-    const doubles = scanSource(abs, text);
+    // Cheap pre-filter: no member with this verb's name, nothing to parse.
+    if (!new RegExp(`\\b${slice.verb}\\s*[(:]`).test(text)) continue;
+    const doubles = scanSource(abs, text, slice);
     if (doubles.length === 0) continue;
     found.push({ file: rel, doubles });
   }
+  return found;
+}
 
-  // DISCOVERED
-  if (found.length === 0) {
-    errors.push(
-      'DISCOVERED: the scan found no engine doubles anywhere. That is not a clean repo, it is a '
-        + 'broken scan — PINNED iterates this set, so every other invariant passes vacuously and '
-        + 'this script reports OK while reading nothing. Fix the discovery before trusting a green run.',
-    );
+function audit() {
+  const baseline = readBaseline();
+  const errors = [];
+  const slices = [];
+
+  // DECLARED — before anything reconciles, every entry must name a verb this
+  // script scans. An entry whose verb nothing scans reconciles against nothing
+  // and reads as a live exemption forever.
+  for (const entry of baseline.entries) {
+    if (!SCANNED_VERBS.has(entry.verb)) {
+      errors.push(
+        `DECLARED: baseline entry for ${entry.file} names verb ${JSON.stringify(entry.verb)}, which `
+          + `no slice scans (known: ${[...SCANNED_VERBS].join(', ')}). An entry no slice reaches is `
+          + 'an exemption nothing can ever retire — fix the verb or delete the entry.',
+      );
+    }
   }
 
-  const seen = new Set();
-  for (const { file, doubles } of found) {
-    const unguarded = doubles.filter((d) => !d.pinned);
-    const entry = byFile.get(file);
-    if (entry) seen.add(file);
+  for (const slice of SLICES) {
+    const found = scanSlice(slice);
+    const byFile = new Map(
+      baseline.entries.filter((e) => e.verb === slice.verb).map((e) => [e.file, e]),
+    );
+    slices.push({ slice, found });
 
-    if (unguarded.length === 0) {
-      if (entry) {
+    // DISCOVERED
+    if (found.length === 0) {
+      errors.push(
+        `DISCOVERED: the ${slice.verb} scan found no engine doubles anywhere. That is not a clean `
+          + 'repo, it is a broken scan — PINNED iterates this set, so every other invariant passes '
+          + 'vacuously and this script reports OK while reading nothing. Fix the discovery before '
+          + 'trusting a green run.',
+      );
+    }
+
+    const seen = new Set();
+    for (const { file, doubles } of found) {
+      const unguarded = doubles.filter((d) => !d.pinned);
+      const entry = byFile.get(file);
+      if (entry) seen.add(file);
+
+      if (unguarded.length === 0) {
+        if (entry) {
+          errors.push(
+            `RECONCILED [${slice.verb}]: ${file} has no unguarded engine double left, but the `
+              + `baseline still records ${entry.unguarded}. Delete the entry in the same PR that `
+              + 'fixed it.',
+          );
+        }
+        continue;
+      }
+      if (!entry) {
         errors.push(
-          `RECONCILED: ${file} has no unguarded engine double left, but the baseline still `
-            + `records ${entry.unguarded}. Delete the entry in the same PR that fixed it.`,
+          `PINNED [${slice.verb}]: ${file} declares ${unguarded.length} engine double(s) whose `
+            + `${slice.verb}() does not route through ${[...slice.symbols][0]} `
+            + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
+            + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
+            + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
+            + "'@objectstack/objectql' (add it as a devDependency if the package lacks it), or add a "
+            + 'MEASURED entry to scripts/engine-double-contract.baseline.json saying why not — with '
+            + `"verb": ${JSON.stringify(slice.verb)}.`,
+        );
+        continue;
+      }
+      if (unguarded.length > entry.unguarded) {
+        errors.push(
+          `PINNED [${slice.verb}]: ${file} now has ${unguarded.length} unguarded engine double(s), `
+            + `baseline records ${entry.unguarded}. The baseline is shrink-only — pin the new one `
+            + 'rather than raising it.',
+        );
+      } else if (unguarded.length < entry.unguarded) {
+        errors.push(
+          `RECONCILED [${slice.verb}]: ${file} is down to ${unguarded.length} unguarded engine `
+            + `double(s) from the baseline's ${entry.unguarded}. Lower the number in the same PR, so `
+            + 'the ratchet holds.',
         );
       }
-      continue;
     }
-    if (!entry) {
+
+    for (const entry of baseline.entries) {
+      if (entry.verb !== slice.verb || seen.has(entry.file)) continue;
       errors.push(
-        `PINNED: ${file} declares ${unguarded.length} engine double(s) whose delete() does not route `
-          + `through assertEngineDeleteDispatch (line${unguarded.length > 1 ? 's' : ''} `
-          + `${unguarded.map((d) => d.line).join(', ')}). A fake looser than ObjectQL.delete is how `
-          + '#4434 shipped a dead REST route with its suite green. Open the fake\'s delete with '
-          + "`assertEngineDeleteDispatch(options)` from '@objectstack/objectql' (add it as a "
-          + 'devDependency if the package lacks it), or add a MEASURED entry to '
-          + 'scripts/engine-double-contract.baseline.json saying why not.',
-      );
-      continue;
-    }
-    if (unguarded.length > entry.unguarded) {
-      errors.push(
-        `PINNED: ${file} now has ${unguarded.length} unguarded engine double(s), baseline records `
-          + `${entry.unguarded}. The baseline is shrink-only — pin the new one rather than raising it.`,
-      );
-    } else if (unguarded.length < entry.unguarded) {
-      errors.push(
-        `RECONCILED: ${file} is down to ${unguarded.length} unguarded engine double(s) from the `
-          + `baseline's ${entry.unguarded}. Lower the number in the same PR, so the ratchet holds.`,
+        `RECONCILED [${slice.verb}]: baseline entry for ${entry.file}, which declares no engine `
+          + `double with a ${slice.verb} any more (file deleted, fake removed, or the shape `
+          + 'changed). Delete the entry.',
       );
     }
   }
 
-  for (const entry of baseline.entries) {
-    if (seen.has(entry.file)) continue;
-    errors.push(
-      `RECONCILED: baseline entry for ${entry.file}, which declares no engine double any more `
-        + '(file deleted, fake removed, or the shape changed). Delete the entry.',
-    );
-  }
-
-  return { found, baseline, errors };
+  return { slices, baseline, errors };
 }
 
 function report() {
-  const { found, baseline, errors } = audit();
-  const doubles = found.reduce((n, f) => n + f.doubles.length, 0);
-  const pinned = found.reduce((n, f) => n + f.doubles.filter((d) => d.pinned).length, 0);
+  const { slices, baseline, errors } = audit();
 
-  console.log(
-    `\nengine doubles: ${doubles} in ${found.length} test file(s) — ${pinned} pinned to `
-      + `ObjectQL.delete's dispatch predicate, ${doubles - pinned} in the shrink-only baseline.\n`,
-  );
+  console.log('');
+  let totalPinned = 0;
+  for (const { slice, found } of slices) {
+    const doubles = found.reduce((n, f) => n + f.doubles.length, 0);
+    const pinned = found.reduce((n, f) => n + f.doubles.filter((d) => d.pinned).length, 0);
+    totalPinned += pinned;
+    console.log(
+      `${slice.verb} doubles: ${doubles} in ${found.length} test file(s) — ${pinned} pinned to `
+        + `${slice.producer}'s dispatch predicate, ${doubles - pinned} in the shrink-only baseline.`,
+    );
+  }
+  console.log('');
 
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
@@ -456,8 +589,10 @@ function report() {
     process.exit(1);
   }
 
-  for (const f of found.filter((f) => f.doubles.some((d) => d.pinned))) {
-    console.log(`  pinned  ${f.file}`);
+  for (const { slice, found } of slices) {
+    for (const f of found.filter((f) => f.doubles.some((d) => d.pinned))) {
+      console.log(`  pinned [${slice.verb}]  ${f.file}`);
+    }
   }
 
   // Print the EXEMPT reasons, not only the count. An entry whose justification
@@ -466,13 +601,13 @@ function report() {
   const exempt = baseline.entries.filter((e) => e.kind === 'EXEMPT');
   if (exempt.length) console.log('');
   for (const e of exempt) {
-    console.log(`  EXEMPT  ${e.file}`);
+    console.log(`  EXEMPT [${e.verb}]  ${e.file}`);
     console.log(`          ${e.why}`);
   }
   console.log('');
   const debt = baseline.entries.filter((e) => e.kind !== 'EXEMPT').length;
   console.log(
-    `check-engine-double-contract: OK — ${pinned} pinned, ${debt} in the DEBT ledger, `
+    `check-engine-double-contract: OK — ${totalPinned} pinned, ${debt} in the DEBT ledger, `
       + `${exempt.length} exempt.\n`,
   );
 }
@@ -665,18 +800,164 @@ const store = {
   expect('a file with no fakes yields no doubles',
     scanSource('empty.test.ts', 'export const x = 1;\n').length === 0);
 
-  // Discovery must reach the real tree, and specifically must reach the fake
-  // #4434 was shipped past. Everything above is synthetic; this is the wiring.
+  // ── The `update` slice (#5480).
+  //
+  // Same detector, second verb. Driven on both sides of every decision again
+  // rather than trusted to generalise: the two slices differ in exactly the
+  // places that could silently mis-fire — `update` IS one of the engine
+  // siblings (so it must not count itself), and the driver's `update` carries
+  // its primary key in the same second position `delete`'s does but with a
+  // payload behind it.
+  const U = SLICES.find((s) => s.verb === 'update');
+  const UIMPORT = "import { assertEngineUpdateDispatch } from '@objectstack/objectql';\n";
+  const engineFakeU = (updateBody, header = '') => `${header}
+function makeEngine() {
+  return {
+    async find(o: string, opts?: any) { return []; },
+    async insert(o: string, data: any) { return data; },
+    async delete(o: string, opts?: any) { return true; },
+    async update(o: string, data: any, opts?: any) { ${updateBody} },
+  };
+}
+`;
+
+  d = scanSource('u.test.ts', engineFakeU('return data;'), U);
+  expect('finds an unpinned engine update double', d.length === 1 && d[0].pinned === false);
+
+  d = scanSource('u.test.ts', engineFakeU('assertEngineUpdateDispatch(data, opts); return data;', UIMPORT), U);
+  expect('a directly pinned update double is not flagged', d.length === 1 && d[0].pinned === true);
+
+  d = scanSource('u.test.ts', engineFakeU('assertUpdatable(data, opts); return data;',
+    UIMPORT + 'function assertUpdatable(dd: any, o: any) { assertEngineUpdateDispatch(dd, o); }\n'), U);
+  expect('a local helper that calls the update predicate counts as pinned',
+    d.length === 1 && d[0].pinned === true);
+
+  d = scanSource('u.test.ts', engineFakeU('assertUpdatable(data, opts); return data;',
+    UIMPORT + 'function assertUpdatable(dd: any, o: any) { if (!dd?.id && !o?.where?.id && !o?.multi) throw new Error("x"); }\n'), U);
+  expect('a HAND-MIRRORED update helper does not count as pinned',
+    d.length === 1 && d[0].pinned === false);
+
+  d = scanSource('u.test.ts', engineFakeU('return data;', UIMPORT), U);
+  expect('an unused update import is not pinning', d.length === 1 && d[0].pinned === false);
+
+  // The slices must not cross-credit. This is the whole reason the ledger is
+  // keyed on (file, verb): #5393's fake is the live specimen — pinned on
+  // `delete`, hand-waving on `update` — and a scan that let the delete pin
+  // vouch for the update would report the asymmetry as fixed.
+  const pinnedDeleteOnly = `${IMPORT}
+const engine = {
+  async find(o: string, opts?: any) { return []; },
+  async insert(o: string, data: any) { return data; },
+  async update(o: string, data: any, opts?: any) { return data; },
+  async delete(o: string, opts?: any) { assertEngineDeleteDispatch(opts); return true; },
+};
+`;
+  expect('a delete-pinned fake is still unpinned for update',
+    scanSource('x.test.ts', pinnedDeleteOnly, U).length === 1
+      && scanSource('x.test.ts', pinnedDeleteOnly, U)[0].pinned === false);
+  expect('…and the same fake IS pinned for delete',
+    scanSource('x.test.ts', pinnedDeleteOnly)[0].pinned === true);
+  // The sharp case, and the one a copy-paste actually produces: the WRONG
+  // slice's predicate called from inside the right verb's body. It reads as a
+  // pin, it imports from the producer, and it answers a different question —
+  // `assertEngineDeleteDispatch(opts)` never looks at `data.id`, so a double
+  // guarded by it rejects `update(o, { id: 'r1' })`, which the engine accepts.
+  // Nothing above catches this: the earlier fixtures differ in which BODY calls
+  // the predicate, so a scan that credited symbols across slices would still
+  // pass them.
+  const crossSlicePredicate = `${IMPORT}
+const engine = {
+  async find(o: string, opts?: any) { return []; },
+  async insert(o: string, data: any) { return data; },
+  async delete(o: string, opts?: any) { return true; },
+  async update(o: string, data: any, opts?: any) { assertEngineDeleteDispatch(opts); return data; },
+};
+`;
+  expect("delete's predicate inside update() does not pin the update slice",
+    scanSource('xs.test.ts', crossSlicePredicate, U)[0].pinned === false);
+  // The mirror image, so neither direction is the one that happens to work.
+  const pinnedUpdateOnly = `${UIMPORT}
+const engine = {
+  async find(o: string, opts?: any) { return []; },
+  async insert(o: string, data: any) { return data; },
+  async update(o: string, data: any, opts?: any) { assertEngineUpdateDispatch(data, opts); return data; },
+  async delete(o: string, opts?: any) { return true; },
+};
+`;
+  expect('an update-pinned fake is still unpinned for delete',
+    scanSource('x.test.ts', pinnedUpdateOnly)[0].pinned === false);
+  expect('…and the same fake IS pinned for update',
+    scanSource('x.test.ts', pinnedUpdateOnly, U)[0].pinned === true);
+
+  // Scope: the DRIVER's update(object, id, data, options) is a different
+  // contract — the primary key sits where the engine takes the payload.
+  const driverUpdate = `
+const driver = {
+  async find(o: string) { return []; },
+  async create(o: string, d: any) { return d; },
+  async delete(object: string, id: string) { return true; },
+  async update(object: string, id: string, data: any) { return data; },
+};
+`;
+  expect('a driver double (update by scalar id) is out of scope for the update slice',
+    scanSource('du.test.ts', driverUpdate, U).length === 0);
+
+  // Arity, both halves, exactly as for delete: sibling evidence decides when
+  // the parameter list cannot.
+  const zeroArityEngineU = `
+const engine = {
+  async find(o: string) { return []; },
+  async findOne(o: string) { return null; },
+  async insert(o: string, d: any) { return d; },
+  async delete(o: string, opts?: any) { return true; },
+  async update() { return null; },
+};
+`;
+  expect('a zero-parameter engine update is in scope',
+    scanSource('zu.test.ts', zeroArityEngineU, U).length === 1);
+
+  const zeroArityDriverU = `
+const driver = {
+  async find(o: string) { return []; },
+  async findOne(o: string) { return null; },
+  async create(o: string, d: any) { return d; },
+  async checkHealth() { return true; },
+  async update() { return null; },
+};
+`;
+  expect('a zero-parameter DRIVER update stays out of scope',
+    scanSource('zdu.test.ts', zeroArityDriverU, U).length === 0);
+
+  // `update` must not count itself as its own sibling, or a lone `update` on
+  // any object literal becomes a finding.
+  const loneUpdate = 'const store = { update(k: string, v: any) { return v; } };\n';
+  expect('an object whose only engine member IS update is out of scope',
+    scanSource('lu.test.ts', loneUpdate, U).length === 0);
+
+  // objectql's own tests import by relative path; that IS the producer — and
+  // the update slice must accept its OWN module, not delete's.
+  d = scanSource('su.test.ts', engineFakeU('assertEngineUpdateDispatch(data, opts); return data;',
+    "import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';\n"), U);
+  expect("objectql's relative import of the update producer counts",
+    d.length === 1 && d[0].pinned === true);
+
+  // Discovery must reach the real tree, for EVERY slice, and specifically must
+  // reach the fake #4434 was shipped past. Everything above is synthetic; this
+  // is the wiring.
   //
   // Deliberately NOT asserted here: that the real tree is clean, or that any
   // particular fake is pinned. That is the job of the run this self-test gates,
   // and duplicating it would make a genuine violation surface as a self-test
   // failure — the least legible message available.
-  const { found } = audit();
-  expect('discovers engine doubles in the real tree', found.length > 0);
+  const { slices } = audit();
+  expect('every slice is exercised', slices.length === SLICES.length);
+  for (const { slice, found } of slices) {
+    expect(`discovers engine doubles in the real tree [${slice.verb}]`, found.length > 0);
+  }
   expect(
     'discovery reaches the #4434 fake',
-    found.some((f) => f.file === 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts'),
+    slices.find((s) => s.slice.verb === 'delete').found
+      .some((f) => f.file === 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts'),
   );
 
   if (failures.length) {
@@ -685,10 +966,11 @@ const store = {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: separates engine doubles from driver doubles, admits a delete that declares '
-      + 'fewer than two parameters only on engine-vs-driver sibling evidence, accepts only the '
-      + 'producer\'s predicate (direct or one helper deep), rejects unused imports, hand-mirrored '
-      + 'guards and look-alikes, and proves discovery reaches the real tree.',
+    'OK  self-test: separates engine doubles from driver doubles on BOTH write verbs, admits a '
+      + 'verb that declares fewer than two parameters only on engine-vs-driver sibling evidence, '
+      + "accepts only that slice's producer predicate (direct or one helper deep) and never the "
+      + 'other slice\'s, rejects unused imports, hand-mirrored guards and look-alikes, and proves '
+      + 'discovery reaches the real tree for every slice.',
   );
 }
 

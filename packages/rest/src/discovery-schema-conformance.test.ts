@@ -16,13 +16,31 @@
 // undeclared.
 
 import { describe, it, expect, vi } from 'vitest';
-import { DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
+import { ApiRoutesSchema, DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
 function declaredResponseKeys(): Set<string> {
   return new Set(Object.keys((GetDiscoveryResponseSchema as any).shape));
+}
+
+/**
+ * [#5679] The keys `ApiRoutesSchema` declares INSIDE `routes`.
+ *
+ * The #4828 gate was deliberately pinned at the top level, and `routes.mcp`
+ * lived in exactly the blind spot that left: emitted here, read by objectui,
+ * declared nowhere. Note which assertion catches it — `DiscoverySchema
+ * .safeParse()` above stays GREEN on an undeclared `routes.mcp`, because
+ * `ApiRoutesSchema` is a plain `z.object` and zod strips unknown keys. Only a
+ * key-set check can see it, one level down exactly as at the top.
+ *
+ * Extended one level, not recursed: this is the level with a measured
+ * producer/consumer pair. Full recursion is still out of scope (#4828), and
+ * `capabilities` / `services` are `z.record`s whose keys are open by design.
+ */
+function declaredRouteKeys(): Set<string> {
+  return new Set(Object.keys((ApiRoutesSchema as any).shape));
 }
 
 function createMockServer() {
@@ -93,6 +111,52 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
     const declared = declaredResponseKeys();
     const undeclared = Object.keys(body).filter(k => !declared.has(k));
     expect(undeclared, 'undeclared top-level keys on the REST /discovery body').toEqual([]);
+  });
+
+  it('[#5679] emits NO `routes` key the schema does not declare', async () => {
+    const body = await invoke(discoveryHandler());
+
+    const declared = declaredRouteKeys();
+    const undeclared = Object.keys(body.routes).filter(k => !declared.has(k));
+    expect(undeclared, 'undeclared keys inside `routes` on the REST /discovery body').toEqual([]);
+  });
+
+  it('[#5679] anti-vacuity: this mount really does advertise `routes.mcp`', async () => {
+    const body = await invoke(discoveryHandler());
+
+    // Without this the gate above would pass for the empty reason. MCP is
+    // default-on and the probe returns `null` (cannot probe) with no kernel
+    // manager and no serviceExistsProvider, so the fail-open branch advertises.
+    expect(body.routes.mcp).toBe('/api/v1/mcp');
+    expect(declaredRouteKeys().has('mcp')).toBe(true);
+  });
+
+  it('[#5679] advertises the UNSCOPED /mcp even from the scoped mount', async () => {
+    const body = await invoke(
+      discoveryHandler({ scoped: true }),
+      { environmentId: 'env_alpha' },
+    );
+
+    // The /mcp route is mounted bare, so the advertised path must NOT pick up
+    // the environment segment the sibling routes carry. Measured, then declared.
+    expect(body.routes.data).toBe('/api/v1/environments/env_alpha/data');
+    expect(body.routes.mcp).toBe('/api/v1/mcp');
+  });
+
+  it('[#5679] omits the key entirely when the env opts out of MCP', async () => {
+    const old = process.env.OS_MCP_SERVER_ENABLED;
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+    try {
+      const body = await invoke(discoveryHandler());
+
+      // `optional`, not `nullable`: the emit site DELETES the key, so a
+      // consumer sees an absent key rather than an explicit null.
+      expect(Object.prototype.hasOwnProperty.call(body.routes, 'mcp')).toBe(false);
+      expect(DiscoverySchema.safeParse(body).success).toBe(true);
+    } finally {
+      if (old === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+      else process.env.OS_MCP_SERVER_ENABLED = old;
+    }
   });
 
   it('fills the three required identity keys the schema declares', async () => {

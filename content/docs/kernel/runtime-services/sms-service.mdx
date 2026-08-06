@@ -57,6 +57,19 @@ Every key accepts the standard settings env override (`OS_SMS_PROVIDER`,
 `OS_SMS_ALIYUN_ACCESS_KEY_ID`, …). The **Send test SMS** action exercises the
 live (or unsaved) provider configuration.
 
+`OS_SMS_PROVIDER` (and `config.sms.provider`) is read twice, at two different
+moments: once by `os serve` while it assembles the kernel — before any settings
+service exists — to pick the plugin's initial transport, and again by the
+settings namespace once that binds at `kernel:ready`. **A provider value outside
+`log` / `aliyun` / `twilio` is refused at the first of those** (#5713): the boot
+fails when the app declares `requires: ['sms']`, and otherwise logs an error and
+starts without an SMS service. It used to become the `log` transport silently, so
+a typo like `OS_SMS_PROVIDER=twilo` produced a server that answered every send
+`status: 'sent'` and delivered nothing. Credentials are *not* required at boot —
+only the provider tag is checked, because the credentials legitimately arrive
+later, from this namespace. An environment that is not meant to send SMS says so
+with `OS_SMS_PROVIDER=log`, which is the default.
+
 ## Consumers
 
 - **Phone-number OTP auth** — sign-in verification codes and self-service

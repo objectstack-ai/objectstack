@@ -19,7 +19,12 @@ import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
 // pair the strategies compile it with, so "the field the gate saw" and "the
 // column that reached SQL" cannot be two different things.
-import { normalizeAnalyticsFilterTree, collectFilterLeaves } from './strategies/filter-normalizer.js';
+import {
+  normalizeAnalyticsFilterTree,
+  collectFilterLeaves,
+  lowerAnalyticsWhere,
+  conjunctFieldKeys,
+} from './strategies/filter-normalizer.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
 import {
@@ -1441,20 +1446,27 @@ export class AnalyticsService implements IAnalyticsService {
    * - Per member, {@link resolveMemberSource} stands down on an expression `sql`
    *   and on a dotted relation traversal — for the dimension gate's reasons.
    *
-   * # Array `where` IS gated, and that is not #5353's territory
+   * # Array `where` IS gated, and #5353's fix did not change that
    *
-   * `inferCubeFromQuery` still skips an array `where` when minting the ad-hoc
-   * cube's `dimensions` (the stale `!Array.isArray` guard #5353 records). That
-   * skip is about the cube's dimension VOCABULARY. It says nothing about which
-   * columns reach the driver: since #5334 an array `where` is lowered by
-   * `normalizeAnalyticsFilterTree` and compiles to the identical predicate — a
-   * measured fact, `where: [['bogus_col','=','x']]` and
-   * `where: {bogus_col: 'x'}` both produce `WHERE bogus_col = $1` and hand
-   * `executeAggregate` the same `{bogus_col: 'x'}`. Gating one spelling and not
-   * the other would answer one mistake two ways, which is the split this whole
-   * gate family exists to close. Nothing here changes `inferCubeFromQuery`, so
-   * #5353 is untouched — and because this gate reads leaves rather than
-   * `cube.dimensions`, #5353's fix cannot change its verdicts either.
+   * Since #5334 an array `where` is lowered by `normalizeAnalyticsFilterTree`
+   * and compiles to the identical predicate — a measured fact,
+   * `where: [['bogus_col','=','x']]` and `where: {bogus_col: 'x'}` both produce
+   * `WHERE bogus_col = $1` and hand `executeAggregate` the same
+   * `{bogus_col: 'x'}`. Gating one spelling and not the other would answer one
+   * mistake two ways, which is the split this whole gate family exists to close.
+   *
+   * `inferCubeFromQuery` used to skip an array `where` when minting the ad-hoc
+   * cube's `dimensions` — a separate question (the cube's dimension VOCABULARY,
+   * not which columns reach the driver), fixed by #5353 by lowering before
+   * reading keys. Because this gate reads filter LEAVES rather than
+   * `cube.dimensions`, that fix could not change its verdicts, and measurement
+   * confirms it did not: the array where's keys now reach `cube.dimensions`, so
+   * {@link resolveMemberSource} takes the DECLARED-dimension branch for those
+   * members instead of the undeclared-bare-column one — and both branches yield
+   * the same `source` for the same member, since the minted dimension's `sql` IS
+   * the member name. What did change is the rejection's suggestion list, in the
+   * direction that closes the split: `Valid filter members:` now reads the same
+   * for both spellings of one filter.
    */
   private assertWhereFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
     const probe = this.getObjectFieldNames;
@@ -1479,9 +1491,10 @@ export class AnalyticsService implements IAnalyticsService {
     if (members.length === 0) return;
 
     // Two passes, for the reason the measure and dimension gates have two: on the
-    // auto-inference path `inferCubeFromQuery` mints the `where`'s own top-level
-    // keys into `cube.dimensions`, so echoing that bag verbatim would offer the
-    // caller their own typo back as a valid filter member.
+    // auto-inference path `inferCubeFromQuery` mints the `where`'s own field keys
+    // into `cube.dimensions` — since #5353 for the array spelling too — so
+    // echoing that bag verbatim would offer the caller their own typo back as a
+    // valid filter member.
     const invalid = new Set<string>();
     for (const member of members) {
       const { key, source } = resolveMemberSource(cube, member, 'any');
@@ -1574,18 +1587,83 @@ export class AnalyticsService implements IAnalyticsService {
       dimensions[key] = { name: key, label: key, type: 'string', sql: key };
     }
 
-    if (query.where && typeof query.where === 'object' && !Array.isArray(query.where)) {
-      // Canonical FilterCondition: top-level keys (excluding logical
-      // combinators) are field names. We only need them to seed an
-      // ad-hoc cube definition for free-form queries.
-      //
-      // The `!Array.isArray` guard predates #5334 and is stale — an array `where`
-      // IS a filter now, and its fields do not get seeded here. That is #5353,
-      // deliberately left alone. It does NOT weaken #5669's `where` gate, which
-      // reads the lowered filter TREE rather than this bag, so both spellings are
-      // judged identically today and #5353's eventual fix cannot change that.
-      for (const key of Object.keys(query.where as Record<string, unknown>)) {
-        if (key.startsWith('$')) continue;
+    // The `where`'s field keys seed dimensions too. LOWER FIRST, then read keys:
+    // the rule this bag has always followed is "the `where`'s own top-level keys
+    // are field names", and the only reason an ARRAY `where` was skipped here is
+    // that it was not a filter when the code was written.
+    //
+    // [#5353] The `!Array.isArray(query.where)` guard this replaces predates
+    // #5334. Since #5334 an array `where` IS a filter — lowered by
+    // `lowerAnalyticsWhere` and compiling to a byte-identical predicate — so
+    // skipping it meant ONE filter, spelled two ways, minted two different
+    // cubes: `{stage: 'won'}` seeded `dimensions.stage`, `[['stage','=','won']]`
+    // seeded nothing. Lowering first makes the spelling stop mattering, which is
+    // the same fix #5334 applied one layer down.
+    let lowered: Record<string, unknown> | null = null;
+    try {
+      lowered = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` the lowering REFUSES (an unlowerable array) is not judged
+      // here — the same stand-down `assertWhereFields` makes, for the same
+      // reason: that refusal already happens in the strategy with an
+      // `INVALID_FILTER`/400 envelope (#5352/#5367), and raising it from
+      // `ensureCube` instead would move the answer's geography and would newly
+      // refuse the draft-preview path, whose `matchesWhere` never consults the
+      // normalizer at all. A cube minted without those keys is exactly what a
+      // query that is about to be refused needs.
+    }
+    if (lowered) {
+      // `conjunctFieldKeys` descends `$and` — which the LOWERING introduces for a
+      // flat array (`[[a,…],[b,…]]` → `{$and: [{a…},{b…}]}`) — and not `$or` /
+      // `$not`, which contribute no key on either spelling. Deliberately NOT
+      // `collectFilterLeaves`: the leaves answer "what does the compiled
+      // predicate BIND", this bag answers "what may a caller NAME", and the two
+      // genuinely differ — `{stage: {$in: []}}` lowers to the boolean constant
+      // FALSE, binding nothing while still naming `stage`.
+      for (const key of conjunctFieldKeys(lowered)) {
+        // BARE keys only — a dotted one is a relation traversal, and #5353 cannot
+        // unify those. See the residue loop below for why, and for the ONE case
+        // that still answers per-spelling.
+        if (key.includes('.')) continue;
+        if (dimensions[key] || measures[key]) continue;
+        dimensions[key] = { name: key, label: key, type: 'string', sql: key };
+      }
+    }
+
+    // ── #5739 residue: dotted keys, still answered per SPELLING ───────────────
+    //
+    // A dotted key names a relation traversal, and an ad-hoc single-table cube
+    // has nothing to declare it as. `stripPrefix` mints the TAIL as a BASE-TABLE
+    // dimension, which is #5739's mis-cast, and today only the OBJECT spelling
+    // reaches that mint. #5353 can go neither way on its own:
+    //
+    //   - PROPAGATE it to the array spelling (`stripPrefix` in the loop above) is
+    //     a measured REGRESSION. On cube `deal`, filter `owner.region = 'NA'`:
+    //       {'owner.region': 'NA'}      → WHERE region = $1            (both, after)
+    //       [['owner.region','=','NA']] → LEFT JOIN "owner" ON "deal"."owner" =
+    //                                     "owner"."id" WHERE "owner"."region" = $1
+    //                                                                  (before)
+    //     …i.e. a working traversal becomes a different-rows base-column filter —
+    //     and where the base has no `region` column, a 400 INVALID_FIELD, because
+    //     `declaredMemberEntry`'s dotted tail lookup resolves `owner.region` to
+    //     the minted dimension and hands #5669's gate a column that is absent.
+    //   - WITHDRAW it from the object spelling (skip dotted keys entirely) breaks
+    //     an invariant #5740 pinned deliberately: one dotted member gets one
+    //     answer across the `where` and `dimensions` request keys, sharing
+    //     `resolveMemberSource`, and "if that reading is ever judged wrong it must
+    //     change for BOTH keys at once". Withdrawing here alone would leave
+    //     `where: {'owner.region': …}` standing down while
+    //     `dimensions: ['owner.region']` still 400s on `region`.
+    //
+    // Both directions are #5739's to choose, so this loop reproduces `origin/main`
+    // verbatim — the OBJECT `where`'s own top-level dotted keys, `stripPrefix`ed —
+    // and the asymmetry #5353 is about survives for dotted keys alone. Delete the
+    // loop (or fold it into the one above) when #5739 rules; the parity test names
+    // the case that then flips.
+    const rawWhere = (query as { where?: unknown }).where;
+    if (rawWhere && typeof rawWhere === 'object' && !Array.isArray(rawWhere)) {
+      for (const key of Object.keys(rawWhere as Record<string, unknown>)) {
+        if (key.startsWith('$') || !key.includes('.')) continue;
         const stripped = stripPrefix(key);
         if (dimensions[stripped] || measures[stripped]) continue;
         dimensions[stripped] = { name: stripped, label: stripped, type: 'string', sql: stripped };

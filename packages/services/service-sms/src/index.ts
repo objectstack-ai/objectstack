@@ -10,6 +10,8 @@ export {
 export { SmsServicePlugin, type SmsServicePluginOptions } from './sms-plugin.js';
 export {
   makeSmsTransport,
+  SMS_TRANSPORT_PROVIDERS,
+  isSmsTransportProvider,
   AliyunSmsTransport,
   TwilioSmsTransport,
   type SmsProviderTag,

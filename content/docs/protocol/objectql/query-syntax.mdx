@@ -237,13 +237,81 @@ const query: QueryAST = {
 | `$lte` | Less or equal | `{ discount: { $lte: 20 } }` |
 | `$in` | In list | `{ stage: { $in: ['proposal', 'negotiation'] } }` |
 | `$nin` | Not in list | `{ status: { $nin: ['deleted', 'archived'] } }` |
-| `$contains` | String contains | `{ name: { $contains: 'Inc' } }` |
-| `$notContains` | String does not contain | `{ name: { $notContains: 'test' } }` |
-| `$startsWith` | String starts with | `{ email: { $startsWith: 'admin' } }` |
-| `$endsWith` | String ends with | `{ domain: { $endsWith: '.com' } }` |
+| `$contains` | String contains, **case-sensitive** | `{ name: { $contains: 'Inc' } }` |
+| `$icontains` | String contains, **ignoring ASCII case** | `{ name: { $icontains: 'inc' } }` |
+| `$notContains` | String does not contain, **case-sensitive** | `{ name: { $notContains: 'test' } }` |
+| `$startsWith` | String starts with, **case-sensitive** | `{ email: { $startsWith: 'admin' } }` |
+| `$endsWith` | String ends with, **case-sensitive** | `{ domain: { $endsWith: '.com' } }` |
 | `$between` | Range (inclusive) | `{ close_date: { $between: ['2024-01-01', '2024-12-31'] } }` |
 | `$null` | Null check | `{ manager_id: { $null: true } }` / `{ phone: { $null: false } }` |
 | `$exists` | Field exists (NoSQL) | `{ metadata: { $exists: true } }` |
+
+### Case Sensitivity
+
+The string operators compare **case-sensitively**. `$icontains` is the one that does
+not, and the case it ignores is **ASCII case only** — `A-Z` against `a-z`, and nothing
+else.
+
+```typescript
+// Case-sensitive: matches "acme corp", NOT "ACME Corp"
+{ name: { $contains: 'acme' } }
+
+// ASCII case-insensitive: matches BOTH "acme corp" and "ACME Corp"
+{ name: { $icontains: 'acme' } }
+```
+
+<Callout type="warn">
+  **`café` does not match `CAFÉ`.** Outside `A-Z`/`a-z`, `$icontains` compares
+  literally — accented Latin, Cyrillic, Greek and every other script are matched
+  exactly as written. If your users search non-ASCII text, `$icontains` is not an
+  accent- or case-blind search, and treating it as one will silently return fewer
+  rows than expected.
+
+  The boundary is ASCII because that is the only fold every backend can actually
+  deliver. SQLite compiled without ICU — which is what `driver-sqlite-wasm` and
+  `driver-turso` run on — folds ASCII only in both `LOWER()` and `LIKE`, so a
+  Unicode promise here would be a guarantee three of the five backends could not
+  keep. See [#4706](https://github.com/objectstack-ai/objectstack/issues/4706).
+</Callout>
+
+The comparand is always matched **literally**. `%` and `_` are ordinary characters,
+not `LIKE` wildcards, and `.` / `*` / `+` are ordinary characters, not regex
+metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`.
+
+<Callout type="info">
+  **Status:** the case rules above are the protocol's declaration as of
+  `@objectstack/spec` 18. The backend lowerings that deliver them — making SQLite's
+  and turso's `LIKE` case-exact, dropping MongoDB's hardcoded `$options: 'i'`, and
+  implementing `$icontains` everywhere — are tracked by
+  [#5702](https://github.com/objectstack-ai/objectstack/issues/5702). Until it
+  lands, a backend that has not been aligned refuses `$icontains` outright rather
+  than answering it approximately, and `$contains` still follows its dialect. The
+  shared standard both halves are measured against is `FILTER_TEXT_CASES`
+  (`@objectstack/spec/data`).
+</Callout>
+
+### `$regex` — removed
+
+`$regex` (and its `$options` companion) was never a declared operator and is
+**retired** ([#4706](https://github.com/objectstack-ai/objectstack/issues/4706)). It
+could not mean one thing across the backends: `driver-sql` compiled it to a
+LIKE-escaped substring match, so `a.b` matched only the literal `a.b`, while
+`driver-memory` evaluated it as a real `RegExp`, so the same filter also matched
+`axb` — and an invalid pattern was caught and answered zero rows, in silence. A real
+regex is not implementable on all five backends: `driver-turso`'s remote transport
+speaks a wire protocol with no way to register a SQLite `REGEXP` function.
+
+| Instead of | Write |
+|:---|:---|
+| `{ name: { $regex: 'acme' } }` | `{ name: { $icontains: 'acme' } }` |
+| `{ name: { $regex: 'acme', $options: 'i' } }` | `{ name: { $icontains: 'acme' } }` |
+| `{ name: { $regex: '^acme' } }` | `{ name: { $startsWith: 'acme' } }` |
+| `{ name: { $regex: 'acme$' } }` | `{ name: { $endsWith: 'acme' } }` |
+
+A pattern that genuinely needs a regular expression has no filter-level
+replacement — narrow the query with the declared operators and match in application
+code. The prescriptions above are declared as data in `RETIRED_FILTER_OPERATORS`
+(`@objectstack/spec/data`), so every backend's refusal quotes the same sentence.
 
 ### Multiple Conditions (Implicit AND)
 
@@ -783,11 +851,24 @@ search — and over the REST/protocol ingress it is `400 INVALID_FIELD` outright
 because the engine-side intersection alone used to drop the unknown name and fall back to
 scanning the full searchable set. Internal callers reaching `engine.find()` directly keep
 the tolerant intersection. Multiple whitespace-separated terms are AND-ed and
-fields are OR-ed. Case sensitivity is the **driver's**, not the expansion's: the
-expansion emits a plain `$contains`, which `SqlDriver` compiles to a parameterised
-`LIKE '%…%'` with no case folding — so the dialect's own `LIKE`/collation rules decide —
-while the in-memory driver matches with a case-insensitive regex. Only `select` /
-`status` option *labels* are matched case-insensitively by the expansion itself.
+fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
+from the expansion: it emits a plain `$contains`, which is **case-sensitive** by the
+rule in [Case Sensitivity](#case-sensitivity) above. Note what that means for search —
+a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
+*labels* are matched case-insensitively by the expansion itself.
+
+<Callout type="warn">
+  **Measured today, and it does not match that rule yet.** The `$contains` alignment
+  is [#5702](https://github.com/objectstack-ai/objectstack/issues/5702), so until it
+  lands the answer is still the driver's: `SqlDriver` compiles a parameterised
+  `LIKE '%…%'` and the dialect decides (SQLite folds ASCII, Postgres does not),
+  `driver-mongodb` folds the full Unicode range through a hardcoded `$options: 'i'`,
+  and `driver-memory`'s query path matches with a case-insensitive regex. Which
+  driver you run therefore still changes which rows a search returns. Whether the
+  expansion should emit `$icontains` instead of `$contains` — i.e. whether search is
+  case-insensitive by definition — is a separate question that rides with that issue,
+  because it can only be answered once both operators mean one thing everywhere.
+</Callout>
 `fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` carry
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
 expansion ignores them.

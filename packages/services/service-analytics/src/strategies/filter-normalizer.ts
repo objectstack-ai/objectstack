@@ -901,36 +901,25 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
 }
 
 /**
- * Normalize an analytics query's `where` into the tree the strategies compile.
- * `null` when the query carries no `where` — i.e. no constraint.
+ * Lower an analytics query's `where` to the CANONICAL `FilterCondition` object,
+ * before any node is built. `null` when the query carries no `where`.
  *
- * `where` is declared a `FilterCondition` (`AnalyticsQuerySchema`), and the
- * object form is the whole of the contract downstream. An ARRAY nevertheless
- * arrives — it is the `FilterArray` authoring sugar four published contracts
- * teach, and analytics is a door into the runtime like any other — so it is
- * LOWERED here (#5334, on #5158's ruling C), giving the same three answers
- * `ObjectQL`'s six entry points give since #5329:
+ * Extracted from {@link normalizeAnalyticsFilterTree} for #5353's second reader
+ * (`inferCubeFromQuery`, which needs the lowered condition's own KEYS rather
+ * than the compiled tree's leaves — see that function for why the two readers
+ * want different views of one filter). The three arrival answers documented on
+ * {@link normalizeAnalyticsFilterTree} are all decided HERE; that function is
+ * now this lowering plus {@link buildNode}.
  *
- * 1. `[]` — "no filter", not a failed filter: `null`, the same reading every
- *    layer gives it (the engine door DELETES the key; `parseFilterAST([])` is
- *    `undefined`). No predicate is emitted and no error is raised.
- * 2. A well-formed `FilterArray` — lowered through `parseFilterAST` and
- *    compiled by {@link buildNode}, so the author gets the SAME rows either
- *    spelling produces. `isFilterAST` gates first so the operator vocabulary is
- *    checked before `parseFilterAST`'s lenient `$${op}` fallback can turn a
- *    misspelling into a `$sounds_like` condition nothing executes.
- * 3. Anything else array-shaped — REFUSED, loudly. Before #5334 all three of
- *    these arrivals answered the same way: `return null`, which for (2) and (3)
- *    means the predicate VANISHED and the chart was drawn over every row.
- *
- * Lowering rather than refusing outright is what keeps ONE dashboard's
- * metadata meaning one thing: the same `where` on a plain `find()` already
- * lowers at the engine door (#5329), so refusing it here would have forked the
- * product by which face read the metadata.
+ * Keeping the lowering in ONE place is the point of the extraction. The
+ * alternative — a second `isFilterAST`/`parseFilterAST` call at the new reader —
+ * is how "the shape the cube was minted from" and "the shape that reached SQL"
+ * drift apart, and both refusal paths below would then have had to be
+ * re-derived to stay in step.
  */
-export function normalizeAnalyticsFilterTree(
+export function lowerAnalyticsWhere(
   query: { where?: unknown } | unknown,
-): NormalizedFilterNode | null {
+): Record<string, unknown> | null {
   if (!query || typeof query !== 'object') return null;
   const where = (query as { where?: unknown }).where;
   if (!where || typeof where !== 'object') return null;
@@ -953,10 +942,93 @@ export function normalizeAnalyticsFilterTree(
         `charting the dataset unfiltered (#5158/#5334).`,
       );
     }
-    return buildNode(condition as Record<string, unknown>);
+    return condition as Record<string, unknown>;
   }
 
-  return buildNode(where as Record<string, unknown>);
+  return where as Record<string, unknown>;
+}
+
+/**
+ * The FIELD KEYS a lowered `FilterCondition` names in its top-level
+ * CONJUNCTION — `$and` descended through, `$or` / `$not` deliberately not.
+ *
+ * # Why a conjunction walker and not {@link collectFilterLeaves}
+ *
+ * This answers a VOCABULARY question, not a predicate question: #5353's caller
+ * mints an ad-hoc cube's `dimensions` from the `where`, and the rule that bag
+ * has always followed is "the `where`'s own top-level keys are field names".
+ * `collectFilterLeaves` answers a different question (every member the compiled
+ * predicate binds, structure discarded) and substituting it here would have
+ * changed three behaviours #5353 does not ask about — see the caller's note.
+ *
+ * `$and` is descended because the LOWERING ITSELF introduces it: a flat filter
+ * array `[[a,…],[b,…]]` is the array spelling of the object `{a…, b…}`, and
+ * `parseFilterAST` lowers it to `{$and: [{a…}, {b…}]}`. Without descending, the
+ * two spellings of one filter would still mint two different cubes — the whole
+ * defect. Conjunction is associative and flat, so nested `$and`s are descended
+ * too; recursing at all is safe here precisely because every entry of one
+ * object ANDs with its siblings at every depth (`buildNode`'s rule).
+ *
+ * `$or` / `$not` are NOT descended, and both spellings agree on that today:
+ * `{$or: […]}` and `["or", …]` each contribute no key. Reading a disjunction's
+ * branches as cube dimensions is a separate question from #5353's asymmetry —
+ * and answering it would force a policy on DOTTED members that #5739 owns.
+ */
+export function conjunctFieldKeys(condition: Record<string, unknown>): string[] {
+  const keys: string[] = [];
+  const walk = (cond: Record<string, unknown>): void => {
+    for (const [key, value] of Object.entries(cond)) {
+      if (key === '$and' && Array.isArray(value)) {
+        for (const child of value) {
+          if (isFilterObject(child)) walk(child);
+        }
+        continue;
+      }
+      // Every other `$` key is a combinator this walk does not enter (`$or`,
+      // `$not`) or an operator that belongs to a field ENTRY, not to the
+      // condition — neither names a field here.
+      if (key.startsWith('$')) continue;
+      keys.push(key);
+    }
+  };
+  walk(condition);
+  return keys;
+}
+
+/**
+ * Normalize an analytics query's `where` into the tree the strategies compile.
+ * `null` when the query carries no `where` — i.e. no constraint.
+ *
+ * `where` is declared a `FilterCondition` (`AnalyticsQuerySchema`), and the
+ * object form is the whole of the contract downstream. An ARRAY nevertheless
+ * arrives — it is the `FilterArray` authoring sugar four published contracts
+ * teach, and analytics is a door into the runtime like any other — so it is
+ * LOWERED by {@link lowerAnalyticsWhere} (#5334, on #5158's ruling C), giving
+ * the same three answers `ObjectQL`'s six entry points give since #5329:
+ *
+ * 1. `[]` — "no filter", not a failed filter: `null`, the same reading every
+ *    layer gives it (the engine door DELETES the key; `parseFilterAST([])` is
+ *    `undefined`). No predicate is emitted and no error is raised.
+ * 2. A well-formed `FilterArray` — lowered through `parseFilterAST` and
+ *    compiled by {@link buildNode}, so the author gets the SAME rows either
+ *    spelling produces. `isFilterAST` gates first so the operator vocabulary is
+ *    checked before `parseFilterAST`'s lenient `$${op}` fallback can turn a
+ *    misspelling into a `$sounds_like` condition nothing executes.
+ * 3. Anything else array-shaped — REFUSED, loudly. Before #5334 all three of
+ *    these arrivals answered the same way: `return null`, which for (2) and (3)
+ *    means the predicate VANISHED and the chart was drawn over every row.
+ *
+ * Lowering rather than refusing outright is what keeps ONE dashboard's
+ * metadata meaning one thing: the same `where` on a plain `find()` already
+ * lowers at the engine door (#5329), so refusing it here would have forked the
+ * product by which face read the metadata.
+ */
+export function normalizeAnalyticsFilterTree(
+  query: { where?: unknown } | unknown,
+): NormalizedFilterNode | null {
+  const condition = lowerAnalyticsWhere(query);
+  if (!condition) return null;
+  return buildNode(condition);
 }
 
 /**

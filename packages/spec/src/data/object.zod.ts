@@ -395,15 +395,39 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
  * `.strict()`: unknown keys (incl. the retired `strategy` /
  * `crossTenantAccess`, #2763) are rejected with guidance, not stripped (#1535).
  *
- * @example Shared database with tenant_id row isolation
+ * `tenantField` carries **no default** (#5315). It used to default to
+ * `'tenant_id'`, which no consumer could act on: the platform's tenant column
+ * is `organization_id` (kernel-injected; the same column `tenantPolicy()` in
+ * `security/rls.zod.ts` and the RLS predicates assume), and the SQL driver's
+ * `computeTenantField` honours a declared name only when the object actually
+ * has that field — so the materialized `'tenant_id'` merely sent it looking for
+ * a column that did not exist before falling back to `organization_id` anyway.
+ * A declaration nobody reads is exactly what ADR-0078 prohibits, and `tenant`
+ * is a word ADR-0120 §Terminology refuses for the authorable vocabulary
+ * (`organization` is the product's noun). Undeclared now stays `undefined` and
+ * the driver's fallback is the single source of truth.
+ *
+ * @example Shared database, platform-default tenant column (organization_id)
+ * {
+ *   enabled: true
+ * }
+ *
+ * @example An object whose tenant column is genuinely not organization_id
  * {
  *   enabled: true,
- *   tenantField: 'tenant_id'
+ *   tenantField: 'workspace_id'
  * }
  */
 export const TenancyConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().describe('Enable multi-tenancy for this object'),
-  tenantField: z.string().default('tenant_id').describe('Field name for tenant identifier'),
+  tenantField: z.string().optional().describe(
+    'Column this object is tenant-scoped by. Omit it unless the tenant column ' +
+    "genuinely is not the platform's: when undeclared the driver falls back to " +
+    '`organization_id`, the kernel-injected column the RLS predicates and ' +
+    '`tenantPolicy()` also assume. A declared name is honoured only when the ' +
+    'object really has that field — otherwise the same `organization_id` ' +
+    'fallback applies. No default is materialized here on purpose (#5315).',
+  ),
 }, { error: strictTenancyError }).strict());
 
 /**

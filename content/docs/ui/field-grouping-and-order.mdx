@@ -25,17 +25,34 @@ So "flat vs grouped" is not a contradiction — it's one flat set seen through d
 
 There are **two** grouping concepts. Keep them distinct:
 
-**1. Semantic grouping — `field.group` (on the object).** A field's logical home ("billing", "contact_info", "system"). It travels with the model. The Studio field editor folds fields by it, and auto-generated forms use it as the **default** sectioning — so you are not starting from zero.
+**1. Semantic grouping — `field.group` + `fieldGroups` (on the object).** A field's logical home ("billing", "contact_info", "system"). It travels with the model. The Studio field editor folds fields by it, and auto-generated forms use it as the **default** sectioning — so you are not starting from zero.
 
+Semantic grouping has **two halves, and you need both**. `fieldGroups` on the object is the **authorization source** for the derivation: `deriveFieldGroupLayout` (ADR-0085 §5) — the one implementation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`. An **undeclared** `group` renders **exactly like no `group` at all** (the field falls into a trailing untitled bucket); with **no** `fieldGroups` declared at all, grouping does not apply and the form comes out flat. `os lint` (and `os build` / `os validate`) reports the mismatch as **`field-group-undeclared`**.
+
+{/* os:check */}
 ```ts
-fields: {
-  name:  Field.text({ label: 'Full name', group: 'contact' }),
-  email: Field.email({ label: 'Email',    group: 'contact' }),
-  stage: Field.select({ label: 'Stage',   group: 'status', options: [/* … */] }),
-}
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Contact = ObjectSchema.create({
+  name: 'showcase_contact',
+  label: 'Contact',
+
+  // The DECLARATION half — array order is display order (there is no `order` key).
+  fieldGroups: [
+    { key: 'contact', label: 'Contact' },
+    { key: 'status',  label: 'Status' },
+  ],
+
+  // The MEMBERSHIP half — each `group` must match a `key` declared above.
+  fields: {
+    name:  Field.text({ label: 'Full name', group: 'contact' }),
+    email: Field.email({ label: 'Email',    group: 'contact' }),
+    stage: Field.select({ label: 'Stage',   group: 'status', options: [{ label: 'New', value: 'new' }] }),
+  },
+});
 ```
 
-**2. Layout grouping — form `sections` (on a view).** A specific form's explicit arrangement: which fields, which section, how many columns, collapsible. It can **inherit** `field.group` as the default or **override** it per form.
+**2. Layout grouping — form `sections` (on a view).** A specific form's explicit arrangement: which fields, which section, how many columns, collapsible. It can **inherit** the object's declared groups as its default or **override** them per form.
 
 ```ts
 form: {
@@ -68,17 +85,18 @@ Keeping grouping off the field (beyond an optional semantic hint) is what lets *
 
 ## Runnable example
 
-- [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — fields tagged with `group`.
+- [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — four declared `fieldGroups`, and the fields tagged with the matching `group`.
 - [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — sections that materialise those groups.
 
 ## Anti-patterns
 
 - **Adding structural nesting to the data model to satisfy a form.** The model is flat; let the form group.
-- **Re-typing the grouping in every form.** Declare `field.group` once; forms inherit and only override on real divergence.
+- **Re-typing the grouping in every form.** Declare the groups (`fieldGroups`) and tag the fields (`field.group`) once; forms inherit and only override on real divergence.
+- **Tagging fields with a `group` you never declared in `fieldGroups`.** The tag reads as intent but authorizes nothing — the fields render ungrouped, and `os lint` says so as `field-group-undeclared`.
 - **Assuming a grid "group" will section your form fields.** It buckets rows by value — a different axis entirely.
 
 ## See also
 
 - [Create form ≠ edit form](/docs/ui/create-vs-edit-form).
-- Reference: [Field schema](/docs/references/data/field) (`group`), [View schema](/docs/references/ui/view) (`sections`, `grouping`).
+- Reference: [Object schema](/docs/references/data/object) (`fieldGroups`), [Field schema](/docs/references/data/field) (`group`), [View schema](/docs/references/ui/view) (`sections`, `grouping`).
 - Studio: [Object Designer](/docs/references/studio/object-designer) — field editor groups by `field.group`.

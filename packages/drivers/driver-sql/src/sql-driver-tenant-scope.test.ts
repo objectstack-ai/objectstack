@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ObjectSchema } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -216,6 +217,63 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       await driver.create('global_flag', { id: 'g1', name: 'G1' });
       const rows = await driver.find('global_flag', { object: 'global_flag' }, { tenantId: 'org_a' });
       expect(rows).toHaveLength(1);
+    });
+  });
+
+  /**
+   * #5315 — behavioural-equivalence pin for dropping `.default('tenant_id')`
+   * from `TenancyConfigSchema.tenantField`.
+   *
+   * The contract this pins is deliberately end-to-end: metadata goes through
+   * `ObjectSchema.parse` (the seam where the default used to materialise) and
+   * *then* to the driver, because the default was only ever observable on a
+   * PARSED object. An author who writes `tenancy: { enabled: true }` and no
+   * `tenantField` must land on `organization_id` — the platform's real tenant
+   * column — and must keep landing there across this change:
+   *
+   *   - before: parse filled `tenantField: 'tenant_id'`, `computeTenantField`
+   *     looked for a `tenant_id` column, did not find one, and fell through to
+   *     `organization_id`. The right answer by accident.
+   *   - after: parse leaves `tenantField` undefined, the declared branch is
+   *     skipped outright, and the same fallback yields `organization_id`.
+   *     The right answer on purpose (ADR-0078: no declaration nobody reads).
+   *
+   * Same answer, one fewer fiction in between — so this test is GREEN on both
+   * sides of the change by construction. That is the claim, not a weakness of
+   * the pin: its job is to fail if anyone reintroduces a default that steers
+   * the driver at a column the object does not have.
+   */
+  describe('#5315 undeclared tenantField resolves to organization_id (parse → driver)', () => {
+    it('an object declaring only `tenancy: { enabled: true }` scopes by organization_id', async () => {
+      await driver.disconnect();
+      driver = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      });
+
+      // Parse through the real spec schema — this is the seam under test.
+      const parsed = ObjectSchema.parse({
+        name: 'ticket',
+        label: 'Ticket',
+        tenancy: { enabled: true },
+        fields: {
+          organization_id: { type: 'text' },
+          subject: { type: 'text' },
+        },
+      });
+
+      await driver.initObjects([parsed as any]);
+
+      // The effective tenant column, whatever the parse did or did not fill in.
+      expect((driver as any).tenantFieldByTable['ticket']).toBe('organization_id');
+
+      // …and it actually isolates, rather than merely being recorded.
+      await driver.create('ticket', { id: 't1', subject: 'A' }, { tenantId: 'org_a' });
+      await driver.create('ticket', { id: 't2', subject: 'B' }, { tenantId: 'org_b' });
+      const rowsA = await driver.find('ticket', { object: 'ticket' }, { tenantId: 'org_a' });
+      expect(rowsA.map((r) => r.id)).toEqual(['t1']);
+      expect(rowsA[0].organization_id).toBe('org_a');
     });
   });
 

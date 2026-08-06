@@ -28,6 +28,13 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // only (no plugin class): `os serve` loads `EmailServicePlugin` itself through
 // the capability loop's dynamic import, host copy first.
 import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
+// The SMS provider vocabulary, read from the package that materialises the
+// transports, for the same reason and by the same rule as the mail one above
+// (#5713). `resolveSmsCapabilityArg` has to refuse exactly the tags
+// `makeSmsTransport` cannot build — restating `log`/`aliyun`/`twilio` here would
+// be the second literal #5094 was filed for. Values only (no plugin class): the
+// capability loop dynamic-imports `SmsServicePlugin` itself, host copy first.
+import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
@@ -2342,13 +2349,12 @@ export default class Serve extends Command {
             // credentials normally live in the `sms` settings namespace
             // (bound at kernel:ready); constructor opts cover pre-settings
             // boot and hosts without the settings service.
-            const cfgSms = (config as any).sms ?? {};
-            const provider = (process.env.OS_SMS_PROVIDER || cfgSms.provider || 'log').toLowerCase();
-            arg = {
-              provider,
-              ...(cfgSms.providerOptions ? { providerOptions: cfgSms.providerOptions } : {}),
-              ...(cfgSms.retries != null ? { retries: cfgSms.retries } : {}),
-            };
+            //
+            // Throws on a provider tag no transport can deliver (#5713) — the
+            // catch below turns that into the boot failure / loud error it
+            // should be, never a LogSmsTransport substituted behind the
+            // operator's back. Same shape as the `email` arm above.
+            arg = resolveSmsCapabilityArg((config as any).sms ?? {}, process.env).options;
           } else if (cap === 'storage') {
             // Storage is now in the default capability slate. If the host
             // hasn't configured a backend explicitly we fall back to the
@@ -3229,6 +3235,71 @@ export function resolveEmailCapabilityArg(
     );
   }
   return { options };
+}
+
+/** Constructor options for `SmsServicePlugin`, as the capability loop builds them. */
+export interface SmsCapabilityArg {
+  options: Record<string, unknown>;
+}
+
+/**
+ * Resolve `SmsServicePlugin` constructor options from `config.sms` + `OS_SMS_*`
+ * env, and **refuse a provider tag no transport can deliver through** (#5713).
+ *
+ * The refusal is the point. Credentials for a real provider normally arrive from
+ * the `sms` settings namespace at `kernel:ready`, so this function deliberately
+ * does NOT demand them — a bare `OS_SMS_PROVIDER=twilio` on a host whose Twilio
+ * keys are stored in Settings is a complete, working configuration and passes
+ * through untouched. What it refuses is the one thing settings can never repair:
+ * a provider *tag* outside `SMS_TRANSPORT_PROVIDERS`.
+ *
+ * That tag used to travel all the way into the plugin, which caught the
+ * `makeSmsTransport: unknown provider 'twilo'` throw and substituted
+ * `LogSmsTransport` behind the operator's back. Measured on `origin/main` before
+ * this change, `new SmsServicePlugin({ provider: 'twilo' }).init(ctx)`:
+ *
+ *   - boots without throwing, registers the `sms` service;
+ *   - transport = `LogSmsTransport`, `isConfigured() === false`;
+ *   - one `logger.warn` line, then `send()` answers
+ *     `{ status: 'sent', messageId: 'dev-sms-…' }`.
+ *
+ * So a phone-OTP sign-in tells the user "code sent" and nothing leaves the box —
+ * the same declared-but-not-delivered shape #5132 closed for mail one layer up,
+ * and the same door #5204 closed on the `SettingsService` env branch. This path
+ * never reaches `SettingsService`: it runs at kernel-assembly time, before the
+ * settings service exists, which is exactly why the `sms` namespace's `select`
+ * options table (`sms.manifest.ts`) could not see it.
+ *
+ * The plugin's fallback is left alone on purpose. For a *known* provider with
+ * incomplete constructor credentials it is correct — the settings bind can still
+ * swap in a working transport — and it stays the last line of defence for hosts
+ * that construct `SmsServicePlugin` themselves. `os serve` simply stops handing
+ * it input it cannot use.
+ *
+ * `OS_SMS_PROVIDER=log` (the default) is how an environment says "this box does
+ * not send SMS", which is what makes refusing the rest fair.
+ */
+export function resolveSmsCapabilityArg(
+  cfgSms: Record<string, any> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): SmsCapabilityArg {
+  const provider = String(env.OS_SMS_PROVIDER || cfgSms.provider || 'log').toLowerCase();
+  if (!isSmsTransportProvider(provider)) {
+    throw new Error(
+      `provider='${provider}' is not a transport this server can deliver through, so every OTP and `
+      + "notification SMS would be answered status: 'sent' and nothing would leave the box — "
+      + `pick one of ${SMS_TRANSPORT_PROVIDERS.join(' / ')} (Settings → SMS Delivery → Provider). `
+      + 'On this boot path the provider is OS_SMS_PROVIDER or config.sms.provider; set '
+      + 'OS_SMS_PROVIDER=log if this environment is not meant to send SMS.',
+    );
+  }
+  return {
+    options: {
+      provider,
+      ...(cfgSms.providerOptions ? { providerOptions: cfgSms.providerOptions } : {}),
+      ...(cfgSms.retries != null ? { retries: cfgSms.retries } : {}),
+    },
+  };
 }
 
 /**

@@ -7,6 +7,13 @@ export * from './filter.zod';
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's
 // `translateFilter` — was enrolled by #4405).
 export * from './filter-logic-conformance';
+// Canonical conformance cases for the filter TEXT operators — case folding
+// (ASCII-only, #4706 Q1), literal comparands (no LIKE wildcards, no regex
+// metacharacters), and the refusal of the retired `$regex`/`$options`. A
+// sibling of the logic table rather than rows inside it: those two axes are
+// explicitly out of that table's scope, and this one needs an `expectRejection`
+// discriminant it deliberately never grew (#5701).
+export * from './filter-text-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result

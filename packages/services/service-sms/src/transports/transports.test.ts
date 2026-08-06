@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AliyunSmsTransport } from './aliyun.js';
 import { TwilioSmsTransport } from './twilio.js';
-import { makeSmsTransport } from './index.js';
+import { makeSmsTransport, SMS_TRANSPORT_PROVIDERS, isSmsTransportProvider } from './index.js';
 import { LogSmsTransport } from '../sms-service.js';
 
 const jsonResponse = (body: any, status = 200) =>
@@ -110,5 +110,37 @@ describe('makeSmsTransport', () => {
     expect(makeSmsTransport({ provider: 'twilio', options: { accountSid: 'a', authToken: 'b', from: '+1' } }))
       .toBeInstanceOf(TwilioSmsTransport);
     expect(() => makeSmsTransport({ provider: 'nope' as any })).toThrow(/unknown provider/);
+  });
+});
+
+// #5713 — the vocabulary the CLI's `sms` capability arm judges OS_SMS_PROVIDER
+// against. It has to be *this* list and not a copy of it: two literals for one
+// vocabulary is how the mail dropdown and the mail transports drifted (#5094).
+describe('SMS_TRANSPORT_PROVIDERS / isSmsTransportProvider', () => {
+  it('names exactly the tags makeSmsTransport can build', () => {
+    expect([...SMS_TRANSPORT_PROVIDERS]).toEqual(['log', 'aliyun', 'twilio']);
+    // Every member builds (given credentials) — none is an aspiration.
+    const credentials: Record<string, Record<string, unknown>> = {
+      log: {},
+      aliyun: { accessKeyId: 'a', accessKeySecret: 'b', signName: 'c' },
+      twilio: { accountSid: 'a', authToken: 'b', from: '+1' },
+    };
+    for (const provider of SMS_TRANSPORT_PROVIDERS) {
+      expect(() => makeSmsTransport({ provider, options: credentials[provider] }), provider).not.toThrow();
+    }
+  });
+
+  it('narrows a provider string, rejecting the typo that used to reach makeSmsTransport', () => {
+    for (const provider of SMS_TRANSPORT_PROVIDERS) expect(isSmsTransportProvider(provider)).toBe(true);
+    // `twilo` is the specimen from #5713: a plausible misspelling of a real
+    // provider, which used to pass the boot path untouched, throw inside
+    // makeSmsTransport, get caught, and become LogSmsTransport.
+    expect(isSmsTransportProvider('twilo')).toBe(false);
+    expect(() => makeSmsTransport({ provider: 'twilo' as any })).toThrow(/unknown provider 'twilo'/);
+    // Non-strings and near-misses are rejected too — the guard is what stands
+    // between an operator's env value and an `as SmsProviderTag` cast.
+    for (const bad of ['', 'LOG', 'sms', undefined, null, 42, {}]) {
+      expect(isSmsTransportProvider(bad), String(bad)).toBe(false);
+    }
   });
 });

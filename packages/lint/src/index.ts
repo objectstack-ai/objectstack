@@ -282,6 +282,13 @@ export { validatePageFieldBindings, PAGE_FIELD_UNKNOWN } from './validate-page-f
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
 
 export {
+  validateComponentProps,
+  COMPONENT_PROPS_UNKNOWN_KEY,
+  COMPONENT_PROPS_INVALID,
+} from './validate-component-props.js';
+export type { ComponentPropsFinding, ComponentPropsSeverity } from './validate-component-props.js';
+
+export {
   validateChartBindings,
   CHART_DIMENSION_UNKNOWN,
   CHART_MEASURE_UNKNOWN,

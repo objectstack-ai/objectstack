@@ -3074,9 +3074,9 @@ export class RestServer {
                             const unscopedBase = isScoped
                                 ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
-                            (discovery.routes as any).mcp = `${unscopedBase}/mcp`;
+                            discovery.routes.mcp = `${unscopedBase}/mcp`;
                         } else {
-                            delete (discovery.routes as any).mcp;
+                            delete discovery.routes.mcp;
                         }
 
                         // Align auth route with the versioned base path if present.

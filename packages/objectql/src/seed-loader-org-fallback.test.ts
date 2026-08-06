@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { SeedLoaderConfigSchema } from '@objectstack/spec/data';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 
 function harness(orgRows: Array<{ id: string }>) {
   const inserted: Array<{ object: string; record: Record<string, unknown> }> = [];
@@ -20,7 +21,15 @@ function harness(orgRows: Array<{ id: string }>) {
       inserted.push({ object, record });
       return { id: `${object}_${inserted.length}` };
     },
-    update: async () => ({}),
+    update: async (_o: string, data: any, opts?: any) => {
+      // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate — the twin of
+      // the delete pin, on the same argument: a double looser than the engine it
+      // stands in for is how #4434 shipped a REST route that 500'd for every
+      // caller with its suite green, and a predicate update is no less
+      // destructive than a predicate delete.
+      assertEngineUpdateDispatch(data, opts);
+      return {};
+    },
   };
   const metadata = {
     // A single text field → no lookup/master_detail references to resolve.
