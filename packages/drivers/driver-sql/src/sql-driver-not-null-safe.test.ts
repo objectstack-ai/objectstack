@@ -29,14 +29,25 @@
  * row 3) and lets the direction of the guard follow each operator's own answer
  * for a missing value (`$ne` / `$nin` are NOT widened).
  *
- * Nothing outside a `$not` changes: an ordinary comparison compiles to the same
- * SQL it always did, so no plain predicate loses an index to this.
+ * A POSITIVE comparison is unchanged: it compiles to the same SQL it always did,
+ * so no plain predicate loses an index to this.
+ *
+ * # [#5298] The sequel, and why this file now pins BOTH directions
+ *
+ * #5146 deliberately stopped at `$not` and this suite pinned that boundary:
+ * two assertions asserted that a bare `$ne` still dropped the NULL rows, so a
+ * rewrite leaking past its scope would go red. The 2026-08-06 ruling on #5298
+ * took the same direction for the operators that carry their own negation
+ * (`$ne` / `$nin` / `$notContains`), so those two assertions FLIPPED — see the
+ * block at the bottom of this file, which says so at the point of the flip.
  *
  * These expectations are duplicated by hand in the two JS backends'
- * `*-not-null-safe.test.ts`. They belong in `FILTER_LOGIC_CASES`
- * (`@objectstack/spec/data`) so every backend is held to them at once — that
- * table is being extended under #5239 / the spec lane of #5146, which lands
- * with driver-mongodb; until then these three files are the pin.
+ * `*-not-null-safe.test.ts`. `FILTER_LOGIC_CASES` (`@objectstack/spec/data`)
+ * grew a nullable column in #5298 and now carries the `$null` partition for
+ * every backend at once; the `$ne` and `$not` rows join it once `driver-turso`'s
+ * remote transport answers them the same way (#5903 — it is an independent
+ * filter compiler that inherits none of this). Until then these files are the
+ * pin for the SQL family.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -220,21 +231,41 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
 
   // ── Nothing outside `$not` moves ───────────────────────────────────────────
 
-  describe('only the $not path is rewritten', () => {
-    it('a plain comparison compiles to exactly the SQL it always did', () => {
+  describe('POSITIVE comparisons are still compiled exactly as before', () => {
+    it('a positive comparison compiles to exactly the SQL it always did', () => {
       expect(sqlFor({ stage: 'won' })).toBe("select `id` from `deal` where `stage` = 'won'");
-      expect(sqlFor({ stage: { $ne: 'won' } })).toBe("select `id` from `deal` where `stage` <> 'won'");
       expect(sqlFor({ amount: { $gt: 15 } })).toBe('select `id` from `deal` where `amount` > 15');
       expect(sqlFor({ stage: { $in: ['won'] } })).toBe("select `id` from `deal` where `stage` in ('won')");
     });
 
-    it('a plain comparison returns the rows it always did', async () => {
-      expect(await ids({ stage: 'won' })).toEqual(['1']);
-      // Still SQL semantics outside a negation: `<> 'won'` drops the NULL rows.
-      // That divergence from the JS backends is real but out of #5146's scope —
-      // it is filed separately rather than smuggled in here.
-      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
+    /**
+     * FLIPPED PIN (#5298). Both assertions in this block used to pin the
+     * OPPOSITE answer, on purpose: when #5146 was implemented the non-negated
+     * `$ne` was explicitly out of its scope, so the suite pinned "`<> 'won'`
+     * still drops the NULL rows" to prove the rewrite had not leaked past the
+     * `$not` it was scoped to. The 2026-08-06 ruling on #5298 took the other
+     * direction for `$ne` / `$nin` / `$notContains`, so the pin flips with it —
+     * this is the reverse-verification anchor doing its job, not a regression.
+     *
+     * The `$not` half of the suite above is untouched and still green, which is
+     * what says the two rulings compose rather than one overwriting the other.
+     */
+    it('$ne / $nin / $notContains are NULL-safe outside a $not too (#5298)', async () => {
+      expect(sqlFor({ stage: { $ne: 'won' } })).toBe(
+        "select `id` from `deal` where (`stage` is null or `stage` <> 'won')",
+      );
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
+      expect(await ids({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
+      expect(await ids({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
       expect(await ids({})).toEqual(ALL);
+    });
+
+    it('a positive comparison returns the rows it always did', async () => {
+      expect(await ids({ stage: 'won' })).toEqual(['1']);
+      expect(await ids({ stage: { $in: ['won'] } })).toEqual(['1']);
+      // `$ne: null` is a null PREDICATE, not a comparison — "has any value" is
+      // still false for a row that has none. Unchanged by #5298.
+      expect(await ids({ stage: { $ne: null } })).toEqual(['1', '2']);
     });
 
     it('a $or / $and of plain comparisons is unchanged', () => {

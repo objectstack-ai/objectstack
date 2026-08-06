@@ -14,6 +14,7 @@
 
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
 import { nanoid } from 'nanoid';
 
 /**
@@ -59,6 +60,39 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$null',
   '$exists',
 ] as const;
+
+/**
+ * The `$`-keys a filter NODE may carry (#5769).
+ *
+ * `FilterConditionSchema` declares exactly three combinators; every OTHER key
+ * of a node is a FIELD NAME. Taken from `@objectstack/spec`'s own
+ * `LOGICAL_OPERATORS` rather than restated here — a private copy of a shared
+ * vocabulary agrees with the spec on the day it is typed and never again, which
+ * is the note `driver-memory`'s `SUPPORTED_FIELD_OPERATORS` already carries.
+ */
+const NODE_COMBINATORS: ReadonlySet<string> = new Set<string>(LOGICAL_OPERATORS);
+
+/**
+ * The `$`-keys that are FIELD operators, i.e. legal one level DOWN (#5769).
+ *
+ * Used only to pick which sentence a refusal prints — never whether to refuse.
+ * That distinction matters because `FILTER_OPERATORS` is a runtime allowlist
+ * other packages derive enforcement from (#5701): a name added there must not
+ * be able to change this transport's VERDICT on a node-position key, and here
+ * it cannot — both branches of {@link RemoteTransport.undeclaredCombinator}
+ * throw `INVALID_FILTER`, they differ only in the repair they suggest.
+ *
+ * `$regex` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
+ * carries it: it is not spec-declared but is what better-auth's adapter emits,
+ * so a caller really can misplace it. `$between` comes in with the spec list
+ * even though this transport never compiles it (TursoDriver lowers it first) —
+ * a misplaced `$between` is still a misplaced FIELD operator, and telling its
+ * author "unknown combinator" would send them looking for the wrong mistake.
+ */
+const MISPLACED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
+  ...FILTER_OPERATORS,
+  '$regex',
+]);
 
 /**
  * Where the wildcard goes in a LIKE pattern: `contains` → `%v%`,
@@ -1033,8 +1067,24 @@ export class RemoteTransport {
    * test before the loop runs. The only remaining sources of `''` are
    * genuinely-empty inputs (`{}`, `$and: []`, an `$or` with a TRUE disjunct) —
    * all of which ARE TRUE.
+   *
+   * Since #5769 that list is also *reachable-from* correct: an `$or` whose TRUE
+   * disjunct absorbed the group used to be the one way a MALFORMED sibling
+   * could still produce `''`, because its compiled clauses were discarded along
+   * with the branch. The node gate at the top of the loop below refuses the
+   * sibling on the way in, so `''` now means TRUE **and** every key of every
+   * node was one this transport compiles.
+   *
+   * `path` names this node's position for a refusal message — `where` at the
+   * top, `where.$or[0]` inside a disjunct. It is read by the #5769 gate ONLY;
+   * every refusal that predates it keeps its own wording and its own way of
+   * naming a location, so threading this parameter changes no existing message.
    */
-  private buildWhereSQL(object: string, filters: any): { whereClauses: string; args: any[] } {
+  private buildWhereSQL(
+    object: string,
+    filters: any,
+    path = 'where',
+  ): { whereClauses: string; args: any[] } {
     // "No filter" is spelled by ABSENCE, and that is the only spelling. All
     // five call sites hand this method `query?.where` (`query.where` in
     // `buildSelectSQL`), so a caller that supplied no filter arrives as
@@ -1084,11 +1134,67 @@ export class RemoteTransport {
     const args: any[] = [];
 
     for (const [key, value] of Object.entries(filters)) {
+      // [#5769] Declared = enforced, in the NODE position.
+      //
+      // Everything `$`-prefixed here that is not one of the three declared
+      // combinators fell through to the FIELD arms below and was compiled as a
+      // COLUMN of that name — the #1051/#1076 diagnostic detour, one level up
+      // from where `$not` used to land. Measured on `origin/main` against three
+      // rows, with a capturing client:
+      //
+      //   { $eq: 'won' }                 → SELECT … WHERE "$eq" = ?          → []
+      //   { $where: 'return true' }      → SELECT … WHERE "$where" = ?       → []
+      //   { $or: [{}, { $where: 'x' }] } → SELECT … (no WHERE at all)        → every row
+      //
+      // The first two are the silent empty set: SQLite's backwards-compatible
+      // rule degrades a double-quoted name that resolves to no column into a
+      // STRING LITERAL, so the statement compiles, runs and matches nothing —
+      // and where a build disables that rule (`SQLITE_DQS=0`) `find()`'s own
+      // `no such column` backstop swallows the error into `[]` anyway. Two
+      // roads, one answer, and neither is distinguishable from "no rows
+      // matched".
+      //
+      // The third is the expensive direction, and it needs no dialect quirk at
+      // all: a `{}` disjunct absorbs its `$or` to TRUE, the compiled clauses are
+      // discarded with it, and the statement loses its WHERE entirely. On
+      // `deleteMany`/`updateMany` that is the whole table — measured, all three
+      // rows updated by a filter naming none of them.
+      //
+      // `SqlDriver` refuses the same shape on its validation walk
+      // (`reduceFilterKey`, objectstack#5348 / PR #5368), which Turso's LOCAL
+      // transport inherits. This transport was the one remaining face, and the
+      // fork ran the wrong way: strict locally, silent remotely, for one filter
+      // whose only difference was the `url` it was sent to.
+      //
+      // Placed inline in this loop rather than on a separate validation walk —
+      // the opposite of `SqlDriver`'s placement, for a reason particular to
+      // this compiler. `SqlDriver`'s emitter is skipped wholesale by a boolean
+      // identity, so an emitter-side gate there would be conditional on a
+      // node's SIBLINGS. This one is not: the `$and` and `$or` branches below
+      // compile EVERY element before applying their identity rule (the third
+      // measurement above is that fact — `{ $where: 'x' }` was compiled, then
+      // its clause thrown away), so this loop already visits every node of the
+      // tree, `$or`'s TRUE-absorbing branch included. The pinning cases for
+      // exactly that are in `remote-transport-node-operator-refusal.test.ts`.
+      if (key.startsWith('$')) {
+        if (!NODE_COMBINATORS.has(key)) {
+          throw this.undeclaredCombinator(object, key, `${path}.${key}`);
+        }
+        // The three declared names still have to carry the shape they are
+        // declared with. `{ $and: 'x' }` fell through the `Array.isArray` tests
+        // below into the very same field arm — `WHERE "$and" = ?` — so leaving
+        // it out would put a hole in this gate at precisely the three keys the
+        // gate is defined by. `$not` takes a single operand rather than a list
+        // and is refused by shape one level down, in `buildSubFilterSQL`.
+        if ((key === '$and' || key === '$or') && !Array.isArray(value)) {
+          throw this.nonListCombinator(object, key, value, `${path}.${key}`);
+        }
+      }
       if (key === '$and' && Array.isArray(value)) {
         const subClauses: string[] = [];
         const subArgs: any[] = [];
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
           // A TRUE conjunct is AND's identity element: `x AND TRUE ≡ x`, so
           // dropping it loses nothing. This is the ONE direction the old
           // "skip whatever compiled to nothing" rule happened to get right.
@@ -1112,7 +1218,7 @@ export class RemoteTransport {
         // truth value — which is the asymmetry #1073 is about.
         let hasTrueDisjunct = false;
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
           if (!sc) {
             hasTrueDisjunct = true;
             continue;
@@ -1163,7 +1269,7 @@ export class RemoteTransport {
         // return it (JS `undefined !== 'won'`). The divergence is the SQL
         // family's, not this transport's, and remote mode is pinned to the
         // family it belongs to — filed as objectstack#5146.
-        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, value);
+        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, value, path);
         if (sc) {
           clauses.push(`NOT (${sc})`);
           args.push(...sa);
@@ -1480,6 +1586,85 @@ export class RemoteTransport {
   }
 
   /**
+   * The error for a `$`-key in a NODE position that is not a declared
+   * combinator (#5769).
+   *
+   * The leading sentence is `driver-sql`'s and `driver-memory`'s, verbatim —
+   * they are word-for-word identical to each other because #5240 ruled that one
+   * condition speaks one wording, and this is the same condition on a third
+   * backend. Only the tail differs, and it says what THIS transport used to do
+   * with the key, because what it used to do is not what the others used to do:
+   * they handed it to knex or to mingo, this one quoted it into SQL as a column
+   * name.
+   *
+   * ## Two tails, one verdict
+   *
+   * A node-position `$eq` and a node-position `$where` are not the same
+   * mistake. The first is a real operator ONE LEVEL too high — the author wrote
+   * `{ $eq: 'won' }` where `{ stage: { $eq: 'won' } }` was meant, which is the
+   * single most likely way to arrive here from a hand-written or AI-authored
+   * filter — and the repair is to name the field. The second names nothing this
+   * protocol declares at any level, and its repair is to stop using it. Telling
+   * a misplaced `$eq`'s author "$eq is not a combinator" is true and useless.
+   *
+   * Both are refused, with the same `INVALID_FILTER` / 400 and the same first
+   * sentence; only the closing direction differs. Nothing branches on the
+   * distinction — see {@link MISPLACED_FIELD_OPERATORS} for why it must stay
+   * that way.
+   */
+  private undeclaredCombinator(object: string, key: string, path: string): Error {
+    const shared =
+      `[RemoteTransport] Unsupported filter combinator "${key}" at ${path} on '${object}'. A filter ` +
+      `node's $-prefixed keys are the declared logical operators $and, $or and $not ` +
+      `(@objectstack/spec LOGICAL_OPERATORS); every other key is a field name. It is refused rather ` +
+      `than compiled as a COLUMN of that name, which is what this transport used to do — SQLite ` +
+      `degrades a double-quoted name that matches no column into a string literal, so the statement ` +
+      `compiled, ran and matched nothing, and a caller could not tell "no rows matched" from "the ` +
+      `filter never compiled"`;
+    if (MISPLACED_FIELD_OPERATORS.has(key)) {
+      return invalidFilterError(
+        `${shared}. "${key}" IS a field operator, one level down: write ` +
+          `{ <field>: { "${key}": <value> } } — e.g. { stage: { "${key}": … } } — rather than putting ` +
+          `it at the condition level (objectstack#5769, objectstack#5348).`,
+      );
+    }
+    return invalidFilterError(
+      `${shared}. The Filter Protocol declares no "${key}" at any level; on a read it cost an empty ` +
+        `page, and on deleteMany/updateMany the predicate is constantly false or constantly true ` +
+        `depending on which side of the comparison the literal lands (objectstack#5769, ` +
+        `objectstack#5348).`,
+    );
+  }
+
+  /**
+   * The error for `$and` / `$or` carrying something other than a list (#5769).
+   *
+   * Split from {@link undeclaredCombinator} because the key is not the mistake:
+   * `$and` is declared, it is spelled correctly, and its VALUE is wrong. Told
+   * "unsupported combinator", its author would go looking for a typo that is
+   * not there.
+   *
+   * It belongs to #5769 all the same, because the OLD ending was identical:
+   * both branches below tested `Array.isArray` before claiming the key, so a
+   * non-list `$and` fell straight through them into the field arms and compiled
+   * to `WHERE "$and" = ?` — measured on `origin/main`, the same silent empty set
+   * as `{ $eq: 'won' }`. `SqlDriver` refuses it on its walk
+   * (`assertFilterNodeList`), so local and remote now agree here too.
+   *
+   * The requirement sentence is `driver-sql`'s, so the two read alike.
+   */
+  private nonListCombinator(object: string, key: string, value: unknown, path: string): Error {
+    const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
+    return invalidFilterError(
+      `[RemoteTransport] Filter combinator "${key}" at ${path} on '${object}' requires an array of ` +
+        `filter conditions, but received ${shown} (${preview(value)}). @objectstack/spec ` +
+        `FilterConditionSchema declares "${key}" as FilterCondition[]. Refusing rather than falling ` +
+        `through to the field path, which read '${key}' as a COLUMN NAME and compiled a predicate ` +
+        `against a column that cannot exist (objectstack#5769).`,
+    );
+  }
+
+  /**
    * Compile ONE sub-filter of a logical operator — an element of `$and` / `$or`
    * (#1073), or the whole operand of `$not` (#1076).
    *
@@ -1497,15 +1682,21 @@ export class RemoteTransport {
    *
    * `index` is the element's position for the array operators, and `null` for
    * `$not`, which takes a single operand rather than a list.
+   *
+   * `path` is the ENCLOSING node's position; this method extends it with the
+   * branch it is descending into, so a #5769 refusal raised further down can
+   * name the disjunct it came from (`where.$or[1].$where`) rather than only the
+   * key. Nothing else reads it — see {@link buildWhereSQL}.
    */
   private buildSubFilterSQL(
     object: string,
     branch: '$and' | '$or' | '$not',
     index: number | null,
     sub: unknown,
+    path = 'where',
   ): { whereClauses: string; args: any[] } {
     if (!isFilterNode(sub)) throw this.uncompilableSubFilter(object, branch, index, sub);
-    return this.buildWhereSQL(object, sub);
+    return this.buildWhereSQL(object, sub, index === null ? `${path}.${branch}` : `${path}.${branch}[${index}]`);
   }
 
   /**

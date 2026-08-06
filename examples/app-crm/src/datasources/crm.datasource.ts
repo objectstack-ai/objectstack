@@ -5,6 +5,12 @@ import { defineDatasource } from '@objectstack/spec/data';
 /**
  * Primary CRM datasource — in-memory SQLite for the example.
  * In production, swap `driver` to 'postgres' and supply real `config`.
+ *
+ * No `pool` block: SQLite's connection strategy is owned by the driver (one
+ * connection per database — a second connection to `:memory:` would open a
+ * separate, empty one). This example declared `pool: { min: 1, max: 5 }` and
+ * measurably ran on `{min:1,max:1}` with no indication at all, which is what
+ * #5714 turned from a silent drop into a loud rejection.
  */
 export const CrmDatasource = defineDatasource({
   name: 'crm_primary',
@@ -12,10 +18,6 @@ export const CrmDatasource = defineDatasource({
   driver: 'sqlite',
   config: {
     filename: ':memory:',
-  },
-  pool: {
-    min: 1,
-    max: 5,
   },
   active: true,
 });

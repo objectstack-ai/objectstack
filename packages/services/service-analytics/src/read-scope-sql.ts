@@ -330,10 +330,37 @@ function bindLike(params: unknown[], pattern: string): string {
   return `${bind(params, pattern)} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
 }
 
+/**
+ * [#5298] Wrap a negative-polarity value test so a row whose column has no value
+ * SATISFIES it: `(col IS NULL OR <test>)`.
+ *
+ * The read-scope twin of `driver-sql`'s `applyNullSafeNegative`, and the reason
+ * this compiler had to move in the same PR rather than a later one: an RLS rule
+ * is authored once and evaluated on BOTH sides — this file lowers it for the
+ * read path while `formula`'s `matchesFilterCondition` evaluates it for the
+ * write-side `check`. Leaving the two on different answers for `$ne` is one
+ * permission rule admitting two different row sets, which is the security
+ * defect #5146 named for `$not` and #5298 ruled for the rest.
+ *
+ * OR-expansion rather than `IS DISTINCT FROM` / `IS NOT` / `<=>`, for the three
+ * reasons recorded on the driver-side twin: `NOT LIKE` has no such form, the
+ * SQLite spelling depends on an engine version nothing here pins, and the
+ * measured query plans are identical either way.
+ *
+ * The parentheses are not optional. {@link compileField} joins a field's
+ * operators with bare ` AND `, so an unwrapped `col IS NULL OR …` would bind
+ * looser than that AND and silently widen the whole scope.
+ */
+function nullSafeNegative(col: string, test: string): string {
+  return `(${col} IS NULL OR ${test})`;
+}
+
 function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
-    case '$ne': return val === null ? `${col} IS NOT NULL` : `${col} <> ${bind(params, val)}`;
+    // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
+    // value" is false for a row that has none. Only the comparison is guarded.
+    case '$ne': return val === null ? `${col} IS NOT NULL` : nullSafeNegative(col, `${col} <> ${bind(params, val)}`);
     case '$gt': return `${col} > ${bind(params, val)}`;
     case '$gte': return `${col} >= ${bind(params, val)}`;
     case '$lt': return `${col} < ${bind(params, val)}`;
@@ -346,7 +373,9 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return '1 = 1'; // NOT IN () excludes nothing
-      return `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`;
+      // [#5298] NULL-safe: "not among this list" holds vacuously for a value
+      // that is not there.
+      return nullSafeNegative(col, `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`);
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
@@ -355,7 +384,9 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
     // character is bound with it. See {@link bindLike}.
     case '$contains': return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
-    case '$notContains': return `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`;
+    // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
+    // contain" is true of a value that is not there.
+    case '$notContains': return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
     case '$startsWith': return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
     case '$endsWith': return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
     case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;

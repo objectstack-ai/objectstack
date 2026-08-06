@@ -463,7 +463,14 @@ export function resolveOrdering(
 function parseUTC(date: string): number {
   // Accepts 'YYYY-MM-DD' (and ISO datetimes); interpreted as UTC.
   const ms = Date.parse(date.length === 10 ? `${date}T00:00:00Z` : date);
-  if (Number.isNaN(ms)) throw new Error(`[dataset-executor] invalid date in dateRange: "${date}"`);
+  // [#5716] `DATASET_INVALID` / 400 — the string comes from the REQUEST
+  // (`selection.timeDimensions[].dateRange`, usually a dashboard's date filter),
+  // reaches here only through `shiftRange`'s `compareTo` math, and no schema
+  // refines it into a date. A caller who sends an unparseable bound gets told
+  // which bound it was; nothing about it is a server fault.
+  if (Number.isNaN(ms)) {
+    throw datasetInvalidError(`[dataset-executor] invalid date in dateRange: "${date}"`);
+  }
   return ms;
 }
 
@@ -508,7 +515,15 @@ function resolveCompareDimension(selection: DatasetSelection): string {
 
   if (cmp.dimension != null) {
     if (!names.includes(cmp.dimension)) {
-      throw new Error(
+      // [#5716] `DATASET_INVALID` / 400 for all three refusals in this function.
+      // Every one of them is a verdict about the SELECTION as a whole — which
+      // `timeDimensions` carry a `dateRange`, and whether `compareTo` can pick
+      // one — so it is `datasetInvalidError`, not the member-level
+      // `invalidMemberError`: the fix is to add a window or drop `compareTo`,
+      // not to correct a misspelled member. Same request, same document, same
+      // family as the order-key and totals refusals already enveloped here
+      // (#5367).
+      throw datasetInvalidError(
         `[dataset-executor] compareTo requires a timeDimension "${cmp.dimension}" with a dateRange. `
         + (names.length > 0
           ? `This selection dates ${names.map((n) => `"${n}"`).join(', ')} — name one of those, or omit compareTo.dimension to let the executor choose when there is only one.`
@@ -521,7 +536,7 @@ function resolveCompareDimension(selection: DatasetSelection): string {
   if (names.length === 1) return names[0];
 
   if (names.length === 0) {
-    throw new Error(
+    throw datasetInvalidError(
       '[dataset-executor] compareTo needs a dated window to shift, but this selection declares no '
       + 'timeDimension with a dateRange. Give the time dimension a dateRange (a dashboard date-range '
       + 'filter is the usual source), or drop compareTo — a period-over-period comparison is only '
@@ -529,7 +544,7 @@ function resolveCompareDimension(selection: DatasetSelection): string {
     );
   }
 
-  throw new Error(
+  throw datasetInvalidError(
     `[dataset-executor] compareTo.dimension is ambiguous: ${names.length} time dimensions carry a `
     + `dateRange (${names.map((n) => `"${n}"`).join(', ')}). Name the one to shift — `
     + `compareTo: { kind: '${cmp.kind}', dimension: '${names[0]}' }.`,

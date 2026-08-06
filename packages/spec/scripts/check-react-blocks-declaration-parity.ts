@@ -50,12 +50,34 @@
 // fixture that stays green while its "renderer" ignores everything, so the
 // capability cannot be re-assumed by the next reader.
 //
-// The frontend side is the objectui registry-inputs manifest (sdui.manifest.json
-// — see objectui scripts/dump-public-manifest.mjs). Provide it with
-// MANIFEST=/path/to/sdui.manifest.json. Without it, the check reports "manifest
-// unavailable" and exits 0 (same manifest-optional posture as the html-tier gate).
+// WHERE THE MANIFEST COMES FROM — AND WHY NOTHING HERE CAN PRODUCE ONE (#4690).
+//
+// The right-hand side is objectui's registry-inputs manifest (sdui.manifest.json).
+// Its only producer is objectui's `scripts/dump-public-manifest.mjs`, which drives a
+// real browser (Playwright chromium) at the built console's `dev/manifest-dump.html`
+// and reads `window.__MANIFEST`: the registry is a browser app (plugin-map / charts
+// pull browser-only deps), so nothing enumerates it from Node. `pnpm sdui:manifest`
+// (scripts/gen-sdui-manifest.sh) is the wrapper that builds objectui at
+// `.objectui-sha`, dumps the manifest, and then runs THIS gate against it.
+//
+// This repository carries no manifest to fall back on. Measured, so the next reader
+// does not have to re-derive it: `packages/console/dist/` is gitignored (the package
+// tracks 4 files, none of them a dist), `scripts/build-console.sh` deliberately does
+// not produce one — it must not drag a browser into the console build, and says so —
+// and the published `@objectstack/console` tarball has none either (16.1.0: 513
+// files, zero `sdui` matches; its `dist/manifest.json` is the PWA manifest), so even
+// the CLI's `@objectstack/console/dist/sdui.manifest.json` fallback resolves to
+// nothing.
+//
+// Therefore "no manifest" never means "nothing to check" here. It means THIS GATE
+// DID NOT RUN — reported as exit 1, not as a `⚠` and exit 0. Until #4690 the two
+// were confused: the gate was in no workflow at all, and a manual run without a
+// MANIFEST skipped and exited 0, so no path existed on which it could ever go red.
+// That is the sample AGENTS.md's "Absence must be loud" describes — a verifier that
+// silently degrades is worse than no verifier, because it reports success.
 //
 // Run: MANIFEST=… pnpm --filter @objectstack/spec check:react-declaration-parity
+//      (or `pnpm sdui:manifest`, which produces the manifest and runs this for you)
 //
 // Baseline ratchet (cheap CI posture). The full spec↔registry divergence has an
 // accepted baseline (some props are designer-palette-curated, some spec-only are
@@ -122,12 +144,70 @@ function manifestInputs(manifest: any, schemaType: string): string[] | null {
   return inputs.map((i: any) => i?.name).filter(Boolean);
 }
 
-if (!MANIFEST || !fs.existsSync(MANIFEST)) {
-  console.log('⚠ react-blocks declaration parity: manifest unavailable (set MANIFEST=…) — skipping.');
-  process.exit(0);
+/**
+ * The prescription every "could not run" exit carries.
+ *
+ * A refusal is only better than a skip if the reader can act on it. The manifest's
+ * provenance is two repos away from whoever hits this — it is dumped from objectui's
+ * registry in a browser — so the exit that replaced the skip has to hand over the
+ * whole path, not just the missing variable's name.
+ */
+const MANIFEST_PRESCRIPTION = [
+  '',
+  '  The registry side of this comparison is objectui\'s sdui.manifest.json, and this',
+  '  repository contains no copy of it: packages/console/dist/ is gitignored, the console',
+  '  build deliberately does not produce one (it must not pull in a browser), and the',
+  '  published @objectstack/console ships none either. Produce one, then re-run:',
+  '',
+  '    pnpm objectui:build     # build + vendor the console at the pinned .objectui-sha',
+  '    pnpm sdui:manifest      # dump the manifest in a browser AND run this ratchet',
+  '',
+  '  Against a sibling objectui checkout, point the build at it first:',
+  '',
+  '    OBJECTUI_ROOT=../objectui pnpm objectui:build && pnpm sdui:manifest',
+  '',
+  '  Or, with a manifest already in hand:',
+  '',
+  '    MANIFEST=/path/to/sdui.manifest.json \\',
+  '      pnpm --filter @objectstack/spec check:react-declaration-parity \\',
+  '      --baseline react-declaration-parity.baseline.json --strict',
+  '',
+  '  (the dump needs a browser: pnpm exec playwright install chromium-headless-shell)',
+].join('\n');
+
+/**
+ * Exit loudly because the gate could not run — never because it ran and disagreed.
+ *
+ * Deliberately independent of `--strict`: that flag decides what a DIVERGENCE costs,
+ * and this is the other thing entirely — no comparison happened at all. Making it
+ * conditional would re-create #4690's hole one flag deeper.
+ */
+function cannotRun(reason: string): never {
+  console.error(`✗ react-blocks declaration parity: ${reason}`);
+  console.error('  This gate did NOT run. That is a failure, not a skip (#4690).');
+  console.error(MANIFEST_PRESCRIPTION);
+  process.exit(1);
 }
 
-const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+if (!MANIFEST) cannotRun('MANIFEST is not set — there is no registry side to compare against.');
+if (!fs.existsSync(MANIFEST)) cannotRun(`MANIFEST=${MANIFEST} does not exist.`);
+
+let manifest: any;
+try {
+  manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+} catch (err) {
+  cannotRun(`MANIFEST=${MANIFEST} is not readable JSON — ${(err as Error).message}`);
+}
+if (!manifest || typeof manifest !== 'object') {
+  cannotRun(`MANIFEST=${MANIFEST} is not an object — expected { components: { <type>: { inputs: [...] } } }.`);
+}
+// An empty dump is the same defect wearing a manifest: every block would report as
+// "missing", which under --strict reads as a catastrophic regression and without it
+// as a green run that compared against nothing. objectui's dumper already refuses to
+// write one ("empty manifest — registry not populated"); refuse to read one too.
+if (Object.keys((manifest.components ?? manifest) as Record<string, unknown>).length === 0) {
+  cannotRun(`MANIFEST=${MANIFEST} declares no components — an empty registry dump compares against nothing.`);
+}
 let totalSpecOnly = 0;
 let totalMissingComp = 0;
 const overlay = (b: (typeof REACT_BLOCKS)[number]) => new Set(b.interactions.map((i) => i.name));
