@@ -21,6 +21,16 @@ rules that most often get missed:
    then `cd` there and `pnpm install`. Never edit the shared checkout — a
    PreToolUse hook blocks it. One worktree **per repo** if the fix spans
    siblings (`objectui`, `cloud`).
+   - **Scratchpad-per-issue — the same shape, one level down.** First step
+     too: create an `issue-<n>/` subdir under your scratchpad dir and write
+     every temp file inside it only (PR body draft, report draft,
+     intermediate measurements, probe output). One batch's agents share
+     **one** scratchpad dir, so the natural names (`pr-body.md`, `notes.md`,
+     `diff.txt`) are silently overwritten by whoever writes next — both
+     sides get a success receipt, and the victim reads someone else's
+     content back under its own name (#5614: #5483's PR body draft came back
+     as #5176's; the bigger the batch, the likelier the collision). Isolate
+     by structure, not by memory.
 2. **The issue is already claimed by the PM** (your shared GitHub identity).
    Do not change assignees. If you discover the issue duplicates or conflicts
    with someone else's in-flight work, stop and report `blocked`.
