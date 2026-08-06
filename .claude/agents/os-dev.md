@@ -138,13 +138,20 @@ Definition of done, in order:
   moment the PR exists. Nothing applies it for you: `.github/labeler.yml` has no
   rule for it, and in every 2026-08-05 case
   (#5533/#5538/#5542/#5624/#5642/#5645) the label came from an agent, never from
-  `github-actions[bot]`. **Add** the one label instead of writing the label set
-  — a set-write wipes the `size/*` / `documentation` / `tests` the bots just
-  applied, and CI's own write can wipe yours back (#5533's lasted one second).
-  Then read the labels back once the bots have settled and quote that list in
-  the report; the read, not the POST, is what closes this step. Check Changeset
-  re-reads the labels live in its first step (#5580), so the first run is a race
-  between that step and your POST, decided by runner start-up — and it is
+  `github-actions[bot]`. **Read the labels back first, then write the union** —
+  the existing set + `skip-changeset` — because `issue_write`'s `labels` field
+  is a whole-set PUT: `labels: ['skip-changeset']` alone wipes the `size/*` /
+  `documentation` / `tests` the bots just applied, and CI's own write can wipe
+  yours back (#5533's lasted one second). Tool surface, not style: #5683
+  measured it — the bare set emitted two `unlabeled` events in one second, the
+  union write only `labeled`. The additive `POST /issues/{n}/labels` is out of
+  reach (no `gh` CLI, unauthenticated `curl` cannot write), so read with REST
+  `GET /repos/{owner}/{repo}/pulls/{n}` — `issue_read get_labels` cannot
+  resolve a PR number. Then read the labels back once the bots have settled and
+  quote that list in the report; the read, not the write, is what closes this
+  step. Check Changeset re-reads the labels live in its first step (#5580), so
+  the first run is a race between that step and your write, decided by runner
+  start-up — and it is
   attested both ways: #5542 labelled correctly and still logged a red `opened`
   run, while #5650's label landed 41 s ahead of the re-read and that same
   `opened` run went green. So land the label fast, and read the first run's

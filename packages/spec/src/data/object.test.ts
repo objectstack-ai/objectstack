@@ -873,6 +873,58 @@ describe('ObjectSchema.create()', () => {
         fields: { title: { type: 'text' } },
       })).toThrow(/record-ownership model|registerObject/);
     });
+
+    // [#4611 / ADR-0117] DELIBERATE REJECTION — do not "complete" this enum.
+    //
+    // ADR-0117 (Accepted, D1/D3 scoped) reserves a fourth tier,
+    // `ownership: 'business_unit'`, whose contract is: NO `owner_id`, and a
+    // kernel-stamped `owning_business_unit_id` instead (D1's table). The
+    // protocol name is already registered —
+    // `SystemFieldName.OWNING_BUSINESS_UNIT_ID` — but the VALUE must not be
+    // added here yet, because `applySystemFields` decides owner injection with
+    // a DENY-list (`packages/objectql/src/registry.ts`):
+    //
+    //   wantOwner = ownership !== 'org' && ownership !== 'none' && …
+    //
+    // so a fourth value would fall through to the default branch and be
+    // stamped with `owner_id` — the exact INVERSE of what D1 declares. Adding
+    // the value alone therefore converts today's loud rejection into a silent
+    // wrong result: ADR-0049's "spec must not declare what the runtime does not
+    // enforce", in miniature.
+    //
+    // The enum member lands in the SAME PR that flips `wantOwner` to an
+    // allow-list and injects the column. Until then this pin holds the line —
+    // and when that PR arrives, this test failing is the intended signal to
+    // rewrite it (not to delete the guard).
+    //
+    // NOTE the direction: 'business_unit' was ALREADY rejected before #4611 —
+    // this test does not change behaviour, it PINS the pre-existing rejection
+    // so a later "obvious" enum completion cannot pass unnoticed. It also
+    // asserts the message still enumerates the three legal values, since that
+    // enumeration is what tells an author (or an AI) what to write instead.
+    it('rejects `business_unit` until ADR-0117 D1 injection lands, naming the three legal values (#4611)', () => {
+      let message = '';
+      try {
+        ObjectSchema.create({
+          name: 'inventory_item',
+          // @ts-expect-error — reserved by ADR-0117; not a legal value until the injection lands
+          ownership: 'business_unit',
+          fields: { sku: { type: 'text' } },
+        });
+        throw new Error('expected ObjectSchema.create to reject ownership: business_unit');
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+
+      expect(message).not.toContain('expected ObjectSchema.create to reject');
+      // The rejection must keep listing what IS legal — an author pointed at
+      // ADR-0117 needs to land on 'user' today, not guess.
+      for (const legal of ['user', 'org', 'none']) {
+        expect(message, `rejection should enumerate the legal value '${legal}'`).toContain(legal);
+      }
+      // And it must not have silently become legal.
+      expect(message).not.toBe('');
+    });
   });
 
   // ADR-0032 "no silent failure" for metadata shape (issue #1535): unknown

@@ -1,7 +1,14 @@
 # ADR-0117: 记录级业务单元归属（owning business unit）
 
-- **状态**: Proposed（提案，待评审）
-- **日期**: 2026-07-31
+- **状态**: **Accepted (D1/D3 scoped)**（2026-08-05）—— 仅 **D1**（`ownership` 新增
+  `business_unit` 一档与 `owning_business_unit_id` 记录戳的命名与语义）与 **D3**
+  （`record.organization_id == sys_business_unit(owning_business_unit_id).organization_id`
+  不变量）进入协议。**D5、D2 的默认盖章策略、D8 的启用门粒度、D4 的权限位选择仍为
+  Proposed**，见文末「未决问题」——合并本 ADR **不**构成对这四项的裁定，它们需各自单独评审。
+- **日期**: 2026-07-31（提案）/ 2026-08-05（scoped 接受）
+- **裁定依据**: #4611（ADR-0105 D13 的「scoping field」无元数据落点）维护者 2026-08-05
+  选 1 —— 加速 ADR-0117，使 promotion 获得可校验的后置条件。该裁定回答了本 ADR 未决问题
+  第 2 条（这一档值得新增），其余四条未被触及。
 - **关联**: ADR-0057（BU 树与深度档位）、ADR-0090（岗位与任职锚点）、ADR-0091（授权时效）、
   ADR-0103（`managedBy` 写策略）、ADR-0105（租户姿态与 org 作用域）
 - **动因**: 集团管控场景需要"记录属于哪个部门/法人"成为结构事实，而不是从所有者推导
@@ -186,14 +193,34 @@ unit 档用户眼前抹掉。因此：
 - D7 豁免清单需长期维护，遗漏的故障形态（子公司看不到集团主数据）在测试里不显眼，
   需要专门的 conformance 用例守住。
 
-## 未决问题（提交评审）
+## 落地状态（2026-08-05，scoped 接受时）
+
+被接受的 D1/D3 是**协议决定**，其运行时执行分两步落地，本轮只完成第一步：
+
+| 面 | 本轮（#4611） | 后续 |
+|---|---|---|
+| 规范名 `owning_business_unit_id` | ✅ 已登记为 `SystemFieldName.OWNING_BUSINESS_UNIT_ID`，标注 **open-core 暂不注入**，并进入公开表单 server-managed 拒收名单（防御纵深，匿名面永不可由客户端提供） | —— |
+| `ownership: 'business_unit'` 枚举档 | ❌ **本轮不加**。`packages/objectql/src/registry.ts` 的 `wantOwner` 是**排除式**判定（只排除 `org` / `none`），此时加入枚举会让该档照常注入 `owner_id`，与 D1 表格相反 —— 属 ADR-0049 所禁止的「声明而不执行」 | #5678（须与 #5677 同 PR 或严格后置） |
+| 列注入（`wantOwner` 翻为正面清单 + 列） | ❌ 未实现 | #5677（engine-core 车道） |
+| 盖章策略（D2）/ D3 校验 / D4 守卫 / D8 迁移 | ❌ 未实现，且 D2 默认值等四项**尚未裁定** | 各自单独评审后再开单 |
+
+即：**协议已接受，执行待实现**；在注入落地前，`ownership: 'business_unit'` 会被 Zod
+以「合法值为 user / org / none」响亮拒绝，这是**正确**行为，不得「顺手补全」。
+
+## 未决问题
+
+**已裁定**
+
+- ~~2. **`ownership: 'business_unit'` 是否值得新增**~~ —— **是**（#4611 维护者 2026-08-05
+  裁定选 1）。ERP 场景（库存、台账、部门预算）有真实需求，且 promotion 的可校验后置条件
+  依赖它。
+
+**仍待评审（合并本 ADR 不视为通过）**
 
 1. **D5 的偏离**：法人归属做成解析规则而非物化列，是否接受？（上游表述为"盖章时
    物化"。）若坚持物化，需先决定多态外键 vs 两个可空列。
-2. **`ownership: 'business_unit'` 是否值得新增**，还是让这类对象用 `ownership:'user'`
-   并接受一个名义所有者？（Dataverse 没有对应档位；ERP 场景有真实需求。）
-3. **`pinned` 作为默认值**是否正确——平台既有对象以 CRM 形态居多，默认 `pinned`
+2. **`pinned` 作为默认值**是否正确——平台既有对象以 CRM 形态居多，默认 `pinned`
    会与它们的直觉相反；但对新建的 ERP 类对象，默认 `follow_owner` 更危险。
-4. **D8 启用门的粒度**：按对象启用，还是按部署一次性启用？前者迁移更平滑，后者
+3. **D8 启用门的粒度**：按对象启用，还是按部署一次性启用？前者迁移更平滑，后者
    语义更简单。
-5. **是否需要独立的权限位**（如 `allowChangeOwningUnit`）而不是复用 `allowTransfer`。
+4. **是否需要独立的权限位**（如 `allowChangeOwningUnit`）而不是复用 `allowTransfer`。

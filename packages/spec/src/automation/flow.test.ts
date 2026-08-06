@@ -18,9 +18,16 @@ import {
 // builtin's config could run. These are the contracts that do.
 import {
   GetRecordConfigSchema,
+  CreateRecordConfigSchema,
   UpdateRecordConfigSchema,
   DeleteRecordConfigSchema,
 } from './builtin-node-config.zod';
+// #5500 — the `loop` container contract (ADR-0031). A `loop` with no
+// `config.body` is the LEGACY flat-graph shape: `loop-node.ts` reads
+// `config.collection` as a bare VARIABLE NAME, binds `$loopItems`/`$loopIndex`
+// and falls through without iterating — so no `iteratorVariable` is ever set
+// and a `{item.…}` token downstream references nothing.
+import { LoopConfigSchema } from './control-flow.zod';
 
 describe('FlowNodeAction', () => {
   it('should accept all node action types', () => {
@@ -114,8 +121,12 @@ describe('FlowNodeSchema', () => {
       id: 'node_3',
       type: 'create_record',
       label: 'Create Account',
+      // #5500 — was `object:`, the retired spelling the ADR-0087 D2 conversion
+      // `flow-node-crud-object-alias` rewrites at load (live through this major,
+      // retires at 18). A fixture is a teaching surface, so it spells the
+      // canonical key the executor actually reads.
       config: {
-        object: 'account',
+        objectName: 'account',
         fields: {
           name: '{input.companyName}',
           status: 'active',
@@ -124,6 +135,13 @@ describe('FlowNodeSchema', () => {
     };
 
     expect(() => FlowNodeSchema.parse(node)).not.toThrow();
+
+    // #5500 — `FlowNodeSchema.config` is deliberately open (ADR-0018), so the
+    // parse above stays green on a config no executor could run. Pin the config
+    // against the contract `create_record` actually parses: this is a VALUE
+    // verdict (the executor refuses the node without `objectName`), so full
+    // safeParse green is the right bar, and the alias spelling turns it red.
+    expect(CreateRecordConfigSchema.safeParse(node.config).success).toBe(true);
   });
 
   it('should accept all node types', () => {
@@ -481,8 +499,11 @@ describe('FlowSchema', () => {
             id: 'create_contact',
             type: 'create_record',
             label: 'Create Contact',
+            // #5500 — `object:` → `objectName:` (see `should accept node with
+            // config`). The `{firstName}` &c. tokens are declared INPUT
+            // variables, which the engine binds by name, so they resolve.
             config: {
-              object: 'contact',
+              objectName: 'contact',
               fields: {
                 first_name: '{firstName}',
                 last_name: '{lastName}',
@@ -494,9 +515,21 @@ describe('FlowSchema', () => {
             id: 'assign_output',
             type: 'assignment',
             label: 'Set Output',
+            // #5500 — was `{ variable: 'contactId', value: '{create_contact.id}' }`,
+            // which set NEITHER. `logic-nodes.ts` normalizes three assignment
+            // shapes and its last branch is "no `assignments` wrapper → the
+            // top-level config keys ARE the variable names", so that config
+            // declared two variables literally named `variable` and `value`,
+            // and `contactId` — declared `isOutput: true` right above — was
+            // never written. Measured: with the old shape the run ends with
+            // `variable='contactId'`, `value='<the new id>'`, `contactId=undefined`.
+            //
+            // The VALUE token was fine and is kept verbatim: the engine binds
+            // every node's `result.output` under `<nodeId>.<key>` and the
+            // template resolver reads that flat key, so `{create_contact.id}`
+            // resolves to the created row's id (`create_record` outputs `id`).
             config: {
-              variable: 'contactId',
-              value: '{create_contact.id}',
+              assignments: { contactId: '{create_contact.id}' },
             },
           },
           { id: 'end', type: 'end', label: 'End' },
@@ -509,6 +542,23 @@ describe('FlowSchema', () => {
       };
 
       expect(() => FlowSchema.parse(screenFlow)).not.toThrow();
+
+      // #5500 — pin the create node against the contract its executor parses.
+      const cfgOf = (id: string) => screenFlow.nodes.find(n => n.id === id)?.config;
+      expect(CreateRecordConfigSchema.safeParse(cfgOf('create_contact')).success).toBe(true);
+
+      // #5500 — pin the assignment's SHAPE, which no spec schema governs (the
+      // executor reads `config` directly, so `FlowSchema.parse` can never catch
+      // this). The writes must live under `assignments`, and every name written
+      // must be a variable this flow declares — reverting to the bare
+      // `{ variable, value }` shape leaves `assignments` undefined and turns
+      // both assertions red.
+      const assignCfg = cfgOf('assign_output') as { assignments?: Record<string, unknown> };
+      expect(Object.keys(assignCfg?.assignments ?? {})).toEqual(['contactId']);
+      const declared = new Set((screenFlow.variables ?? []).map(v => v.name));
+      for (const written of Object.keys(assignCfg?.assignments ?? {})) {
+        expect(declared.has(written)).toBe(true);
+      }
     });
 
     it('should accept scheduled flow', () => {
@@ -523,33 +573,72 @@ describe('FlowSchema', () => {
             id: 'get_old_records',
             type: 'get_record',
             label: 'Find Old Records',
+            // #5500 — three defects in two keys:
+            //  • `object:` → `objectName:` (the ADR-0087 D2 alias, as above).
+            //  • `filter` was the STRING `'created_at < DAYS_AGO(90)'`. The
+            //    contract declares `z.record(z.string(), z.unknown())`, so a
+            //    string fails safeParse outright ("expected record, received
+            //    string"), and `DAYS_AGO()` is a function no layer implements.
+            //    The date window is spelled in the dialect that OWNS a filter
+            //    value position: `{90_days_ago}` is a spec date macro
+            //    (`DATE_MACRO_PARAM_RE`), and `interpolateFilter` hands a known
+            //    filter token through VERBATIM for the query engine's
+            //    `resolveFilterTokens` to expand (#3810 ownership transfer) —
+            //    `date-macros.zod.ts` names "flow node filters" as a consumer.
+            //  • `limit` was absent. The executor branches on it: `limit > 1`
+            //    runs `find` and outputs a `records` LIST; otherwise `findOne`
+            //    and a single `record`. A cleanup sweep wants the list, and the
+            //    loop below needs an array, so the limit is what makes the
+            //    downstream `collection` an array at all.
             config: {
-              object: 'log_entry',
-              filter: 'created_at < DAYS_AGO(90)',
+              objectName: 'log_entry',
+              filter: { created_at: { $lt: '{90_days_ago}' } },
+              limit: 200,
+              outputVariable: 'oldRecords',
             },
           },
           {
             id: 'loop_records',
             type: 'loop',
             label: 'For Each Record',
+            // #5500 — was a LEGACY flat-graph loop: no `config.body`, so
+            // `loop-node.ts` took its back-compat branch, which reads
+            // `config.collection` as a bare VARIABLE NAME (not a template),
+            // found no variable literally named `{get_old_records.records}`,
+            // bound nothing and returned success. The `loop → delete → loop`
+            // back-edge was ordinary graph traversal, and `{item.id}` in the
+            // delete node below referenced a variable no one ever set.
+            // Measured on the old shape: `$loopItems` unset, `item` undefined.
+            //
+            // This is now the ADR-0031 structured container: the per-item steps
+            // live in `config.body` (a single-entry/single-exit region run in
+            // the enclosing scope) and `iteratorVariable` is what binds `item`.
             config: {
-              collection: '{get_old_records.records}',
-            },
-          },
-          {
-            id: 'delete_record',
-            type: 'delete_record',
-            label: 'Delete Record',
-            // #4924 — this was the worst of the three shapes: `recordId` was the
-            // node's ONLY key, no executor reads it, and a `delete_record` whose
-            // single "constraint" is unread is a match-everything delete (#3810)
-            // wearing a key that reads like a constraint. The executor locates rows
-            // through `filter` and refuses the node without `objectName`.
-            // The per-item token is the loop's `iteratorVariable` (default `item`),
-            // NOT `{<node id>.item}` — node outputs are never bound under a node id.
-            config: {
-              objectName: 'log_entry',
-              filter: { id: '{item.id}' },
+              collection: '{oldRecords}',
+              iteratorVariable: 'item',
+              maxIterations: 200,
+              body: {
+                nodes: [
+                  {
+                    id: 'delete_record',
+                    type: 'delete_record',
+                    label: 'Delete Record',
+                    // #4924 — this was the worst of the three shapes: `recordId` was the
+                    // node's ONLY key, no executor reads it, and a `delete_record` whose
+                    // single "constraint" is unread is a match-everything delete (#3810)
+                    // wearing a key that reads like a constraint. The executor locates rows
+                    // through `filter` and refuses the node without `objectName`.
+                    // The per-item token is the loop's `iteratorVariable` (default `item`),
+                    // NOT `{<node id>.item}` — and #5500 moved the node INSIDE the loop
+                    // body, which is what makes `item` actually bound per iteration.
+                    config: {
+                      objectName: 'log_entry',
+                      filter: { id: '{item.id}' },
+                    },
+                  },
+                ],
+                edges: [],
+              },
             },
           },
           { id: 'end', type: 'end', label: 'End' },
@@ -557,9 +646,10 @@ describe('FlowSchema', () => {
         edges: [
           { id: 'e1', source: 'start', target: 'get_old_records' },
           { id: 'e2', source: 'get_old_records', target: 'loop_records' },
-          { id: 'e3', source: 'loop_records', target: 'delete_record' },
-          { id: 'e4', source: 'delete_record', target: 'loop_records' },
-          { id: 'e5', source: 'loop_records', target: 'end', label: 'Done' },
+          // #5500 — the `loop → delete → loop` back-edge pair is gone: the
+          // delete node now lives in `config.body`, so the loop's ordinary
+          // out-edge is simply the after-loop continuation (ADR-0031).
+          { id: 'e3', source: 'loop_records', target: 'end', label: 'Done' },
         ],
         runAs: 'system',
       };
@@ -567,11 +657,36 @@ describe('FlowSchema', () => {
       expect(() => FlowSchema.parse(scheduledFlow)).not.toThrow();
 
       // #4924 — the delete node addresses rows the only way the executor does.
-      // (The `get_old_records` / `loop_records` pair upstream still carries
-      // shapes of its own — a string `filter`, the `object` alias and a
-      // `{<node id>.…}` output reference — tracked separately, see the PR.)
-      const deleteConfig = scheduledFlow.nodes.find(n => n.id === 'delete_record')?.config;
+      // #5500 — it is now reached through the loop's body region.
+      const loopConfig = scheduledFlow.nodes.find(n => n.id === 'loop_records')?.config;
+      const parsedLoop = LoopConfigSchema.safeParse(loopConfig);
+      expect(parsedLoop.success).toBe(true);
+      const deleteConfig = parsedLoop.success
+        ? parsedLoop.data.body?.nodes.find(n => n.id === 'delete_record')?.config
+        : undefined;
       expect(DeleteRecordConfigSchema.safeParse(deleteConfig).success).toBe(true);
+
+      // #5500 — pin the loop as a STRUCTURED container. `body` is what separates
+      // it from the legacy flat-graph shape that iterated nothing, and
+      // `iteratorVariable` is the only thing that binds the `{item.…}` token the
+      // body's filter reads. Dropping `body` puts the fixture back on the
+      // legacy branch and turns both of these red.
+      expect(parsedLoop.success && parsedLoop.data.body).toBeDefined();
+      expect(parsedLoop.success && parsedLoop.data.iteratorVariable).toBe('item');
+      // …and no main-graph edge targets a body node any more.
+      const bodyNodeIds = new Set(
+        parsedLoop.success ? (parsedLoop.data.body?.nodes ?? []).map(n => n.id) : [],
+      );
+      expect(scheduledFlow.edges.filter(e => bodyNodeIds.has(e.target))).toHaveLength(0);
+
+      // #5500 — the upstream read must produce an ARRAY for the loop to iterate:
+      // `limit > 1` is what selects the `find`/`records` branch over
+      // `findOne`/`record`, so it is a contract detail, not a tuning knob.
+      const getConfig = scheduledFlow.nodes.find(n => n.id === 'get_old_records')?.config;
+      const parsedGet = GetRecordConfigSchema.safeParse(getConfig);
+      expect(parsedGet.success).toBe(true);
+      expect(parsedGet.success && (parsedGet.data.limit ?? 0) > 1).toBe(true);
+      expect(parsedGet.success && parsedGet.data.outputVariable).toBe('oldRecords');
     });
 
     it('should accept API flow with webhook', () => {
@@ -975,11 +1090,29 @@ describe('BPMN — Default Sequence Flow (isDefault)', () => {
       source: 'decision_1',
       target: 'branch_a',
       type: 'conditional',
-      condition: '{amount} > 1000',
+      // #5500 — was `'{amount} > 1000'`. An edge condition is BARE CEL
+      // (ADR-0032 §1a); `{…}` template braces parse as a CEL map literal, and
+      // `AutomationEngine.registerFlow` parse-validates every predicate at
+      // registration, so the braced form is a HARD registration failure:
+      // "Flow '…' has 1 invalid expression (ADR-0032 §1a). Predicates … must
+      // not wrap references in `{…}` template braces". This is the #1491 trap.
+      condition: 'amount > 1000',
       label: 'High Value',
     });
     expect(result.type).toBe('conditional');
     expect(result.isDefault).toBe(false);
+    // #5500 — only an explicit assertion keeps this fixture from teaching the
+    // braced form back in. Braces are correct in TEMPLATE slots
+    // (`loop.collection`) and wrong here — the distinction is the whole point.
+    //
+    // Read `.source`, NOT the condition itself: `ExpressionInputSchema`
+    // normalizes a bare-string predicate into the canonical
+    // `{ dialect: 'cel', source }` envelope, so `expect(result.condition)
+    // .not.toContain('{')` asserts against an OBJECT and passes no matter what
+    // the predicate says. That phantom was written here first and caught by
+    // reverse-verification (the braced spelling stayed green) — hence this note.
+    expect(result.condition?.dialect).toBe('cel');
+    expect(result.condition?.source).not.toContain('{');
   });
 
   it('should validate a decision with default and conditional branches', () => {
@@ -997,8 +1130,11 @@ describe('BPMN — Default Sequence Flow (isDefault)', () => {
       ],
       edges: [
         { id: 'e1', source: 'start', target: 'check_priority' },
-        { id: 'e2', source: 'check_priority', target: 'high_path', type: 'conditional', condition: '{priority} == "high"' },
-        { id: 'e3', source: 'check_priority', target: 'medium_path', type: 'conditional', condition: '{priority} == "medium"' },
+        // #5500 — bare CEL, not `{…}` template braces (ADR-0032 §1a; see
+        // 'should accept conditional edge type'). Registering the braced form
+        // threw at `registerFlow`, so this whole fixture was un-runnable.
+        { id: 'e2', source: 'check_priority', target: 'high_path', type: 'conditional', condition: 'priority == "high"' },
+        { id: 'e3', source: 'check_priority', target: 'medium_path', type: 'conditional', condition: 'priority == "medium"' },
         { id: 'e4', source: 'check_priority', target: 'default_path', isDefault: true, label: 'Default' },
         { id: 'e5', source: 'high_path', target: 'end' },
         { id: 'e6', source: 'medium_path', target: 'end' },
@@ -1012,6 +1148,17 @@ describe('BPMN — Default Sequence Flow (isDefault)', () => {
       const defaultEdge = result.data.edges.find(e => e.isDefault);
       expect(defaultEdge).toBeDefined();
       expect(defaultEdge!.target).toBe('default_path');
+      // #5500 — every guarded branch is bare CEL. `FlowSchema.parse` accepts any
+      // string here, so without this the fixture could teach the #1491 braced
+      // form back in while staying green. Assert on the normalized
+      // `condition.source` (see 'should accept conditional edge type') — the
+      // parsed `condition` is an Expression ENVELOPE, and `toContain` against
+      // the envelope object pins nothing.
+      const guardedEdges = result.data.edges.filter(e => e.condition);
+      expect(guardedEdges).toHaveLength(2);
+      for (const guarded of guardedEdges) {
+        expect(guarded.condition?.source).not.toContain('{');
+      }
     }
   });
 });
