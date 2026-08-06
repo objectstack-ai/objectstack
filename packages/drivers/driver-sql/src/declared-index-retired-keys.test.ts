@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver, normalizeDeclaredIndex } from '../src/index.js';
 
 /**
- * `indexes[].type` / `indexes[].partial` were retired at protocol 18 (#5248,
+ * `indexes[].type` / `indexes[].partial` were retired at protocol 17 (#5248,
  * #4943, ADR-0049 enforce-or-remove). The retirement rests on ONE factual
  * claim, and this file is that claim's proof rather than its restatement:
  *

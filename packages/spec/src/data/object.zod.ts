@@ -279,7 +279,7 @@ export const ObjectCapabilities = z.object({
  *   unique: true
  * }
  *
- * ## `type` / `partial` were RETIRED at protocol 18 (#5248, #4943, ADR-0049)
+ * ## `type` / `partial` were RETIRED at protocol 17 (#5248, #4943, ADR-0049)
  *
  * Both were authorable and had **zero** DDL consumers.
  * `SqlDriver.syncDeclaredIndexes` builds every declared index through knex's
@@ -370,26 +370,26 @@ export const IndexSchema = lazySchema(() => z.object({
   // makes the removal audible in the two channels an upgrading author
   // actually reads: `tsc` (input type `never`) and the parse itself.
   // `object-index-type-partial-removed` strips both from stored/authored
-  // sources on the protocol-18 migration.
+  // sources on the protocol-17 migration.
   type: retiredKey(
-    '`indexes[].type` was removed in @objectstack/spec 18.0.0 (#5248, ADR-0049) — no driver ever ' +
+    '`indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever ' +
     'read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex\'s ' +
     '`table.index()` / `table.unique()`, which cannot express an access method, so the value ' +
     'changed no DDL; its `.default(\'btree\')` merely made an inert knob show up in every parse ' +
     'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
     'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
     'database-layer migration when a workload actually needs one). ' +
-    'Run `os migrate meta --from 17` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
   ),
   partial: retiredKey(
-    '`indexes[].partial` was removed in @objectstack/spec 18.0.0 (#5248, #4943, ADR-0049) — no ' +
+    '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no ' +
     'driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a ' +
     'FULL index and the predicate silently did nothing. Delete the key. Partial indexes are ' +
     'built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … ' +
     'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
     '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
     'reads partiality back from the database\'s own DDL, never from this key. ' +
-    'Run `os migrate meta --from 17` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
   ),
 }));
 

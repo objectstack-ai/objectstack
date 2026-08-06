@@ -60,8 +60,8 @@ sync, unchanged.
   either key is now a `tsc` error and a parse error carrying the prescription.
   They sit at the bottom of the shape per the #5606 renderer note.
 - **ADR-0087 D2 conversion + D3 chain step** (`object-index-type-partial-removed`,
-  `toMajor: 18`, opening the protocol-18 step): strips both keys from `objects[]`
-  and `objectExtensions[]`; `os migrate meta --from 17` rewrites sources
+  `toMajor: 17`, wired into the existing step-17 chain): strips both keys from
+  `objects[]` and `objectExtensions[]`; `os migrate meta --from 16` rewrites sources
   mechanically. A pure lossless delete — there was no effect to lose.
 - **Producers flipped:** `sys_metadata` (`idx_sys_metadata_overlay_active`, the
   case #4943 named) and `sys_view_definition` (`idx_sys_view_def_active`), both

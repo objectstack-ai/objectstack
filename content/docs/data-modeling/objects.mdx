@@ -222,12 +222,12 @@ indexes: [
 | `name` | `string` | optional | Index name (auto-generated if omitted) |
 
 <Callout type="warn">
-  **`type` and `partial` were retired in protocol 18** (#5248, #4943). Neither
+  **`type` and `partial` were retired in protocol 17** (#5248, #4943). Neither
   had a driver consumer: declared indexes are created through knex's
   `table.index()` / `table.unique()`, so an authored `type` selected no access
   method and an authored `partial` produced a **full** index with the predicate
   silently discarded. Writing either now fails `tsc` and the parse with a
-  migration prescription — run `os migrate meta --from 17` to strip them.
+  migration prescription — run `os migrate meta --from 16` to strip them.
 
   Both capabilities remain available where they are actually implementable: the
   index method is the driver/dialect's choice, and a partial index is issued as

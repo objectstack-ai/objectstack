@@ -251,7 +251,7 @@ describe('IndexSchema retired keys (#5248 / #4943)', () => {
 
   it('points at the CLI conversion rather than naming the conversion id', () => {
     for (const bad of [{ fields: ['a'], type: 'btree' }, { fields: ['a'], partial: 'x' }]) {
-      expect(() => IndexSchema.parse(bad)).toThrow(/os migrate meta --from 17/);
+      expect(() => IndexSchema.parse(bad)).toThrow(/os migrate meta --from 16/);
     }
   });
 

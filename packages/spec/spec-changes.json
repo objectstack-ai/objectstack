@@ -325,6 +325,12 @@
         "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
         "conversionId": "page-header-subtitle-alias",
         "toMajor": 17
+      },
+      {
+        "surface": "object.indexes[].type / object.indexes[].partial",
+        "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
+        "conversionId": "object-index-type-partial-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1032,6 +1038,12 @@
           "surface": "page.component.page-header.description",
           "to": "page-header component prop 'description' → 'subtitle' (objectui#3226 — the `subtitle ?? description` fallback retires)",
           "conversionId": "page-header-subtitle-alias",
+          "toMajor": 17
+        },
+        {
+          "surface": "object.indexes[].type / object.indexes[].partial",
+          "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
+          "conversionId": "object-index-type-partial-removed",
           "toMajor": 17
         }
       ],

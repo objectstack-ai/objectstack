@@ -3584,7 +3584,7 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
 };
 
 /**
- * `indexes[].type` / `indexes[].partial` leave the surface (protocol 18,
+ * `indexes[].type` / `indexes[].partial` leave the surface (protocol 17,
  * #5248 + #4943, ADR-0049 enforce-or-remove).
  *
  * Neither key had a single DDL consumer. `SqlDriver.syncDeclaredIndexes` builds
@@ -3607,14 +3607,14 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
  * the exemption it grants DB-authored partial indexes still stands.
  *
  * `retiredFromLoadPath`: both keys are tombstoned at `IndexSchema`, so a live
- * author is taught by the parse error. This entry exists so stored ≤17 rows
+ * author is taught by the parse error. This entry exists so stored ≤16 rows
  * replay clean through `applyConversionsToStoredItem` (without it a
  * pre-removal row would flag `metadata_spec_invalid` forever) and so
- * `os migrate meta --from 17` rewrites sources mechanically.
+ * `os migrate meta --from 16` rewrites sources mechanically.
  */
 const objectIndexTypePartialRemoved: MetadataConversion = {
   id: 'object-index-type-partial-removed',
-  toMajor: 18,
+  toMajor: 17,
   retiredFromLoadPath: true,
   surface: 'object.indexes[].type / object.indexes[].partial',
   summary:
@@ -4432,8 +4432,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     connectorRateLimitConfigRemoved,
     themeInertTokenScalesRemoved,
     pageHeaderSubtitleAlias,
+    objectIndexTypePartialRemoved,
   ],
-  18: [objectIndexTypePartialRemoved],
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */
