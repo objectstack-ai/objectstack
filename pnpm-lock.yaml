@@ -2349,6 +2349,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

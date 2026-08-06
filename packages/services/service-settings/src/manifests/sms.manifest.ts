@@ -21,6 +21,26 @@ const manifest = {
     { type: 'group', id: 'provider', label: 'Provider', required: false,
       description: 'Choose how this workspace sends outbound SMS.' },
 
+    // ⚠️ This options table is a CONTRACT, not a menu of aspirations: every
+    // value here must be one `@objectstack/service-sms` can actually build a
+    // transport for, and every transport it can build must appear here. The two
+    // sets are held equal by an executable assertion —
+    // `packages/services/service-sms/src/sms-manifest-providers.contract.test.ts`
+    // compares these values against `SMS_TRANSPORT_PROVIDERS` / `makeSmsTransport`
+    // and goes red the moment they diverge, in either direction, naming the
+    // value that drifted.
+    //
+    // Adding an option without a transport is not a harmless placeholder: the
+    // form validates, the save succeeds, and every send is silently downgraded
+    // to `LogSmsTransport` — a workspace that reports `status: 'sent'` and
+    // delivers nothing. That is exactly what mail shipped before #5094
+    // (`sendgrid` / `ses` offered with nothing behind them, while `resend` had a
+    // working transport nobody could pick), and what `os serve` did with an
+    // out-of-table `OS_SMS_PROVIDER` before #5713.
+    //
+    // `log` is listed and labelled for what it does. It is the one option that
+    // does not deliver, but it does not *pretend* to — which is what makes
+    // "offered" and "deliverable" the same set rather than merely overlapping.
     { type: 'select', key: 'provider', label: 'Provider', required: true, default: 'log',
       options: [
         { value: 'log', label: 'None (log only — no real delivery)' },
