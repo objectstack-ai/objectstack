@@ -118,6 +118,25 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // and is deliberately absent from this table — it is neither source nor
   // target, and it is emitted byte-for-byte unchanged by this build.
   'kernel/PackageDependency': 'kernel/ResolvedPackageDependency', // 4 keys carried
+
+  // #5832 / ADR-0112 D9 — `shared/http.zod.ts` declared TWO different enums
+  // whose def keys collided after the `Schema` suffix strip: `HttpMethod`
+  // (7 values, the routing contract every `api/*` endpoint is declared with)
+  // and `HttpMethodSchema` (5 values, the view data-source subset). The subset
+  // won by iteration order, so `shared/HttpMethod` published five values and
+  // the routing contract was not published at all. The SUBSET is renamed
+  // (`HttpMethodSubsetSchema` / `HttpMethodSubset`) and `HttpMethod` keeps the
+  // bare name, per #4684's `RateLimitConfig` precedent.
+  //
+  // Only the `ui` side is a def RENAME and belongs here: `./ui` re-exported the
+  // subset alone, so `ui/HttpMethod` really did leave and `ui/HttpMethodSubset`
+  // took its keys (0-key carry: enum def, no authorable properties).
+  // `shared/HttpMethod` is deliberately absent — it is still emitted, by the
+  // 7-value enum that always declared it, so the table would reject it as a
+  // copy. What changed there is the def's CONTENT (5 values -> the 7 the source
+  // always had), which no ratchet here measures and which the changeset states.
+  // `shared/HttpMethodSubset` is a plain manifest addition.
+  'ui/HttpMethod': 'ui/HttpMethodSubset',
 };
 
 /**

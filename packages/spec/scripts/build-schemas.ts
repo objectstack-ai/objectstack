@@ -10,6 +10,11 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { z } from 'zod';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import {
+  findDefKeyCollisions,
+  formatDefKeyCollisions,
+  type EmittedDef,
+} from './lib/def-key-collisions';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
@@ -296,6 +301,12 @@ const generatedSchemas = new Map<string, Record<string, unknown>>();
 // roots instead of approximating reachability from names or imports.
 const zodByDefKey = new Map<string, z.ZodType>();
 
+// Every export this run published, in encounter order, so the def-key collision
+// guard below can see the writes `generatedSchemas` collapses. That map is
+// keyed by def key and `set()` is unconditional, so by the time a duplicate is
+// in it the loser is already gone — the record has to be kept alongside (#5832).
+const emittedDefs: EmittedDef[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -373,6 +384,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           writeFileWithRetry(filePath, JSON.stringify(jsonSchema, null, 2));
           generatedSchemas.set(`${categorySlug}/${schemaName}`, jsonSchema);
           zodByDefKey.set(`${categorySlug}/${schemaName}`, value);
+          emittedDefs.push({ category: categorySlug, exportKey: key, schemaName, schema: value });
           console.log(`  ✓ ${namespaceName.toLowerCase()}/${fileName}${io === 'input' ? ' (input shape)' : ''}`);
           count++;
           if (io === 'input') inputModeCount++;
@@ -404,6 +416,21 @@ if (skippedCount > 0) {
 if (errorCount > 0) {
   console.error(`  Errors:    ${errorCount}`);
   console.error(`\n❌ Build failed with ${errorCount} unexpected error(s).`);
+  process.exit(1);
+}
+
+// ─── Guard: one def key, one schema (#5832) ──────────────────────────
+// `generatedSchemas.set()` above is an unconditional overwrite, so two exports
+// of one namespace that strip to the same schema name publish ONE file and the
+// loser vanishes without a word — which is how `shared/HttpMethod` shipped the
+// five-value view subset while `api/*` routes were declared with the seven-value
+// enum of the same name. Runs BEFORE both ratchets: neither can see this (they
+// measure def keys, and a collision produces exactly one), and neither should
+// adjudicate a build whose output already depends on export iteration order.
+// See lib/def-key-collisions.ts for why a self-alias is exempt.
+const defKeyCollisions = findDefKeyCollisions(emittedDefs);
+if (defKeyCollisions.length > 0) {
+  console.error(`\n❌ ${formatDefKeyCollisions(defKeyCollisions)}`);
   process.exit(1);
 }
 

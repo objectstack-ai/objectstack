@@ -18,8 +18,8 @@ These schemas ensure consistency across different parts of the stack.
 ## TypeScript Usage
 
 ```typescript
-import { CorsConfigSchema, HttpMethodSchema, HttpRequestSchema, RateLimitConfigSchema, StaticMountSchema } from '@objectstack/spec/shared';
-import type { CorsConfig, HttpMethod, HttpRequest, RateLimitConfig, StaticMount } from '@objectstack/spec/shared';
+import { CorsConfigSchema, HttpMethod, HttpMethodSubsetSchema, HttpRequestSchema, RateLimitConfigSchema, StaticMountSchema } from '@objectstack/spec/shared';
+import type { CorsConfig, HttpMethod, HttpMethodSubset, HttpRequest, RateLimitConfig, StaticMount } from '@objectstack/spec/shared';
 
 // Validate data
 const result = CorsConfigSchema.parse(data);
@@ -43,6 +43,25 @@ const result = CorsConfigSchema.parse(data);
 ---
 
 ## HttpMethod
+
+HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request.
+
+### Allowed Values
+
+* `GET`
+* `POST`
+* `PUT`
+* `DELETE`
+* `PATCH`
+* `HEAD`
+* `OPTIONS`
+
+
+---
+
+## HttpMethodSubset
+
+HTTP methods a view data source may request — the subset of `HttpMethod` without `HEAD`/`OPTIONS`.
 
 ### Allowed Values
 

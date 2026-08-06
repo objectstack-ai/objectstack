@@ -14,7 +14,7 @@ import {
   PaginationConfigSchema,
   ViewDataSchema,
   HttpRequestSchema,
-  HttpMethodSchema,
+  HttpMethodSubsetSchema,
   ColumnSummarySchema,
   RowHeightSchema,
   GroupingConfigSchema,
@@ -40,17 +40,17 @@ import {
   defineView,
 } from './view.zod';
 
-describe('HttpMethodSchema', () => {
+describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
     
     methods.forEach(method => {
-      expect(() => HttpMethodSchema.parse(method)).not.toThrow();
+      expect(() => HttpMethodSubsetSchema.parse(method)).not.toThrow();
     });
   });
 
   it('should reject invalid HTTP methods', () => {
-    expect(() => HttpMethodSchema.parse('INVALID')).toThrow();
+    expect(() => HttpMethodSubsetSchema.parse('INVALID')).toThrow();
   });
 });
 
@@ -2639,14 +2639,14 @@ describe('ListViewSchema — retired responsive/performance (#3896 close-out)', 
   });
 });
 
-describe('HttpMethodSchema/HttpRequestSchema backward compat', () => {
+describe('HttpMethodSubsetSchema/HttpRequestSchema backward compat', () => {
   it('should still be importable from view.zod', () => {
-    expect(HttpMethodSchema).toBeDefined();
+    expect(HttpMethodSubsetSchema).toBeDefined();
     expect(HttpRequestSchema).toBeDefined();
   });
 
   it('should still parse correctly when imported from view.zod', () => {
-    expect(HttpMethodSchema.parse('GET')).toBe('GET');
+    expect(HttpMethodSubsetSchema.parse('GET')).toBe('GET');
     const result = HttpRequestSchema.parse({ url: '/api/test' });
     expect(result.method).toBe('GET');
   });
@@ -2757,12 +2757,21 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
 // was a re-export. Here the two declarations are genuinely different types:
 //
 //   shared/http.zod.ts  `export const/type HttpMethod`  → 7 values (+HEAD/OPTIONS)
-//   shared/http.zod.ts  `HttpMethodSchema`/`HttpMethodType` → 5 values (UI subset)
+//   shared/http.zod.ts  `HttpMethodSubsetSchema`/`HttpMethodSubset` → 5 (UI subset)
 //   ui/view.zod.ts      `export type HttpMethod` (removed) → the 5-value one
 //
 // So re-exporting `./shared`'s into `./ui` would have widened the UI type to 7
 // while `HttpRequestSchema.method` still accepts only 5 — a type that lies about
 // its own runtime. The name was removed from `./ui` instead.
+//
+// [#5832] The 5-value side was spelled `HttpMethodSchema`/`HttpMethodType` until
+// #5832. That const still collided with the 7-value enum one layer down — after
+// `schemaNameFromExportKey` strips the `Schema` suffix both published as
+// `shared/HttpMethod`, and the subset overwrote the routing contract in
+// `json-schema/`, in the bundled `$defs` and on the reference page. Renaming the
+// trio to `HttpMethodSubsetSchema` / `HttpMethodSubset` / `<cat>/HttpMethodSubset`
+// is what freed `shared/HttpMethod` to publish the 7 values it always declared;
+// the assertions below are unchanged in substance, only in spelling.
 //
 // Same reasoning as #4688 on the mechanism: `HttpMethod` is a TYPE, erased
 // before any runtime assertion can see it, and #4642 established that a
@@ -2809,10 +2818,12 @@ describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
     // 1. The row this change removes: `./ui` no longer names `HttpMethod`.
     expect(uiExports.map((e) => e.getName())).not.toContain('HttpMethod');
 
-    // 2. …but it still offers the 5-value type under its honest name, so the
+    // 2. …but it still offers the 5-value type under its own name, so the
     //    migration stays inside this entry point.
-    const uiMethodType = uiExports.find((e) => e.getName() === 'HttpMethodType');
-    expect(uiMethodType, './ui must export `HttpMethodType`').toBeTruthy();
+    expect(uiExports.map((e) => e.getName()), '`HttpMethodType` was renamed at #5832')
+      .not.toContain('HttpMethodType');
+    const uiMethodSubset = uiExports.find((e) => e.getName() === 'HttpMethodSubset');
+    expect(uiMethodSubset, './ui must export `HttpMethodSubset`').toBeTruthy();
 
     const originOf = (sym: import('typescript').Symbol, label: string) => {
       const decl = unalias(sym).declarations?.[0];
@@ -2823,7 +2834,7 @@ describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
       }`;
     };
 
-    expect(originOf(uiMethodType!, './ui HttpMethodType'))
+    expect(originOf(uiMethodSubset!, './ui HttpMethodSubset'))
       .toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
 
     // 3. `./shared` and `./api` keep naming ONE declaration `HttpMethod` — the
@@ -2838,7 +2849,7 @@ describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
     expect(origins.get('./shared')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
   });
 
-  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSchema`', async () => {
+  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', async () => {
     const sharedEntry = await import('../shared/index');
     const apiEntry = await import('../api/index');
 
@@ -2848,20 +2859,20 @@ describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
     expect([...sharedEntry.HttpMethod.options].sort()).toEqual(
       ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
     );
-    expect([...sharedEntry.HttpMethodSchema.options].sort()).toEqual(
+    expect([...sharedEntry.HttpMethodSubsetSchema.options].sort()).toEqual(
       ['DELETE', 'GET', 'PATCH', 'POST', 'PUT'],
     );
 
     // The subset relation is the whole reason the two names cannot merge.
     expect(sharedEntry.HttpMethod.options).toContain('HEAD');
-    expect(sharedEntry.HttpMethodSchema.options).not.toContain('HEAD');
+    expect(sharedEntry.HttpMethodSubsetSchema.options).not.toContain('HEAD');
   });
 
   it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', async () => {
     const uiEntry = await import('../ui/index');
 
-    expect(() => uiEntry.HttpMethodSchema.parse('HEAD')).toThrow();
-    expect(() => uiEntry.HttpMethodSchema.parse('OPTIONS')).toThrow();
+    expect(() => uiEntry.HttpMethodSubsetSchema.parse('HEAD')).toThrow();
+    expect(() => uiEntry.HttpMethodSubsetSchema.parse('OPTIONS')).toThrow();
     expect(() => uiEntry.HttpRequestSchema.parse({ url: '/api/data', method: 'HEAD' })).toThrow();
     // …while the 5 it does accept still round-trip, so the guard above is not
     // passing because the schema rejects everything.
