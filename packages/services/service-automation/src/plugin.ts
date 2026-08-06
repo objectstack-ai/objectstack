@@ -450,8 +450,16 @@ export class AutomationServicePlugin implements Plugin {
             });
             return true;
         } catch (err) {
+            // #5661 — `err` is the kernel registry's, not ours, so its text must
+            // not be interpolated into the MESSAGE. This one is `warn` → stdout,
+            // which is the stream `serve`'s boot-quiet window wraps: a
+            // continuation line here is DROPPED by `BootLogCapture.offer()`, not
+            // merely mangled (#5636 measured 13 lines in, 1 retained). `warn`'s
+            // SECOND argument is `meta` — the `Logger` contract has no `Error`
+            // slot below `error`. See ./thrown-cause-diagnostics.ts.
             ctx.logger.warn(
-                `[Automation] manifest service unavailable; sys_automation_run not registered yet: ${(err as Error).message}`,
+                '[Automation] manifest service unavailable; sys_automation_run not registered yet.',
+                describeThrownForLog(err),
             );
             return false;
         }
@@ -588,9 +596,21 @@ export class AutomationServicePlugin implements Plugin {
                     try {
                         await candidate.probe();
                     } catch (err) {
+                        // #5661 — this record exists to be READ: it states the
+                        // durability consequence and the fix (#4632), and `err`
+                        // comes out of the DATASOURCE DRIVER, whose multi-line
+                        // failures are ordinary in the ecosystem. Interpolating
+                        // it split one `error` into N fragments of which only the
+                        // first carries a level head, so a file sink stored the
+                        // rest as their own records and `grep ERROR` returned the
+                        // line holding no facts. Third argument, per
+                        // `error(message, error?, meta?)` — the second would ship
+                        // the driver's stack on top (#5575).
                         ctx.logger.error(
                             `[Automation] sys_automation_run could not be read at startup — if this persists, suspended runs will NOT ` +
-                            `survive a restart. Check that schema sync ran for this datasource: ${(err as Error).message}`,
+                            `survive a restart. Check that schema sync ran for this datasource; the driver's own failure is in this record's meta.`,
+                            undefined,
+                            describeThrownForLog(err),
                         );
                     }
                     durableStore = candidate;
@@ -928,11 +948,29 @@ export class AutomationServicePlugin implements Plugin {
                 // ever resume on its own. To everyone waiting on one, that is
                 // indistinguishable from the #4420 loss this store exists to
                 // prevent — so it is reported at `error`, not `warn`.
+                //
+                // #5661 — and precisely because this is the record an operator
+                // greps for, a foreign text does not go into the MESSAGE.
+                // `Cause: ${err.message}` made the loudest durability warning in
+                // this plugin the one most likely to arrive as unattributable
+                // fragments. Third argument, per `error(message, error?, meta?)`.
+                // See ./thrown-cause-diagnostics.ts.
+                //
+                // On WHOSE text that is: `rearmSuspendedWaitTimers` catches every
+                // failure it models — the store read, each overdue `resume()`,
+                // each `job.schedule()` — and reports them on its own `[wait]`
+                // records. So this catch is the net for what that function did
+                // NOT model, and the message's "job-service error" is a guess at
+                // the likeliest culprit rather than a guarantee. All the more
+                // reason to hand the value over structurally instead of splicing
+                // a shape we cannot predict into a line-oriented record.
                 ctx.logger.error(
                     `[Automation] suspended wait-timer re-arm FAILED after restart — suspended runs are still persisted in ` +
                         `sys_automation_run, but their timers were NOT re-armed: every wait/approval paused before this restart ` +
-                        `will hang indefinitely instead of resuming. Fix the job-service error below and restart to re-attempt the ` +
-                        `re-arm; runs can also be resumed manually via the automation resume API. Cause: ${(err as Error).message}`,
+                        `will hang indefinitely instead of resuming. Fix the job-service error in this record's meta and restart ` +
+                        `to re-attempt the re-arm; runs can also be resumed manually via the automation resume API.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
