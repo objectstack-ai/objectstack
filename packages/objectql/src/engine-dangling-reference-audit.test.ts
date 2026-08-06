@@ -50,7 +50,10 @@ const history = {
     id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
     note: { name: 'note', label: 'Note', type: 'text' as const },
     // `sys_metadata_history.recorded_by` in miniature: a readonly lookup the
-    // platform fills with the sentinel string `actor ?? 'system'`.
+    // platform USED to fill with the sentinel string `actor ?? 'system'` (NULL
+    // since #4556). The stored `'system'` below is therefore a legacy row —
+    // still the honest specimen for what a readonly reference that resolves to
+    // nothing looks like (#4743).
     recorded_by: {
       name: 'recorded_by', label: 'Recorded By',
       type: 'lookup' as const, reference: 'aud_permission_set', readonly: true,
@@ -207,16 +210,31 @@ describe('[#4551] the engine reports the dangling rows its own `isSystem` exempt
     expect(snapshot()).toBe(before);
   });
 
-  it('a readonly lookup holding a SENTINEL string is not reported', async () => {
-    // `recorded_by: 'system'` is not a user id and never was. #4441 skips it on
-    // the write path; the audit must not undo that by reporting the same value
-    // from the other side.
+  it('[#4743] a readonly lookup that resolves to nothing lands in `provenance`, not `dangling`', async () => {
+    // This case used to assert "not reported at all", on the grounds that the
+    // platform wrote the SENTINEL STRING `actor ?? 'system'` here. #4556 made
+    // that write NULL, so the only readonly references left are real ids — and
+    // a real id that names no row is a finding. It is filed apart from
+    // `dangling` because it answers a different question: not "a declared link
+    // is broken" but "the actor this row records is gone".
+    //
+    // Note what the retired assertion would have done: `dangling: []` still
+    // passes, because the finding MOVED rather than vanished. Asserting where
+    // it moved to is the only version of this test that can go red.
     await engine.insert(
       'aud_history', { id: 'h1', note: 'n', recorded_by: 'system' }, { context: { isSystem: true } } as any,
     );
     const out = await engine.inspectDanglingReferences({ objects: ['aud_history'] });
+
     expect(out.dangling).toEqual([]);
     expect(out.undetermined).toBe(0);
+    expect(out.provenance).toEqual([{
+      objectName: 'aud_history',
+      recordId: 'h1',
+      field: 'recorded_by',
+      target: 'aud_permission_set',
+      value: 'system',
+    }]);
   });
 
   it('an unregistered TARGET is `undetermined`, not a finding', async () => {

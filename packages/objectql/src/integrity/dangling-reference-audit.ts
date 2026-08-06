@@ -16,12 +16,15 @@ import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
  * kind: **the platform itself can still write a reference into the void, and
  * nothing says so.**
  *
- * Removing the exemption is not the fix. Beyond the boot-ordering problem, the
- * platform has legitimate non-id writes of its own — `sys_metadata_history.
- * recorded_by` is a `lookup('sys_user')` the metadata repository fills with the
- * SENTINEL STRING `actor ?? 'system'` (that one is already out of scope via
- * #4441's `readonly` narrowing). Rejecting the platform's own write is not the
- * right way to report the problem. Making it VISIBLE is.
+ * Removing the exemption is not the fix. Rejecting the platform's own write is
+ * not the right way to report the problem. Making it VISIBLE is.
+ *
+ * (Historical note, because it is load-bearing for the scope section below: the
+ * platform used to have a legitimate NON-ID write of its own —
+ * `sys_metadata_history.recorded_by`, a `lookup('sys_user')` the metadata
+ * repository filled with the SENTINEL STRING `actor ?? 'system'`. #4556
+ * replaced that sentinel with NULL. Nothing writes a non-id into a reference
+ * column any more, which is what #4743 re-scoped the `readonly` skip on.)
  *
  * ## Reports; never rewrites
  *
@@ -70,14 +73,55 @@ import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
  * datasource. `aborted` keeps the incompleteness loud (the report can never be
  * read as a clean bill of health) without spending the finding bucket on it.
  *
+ * ## …and PROVENANCE is a fourth answer (#4743)
+ *
+ * `readonly` reference fields used to be skipped outright, on two grounds. The
+ * first is #4441's and still holds: a non-system caller's value is stripped
+ * before the write (`stripReadonlyFields` / `stripReadonlyForInsert`), so what
+ * survives was minted by the platform and was never the caller's to answer for.
+ * The second was the `recorded_by` sentinel above — the platform wrote a
+ * NON-ID into a reference column, and probing it could only ever produce a
+ * finding about a value that was never an id. **#4556 deleted that ground**,
+ * and with it the only argument the skip ever had beyond "not the caller's
+ * fault".
+ *
+ * What the skip covered after that was exactly one family: the audit-provenance
+ * fields (`created_by` / `updated_by` / `organization_id`, all `readonly: true`
+ * from `applySystemFields`). Those hold GENUINE ids, and genuine ids dangle —
+ * delete one user and every row they ever created points `created_by` at a row
+ * that is gone. "Who did this" failing to resolve is precisely what an audit
+ * trail exists to answer, so skipping it is blindness rather than economy.
+ *
+ * They are still not the SAME finding as a broken business foreign key, so they
+ * do not share its bucket. `dangling` keeps meaning "a link the model declares
+ * is broken"; {@link DanglingReferenceReport.provenance} means "the actor this
+ * row records no longer exists". Same discipline, same reason, as the
+ * unknown/absent split above — mixing them would drown the business findings in
+ * the provenance ones, which is the failure mode this whole file is written
+ * against.
+ *
+ * ⚠️ **Expect `provenance` to be BIG the first time you look at it**, on any
+ * database that has ever deleted a user or an organization: one deleted user
+ * dangles every row they ever touched. That number is PRE-EXISTING STATE being
+ * reported for the first time — not damage this audit caught being done, and
+ * not a regression introduced by looking. It is also why `provenance` alone
+ * does NOT raise the summary warning: an alarm that fires on every run of an
+ * ordinarily-aged database is #4747's broken alarm all over again, and it would
+ * cost the buckets next to it the attention they were built for. The count
+ * rides along whenever the line fires for a real finding, and the itemised rows
+ * are always in the returned report for a caller that asked the question.
+ *
+ * The unknown/absent split applies INSIDE the new bucket too, and it bites at
+ * once: `undetermined` counts probes that could not run, and on a stack where
+ * `sys_user` is not registered every provenance value probes `null`. Folding
+ * those into `undetermined` would inflate a bucket that DOES raise the warning,
+ * with a fact about which platform tables are mounted rather than about the
+ * data being audited. Hence
+ * {@link DanglingReferenceReport.provenanceUndetermined}, on its own side of
+ * the same line.
+ *
  * ## Scope — the same judgments #4441 already made, not new ones
  *
- * - **`readonly` reference fields are skipped**, exactly as the write-path
- *   check skips them: a non-system caller's value is stripped before the write
- *   (`stripReadonlyFields` / `stripReadonlyForInsert`), so what remains was
- *   minted by the platform — including the audit-provenance family
- *   (`created_by` / `updated_by` / `organization_id`, all `readonly: true` from
- *   `applySystemFields`) and the `recorded_by` sentinel above.
  * - **Which fields are references** is `referenceTargetOf` — the single
  *   arbiter the write-path check and the expand gate already share, covering
  *   `lookup` / `master_detail` / `user` / `tree`. A hand-written type list here
@@ -134,6 +178,38 @@ export interface DanglingReferenceReport {
    * it explicitly.
    */
   aborted?: boolean;
+  /**
+   * [#4743] Audit-provenance references that resolve to nothing: `created_by` /
+   * `updated_by` / `organization_id` — the `readonly` family `applySystemFields`
+   * injects — naming a user or organization that no longer exists.
+   *
+   * Its own bucket rather than an entry in `dangling`, because it answers a
+   * different question with a different remedy: `dangling` says a link the
+   * model DECLARES is broken (re-seed the target, or clear the link);
+   * `provenance` says the actor a row records has since been deleted, which is
+   * usually nothing to fix and everything to know.
+   *
+   * **Read a large number here as history, not as damage.** Every row a deleted
+   * user ever created lands in it, and this is the first release that reports
+   * them at all (before #4743 the whole family was skipped) — so the first run
+   * on an aged database measures accumulated state, not a new defect.
+   *
+   * Same optionality as {@link DanglingReferenceReport.aborted}, for the same
+   * reason: hand-written reports (test doubles) predate the key. Every report
+   * this module produces sets it.
+   */
+  provenance?: DanglingReference[];
+  /**
+   * [#4743] Provenance reference values whose target could NOT be probed — the
+   * `undetermined` axis, kept on the provenance side of the line.
+   *
+   * Separate from {@link DanglingReferenceReport.undetermined} because that
+   * count raises the summary warning and this one must not: on a stack that
+   * never registers `sys_user`, EVERY provenance value probes `null`, and a
+   * fact about which platform tables are mounted would otherwise arrive
+   * disguised as a fact about the audited data.
+   */
+  provenanceUndetermined?: number;
 }
 
 /** Minimal object shape the audit reads — duck-typed so tests need no registry. */
@@ -218,33 +294,75 @@ function isEmptyStoredReference(v: unknown): boolean {
   return v === null || v === undefined || v === '';
 }
 
+/** One reference field worth reading an object for, and which bucket it feeds. */
+interface AuditableField {
+  name: string;
+  target: string;
+  /**
+   * [#4743] `true` for a `readonly` reference — the audit-provenance family.
+   * Findings on it are still findings; they just answer a different question,
+   * so they land in {@link DanglingReferenceReport.provenance}.
+   */
+  provenance: boolean;
+}
+
 /**
- * Reference fields worth auditing on one object: declared target, not
- * `readonly`. Returns `[]` for an object with none, which is how the audit
- * avoids reading a single row of the vast majority of tables.
+ * Reference fields worth auditing on one object: everything with a declared
+ * target, each tagged with the bucket its findings belong in. Returns `[]` for
+ * an object with none, which is how the audit avoids reading a single row of
+ * the tables that have nothing referential on them at all.
+ *
+ * `readonly` is no longer a reason to drop a field (#4743) — it is the reason
+ * to file its findings separately. See the provenance section in the module
+ * header for why the skip's second ground stopped existing at #4556.
  */
-function auditableReferenceFields(obj: AuditableObject): Array<{ name: string; target: string }> {
+function auditableReferenceFields(obj: AuditableObject): AuditableField[] {
   const fields = obj?.fields;
   if (!fields || typeof fields !== 'object') return [];
-  const out: Array<{ name: string; target: string }> = [];
+  const out: AuditableField[] = [];
   for (const [name, def] of Object.entries(fields)) {
-    if ((def as { readonly?: unknown })?.readonly === true) continue;
     const target = referenceTargetOf(def);
     if (!target) continue;
-    out.push({ name, target });
+    out.push({ name, target, provenance: (def as { readonly?: unknown })?.readonly === true });
   }
   return out;
 }
 
+/** An object paired with the reference fields the audit will read it for. */
+interface AuditTarget {
+  obj: AuditableObject;
+  refFields: AuditableField[];
+}
+
 /**
- * Security-surface objects first, everything else after, each group keeping
- * registration order so a run is deterministic.
+ * Scan order for a finite budget: security surface, then objects carrying a
+ * business reference, then the provenance-only remainder. Each group keeps
+ * registration order so a run is deterministic, and objects with no reference
+ * field at all are dropped here — they are the ones the audit reads zero rows
+ * of.
+ *
+ * The third tier is #4743's doing and is the reason it is safe. Admitting the
+ * provenance family means nearly EVERY object now has an auditable field
+ * (`applySystemFields` injects `created_by` almost everywhere), so without an
+ * ordering rule a bounded scan would start spending its row budget on tables
+ * that carry only provenance — and the business findings that budget was built
+ * for would be the ones it ran out before reaching. Same argument as
+ * {@link SECURITY_SURFACE_OBJECTS}, one tier down: when the budget is finite,
+ * order is what decides which question actually gets answered.
  */
-function prioritise(objects: AuditableObject[]): AuditableObject[] {
-  const security: AuditableObject[] = [];
-  const rest: AuditableObject[] = [];
-  for (const o of objects) (SECURITY_SURFACE_OBJECTS.has(o?.name) ? security : rest).push(o);
-  return [...security, ...rest];
+function prioritise(objects: AuditableObject[]): AuditTarget[] {
+  const security: AuditTarget[] = [];
+  const business: AuditTarget[] = [];
+  const provenanceOnly: AuditTarget[] = [];
+  for (const obj of objects) {
+    const refFields = auditableReferenceFields(obj);
+    if (refFields.length === 0) continue;   // nothing referential here — read nothing
+    const tier = SECURITY_SURFACE_OBJECTS.has(obj?.name)
+      ? security
+      : refFields.some((f) => !f.provenance) ? business : provenanceOnly;
+    tier.push({ obj, refFields });
+  }
+  return [...security, ...business, ...provenanceOnly];
 }
 
 /**
@@ -257,8 +375,13 @@ export async function auditDanglingReferences(
   port: DanglingReferenceAuditPort,
   options?: DanglingReferenceAuditOptions,
 ): Promise<DanglingReferenceReport> {
-  const report: DanglingReferenceReport = {
+  // The optional keys are optional in the TYPE only (hand-written test doubles
+  // predate them); every report this function produces sets them, so the local
+  // view of it requires them and no call site below has to guard.
+  const report: DanglingReferenceReport &
+    Required<Pick<DanglingReferenceReport, 'provenance' | 'provenanceUndetermined'>> = {
     scanned: 0, dangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [],
+    provenance: [], provenanceUndetermined: 0,
     aborted: false,
   };
 
@@ -317,15 +440,13 @@ export async function auditDanglingReferences(
     return answer;
   };
 
-  objects: for (const obj of prioritise(all)) {
+  objects: for (const { obj, refFields } of prioritise(all)) {
     if (report.scanned >= maxRows) break;
     // Called off before this object was read: it was never attempted, so it is
     // not a finding about the object — the run reports that it stopped instead.
     if (calledOff()) { report.aborted = true; break; }
     const name = obj?.name;
     if (!name || (only && !only.has(name))) continue;
-    const refFields = auditableReferenceFields(obj);
-    if (refFields.length === 0) continue;   // nothing referential here — read nothing
 
     const budget = Math.min(rowsPerObject, maxRows - report.scanned);
     let rows: Array<Record<string, unknown>>;
@@ -353,7 +474,7 @@ export async function auditDanglingReferences(
     if (rows.length >= budget) report.truncatedObjects.push(name);
 
     for (const row of rows) {
-      for (const { name: field, target } of refFields) {
+      for (const { name: field, target, provenance } of refFields) {
         const raw = row?.[field];
         if (isEmptyStoredReference(raw)) continue;
         const values = Array.isArray(raw) ? raw : [raw];
@@ -363,9 +484,16 @@ export async function auditDanglingReferences(
           if (typeof v === 'object') continue;
           const answer = await exists(target, v);
           if (answer === 'called-off') { report.aborted = true; break objects; }
-          if (answer === null) { report.undetermined++; continue; }
+          // [#4743] Both verdicts are routed by the field's class, not merged:
+          // a provenance answer never lands in a bucket a business reference
+          // shares, in EITHER direction (absent or unknown).
+          if (answer === null) {
+            if (provenance) report.provenanceUndetermined++;
+            else report.undetermined++;
+            continue;
+          }
           if (answer) continue;
-          report.dangling.push({
+          (provenance ? report.provenance : report.dangling).push({
             objectName: name,
             recordId: String(row?.id ?? ''),
             field,
@@ -377,6 +505,12 @@ export async function auditDanglingReferences(
     }
   }
 
+  // [#4743] The provenance buckets deliberately do NOT appear in this
+  // condition. On a database of any age they are non-empty on every healthy
+  // run, and a line that always fires is the #4747 broken alarm — it would
+  // train its reader past the one run where `dangling` had something in it.
+  // They ride along whenever the line fires for a real finding; the full
+  // report always carries them for a caller that came looking.
   if (report.dangling.length || report.undetermined || report.unreadableObjects.length) {
     port.warn?.('[integrity] stored references that resolve to nothing (#4551)', {
       scanned: report.scanned,
@@ -387,6 +521,11 @@ export async function auditDanglingReferences(
       // Carried into the log line too: findings from a run that stopped early
       // are real, but its silence about everything else is not a verdict.
       aborted: report.aborted,
+      // Counted here, never itemised: on a database that has deleted users this
+      // can outnumber every other finding by orders of magnitude, and the rows
+      // themselves are in the returned report.
+      provenance: report.provenance.length,
+      provenanceUndetermined: report.provenanceUndetermined,
       references: report.dangling.map(
         (d) => `${d.objectName}#${d.recordId}.${d.field} → ${d.target}#${d.value}`,
       ),
