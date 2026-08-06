@@ -30,7 +30,12 @@
 //     from becoming a third dialect of the contract.
 
 import { describe, it, expect } from 'vitest';
-import { ApiRoutesSchema, DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
+import {
+  ApiRoutesSchema,
+  DiscoverySchema,
+  GetDiscoveryResponseSchema,
+  WELL_KNOWN_CAPABILITY_KEYS,
+} from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './index.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
@@ -51,6 +56,17 @@ function declaredResponseKeys(): Set<string> {
  */
 function declaredRouteKeys(): Set<string> {
   return new Set(Object.keys((ApiRoutesSchema as any).shape));
+}
+
+/**
+ * [#5672] The capability vocabulary, taken from the spec's own key list.
+ *
+ * Derived, never hand-listed — same discipline as `declaredResponseKeys` and
+ * `declaredRouteKeys` above. A gate that spells the vocabulary itself is a
+ * fourth dialect of the contract and drifts the moment a key is added.
+ */
+function declaredCapabilityKeys(): Set<string> {
+  return new Set(WELL_KNOWN_CAPABILITY_KEYS as readonly string[]);
 }
 
 /**
@@ -106,6 +122,62 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
     // spell it this way.
     expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'mcp')).toBe(false);
     expect(declaredRouteKeys().has('mcp')).toBe(true);
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // [#5672] Fullness: the vocabulary, whole, from every producer
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // The #4828 gate above judges the shape; #5679 extended it one level into
+  // `routes`. This is the same move into `capabilities`, plus the one criterion
+  // neither of those needed: COMPLETENESS. `routes.mcp` is legitimately absent
+  // from a producer that cannot know it — a capability never is, because ruling
+  // A gives "cannot deliver" a spelling of its own (`enabled: false`).
+  //
+  // Three criteria, deliberately separate questions:
+  //   1. every vocabulary key present   — the split this issue is about;
+  //   2. every `enabled` a real boolean — no truthy string / undefined slipping
+  //      through as a capability claim;
+  //   3. no key outside the vocabulary  — the KEY question `safeParse` cannot
+  //      answer, because a zod object strips unknown keys (the #5679 lesson).
+  describe('[#5672] the capability vocabulary is emitted in full', () => {
+    it('emits EVERY declared capability key — undelivered means `enabled: false`, never absent', async () => {
+      const discovery: any = await makeImpl().getDiscovery();
+
+      const missing = [...declaredCapabilityKeys()].filter(
+        k => !Object.prototype.hasOwnProperty.call(discovery.capabilities, k),
+      );
+      expect(missing, 'capability keys the getDiscovery() shape fails to emit').toEqual([]);
+    });
+
+    it('reports every capability with a boolean `enabled`', async () => {
+      const discovery: any = await makeImpl().getDiscovery();
+
+      const nonBoolean = Object.entries(discovery.capabilities as Record<string, any>)
+        .filter(([, v]) => typeof v?.enabled !== 'boolean')
+        .map(([k, v]) => `${k}: ${typeof v?.enabled}`);
+      expect(nonBoolean, 'capability entries whose `enabled` is not a boolean').toEqual([]);
+    });
+
+    it('emits NO capability key the vocabulary does not declare', async () => {
+      const discovery: any = await makeImpl().getDiscovery();
+
+      const declared = declaredCapabilityKeys();
+      const undeclared = Object.keys(discovery.capabilities).filter(k => !declared.has(k));
+      expect(undeclared, 'undeclared keys inside `capabilities` on the getDiscovery() shape').toEqual([]);
+    });
+
+    it('anti-vacuity: the vocabulary really does span BOTH producers\' historical halves', async () => {
+      const discovery: any = await makeImpl().getDiscovery();
+
+      // Without this the three gates above would pass on a vocabulary that had
+      // quietly shrunk back to one producer's half. `websockets` was the
+      // dispatcher's alone before #5672 and `transactionalBatch` this
+      // builder's; both must now be answered here.
+      expect(discovery.capabilities.transactionalBatch.enabled).toBe(false); // no transaction() on this stub engine
+      expect(discovery.capabilities.websockets.enabled).toBe(false);
+      expect(declaredCapabilityKeys().size).toBeGreaterThanOrEqual(13);
+    });
   });
 
   it('carries the canonical `name`, and keeps `apiName` for its deprecation window', async () => {

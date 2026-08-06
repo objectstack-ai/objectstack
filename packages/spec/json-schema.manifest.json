@@ -130,6 +130,7 @@
     "api/CacheInvalidationRequest",
     "api/CacheInvalidationResponse",
     "api/CacheInvalidationTarget",
+    "api/CapabilityDescriptor",
     "api/CheckPermissionRequest",
     "api/CheckPermissionResponse",
     "api/CodeGenerationTemplate",

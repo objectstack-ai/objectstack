@@ -1257,6 +1257,18 @@ export class HttpDispatcher {
         // Self-description of whatever fills the `metadata` slot (D12, #4089).
         const metadataSelf = metadataSvc ? readServiceSelfInfo(metadataSvc) : undefined;
 
+        // [#5672] Comments/chatter are served by the `sys_comment` object via
+        // the generic data API (ADR-0052 §5) — `/data/sys_comment` is a
+        // dispatcher domain, so this producer really does deliver the
+        // capability and must answer it from what it can measure, not with a
+        // blanket `false`. `getObjectQLService` is the same accessor the data
+        // domain resolves its engine through, so the advertisement and the
+        // service agree by construction. Same derivation as `getDiscovery()`,
+        // reached through this producer's own kernel face.
+        const objectqlSvc = await this.getObjectQLService(kernel);
+        const hasComments = !!(objectqlSvc as { registry?: { getObject?: (n: string) => unknown } } | null)
+            ?.registry?.getObject?.('sys_comment');
+
         // Derive locale info from actual i18n service when available
         let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
         if (hasI18n && i18nSvc) {
@@ -1308,6 +1320,18 @@ export class HttpDispatcher {
             // The hierarchical `{ enabled }` shape is what `capabilities`
             // declares (and what the `getDiscovery()` producer already emits),
             // so a client reads ONE shape from either producer.
+            //
+            // [#5672] …and now the same KEY SET from either producer. #4828
+            // stopped at the spelling: both producers emitted `capabilities`,
+            // but this one filled `search`/`websockets`/`files`/`analytics`/
+            // `ai`/`notifications`/`i18n` while `getDiscovery()` filled
+            // `comments`/`automation`/`cron`/`search`/`export`/`chunkedUpload`/
+            // `transactionalBatch` — disjoint but for `search`, and legal
+            // because `DiscoverySchema.capabilities` was an open record. Ruling
+            // A (2026-08-06) closes the vocabulary and requires EVERY key from
+            // EVERY producer, with `enabled: false` as the spelling for "this
+            // host does not deliver it". The six additions below are the other
+            // producer's half, answered from THIS producer's own facts.
             capabilities: {
                 search: { enabled: hasSearch },
                 // No WS/HTTP realtime surface is mounted anywhere — a mere
@@ -1319,6 +1343,45 @@ export class HttpDispatcher {
                 ai: { enabled: hasAi },
                 notifications: { enabled: hasNotification },
                 i18n: { enabled: hasI18n },
+
+                // ── The `getDiscovery()` half (#5672) ─────────────────────────
+                // Basis per key, since ruling A's `false` must never be
+                // confused with "we did not look":
+
+                // MEASURED: the `sys_comment` object in the registry this
+                // dispatcher resolves for its own `/data` domain (see above).
+                comments: { enabled: hasComments },
+                // MEASURED: the same serveability predicate that gates
+                // `routes.automation` — a self-declared stub in the slot
+                // advertises neither the route nor the capability.
+                automation: { enabled: hasAutomation },
+                // MEASURED: the `job` slot. Presence, not serveability, is the
+                // right test — job is a kernel-INTERNAL contract with no HTTP
+                // surface by design (#4318), so an occupant is the capability.
+                cron: { enabled: hasJob },
+                // MEASURED: async export is driven by automation or by the
+                // queue — the same disjunction `getDiscovery()` uses.
+                export: { enabled: hasAutomation || hasQueue },
+                // MEASURED: chunked upload rides the file-storage surface, so
+                // it is exactly `files` on this host. Two vocabulary keys with
+                // one answer is a fact about the host (one storage surface
+                // serving both), not a copy-paste.
+                chunkedUpload: { enabled: hasFiles },
+                // NOT DELIVERED ⇒ false (ruling A point 3), and this is the one
+                // key here that is a genuine "this face does not serve it"
+                // rather than a measurement. The atomic cross-object `/batch`
+                // route is mounted by `@objectstack/rest`
+                // (`registerBatchEndpoints`) — this dispatcher has no batch
+                // branch at all: `domains/data.ts` routes only `query` as a
+                // custom action, and `callData`'s vestigial `action === 'batch'`
+                // arm is unreachable from here and returns `{ results: [] }`
+                // without opening a transaction. Answering `engine.transaction`
+                // instead would advertise atomicity for an endpoint this host
+                // does not serve — the `declared ≠ enforced` lie the flag was
+                // introduced (#3298/#1604) to remove. A host that mounts REST
+                // gets the honest `true` from the REST producer, which ANDs the
+                // runtime verdict with its own `api.enableBatch`.
+                transactionalBatch: { enabled: false },
             },
             services: {
                 // Kernel-provided (always served by the protocol implementation)
