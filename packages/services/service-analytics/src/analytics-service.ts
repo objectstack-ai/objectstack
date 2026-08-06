@@ -916,6 +916,16 @@ export class AnalyticsService implements IAnalyticsService {
     // table header reads "Status" instead of the raw field name "status". The
     // measure-only enrichment above left dimension headers bare (the renderer
     // then fell back to the raw dimension name).
+    //
+    // This ENRICHES existing entries and deliberately mints none: whether a
+    // column exists at all is the query layer's answer, and inventing one here
+    // would describe a column the rows may not carry. #5537 was that gap read
+    // from the wrong end — a selection whose base measures were ALL
+    // filter-scoped ran no primary query, so `DatasetExecutor.runMeasurePass`
+    // assembled a grid with dimension columns in every row and no dimension
+    // entry in `fields` for this pass to enrich. Fixed where the grid is
+    // assembled (see that method's #5537 note), which is also the only place
+    // that knows what the active strategy actually projected.
     if (result.fields?.length && selectedDims.length) {
       const dimByName = new Map(selectedDims.map((d) => [d.name, d]));
       const dimByField = new Map(selectedDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
