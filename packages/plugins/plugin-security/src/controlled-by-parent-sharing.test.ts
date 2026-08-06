@@ -229,6 +229,18 @@ async function boot(options: BootOptions = {}) {
       .map((r) => String(r.id));
   };
 
+  /**
+   * [#5815] The ANALYTICS read face: the scope `getReadFilter` hands the
+   * raw-SQL path, applied to the same rows. No middleware runs here — this
+   * method IS the whole enforcement on that surface.
+   */
+  const analyticsVisibleContacts = async (context?: any): Promise<string[]> => {
+    const filter = await plugin.getReadFilter('crm_contact', context ?? repContext());
+    return (store.rows.crm_contact ?? [])
+      .filter((r) => matchesFilterCondition(r, (filter ?? null) as any))
+      .map((r) => String(r.id));
+  };
+
   /** The WRITE face: a by-id update of one detail row. Resolves or throws. */
   const updateContact = async (id: string): Promise<void> => {
     const opCtx: any = {
@@ -254,7 +266,16 @@ async function boot(options: BootOptions = {}) {
     return out;
   };
 
-  return { store, ctx, visibleContacts, updateContact, writableContacts };
+  return {
+    store,
+    ctx,
+    plugin,
+    repContext,
+    visibleContacts,
+    analyticsVisibleContacts,
+    updateContact,
+    writableContacts,
+  };
 }
 
 describe('[#5386] controlled_by_parent folds the master\'s ownership and share grants in', () => {
@@ -351,5 +372,98 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
     const h = await boot({ shareLevel: 'edit', sharing: 'throws' });
     expect(await h.visibleContacts()).toEqual([]);
     await expect(h.updateContact('ct_us')).rejects.toThrow(/record sharing/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * [#5815] The THIRD face of the same contract — `getReadFilter`, the read-scope
+ * provider bound by the analytics / raw-SQL path.
+ *
+ * The suite above pins the engine middleware and the by-id write gate against
+ * one fixture precisely so a third, quieter answer cannot hide between them.
+ * There WAS one: `getReadFilter` composed the RLS layer and the sharing layer
+ * and never called the controlled_by_parent derivation at all. On this exact
+ * fixture both of those layers legitimately return `null` — the app authors no
+ * RLS, and plugin-sharing maps `controlled_by_parent` to `public` — so the
+ * composed scope came back `undefined`: NO predicate. A caller who could not
+ * read `acct_eu` could still `COUNT(*)` and `GROUP BY` its contacts.
+ *
+ * These cases therefore assert AGREEMENT, not a filter shape. The two read
+ * surfaces may compose their layers in any order and produce different ASTs;
+ * what they may never do is disagree about which rows are visible.
+ */
+describe('[#5815] getReadFilter enforces the same read scope as the engine middleware', () => {
+  it('PARITY: the analytics read scope and the middleware-injected `ast.where` see the same rows', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    const viaMiddleware = await h.visibleContacts();
+    const viaReadFilter = await h.analyticsVisibleContacts();
+    expect(viaReadFilter.sort()).toEqual(viaMiddleware.sort());
+    // …and the agreement carries information: one row is excluded on BOTH
+    // surfaces. Without this, "identical" would be satisfied by two surfaces
+    // that each return everything — which is exactly the broken state.
+    expect(viaReadFilter).not.toContain('ct_eu');
+    expect(viaReadFilter).toHaveLength(2);
+  });
+
+  it('the returned scope is a real predicate, not `undefined` — the defect measured', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
+    // Before the fix this was `undefined` (RLS null AND sharing null), which
+    // the raw-SQL path spreads into a WHERE that constrains nothing.
+    expect(filter).toBeDefined();
+    expect(JSON.stringify(filter)).toContain('acct_own');
+    expect(JSON.stringify(filter)).not.toContain('acct_eu');
+  });
+
+  it('PARITY with no grant at all: both surfaces narrow to the caller-owned master', async () => {
+    const h = await boot({ shareLevel: null });
+    expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
+    expect(await h.analyticsVisibleContacts()).toEqual(['ct_own']);
+  });
+
+  it('PARITY on a READ-level grant: the read share widens the analytics face too', async () => {
+    const h = await boot({ shareLevel: 'read' });
+    expect(await h.analyticsVisibleContacts()).toEqual(['ct_us', 'ct_own']);
+    expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
+  });
+
+  it('PARITY without plugin-sharing: neither surface narrows, for the same reason', async () => {
+    // Both faces stand down together — there is no owner scope and there are no
+    // grants anywhere in the deployment, so a direct find of the master returns
+    // every row. Parity must hold in the WIDE direction as well, or the pin
+    // would merely be asserting that the analytics face is always narrower.
+    const h = await boot({ shareLevel: 'edit', sharing: 'none' });
+    expect(await h.analyticsVisibleContacts()).toEqual(['ct_us', 'ct_eu', 'ct_own']);
+    expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
+  });
+
+  it('fail-closed: a sharing service that throws denies the analytics face too', async () => {
+    const h = await boot({ shareLevel: 'edit', sharing: 'throws' });
+    expect(await h.analyticsVisibleContacts()).toEqual([]);
+    expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
+  });
+
+  it('fail-closed: the derivation resolves the master ONCE per call, never re-entering the detail', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    h.store.find.mockClear();
+    await h.analyticsVisibleContacts();
+    const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    // Direct evidence the derivation (and its sharing half) ran on THIS path
+    // rather than a filter merely coming back from somewhere.
+    expect(reads).toContain('sys_record_share');
+    expect(reads.filter((o) => o === 'crm_account')).toHaveLength(1);
+    expect(reads).not.toContain('crm_contact');
+  });
+
+  it('a delegated (on-behalf-of) read still denies outright — unchanged by the added layer', async () => {
+    // [#2852] The D10 delegator intersection is not implemented on this path,
+    // so it fails closed BEFORE any layer is composed. Pinned here because the
+    // added layer must not become a reason to compute a scope for a context
+    // this method refuses to scope at all.
+    const h = await boot({ shareLevel: 'edit' });
+    const delegated = { ...h.repContext(), onBehalfOf: { userId: OTHER } };
+    expect(await h.analyticsVisibleContacts(delegated)).toEqual([]);
   });
 });
