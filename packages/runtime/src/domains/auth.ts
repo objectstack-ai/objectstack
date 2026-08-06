@@ -4,8 +4,11 @@
  * `/auth` domain — extracted dispatcher body (ADR-0076 D11 step ③, PR-7).
  * Bridges to the `auth` service's contract handler. With no auth service
  * registered the domain answers 501 — it never fabricates a session (#4113).
+ * A THROW out of that handler is an unattributable server fault and never
+ * ships its own words to the client (#5085 — see the try/catch below).
  */
 
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -52,7 +55,43 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
     // now gets the auth service; #4113 removed the mock entirely (see below).
     const authService = await deps.getService(context, CoreServiceName.enum.auth);
     if (authService && typeof authService.handleRequest === 'function') {
-        const response = await authService.handleRequest(context.request as Request);
+        // [#5085] The auth service owns the routing, so whatever it THROWS is
+        // unattributable here: this domain never inspected the sub-path, never
+        // parsed the body, and cannot tell a caller mistake from a handler bug.
+        // Until now the thrown message reached the client verbatim, and the
+        // measured leak was a plain `TypeError` — `request.headers.get is not a
+        // function`, raised inside better-auth's fetch-style handler when a
+        // transport handed it a non-Fetch request. Neither dispatcher exit
+        // catches that: both sanitise only on `looksLikeInternalErrorLeak`, a
+        // SQL/driver-dump heuristic that says nothing about a TypeError, and
+        // #5462 already recorded that a negative from a keyword heuristic is
+        // not evidence of safety.
+        //
+        // So the message is withheld UNCONDITIONALLY — the discipline
+        // #5437/#5464 established one boundary up, and #5489 wrote down for
+        // `mapDataError`'s terminal branch (`UNCLASSIFIED_FAULT`), where a
+        // handler `TypeError` is named as the very shape that lands there.
+        // The answer is a plain 500 with the catalog's floor code for "500 with
+        // no more specific code" (`INTERNAL_ERROR`, derived from the status by
+        // `deps.error`) and the original error goes to the server log, which is
+        // where an operator reads it.
+        //
+        // This costs the honest paths nothing: better-auth answers its own
+        // failures with a `Response` rather than by throwing (the reason
+        // `AuthPlugin`'s wildcard logs >=500 responses proactively), so a real
+        // 401/403/404/422 is still returned below with its own body untouched.
+        let response: Response;
+        try {
+            response = await authService.handleRequest(context.request as Request);
+        } catch (err) {
+            const logger = deps.logger ?? console;
+            logger?.error?.(
+                '[auth] the auth service threw while handling the request; the client was answered '
+                + 'with a sanitised 500 (#5085)',
+                err instanceof Error ? err : new Error(String(err)),
+            );
+            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
+        }
         return { handled: true, result: response };
     }
 

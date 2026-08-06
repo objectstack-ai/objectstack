@@ -728,26 +728,43 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
-            // ── Auth ────────────────────────────────────────────────────
-            // NOTE: /auth/* wildcard is mounted by AuthProxyPlugin (cloud)
-            // or AuthPlugin (single-tenant) directly on the raw Hono app —
+            // ── Auth: DELIBERATELY NOT MOUNTED ──────────────────────────
+            // The /auth/* wildcard is mounted by AuthProxyPlugin (cloud) or
+            // AuthPlugin (single-tenant) directly on the raw Hono app —
             // those handlers can return native Web `Response` objects which
             // is what better-auth produces. The dispatcher cannot represent
             // a streaming Response cleanly through `IHttpServer.send`, so
-            // we deliberately do NOT register a dispatcher wildcard here.
+            // this plugin registers NO auth route at all.
             //
-            // Legacy explicit /auth/login retained for self-hosted clients
-            // that still POST there; superseded by the wildcard above for
-            // the better-auth surface (sign-up/email, sign-in/email, …).
-            server.post(`${prefix}/auth/login`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.handleAuth('login', 'POST', req.body, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
-
+            // [#5085] It used to register exactly one — a "legacy explicit
+            // `POST ${prefix}/auth/login` retained for self-hosted clients"
+            // — and that single mount was the only producer in this repo that
+            // handed better-auth a NON-Fetch request. `IHttpServer` gives a
+            // handler the adapter's internal `IHttpRequest`, whose `headers`
+            // is a PLAIN OBJECT (`HonoHttpServer.runHandler` builds it from
+            // `c.req.header()`); `handleAuthRequest` forwards
+            // `context.request` whole to `IAuthService.handleRequest(request:
+            // Request)`, and better-auth's fetch-style handler opens with
+            // `request.headers.get(…)`. Measured on a real showcase boot:
+            // `POST /api/v1/auth/login` → HTTP 500 with the raw
+            // `request.headers.get is not a function` in the response body,
+            // while `POST /api/v1/auth/sign-in/email` — the same forwarding
+            // layer, reached through the raw-app wildcard with `c.req.raw` —
+            // answered 200.
+            //
+            // The route could not work for any caller: `/login` is not a
+            // better-auth endpoint (it is absent from `plugin-auth`'s
+            // `auth-route-ledger.ts`, and `content/docs/api/
+            // plugin-endpoints.mdx` says in as many words "There is no
+            // `/auth/login` route"), and `handleAuthRequest` does not route on
+            // the sub-path at all (#4113) — so the ONLY thing this mount ever
+            // added over the wildcard was a 500 where the wildcard yields
+            // better-auth's own clean 404. Converting the internal request
+            // into a Fetch `Request` here would be the consumer-side
+            // accommodation Prime Directive #12 rejects, and would buy nothing
+            // but a more expensive 404. So it is deleted, and every unknown
+            // auth sub-path now falls to the namespace owner exactly like
+            // every other one.
 
             // ── Analytics ───────────────────────────────────────────────
             // [#3891 follow-through / ADR-0076 D11] The /analytics wire
