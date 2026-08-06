@@ -91,6 +91,7 @@
     "PredicateInput (type)",
     "PredicateInputSchema (const)",
     "PredicateSchema (const)",
+    "RETIRED_DEFS_BY_MAJOR (const)",
     "RETIRED_KEYS_BY_MAJOR (const)",
     "STACK_KEY_GUIDANCE (const)",
     "STACK_RUNTIME_MEMBERS (const)",

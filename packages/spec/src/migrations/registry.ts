@@ -2041,3 +2041,80 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // Empty by design at protocol 17: see "Not a backfill of history" above. The
   // first entry arrives with the first retirement tombstoned after #4659.
 };
+
+/**
+ * Every whole JSON Schema **def** UNPUBLISHED at each protocol major, named
+ * EXACTLY.
+ *
+ * One entry per def, spelled `${category}/${SchemaName}` — the same string
+ * `packages/spec/json-schema.manifest.json` records (`'identity/Session'`,
+ * `'data/ValidationRule'`). The sibling of {@link RETIRED_KEYS_BY_MAJOR} one
+ * level up: that table registers a single authorable KEY being tombstoned, this
+ * one registers a whole SCHEMA leaving the published set.
+ *
+ * ## What reads it
+ *
+ * The manifest deletion gate in `scripts/build-schemas.ts`
+ * (`check:authorable-surface`): a def listed in `json-schema.manifest.json` at
+ * the merge base with origin/main that this build no longer emits must appear
+ * here, by exact set membership, or the build fails. Nothing else consumes the
+ * table, and nothing infers an entry.
+ *
+ * ## Why the manifest line alone was not a declaration
+ *
+ * The #2978 ratchet asks for one, in a comment: "remove a key ONLY for a
+ * deliberate retirement". Nothing checked it. The ratchet's `missing` set is
+ * `manifest − emitted` with the manifest read from the SAME commit, so a PR that
+ * deleted the export and the manifest line together produced an empty `missing`
+ * and a silent gate — the exact shape #4650 had just closed one level down, for
+ * authorable keys. Worse, the two gates deferred to each other: the #4650
+ * deletion gate waives every baseline key under a def the build stopped emitting
+ * ("adjudicated by json-schema.manifest.json"), and the manifest said nothing.
+ * Measured on #4725 by dropping one barrel re-export: 7 defs and 116 authorable
+ * keys left the contract with `gen:schema`, `check:authorable-surface` and
+ * `check:api-surface` all green.
+ *
+ * The fix is the #4650 structure: the removal is judged against the manifest at
+ * the merge base — which the commit under test cannot rewrite — and the deleted
+ * line has to be answered by a declaration written down HERE, under a major.
+ *
+ * ## Why not reachability
+ *
+ * #4650's per-key gate lets a deletion prove itself by showing the def is
+ * unreachable from the metadata-type roots, computed by BFS over the build's own
+ * Zod graph. That proof is unavailable one level up, and unavailable in the
+ * dangerous direction: reachability is keyed by `zodByDefKey`, which only holds
+ * defs this build EMITS, so a def that just stopped being emitted answers
+ * "unreachable" — a waiver for exactly the removals the gate exists to catch.
+ * Declaration is therefore the only honest proof at def granularity.
+ *
+ * ## What it does NOT replace
+ *
+ * A rename is not a retirement: a def published under a new name is declared in
+ * `scripts/lib/renamed-defs.ts` (`RENAMED_DEFS`), which the gate consults first,
+ * and an entry here would be a false claim that the contract shrank. And as with
+ * {@link RETIRED_KEYS_BY_MAJOR}, the D2 conversion (`src/conversions/registry.ts`)
+ * plus its D3 chain step stay the *documentation* channel that `spec-changes.json`,
+ * the upgrade guide and `os migrate meta` project; an entry here is the *proof
+ * the removal was declared*. A retirement needs both.
+ *
+ * ## Not a backfill of history
+ *
+ * The gate fires only on a def that leaves the published set relative to the
+ * merge base, so removals that landed before this table existed never re-trigger
+ * it and are deliberately absent. This reads "whole-schema removals registered
+ * under the manifest deletion gate", not "every schema ever unpublished".
+ *
+ * ## Lifecycle
+ *
+ * Entries are permanent, and after the removal merges they name a def no build
+ * emits — the expected steady state. The one state the gate rejects is an entry
+ * naming a def this build STILL publishes: a registration nothing consumed,
+ * pre-approving a removal that has not happened.
+ *
+ * @see scripts/build-schemas.ts — the manifest deletion gate, the only consumer
+ */
+export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
+  // Empty by design at protocol 17: see "Not a backfill of history" above. The
+  // first entry arrives with the first whole-schema removal after #4725.
+};
