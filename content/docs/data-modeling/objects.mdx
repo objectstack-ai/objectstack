@@ -111,7 +111,20 @@ not object metadata.
 ```typescript
 tenancy: {
   enabled: true,
-  tenantField: 'tenant_id',
+}
+```
+
+The tenant column defaults to nothing at the spec level: leave `tenantField`
+undeclared and the driver scopes by `organization_id` — the kernel-injected
+column the RLS predicates use. Declare it only when an object's tenant column
+genuinely is not `organization_id`, and only when the object really has that
+field (a declared name for a column that does not exist is ignored, and the
+`organization_id` fallback applies):
+
+```typescript
+tenancy: {
+  enabled: true,
+  tenantField: 'workspace_id',
 }
 ```
 

@@ -1404,10 +1404,18 @@ describe('ADR-0066 — object access posture (D2) + requiredPermissions (D3)', (
 });
 
 describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () => {
-  it('accepts the two live knobs and applies the tenantField default', () => {
+  it('accepts the two live knobs and materializes NO tenantField default (#5315)', () => {
+    // An undeclared tenant column stays undeclared. The old `.default('tenant_id')`
+    // invented a column name the platform does not use and no consumer could act
+    // on — the effective column is resolved by the driver, which falls back to
+    // `organization_id`. Parsing must not put words in the author's mouth.
     const result = TenancyConfigSchema.parse({ enabled: true });
     expect(result.enabled).toBe(true);
-    expect(result.tenantField).toBe('tenant_id');
+    expect(result.tenantField).toBeUndefined();
+    expect(result).toEqual({ enabled: true });
+    expect('tenantField' in result).toBe(false);
+
+    // An explicitly declared column still round-trips untouched.
     expect(TenancyConfigSchema.parse({ enabled: false, tenantField: 'workspace_id' }))
       .toEqual({ enabled: false, tenantField: 'workspace_id' });
   });
