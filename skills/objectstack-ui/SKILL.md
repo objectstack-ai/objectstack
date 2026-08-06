@@ -1829,18 +1829,17 @@ sharing service use:
 ```typescript
 // ✅ Canonical since #5613
 const positions = ctx.session?.positions ?? [];
-
-// ⚠️ Deprecated alias of the SAME array — emitted for one deprecation window
-// (ADR-0087 `action-session-roles-to-positions`), then removed.
-const legacy = ctx.session?.roles;
 ```
 
-> Both keys are absent (not empty) when the caller holds no positions, and the
-> whole `ctx.session` is `undefined` for a call with no identity envelope.
-> **Neither array is an authorization input.** Do not migrate
-> `roles.includes('admin')` into `positions.includes('admin')` — that renames a
-> defect. Ask the security service for privilege (capability grants,
-> placements, derived posture — ADR-0095).
+> The key is **absent** (not empty) when the caller holds no positions, and the
+> whole `ctx.session` is `undefined` for a call with no identity envelope. The
+> pre-ADR-0090 alias of this same array is still emitted for one migration
+> window and then removed — see `action-session-*-to-positions` in the protocol
+> upgrade guide for the prescription. Migrate the READ to `positions`; do not
+> migrate an access check by renaming it. **This array is not an authorization
+> input**: `positions.includes('admin')` is the same defect under a blessed
+> name. Ask the security service for privilege (capability grants, placements,
+> derived posture — ADR-0095).
 
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
