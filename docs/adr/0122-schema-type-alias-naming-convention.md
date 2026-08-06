@@ -261,7 +261,7 @@ was found.
 | | count |
 |:---|---:|
 | `XParsed` aliases added | **660** |
-| `*.zod.ts` files touched | **152** |
+| `*.zod.ts` files edited | **151** |
 | existing declarations modified, renamed or removed | **0** |
 | schemas pinned isomorphic | **717** |
 | final: bare `z.infer` aliases paired with an `XParsed` | 667 |
@@ -271,3 +271,23 @@ was found.
 The 667 is 663 covered by D5 plus 4 isomorphic aliases in `automation/execution.zod.ts`
 that already carried an `XParsed` from a half-finished earlier pass; those are left
 alone (D4 removes nothing) and simply do not need a pin.
+
+151 files were edited rather than the 152 that contain a differing alias, because
+`automation/execution.zod.ts`'s three differing aliases already had their `XParsed`.
+
+### G. Two findings the gate produced on its first real run
+
+Worth recording because they are the evidence that the gate is not a tautology over
+the same census that generated the change:
+
+1. **`ServiceObject`** (`data/object.zod.ts`) was invisible to the probe — its schema
+   `ObjectSchemaBase` is not exported, so no module-level assertion could reach it. The
+   gate reported it as neither paired nor pinned; a separate assertion through the
+   already-exported `ServiceObjectInput` / `ServiceObject` pair confirmed the two shapes
+   differ, and it received `ServiceObjectParsed` like any other covered alias.
+2. **Four redundant pins** in `automation/execution.zod.ts`. Those schemas are
+   isomorphic *and* already carried an `XParsed`, so the generated pin list proposed an
+   exemption nothing relied on. The stale-pin arm caught all four, and they were dropped.
+
+Both are cases where the census and the gate disagreed and the gate was right, which is
+the property that makes it worth running.

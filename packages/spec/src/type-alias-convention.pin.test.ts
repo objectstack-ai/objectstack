@@ -36,6 +36,9 @@
 // gate refuses a bare alias that is neither pinned here nor paired with an
 // `XParsed`.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -1352,12 +1355,20 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('pins 717 isomorphic aliases, each proved by tsc rather than asserted here', () => {
-    // The proof is this file's compile: every `Iso*` above is an
-    // `Assert<Eq<...>>` tsc rejects the moment the two shapes diverge. This
-    // case exists so the count shows up in test output and moves only with a
-    // deliberate edit.
-    expect(717).toBeGreaterThan(0);
+  it('still declares all 717 isomorphic pins', () => {
+    // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
+    // that stops holding is a compile error with the alias named. What tsc
+    // cannot notice is a pin that was DELETED: removing the assertion removes
+    // the failure too, so a red line can be made green by deleting it, and the
+    // schema it exempted then drifts unwatched. Counting them from the source
+    // is what makes that edit visible in `pnpm test` as well as in the gate.
+    //
+    // Rebalancing this number is normal — it drops by one whenever a schema
+    // gains a shape and its alias gains an `XParsed`. Dropping it without that
+    // corresponding alias is the edit this case exists to stop.
+    const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
+    expect(pins).toHaveLength(717);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
