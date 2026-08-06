@@ -123,12 +123,22 @@ export interface IStorageService {
      */
     getInfo(key: string): Promise<StorageFileInfo>;
 
-    /**
-     * List files in a directory/prefix
-     * @param prefix - Key prefix to list
-     * @returns Array of file info objects
-     */
-    list?(prefix: string): Promise<StorageFileInfo[]>;
+    // `list?(prefix: string): Promise<StorageFileInfo[]>` was REMOVED in
+    // @objectstack/spec 5.x (#5540, ADR-0049 enforce-or-remove; analysis in
+    // #5266). It had no consumer — the only in-repo call site was a proxy
+    // pass-through — and the two shipped adapters answered the same call with
+    // two different semantics, both silently incomplete: the local adapter
+    // listed one level and reported directories as files, the S3 adapter
+    // recursed and truncated at 1000 objects without reading
+    // `IsTruncated`/`ContinuationToken`. One contract method, two dialects,
+    // no signal.
+    //
+    // There is no replacement, deliberately: a prefix enumeration that cannot
+    // paginate is the wrong shape to inherit. When a real caller needs one, it
+    // comes back cursor-shaped — `list(prefix, { cursor, limit })` returning a
+    // page plus a continuation token — with adapter-conformance cases (nested
+    // keys, directory entries, >1000 objects) proving both backends agree.
+    // Until then the storage contract only exposes per-key operations.
 
     /**
      * Generate a pre-signed URL for temporary access
