@@ -57,6 +57,13 @@
  *     exists but is stale is still #5726's other half; AGENTS.md §9 is the
  *     standing remedy (`pnpm install --frozen-lockfile && pnpm build` after a
  *     merge) and is not something a cheap probe can see.
+ *
+ *     That gap has a consequence this gate must not paper over: a green line here
+ *     is reassurance, and on a STALE dist it is reassurance in the wrong
+ *     direction — the developer has just been told the workspace is fine, so the
+ *     fake drift that follows reads even more like a real bug. Hence the pass
+ *     message says "artifacts present", never "the workspace is fine", and the
+ *     gap is filed as #5864 rather than left implicit here.
  *   - Type declarations. Only the JS entry is probed, never `.d.ts`, so a fast
  *     `OS_SKIP_DTS=1` build stays green — dev boot needs JS, not declarations.
  *   - packages/console/dist. It is built by scripts/build-console.sh, NOT by
@@ -212,7 +219,7 @@ function inspect(root) {
 function report(verdict) {
   const { checked, missing, fix } = verdict;
   if (missing.length === 0) {
-    console.log(`✓ Workspace is built — ${checked} package build artifacts present.`);
+    console.log(`✓ ${checked} package build artifacts present (existence, not freshness).`);
     return 0;
   }
 
