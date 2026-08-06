@@ -3585,6 +3585,7 @@
     "DelegableAdminScope (interface)",
     "DelegableScope (interface)",
     "DeployExecutionResult (interface)",
+    "DriverQuery (type)",
     "EMBEDDER_SERVICE (const)",
     "EmailAddress (type)",
     "EmailAttachment (interface)",

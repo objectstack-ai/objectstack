@@ -168,6 +168,24 @@ describe('IDataDriver', () => {
       expect([dropped, kept]).toEqual(['dropped', 'kept']);
     });
 
+    it('is what all six query-taking methods actually declare', () => {
+      // This pin reads the parameter off the CONTRACT rather than off the alias,
+      // and that is the point: a revert that puts `QueryAST` back on one
+      // signature while leaving `DriverQuery` defined would sail past every
+      // alias-scoped assertion in this block. Here that slot resolves to `never`
+      // and the line goes red — per method, so the message names which one.
+      type DropsObject<T> = 'object' extends keyof T ? never : 'dropped';
+      const perMethod: [
+        DropsObject<Parameters<IDataDriver['find']>[1]>,
+        DropsObject<Parameters<IDataDriver['findOne']>[1]>,
+        DropsObject<NonNullable<Parameters<IDataDriver['count']>[1]>>,
+        DropsObject<Parameters<NonNullable<IDataDriver['updateMany']>>[1]>,
+        DropsObject<Parameters<NonNullable<IDataDriver['deleteMany']>>[1]>,
+        DropsObject<Parameters<NonNullable<IDataDriver['explain']>>[1]>,
+      ] = ['dropped', 'dropped', 'dropped', 'dropped', 'dropped', 'dropped'];
+      expect(perMethod).toHaveLength(6);
+    });
+
     it('lets a caller pass only the query, which is what forced the casts', () => {
       // Before #5181 this literal did not compile (`object` was required), so a
       // caller holding just a `where` reached for `as any` — and lost the type
