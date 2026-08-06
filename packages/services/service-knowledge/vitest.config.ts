@@ -9,16 +9,20 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    alias: {
-      '@objectstack/core': path.resolve(__dirname, '../../core/src/index.ts'),
-      '@objectstack/spec/ai': path.resolve(__dirname, '../../spec/src/ai/index.ts'),
-      '@objectstack/spec/contracts': path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
-      '@objectstack/spec/data': path.resolve(__dirname, '../../spec/src/data/index.ts'),
-      '@objectstack/spec/kernel': path.resolve(__dirname, '../../spec/src/kernel/index.ts'),
-      '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),
-      // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
-      '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
-      '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
-    },
+    // Array form with anchored patterns, deliberately. The object form matches
+    // by PREFIX, so the bare `@objectstack/spec` entry swallowed every subpath
+    // that was not spelled out above it — `@objectstack/spec/ui` resolved to
+    // `spec/src/index.ts/ui` and failed with `ENOTDIR`. That made the list of
+    // namespaces something every new import had to extend by hand, and the
+    // failure landed on whoever added the import, naming a path nobody wrote.
+    // One rule for all namespaces cannot go stale that way.
+    alias: [
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      {
+        find: /^@objectstack\/spec\/([a-z-]+)$/,
+        replacement: `${path.resolve(__dirname, '../../spec/src')}/$1/index.ts`,
+      },
+      { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
+    ],
   },
 });
