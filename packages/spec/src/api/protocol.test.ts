@@ -390,14 +390,19 @@ describe('ObjectStack Protocol', () => {
 // GetDiscoveryResponseSchema — capabilities
 // ==========================================
 import { GetDiscoveryResponseSchema } from './protocol.zod';
+import { WELL_KNOWN_CAPABILITY_KEYS } from './discovery.zod';
 
 describe('GetDiscoveryResponseSchema (capabilities)', () => {
+  /** The full vocabulary as hierarchical descriptors, all off. */
+  const allCapabilitiesOff = () =>
+    Object.fromEntries(WELL_KNOWN_CAPABILITY_KEYS.map(k => [k, { enabled: false }]));
+
   it('should accept response with hierarchical capabilities', () => {
     const result = GetDiscoveryResponseSchema.safeParse({
       version: 'v1',
       name: 'ObjectStack API',
       capabilities: {
-        feed: { enabled: true },
+        ...allCapabilitiesOff(),
         comments: { enabled: true, features: { threaded: true } },
         automation: { enabled: false },
         search: { enabled: true, description: 'Full-text search' },
@@ -405,9 +410,46 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.capabilities?.feed?.enabled).toBe(true);
+      expect(result.data.capabilities?.comments?.enabled).toBe(true);
+      expect(result.data.capabilities?.comments?.features?.threaded).toBe(true);
       expect(result.data.capabilities?.automation?.enabled).toBe(false);
     }
+  });
+
+  // [#5672] This fixture used to lead with `feed: { enabled: true }` and assert
+  // it round-tripped. It did — `capabilities` was an open `z.record`, so a key
+  // no producer emits and no consumer reads looked exactly like a real one.
+  // That is the phantom the closed vocabulary removes, and it is worth a test
+  // of its own rather than a silent deletion.
+  it('[#5672] rejects a capability key outside the vocabulary', () => {
+    const result = GetDiscoveryResponseSchema.safeParse({
+      version: 'v1',
+      name: 'ObjectStack API',
+      capabilities: { ...allCapabilitiesOff(), feed: { enabled: true } },
+    });
+
+    // A zod object STRIPS unknown keys rather than failing, so the parse itself
+    // stays green — the fact to pin is that `feed` does not survive into the
+    // parsed value, i.e. a consumer reading the spec-parsed body can never see
+    // it. (The producers' own gates carry the complementary key-set check that
+    // makes emitting it an error rather than a silent drop.)
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.capabilities).not.toHaveProperty('feed');
+    }
+  });
+
+  it('[#5672] rejects a capability map that is missing part of the vocabulary', () => {
+    const { comments: _dropped, ...partial } = allCapabilitiesOff();
+    const result = GetDiscoveryResponseSchema.safeParse({
+      version: 'v1',
+      name: 'ObjectStack API',
+      capabilities: partial,
+    });
+
+    // `.partial()` makes the `capabilities` BLOCK optional at this layer; it
+    // does not make the vocabulary inside it optional. Present ⇒ complete.
+    expect(result.success).toBe(false);
   });
 
   it('should accept response without capabilities (optional)', () => {
@@ -415,6 +457,10 @@ describe('GetDiscoveryResponseSchema (capabilities)', () => {
       version: 'v1',
       apiName: 'ObjectStack API',
     });
+    // Still optional HERE and only here: `GetDiscoveryResponseSchema` is
+    // `DiscoverySchema.partial()`, the lenient wire wrapper. The canonical
+    // `DiscoverySchema` — the one every producer's conformance gate parses
+    // against since #4828 — requires it (#5672).
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.capabilities).toBeUndefined();

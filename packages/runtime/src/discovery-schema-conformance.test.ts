@@ -15,7 +15,12 @@
 // contrived fixture needed.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiRoutesSchema, DiscoverySchema, GetDiscoveryResponseSchema } from '@objectstack/spec/api';
+import {
+  ApiRoutesSchema,
+  DiscoverySchema,
+  GetDiscoveryResponseSchema,
+  WELL_KNOWN_CAPABILITY_KEYS,
+} from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
@@ -36,6 +41,11 @@ function declaredResponseKeys(): Set<string> {
  */
 function declaredRouteKeys(): Set<string> {
   return new Set(Object.keys((ApiRoutesSchema as any).shape));
+}
+
+/** [#5672] The capability vocabulary, derived from the spec — never hand-listed. */
+function declaredCapabilityKeys(): Set<string> {
+  return new Set(WELL_KNOWN_CAPABILITY_KEYS as readonly string[]);
 }
 
 describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
@@ -120,6 +130,109 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
     const withoutMcp: any = await dispatcher.getDiscoveryInfo('/api/v1');
     expect(Object.prototype.hasOwnProperty.call(withoutMcp.routes, 'mcp')).toBe(true);
     expect(withoutMcp.routes.mcp).toBeUndefined();
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // [#5672] Fullness: the vocabulary, whole, from every producer
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // The sibling gate in `packages/metadata-protocol` carries the full reasoning.
+  // This producer is the one that owned the OTHER half of the split: before
+  // ruling A it emitted `search`/`websockets`/`files`/`analytics`/`ai`/
+  // `notifications`/`i18n` and nothing else, so `client.capabilities
+  // .transactionalBatch` was statically `boolean` and actually `undefined`
+  // against any dispatcher-served host.
+  describe('[#5672] the capability vocabulary is emitted in full', () => {
+    it('emits EVERY declared capability key — undelivered means `enabled: false`, never absent', async () => {
+      const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+      const missing = [...declaredCapabilityKeys()].filter(
+        k => !Object.prototype.hasOwnProperty.call(info.capabilities, k),
+      );
+      expect(missing, 'capability keys the getDiscoveryInfo() shape fails to emit').toEqual([]);
+    });
+
+    it('reports every capability with a boolean `enabled`', async () => {
+      const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+      const nonBoolean = Object.entries(info.capabilities as Record<string, any>)
+        .filter(([, v]) => typeof v?.enabled !== 'boolean')
+        .map(([k, v]) => `${k}: ${typeof v?.enabled}`);
+      expect(nonBoolean, 'capability entries whose `enabled` is not a boolean').toEqual([]);
+    });
+
+    it('emits NO capability key the vocabulary does not declare', async () => {
+      const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+      const declared = declaredCapabilityKeys();
+      const undeclared = Object.keys(info.capabilities).filter(k => !declared.has(k));
+      expect(undeclared, 'undeclared keys inside `capabilities` on the getDiscoveryInfo() shape').toEqual([]);
+    });
+
+    it('anti-vacuity: the six keys this producer never used to emit are really answered', async () => {
+      const info: any = await dispatcher.getDiscoveryInfo('/api/v1');
+
+      // The metadata-protocol half of the old split, measured on THIS producer.
+      for (const key of ['comments', 'automation', 'cron', 'export', 'chunkedUpload', 'transactionalBatch'] as const) {
+        expect(info.capabilities[key], `capabilities.${key}`).toBeDefined();
+        expect(typeof info.capabilities[key].enabled, `capabilities.${key}.enabled`).toBe('boolean');
+      }
+
+      // `comments` is TRUE here, and that is the anti-vacuity that matters:
+      // this suite's kernel stubs `registry.getObject` to answer every name, so
+      // `sys_comment` resolves. A hardcoded `false` — the shape ruling A allows
+      // for a capability a producer cannot deliver — would read `false` here,
+      // so this one assertion is what proves the key is MEASURED rather than
+      // stamped. Its `false` counterpart is the dedicated test below.
+      expect(info.capabilities.comments.enabled).toBe(true);
+
+      // The rest are genuinely absent on a kernel with no services registered.
+      for (const key of ['automation', 'cron', 'export', 'chunkedUpload', 'transactionalBatch'] as const) {
+        expect(info.capabilities[key].enabled, `capabilities.${key}.enabled`).toBe(false);
+      }
+    });
+
+    it('answers `comments` from the registry it can actually reach, not from a hardcoded false', async () => {
+      // Ruling A point 3 says an undeliverable capability is `false` — but it
+      // does NOT license answering `false` for a capability the producer CAN
+      // compute. This dispatcher resolves `objectql` for its own data domain,
+      // and `/data/sys_comment` is exactly how comments are served (ADR-0052
+      // §5), so the honest answer tracks the object's presence — the same
+      // derivation `getDiscovery()` uses, from this producer's own kernel face.
+      const kernel = {
+        context: {
+          getService: (name: string) => {
+            if (name === 'objectql') {
+              return {
+                registry: {
+                  getObject: (n: string) => (n === 'sys_comment' ? { name: 'sys_comment' } : undefined),
+                  getRegisteredTypes: () => [],
+                  getAllPackages: () => [],
+                },
+              };
+            }
+            return null;
+          },
+        },
+      } as any;
+
+      const info: any = await new HttpDispatcher(kernel).getDiscoveryInfo('/api/v1');
+      expect(info.capabilities.comments.enabled).toBe(true);
+      expect(DiscoverySchema.safeParse(info).success).toBe(true);
+
+      // …and the other direction: a registry WITHOUT `sys_comment` answers
+      // false. Both halves, so neither a stamped `true` nor a stamped `false`
+      // could pass this pair.
+      const withoutComments = {
+        context: {
+          getService: (name: string) => (name === 'objectql'
+            ? { registry: { getObject: () => undefined, getRegisteredTypes: () => [], getAllPackages: () => [] } }
+            : null),
+        },
+      } as any;
+      const bare: any = await new HttpDispatcher(withoutComments).getDiscoveryInfo('/api/v1');
+      expect(bare.capabilities.comments.enabled).toBe(false);
+    });
   });
 
   it('has retired `features` and `endpoints` (ADR-0049 enforce-or-remove)', async () => {

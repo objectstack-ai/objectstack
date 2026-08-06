@@ -5,6 +5,8 @@ import {
   ServiceInfoSchema,
   ServiceStatus,
   WellKnownCapabilitiesSchema,
+  WELL_KNOWN_CAPABILITY_KEYS,
+  CapabilityDescriptorSchema,
   RouteHealthEntrySchema,
   RouteHealthReportSchema,
   ServiceSelfInfoSchema,
@@ -95,6 +97,23 @@ const minimalServices = {
   metadata: { enabled: true, status: 'available' as const, route: '/api/v1/meta', provider: 'objectql' },
 };
 
+/**
+ * [#5672] The minimal legal `capabilities` block: the WHOLE vocabulary, every
+ * entry `enabled: false`.
+ *
+ * Ruling A made `capabilities` a required, closed map, so every fixture below
+ * carries one — including the fixtures that exist to be REJECTED, which must
+ * fail for their own planted defect rather than for a second missing key they
+ * were never testing.
+ *
+ * Built from `WELL_KNOWN_CAPABILITY_KEYS` rather than hand-listed, so adding a
+ * capability to the spec does not silently leave this file testing a stale
+ * vocabulary.
+ */
+const allCapabilitiesOff = Object.fromEntries(
+  WELL_KNOWN_CAPABILITY_KEYS.map(key => [key, { enabled: false }]),
+) as DiscoveryResponse['capabilities'];
+
 describe('DiscoverySchema', () => {
   it('should accept valid minimal discovery response', () => {
     const discovery: DiscoveryResponse = {
@@ -106,6 +125,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -129,6 +149,7 @@ describe('DiscoverySchema', () => {
         actions: '/api/v1/p',
         storage: '/api/v1/storage',
       },
+      capabilities: allCapabilitiesOff,
       services: {
         ...minimalServices,
         search: { enabled: true, status: 'available' as const, route: '/api/v1/search', provider: 'plugin-search' },
@@ -157,6 +178,7 @@ describe('DiscoverySchema', () => {
           metadata: '/api/v1/meta',
           auth: '/api/v1/auth',
         },
+        capabilities: allCapabilitiesOff,
         services: minimalServices,
         locale: {
           default: 'en-US',
@@ -178,6 +200,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -197,6 +220,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: {
         ...minimalServices,
         search: { enabled: true, status: 'available' as const, route: '/api/v1/search', provider: 'plugin-search' },
@@ -221,6 +245,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -242,6 +267,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -263,6 +289,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'zh-CN',
@@ -296,6 +323,7 @@ describe('DiscoverySchema', () => {
           metadata: '/api/v1/meta',
           auth: '/api/v1/auth',
         },
+        capabilities: allCapabilitiesOff,
         services: minimalServices,
         locale: {
           default: 'en-US',
@@ -317,6 +345,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -348,6 +377,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -364,6 +394,7 @@ describe('DiscoverySchema', () => {
         metadata: '/api/v1/meta',
         auth: '/api/v1/auth',
       },
+      capabilities: allCapabilitiesOff,
       services: minimalServices,
       locale: {
         default: 'en-US',
@@ -382,6 +413,10 @@ describe('DiscoverySchema', () => {
         data: '/api/v1/data',
         metadata: '/api/v1/meta',
       },
+      // Present so the ONLY defect under test is the missing `services` —
+      // without it this would also throw for a missing `capabilities` (#5672)
+      // and stop testing what its name says.
+      capabilities: allCapabilitiesOff,
       locale: {
         default: 'en-US',
         supported: ['en-US'],
@@ -452,6 +487,7 @@ describe('DiscoverySchema with services', () => {
       metadata: '/api/v1/meta',
       auth: '/api/v1/auth',
     },
+    capabilities: allCapabilitiesOff,
     services: minimalServices,
     locale: {
       default: 'en-US',
@@ -589,6 +625,7 @@ describe('DiscoverySchema (capabilities field)', () => {
     version: '1.0.0',
     environment: 'production' as const,
     routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+    capabilities: allCapabilitiesOff,
     services: minimalServices,
     locale: { default: 'en-US', supported: ['en-US'], timezone: 'UTC' },
   };
@@ -596,7 +633,12 @@ describe('DiscoverySchema (capabilities field)', () => {
   it('should accept discovery with capabilities', () => {
     const discovery = DiscoverySchema.parse({
       ...fixture,
+      // [#5672] Spread over the full vocabulary rather than replacing it: this
+      // test is about the hierarchical extras (`features`, `description`)
+      // round-tripping, and a two-key literal is no longer a legal
+      // `capabilities` block at all.
       capabilities: {
+        ...allCapabilitiesOff,
         comments: {
           enabled: true,
           features: { threaded: true, reactions: true, mentions: true },
@@ -608,14 +650,66 @@ describe('DiscoverySchema (capabilities field)', () => {
         },
       },
     });
-    expect(discovery.capabilities?.comments.enabled).toBe(true);
-    expect(discovery.capabilities?.comments.features?.threaded).toBe(true);
-    expect(discovery.capabilities?.automation.enabled).toBe(false);
+    expect(discovery.capabilities.comments.enabled).toBe(true);
+    expect(discovery.capabilities.comments.features?.threaded).toBe(true);
+    expect(discovery.capabilities.automation.enabled).toBe(false);
   });
 
-  it('should allow capabilities to be omitted', () => {
-    const discovery = DiscoverySchema.parse(fixture);
-    expect(discovery.capabilities).toBeUndefined();
+  // ── [#5672] ruling A: closed vocabulary, emitted whole ─────────────────────
+  //
+  // These four replace the single `should allow capabilities to be omitted`
+  // test, which pinned exactly the limb this issue removes. Note it would have
+  // kept PASSING for the wrong reason if it had merely been re-spelled — a
+  // `toBeUndefined()` on a key nothing produces is green whether the contract
+  // says "optional" or "we forgot"; only asserting the rejection is evidence.
+
+  it('REJECTS a discovery that omits capabilities entirely', () => {
+    const { capabilities: _omitted, ...withoutCapabilities } = fixture;
+    const result = DiscoverySchema.safeParse(withoutCapabilities);
+
+    expect(result.success).toBe(false);
+    expect(
+      result.success ? [] : result.error.issues.map(i => i.path.join('.')),
+    ).toContain('capabilities');
+  });
+
+  it('REJECTS a discovery that emits only part of the vocabulary', () => {
+    // The exact pre-#5672 shapes: each producer's half, on its own.
+    const dispatcherHalf = {
+      search: { enabled: true }, websockets: { enabled: false }, files: { enabled: false },
+      analytics: { enabled: false }, ai: { enabled: false }, notifications: { enabled: false },
+      i18n: { enabled: false },
+    };
+    const protocolHalf = {
+      comments: { enabled: false }, automation: { enabled: false }, cron: { enabled: false },
+      search: { enabled: true }, export: { enabled: false }, chunkedUpload: { enabled: false },
+      transactionalBatch: { enabled: false },
+    };
+
+    for (const half of [dispatcherHalf, protocolHalf]) {
+      expect(
+        DiscoverySchema.safeParse({ ...fixture, capabilities: half }).success,
+        `a partial capability map must not parse: ${Object.keys(half).join(',')}`,
+      ).toBe(false);
+    }
+  });
+
+  it('declares exactly the WellKnownCapabilities vocabulary — one list, not two', () => {
+    const declared = Object.keys((DiscoverySchema as any).shape.capabilities.shape);
+    expect(new Set(declared)).toEqual(new Set(WELL_KNOWN_CAPABILITY_KEYS));
+    // Anti-vacuity: the vocabulary really is the UNION of the two halves that
+    // used to be disjoint, not one of them.
+    expect(declared).toEqual(expect.arrayContaining(['transactionalBatch', 'websockets']));
+  });
+
+  it('every entry carries the CapabilityDescriptor shape', () => {
+    const parsed = DiscoverySchema.parse(fixture);
+    for (const key of WELL_KNOWN_CAPABILITY_KEYS) {
+      expect(
+        CapabilityDescriptorSchema.safeParse(parsed.capabilities[key]).success,
+        `capabilities.${key}`,
+      ).toBe(true);
+    }
   });
 });
 
@@ -629,6 +723,7 @@ describe('DiscoverySchema (schemaDiscovery field)', () => {
     version: '1.0.0',
     environment: 'production' as const,
     routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+    capabilities: allCapabilitiesOff,
     services: minimalServices,
     locale: { default: 'en-US', supported: ['en-US'], timezone: 'UTC' },
   };
@@ -666,70 +761,65 @@ describe('DiscoverySchema (schemaDiscovery field)', () => {
 // ==========================================
 
 describe('WellKnownCapabilitiesSchema', () => {
+  /** Every vocabulary flag set to `value` — built from the vocabulary, never listed. */
+  const allFlags = (value: boolean) =>
+    Object.fromEntries(WELL_KNOWN_CAPABILITY_KEYS.map(k => [k, value])) as WellKnownCapabilities;
+
   it('should accept all capabilities enabled', () => {
-    const caps: WellKnownCapabilities = {
-      comments: true,
-      automation: true,
-      cron: true,
-      search: true,
-      export: true,
-      chunkedUpload: true,
-      transactionalBatch: true,
-    };
+    const caps: WellKnownCapabilities = allFlags(true);
     expect(() => WellKnownCapabilitiesSchema.parse(caps)).not.toThrow();
   });
 
   it('should accept all capabilities disabled', () => {
-    const caps = WellKnownCapabilitiesSchema.parse({
-      comments: false,
-      automation: false,
-      cron: false,
-      search: false,
-      export: false,
-      chunkedUpload: false,
-      transactionalBatch: false,
-    });
+    const caps = WellKnownCapabilitiesSchema.parse(allFlags(false));
     expect(caps.comments).toBe(false);
     expect(caps.chunkedUpload).toBe(false);
     expect(caps.transactionalBatch).toBe(false);
+    // [#5672] The six that joined the vocabulary with ruling A.
+    expect(caps.websockets).toBe(false);
+    expect(caps.files).toBe(false);
+    expect(caps.analytics).toBe(false);
+    expect(caps.ai).toBe(false);
+    expect(caps.notifications).toBe(false);
+    expect(caps.i18n).toBe(false);
   });
 
   it('should reject missing required fields', () => {
     expect(() => WellKnownCapabilitiesSchema.parse({ comments: true })).toThrow();
     expect(() => WellKnownCapabilitiesSchema.parse({})).toThrow();
-    // transactionalBatch is required — a payload missing only it must fail so a
-    // producer can never silently omit the batch capability bit (#3298).
-    expect(() => WellKnownCapabilitiesSchema.parse({
-      comments: true,
-      automation: true,
-      cron: true,
-      search: true,
-      export: true,
-      chunkedUpload: true,
-    })).toThrow();
+    // EVERY key is required — a payload missing exactly one must fail, so no
+    // producer can silently drop a capability bit (#3298 established this for
+    // `transactionalBatch`; #5672 makes it the rule for the whole vocabulary).
+    for (const dropped of WELL_KNOWN_CAPABILITY_KEYS) {
+      const { [dropped]: _gone, ...rest } = allFlags(true);
+      expect(
+        WellKnownCapabilitiesSchema.safeParse(rest).success,
+        `a payload missing only \`${dropped}\` must be rejected`,
+      ).toBe(false);
+    }
   });
 
   it('should reject non-boolean values', () => {
     expect(() => WellKnownCapabilitiesSchema.parse({
+      ...allFlags(true),
       comments: 'yes',
-      automation: true,
-      cron: true,
-      search: true,
-      export: true,
-      chunkedUpload: true,
-      transactionalBatch: true,
     })).toThrow();
   });
 
   it('should have .describe() annotations on all fields', () => {
-    const shape = WellKnownCapabilitiesSchema.shape;
-    expect(shape.comments.description).toBeDefined();
-    expect(shape.automation.description).toBeDefined();
-    expect(shape.cron.description).toBeDefined();
-    expect(shape.search.description).toBeDefined();
-    expect(shape.export.description).toBeDefined();
-    expect(shape.chunkedUpload.description).toBeDefined();
-    expect(shape.transactionalBatch.description).toBeDefined();
+    const shape = WellKnownCapabilitiesSchema.shape as Record<string, { description?: string }>;
+    // Derived, so a new capability cannot arrive undocumented — the reference
+    // docs are generated from these strings.
+    const undocumented = WELL_KNOWN_CAPABILITY_KEYS.filter(k => !shape[k]?.description);
+    expect(undocumented, 'vocabulary keys with no .describe()').toEqual([]);
+  });
+
+  it('[#5672] is the ONE vocabulary — WELL_KNOWN_CAPABILITY_KEYS is derived from it', () => {
+    expect([...WELL_KNOWN_CAPABILITY_KEYS].sort())
+      .toEqual(Object.keys(WellKnownCapabilitiesSchema.shape).sort());
+    // The union of the two historically disjoint producer halves: 7 + 7 with
+    // `search` shared.
+    expect(WELL_KNOWN_CAPABILITY_KEYS).toHaveLength(13);
   });
 });
 
@@ -1036,6 +1126,7 @@ describe('[#4828] scoping (decision 3 — declare what REST actually emits)', ()
     version: '1.0.0',
     environment: 'development',
     routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+    capabilities: allCapabilitiesOff,
     services: minimalServices,
     locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
   };
@@ -1103,6 +1194,7 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
         version: '1.0.0',
         environment: resolveDiscoveryEnvironment(raw),
         routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+        capabilities: allCapabilitiesOff,
         services: minimalServices,
         locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
       });

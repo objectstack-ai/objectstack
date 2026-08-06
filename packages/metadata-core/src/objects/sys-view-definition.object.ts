@@ -119,13 +119,24 @@ export const SysViewDefinitionObject = ObjectSchema.create({
   },
 
   indexes: [
-    // A given view name is unique per (organization, owner) among active rows —
-    // a shared view (owner NULL) and each user's personal views don't collide.
+    // A given view name is unique per (organization, owner) — a shared view
+    // (owner NULL) and each user's personal views don't collide.
+    //
+    // ⚠️ This entry carried `partial: "state = 'active'"` until #5248 / #4943
+    // retired the key, intending "among ACTIVE rows". No driver ever emitted
+    // the predicate (`syncDeclaredIndexes` builds indexes through knex's
+    // `table.unique()`, which cannot express a `WHERE`), so the index that has
+    // always been created is the unrestricted one below — dropping the key is
+    // a zero-DDL change. Unlike `sys_metadata`, there is NO runtime migration
+    // issuing the partial form for this table, so the active-row scoping is
+    // simply not delivered anywhere today: an archived/reset view still
+    // occupies its (name, organization_id, owner) slot. Tracked separately —
+    // deciding whether this table wants an `ensureOverlayIndex`-style
+    // migration is a behaviour change, out of scope for the key retirement.
     {
       name: 'idx_sys_view_def_active',
       fields: ['name', 'organization_id', 'owner'],
       unique: true,
-      partial: "state = 'active'",
     },
     // The switcher query: views for one object within a tenant.
     { name: 'idx_sys_view_def_object', fields: ['organization_id', 'object'] },

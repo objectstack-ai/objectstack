@@ -67,9 +67,9 @@ const result = ApiMethod.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Index name (auto-generated if not provided) |
 | **fields** | `string[]` | ✅ | Fields included in the index |
-| **type** | `Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>` | ✅ | Index algorithm type |
 | **unique** | `boolean \| 'global' \| 'organization'` | ✅ | Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization' |
-| **partial** | `string` | optional | Partial index condition (SQL WHERE clause for conditional indexes) |
+| **type** | `any` | optional | [REMOVED] `indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex's `table.index()` / `table.unique()`, which cannot express an access method, so the value changed no DDL; its `.default('btree')` merely made an inert knob show up in every parse output. Delete the key. The index method is the driver/dialect's decision (Postgres defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a database-layer migration when a workload actually needs one). Run `os migrate meta --from 16` to rewrite it automatically. |
+| **partial** | `any` | optional | [REMOVED] `indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a FULL index and the predicate silently did nothing. Delete the key. Partial indexes are built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`'s `ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it reads partiality back from the database's own DDL, never from this key. Run `os migrate meta --from 16` to rewrite it automatically. |
 
 
 ---
@@ -122,7 +122,7 @@ const result = ApiMethod.parse(data);
 | **datasource** | `string` | optional | Target Datasource ID. "default" is the primary DB. |
 | **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
-| **indexes** | `{ name?: string; fields: string[]; type?: Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>; unique?: boolean \| 'global' \| 'organization'; … }[]` | optional | Database performance indexes |
+| **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization'; type?: any; … }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
 | **tenancy** | `{ enabled: boolean; tenantField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
 | **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
@@ -196,7 +196,7 @@ const result = ApiMethod.parse(data);
 | **pluralLabel** | `string` | optional | Override plural label for the extended object |
 | **description** | `string` | optional | Override description for the extended object |
 | **validations** | `any[]` | optional | Additional validation rules to merge into the target object |
-| **indexes** | `{ name?: string; fields: string[]; type?: Enum<'btree' \| 'hash' \| 'gin' \| 'gist' \| 'fulltext'>; unique?: boolean \| 'global' \| 'organization'; … }[]` | optional | Additional indexes to merge into the target object |
+| **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization'; type?: any; … }[]` | optional | Additional indexes to merge into the target object |
 | **priority** | `integer` | optional | Merge priority (higher = applied later) |
 
 

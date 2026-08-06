@@ -3584,6 +3584,117 @@ const objectEnableTrashMruRemoved: MetadataConversion = {
 };
 
 /**
+ * `indexes[].type` / `indexes[].partial` leave the surface (protocol 17,
+ * #5248 + #4943, ADR-0049 enforce-or-remove).
+ *
+ * Neither key had a single DDL consumer. `SqlDriver.syncDeclaredIndexes` builds
+ * every declared index through knex's `table.index(fields, name)` /
+ * `table.unique(fields, { indexName })`, and the differ's `DeclaredIndexInput`
+ * declares `name` / `fields` / `unique` / `nullSafeColumns` — so an authored
+ * `type` selected no access method and an authored `partial` produced a FULL
+ * index with the predicate silently discarded. `type` additionally carried
+ * `.default('btree')`, so it was materialized into *every* parse output: the
+ * ADR-0078 shape where an inert knob reads as live configuration.
+ *
+ * The maintainer chose remove over enforce (#5248, 2026-08-06): enforcing means
+ * per-dialect algorithm mapping, raw-SQL `CREATE INDEX … WHERE` (MySQL has no
+ * partial index), and reworking how `isSyncReproducibleIndex` excludes partial
+ * indexes from incremental sync — design cost for a capability with no demand.
+ *
+ * ⚠️ NOT the same `partial` as the driver's: `schema-drift.ts` carries a
+ * `partial: boolean` parsed back out of the DATABASE's own `CREATE INDEX` DDL
+ * (`parseIndexDdl`), consumed by drift detection. That is untouched here, and
+ * the exemption it grants DB-authored partial indexes still stands.
+ *
+ * `retiredFromLoadPath`: both keys are tombstoned at `IndexSchema`, so a live
+ * author is taught by the parse error. This entry exists so stored ≤16 rows
+ * replay clean through `applyConversionsToStoredItem` (without it a
+ * pre-removal row would flag `metadata_spec_invalid` forever) and so
+ * `os migrate meta --from 16` rewrites sources mechanically.
+ */
+const objectIndexTypePartialRemoved: MetadataConversion = {
+  id: 'object-index-type-partial-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'object.indexes[].type / object.indexes[].partial',
+  summary:
+    "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver "
+    + 'ever read either: the index method is the dialect\'s choice and a partial index is built '
+    + 'by a database-layer migration, not declared)',
+  apply(stack, emit) {
+    // `indexes` is an ARRAY one level down, so `stripKeys` (top-level only)
+    // cannot reach it — drill in and copy-on-write, so an object whose indexes
+    // carry neither key keeps its identity. Both `objects[]` and
+    // `objectExtensions[]` embed `IndexSchema`, so both are walked.
+    const stripIndexes = (owner: Dict, path: string): Dict => {
+      const indexes = owner.indexes;
+      if (!Array.isArray(indexes)) return owner;
+      let changed = false;
+      const next = indexes.map((idx, i) => {
+        if (!isDict(idx)) return idx;
+        const stripped = stripKeys(idx, ['type', 'partial'], emit, `${path}.indexes[${i}]`);
+        if (stripped !== idx) changed = true;
+        return stripped;
+      });
+      return changed ? { ...owner, indexes: next } : owner;
+    };
+    let out = mapCollection(stack, 'objects', stripIndexes);
+    out = mapCollection(out, 'objectExtensions', stripIndexes);
+    return out;
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'crm_invoice',
+          label: 'Invoice',
+          indexes: [
+            // both retired keys on one index, alongside surviving ones
+            {
+              name: 'idx_invoice_active_no',
+              fields: ['invoice_no'],
+              unique: 'global',
+              type: 'btree',
+              partial: "state = 'active'",
+            },
+            // an index carrying neither key passes through untouched
+            { name: 'idx_invoice_customer', fields: ['customer'] },
+          ],
+        },
+      ],
+      objectExtensions: [
+        {
+          extend: 'crm_invoice',
+          indexes: [{ fields: ['tags'], type: 'gin' }],
+        },
+      ],
+    },
+    // Three notices: two keys on the object's first index, one on the
+    // extension's. The surviving `name`/`fields`/`unique` prove the strip is
+    // surgical rather than an index-level delete.
+    after: {
+      objects: [
+        {
+          name: 'crm_invoice',
+          label: 'Invoice',
+          indexes: [
+            { name: 'idx_invoice_active_no', fields: ['invoice_no'], unique: 'global' },
+            { name: 'idx_invoice_customer', fields: ['customer'] },
+          ],
+        },
+      ],
+      objectExtensions: [
+        {
+          extend: 'crm_invoice',
+          indexes: [{ fields: ['tags'] }],
+        },
+      ],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
  * The retry policy converges to one declaration (protocol 17, #4661 — the
  * #4535 C8 dual-source cluster).
  *
@@ -4321,6 +4432,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     connectorRateLimitConfigRemoved,
     themeInertTokenScalesRemoved,
     pageHeaderSubtitleAlias,
+    objectIndexTypePartialRemoved,
   ],
 };
 

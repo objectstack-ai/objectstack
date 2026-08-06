@@ -78,7 +78,8 @@
     "indexes": {
       "status": "live",
       "evidence": "packages/drivers/driver-sql/src/sql-driver.ts:1181",
-      "note": "DDL."
+      "verifiedAt": "2026-08-06",
+      "note": "DDL — but only through `name`/`fields`/`unique`. `syncDeclaredIndexes` creates every declared index via knex's `table.index()` / `table.unique()`, and the differ's `DeclaredIndexInput` carries `name`/`fields`/`unique`/`nullSafeColumns`. The other two child keys were RETIRED 2026-08-06 (#5248, #4943, ADR-0049): `indexes[].type` selected no access method (and its `.default('btree')` materialized an inert knob into every parse output) and `indexes[].partial` produced a FULL index with the predicate discarded. Both are `retiredKey()` tombstones at `IndexSchema` and are stripped from sources by the protocol-17 conversion `object-index-type-partial-removed`. The container stays `live` because the surviving keys drive real DDL. ⚠ Not to be confused with driver-sql's own `partial: boolean`, which is parsed back out of the database's own CREATE INDEX DDL for drift detection and is unrelated to the declaration surface."
     },
     "validations": {
       "status": "live",

@@ -209,19 +209,33 @@ Optimize query performance:
 {/* os:check */}
 ```typescript
 indexes: [
-  { fields: ['name'], type: 'btree', unique: false },
-  { fields: ['email'], type: 'btree', unique: 'organization' },
-  { fields: ['type', 'status'], type: 'btree', unique: false },
+  { fields: ['name'] },
+  { fields: ['email'], unique: 'organization' },
+  { fields: ['type', 'status'] },
 ]
 ```
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `fields` | `string[]` | ✅ | Fields in the index |
-| `type` | `enum` | optional | `'btree'`, `'hash'`, `'gin'`, `'gist'`, `'fulltext'` (default: `'btree'`) |
-| `unique` | `boolean` | optional | Enforce uniqueness (default: `false`) |
-| `partial` | `string` | optional | Conditional index (SQL WHERE clause) |
+| `unique` | `boolean \| 'global' \| 'organization'` | optional | Enforce uniqueness, and at which scope (default: `false`) |
 | `name` | `string` | optional | Index name (auto-generated if omitted) |
+
+<Callout type="warn">
+  **`type` and `partial` were retired in protocol 17** (#5248, #4943). Neither
+  had a driver consumer: declared indexes are created through knex's
+  `table.index()` / `table.unique()`, so an authored `type` selected no access
+  method and an authored `partial` produced a **full** index with the predicate
+  silently discarded. Writing either now fails `tsc` and the parse with a
+  migration prescription — run `os migrate meta --from 16` to strip them.
+
+  Both capabilities remain available where they are actually implementable: the
+  index method is the driver/dialect's choice, and a partial index is issued as
+  raw SQL from a runtime migration (`CREATE [UNIQUE] INDEX … WHERE …`, the way
+  `metadata-protocol` builds `sys_metadata`'s overlay index). Drift detection
+  reads partiality back from the database's own DDL, so migration-created
+  partial indexes are recognized and left alone.
+</Callout>
 
 ### Additional Properties
 
@@ -347,8 +361,8 @@ export const ProjectTask = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['status'], type: 'btree', unique: false },
-    { fields: ['project', 'status'], type: 'btree', unique: false },
+    { fields: ['status'] },
+    { fields: ['project', 'status'] },
   ],
 
   enable: {

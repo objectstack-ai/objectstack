@@ -343,6 +343,182 @@ export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvir
   return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[raw.trim().toLowerCase()] ?? 'development';
 }
 
+// ============================================================================
+// The capability vocabulary (#5672, maintainer ruling A 2026-08-06)
+// ============================================================================
+
+/**
+ * Well-Known Capabilities Schema — **the one capability vocabulary**.
+ *
+ * Flat boolean flags for quick feature detection by clients (ObjectUI).
+ * Each flag indicates whether the backend supports a specific capability.
+ * Clients use these to show/hide UI elements without probing individual
+ * endpoints.
+ *
+ * ## Closed, and why (#5672)
+ *
+ * Until the 2026-08-06 ruling this schema was one of TWO de-facto vocabularies.
+ * `#4828` renamed the runtime dispatcher's top-level `features` map to the
+ * canonical `capabilities`, which collapsed the *spelling* split — but the two
+ * producers went on filling **disjoint key sets**:
+ *
+ * | producer | keys it filled |
+ * |:---|:---|
+ * | `getDiscovery()` (`@objectstack/metadata-protocol`) | `comments` `automation` `cron` `search` `export` `chunkedUpload` `transactionalBatch` |
+ * | `getDiscoveryInfo()` (`@objectstack/runtime` dispatcher) | `search` `websockets` `files` `analytics` `ai` `notifications` `i18n` |
+ *
+ * Only `search` overlapped. `DiscoverySchema.capabilities` was an OPEN
+ * `z.record`, so both shapes parsed clean and no gate could see the split —
+ * while `packages/client`'s getter ASSERTED the result was a
+ * `WellKnownCapabilities`. Against a dispatcher-served host
+ * `client.capabilities.transactionalBatch` was therefore statically `boolean`
+ * and actually `undefined`: the type lied.
+ *
+ * Ruling A closes the vocabulary here and binds every producer to it:
+ *
+ * 1. this schema is the ONE vocabulary — every key explicitly declared, boolean;
+ * 2. every discovery producer emits EVERY key (see `DiscoverySchema.capabilities`);
+ * 3. a capability the producer does not deliver is `enabled: false`, **never a
+ *    missing key** — loudly decidable, and a consumer never has to know which
+ *    kind of host answered it;
+ * 4. so `WellKnownCapabilities` becomes true rather than asserted.
+ *
+ * Adding a key here therefore obliges BOTH producers to answer it, and the
+ * three `discovery-schema-conformance.test.ts` gates fail until they do.
+ * Removing one is an ADR-0049 enforce-or-remove exercise, not an edit.
+ */
+export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
+  /** Whether the backend supports record comments / chatter (served by `sys_comment` via the data API) */
+  comments: z.boolean().describe('Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API)'),
+  /** Whether the backend supports Automation CRUD (flows, triggers) */
+  automation: z.boolean().describe('Whether the backend supports Automation CRUD (flows, triggers)'),
+  /** Whether the backend supports cron scheduling */
+  cron: z.boolean().describe('Whether the backend supports cron scheduling'),
+  /** Whether the backend supports full-text search */
+  search: z.boolean().describe('Whether the backend supports full-text search'),
+  /** Whether the backend supports async export */
+  export: z.boolean().describe('Whether the backend supports async export'),
+  /** Whether the backend supports chunked (multipart) uploads */
+  chunkedUpload: z.boolean().describe('Whether the backend supports chunked (multipart) uploads'),
+  /**
+   * Whether the backend exposes the atomic cross-object batch endpoint
+   * (`POST {basePath}/batch`, issue #1604 / ADR-0034 item 4): heterogeneous
+   * create/update/delete across objects that all commit or all roll back in a
+   * single transaction, with intra-batch `{ $ref: <opIndex> }` parent references.
+   *
+   * This lets a client decide **at connection time** whether to send an atomic
+   * batch or fall back to non-atomic client-side simulation — replacing the
+   * runtime probe (fire a `/batch` and read 404/405/501). `true` means the route
+   * is mounted AND the runtime engine can honour a transaction; a backend that
+   * would 404 (no route) or 501 (no `transaction()`) MUST report `false`
+   * (declared === enforced).
+   */
+  transactionalBatch: z.boolean().describe(
+    'Whether the backend exposes the atomic cross-object batch endpoint (POST {basePath}/batch, #1604/ADR-0034): '
+    + 'all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation '
+    + 'instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction.'
+  ),
+
+  // ── Joined the vocabulary with ruling A (#5672) ────────────────────────────
+  // These six were the dispatcher's half of the split. They were already REAL
+  // answers on the wire (`/.well-known/objectstack` has emitted them since
+  // #4828) — declaring them here does not invent capability, it stops the
+  // vocabulary from depending on which producer you asked.
+
+  /**
+   * Whether the backend mounts a realtime push surface (WebSocket or SSE)
+   * clients can subscribe to.
+   *
+   * `false` on every host today, and that is a measured fact rather than a
+   * placeholder: `service-realtime` is an **in-process pub/sub bus**, the
+   * dispatcher has no `/realtime` branch and no plugin mounts one (ADR-0076
+   * D12, #2462), which is exactly why `ApiRoutesSchema.realtime` is never
+   * advertised either. A producer that one day mounts a real WS/SSE surface
+   * flips this — and must also pass the anonymous-access gate (#2567).
+   */
+  websockets: z.boolean().describe(
+    'Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. '
+    + 'False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12, #2462).'
+  ),
+  /**
+   * Whether a file-storage surface is served at all (upload / download /
+   * attachment handling), i.e. the `file-storage` slot is filled by something
+   * that really serves HTTP.
+   *
+   * Related to but distinct from {@link WellKnownCapabilitiesSchema} `chunkedUpload`:
+   * this one says "files work"; that one says "large files can be uploaded in
+   * chunks". On the hosts that exist today the two coincide, because the only
+   * storage surface shipped serves both — see the per-producer notes at each
+   * emit site.
+   */
+  files: z.boolean().describe('Whether a file-storage surface (upload/download/attachments) is served'),
+  /** Whether the backend serves the analytics / BI query surface */
+  analytics: z.boolean().describe('Whether the backend serves the analytics / BI query surface'),
+  /** Whether the backend serves the AI surface (NLQ, chat, agents, suggest) */
+  ai: z.boolean().describe('Whether the backend serves the AI surface (NLQ, chat, agents, suggest)'),
+  /** Whether the backend serves the notification surface (inbox, delivery) */
+  notifications: z.boolean().describe('Whether the backend serves the notification surface (inbox, delivery)'),
+  /** Whether the backend serves the i18n surface (translations, locale negotiation) */
+  i18n: z.boolean().describe('Whether the backend serves the i18n surface (translations, locale negotiation)'),
+}).describe('Well-known capability flags for frontend intelligent adaptation'));
+
+export type WellKnownCapabilities = z.infer<typeof WellKnownCapabilitiesSchema>;
+
+/**
+ * The capability vocabulary as a key list, derived from
+ * {@link WellKnownCapabilitiesSchema} rather than hand-written.
+ *
+ * Every consumer that has to enumerate the vocabulary — the SDK getter that
+ * flattens a discovery response, the three producer conformance gates —
+ * reads THIS, so none of them can become a fourth dialect of the contract.
+ * Hand-listing the keys anywhere is the drift this constant exists to prevent.
+ */
+export const WELL_KNOWN_CAPABILITY_KEYS = Object.freeze(
+  Object.keys(WellKnownCapabilitiesSchema.shape) as Array<keyof WellKnownCapabilities>,
+);
+
+/**
+ * The value shape of one entry in `DiscoverySchema.capabilities`.
+ *
+ * `enabled` is the vocabulary's boolean; `features` and `description` are the
+ * optional hierarchical extras that let a producer say more about a capability
+ * it does deliver. `features` stays an OPEN record on purpose — sub-feature
+ * flags are per-capability and per-producer, and #4828 explicitly kept this
+ * (the surviving `features`) as the declared sub-key.
+ */
+export const CapabilityDescriptorSchema = lazySchema(() => z.object({
+  enabled: z.boolean().describe('Whether this capability is available'),
+  features: z.record(z.string(), z.boolean()).optional()
+    .describe('Sub-feature flags within this capability'),
+  description: z.string().optional()
+    .describe('Human-readable capability description'),
+}));
+
+export type CapabilityDescriptor = z.infer<typeof CapabilityDescriptorSchema>;
+
+/**
+ * `capabilities` as a CLOSED object over the vocabulary — one required entry
+ * per {@link WellKnownCapabilitiesSchema} key, built from that schema's own
+ * shape so the two cannot drift apart (ruling A point 1: there is one
+ * vocabulary, not two that a test has to keep in step).
+ *
+ * Each key's `.describe()` is inherited from the flag it mirrors, so the
+ * generated reference docs say the same thing in both places.
+ *
+ * A function, not a module-level constant: reading `.shape` materialises the
+ * lazy schema, so evaluating this at import time would undo exactly the
+ * deferral {@link lazySchema} exists for. It is called from inside
+ * `DiscoverySchema`'s own factory, i.e. on first use of that schema.
+ */
+function capabilityMapShape(): Record<keyof WellKnownCapabilities, typeof CapabilityDescriptorSchema> {
+  return Object.fromEntries(
+    Object.entries(WellKnownCapabilitiesSchema.shape).map(([key, flag]) => {
+      const description = (flag as z.ZodTypeAny).description;
+      return [key, description ? CapabilityDescriptorSchema.describe(description) : CapabilityDescriptorSchema];
+    }),
+  ) as Record<keyof WellKnownCapabilities, typeof CapabilityDescriptorSchema>;
+}
+
 export const DiscoverySchema = lazySchema(() => z.object({
   /** System Identity */
   name: z.string(),
@@ -370,18 +546,30 @@ export const DiscoverySchema = lazySchema(() => z.object({
   ),
 
   /**
-   * Hierarchical capability descriptors.
-   * Declares platform features so clients can adapt UI without probing individual services.
-   * Each key is a capability domain (e.g., "comments", "automation", "search"),
-   * and its value describes what sub-features are available.
+   * Hierarchical capability descriptors — **the whole vocabulary, every time**.
+   *
+   * One entry per {@link WellKnownCapabilitiesSchema} key, every entry
+   * REQUIRED. Ruling A (#5672): a capability a producer does not deliver is
+   * reported `enabled: false`, never omitted, so a consumer reads the same key
+   * set from every host and never has to know which producer answered.
+   *
+   * Two things changed here at once, and both were load-bearing:
+   *
+   * * **open `z.record` → closed object.** The record accepted any key, which
+   *   is how two producers filled disjoint key sets for a year without a gate
+   *   noticing. Closed, an undeclared capability is a contract change you have
+   *   to make in {@link WellKnownCapabilitiesSchema} — where both producers are
+   *   then obliged to answer it. (A zod object STRIPS unknown keys rather than
+   *   rejecting them, so the producer gates also carry a key-set check, exactly
+   *   as `routes` does since #5679.)
+   * * **optional → required.** This is the `scoping` precedent read the other
+   *   way round. `scoping` is optional because only ONE producer can honestly
+   *   answer it; `capabilities` is answerable by all of them, and an optional
+   *   block would leave the consumer back at `undefined` for every flag —
+   *   precisely the pre-#4828 dispatcher situation the ruling removes.
    */
-  capabilities: z.record(z.string(), z.object({
-    enabled: z.boolean().describe('Whether this capability is available'),
-    features: z.record(z.string(), z.boolean()).optional()
-      .describe('Sub-feature flags within this capability'),
-    description: z.string().optional()
-      .describe('Human-readable capability description'),
-  })).optional().describe('Hierarchical capability descriptors for frontend intelligent adaptation'),
+  capabilities: z.object(capabilityMapShape())
+    .describe('Hierarchical capability descriptors — the full WellKnownCapabilities vocabulary, every key present'),
 
   /**
    * Schema discovery URLs for cross-ecosystem interoperability.
@@ -424,46 +612,6 @@ export const DiscoverySchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata key-value pairs for extensibility'),
 }));
 
-/**
- * Well-Known Capabilities Schema
- * Flat boolean flags for quick feature detection by clients (ObjectUI).
- * Each flag indicates whether the backend supports a specific capability.
- * Clients can use these to show/hide UI elements without probing individual endpoints.
- */
-export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
-  /** Whether the backend supports record comments / chatter (served by `sys_comment` via the data API) */
-  comments: z.boolean().describe('Whether the backend supports record comments / chatter (the `sys_comment` object served via the data API)'),
-  /** Whether the backend supports Automation CRUD (flows, triggers) */
-  automation: z.boolean().describe('Whether the backend supports Automation CRUD (flows, triggers)'),
-  /** Whether the backend supports cron scheduling */
-  cron: z.boolean().describe('Whether the backend supports cron scheduling'),
-  /** Whether the backend supports full-text search */
-  search: z.boolean().describe('Whether the backend supports full-text search'),
-  /** Whether the backend supports async export */
-  export: z.boolean().describe('Whether the backend supports async export'),
-  /** Whether the backend supports chunked (multipart) uploads */
-  chunkedUpload: z.boolean().describe('Whether the backend supports chunked (multipart) uploads'),
-  /**
-   * Whether the backend exposes the atomic cross-object batch endpoint
-   * (`POST {basePath}/batch`, issue #1604 / ADR-0034 item 4): heterogeneous
-   * create/update/delete across objects that all commit or all roll back in a
-   * single transaction, with intra-batch `{ $ref: <opIndex> }` parent references.
-   *
-   * This lets a client decide **at connection time** whether to send an atomic
-   * batch or fall back to non-atomic client-side simulation — replacing the
-   * runtime probe (fire a `/batch` and read 404/405/501). `true` means the route
-   * is mounted AND the runtime engine can honour a transaction; a backend that
-   * would 404 (no route) or 501 (no `transaction()`) MUST report `false`
-   * (declared === enforced).
-   */
-  transactionalBatch: z.boolean().describe(
-    'Whether the backend exposes the atomic cross-object batch endpoint (POST {basePath}/batch, #1604/ADR-0034): '
-    + 'all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation '
-    + 'instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction.'
-  ),
-}).describe('Well-known capability flags for frontend intelligent adaptation'));
-
-export type WellKnownCapabilities = z.infer<typeof WellKnownCapabilitiesSchema>;
 export type DiscoveryResponse = z.infer<typeof DiscoverySchema>;
 export type ApiRoutes = z.infer<typeof ApiRoutesSchema>;
 export type ServiceInfo = z.infer<typeof ServiceInfoSchema>;
