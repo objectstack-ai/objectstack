@@ -208,14 +208,105 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
  *   Each service entry includes `enabled`, `status`, `route`, and `provider`.
  * - `routes` is a convenience shortcut: a flat map of service-name → route-path
  *   so that clients can resolve endpoints without iterating the services map.
- * - `capabilities`/`features` was removed because it was fully derivable
- *   from `services[x].enabled`. Use `services` to determine feature availability.
+ * - `capabilities` is the ONE canonical name for the hierarchical capability
+ *   map (#4828, maintainer ruling 2026-08-05). A top-level `features` key was
+ *   emitted by the runtime dispatcher for a while and was never declared here;
+ *   it is retired — see {@link DiscoverySchema} `capabilities` below. Note the
+ *   surviving `features` is the SUB-key *inside* a capability entry
+ *   (`capabilities.<domain>.features`), which is declared and stays.
+ *
+ * **This schema is authoritative for every producer** (#4828). Both the
+ * `@objectstack/rest` `/discovery` endpoint and the runtime dispatcher's
+ * `getDiscoveryInfo()` must satisfy it — required keys included. It is a
+ * machine-readable surface (AGENTS.md "Route & surface ownership" #4: it must
+ * not lie), so the gate is `DiscoverySchema.parse()` against each producer's
+ * LIVE shape, plus a key-set check that nothing undeclared is emitted. Those
+ * gates live next to each producer:
+ * `packages/metadata-protocol/src/discovery-schema-conformance.test.ts`,
+ * `packages/runtime/src/discovery-schema-conformance.test.ts` and
+ * `packages/rest/src/discovery-schema-conformance.test.ts`.
+ *
+ * Why they were needed at all: the only schema the protocol layer referenced
+ * was `GetDiscoveryResponseSchema` (`./protocol.zod.ts`), which is this schema
+ * `.partial()`-ed — so missing required keys parsed clean — and a zod object
+ * strips unknown keys by default — so undeclared keys parsed clean too. Both
+ * halves of `declared ≠ enforced` were swallowed by one lenient wrapper.
  */
+export const DiscoveryEnvironmentSchema = lazySchema(() => z
+  .enum(['production', 'sandbox', 'development'])
+  .describe(
+    'Deployment posture a discovery response advertises. Deliberately three coarse buckets — '
+    + 'a client reads this to answer "am I talking to production?", not to identify a specific '
+    + 'environment (that is `sys_environment` / EnvironmentTypeSchema, a richer 7-member taxonomy).'
+  ));
+
+export type DiscoveryEnvironment = z.infer<typeof DiscoveryEnvironmentSchema>;
+
+/**
+ * `NODE_ENV` spellings accepted for each declared discovery environment (#4828).
+ *
+ * `DiscoverySchema.environment` is an enum, and the runtime dispatcher used to
+ * pass `NODE_ENV` through raw — so `NODE_ENV=test` (what vitest sets) or
+ * `staging` advertised a value outside the declared enum on a machine-readable
+ * surface. The maintainer's 2026-08-05 ruling requires every producer's value
+ * to land inside the enum, with the disposition of the out-of-enum spellings
+ * left to this layer and documented.
+ *
+ * Normalizing `NODE_ENV` here is the same move `NODE_ENV_TO_SEED_ENV` already
+ * makes in `packages/metadata-protocol/src/seed-loader.ts`: `NODE_ENV` is an
+ * OPERATOR-supplied variable at a third-party boundary (Prime Directive #9
+ * lists it as exactly that), so normalizing its spellings is not the
+ * consumer-side tolerance PD #12 forbids — that rule governs OUR OWN metadata
+ * contract, and this is the far side of it. The `prod`/`dev` short spellings
+ * are accepted for the same reason they are there: an operator who exported
+ * `NODE_ENV=prod` gets what they meant rather than an indeterminate answer.
+ *
+ * The mapping, and why each row:
+ *
+ * | `NODE_ENV`              | advertised     | why |
+ * |:------------------------|:---------------|:----|
+ * | `production`, `prod`    | `production`   | exact / short spelling |
+ * | `sandbox`               | `sandbox`      | exact |
+ * | `development`, `dev`    | `development`  | exact / short spelling |
+ * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
+ * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
+ * | unset / anything else   | `development`  | preserves the pre-existing `getEnv('NODE_ENV', 'development')` default, and never CLAIMS production on a guess |
+ *
+ * The last row is the safety-relevant one: an unknown spelling degrades to
+ * `development`, so this function can never advertise `production` for an
+ * environment it failed to recognise.
+ */
+const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
+  production: 'production',
+  prod: 'production',
+  sandbox: 'sandbox',
+  staging: 'sandbox',
+  development: 'development',
+  dev: 'development',
+  test: 'development',
+};
+
+/**
+ * Map a raw `NODE_ENV` (or any operator-supplied environment string) onto the
+ * `DiscoverySchema.environment` enum.
+ *
+ * Shared by both discovery producers so they cannot drift — the same reason
+ * `serviceUnavailableMessage` / `inProcessServiceMessage` live in
+ * `@objectstack/spec/system` rather than in each builder.
+ *
+ * @param raw the operator-supplied value, typically `process.env.NODE_ENV`
+ * @returns a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}
+ */
+export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
+  if (typeof raw !== 'string') return 'development';
+  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[raw.trim().toLowerCase()] ?? 'development';
+}
+
 export const DiscoverySchema = lazySchema(() => z.object({
   /** System Identity */
   name: z.string(),
   version: z.string(),
-  environment: z.enum(['production', 'sandbox', 'development']),
+  environment: DiscoveryEnvironmentSchema,
   
   /** Dynamic Routing — convenience shortcut for client routing */
   routes: ApiRoutesSchema,
@@ -258,6 +349,33 @@ export const DiscoverySchema = lazySchema(() => z.object({
     openapi: z.string().optional().describe('URL to OpenAPI (Swagger) specification (e.g., "/api/v1/openapi.json")'),
     jsonSchema: z.string().optional().describe('URL to JSON Schema definitions'),
   }).optional().describe('Schema discovery endpoints for API toolchain integration'),
+
+  /**
+   * Environment-scoping posture of the server that answered (#4828).
+   *
+   * Added by the `@objectstack/rest` discovery endpoint, which is the only
+   * layer that knows it: the REST server can mount the same API twice — once
+   * bare (`/api/v1`) and once environment-scoped
+   * (`/api/v1/environments/:environmentId`) — and a client needs to know which
+   * mode it reached and how the environment id is resolved before it can build
+   * URLs. It was emitted (and consumed — `packages/client`'s
+   * `client.environment-scoping.test.ts` asserts `scoping.enabled` /
+   * `scoping.resolution` off the live response) long before it was declared;
+   * the 2026-08-05 ruling declares it here rather than deleting a real
+   * capability-negotiation fact.
+   *
+   * Optional because only the REST producer can answer it: the runtime
+   * dispatcher serves one kernel and mounts no scoped variant, so it emits
+   * nothing here rather than inventing a value.
+   */
+  scoping: z.object({
+    enabled: z.boolean().describe('Whether environment-scoped routes are mounted at all'),
+    resolution: z.enum(['required', 'optional', 'auto'])
+      .describe('How the environment id is resolved when scoping is enabled (mirrors RestApiConfig.projectResolution)'),
+    scoped: z.boolean().describe('Whether THIS response was served from the environment-scoped mount'),
+    environmentId: z.string().optional()
+      .describe('The resolved environment id — present only on a scoped mount'),
+  }).optional().describe('Environment-scoping posture, added by the REST discovery endpoint'),
 
   /**
    * Custom metadata key-value pairs for extensibility

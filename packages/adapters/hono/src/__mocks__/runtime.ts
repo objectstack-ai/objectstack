@@ -2,7 +2,7 @@
 import { vi } from 'vitest';
 
 export class HttpDispatcher {
-  getDiscoveryInfo = vi.fn().mockReturnValue({ version: '1.0', endpoints: [] });
+  getDiscoveryInfo = vi.fn().mockReturnValue({ version: '1.0', routes: {} });
   handleGraphQL = vi.fn().mockResolvedValue({ data: {} });
   handleAuth = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { ok: true } } });
   handleMetadata = vi.fn().mockResolvedValue({ handled: true, response: { status: 200, body: { objects: [] } } });

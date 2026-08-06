@@ -26,7 +26,9 @@ export type CompareTo = DatasetCompareTo;
  * runtime, then post-processes the results:
  *   - resolves the base measures a selection needs (including derived deps),
  *   - applies measure-scoped filters via supplementary grouped queries — in
- *     EVERY window it runs, the `compareTo` one included (#4820),
+ *     EVERY window it runs, the `compareTo` one included (#4820) — and keeps the
+ *     assembled grid's `fields` describing its DIMENSION columns even when there
+ *     was no primary query to carry them (#5537),
  *   - fills the empty-group value into columns no query reported, by aggregate
  *     kind (#4708) — a count/sum over an excluded group is 0, avg/min/max null,
  *   - evaluates derived measures (ratio/sum/difference/product) row-by-row (Q1),
@@ -796,8 +798,9 @@ export class DatasetExecutor {
 
     // Primary query: all unfiltered base measures in one pass. When every base
     // measure is filter-scoped, the supplementary queries below build the grid.
+    const primary = unfiltered.length > 0 || filtered.length === 0;
     let result: AnalyticsResult;
-    if (unfiltered.length > 0 || filtered.length === 0) {
+    if (primary) {
       result = await this.service.query(this.buildQuery(compiled, {
         measures: unfiltered,
         dimensions,
@@ -811,13 +814,38 @@ export class DatasetExecutor {
     }
 
     // Supplementary queries: one per measure-scoped filter, merged by dimension key.
-    for (const m of filtered) {
+    const measureNames = new Set(measures);
+    for (const [i, m] of filtered.entries()) {
       const mFilter = combineFilters(baseFilter, compiled.measureFilters[m]);
       const sub = await this.service.query(this.buildQuery(compiled, {
         measures: [m], dimensions, where: mFilter, selection,
         contextTimezone: context?.timezone,
       }), context);
       result.rows = mergeByDimensions(result.rows, sub.rows, dimensions, [m]);
+      // #5537 — with NO primary query there is nothing carrying the grid's
+      // DIMENSION descriptors, and this loop only ever appends MEASURE ones. The
+      // dimension columns are still in every row (they are the merge key), so
+      // the grid silently described only half of itself: a consumer reading
+      // column metadata got no `label` and no `type` for the grouped column and
+      // fell back to humanizing the raw key — "owner" where the dataset declares
+      // "Owner". Adopt them from the FIRST supplementary result, which projects
+      // exactly the same dimensions this pass groups by.
+      //
+      // Deliberately taken from the sub-result rather than re-derived from
+      // `compiled.cube` here. `buildFieldMeta` (both strategies) and the
+      // draft-preview evaluator are the three producers of this shape, and each
+      // decides its own projected set — every `dimensions` entry plus each
+      // granular `timeDimensions` entry not already among them (#4033's "one
+      // definition, every consumer"). An executor-side reconstruction would be a
+      // fourth copy of that rule, free to drift from the very rows it labels;
+      // reading the sub-result makes the two paths converge BY CONSTRUCTION, on
+      // whatever the active strategy projects. Non-measure entries only, so the
+      // measure descriptor stays the one this loop appends.
+      if (!primary && i === 0) {
+        for (const f of sub.fields ?? []) {
+          if (!measureNames.has(f.name)) result.fields.push(f);
+        }
+      }
       result.fields.push({ name: m, type: 'number' });
     }
 

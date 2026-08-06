@@ -6811,8 +6811,30 @@ export class RestServer {
                     if (/not declared in the dataset|not backed by a declared relationship|not supported by the v1 dataset runtime|read-scope-sql|not a selected dimension or measure|is not a subset of the selected dimensions/.test(msg)) {
                         return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });
                     }
+                    // ── ③ The 500 — and it does not ship driver internals ────
+                    // [#5520] This route built its 5xx body by hand and echoed
+                    // the message verbatim, so a driver error arrived here with
+                    // the generated statement prefixed to it (knex's format is
+                    // `<sql> - <cause>`) and the caller received the physical
+                    // table and column names of the query:
+                    //
+                    //   {"code":"ANALYTICS_QUERY_FAILED","error":"SELECT bogus_dim AS
+                    //    \"bogus_dim\", COUNT(*) … FROM \"crm_account\" GROUP BY
+                    //    bogus_dim - no such column: bogus_dim"}
+                    //
+                    // The SIBLING analytics face never did: `/analytics/query`
+                    // exits through `dispatcher-plugin.errorResponseBase`, which
+                    // applies `looksLikeInternalErrorLeak` to any >=500 message
+                    // (#3867) — which is why the same mistake read "Internal
+                    // server error" there and dumped SQL here. One boundary
+                    // property, one shared predicate; this is the application
+                    // that was missing, not a new rule. Classification is
+                    // untouched (still `500 ANALYTICS_QUERY_FAILED`), and the
+                    // full text still reaches the operator through `logError`
+                    // immediately below — the log line is now the only copy.
                     logError('[REST] Analytics dataset query error:', error);
-                    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: msg.slice(0, 500) });
+                    const outward = looksLikeInternalErrorLeak(msg) ? INTERNAL_ERROR_MESSAGE : msg.slice(0, 500);
+                    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });
                 }
             },
             metadata: { summary: 'Run a semantic-layer dataset (preview/query)', tags: ['analytics'] },

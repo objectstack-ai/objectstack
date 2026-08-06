@@ -346,6 +346,12 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
   —— Routine 座位查调度器(`last_fired` / `next_run`),会话座位查它最近一条
   产出评论的时间戳,**>24h 无产出即可回收**(编辑该行 + 一条审计评论)。子树/
   批次里在飞的认领仍按认领协议由原认领者跟完。
+- **每轮巡检核对自己的正文行。** 协议或表格结构升级会迁移状态:2026-08-05
+  spec 座位的在任 PM(接管时按升级前惯例只发过登记评论)在正文表格化迁移后
+  被记为「⏳ 待认领 / 前任已收官」—— 而上一条的惰性回收会把这个错位变成
+  误回收,别的会话也可能照着「待认领」真来接管。自查一行的成本是零;发现
+  不符,当场改行 + 审计评论,不等冲突发生。这与「从 labels 重建状态」同源:
+  正文行也是状态,读它、修它,不靠记忆。
 - **epic 委托不在座位表登记** —— `pm:epic` 父单正文自带会话与领地,
   `label:pm:epic` 即全量索引(见「Epic 子树车道」)。座位表只记常设座位,一件
   事只记一处。
@@ -987,8 +993,11 @@ disobedience.
 
 `/compact`, and any host-level interruption of the PM session, kills running
 subagents together with their pending tool calls — #4700 and #4775 both died on
-the same second. **The agent is not resumable; its worktree, branch and commits
-are intact.** Never re-run the original dispatch prompt over that state: a fresh
+the same second. **先试 SendMessage 复活,再谈接手**:对已死 agent 发一条消息,
+宿主会「从 transcript 恢复」—— 带着它全部上下文接着干,worktree、分支、提交
+都还在(2026-08-05 三个死 agent 全部由此复活并各自收尾,见 step 6 探活)。
+仅当 resume 不可用(跨会话接手、transcript 丢失)时才走下面的 worktree 接手
+协议。Never re-run the original dispatch prompt over that state: a fresh
 agent that follows it will try to create the worktree that already exists, or
 redo work already committed. Dispatch a **new** agent with these four additions
 instead:
@@ -1093,9 +1102,26 @@ connector grant 只能传递调用会话自身持有的,CCR 平台注入的 gith
 
 ### 6. Collect
 
-**Subagent mode:** wait for the background task notifications — do not poll,
-do not fabricate a pending agent's result. A dev that dies or returns
-malformed output counts as `status: "blocked"` with its raw output attached.
+**Subagent mode:** wait for the background task notifications — do not poll
+for *results*, do not fabricate a pending agent's result. A dev that dies or
+returns malformed output counts as `status: "blocked"` with its raw output
+attached.
+
+**探活是每轮巡检的固定动作 —— 完成通知不可靠,它的缺席什么都不证明。**
+下面的停摆纠偏处理「带任务中状态的通知到了」;这一条处理更隐蔽的另一半:
+**通知根本不来**。宿主进程重启会把运行中的 subagent 连同其完成通知一起
+静默杀掉 —— 2026-08-05 实测,五个「在飞」dev 里三个(#5050/#5515/#5483)
+已死数小时,批次视图仍显示 5/5,实际吞吐 2/5,零信号。规程三条:
+
+- 每次巡检(定时器唤醒、轮间隙)对**每个已派发且尚无远程分支/PR** 的
+  dev 发一次状态询问(SendMessage,措辞「回一段简报后继续干活」,不改变
+  任务);派发后 ~45 分钟无任何远程产出即到探活门槛。
+- 两种回包都有价值:活着 → 拿到进度与阻塞点;**「no active task; resumed
+  from transcript」→ agent 生前已死,这次询问本身就是复活** —— 从其
+  transcript 带全部上下文恢复,比 worktree 接手协议(step 5)便宜得多,
+  优先用它;resume 不可用时才走接手协议。
+- 判据永远取正向证据(远程分支、PR、报告、探活回包),⛔ 绝不把「还没
+  收到失败通知」读作「还在跑」。
 
 **A stalled subagent is this half's most common failure, and it never
 self-heals.** When a dev stops mid-task reasoning that "a background watcher will
@@ -1142,6 +1168,14 @@ dispatch 由下一轮按同一判据处置(~2h 无报告即 `blocked`),`delete_t
 Routine 的取舍是:凡验证管线可能超过一个 fire 的活,**一开始就走 `mode:cloud`**,
 把恢复权交给下一轮的 GitHub 读数,而不是赌它能在本轮内被唤醒。
 
+**报告丢失 ≠ 验收停摆(直接验收兜底)。** dev 的 JSON 报告是证据来源之一,
+不是验收的先决条件 —— 状态模型第一句就是「所有状态在 GitHub」。同时满足
+(a) draft PR 已存在且 CI 全绿、(b) 探活确认 agent 已死或 ≥2h 无任何推送、
+(c) 报告未达 —— 则 PM 直接按 PR 验收:逐文件核对 diff 与认领申报的文件面,
+对照 `origin/main` 复核 PR 正文的前提声明与验证叙述,step 7 其余判据不变
+(2026-08-05 的 #5550/#5556 即此路径落地并合并)。顺序保护:agent 可能还
+活着时**先探活、后翻 ready** —— 抢先翻会与它的收尾推送竞态。
+
 ### 7. Review each report
 
 You are the reviewer of record. For each report, verify against GitHub — not
@@ -1187,6 +1221,22 @@ against the report's own claims:
   correction belongs in the PR/issue comments so the next reader inherits the
   corrected premise, and a wrong premise still sitting in an issue body gets
   its own follow-up issue rather than being silently dropped.
+- **验收判据本身也是前提的一部分,可被 dev 证伪。** #5452 的 issue 把验收写成
+  「某条字面 grep 归零」,dev 实测证明该 pattern 修前修后命中数不变(修好的
+  正确输出同样匹配它),于是改钉真不变量(行内代码跨度花括号配平)做门禁,
+  并因此多抓出 2 处 issue 的 grep 天然看不见的同根因缺陷。评审姿势:dev 用
+  测量推翻字面判据、换上等价或更强的不变量门禁 = 好运行,照 ACCEPT;但推翻
+  过程必须写在 PR 正文里,且新判据要附在 main 语料上的实测信噪比(误报为零
+  的证据),否则按 REWORK 要证据。
+- **Tests/docs-only PR 走 `skip-changeset` 标签,不走空 changeset**(空
+  changeset 滞留发布,#4898)。标签由 PM 在验收时打。历史坑(#5497/#5502
+  实测):该闸曾从**事件载荷**读标签,rerun 重放旧载荷看不见新标签,得靠
+  「摘掉再打回」制造新 labeled 事件 —— **#5625(#5580)已根治**,闸门改为
+  实时读 PR 标签,rerun 即翻绿。留此一条是因为它是一类通病的标本:**任何
+  从事件载荷而非现状读判据的闸,rerun 都复现旧世界** —— 撞上同形状的红,
+  先查该闸读的是载荷还是现状,再决定是补事件还是改闸。
+  边界:改动若含读者可见的生成产物(如参考文档),dev 选 changeset 而非
+  标签是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别来回改。
 - **`+0/-0` in a PR diff is not proof of an empty file.** git renders a file
   as binary — zero added, zero removed — as soon as it contains a NUL byte.
   #4870's 347-line test file showed `+0/-0` and was briefly misread as an

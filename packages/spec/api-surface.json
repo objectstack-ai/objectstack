@@ -2530,6 +2530,8 @@
     "DisablePackageRequestSchema (const)",
     "DisablePackageResponse (type)",
     "DisablePackageResponseSchema (const)",
+    "DiscoveryEnvironment (type)",
+    "DiscoveryEnvironmentSchema (const)",
     "DiscoveryResponse (type)",
     "DiscoverySchema (const)",
     "DispatcherConfig (type)",
@@ -3145,6 +3147,7 @@
     "identityFreeEndpointGateFailure (function)",
     "normalizeEndpointPath (function)",
     "readServiceSelfInfo (function)",
+    "resolveDiscoveryEnvironment (function)",
     "standardErrorCodeForHttpStatus (function)",
     "validateApiEndpointDeclarations (function)"
   ],

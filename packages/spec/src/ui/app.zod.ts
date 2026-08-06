@@ -86,13 +86,42 @@ const NAV_ITEM_ALIASES: Readonly<Record<string, string>> = {
   requiresobjects: 'requiresObject',
   badgecolor: 'badgeVariant',
   badgestyle: 'badgeVariant',
-  // Found by this very gate: the platform's own Account app declared
-  // `defaultOpen` on three groups (never a schema key), so all three shipped
-  // COLLAPSED while their author believed they opened by default.
+};
+
+/**
+ * The four spellings of "start expanded", which is a CROSS-VARIANT key and not
+ * a shared one — so they are assembled per variant below, not listed above.
+ *
+ * Found by the alias gate: the platform's own Account app declared `defaultOpen`
+ * on three groups (never a schema key), so all three shipped COLLAPSED while
+ * their author believed they opened by default. The redirect that fixed that is
+ * right only where `expanded` exists, i.e. on `group`.
+ *
+ * They lived in the shared table until #5555 measured the consequence: `expanded`
+ * is declared on `group` alone, so on the other eight variants the redirect named
+ * a key that variant ALSO rejects — the author fixed the spelling as instructed
+ * and was rejected a second time, with no suggestion left (ledger finding 7, from
+ * the #4001 campaign built to end exactly that). Below they get the same prose
+ * treatment as the six cross-variant payload keys, for the same reason: the key
+ * is spelled right, the `type` is wrong, and a bare key name cannot say so.
+ *
+ * Spelled out as two literal tables rather than derived, because the prose
+ * string is contract surface: `alias-integrity.test.ts`'s `PROSE_ALIAS_TARGETS`
+ * allowlist matches it exactly, and a reader who greps the message an author
+ * reported has to land here.
+ */
+const NAV_EXPANDED_ALIASES_ON_GROUP: Readonly<Record<string, string>> = {
   defaultopen: 'expanded',
   open: 'expanded',
   collapsed: 'expanded',
   isopen: 'expanded',
+};
+
+const NAV_EXPANDED_ALIASES_ELSEWHERE: Readonly<Record<string, string>> = {
+  defaultopen: 'type: \'group\' (with expanded)',
+  open: 'type: \'group\' (with expanded)',
+  collapsed: 'type: \'group\' (with expanded)',
+  isopen: 'type: \'group\' (with expanded)',
 };
 
 /** Per-variant payload keys, for the error map's suggestion pool. */
@@ -127,6 +156,10 @@ const navItemUnknownKeyError = (variant: keyof typeof NAV_VARIANT_KEYS) =>
       ...(variant !== 'dashboard' ? { dashboardname: 'type: \'dashboard\' (with dashboardName)' } : {}),
       ...(variant !== 'report' ? { reportname: 'type: \'report\' (with reportName)' } : {}),
       ...(variant !== 'component' ? { componentref: 'type: \'component\' (with componentRef)' } : {}),
+      // `expanded` is a cross-variant key too — it just looks shared because
+      // "start expanded" is a sidebar-wide idea. It exists on `group` alone, so
+      // only `group` may answer with the bare key name (#5555).
+      ...(variant !== 'group' ? NAV_EXPANDED_ALIASES_ELSEWHERE : NAV_EXPANDED_ALIASES_ON_GROUP),
     },
     guidance: {
       children:
