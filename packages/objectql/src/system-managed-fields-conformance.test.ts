@@ -51,10 +51,22 @@ describe('[#3058] PUBLIC_FORM_SERVER_MANAGED_FIELDS conformance', () => {
   //   • tenant_id  — legacy/enterprise tenant key (not injected by open-core).
   //   • is_deleted / deleted_at — soft-delete state, written by the lifecycle/
   //     trash layer at runtime, never client-suppliable on a public form.
+  //   • owning_business_unit_id — ADR-0117 D1's record-level BU ownership stamp.
+  //     The NAME is reserved (SystemFieldName.OWNING_BUSINESS_UNIT_ID, #4611) but
+  //     open-core does NOT inject it yet: `applySystemFields`' `wantOwner` is a
+  //     DENY-list (only 'org'/'none' opt out), so the `ownership: 'business_unit'`
+  //     tier cannot land until that flips to an allow-list — until then the enum
+  //     value stays rejected by ObjectSchema on purpose. Denied here in advance
+  //     because it is an ownership anchor of exactly the owner_id/organization_id
+  //     forge class, and a denylist entry added only once the column ships is a
+  //     hole with a release in it. MOVE THIS to the injected group (Group A) in
+  //     the same PR that lands the injection — it is derived from live code
+  //     there, so leaving it here would then fail as a stray entry.
   const reservedDefenseInDepth = new Set<string>([
     SystemFieldName.TENANT_ID, // 'tenant_id'
     'is_deleted',
     SystemFieldName.DELETED_AT, // 'deleted_at'
+    SystemFieldName.OWNING_BUSINESS_UNIT_ID, // 'owning_business_unit_id'
   ]);
 
   it('registry injection actually produces the fields this test reasons about', () => {

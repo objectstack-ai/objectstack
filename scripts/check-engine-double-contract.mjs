@@ -114,6 +114,35 @@ const ENGINE_SIBLINGS = new Set([
 /** Parameter names that mean "this is the DRIVER's delete(object, id, options)". */
 const ID_PARAM = /^_*(id|recordId|ids|pk)$/i;
 
+/**
+ * Members present on `IDataDriver` and on NEITHER `IDataEngine` nor the ObjectQL
+ * class — so declaring one is positive evidence of the DRIVER contract.
+ *
+ * Consulted only when the parameter test cannot answer (see `isEngineDeleteShape`).
+ * Deliberately excludes every name both contracts share — `find`, `findOne`,
+ * `update`, `count`, `delete` and `execute` (the engine declares `execute?` too,
+ * `data-engine.ts`) — because a name on both sides separates nothing.
+ */
+const DRIVER_ONLY_MEMBERS = new Set([
+  'connect', 'disconnect', 'checkHealth', 'getPoolStats', 'create', 'upsert',
+  'bulkCreate', 'bulkUpdate', 'bulkDelete', 'updateMany', 'deleteMany',
+  'beginTransaction', 'commit', 'rollback', 'syncSchema', 'syncSchemasBatch',
+  'registerExternalObject', 'getSchemaSyncStats', 'dropTable', 'reclaimSpace',
+  'explain', 'temporalFilterValue', 'temporalFilterColumnSql',
+]);
+
+/**
+ * The engine-side half of the same evidence: on `IDataEngine` (`insert`,
+ * `aggregate`) or on the ObjectQL class itself (`getSchema`, `registry`,
+ * `insertMany`), and absent from `IDataDriver`.
+ *
+ * A subset of ENGINE_SIBLINGS, and the distinction is the whole point: `find` /
+ * `findOne` / `update` / `count` are engine siblings for DISCOVERY (they mark a
+ * data-access object) while being useless for ATTRIBUTION (drivers speak all
+ * four). Only the names here answer "engine, not driver".
+ */
+const ENGINE_ONLY_MEMBERS = new Set(['insert', 'insertMany', 'aggregate', 'getSchema', 'registry']);
+
 // ── Discovery ───────────────────────────────────────────────────────────────
 
 function walk(dir, out = []) {
@@ -169,10 +198,43 @@ function memberName(member) {
  * The second parameter is the whole question: the engine takes an options bag
  * there, the driver takes a primary key. Judged on the name first (the repo
  * writes `id` when it means one) and on a scalar type annotation second.
+ *
+ * ## When there IS no second parameter (#5629)
+ *
+ * A fake omits the parameters it ignores — `async delete() { return false; }` —
+ * and this function used to open with `if (params.length < 2) return false`,
+ * which discarded the double before any other test ran. Not "declared out of
+ * scope": unreachable. Those deletes reached neither PINNED nor the ledger and
+ * produced no output at all, which is the #4868 shape this script's own
+ * DISCOVERED invariant is written against. Measured on this branch: 92 such
+ * deletes behind that one line, 0 of them pinned.
+ *
+ * So when arity cannot answer, the SIBLING SET answers instead — and it has to
+ * be a real test, not a waved-through `return true`. #5629's premise for a
+ * blanket admit ("a zero-parameter delete cannot be the driver's, since the
+ * driver's signature has a primary-key position") does not survive measurement:
+ * fake DRIVERS drop their unused parameters exactly like fake engines do, so 43
+ * of those 92 are driver doubles — `spec/src/contracts/data-driver.test.ts`
+ * itself, and `objectql/src/engine-aggregate-having.test.ts`'s self-described
+ * "driver WITH native aggregate()". Admitting them unconditionally would have
+ * pointed this gate at the wrong contract 43 times.
+ *
+ * The evidence that does separate them is which members the object declares
+ * ALONGSIDE delete: it must show a member only the engine has, and none that
+ * only the driver has. Both halves are load-bearing — `aggregate` alone admits
+ * the native-aggregate driver above, and "no driver members" alone admits any
+ * `{ find, findOne, update, delete }` store mock that is neither contract.
  */
-function isEngineDeleteShape(fn) {
+function isEngineDeleteShape(fn, memberNames = new Set()) {
   const params = fn.parameters ?? [];
-  if (params.length < 2) return false;
+  if (params.length < 2) {
+    let engineEvidence = false;
+    for (const n of memberNames) {
+      if (DRIVER_ONLY_MEMBERS.has(n)) return false;
+      if (ENGINE_ONLY_MEMBERS.has(n)) engineEvidence = true;
+    }
+    return engineEvidence;
+  }
   const second = params[1];
   const name = ts.isIdentifier(second.name) ? second.name.text : '';
   if (ID_PARAM.test(name)) return false;
@@ -279,7 +341,7 @@ function scanSource(fileName, text) {
     if (!del) return;
     const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n));
     if (siblings.length < 2) return;
-    if (!isEngineDeleteShape(del)) return;
+    if (!isEngineDeleteShape(del, names)) return;
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     doubles.push({ line, siblings: siblings.sort(), pinned: bodyIsPinned(del) });
   };
@@ -508,6 +570,82 @@ const engine = {
   d = scanSource('p.test.ts', arrowFake);
   expect('an arrow-property fake engine is in scope', d.length === 1 && d[0].pinned === false);
 
+  // ── Arity: a fake omits the parameters it ignores (#5629).
+  //
+  // `async delete() { return false; }` is the commonest engine-double spelling
+  // in this repo, and it used to leave the scan before any other test ran — 92
+  // deletes, none of them pinned, none of them in the ledger, no output. These
+  // cases drive both halves of the sibling evidence that admits them now,
+  // because the obvious cheap fix (admit every short-arity delete) is WRONG:
+  // fake drivers drop their unused parameters exactly like fake engines do.
+  const zeroArityEngine = `
+const engine = {
+  async find(o: string) { return []; },
+  async findOne(o: string) { return null; },
+  async insert(o: string, d: any) { return d; },
+  async update(o: string, d: any) { return d; },
+  async delete() { return false; },
+};
+`;
+  d = scanSource('z.test.ts', zeroArityEngine);
+  expect('a zero-parameter engine delete is in scope', d.length === 1 && d[0].pinned === false);
+
+  // Same shape, one parameter — `action-body-identity.test.ts`'s scoped facade.
+  const oneArityEngine = `
+const engine = {
+  find: async (o: string) => [],
+  insert: async (o: string, d: any) => d,
+  update: async (o: string, d: any) => d,
+  delete: async (opts?: any) => ({ ok: true }),
+};
+`;
+  d = scanSource('y.test.ts', oneArityEngine);
+  expect('a single-parameter engine delete is in scope', d.length === 1 && d[0].pinned === false);
+
+  // A fake DRIVER with the same zero-parameter delete must stay out: driver-only
+  // members veto. `spec/src/contracts/data-driver.test.ts` is this shape.
+  const zeroArityDriver = `
+const driver = {
+  async find(o: string) { return []; },
+  async findOne(o: string) { return null; },
+  async update(o: string, id: string, d: any) { return d; },
+  async create(o: string, d: any) { return d; },
+  async checkHealth() { return true; },
+  async delete() { return true; },
+};
+`;
+  expect('a zero-parameter DRIVER delete stays out of scope',
+    scanSource('zd.test.ts', zeroArityDriver).length === 0);
+
+  // The veto has to outrank engine-looking evidence, or `engine-aggregate-
+  // having.test.ts`'s self-described "driver WITH native aggregate()" is read as
+  // an engine: drivers may implement `aggregate` for pushdown.
+  const nativeAggregateDriver = `
+const driver = {
+  async find() { return []; },
+  async count() { return 0; },
+  async create(o: string, d: any) { return d; },
+  async bulkCreate(o: string, rows: any[]) { return rows; },
+  async aggregate(o: string, ast: any) { return []; },
+  async delete() { return true; },
+};
+`;
+  expect('a zero-parameter driver that implements aggregate() stays out of scope',
+    scanSource('zn.test.ts', nativeAggregateDriver).length === 0);
+
+  // And the positive half must be required too, or every `{ find, findOne,
+  // update, delete }` store mock — neither contract — becomes a finding.
+  const zeroArityStoreMock = `
+const store = {
+  async find(k: string) { return []; },
+  async findOne(k: string) { return null; },
+  async update(k: string, v: any) { return v; },
+  async delete() { return true; },
+};
+`;
+  expect('a zero-parameter mock with no engine-only member stays out of scope',
+    scanSource('zs.test.ts', zeroArityStoreMock).length === 0);
+
   // The import must come from the producer. A same-named local function is not
   // the contract — the whole point is that ONE predicate answers.
   d = scanSource('q.test.ts', engineFake('assertEngineDeleteDispatch(opts); return 1;',
@@ -547,9 +685,10 @@ const engine = {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: separates engine doubles from driver doubles, accepts only the producer\'s '
-      + 'predicate (direct or one helper deep), rejects unused imports, hand-mirrored guards and '
-      + 'look-alikes, and proves discovery reaches the real tree.',
+    'OK  self-test: separates engine doubles from driver doubles, admits a delete that declares '
+      + 'fewer than two parameters only on engine-vs-driver sibling evidence, accepts only the '
+      + 'producer\'s predicate (direct or one helper deep), rejects unused imports, hand-mirrored '
+      + 'guards and look-alikes, and proves discovery reaches the real tree.',
   );
 }
 
