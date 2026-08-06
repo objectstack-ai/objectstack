@@ -71,7 +71,14 @@ function mockServer() {
 }
 function mockProtocol() {
   return {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    // [#5674] `routes` (ApiRoutesSchema) is what the producer emits and what
+    // `DiscoverySchema` requires. This double was copy-pasted from a sibling
+    // before #5674 landed and spelled `endpoints` — the dispatcher-only copy of
+    // `routes` that #4828 retired under ADR-0049, and which no producer ever
+    // emitted. It was inert here (nothing in this file drives discovery), which
+    // is exactly why the key kept surviving; `discovery-double-retired-key.test.ts`
+    // pins it out of the fixture layer so the next copy-paste cannot regrow it.
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([]),
   };
