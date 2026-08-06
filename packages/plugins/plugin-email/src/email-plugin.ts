@@ -486,6 +486,14 @@ export class EmailServicePlugin implements Plugin {
             const created = await (engine as any).insert('sys_email', row, {
               context: SYSTEM_CTX,
             });
+            // The engine's OWN answer is forwarded, not laundered into
+            // `row.id`. ObjectQL honours the id it is handed, so this confirms
+            // `row.id` — and on the day some driver re-keys the row instead,
+            // `EmailPersistence`'s insert contract (#5523) says so loudly here
+            // rather than letting the outbox drain hook double-send the
+            // message. `created` without a usable id means the engine reported
+            // no identity at all, which is not a disagreement: confirm the row
+            // we asked for.
             return created?.id ? { id: String(created.id) } : { id: String(row.id) };
           },
           async update(id, patch) {

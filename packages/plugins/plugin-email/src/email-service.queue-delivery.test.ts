@@ -189,12 +189,17 @@ describe('EmailService — queue delivery on', () => {
     expect(svc.isServiceManaged(res.id)).toBe(false);
   });
 
-  it('releases an insert-assigned id once the job is published (#5169)', async () => {
-    // Queue mode returns EARLY (right after the publish), so the release of an
-    // insert-assigned id happens on that path too — and it must, because the
-    // row is now the worker's: the boot outbox sweep decides whether to requeue
-    // it by asking `isServiceManaged`, and a permanently-true answer would make
-    // a stranded row unsweepable forever.
+  it('rejects an insert that returns a different id — and publishes NO job (#5523)', async () => {
+    // Re-judged from #5169's "releases an insert-assigned id once the job is
+    // published". That test pinned the release on the queue path's EARLY return
+    // for an insert-assigned id; `EmailPersistence.insert` may no longer assign
+    // one, so the scenario is now a rejection. The release-on-early-return fact
+    // it also carried is still pinned by the test above, which asserts
+    // `isServiceManaged(res.id) === false` after a queued send.
+    //
+    // Queue mode matters on its own here: a job that referenced the substituted
+    // id would send the mail from the WORKER as well, so the rejection has to
+    // land before the publish, not just before inline delivery.
     const queue = makeQueue();
     const transport = { send: vi.fn(async () => ({ messageId: '<x>' })) };
     const persistence: EmailPersistence = {
@@ -205,11 +210,10 @@ describe('EmailService — queue delivery on', () => {
       transport, defaultFrom: 'no@reply.com', persistence, queueDelivery: wiring(queue),
     });
 
-    const res = await svc.send(MSG);
+    await expect(svc.send(MSG)).rejects.toThrow(/EmailPersistence\.insert must return the row's own id/);
 
-    // The job references the PERSISTED id, and that id is no longer managed.
-    expect(res).toMatchObject({ id: 'db-pk-9', status: 'queued' });
-    expect(queue.published[0].data).toEqual({ rowId: 'db-pk-9' });
+    expect(queue.published).toHaveLength(0);   // nothing for a worker to double-send
+    expect(transport.send).not.toHaveBeenCalled();
     expect(svc.isServiceManaged('db-pk-9')).toBe(false);
   });
 

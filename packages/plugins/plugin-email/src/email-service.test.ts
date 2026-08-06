@@ -147,6 +147,7 @@ describe('EmailService', () => {
     // afterInsert drain hook would fire — assert the row is flagged managed
     // there, and unflagged once send() resolves.
     let managedAtInsert: boolean | undefined;
+    let managedDuringDelivery: boolean | undefined;
     let insertedId: string | undefined;
     const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
     let svc!: EmailService;
@@ -156,42 +157,133 @@ describe('EmailService', () => {
         managedAtInsert = svc.isServiceManaged(insertedId);
         return { id: row.id };
       },
-      async update() { /* noop */ },
+      async update(id) {
+        // The `sent` finalize runs INSIDE send(), i.e. while this row is still
+        // send()'s to deliver — the window the managed flag exists to protect
+        // must NOT shrink. (Inherited from the #5169 test this file used to
+        // carry on the insert-assigned-id path; that path is now a contract
+        // violation, so the fact is pinned here, on the compliant one.)
+        managedDuringDelivery = svc.isServiceManaged(String(id));
+      },
     };
     svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
     const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
     expect(res.status).toBe('sent');
     expect(managedAtInsert).toBe(true);                 // hook would skip it
+    expect(managedDuringDelivery).toBe(true);           // window kept through finalize
     expect(svc.isServiceManaged(insertedId!)).toBe(false); // cleared after send
   });
 
-  it('releases an insert-ASSIGNED row id from the managed set too (#5169)', async () => {
-    // `EmailPersistence` is public and its `insert` may answer with an id of
-    // its own — a database-assigned primary key, an external delivery system's
-    // receipt id. `send()` reserves that id as managed as well; the bug was
-    // that it never released it, so `isServiceManaged(persistedId)` stayed true
-    // forever: one leaked entry per message, and a "belongs to a live send()"
-    // assertion the drain hook and the boot sweep trust but nobody re-checks.
-    let managedDuringDelivery: boolean | undefined;
+  // ── EmailPersistence.insert id contract (#5523) ────────────────────
+  //
+  // Re-judged from #5169's "releases an insert-ASSIGNED row id" test. That test
+  // pinned the *leak fix* on a capability — `insert` answering with an id of its
+  // own — that is now a contract violation, so the leak has no source left to
+  // fix. Same scenario, opposite verdict: rejected, by name, before delivery.
+  it('rejects an insert that returns a DIFFERENT id, naming the contract, before delivering', async () => {
+    // The double-send this closes: the sys_email afterInsert drain hook asks
+    // `isServiceManaged(hookCtx.result.id)` — the INSERTED row's id. A
+    // persistence that re-keys the row hands the hook an id send() never
+    // reserved, the hook reads the row as an app-inserted outbox entry and
+    // delivers it, and send() delivers it again down its own path.
     const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
-    let svc!: EmailService;
+    const update = vi.fn(async () => { /* noop */ });
     const persistence: EmailPersistence = {
-      // Ignores the minted id and hands back the row's real (DB) key.
+      // Ignores the minted id and hands back a DB primary key of its own.
       async insert() { return { id: 'db-pk-7' }; },
-      async update(id) {
-        // The `sent` finalize runs INSIDE send(), i.e. while this row is still
-        // send()'s to deliver — the window the managed flag exists to protect
-        // must NOT shrink to make the release possible.
-        managedDuringDelivery = svc.isServiceManaged(String(id));
-      },
+      update,
     };
-    svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
+
+    await expect(svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' }))
+      .rejects.toThrow(/EmailPersistence\.insert must return the row's own id/);
+
+    // Names the value actually returned, so the operator can find the
+    // implementation that returned it.
+    await expect(svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' }))
+      .rejects.toThrow(/'db-pk-7'/);
+
+    // BEFORE delivery — not "double-send, then complain". This is the whole
+    // point of where the check sits: nothing was sent, nothing was finalized.
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+
+    // And the throw does not leak the reservation — the `finally` still runs.
+    expect(svc.isServiceManaged('db-pk-7')).toBe(false);
+  });
+
+  it('accepts the bare-string confirmation form when it names the row id', async () => {
+    // `insert` may answer `row.id` instead of `{ id: row.id }` — same
+    // confirmation, and it must not be mistaken for a substitution.
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const persistence: EmailPersistence = {
+      async insert(row) { return String(row.id); },
+      async update() { /* noop */ },
+    };
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
 
     const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
 
-    expect(res).toMatchObject({ id: 'db-pk-7', status: 'sent' });
-    expect(managedDuringDelivery).toBe(true);              // window kept
-    expect(svc.isServiceManaged('db-pk-7')).toBe(false);   // released, not leaked
+    expect(res.status).toBe('sent');
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(svc.isServiceManaged(res.id)).toBe(false);
+  });
+
+  it('rejects a bare-string confirmation that names a different id', async () => {
+    // The string form is the same contract, not a loophole around it.
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const persistence: EmailPersistence = {
+      async insert() { return 'db-pk-8'; },
+      async update() { /* noop */ },
+    };
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
+
+    await expect(svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' }))
+      .rejects.toThrow(/EmailPersistence\.insert must return the row's own id/);
+    expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it('treats a confirmation that names NO id as confirming the row it inserted', async () => {
+    // Only reachable from an untyped JS implementation (the declared return
+    // type requires an id). There is no id to disagree with, and the drain hook
+    // reads the id off the inserted ROW — the minted one — so no double-send is
+    // reachable this way. The check judges the VALUE, not its presence, and an
+    // insert that silently returned nothing must not stop the mail.
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const persistence = {
+      async insert() { /* returns undefined */ },
+      async update() { /* noop */ },
+    } as unknown as EmailPersistence;
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence });
+
+    const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
+
+    expect(res.status).toBe('sent');
+    expect(transport.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('still rides out an insert that THROWS — an operational failure, not a contract violation', async () => {
+    // The two must stay distinguishable: a failing insert keeps its non-fatal
+    // warning path (mail goes inline), while a *renaming* insert is fatal. If
+    // the contract check ever moved inside the insert's catch, this test would
+    // still pass and the rejection test above would go green for the wrong
+    // reason — hence both, side by side.
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const warn = vi.fn();
+    const persistence: EmailPersistence = {
+      async insert() { throw new Error('db down'); },
+      async update() { /* noop */ },
+    };
+    const svc = new EmailService({
+      transport, defaultFrom: 'no@reply.com', persistence,
+      logger: { info: vi.fn(), warn },
+    });
+
+    const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
+
+    expect(res.status).toBe('sent');
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('persist failed'), expect.any(Object));
   });
 
   it('deliverPersistedRow delivers an existing row WITHOUT inserting a new one', async () => {
