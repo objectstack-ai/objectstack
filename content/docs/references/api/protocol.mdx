@@ -164,7 +164,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **models** | `string \| { id: string; label: string; default: boolean }[]` | ✅ | Models this environment offers |
+| **models** | `(string \| { id: string; label: string; default: boolean })[]` | ✅ | Models this environment offers |
 | **defaultModel** | `string` | optional | Default model id, when the service reports one |
 
 

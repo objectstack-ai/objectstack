@@ -24,7 +24,7 @@
 import type { Hook } from '@objectstack/spec/data';
 import { normalizeFlowFunctionEntry, type FlowFunctionEntry } from '@objectstack/spec/automation';
 import type { ObjectQL, HookHandler } from './engine.js';
-import { wrapDeclarativeHook } from './hook-wrappers.js';
+import { wrapDeclarativeHook, type HookDiagnosticsLogger } from './hook-wrappers.js';
 import type { HookMetricsRecorder } from './hook-metrics.js';
 
 export interface BindHooksOptions {
@@ -73,16 +73,19 @@ export interface BindHooksOptions {
   /** Per-hook execution metrics sink. Defaults to no-op. */
   metrics?: HookMetricsRecorder;
 
-  /** Logger; defaults to a silent no-op. */
-  logger?: {
-    debug: (msg: string, meta?: any) => void;
-    info: (msg: string, meta?: any) => void;
-    warn: (msg: string, meta?: any) => void;
-    error: (msg: string, meta?: any) => void;
-  };
+  /**
+   * Logger; defaults to a silent no-op.
+   *
+   * The `Logger` contract, narrowed to the levels this layer uses — the SAME
+   * type the wrapper takes, since every logger handed to the binder is passed
+   * straight through to `wrapDeclarativeHook`. See
+   * {@link HookDiagnosticsLogger} for why this is not a locally-declared shape
+   * (#5637).
+   */
+  logger?: HookDiagnosticsLogger;
 }
 
-const noopLogger = {
+const noopLogger: HookDiagnosticsLogger = {
   debug: () => {},
   info: () => {},
   warn: () => {},
@@ -240,7 +243,11 @@ export function bindHooksToEngine(
       // Under strict, every bind failure is fatal, as advertised.
       if (opts.strict) throw err;
       result.errors.push({ hook: hook.name, reason: err?.message ?? String(err) });
-      logger.error('[hook-binder] failed to bind hook', {
+      // Contract arg order (#5637): `error(message, error?: Error, meta?)`.
+      // `err` is the `any` of a catch clause — a bind failure may be thrown by
+      // user code and need not be an `Error` — so the Error slot stays empty
+      // and the diagnostic travels as meta, in the third parameter.
+      logger.error('[hook-binder] failed to bind hook', undefined, {
         hook: hook.name,
         error: err?.message,
       });

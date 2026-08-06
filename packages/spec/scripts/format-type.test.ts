@@ -133,6 +133,135 @@ describe('formatType — open objects keep their declared shape (#4912)', () => 
   });
 });
 
+/**
+ * The real `AiModelsResponse.models` node, as `gen:schema` emits it —
+ * `z.union([z.string(), z.object({ id, label, default })]).array()`.
+ */
+const AI_MODELS = {
+  type: 'array',
+  items: {
+    anyOf: [
+      { type: 'string' },
+      {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          label: { type: 'string' },
+          default: { type: 'boolean' },
+        },
+        required: ['id', 'label', 'default'],
+        additionalProperties: false,
+      },
+    ],
+  },
+};
+
+/** The real `View.list.filter[].value` node — a union that CONTAINS an array. */
+const VIEW_FILTER_VALUE = {
+  anyOf: [
+    { type: 'string' },
+    { type: 'number' },
+    { type: 'boolean' },
+    { type: 'null' },
+    { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+  ],
+};
+
+/**
+ * Pin for arrays whose ELEMENT is a union — #5338.
+ *
+ * Same associativity fact as the intersection half above, one operator over:
+ * `[]` binds tighter than `|`, so `string | number[]` is `string | (number[])`
+ * — "a string, OR an array of numbers" — while the schema said "an array whose
+ * elements are string or number". An author copying that cell writes a bare
+ * string and the schema rejects it. This half is OLDER than #4912 (it predates
+ * the passthrough fix entirely); #4912 scoped its scan to `&` on purpose so its
+ * ~12-line regeneration wouldn't be buried under this one's ~200.
+ *
+ * MEASURED (reverse verification): narrowing the scan back to `&` alone — the
+ * pre-#5338 `hasTopLevelIntersection` — turns 5 of this block's 7 cases red
+ * with the unbracketed spelling (`string | { id: string; … }[]` etc.), while
+ * every case in the `&` block above stays green. The direction is the ordinary
+ * one because these assert a POSITIVE shape the fix produces, not the absence
+ * of a finding. The two that stay green under the narrow scan are honest
+ * non-regressions rather than dead pins: the mixed union+intersection case was
+ * ALREADY bracketed by the `&` half (it carries both operators), and the last
+ * case asserts the parens are NOT added, which is the half of the rule this
+ * change must not break.
+ */
+describe('formatType — union elements are parenthesized before `[]` (#5338)', () => {
+  it('brackets a union of primitives instead of letting `[]` claim the last variant', () => {
+    expect(formatType({ type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } }, ctx()))
+      .toBe('(string | number)[]');
+    expect(
+      formatType(
+        { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] } },
+        ctx(),
+      ),
+    ).toBe('(string | number | boolean)[]');
+    // `oneOf` is the same node class and must render identically.
+    expect(formatType({ type: 'array', items: { oneOf: [{ type: 'string' }, { type: 'number' }] } }, ctx()))
+      .toBe('(string | number)[]');
+  });
+
+  it('brackets a union whose variants are objects (the AiModelsResponse specimen)', () => {
+    expect(formatType(AI_MODELS, ctx()))
+      .toBe('(string | { id: string; label: string; default: boolean })[]');
+  });
+
+  it('brackets a JSON Schema type-array element (`type: [a, b]`), which also renders a union', () => {
+    expect(formatType({ type: 'array', items: { type: ['string', 'null'] } }, ctx()))
+      .toBe('(string | null)[]');
+  });
+
+  it('brackets the ARRAY VARIANT inside a union, leaving the outer union unbracketed', () => {
+    // The `View.list.filter[].value` cell. The outer union is not suffixed by
+    // `[]`, so it needs no parens; the inner array element does.
+    expect(formatType(VIEW_FILTER_VALUE, ctx()))
+      .toBe('string | number | boolean | null | (string | number)[]');
+  });
+
+  it('brackets once per array level, so nested arrays stay readable', () => {
+    expect(
+      formatType(
+        { type: 'array', items: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } } },
+        ctx(),
+      ),
+    ).toBe('(string | number)[][]');
+  });
+
+  it('brackets a union that also carries an intersection variant', () => {
+    const open = { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: {} };
+    expect(formatType({ type: 'array', items: { anyOf: [{ type: 'string' }, open] } }, ctx()))
+      .toBe('(string | { a?: string } & Record<string, any>)[]');
+  });
+
+  it('adds NO parens when the element has no top-level operator', () => {
+    // A single-variant union renders as one type — bracketing it would be noise.
+    expect(formatType({ type: 'array', items: { anyOf: [{ type: 'string' }] } }, ctx())).toBe('string[]');
+    // `|` inside `Enum<…>`, a shape, a `Record<…>` argument or a link target is
+    // nested, and the depth scan must keep ignoring it.
+    expect(formatType({ type: 'array', items: { enum: ['a', 'b'] } }, ctx())).toBe("Enum<'a' | 'b'>[]");
+    expect(
+      formatType(
+        { type: 'array', items: { type: 'object', properties: { k: { anyOf: [{ type: 'string' }, { type: 'number' }] } } } },
+        ctx(),
+      ),
+    ).toBe('{ k?: string | number }[]');
+    expect(
+      formatType(
+        { type: 'array', items: { type: 'object', additionalProperties: { anyOf: [{ type: 'string' }, { type: 'number' }] } } },
+        ctx(),
+      ),
+    ).toBe('Record<string, string | number>[]');
+    expect(formatType({ type: 'array', items: { $ref: '#/$defs/Field' } }, {
+      defs: {},
+      currentSchema: 'Probe',
+      schemaHref: () => '/docs/references/data/field#field',
+    })).toBe('[Field](/docs/references/data/field#field)[]');
+  });
+});
+
 describe('formatType — the shapes that were already right stay right', () => {
   it('renders a pure record (no declared keys) as a bare Record', () => {
     expect(formatType({ type: 'object', additionalProperties: { type: 'number' } }, ctx()))

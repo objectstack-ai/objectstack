@@ -246,7 +246,7 @@ const result = SCIMAddressSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **schemas** | `string[]` | ✅ | SCIM schema URIs |
 | **totalResults** | `integer` | ✅ | Total results count |
-| **Resources** | `{ schemas: string[]; id?: string; externalId?: string; userName: string; … } \| { schemas: string[]; id?: string; externalId?: string; displayName: string; … } \| Record<string, any>[]` | ✅ | Resources array (Users, Groups, or custom resources) |
+| **Resources** | `({ schemas: string[]; id?: string; externalId?: string; userName: string; … } \| { schemas: string[]; id?: string; externalId?: string; displayName: string; … } \| Record<string, any>)[]` | ✅ | Resources array (Users, Groups, or custom resources) |
 | **startIndex** | `integer` | optional | Start index (1-based) |
 | **itemsPerPage** | `integer` | optional | Items per page |
 

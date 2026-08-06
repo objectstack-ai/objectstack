@@ -29,7 +29,7 @@ function mockRes() {
 
 function buildServer(protocolOverrides: Record<string, any>) {
   const protocol: any = {
-    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     // No object registered → enforceApiAccess default-allows and the handler
     // proceeds straight to the (mocked) write method.
