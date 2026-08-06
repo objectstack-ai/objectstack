@@ -1884,6 +1884,54 @@ const step17: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 18 step.
+ *
+ * Opens the 18 lane with the `IndexSchema` retirement (#5248, #4943). Purely
+ * mechanical: two authorable keys with zero DDL consumers are deleted, so
+ * there is no semantic residue and nothing an author has to decide.
+ *
+ * ⚠️ This step targets a major the running package has not reached yet
+ * (`PROTOCOL_MAJOR` is read from `packages/spec/package.json`, today 17.x).
+ * `composeMigrationChain` filters `m <= toMajor` and `toMajor` defaults to
+ * `PROTOCOL_MAJOR`, so the step is *registered but dormant*: `os migrate meta
+ * --from 17` composes no hop for it until the package is 18.0.0, at which
+ * point it activates with no further edit. That is deliberate — the retirement
+ * was ruled out of the v17 rc window (#5248), and registering it now is what
+ * keeps `spec-changes.json`, the upgrade guide and the `spec_changes` MCP tool
+ * carrying the break from the moment it lands in the schema.
+ */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 removes the two inert `IndexSchema` keys (#5248, #4943, ADR-0049 '
+    + 'enforce-or-remove): `indexes[].type` and `indexes[].partial`. Neither ever had a DDL '
+    + 'consumer — `SqlDriver.syncDeclaredIndexes` creates declared indexes through knex\'s '
+    + '`table.index()` / `table.unique()`, and the drift differ\'s `DeclaredIndexInput` carries '
+    + 'only `name`/`fields`/`unique`/`nullSafeColumns` — so an authored `type` selected no '
+    + 'access method and an authored `partial` produced a FULL index with its predicate '
+    + 'discarded. `partial` was the more damaging of the two because it read as a correctness '
+    + 'control: the platform\'s own `sys_metadata` declared `partial: "state = \'active\'"` for '
+    + 'overlay uniqueness, and what the declaration alone materialized was an unrestricted '
+    + 'unique index (the active-row scoping is delivered by a runtime migration, '
+    + '`metadata-protocol`\'s `ensureOverlayIndex`, not by the key). `type` was the louder: its '
+    + '`.default(\'btree\')` put an inert knob into every parse output, so it read as live '
+    + 'configuration — the ADR-0078 no-silently-inert shape.\n\n'
+    + 'Remove was chosen over enforce (maintainer ruling, 2026-08-06): enforcing would require '
+    + 'per-dialect algorithm mapping (`gin`/`gist` Postgres-only, `fulltext` MySQL-only), '
+    + 'raw-SQL `CREATE INDEX … WHERE` on the dialects that have partial indexes at all (MySQL '
+    + 'does not), and a redesign of how `isSyncReproducibleIndex` excludes partial indexes from '
+    + 'incremental sync — real design cost for a capability nothing has asked for. If a genuine '
+    + 'need appears it returns enforce-first.\n\n'
+    + 'Both are lossless deletes: no DDL changes, because no DDL ever depended on them. The '
+    + 'replacements are the mechanisms that were already doing the work — the index method is '
+    + 'the driver/dialect\'s decision, and a partial index is issued by a database-layer '
+    + 'migration. Drift detection is untouched: the `partial` flag it consumes is parsed back '
+    + 'out of the database\'s OWN `CREATE INDEX` DDL and never came from this key.',
+  conversionIds: ['object-index-type-partial-removed'],
+  semantic: [],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
@@ -1893,6 +1941,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */
