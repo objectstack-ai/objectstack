@@ -548,7 +548,7 @@ jobs:
       # generated page and the filter kept watching the old path, so hand-edits
       # went unchecked for months; #3855 listed specific spec paths but no schema
       # dirs, so `check:authorable-surface` went dormant on exactly the PRs that
-      # remove an authorable key; and `json-schema.manifest.json` — the #2978
+      # remove an authorable key; and the json-schema manifest — the #2978
       # ratchet that is the ONLY durable record of every emitted schema, since
       # json-schema/ is gitignored — was never watched at all, so a PR retiring a
       # key from it skipped its own verifier. Six gates had already escaped to
@@ -570,7 +570,7 @@ jobs:
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
       # The authorable KEY surface — what a metadata author may write, which for
-      # this platform is the third-party API. `api-surface.json` records exported
+      # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript
       # PRINTS them (a reference, never structurally expanded), so neither sees a
       # key added to or removed from a schema. #3883 removed three authorable keys
@@ -690,7 +690,7 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
-      # Same surface, the other axis: api-surface.json records that an export
+      # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers
       # to replace a local declaration with the spec import, which for those four
@@ -703,7 +703,7 @@ jobs:
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
 
-      # Third axis on the same surface: api-surface.json shows a name on two
+      # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
       # or TWO declarations sharing a name — the #4411 trap, where which type a
       # consumer gets depends on nothing but the import path and the copy that

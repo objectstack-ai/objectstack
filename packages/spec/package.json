@@ -178,7 +178,7 @@
     "README.md",
     "src/**/*.zod.ts",
     "CHANGELOG.md",
-    "api-surface.json",
+    "api-surface",
     "spec-changes.json"
   ],
   "scripts": {

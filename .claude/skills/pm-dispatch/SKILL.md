@@ -1385,9 +1385,10 @@ file-disjoint;它管不到**先后两单都碰 `packages/spec` 生成物**的情
 
 ```
 packages/spec/spec-changes.json
-packages/spec/authorable-surface.json
-packages/spec/json-schema.manifest.json
-packages/spec/api-surface.json
+packages/spec/authorable-surface/**
+packages/spec/authorable-surface.base.json
+packages/spec/json-schema.manifest/**
+packages/spec/api-surface/**
 packages/spec/api-surface-signatures.json
 docs/protocol-upgrade-guide.md
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md
@@ -1423,7 +1424,7 @@ content/docs/references/**
 
 > 断言 `pnpm --filter @objectstack/spec check:authorable-surface` **绿**即可。锚点
 > authenticity 的定义是两件事:`baseRev` 是 `origin/main` 的**祖先**,且它记录的 keys
-> 与**该 commit** 的 `authorable-surface.json` 逐行一致(`verifyCommittedSurfaceBase`
+> 与**该 commit** 的 authorable surface 逐行一致(`verifyCommittedSurfaceBase`
 > 就查这两条)。`baseRev` **允许滞后** —— `gen:schema` 只在 keys 真的漂移时才重写它
 > (在 `main` 上 merge base 就是 HEAD,该文件**必然**落后自己的 surface 一个 PR),
 > 滞后只打一行 `ℹ️`,不是错误。⛔ 禁止为了凑「相等」手改锚点文件 —— 那正是 #4650
