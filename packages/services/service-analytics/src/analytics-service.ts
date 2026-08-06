@@ -81,6 +81,31 @@ type AnalyticsResultWithDrill = AnalyticsResult & {
 };
 
 /**
+ * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
+ * already classify it?
+ *
+ * The structural fact, read exactly as `rest-server.ts`'s
+ * `/analytics/dataset/query` catch reads it (`envelopeStatus`/`envelopeCode`):
+ * a numeric `status` plus a non-empty string `code`. Deliberately the SAME
+ * predicate rather than a second dialect of "looks enveloped" — a producer that
+ * ships half an envelope has a bug of its own and must be found, not guessed at
+ * from either end of the wire.
+ *
+ * Status RANGE is deliberately not part of it. The 4xx case is the loud one
+ * (#5717's own: a `DATASET_INVALID` / 400 refusal must reach the caller as a
+ * 400, never as an empty grid), but a DECLARED 5xx — `read-scope-sql.ts`'s
+ * `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed refusals — is if anything worse
+ * to swallow: an RLS lowering that failed closed, rendered as a confident empty
+ * chart, is a server fault nobody is told about. Either way the producer has
+ * ANSWERED the classification question, and {@link isMissingSourceError} — a
+ * heuristic over DRIVER phrasing — has no business re-opening it.
+ */
+function hasDeclaredErrorEnvelope(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null | undefined;
+  return typeof e?.status === 'number' && typeof e?.code === 'string' && e.code.length > 0;
+}
+
+/**
  * Detect the "backing object/table isn't present in this kernel" class of
  * error so a dataset query can degrade to an empty result instead of failing
  * the widget with a 500. Matches the missing-relation signatures across the
@@ -88,12 +113,43 @@ type AnalyticsResultWithDrill = AnalyticsResult & {
  * framework's own unknown-object signal. Deliberately scoped to MISSING SOURCE
  * (table/object/relation) — not column/syntax errors, which stay hard failures
  * so real query bugs still surface.
+ *
+ * ⚠️ It is a heuristic over driver PHRASING, so it is the SECOND question the
+ * degradation path asks, never the first: {@link hasDeclaredErrorEnvelope} runs
+ * ahead of it (#5717), and only an error whose producer declared nothing is
+ * classified by its words here.
+ *
+ * [#5717] The postgres limb is ANCHORED to postgres's actual wording
+ * (`relation "x" does not exist`, relation name quoted or bare) instead of the
+ * `includes('relation') && includes('does not exist')` conjunction it used to
+ * be. That conjunction matched any sentence carrying both words — including
+ * `dataset-compiler.ts`'s `… includes relationship "R" which does not exist on
+ * object "O"`, where the "relation" is inside "relationship" and the missing
+ * thing is a RELATIONSHIP, not a table. The anchor is the same pattern the
+ * sibling {@link missingSourceRelation} already uses for postgres (and the same
+ * shape as `metadata/src/utils/schema-sync-errors.ts`), so "is something
+ * missing" and "what is missing" can no longer disagree on this limb.
+ *
+ * MEASURED over the wordings this repo actually carries — 13 strings: the three
+ * driver families' phrasings (including sql-prefixed and schema-qualified
+ * forms), the framework's not-registered signals, and this package's own
+ * refusals — exactly ONE verdict moves, the compiler refusal above. No driver
+ * wording changes, which is what makes this a narrowing rather than a
+ * behaviour change for #5033's leniency.
+ *
+ * Known residue, filed as #6035 rather than widened into here: postgres spells
+ * a missing COLUMN on the write path as `column "c" of relation "t" does not
+ * exist`, which carries a whole missing-relation phrase inside it and so is a
+ * hit both before and after this anchor. Dormant on a read-only face (a SELECT
+ * says `column "c" does not exist`, no `relation`), but it is the one case
+ * where this predicate is still wider than the paragraph above it.
  */
 function isMissingSourceError(err: unknown): boolean {
-  const msg = String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();
+  const raw = String((err as { message?: unknown })?.message ?? err ?? '');
+  const msg = raw.toLowerCase();
   return (
     msg.includes('no such table') ||      // sqlite / libsql
-    (msg.includes('relation') && msg.includes('does not exist')) || // postgres
+    /relation\s+[`"']?[A-Za-z0-9_$.]+[`"']?\s+does not exist/i.test(raw) || // postgres
     msg.includes("doesn't exist") ||      // mysql ("table ... doesn't exist")
     msg.includes('not registered') ||     // framework: object not in registry
     msg.includes('unknown object') ||
@@ -789,10 +845,22 @@ export class AnalyticsService implements IAnalyticsService {
     // wearing a new cause: the base table is right there, and the widget would keep
     // rendering the confident `0` this issue is about. So triage by WHICH relation
     // the driver named, and let a cross-datasource dataset fail loudly.
+    //
+    // #5717 — and the leniency is scoped to errors NOBODY classified. The
+    // triage below reads message text, so before it runs, an error that carries
+    // an ADR-0112 envelope is re-thrown untouched: its producer already said
+    // what it is, and a `DATASET_INVALID` / 400 turned into `{rows: []}` is the
+    // #5033 symptom wearing the opposite disguise — the caller's own mistake
+    // reported as "no data", with no exception, no 4xx, no 5xx, just a warn and
+    // a confident empty chart. See {@link hasDeclaredErrorEnvelope}.
     let result: AnalyticsResult;
     try {
       result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
+      // The producer answered the classification question — the route's
+      // envelope reader serves it (4xx as itself, declared 5xx through the
+      // `ANALYTICS_QUERY_FAILED` path). Nothing here may re-judge it by wording.
+      if (hasDeclaredErrorEnvelope(err)) throw err;
       if (isMissingSourceError(err)) {
         const missing = missingSourceRelation(err);
         const detail = String((err as Error)?.message ?? err);
