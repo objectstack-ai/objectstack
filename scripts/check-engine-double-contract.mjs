@@ -76,10 +76,12 @@
 //               print OK while checking nothing -- the #4868 family, where a
 //               check runs, is green, and structurally cannot reach its subject.
 //   PINNED      every discovered engine double's verb routes through that
-//               slice's `assert…Dispatch` / `resolve…Dispatch` from
-//               `@objectstack/objectql` -- the predicate the real
-//               `ObjectQL.<verb>` itself uses -- or its file carries a measured
-//               baseline entry for that verb.
+//               slice's `assert…Dispatch` / `resolve…Dispatch` -- the predicate
+//               the real `ObjectQL.<verb>` itself uses, importable from
+//               `@objectstack/metadata-core` (where it lives since #5619) or
+//               from `@objectstack/objectql` (which re-exports it from the
+//               original path) -- or its file carries a measured baseline entry
+//               for that verb.
 //   RECONCILED  in both directions. A baseline entry for a file with no
 //               unguarded doubles left, for a file that no longer exists, or
 //               whose count is now lower, is an error. A ratchet that can only
@@ -130,15 +132,41 @@ const SCAN_ROOTS = ['packages', 'examples'];
  *
  * `symbols` is the pair the producer exports (`assert…` throws, `resolve…`
  * classifies -- a double may legitimately use either), and `modules` is where
- * they may come from: the public export, or objectql's own relative path for
- * objectql's own tests.
+ * they may come from.
+ *
+ * ## Why `modules` names TWO packages and not one (#5619)
+ *
+ * The predicates were written in `packages/objectql/src/` and MOVED to
+ * `@objectstack/metadata-core` by #5619 -- the implementation lives there now,
+ * and `@objectstack/objectql` re-exports every symbol from the original paths.
+ * Both spellings therefore reach the SAME function, which is the only property
+ * this list has ever been about: a double that imports the producer's decision
+ * cannot be looser than the producer, whichever door it came through.
+ *
+ * The move was not cosmetic. `@objectstack/objectql` DEPENDS ON
+ * `@objectstack/metadata-protocol`, so that package's thirteen fake engines
+ * could not import from `@objectstack/objectql` at all -- turbo 2.10.7 rejects
+ * the resulting task graph outright ("Circular package dependency detected") --
+ * and all 26 of their (file, verb) pairs sat in the ledger for that one
+ * structural reason. Sinking the predicate into a package both sides already
+ * depend on is the route the EXEMPT entry for
+ * `packages/spec/src/contracts/data-engine.test.ts` names, and #5619 took it.
+ *
+ * Note what this does NOT relax: `@objectstack/spec` stays unpinnable in
+ * principle, because `metadata-core` depends on `spec` -- the import would
+ * invert that edge exactly as it inverted `objectql -> spec`. That entry's
+ * EXEMPT reasoning survives the move unchanged.
  */
 const SLICES = [
   {
     verb: 'delete',
     producer: 'ObjectQL.delete',
     symbols: new Set(['assertEngineDeleteDispatch', 'resolveEngineDeleteDispatch']),
-    modules: [/^@objectstack\/objectql$/, /engine-delete-dispatch(\.js)?$/],
+    modules: [
+      /^@objectstack\/objectql$/,
+      /^@objectstack\/metadata-core$/,
+      /engine-delete-dispatch(\.js)?$/,
+    ],
     pinCall: 'assertEngineDeleteDispatch(options)',
     origin: '#4434',
   },
@@ -146,7 +174,11 @@ const SLICES = [
     verb: 'update',
     producer: 'ObjectQL.update',
     symbols: new Set(['assertEngineUpdateDispatch', 'resolveEngineUpdateDispatch']),
-    modules: [/^@objectstack\/objectql$/, /engine-update-dispatch(\.js)?$/],
+    modules: [
+      /^@objectstack\/objectql$/,
+      /^@objectstack\/metadata-core$/,
+      /engine-update-dispatch(\.js)?$/,
+    ],
     pinCall: 'assertEngineUpdateDispatch(data, options)',
     origin: '#5480',
   },
@@ -533,8 +565,12 @@ function audit() {
             + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
             + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
             + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
-            + "'@objectstack/objectql' (add it as a devDependency if the package lacks it), or add a "
-            + 'MEASURED entry to scripts/engine-double-contract.baseline.json saying why not — with '
+            + "'@objectstack/metadata-core' (where the predicate lives since #5619) or from "
+            + "'@objectstack/objectql' (which re-exports it) — add whichever you pick as a "
+            + 'devDependency if the package lacks it, and prefer metadata-core when '
+            + '@objectstack/objectql DEPENDS ON the package you are pinning, since that reverse edge '
+            + 'is a cycle turbo refuses. Or add a MEASURED entry to '
+            + 'scripts/engine-double-contract.baseline.json saying why not — with '
             + `"verb": ${JSON.stringify(slice.verb)}.`,
         );
         continue;
