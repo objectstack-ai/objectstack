@@ -34,15 +34,31 @@
 //
 // ## Invariants
 //
-//   DISCOVERED  at least one driver package was found. Zero is not an empty
-//               matrix, it is a broken run: the other three invariants iterate
-//               the discovered set, so they all pass vacuously and this script
+//   DISCOVERED  at least one driver package was found, AND every entry under
+//               DRIVERS_DIR was accounted for. Zero is not an empty matrix, it
+//               is a broken run: the other three invariants iterate the
+//               discovered set, so they all pass vacuously and this script
 //               prints OK while checking nothing. The case-set axis cannot fail
 //               this way -- CASE_SETS is a declared expectation, so a vanished
 //               `spec/src/data` fails CLASSIFIED's reverse direction -- but the
 //               driver axis is disk-discovery with nothing declared to
 //               reconcile against, and RECONCILED's reverse direction walks
 //               LEDGER, which is empty in the intended steady state.
+//
+//               The zero floor is only half of that, which is what #4932 adds:
+//               it fires when the WHOLE axis evaporates and is silent when ONE
+//               row does. Rename `driver-sql/` to `sql/` and the package still
+//               builds, still tests, still ships -- only this gate loses it, and
+//               loses it as a matrix with one fewer row and a green verdict. So
+//               the discovery is TOTAL: every entry under DRIVERS_DIR is either a
+//               discovered driver, a non-directory, or a named error
+//               (`discoverDrivers` reports `unnamed` / `manifestless`; nothing is
+//               filtered away in silence). Note which half of that the ledger
+//               covers today and why it cannot be relied on: a vanished driver
+//               that HOLDS a ledger entry does fail RECONCILED, but only while
+//               the ledger is non-empty -- and an empty ledger is the intended
+//               steady state, so that catch is a coincidence of the current
+//               FILTER_TEXT rows, not a mechanism.
 //   CONSUMED    every (driver x case-set) cell is either covered -- some file
 //               under the package's `src/` imports the case-set's marker export
 //               from `@objectstack/spec/data` -- or carries a DEBT/EXEMPT entry
@@ -88,6 +104,12 @@
 // during a walk means the corpus was only partly read, and partial evidence of
 // coverage is exactly the wrong thing to resolve in coverage's favour.
 // Deliberately no whitelist and no optional-root flag — see `assertRootsResolvable`.
+//
+// One swallow outlived that pass: `discoverDrivers`'s manifest probe was
+// `try { ... } catch { return false; }`, so ANY error reading a candidate's
+// package.json — not merely its absence — answered "then it is not a driver" and
+// removed the row. #4932 narrowed it to ENOENT, which is the only errno that
+// actually answers the question the filter asks.
 
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -419,22 +441,54 @@ function assertRootsResolvable(roots) {
  */
 const listDir = (dir) => readdirSync(dir);
 
-/** Driver packages, from disk — never a hardcoded list. */
-function discoverDrivers() {
-  return listDir(DRIVERS_DIR)
-    .filter((name) => name.startsWith('driver-'))
-    .filter((name) => {
-      try {
-        return statSync(join(DRIVERS_DIR, name, 'package.json')).isFile();
-      } catch {
-        return false;
-      }
-    })
-    .sort();
+/**
+ * Driver packages, from disk — never a hardcoded list.
+ *
+ * Reports the two kinds of entry the filters would otherwise drop in SILENCE
+ * alongside the drivers, because "not discovered" and "not a driver" are
+ * different facts (#4932):
+ *
+ *   unnamed       a real package (it has a package.json) whose directory does not
+ *                 carry the `driver-` prefix. This is the evaporation the zero
+ *                 floor cannot see: rename `driver-sql/` to `sql/` and the row
+ *                 leaves the matrix while pnpm, turbo and its own suite carry on
+ *                 as before, so this gate is the only place it shows up — and it
+ *                 showed up as nothing at all.
+ *   manifestless  a `driver-`-prefixed directory with no package.json. Either the
+ *                 manifest is missing (a broken package, not a covered one) or the
+ *                 directory should not wear the prefix. Both are decisions to
+ *                 make, not states to skip past.
+ *
+ * @param {string} [dir] scan root; parameterised so the self-test drives the real
+ *   function over a synthetic tree instead of a re-implementation of it.
+ */
+function discoverDrivers(dir = DRIVERS_DIR) {
+  const drivers = [];
+  const unnamed = [];
+  const manifestless = [];
+  for (const name of listDir(dir).sort()) {
+    // Not caught: failing to stat an entry `readdirSync` just returned is a read
+    // failure, and a read failure must not be answered "then it is not a driver".
+    if (!statSync(join(dir, name)).isDirectory()) continue;
+    let hasManifest = false;
+    try {
+      hasManifest = statSync(join(dir, name, 'package.json')).isFile();
+    } catch (err) {
+      // ENOENT is this filter's question, answered: there is no manifest here.
+      // Any other errno means the entry could not be READ, which is the swallow
+      // #4930 removed from `listDir` and #4932 removes from here — a measurement
+      // failure resolved in coverage's favour.
+      if (err?.code !== 'ENOENT') throw err;
+    }
+    if (name.startsWith('driver-')) (hasManifest ? drivers : manifestless).push(name);
+    else if (hasManifest) unnamed.push(name);
+  }
+  return { drivers, unnamed, manifestless };
 }
 
 /**
- * DISCOVERED — the errors for a discovery that found nothing.
+ * DISCOVERED — the errors for a discovery that found nothing, or that found
+ * something it would have dropped without saying so.
  *
  * Split out from `audit()` so the self-test can drive the invariant itself
  * rather than a proxy for it. The previous guard lived only in the self-test
@@ -443,15 +497,46 @@ function discoverDrivers() {
  * drivers come from disk and are never listed. Both would have needed editing
  * the next time a driver is added or the packages move, which is exactly when
  * the guard matters.
+ *
+ * The zero floor (#4363) is only half of non-vacuity, which is what #4932 is
+ * about: it fires when the whole axis evaporates and is silent when ONE row
+ * does. A single missing row is caught today only when that driver happens to
+ * hold a ledger entry (RECONCILED's reverse direction) — and the ledger is empty
+ * in the intended steady state, as it was between #5590 and #5701. So the
+ * discovery is TOTAL instead: every entry under DRIVERS_DIR is a discovered
+ * driver, a non-directory, or a named error here.
+ *
+ * @param {{drivers: string[], unnamed?: string[], manifestless?: string[]}} discovery
  */
-function discoveredErrors(drivers) {
-  if (drivers.length) return [];
-  return [
-    `DISCOVERED: no driver package found under ${DRIVERS_DIR.slice(ROOT.length + 1)}/. `
-      + 'Either these packages moved and DRIVERS_DIR is stale, or they are gone. '
-      + 'Every other invariant iterates the discovered set, so a zero-driver run '
-      + 'reports OK having checked nothing — it fails here instead.',
-  ];
+function discoveredErrors({ drivers, unnamed = [], manifestless = [] }) {
+  const errors = [];
+  const rel = DRIVERS_DIR.slice(ROOT.length + 1);
+  if (!drivers.length) {
+    errors.push(
+      `DISCOVERED: no driver package found under ${rel}/. `
+        + 'Either these packages moved and DRIVERS_DIR is stale, or they are gone. '
+        + 'Every other invariant iterates the discovered set, so a zero-driver run '
+        + 'reports OK having checked nothing — it fails here instead.',
+    );
+  }
+  for (const name of unnamed) {
+    errors.push(
+      `DISCOVERED: ${rel}/${name} is a package (it has a package.json) but is not named `
+        + '`driver-*`, so discovery drops it and the matrix is one row short without saying so. '
+        + 'Name it `driver-<backend>` if it implements IDataDriver, or move it out of this directory '
+        + 'if it does not. Nothing else reports this: the driver axis is discovered from disk, and a '
+        + 'renamed package keeps building and testing exactly as before (#4932).',
+    );
+  }
+  for (const name of manifestless) {
+    errors.push(
+      `DISCOVERED: ${rel}/${name} is named like a driver package but has no package.json, so `
+        + 'discovery drops it. Either the manifest is missing — a broken package, which is not the '
+        + 'same as a covered one — or the directory should not carry the `driver-` prefix. Both are '
+        + 'decisions to record rather than states to skip past (#4932).',
+    );
+  }
+  return errors;
 }
 
 /** Every `*-conformance.ts` under spec/src/data, and the case-set exports in it. */
@@ -523,12 +608,14 @@ function audit() {
   // that names the directory rather than the five downstream symptoms (#4930).
   assertRootsResolvable([DRIVERS_DIR, CASE_SETS_DIR]);
 
-  const drivers = discoverDrivers();
+  const discovery = discoverDrivers();
+  const { drivers } = discovery;
   const errors = [];
   const rows = [];
 
-  // DISCOVERED — the precondition the other three iterate over.
-  errors.push(...discoveredErrors(drivers));
+  // DISCOVERED — the precondition the other three iterate over. Zero drivers is a
+  // broken run, and so is one driver silently missing from the axis (#4932).
+  errors.push(...discoveredErrors(discovery));
 
   // CLASSIFIED — both directions between CASE_SETS and the files on disk.
   const onDisk = discoverCaseSets();
@@ -708,9 +795,63 @@ function selfTest() {
   // DISCOVERED: the invariant itself, in both directions, then against the
   // real tree. No driver name or count is asserted — the point of the gate is
   // that the set comes from disk.
-  expect('a discovery that found nothing is an error', discoveredErrors([]).length === 1);
-  expect('a discovery that found something is not', discoveredErrors(['driver-anything']).length === 0);
-  expect('discovers driver packages from disk', discoverDrivers().length > 0);
+  expect('a discovery that found nothing is an error', discoveredErrors({ drivers: [] }).length === 1);
+  expect('a discovery that found something is not', discoveredErrors({ drivers: ['driver-anything'] }).length === 0);
+  expect('discovers driver packages from disk', discoverDrivers().drivers.length > 0);
+
+  // ...and the half the zero floor cannot see (#4932): a row dropped in silence
+  // while the axis stays non-empty. Both drop shapes are errors even though a
+  // driver WAS found, because "one fewer row, still green" is the failure.
+  expect(
+    'a package the `driver-` filter would drop is an error, not a smaller matrix',
+    discoveredErrors({ drivers: ['driver-a'], unnamed: ['sql'] }).length === 1,
+  );
+  expect(
+    'the error names the dropped package',
+    /packages\/drivers\/sql is a package/.test(discoveredErrors({ drivers: ['driver-a'], unnamed: ['sql'] })[0]),
+  );
+  expect(
+    'a driver-named directory with no manifest is an error too',
+    discoveredErrors({ drivers: ['driver-a'], manifestless: ['driver-b'] }).length === 1,
+  );
+
+  // The classification itself, driven over a synthetic tree by the real function
+  // (the alternative — asserting against the live packages/drivers — can only
+  // ever observe the clean case, which is the case that never fails).
+  const tmpDrivers = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-discovery');
+  try {
+    mkdirSync(join(tmpDrivers, 'driver-a'), { recursive: true });
+    writeFileSync(join(tmpDrivers, 'driver-a', 'package.json'), '{}\n');
+    mkdirSync(join(tmpDrivers, 'sql'), { recursive: true });          // a package, misnamed
+    writeFileSync(join(tmpDrivers, 'sql', 'package.json'), '{}\n');
+    mkdirSync(join(tmpDrivers, 'driver-b'), { recursive: true });     // named, no manifest
+    writeFileSync(join(tmpDrivers, 'README.md'), 'not a package\n');  // not a directory
+    const found = discoverDrivers(tmpDrivers);
+    expect('a manifested driver- package is discovered', found.drivers.join(',') === 'driver-a');
+    expect('a manifested package with the wrong name is reported', found.unnamed.join(',') === 'sql');
+    expect('a driver- directory without a manifest is reported', found.manifestless.join(',') === 'driver-b');
+
+    // An entry the discovery cannot stat is a read failure, not an answer — the
+    // same direction as the walkTs case below, at the axis level.
+    symlinkSync(join(tmpDrivers, 'no-such-target'), join(tmpDrivers, 'driver-dangling'));
+    let danglingErr = null;
+    try { discoverDrivers(tmpDrivers); } catch (err) { danglingErr = err; }
+    expect('an entry discovery cannot stat is an error, not a smaller axis', danglingErr?.code === 'ENOENT');
+    rmSync(join(tmpDrivers, 'driver-dangling'));
+
+    // ...and removing the break restores the previous verdict, so the red above
+    // was caused by the dangling entry and nothing else.
+    expect('removing the break restores the discovery', discoverDrivers(tmpDrivers).drivers.join(',') === 'driver-a');
+  } finally {
+    rmSync(tmpDrivers, { recursive: true, force: true });
+  }
+
+  // The real tree is clean on both drop shapes — the assertion is wired in, not
+  // merely defined, and today's packages/drivers has nothing being skipped.
+  const real = discoverDrivers();
+  expect('no live driver package is dropped by the name filter', real.unnamed.length === 0);
+  expect('no live driver directory is missing its manifest', real.manifestless.length === 0);
+  expect('the live discovery raises no DISCOVERED error', discoveredErrors(real).length === 0);
 
   // --- Reverse proof for the dead-root hard error (#4930), made permanent. ---
   // Everything above ran over roots that resolve, which proves nothing about a
@@ -771,8 +912,9 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, and holds the '
-      + 'dead-root hard error (red when a scan root is renamed, green when restored).',
+    'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, accounts for '
+      + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), and '
+      + 'holds the dead-root hard error (red when a scan root is renamed, green when restored).',
   );
 }
 
