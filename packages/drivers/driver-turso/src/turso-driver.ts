@@ -235,6 +235,20 @@ export class TursoDriver extends SqlDriver {
    */
   private remoteTransport: RemoteTransport | null = null;
 
+  /**
+   * Objects whose physical table THIS driver created through the remote
+   * transport — the remote-mode answer to the one question
+   * {@link SqlDriver.paginationTieBreaker} asks.
+   *
+   * Local mode records that fact inside `SqlDriver.initObjects`, in
+   * `managedObjectFields`. Remote DDL never reaches that method (it goes out
+   * over `@libsql/client` — see {@link initObjects}), so the base map stays
+   * empty however many tables the transport has created, and the inherited
+   * rule reading an empty map would answer "not mine" for every object in
+   * remote mode. Same question, same answer, different place to look it up.
+   */
+  private readonly remoteManagedObjects = new Set<string>();
+
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
@@ -483,12 +497,12 @@ export class TursoDriver extends SqlDriver {
   // ===================================
 
   override async find(object: string, query: any, options?: any): Promise<any[]> {
-    if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteQuery(object, query)));
+    if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
     return super.find(object, query, options);
   }
 
   override async findOne(object: string, query: any, options?: any): Promise<any> {
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteQuery(object, query)));
+    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
     return super.findOne(object, query, options);
   }
 
@@ -709,6 +723,78 @@ export class TursoDriver extends SqlDriver {
     return { ...query, where: this.toRemoteFilter(object, query.where) };
   }
 
+  /**
+   * A READ query as the remote transport should receive it: the caller's
+   * `where` compiled through {@link toRemoteQuery}, and the complete ORDER BY
+   * the deterministic-paging contract asks for (`IDataDriver.find`,
+   * objectstack#4363) already resolved into `orderBy`.
+   *
+   * The order comes from the inherited {@link SqlDriver.orderKeysFor} — the
+   * same method local mode calls, not a second copy of its three-state table —
+   * so the two transports of this ONE driver cannot answer the same paged
+   * query with different ordering guarantees when only the URL differs. That
+   * split is the seam ADR-0053 D-A1 exists to close, and it was open here:
+   * `RemoteTransport.buildSelectSQL` mapped the caller's `orderBy` verbatim and
+   * appended no unique column, so `ORDER BY status LIMIT 50 OFFSET 50` served
+   * its ties in whatever arrangement the plan chose — one row twice, another
+   * never, several screens apart (#5653). `RemoteTransport` keeps its job:
+   * assemble SQL for the query it is handed.
+   *
+   * Deriving it HERE rather than inside `buildSelectSQL` is also what keeps
+   * `findOne` correct. The transport spells an id lookup as
+   * `find(object, { ...query, limit: 1 })`, so by the time the SQL is built a
+   * `findOne` is indistinguishable from "page one of a walk with page size 1"
+   * — and the two want opposite things: `ORDER BY id LIMIT 1` is the shape
+   * that makes a planner abandon the predicate's own index and walk the
+   * primary key instead (~100× on the measurement recorded in
+   * `SqlDriver.findRows`), and `findOne` promises *a* matching record, never a
+   * position in a sequence. Up here the two callers are still distinguishable,
+   * and `singleRowLookup` is how they say so — exactly as they do locally.
+   *
+   * `orderKeysFor` returns `[]` for the third row of its table — an unpaged
+   * read with no `orderBy` (#4363's deliberate carve-out) — and an empty
+   * `orderBy` makes `buildSelectSQL` emit no ORDER BY clause at all, i.e. the
+   * same statement it emitted before this method existed.
+   */
+  private toRemoteReadQuery(
+    object: string,
+    query: any,
+    opts?: { singleRowLookup?: boolean },
+  ): any {
+    if (!query || typeof query !== 'object') return query;
+    const orderBy = this.orderKeysFor(object, query, opts).map((key) => ({
+      field: key.field,
+      order: key.direction,
+    }));
+    return this.toRemoteQuery(object, { ...query, orderBy });
+  }
+
+  /**
+   * The unique column a paged read can be made deterministic with (#4363),
+   * answered for remote mode.
+   *
+   * The RULE is not restated here: {@link SqlDriver.orderKeysFor} still decides
+   * *when* a tie-breaker is appended and in which direction, and remote reads
+   * go through it (see {@link toRemoteReadQuery}). What is remote-specific is
+   * the single FACT that rule needs — did this driver create the table, and
+   * does it therefore carry an `id` primary key?
+   * `RemoteTransport.buildCreateTableSQL` opens every table it creates with
+   * `"id" TEXT PRIMARY KEY`, so for anything this driver synced the answer is
+   * yes; it is simply recorded in {@link remoteManagedObjects}, because the
+   * base class's `managedObjectFields` is filled by `SqlDriver.initObjects`
+   * and remote DDL never calls it.
+   *
+   * The base method's conservatism is kept deliberately for everything else: a
+   * table this driver did not create still gets `null` and no invented ORDER
+   * BY. An `id` column that is not there fails the whole statement, and
+   * guessing on a federated table (ADR-0015) would trade a reshuffle among
+   * ties for the loss of the caller's entire result.
+   */
+  protected override paginationTieBreaker(object: string): string | null {
+    if (!this.isRemote) return super.paginationTieBreaker(object);
+    return this.remoteManagedObjects.has(object) ? 'id' : null;
+  }
+
   /** Apply the inherited read-coercion to a single remote row (in place). */
   private formatRemoteRow<T>(object: string, row: T): T {
     if (row && typeof row === 'object') this.formatOutput(object, row as any);
@@ -731,8 +817,15 @@ export class TursoDriver extends SqlDriver {
    * canonical logic, so the two can never drift. A managed object is its own
    * physical table, so the default `remoteName === name` mapping is a no-op for
    * the RemoteTransport SQL (which addresses tables by object name directly).
+   *
+   * It also records the object as one whose table this driver created, which is
+   * the whole input to {@link paginationTieBreaker} in remote mode. That goes
+   * FIRST and outside the `try`: both callers reach here only after the DDL has
+   * already succeeded, so the table exists with its `id` primary key whether or
+   * not the best-effort coercion registration below does.
    */
   private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any> }): void {
+    this.remoteManagedObjects.add(obj.name);
     try {
       this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: (obj as any).tenancy });
     } catch {
