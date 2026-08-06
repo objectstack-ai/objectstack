@@ -23,14 +23,25 @@ The create-form subset is not an arbitrary pick; it is *derivable* from signals 
 | `readonly` / formula / rollup / autonumber / system-stamped | **never** on create (you can't set it) |
 | `defaultValue` present | **can be omitted** from create (it self-fills) |
 | `hidden` | off everywhere by default |
-| `group` | which section the field belongs to (semantic, travels with the model) |
+| `group` | which section the field belongs to (semantic, travels with the model — and only once that group is **declared** in `fieldGroups`; see §2) |
 | *declaration order* | the order you write fields in **is** the default order everywhere — there is no `field.order` |
 
 So a sensible create form is: *editable, required-or-core fields, in declaration order* — and it **falls out** of the object. This is ADR-0047's guardrail: **omission is correct** — emit nothing extra and you still get a complete, correct form.
 
-### 2. The default (edit) form derives from `field.group`
+### 2. The default (edit) form derives from `field.group` — as authorized by `fieldGroups`
 
-The full edit form materialises each `field.group` into a section. You can omit it entirely and let the platform derive an equivalent grouped form. When you do write it, list fields as **bare strings** so each one inherits its type / validation / FLS / default from the object — the form carries layout only, never data semantics.
+`field.group` on its own does not create a section. The **authorization source is the object's `fieldGroups` declaration**: `deriveFieldGroupLayout` (ADR-0085 §5) — the single derivation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`.
+
+- An **undeclared** `group` renders **exactly like no `group` at all**: the field drops into a trailing untitled bucket.
+- Declare **no** `fieldGroups` at all and grouping does not apply — the derivation yields nothing and you get a flat form.
+- Either way, `os lint` (and `os build` / `os validate`) reports every unmatched reference as **`field-group-undeclared`**.
+
+So tag the fields **and** declare the groups — [`contact.object.ts`](#runnable-example) does both. With both halves present, the full edit form materialises each declared group into a section, and you can omit the `form` view entirely and let the platform derive the grouped form. Two ways the derived form still differs from the hand-written one below:
+
+- fields the platform injects and you never grouped (`owner_id`, under `sharingModel: 'private'`) surface in that trailing untitled section;
+- `columns` is a **form-view** knob, and the group declaration has no column count to give — a derived section carries only `key` / `label` / `icon` / `description` / `collapse` and its member fields — so a hand-written `columns: 2` is not part of what derivation gives back.
+
+When you do write the form, list fields as **bare strings** so each one inherits its type / validation / FLS / default from the object — the form carries layout only, never data semantics.
 
 ### 3. Hand-shape the create form *only when layout or flow diverges*
 
@@ -50,7 +61,8 @@ export const ContactViews = defineView({
     addRecord: { enabled: true, mode: 'form', formView: 'create' },
   },
 
-  // Full edit form — grouped by field.group; bare strings inherit field defs.
+  // Full edit form — one section per group DECLARED in the object's
+  // `fieldGroups`; bare strings inherit field defs.
   form: {
     type: 'simple', data,
     sections: [
@@ -102,7 +114,7 @@ Rule of thumb: **"different field subset" → derive. "different layout or flow"
 
 ## Runnable example
 
-- Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — flat, grouped, intent-tagged field set.
+- Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — flat, intent-tagged field set, with the four `fieldGroups` its `group` tags point at.
 - Views: [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — full edit form + sparse `formViews.create` + `addRecord` binding.
 
 ## Anti-patterns
