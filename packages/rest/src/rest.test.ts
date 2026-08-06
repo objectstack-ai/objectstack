@@ -3375,9 +3375,9 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     const rest: any = new RestServer(
       createMockServer() as any,
       protocol,
-      // The widget gate lives on the uncached read; the cached branch does not
-      // run it at all (pre-existing, filed separately), so this pins the gate
-      // where it exists.
+      // The widget gate lives on the uncached read; the cached branch — which
+      // is the DEFAULT — does not run it at all (pre-existing and unrelated to
+      // #5563, filed as #5881), so this pins the gate where it exists.
       { api: { requireAuth: false }, metadata: { enableCache: false } } as any,
     );
     rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });

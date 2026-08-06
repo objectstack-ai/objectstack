@@ -4161,8 +4161,8 @@ export class RestServer {
                         // convergence deliberately stops at the ordinary read.
                         // What remains is a spec gap, not a runtime split: the
                         // route declares ONE `responseSchema` while `?layers=`
-                        // answers a second, undeclared shape. Filed for a spec
-                        // seat (⛔ this PR touches no `packages/spec`).
+                        // answers a second, undeclared shape — filed as #5882
+                        // for a spec seat.
                         const wantLayered = req.query?.layers !== undefined && req.query?.layers !== '';
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
                             // ADR-0048 — thread `?package=` so the layered (Studio
