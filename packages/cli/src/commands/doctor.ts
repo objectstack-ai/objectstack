@@ -160,6 +160,70 @@ export function doctorNodeEnv(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * Say out loud that `NODE_ENV` is unset — and that the whole stack is therefore
+ * treating this environment as **production** (#5673).
+ *
+ * `undefined` when the variable is set, so a configured environment gets no row
+ * at all. That is the same shape the tenancy-posture finding has: a value doctor
+ * is happy with is not a finding, and doctor's output for every explicitly
+ * configured environment is unchanged by this addition.
+ *
+ * ── Why the unset case deserves a row ────────────────────────────────────
+ *
+ * `production` is the conservative default and, since #5673, every reader
+ * agrees on it: `os start` forces `NODE_ENV='production'` when unset
+ * (`start.ts:248`), `os serve` resolves its `.env*` cascade for
+ * `NODE_ENV || 'production'` (`serve.ts:532-533`), {@link doctorNodeEnv} is the
+ * same expression, and the `/discovery` `environment` field now advertises
+ * `production` too (`packages/runtime/src/http-dispatcher.ts`).
+ *
+ * Agreement is what makes the default SAFE. It is not what makes it VISIBLE.
+ * An operator who never set the variable cannot tell an intended production
+ * deployment from an oversight, and those two want opposite follow-ups — one is
+ * finished, the other is a local shell about to be told it is production. The
+ * maintainer's 2026-08-06 ruling on #5673 asked for exactly this: the default
+ * state should be loud, not merely documented.
+ *
+ * A `warning`, never an `error`. Nothing is broken: the environment starts, and
+ * it starts in the mode this row names. `error` is what turns doctor's summary
+ * into `process.exit(1)`, and an unset `NODE_ENV` must not fail a health check.
+ *
+ * ── Deliberately NOT in `DOCTOR_ENV_INPUTS`, and not read through the overlay ─
+ *
+ * That list is for variables whose value doctor resolves through the `.env*`
+ * cascade. `NODE_ENV` is the one variable that cannot come from a file: it
+ * SELECTS the cascade (`.env.production` vs `.env.development`), so `os serve`
+ * reads it from the process before any file is loaded and a `NODE_ENV=` line
+ * inside a `.env` never reaches this decision. Attributing it to a file would
+ * report something the runtime does not do — see {@link doctorNodeEnv}'s note.
+ *
+ * "Unset" here is `!env.NODE_ENV`, character for character the condition under
+ * which {@link doctorNodeEnv} falls back to its default. The row therefore
+ * appears exactly when the default was taken, which is the only claim it makes.
+ */
+export function nodeEnvCheck(env: NodeJS.ProcessEnv = process.env): HealthCheckResult | undefined {
+  if (env.NODE_ENV) return undefined;
+
+  return {
+    name: 'NODE_ENV',
+    status: 'warning',
+    message: 'Not set — this environment is being treated as production',
+    fix:
+      'Set it explicitly so the mode is a decision rather than a default:\n'
+      + '      • production deployment → NODE_ENV=production (what `os start` already forces)\n'
+      + '      • local development     → NODE_ENV=development (what `os dev` already sets)\n'
+      + '      Unset reads as production everywhere: `os serve` and `os doctor` resolve the\n'
+      + '      `.env*` cascade for node_env=production, and the /discovery `environment` field\n'
+      + '      advertises "production" (#5673). That is the safe direction — a client asking\n'
+      + '      "am I talking to production?" is never told "development" by an omission — but\n'
+      + '      it also makes an oversight look identical to a deliberate production deployment,\n'
+      + '      and this row is the only place the difference is visible.\n'
+      + '      NODE_ENV cannot be supplied by a `.env*` file: it SELECTS which of those files\n'
+      + '      load, so it is read from the process before any of them.',
+  };
+}
+
+/**
  * Read — without loading — the `.env*` files `os serve` would load from `cwd`.
  *
  * `dotenvFlow.listFiles()` is the same function `dotenvFlow.config()` uses to
@@ -1559,6 +1623,16 @@ export default class Doctor extends Command {
     // not attributed is a verdict the operator cannot check, and after this
     // change every such verdict has four possible sources.
     results.push(environmentSourcesCheck(dotenvReading));
+
+    // #5673 — the mode the row above was resolved FOR, when nobody chose it.
+    // Placed immediately after the sources row because it answers the question
+    // that row raises: `node_env=production` appears there whether the operator
+    // set NODE_ENV or not, and only this row tells the two apart. Only the unset
+    // case produces a row; a configured environment's report is unchanged.
+    const nodeEnvFinding = nodeEnvCheck();
+    if (nodeEnvFinding) {
+      results.push(nodeEnvFinding);
+    }
 
     // #5382 — the posture verdict resolved at the top of `run()`, reported here
     // among the other environment facts. Only an unrecognized value produces a

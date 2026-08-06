@@ -1291,9 +1291,44 @@ export class HttpDispatcher {
             // `getEnv('NODE_ENV', 'development')` raw — so `NODE_ENV=test` (what
             // vitest sets) or `staging` advertised a value outside the declared
             // enum on a machine-readable surface. The mapping table and the
-            // reasoning per row live with the enum, in `@objectstack/spec/api`,
-            // so both discovery producers answer identically.
-            environment: resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'development')),
+            // reasoning per row live with the enum, in `@objectstack/spec/api`.
+            //
+            // [#5673] The DEFAULT — what this producer says when the host set no
+            // `NODE_ENV` at all — flipped from `development` to `production` per
+            // the maintainer's 2026-08-06 ruling. Two facts made the old default
+            // the wrong one:
+            //
+            //   • Every other reader of the same absence already said
+            //     `production`. `os start` forces `NODE_ENV='production'` when
+            //     unset (`packages/cli/src/commands/start.ts:248`), `os serve`
+            //     resolves its `.env*` cascade for `NODE_ENV || 'production'`
+            //     (`serve.ts:532-533`), and `os doctor` derives the identical
+            //     expression (`doctor.ts` `doctorNodeEnv()`). Discovery was the
+            //     one surface reading that absence the other way.
+            //   • `environment` is a MACHINE-READABLE field: a client reads it to
+            //     answer "am I talking to production?" and may skip production
+            //     warnings or loosen a destructive action's confirmation on the
+            //     answer. Of the two ways to be wrong here, claiming
+            //     `development` on a real production deployment whose operator
+            //     forgot the variable is the dangerous one.
+            //
+            // #4828's rule is untouched and is a DIFFERENT rule: a value that IS
+            // set but is not a spelling this repo recognises (`qa`, `preview`)
+            // still degrades to `development` inside the mapper, so nothing here
+            // ever CLAIMS production on a guess. Absence is not a guess — it is
+            // the host declining to say, and the conservative answer to that is
+            // `production`.
+            //
+            // The default is passed as `getEnv`'s second argument rather than
+            // moved into `resolveDiscoveryEnvironment` because the mapper lives
+            // in `@objectstack/spec`, which this issue's ruling put out of scope.
+            // Consequence, stated rather than hidden: the second discovery
+            // producer (`getDiscovery()` in `@objectstack/metadata-protocol`,
+            // served by `@objectstack/rest`) passes a genuinely-absent
+            // `NODE_ENV` straight into the mapper and therefore still answers
+            // `development` for the unset case. Filed as a follow-up (#5936);
+            // do not "fix" it by re-defaulting a consumer somewhere else.
+            environment: resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'production')),
             routes,
             // [#4828] `endpoints` (a verbatim duplicate of `routes`, commented
             // "Alias for backward compatibility with some clients") and the
