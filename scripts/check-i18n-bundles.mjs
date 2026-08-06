@@ -47,12 +47,40 @@
 // the two output classifiers against fixed samples, no build and no CLI. That
 // self-test exists because a gate observed only green is indistinguishable from
 // a gate that matches nothing (#4690).
+//
+// That requirement is now CHECKED, not merely declared (#5217). It used to be a
+// sentence in this header, and an unbuilt workspace paid for it twice over:
+//
+//   - `--check` reported "9 bundle problem(s) … extract failed" — one
+//     environment prerequisite rendered as nine CONTENT problems, in the two
+//     words ("bundle", "extract") that send the reader to the i18n configs;
+//   - `--write` printed "regenerated" nine times and exited **0** — a fully
+//     green run that wrote nothing at all.
+//
+// CI never sees either shape (it builds first — lint.yml's `typecheck` job runs
+// `Build workspace packages` well before `pnpm check:i18n`), which is exactly
+// why it survived: the only people who meet it are the ones reproducing a red
+// i18n CI locally, at the moment a wrong first diagnosis costs the most.
+// `checkCliBuildPrerequisite()` now answers it once, before the per-package
+// loop, and both shapes above collapse into one prerequisite plus one command.
+// "Prefer failing to falling back" (AGENTS.md, route & surface ownership §3):
+// the prerequisite verdict is a HARD failure that states it checked nothing —
+// never a skip, and never anything a reader can mistake for "bundles are fine".
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const CLI = 'packages/cli/bin/run.js';
+/**
+ * `CLI` is a SOURCE file — four lines handing off to `@oclif/core` — so it is
+ * present in an unbuilt tree and proves nothing. What the gate actually depends
+ * on is the built command surface `bin/run.js` makes oclif resolve, which is why
+ * the prerequisite probe below reads the package rather than the bin stub.
+ */
+const CLI_PKG = 'packages/cli';
+/** The one command this gate invokes per package, as oclif topic/command parts. */
+const EXTRACT_COMMAND_ID = ['i18n', 'extract'];
 const write = process.argv.includes('--write');
 const filterArg = process.argv.find((a) => a.startsWith('--filter='));
 const filter = filterArg ? filterArg.slice('--filter='.length) : '';
@@ -145,6 +173,56 @@ function collectDriftedBundles(text) {
   return [...String(text ?? '').matchAll(/(?:out of date|missing):\s+(\S+)/g)].map((m) => m[1]);
 }
 
+/**
+ * Where oclif will look for the command this gate runs, derived from the CLI
+ * package's own `oclif.commands.target` (#5217). Pure: takes the parsed
+ * package.json, returns a repo-relative path or a reason it cannot tell.
+ *
+ * Derived rather than hardcoded for the same reason the extract flags come from
+ * each config's docstring: `dist/commands` is the CLI's declaration of where its
+ * commands live, and a gate that restates it would keep probing the old path for
+ * a release after someone moves it — passing while checking nothing.
+ */
+function oclifCommandFileFor(pkgJson, commandId) {
+  const target = pkgJson?.oclif?.commands?.target ?? pkgJson?.oclif?.commands;
+  if (typeof target !== 'string' || !target) {
+    return { unknown: `${CLI_PKG}/package.json declares no oclif.commands.target` };
+  }
+  const rel = target.replace(/^\.\//, '').replace(/\/+$/, '');
+  return { file: join(CLI_PKG, rel, ...commandId.slice(0, -1), `${commandId.at(-1)}.js`) };
+}
+
+/**
+ * oclif's own "command <id> not found", which is what an unbuilt (or half-built)
+ * CLI answers with. The in-loop safety net for the prerequisite probe, and it has
+ * to survive oclif's line wrapping to be worth anything: oclif hard-wraps that
+ * one sentence across two or three ` › `-prefixed lines, and it wraps at a width
+ * that depends on the config path's length, so the real corpus contains BOTH
+ *
+ *   " ›   Error: command \n ›   i18n:extract:<path> not \n ›   found"
+ *   " ›   Error: command i18n:extract:<path-broken\n ›   -mid-token> not found"
+ *
+ * — the second one split inside the path itself. A per-line regex (the obvious
+ * first implementation, and the one that reads as correct) matches NEITHER. So
+ * the prefixes come off and the whole text is flattened before matching.
+ *
+ * Returns the matched SENTENCE (re-joined into one readable line) so the caller
+ * can quote it as evidence, or '' for no match. Returning the whole flattened
+ * text instead is a trap this returned from once in review: a stale-dist run
+ * also carries a node `Warning:` block above the error, and quoting the flattened
+ * text put that unrelated block in the report while the actual sentence sat past
+ * the truncation.
+ */
+function looksLikeMissingCliCommand(text) {
+  const flat = String(text ?? '')
+    .split('\n')
+    .map((l) => l.replace(/^\s*›\s*/, ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.match(/Error:\s*command\b.*?\bnot found\b/)?.[0] ?? '';
+}
+
 /** stderr lines that are neither the lint signature nor blank — pass them through. */
 function passthroughStderrLines(text) {
   return String(text ?? '')
@@ -225,18 +303,155 @@ function selfTest() {
   const pass = passthroughStderrLines(`${REAL_STDERR_AT_FFAB8033B_PARENT}\nnode:internal/errors: something else\n`);
   expect('#4804 passthrough keeps other stderr', pass.length === 1 && pass[0].includes('something else'), `got ${JSON.stringify(pass)}`);
 
+  // -------------------------------------------------------------------------
+  // Third classifier (#5217): the build prerequisite. Same anti-#4690 duty as
+  // the two above — a prerequisite check observed only green is indistinguishable
+  // from one that matches nothing, and this one's whole job is to fire on a
+  // machine where the gate cannot run at all.
+  // -------------------------------------------------------------------------
+
+  // Both recorded VERBATIM from `node scripts/check-i18n-bundles.mjs` in an
+  // installed-but-unbuilt worktree at 72c3c8613 — the run reproduced in #5217.
+  // oclif wraps its one-sentence error at a width that depends on the config
+  // path, so the same failure arrives in two shapes; the second breaks the path
+  // mid-token ("…/i18n" + "-extract.config.ts"). Keep both: a per-line regex
+  // passes neither, which is the implementation this corpus exists to reject.
+  const OCLIF_WRAPPED_3_LINE =
+    ' ›   Error: command \n ›   i18n:extract:packages/platform-objects/scripts/i18n-extract.config.ts not \n ›   found';
+  const OCLIF_WRAPPED_MID_TOKEN =
+    ' ›   Error: command i18n:extract:packages/plugins/plugin-approvals/scripts/i18n\n ›   -extract.config.ts not found';
+
+  expect('#5217 wrapped 3-line', !!looksLikeMissingCliCommand(OCLIF_WRAPPED_3_LINE), 'oclif line wrapping must not hide the signature');
+  expect('#5217 wrapped mid-token', !!looksLikeMissingCliCommand(OCLIF_WRAPPED_MID_TOKEN), 'a path split mid-token must still match');
+  expect(
+    '#5217 unwrapped form',
+    !!looksLikeMissingCliCommand('Error: command i18n:extract:x/y.ts not found'),
+    'the unwrapped single-line form must match too',
+  );
+  expect(
+    '#5217 flattens for the message',
+    looksLikeMissingCliCommand(OCLIF_WRAPPED_3_LINE) ===
+      'Error: command i18n:extract:packages/platform-objects/scripts/i18n-extract.config.ts not found',
+    `the evidence line must come back as one readable sentence; got ${JSON.stringify(looksLikeMissingCliCommand(OCLIF_WRAPPED_3_LINE))}`,
+  );
+
+  // Recorded verbatim from the OTHER real prerequisite scenario: `dist/` and the
+  // command file both present but the built command surface unusable (a stale or
+  // interrupted build), which the pre-loop probe cannot see and the net catches.
+  // oclif prepends a node `Warning:` block there, so this pins that the quoted
+  // evidence is the ERROR SENTENCE and not whichever noise came first.
+  const OCLIF_STALE_DIST_WITH_WARNING_NOISE =
+    '(node:13260) Warning: Error\nmodule: @oclif/core@4.13.2\ntask: findCommand (i18n:extract)\nplugin: @objectstack/cli\nroot: /repo/packages/cli\nmessage: command i18n:extract not found\nSee more details with DEBUG=*\n' +
+    ' ›   Error: command \n ›   i18n:extract:packages/platform-objects/scripts/i18n-extract.config.ts not \n ›   found';
+  expect(
+    '#5217 stale dist quotes the sentence, not the noise',
+    looksLikeMissingCliCommand(OCLIF_STALE_DIST_WITH_WARNING_NOISE) ===
+      'Error: command i18n:extract:packages/platform-objects/scripts/i18n-extract.config.ts not found',
+    `evidence must be the error sentence; got ${JSON.stringify(looksLikeMissingCliCommand(OCLIF_STALE_DIST_WITH_WARNING_NOISE))}`,
+  );
+
+  // Must not contaminate — or be contaminated by — the two content verdicts.
+  // A real bundle problem on a correctly built workspace must never be reported
+  // as "your workspace is not built", which would send the reader to run a build
+  // that changes nothing and hide a genuine drift behind it.
+  expect('#5217 clean run is not a missing build', !looksLikeMissingCliCommand('  ✓ 8 bundle(s) are in sync with the schema (487ms)'), 'clean output must not match');
+  expect('#5217 drift is not a missing build', !looksLikeMissingCliCommand(driftOutput), 'drift leaked into the prerequisite verdict');
+  expect(
+    '#5217 undeclared key is not a missing build',
+    !looksLikeMissingCliCommand(REAL_STDERR_AT_FFAB8033B_PARENT),
+    'the key verdict leaked into the prerequisite verdict',
+  );
+  expect(
+    '#5217 unrelated failure is not a missing build',
+    !looksLikeMissingCliCommand("Error: Cannot find module 'node:fs/promises'\n  at ModuleJob.run"),
+    'only oclif command resolution may claim this verdict',
+  );
+
+  // The probe derives its path from the CLI's declaration; pin the derivation
+  // against the real oclif block so a moved `target` is caught here rather than
+  // by a probe that quietly checks a path nothing writes any more.
+  const derived = oclifCommandFileFor({ oclif: { commands: { strategy: 'pattern', target: './dist/commands', glob: '**/*.js' } } }, ['i18n', 'extract']);
+  expect('#5217 derives the command file', derived.file === 'packages/cli/dist/commands/i18n/extract.js', `got ${JSON.stringify(derived)}`);
+  const undeclaredTarget = oclifCommandFileFor({ oclif: {} }, ['i18n', 'extract']);
+  expect('#5217 unreadable shape defers, loudly', !!undeclaredTarget.unknown && !undeclaredTarget.file, `an unreadable oclif block must yield a reason, not a guessed path; got ${JSON.stringify(undeclaredTarget)}`);
+
   if (failures.length) {
     console.error(`✗ check:i18n --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log('✓ check:i18n --self-test — bundle-drift and undeclared-authoring-key classifiers both go red, and stay distinct.');
+  console.log('✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key and missing-CLI-build classifiers all go red, and stay distinct.');
 }
 
 if (process.argv.includes('--self-test')) {
   selfTest();
   process.exit(0);
 }
+
+// ---------------------------------------------------------------------------
+// The prerequisite: this gate runs the BUILT CLI (#5217).
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE prerequisite and ONE command to satisfy it — never per package, and never
+ * phrased so it can be mistaken for a verdict about the bundles.
+ *
+ * Exits 1, the same code the two real verdicts use: any wrapper that treats
+ * non-zero as failure keeps behaving identically, and inventing a second failure
+ * code would be a new contract nobody asked for.
+ */
+function reportPrerequisiteNotMet(headline, detail) {
+  console.error(
+    `\ncheck-i18n-bundles: PREREQUISITE NOT MET — ${headline}\n\n` +
+      detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
+      `\n\n  Fix:  pnpm exec turbo run build --filter=@objectstack/cli\n\n` +
+      `  Nothing was checked: no bundle was compared and no config was parsed, so this\n` +
+      `  result says NOTHING about whether the committed translation bundles are in sync.\n` +
+      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
+      `  \`pnpm check:i18n | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+  );
+  process.exit(1);
+}
+
+/**
+ * Answered once, before the per-package loop — so a missing build costs one
+ * verdict instead of one per package, and costs zero CLI spawns.
+ *
+ * Probes the exact command FILE the loop needs, not merely `dist/`: an
+ * interrupted or partial build leaves the directory behind, and a `dist/` that
+ * exists without `commands/i18n/extract.js` reproduces the nine-problem report
+ * this check exists to prevent.
+ *
+ * When the CLI's package.json shape moves out from under the derivation, this
+ * says so on stderr and defers to the in-loop signature net rather than failing:
+ * a probe that cannot read the declaration must not turn a correctly-built
+ * workspace red. It stays audible either way — the net is the enforcement, this
+ * is only the cheap early answer.
+ */
+function checkCliBuildPrerequisite() {
+  let pkgJson;
+  try {
+    pkgJson = JSON.parse(readFileSync(join(CLI_PKG, 'package.json'), 'utf8'));
+  } catch (e) {
+    console.error(`check-i18n-bundles: could not read ${CLI_PKG}/package.json (${e.message}) — build prerequisite not pre-checked`);
+    return;
+  }
+  const resolved = oclifCommandFileFor(pkgJson, EXTRACT_COMMAND_ID);
+  if (resolved.unknown) {
+    console.error(`check-i18n-bundles: ${resolved.unknown} — build prerequisite not pre-checked`);
+    return;
+  }
+  if (existsSync(resolved.file)) return;
+  reportPrerequisiteNotMet('the workspace CLI is not built', [
+    `This gate runs the BUILT CLI. ${CLI} is only a source stub that hands`,
+    `off to oclif, which resolves \`os ${EXTRACT_COMMAND_ID.join(' ')}\` from the compiled`,
+    `output — and that command is not there:`,
+    ``,
+    `  ${resolved.file}`,
+  ]);
+}
+
+checkCliBuildPrerequisite();
 
 const configs = findConfigs('packages').sort().filter((c) => !filter || c.includes(filter));
 if (configs.length === 0) {
@@ -281,6 +496,27 @@ for (const config of configs) {
   const stdout = run.stdout ?? '';
   const stderr = run.stderr ?? '';
   const failed = run.status !== 0;
+
+  // The prerequisite's safety net, and the reason the probe above is allowed to
+  // defer instead of guessing. It fires on the cases the probe cannot see: a
+  // stale build whose command surface no longer answers to this id, a partial
+  // dist that satisfies the file check, or a package.json shape the derivation
+  // could not read. Aborting on the FIRST package is the whole point — the
+  // defect being fixed is nine reports of one cause, so the loop must not
+  // continue accumulating them.
+  if (failed) {
+    const signature = looksLikeMissingCliCommand(`${stdout}\n${stderr}`);
+    if (signature) {
+      reportPrerequisiteNotMet('the built CLI cannot resolve the command this gate runs', [
+        `${pkg}'s extract exited ${run.status} with oclif's own "command not found":`,
+        ``,
+        `  ${signature.length > 160 ? `${signature.slice(0, 160)}…` : signature}`,
+        ``,
+        `Every remaining package would fail the same way for the same one reason, so the`,
+        `loop stopped here rather than reporting it ${configs.length} times as bundle problems.`,
+      ]);
+    }
+  }
 
   const keyScan = collectUndeclaredKeys(`${stdout}\n${stderr}`);
   for (const line of passthroughStderrLines(stderr)) console.error(line);

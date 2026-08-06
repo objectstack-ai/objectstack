@@ -600,3 +600,79 @@ describe('HttpFindQueryParamsSchema', () => {
     expect(HttpFindQueryParamsSchema.safeParse({}).success).toBe(true);
   });
 });
+
+import { SaveMetaItemResponseSchema } from './protocol.zod';
+
+/**
+ * #5745 — `SaveMetaItemResponseSchema` must describe the FULL body the save
+ * route returns, not a subset of it.
+ *
+ * Before this suite the declaration was `{ success, message? }`, so parsing a
+ * real response silently DROPPED `version` / `seq` / `state` /
+ * `projectionApplied` — `safeParse` stayed green while the data disappeared,
+ * which is the worst shape of failure to leave for a consumer. The first case
+ * below is the one that was red: it asserts nothing is stripped.
+ *
+ * Optionality is measured, not assumed (evidence in the PR): the sole producer
+ * always emits `version` / `seq` / `state` on its only reachable success
+ * return, and emits `projectionApplied` only when an ADR-0094 mutation
+ * projector is registered for the type.
+ */
+describe('SaveMetaItemResponseSchema (#5745 — declares the full save response)', () => {
+  /** A verbatim capture of a real `saveMetaItem` return (repo write path). */
+  const realResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 1,
+    state: 'active',
+    message: 'Saved customization overlay (org=org_x, state=active) — type=view, name=cases [seq=1]',
+  };
+
+  it('round-trips a real response without stripping any field', () => {
+    const parsed = SaveMetaItemResponseSchema.parse(realResponse);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+    expect(parsed).toEqual(realResponse);
+  });
+
+  it('carries the ADR-0008 OCC token: version survives parse as the If-Match value', () => {
+    const parsed = SaveMetaItemResponseSchema.parse(realResponse);
+    expect(parsed.version).toBe(realResponse.version);
+  });
+
+  it('keeps seq as an integer and rejects a fractional one', () => {
+    expect(SaveMetaItemResponseSchema.parse(realResponse).seq).toBe(1);
+    expect(SaveMetaItemResponseSchema.safeParse({ ...realResponse, seq: 1.5 }).success).toBe(false);
+  });
+
+  it('accepts both lifecycle states and rejects any other', () => {
+    expect(SaveMetaItemResponseSchema.safeParse({ ...realResponse, state: 'draft' }).success).toBe(true);
+    expect(SaveMetaItemResponseSchema.safeParse({ ...realResponse, state: 'active' }).success).toBe(true);
+    expect(SaveMetaItemResponseSchema.safeParse({ ...realResponse, state: 'published' }).success).toBe(false);
+  });
+
+  it('requires version / seq / state — the producer always emits them', () => {
+    for (const missing of ['version', 'seq', 'state'] as const) {
+      const body: Record<string, unknown> = { ...realResponse };
+      delete body[missing];
+      expect(
+        SaveMetaItemResponseSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('leaves projectionApplied optional — absent means no projector ran', () => {
+    expect(SaveMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    const withProjection = SaveMetaItemResponseSchema.parse({
+      ...realResponse,
+      projectionApplied: { success: false, error: 'boom-from-projector' },
+    });
+    expect(withProjection.projectionApplied).toEqual({ success: false, error: 'boom-from-projector' });
+  });
+
+  it('projectionApplied.success is required once the key is present', () => {
+    expect(
+      SaveMetaItemResponseSchema.safeParse({ ...realResponse, projectionApplied: { error: 'x' } }).success,
+    ).toBe(false);
+  });
+});
