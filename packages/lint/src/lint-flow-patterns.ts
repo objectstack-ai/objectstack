@@ -98,10 +98,38 @@
  *    that actually carries the string, and the count stays 1.
  *
  * Deliberately still flow-level, i.e. read off the top-level nodes only: the
- * start-node trigger rules (a trigger is a property of the flow, and a region
- * has an entry node, not a `start`) and {@link FLOW_RUNAS_UNSCOPED}, whose
- * data-node search is left alone here on purpose — widening a build-GATING rule
- * is its own change with its own blast radius, filed separately.
+ * start-node trigger rules. A trigger is a property of the flow, and a region has
+ * an entry node, not a `start` — there is nothing one level down for them to read.
+ *
+ * ## The one rule whose VERDICT is flow-level but whose EVIDENCE is not (#5633)
+ *
+ * {@link FLOW_RUNAS_UNSCOPED} was the third case, and it is neither of the two
+ * above. #5383 left it top-level-only on purpose — it is the family's only
+ * build-GATING member, so widening it turns green builds red and deserved its own
+ * change — and #5633 is that change. Its two halves sit at different altitudes:
+ *
+ *  - the **verdict** is flow-level and stays there. `flow.runAs` is one
+ *    declaration and the trigger is the start node's, so a flow is either
+ *    unscoped or it is not: one finding per flow, `where` = `flow 'x' · runAs`,
+ *    never per region and never once per data node.
+ *  - the **evidence** — "does this flow perform a data operation at all", the
+ *    condition that makes `runAs` matter — is a question about the whole flow.
+ *    A `loop` body is as much part of it as the top level, and the runtime agrees:
+ *    `resolveRunAsIdentity` refuses a nested write for exactly the reason it
+ *    refuses a top-level one (#3760). Nesting depth is not a property it consults.
+ *
+ * So {@link findDataNodeAnywhere} searches every graph while the finding stays
+ * flow-level, and the region is named in the **message** rather than in `where`
+ * (`its data node 'touch' (update_record), in loop 'loop_rows' body,`): `where`
+ * says which declaration is wrong, the message says where to find the proof. A
+ * top-level hit yields the byte-identical message it always did — pinned in the
+ * tests, since the wording is what every existing author already sees.
+ *
+ * What this fixes is not a corner. Query a set, loop it, write per item is *the*
+ * shape of a scheduled data flow, so the write is almost always the nested node —
+ * and because this rule gates the build, the shape it was missing built clean and
+ * then could not run at all. That is precisely what promoting it to `error`
+ * (#3760) was for.
  */
 
 import {
@@ -220,6 +248,49 @@ const INERT_CONDITION_NODE_TYPES = new Set([
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+
+/**
+ * The first data node ANYWHERE in a flow, with the region it was found in —
+ * {@link FLOW_RUNAS_UNSCOPED}'s evidence that the flow performs a data operation
+ * at all (#5633).
+ *
+ * Three properties of this search are load-bearing:
+ *
+ *  - **It returns the FIRST hit, not all of them.** The rule's verdict is about
+ *    `flow.runAs`, a single declaration, so the finding is one per flow and the
+ *    node is only cited to point the author at it. Collecting every data node
+ *    would invite a per-node push and turn one wrong declaration into N
+ *    identical build errors.
+ *  - **Top-level first.** {@link collectFlowGraphs} yields the flow's own graph
+ *    before it descends, so a flow with data nodes at both altitudes still cites
+ *    the same node it cited before this widening — the top-level behaviour is
+ *    bit-for-bit unchanged, including which node appears in the message.
+ *  - **No region strip is needed.** A container's `config` physically contains
+ *    its descendants', which is what forces {@link stripRegions} on the
+ *    recursive config scans — but this search reads `node.type` only, and no
+ *    container type (`loop`/`parallel`/`try_catch`) is a data node type. A nested
+ *    write is therefore seen exactly once, in the region graph that owns it,
+ *    never a second time through its enclosing container.
+ */
+function findDataNodeAnywhere(
+  nodes: AnyRec[],
+  edges: AnyRec[],
+): { readonly node: AnyRec; readonly scope: string } | null {
+  // A cast, not a parse — same contract as the main per-graph walk below: the
+  // walk touches only `type` / `config`, and the guarded arrays are passed so a
+  // malformed region cannot make this throw (this module never throws).
+  for (const graph of collectFlowGraphs({
+    nodes: nodes as unknown as FlowNodeParsed[],
+    edges: edges as unknown as FlowEdgeParsed[],
+  })) {
+    for (const node of graph.nodes as unknown as AnyRec[]) {
+      if (DATA_NODE_TYPES.has(typeof node.type === 'string' ? (node.type as string) : '')) {
+        return { node, scope: graph.scope };
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * #5482 — the two node types that carry the `multi` bulk declaration, with the
@@ -951,17 +1022,34 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //      the same refusal, but whether a given write carries a user is not
     //      knowable at authoring time. That case is caught at run time only
     //      (#3760) — do not try to approximate it here.
+    //      #5633 — the data-node EVIDENCE is searched across every region, while
+    //      the verdict stays flow-level. The two are at different altitudes on
+    //      purpose: `runAs` is a flow property and the trigger is the start
+    //      node's, so "is this flow unscoped" has exactly one answer per flow —
+    //      but "does it touch data at all" is a question about the whole flow,
+    //      and a `loop` body is as much part of it as the top level. The runtime
+    //      agrees: `resolveRunAsIdentity` refuses a nested write for the same
+    //      reason it refuses a top-level one; nesting depth is not a property it
+    //      consults. Left top-level-only by #5383/#5635 because widening a
+    //      build-GATING rule is its own change with its own blast radius — this
+    //      is that change. The shape it was missing is the DEFAULT one for a
+    //      scheduled data flow: query a set, loop it, write per item.
     const runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';
     const userLessKind = userLessTriggerKind(flow, startCfg);
     if (userLessKind && runAs !== 'system') {
-      const dataNode = nodes.find((n) => DATA_NODE_TYPES.has(typeof n.type === 'string' ? (n.type as string) : ''));
+      const dataNode = findDataNodeAnywhere(nodes, edges);
       if (dataNode) {
         const declared = typeof flow.runAs === 'string' ? `\`runAs:'${runAs}'\`` : `the default \`runAs:'user'\``;
+        // The region is named in the MESSAGE, not in `where`: `where` says which
+        // declaration is wrong (`flow 'x' · runAs`, unchanged), the message says
+        // where to look for the node that proves it. A top-level hit adds nothing
+        // here, so its wording is byte-identical to before (pinned in the tests).
+        const at = dataNode.scope ? `, in ${dataNode.scope},` : '';
         findings.push({
           where: `flow '${flowName}' · runAs`,
           message:
             `${userLessKind}-triggered flow runs as ${declared}, but a ${userLessKind} run has no trigger ` +
-            `user — so its data node '${dataNode.id}' (${dataNode.type}) has no identity to scope to and ` +
+            `user — so its data node '${dataNode.node.id}' (${dataNode.node.type})${at} has no identity to scope to and ` +
             `will be REFUSED at run time.`,
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +
