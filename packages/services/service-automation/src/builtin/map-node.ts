@@ -52,6 +52,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       // Each item's subflow may pause, so the map suspends and resumes per item.
       supportsPause: true,
       isAsync: true,
+      // As with `subflow`, `'any'` here is not the authority that applies: the
+      // #3801 gate follows the `map:` correlation to the in-flight item's child
+      // run and judges that node instead — judging the loop rather than the item
+      // is precisely the hole #3853 closed. Stated rather than inherited (#5561).
+      resumeAuthority: 'any',
       // Structured config form for the flow designer (ADR-0018). Mirrors the
       // objectui hardcoded `map` field group field-for-field, so the online
       // (schema-driven) form matches the offline one (objectui #2670 Phase 3 /

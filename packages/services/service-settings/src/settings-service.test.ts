@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SettingsService } from './settings-service.js';
 import { SettingsLockedError, UnknownKeyError, UnknownNamespaceError, envKeyOf } from './settings-service.types.js';
 import { NoopCryptoAdapter } from './crypto-adapter.js';
@@ -592,6 +592,356 @@ describe('SettingsService — save-time validation (declared options are enforce
     expect(err.fields[0]).toMatchObject({ field: 'key_ref', code: 'invalid_option' });
     expect(err.fields[0].value).toBeUndefined();
     expect(err.message).not.toContain('s3cr3t-handle');
+  });
+});
+
+/**
+ * #5204 — the option table is enforced on the ENV side too.
+ *
+ * The symmetric half of the suite above. `setMany` has checked the declared
+ * table since #5131, but `get()` produced an effective value by a second route
+ * that never consulted it: an `OS_*` override was reshaped by the default's type
+ * (`coerceEnvValue`) and returned straight out of the top of the cascade with
+ * `locked: true`. So the values #5094/#5133 retired from `mail.provider` could
+ * walk back in through the one door with no gate on it —
+ * `OS_MAIL_PROVIDER=sendgrid` reached the mail plugin unchallenged — and a plain
+ * typo (`OS_BRANDING_THEME_MODE=drak`) was served to every consumer as a normal
+ * value with a normal-looking provenance.
+ *
+ * Per the ruling on #5204 an offending override is IGNORED, not repaired: the
+ * value falls through to the next cascade layer, and the read API reports THAT
+ * layer honestly instead of claiming `source: 'env'` for a value not in force.
+ */
+describe('SettingsService — env overrides are checked against declared options (#5204)', () => {
+  /** Capture the loud channel without stubbing the console. */
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it('ignores an out-of-table env value and resolves the manifest default instead', async () => {
+    const { errors, logger } = spyLogger();
+    // The issue's own example: a typo, one transposition away from 'dark'.
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+
+    const r = await svc.get('branding', 'theme_mode');
+    expect(r.value).toBe('system'); // the manifest default, not 'drak'
+    expect(r.source).toBe('default');
+    // The override is not in force, so it does not lock anything either.
+    expect(r.locked).toBe(false);
+    expect(r.lockedReason).toBeUndefined();
+    // And it contributes NO cascade entry — an `env` entry here would be read as
+    // a layer that supplied (and locked) the value.
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_BRANDING_THEME_MODE');
+    expect(errors[0]).toContain('drak');
+    expect(errors[0]).toContain('light, dark, system'); // the legal value set
+    expect(errors[0]).toContain('IGNORED');
+  });
+
+  it('falls back to the next cascade layer, not straight to the default', async () => {
+    // "Ignored" means the env layer is skipped, not that the whole cascade is.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+    await svc.set('branding', 'theme_mode', 'dark');
+
+    const r = await svc.get('branding', 'theme_mode');
+    expect(r.value).toBe('dark');
+    expect(r.source).toBe('tenant');
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('still lets a value the table DOES declare win at the top of the cascade', async () => {
+    // The regression pin for the untouched path: a legal override keeps its
+    // precedence, its `locked: true`, and its reason string.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'dark' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+
+    const r = await svc.get('branding', 'theme_mode');
+    expect(r.value).toBe('dark');
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(r.lockedReason).toContain('OS_BRANDING_THEME_MODE');
+    expect(r.cascadeChain?.[0]).toMatchObject({ scope: 'env', effective: true });
+    expect(errors).toHaveLength(0);
+  });
+
+  it('an IN-FORCE override still pins the key against writes', async () => {
+    // The other half of the `locked` contract, unchanged: what `get()` reports as
+    // locked, `setMany` refuses. Pinned here so the coherence fix below cannot be
+    // over-applied into "env never locks anything".
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'dark' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+    expect((await svc.get('branding', 'theme_mode')).locked).toBe(true);
+    await expect(svc.set('branding', 'theme_mode', 'light')).rejects.toBeInstanceOf(
+      SettingsLockedError,
+    );
+  });
+
+  it('a REJECTED override pins nothing — read and write agree the key is editable', async () => {
+    // Both halves of `locked` are judged by the same rule, so they cannot
+    // disagree. Before this, `setMany` locked on the mere PRESENCE of the env
+    // var: the read side would have said `locked: false` while the save threw
+    // `SETTINGS_LOCKED`, leaving the key configurable by nothing at all — env
+    // value ignored, UI refused — a lockout only an env edit could clear.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+
+    expect((await svc.get('branding', 'theme_mode')).locked).toBe(false);
+    // …and the write the read surface just advertised as possible really is.
+    await expect(svc.set('branding', 'theme_mode', 'light')).resolves.toBeDefined();
+    const after = await svc.get('branding', 'theme_mode');
+    expect(after.value).toBe('light');
+    expect(after.source).toBe('tenant');
+  });
+
+  it('closes the #5094 door: OS_MAIL_PROVIDER cannot smuggle a retired provider back in', async () => {
+    // THE load-bearing case. `sendgrid` and `ses` left `mail.provider` in
+    // #5094/#5133 because this server cannot deliver through them; #5131 stopped
+    // them at the write path on the same day, and this is the other door.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_MAIL_PROVIDER: 'sendgrid' }, logger });
+    svc.registerManifest(mailSettingsManifest);
+
+    const r = await svc.get('mail', 'provider');
+    expect(r.value).toBe('smtp'); // the manifest default
+    expect(r.source).toBe('default');
+    expect(errors[0]).toContain('smtp, resend, postmark, log');
+    // The consequence is spelled out, not left to the reader.
+    expect(errors[0]).toContain('does NOT take effect');
+    expect(errors[0]).toContain('OS_MAIL_PROVIDER');
+  });
+
+  it('leaves keys with no declared option table completely alone', async () => {
+    // The check must not widen past `select`/`radio`/`multiselect` with a table:
+    // a free-text, a boolean and a number env override behave exactly as before.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({
+      env: {
+        OS_BRANDING_WORKSPACE_NAME: 'EnvCorp', // text — any string is legal
+        OS_FEATURE_FLAGS_AI_ENABLED: 'true',   // boolean — coerced, not enumerated
+      },
+      logger,
+    });
+    svc.registerManifest(brandingSettingsManifest);
+    svc.registerManifest(featureFlagsSettingsManifest);
+
+    const name = await svc.get('branding', 'workspace_name');
+    expect(name.value).toBe('EnvCorp');
+    expect(name.source).toBe('env');
+    expect(name.locked).toBe(true);
+
+    const flag = await svc.get('feature_flags', 'ai_enabled');
+    expect(flag.value).toBe(true);
+    expect(flag.source).toBe('env');
+
+    expect(errors).toHaveLength(0);
+  });
+
+  it('reports the misconfiguration at registration, before anything reads the key', async () => {
+    // An override that will never take effect is a misconfigured deployment, and
+    // the operator should learn at boot rather than whenever someone first opens
+    // the settings page (or never, for a key nothing reads this process).
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_MAIL_PROVIDER: 'ses' }, logger });
+    expect(errors).toHaveLength(0);
+
+    svc.registerManifest(mailSettingsManifest);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_MAIL_PROVIDER');
+    expect(errors[0]).toContain('ses');
+  });
+
+  it('registration REPORTS but never refuses — a stale pin must not block a boot', async () => {
+    // The upgrade trap: `sendgrid` was a legal value the day the deployment was
+    // written. Turning today's narrower table into a crash-on-start would punish
+    // exactly the operator the message is trying to help.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_MAIL_PROVIDER: 'sendgrid' }, logger });
+    expect(() => svc.registerManifest(mailSettingsManifest)).not.toThrow();
+    // The service is fully usable afterwards, including writes to the same key.
+    await expect(
+      svc.setMany('mail', { provider: 'smtp', smtp_host: 's.example.com', from_email: 'a@b.com' }),
+    ).resolves.toBeDefined();
+  });
+
+  it('says it ONCE, not once per read', async () => {
+    // `getNamespace` resolves every specifier on every settings page load, so a
+    // per-read line would be a firehose — and AGENTS.md's "Degradation log
+    // levels" names training people to skim `error` as the mirror-image failure.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
+    svc.registerManifest(brandingSettingsManifest); // one report here
+    for (let i = 0; i < 5; i++) await svc.get('branding', 'theme_mode');
+    await svc.getNamespace('branding');
+    await svc.getNamespace('branding');
+    expect(errors).toHaveLength(1);
+  });
+
+  it('reports a DIFFERENT bad value that appears after registration', async () => {
+    // The dedupe is keyed on the value, not just the var name: `this.env` may be
+    // a live `process.env` reference, so a newly-set bad override must not
+    // inherit an earlier line's silence.
+    const { errors, logger } = spyLogger();
+    const env: Record<string, string | undefined> = { OS_BRANDING_THEME_MODE: 'drak' };
+    const svc = new SettingsService({ env, logger });
+    svc.registerManifest(brandingSettingsManifest);
+    expect(errors).toHaveLength(1);
+
+    env.OS_BRANDING_THEME_MODE = 'lite';
+    const r = await svc.get('branding', 'theme_mode');
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(2);
+    expect(errors[1]).toContain('lite');
+  });
+
+  it('the read surface reports the layer actually in force, never a phantom env', async () => {
+    // What `GET /api/settings/:ns` serves. Reporting `source: 'env'` with
+    // `locked: true` for a value that was discarded would tell an admin the
+    // field is pinned by the deployment and not editable — about a value nothing
+    // is using.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
+    svc.registerManifest(brandingSettingsManifest);
+    await svc.set('branding', 'theme_mode', 'light');
+
+    const payload = await svc.getNamespace('branding');
+    expect(payload.values.theme_mode).toMatchObject({
+      value: 'light',
+      source: 'tenant',
+      locked: false,
+    });
+    expect(payload.values.theme_mode.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+    // A sibling key with a legal env override is unaffected in the same payload.
+    expect(payload.values.workspace_name.source).toBe('default');
+  });
+
+  it('falls back to console.error when no logger is injected', async () => {
+    // A service built without a kernel (unit tests, control-plane mock, boot
+    // before the logger exists) must still report — going silent there is the
+    // very failure #5204 is about.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' } });
+      svc.registerManifest(brandingSettingsManifest);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]![0])).toContain('OS_BRANDING_THEME_MODE');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rejects the WHOLE multiselect override when any one member is undeclared', async () => {
+    // No manifest ships a `multiselect` today, so this is the shape the first one
+    // to do so will meet. Partial acceptance is deliberately not on the table: it
+    // would synthesise a combination nobody configured.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({
+      // A JSON array, because that is what `coerceEnvValue` produces when the
+      // declared default is an array — verified, not assumed.
+      env: { OS_DIGEST_CHANNELS: '["email","carrier_pigeon"]' },
+      logger,
+    });
+    svc.registerManifest({
+      namespace: 'digest',
+      version: 1,
+      label: 'Digest',
+      scope: 'tenant',
+      readPermission: 'setup.access',
+      writePermission: 'setup.access',
+      specifiers: [
+        {
+          type: 'multiselect',
+          key: 'channels',
+          label: 'Channels',
+          required: false,
+          default: ['email'],
+          options: [
+            { value: 'email', label: 'Email' },
+            { value: 'sms', label: 'SMS' },
+          ],
+        },
+      ],
+    } as any);
+
+    const r = await svc.get('digest', 'channels');
+    // `email` was legal, but the override is dropped whole — not narrowed to it.
+    expect(r.value).toEqual(['email']); // the manifest default, which happens to match
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('carrier_pigeon');
+    expect(errors[0]).toContain('email, sms');
+  });
+
+  it('accepts a multiselect override whose every member is declared', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_DIGEST_CHANNELS: '["email","sms"]' }, logger });
+    svc.registerManifest({
+      namespace: 'digest', version: 1, label: 'Digest', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'multiselect', key: 'channels', label: 'Channels', required: false,
+          default: ['email'],
+          options: [{ value: 'email', label: 'Email' }, { value: 'sms', label: 'SMS' }] },
+      ],
+    } as any);
+
+    const r = await svc.get('digest', 'channels');
+    expect(r.value).toEqual(['email', 'sms']);
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('compares by string form, so a numeric option survives the env round-trip', async () => {
+    // An env var is always a string and `coerceEnvValue` turns it back into a
+    // number when the default is numeric. Comparing raw would reject the legal
+    // value `30`; the table is compared in string form for exactly this reason.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_RETENTION_WINDOW_DAYS: '30' }, logger });
+    svc.registerManifest({
+      namespace: 'retention', version: 1, label: 'Retention', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'select', key: 'window_days', label: 'Window', required: false, default: 7,
+          options: [{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }] },
+      ],
+    } as any);
+
+    const r = await svc.get('retention', 'window_days');
+    expect(r.value).toBe(30);
+    expect(r.source).toBe('env');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('never echoes the rejected value for an encrypted specifier', async () => {
+    // An option value is not a secret, but `encrypted` is authorable on ANY
+    // specifier, and this message lands in logs. Same rule as the save path.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_VAULT_KEY_REF: 's3cr3t-handle' }, logger });
+    svc.registerManifest({
+      namespace: 'vault', version: 1, label: 'Vault', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'select', key: 'key_ref', label: 'Key reference', required: false,
+          encrypted: true,
+          options: [{ value: 'primary', label: 'Primary' }, { value: 'backup', label: 'Backup' }] },
+      ],
+    } as any);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).not.toContain('s3cr3t-handle');
+    // …but it still names the var and the legal set, so the message stays useful.
+    expect(errors[0]).toContain('OS_VAULT_KEY_REF');
+    expect(errors[0]).toContain('primary, backup');
   });
 });
 

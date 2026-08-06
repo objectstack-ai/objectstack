@@ -116,11 +116,20 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
       expect(applyConversionsToStoredItem('datasource', row)).toBe(row);
     });
 
-    it('lets a canonical key win over a shadowed legacy alias', () => {
+    it('keeps BOTH spellings on a stored row when they disagree', () => {
       const row = { name: 'ds', driver: 'sqlite', config: { filename: './real.db', file: './stale.db' } };
       const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
-      // renameKey convention: canonical present → alias left shadowed, untouched.
+      // `renameKey` convention since #4923: two DIFFERENT files under two names
+      // is the author's ambiguity to resolve, so the replay picks neither.
       expect(out.config).toEqual({ filename: './real.db', file: './stale.db' });
+    });
+
+    it('drops a redundant alias on a stored row when it repeats the canonical value', () => {
+      const row = { name: 'ds', driver: 'sqlite', config: { filename: './real.db', file: './real.db' } };
+      const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
+      // Data at rest gets the same hygiene as a fresh load (#3903 replays the
+      // full chain), so a rehydrated row is canonical rather than half-migrated.
+      expect(out.config).toEqual({ filename: './real.db' });
     });
   });
 

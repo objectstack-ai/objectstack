@@ -778,10 +778,13 @@ describe('audit writers — enable.files server-side enforcement (#2727)', () =>
 });
 
 describe('audit writers — update diff hygiene (objectui detail-history report)', () => {
-  // gantt_plan-shaped object: a formula helper alongside real fields. The
-  // `before` snapshot is read through the query path (formula computed), but
-  // `after` (ctx.result) is the raw write result (formula absent) — the diff
-  // must not record that asymmetry as a change.
+  // gantt_plan-shaped object: a formula helper alongside real fields. The diff
+  // must not record a computed field as a change, whichever way the two sides
+  // disagree. The contexts below keep the ORIGINAL asymmetry (`before` from the
+  // query path carries the formula, `after` does not) because that is the shape
+  // the objectui History tab reported — #5504 later made the real write path
+  // hydrate `after` as well, and the exclusion is keyed on the field TYPE, so it
+  // holds in both worlds.
   const SCHEMA = {
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
     sys_activity: SINGLE_TENANT.sys_activity,

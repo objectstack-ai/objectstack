@@ -1,13 +1,19 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #3426 — a `formula` field is a READ-time virtual: the engine evaluates it
- * post-fetch on `find`/`findOne`, never on the write path, so it is absent from
- * the raw after-create/after-update row a record-change flow is seeded with.
- * `{record.full_name}` in a notify template (or a start condition) therefore
- * resolved to an empty string. The trigger now re-reads the written record
+ * #3426 — a `formula` field is a virtual the engine evaluates post-fetch. It
+ * used to be evaluated on `find`/`findOne` ONLY, so it was absent from the raw
+ * after-create/after-update row a record-change flow is seeded with, and
+ * `{record.full_name}` in a notify template (or a start condition) resolved to
+ * an empty string. The trigger fixed that by re-reading the written record
  * through the data engine, so the seeded `record` carries the same computed
  * fields a data-API read returns.
+ *
+ * #5504 later hydrated the write path's own return value as well, so the raw
+ * row is no longer the empty half of that pair. The re-read still earns its
+ * keep — `summary` / `rollup` virtuals and hook-side effects are only visible
+ * through a read — and this test keeps pinning the trigger's contract: the
+ * seeded record resolves computed fields, whatever the write path returned.
  *
  * This exercises the whole stack (real ObjectQL + automation + record-change
  * trigger) with a formula field, proving the seeded record resolves it. The

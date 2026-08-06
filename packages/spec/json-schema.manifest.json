@@ -1460,6 +1460,7 @@
     "ui/ActionLocation",
     "ui/ActionNavItem",
     "ui/ActionParam",
+    "ui/ActionSession",
     "ui/ActionType",
     "ui/AddRecordConfig",
     "ui/App",

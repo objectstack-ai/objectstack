@@ -74,34 +74,45 @@ const IO_NODE_CONFIG_HISTORY =
  *
  * Each is a RETIRED SPELLING, not a typo, so a bare "did you mean" would
  * under-serve it: `flow-node-notify-config-aliases` rewrites all five at load
- * (including the `registerFlow` rehydration seam), which means a config that
- * still carries one when it reaches this parse carries the canonical key too —
- * `renameConfigKey` leaves a SHADOWED alias in place rather than clobbering the
- * winner. So each prescription answers both readings: the rename, for whoever
- * parses this contract directly, and "delete the dead twin", for whoever came
- * through the load path.
+ * (including the `registerFlow` rehydration seam). Since #4923 that rewrite
+ * also DELETES a retired spelling that merely repeats the canonical key's
+ * value, which sharpens what a surviving one means: it survived because the
+ * canonical key is also present and says something DIFFERENT, and the
+ * conversion will not pick between two values the author wrote.
+ *
+ * So each prescription answers both readings — the rename, for whoever parses
+ * this contract directly, and a reconciliation naming BOTH keys, for whoever
+ * came through the load path.
  */
 const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   to:
     'The recipient slot is `recipients`. `to` is the pre-17 spelling, rewritten at load by the ADR-0087 D2 '
-    + 'conversion `flow-node-notify-config-aliases` — so if `recipients` is already present, the conversion left '
-    + '`to` behind as a dead twin (a shadowed alias is not clobbered) and it should be deleted.',
+    + 'conversion `flow-node-notify-config-aliases` — so if `recipients` is also present, the two name DIFFERENT '
+    + 'recipients and the conversion kept both rather than choosing who gets notified (#4923). Decide the '
+    + 'recipients, put them on `recipients`, and delete `to`.',
   subject:
     'The heading slot is `title`. `subject` is the pre-17 spelling rewritten at load by '
-    + '`flow-node-notify-config-aliases`; delete it once `title` carries the text.',
+    + '`flow-node-notify-config-aliases`; delete it once `title` carries the text. If `title` is also present with '
+    + 'DIFFERENT text, the conversion kept both rather than choosing (#4923) — reconcile them onto `title`.',
   body:
     'The body slot is `message`. `body` is the pre-17 spelling rewritten at load by '
-    + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. (`body` IS canonical on an '
-    + '`http` node — the key is wrong only here.)',
+    + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. If `message` is also present '
+    + 'with DIFFERENT text, the conversion kept both rather than choosing (#4923) — reconcile them onto `message`. '
+    + '(`body` IS canonical on an `http` node — the key is wrong only here.)',
   url:
     'The click-through slot is `actionUrl`. It was renamed at 17 because `url` elsewhere on the platform means '
     + '"HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app click target. '
-    + '`flow-node-notify-config-aliases` rewrites it at load; delete it once `actionUrl` carries the link.',
+    + '`flow-node-notify-config-aliases` rewrites it at load; delete it once `actionUrl` carries the link. If '
+    + '`actionUrl` is also present with a DIFFERENT link, the conversion kept both rather than choosing where the '
+    + 'notification points (#4923) — reconcile them onto `actionUrl`.',
   source:
     'The click-through target is the flat PAIR `sourceObject` + `sourceId`, never a nested `source: { object, id }`. '
     + '`flow-node-notify-config-aliases` lifts the nested shape at load and drops it once every part is accounted '
-    + 'for, so a surviving `source` means both flat keys were already set — delete it. Note the pair only takes '
-    + 'effect together: a half-specified target is dropped so the inbox never renders a dead link.',
+    + 'for, so a surviving `source` means a part of it holds a DIFFERENT value from the flat `sourceObject` / '
+    + '`sourceId` already in that slot, and the conversion declined to pick (#4923) — reconcile onto the flat pair '
+    + 'and delete `source`. '
+    + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
+    + 'dead link.',
 };
 
 // ─── notify ──────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
+import { datasetInvalidError } from './dataset-refusal.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
 
 // Re-export the shared protocol shapes so existing importers keep working.
@@ -435,7 +436,9 @@ export function resolveOrdering(
     ]);
     const unknown = Object.keys(order).filter((k) => !selectable.has(k));
     if (unknown.length) {
-      throw new Error(
+      // [#5367] `DATASET_INVALID` / 400 — `selection.order` is request input and
+      // the message already lists what was selectable, so the caller can fix it.
+      throw datasetInvalidError(
         `[dataset-executor] order key(s) ${unknown.map((k) => `"${k}"`).join(', ')} — ` +
         `not a selected dimension or measure. Selectable here: ` +
         `${[...selectable].join(', ') || '(none)'}.`,
@@ -595,7 +598,9 @@ export class DatasetExecutor {
       for (const grouping of groupings) {
         const unknown = grouping.filter((d) => !selected.has(d));
         if (unknown.length) {
-          throw new Error(
+          // [#5367] `DATASET_INVALID` / 400 — `selection.totals.groupings` is
+          // request input, judged against the caller's own `selection.dimensions`.
+          throw datasetInvalidError(
             `[dataset-executor] totals grouping [${grouping.join(', ')}] is not a subset of the selected dimensions — unknown: ${unknown.join(', ')}.`,
           );
         }

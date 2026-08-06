@@ -1,0 +1,256 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#5367] `POST /analytics/dataset/query` — five dataset refusals reach the
+ * caller as `400 DATASET_INVALID` because their PRODUCER says so, not because
+ * this route recognised their prose.
+ *
+ * ## The seam, and why this file boots the REAL analytics service
+ *
+ * #5352 / PR #5366 gave the route an envelope branch (`error.code` + a 4xx
+ * `error.status`, read first) and left a transitional list of message substrings
+ * behind it, because six refusal families were still bare `throw new Error(…)`:
+ *
+ * ```
+ * /not declared in the dataset|not backed by a declared relationship|
+ *  not supported by the v1 dataset runtime|read-scope-sql|
+ *  not a selected dimension or measure|is not a subset of the selected dimensions/
+ * ```
+ *
+ * With that list in place the HTTP status of six families was a property of their
+ * **wording**: rephrasing `dataset-compiler`'s "is not declared in the dataset's
+ * `include`" — no logic change — dropped the refusal from 400 to 500, and no test
+ * and no gate would have gone red. Prime Directive #12 allows such an
+ * accommodation only while it is declared, loud, tested **and removable on a
+ * schedule**; #5366 delivered the first three. #5367 is the schedule: five
+ * producers now throw `datasetInvalidError` (`DATASET_INVALID` / 400) and their
+ * five entries are gone from the list.
+ *
+ * The claim has two halves and either alone reads as fixed:
+ *
+ *   - **B** — the producer throws the envelope. Pinned per site, against the real
+ *     producer, in `service-analytics`'s `dataset-refusal-envelope.test.ts`.
+ *   - **A** — the route classifies on that envelope rather than on the message.
+ *     Pinned in `analytics-filter-refusal-envelope.test.ts`, including the
+ *     five deleted entries asserted in both directions.
+ *
+ * A unit test on either side can be green while an author still sees a 500. So
+ * this file asserts the SEAM: the analytics provider is a real `AnalyticsService`
+ * compiling a real dataset, the error crossing into the catch is the one the real
+ * `dataset-compiler` / `dataset-executor` / `native-sql-strategy` throws, and
+ * nothing here asserts a shape it also constructs.
+ *
+ * ## Reverse verification, direction predicted BEFORE running
+ *
+ * Restore ANY of the five `throw new Error(…)` calls in `service-analytics` (and
+ * rebuild it — this file exercises the BUILT package) and that family's case here
+ * goes RED with `500 ANALYTICS_QUERY_FAILED`, because the route no longer carries
+ * a message entry that would rescue it. The direction is plain red, not the
+ * inverted/extra-diagnostic shapes: the canonical envelope branch is FIRST in the
+ * catch and the fallback that used to answer for these families is gone, so
+ * "producer stops declaring" has exactly one outward consequence. Confirmed by
+ * running it (see the PR).
+ *
+ * Positive controls sit next to the refusals so a case cannot pass merely because
+ * the wiring never reached the producer.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import type { Logger } from '@objectstack/spec/contracts';
+import { AnalyticsService } from '@objectstack/service-analytics';
+import { RestServer } from './rest-server';
+
+// ── harness (the shape `analytics-filter-refusal-envelope.test.ts` uses) ──────
+
+function mockServer() {
+  return {
+    get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(),
+    use: vi.fn(), listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+function mockProtocol() {
+  return {
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', endpoints: {} }),
+    getMetaTypes: vi.fn().mockResolvedValue([]),
+    getMetaItems: vi.fn().mockResolvedValue([]),
+  };
+}
+function mockRes() {
+  const res: any = { statusCode: 200, body: undefined };
+  res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
+  res.json = vi.fn((b: any) => { res.body = b; return res; });
+  res.end = vi.fn(() => res);
+  return res;
+}
+
+/** Build a RestServer over an analytics provider (positional arg #15). */
+function buildRoute(analyticsProvider?: any) {
+  const rest = new RestServer(
+    mockServer() as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined,
+    analyticsProvider,
+  );
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
+  return rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query'))!;
+}
+
+async function post(route: any, body: unknown) {
+  const res = mockRes();
+  await route.handler({ method: 'POST', params: {}, headers: {}, body } as any, res);
+  return res;
+}
+
+const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+
+/**
+ * A real `AnalyticsService` on the ObjectQL aggregate path — one fixed bucket, so
+ * a selection that gets far enough to touch data answers 200. That is what makes
+ * the refusals meaningful: they fail on the dataset/selection, on a route that
+ * demonstrably works otherwise.
+ */
+function aggregateAnalytics(): AnalyticsService {
+  return new AnalyticsService({
+    logger: silent,
+    queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+    executeAggregate: async () => [{ stage: 'won', revenue: 100 }],
+    isRegisteredObject: () => true,
+  });
+}
+
+/** A real `AnalyticsService` on the raw-SQL path — the only one that enforces the join allowlist. */
+function nativeAnalytics(): AnalyticsService {
+  return new AnalyticsService({
+    logger: silent,
+    queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+    executeRawSql: async () => [{ stage: 'won', revenue: 100 }],
+    isRegisteredObject: () => true,
+  });
+}
+
+/** A valid single-object dataset — no `include`, so nothing here needs a join. */
+const dataset = {
+  name: 'pipeline',
+  label: 'Pipeline',
+  object: 'crm_opportunity',
+  dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+  measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+};
+const selection = { dimensions: ['stage'], measures: ['revenue'] };
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own envelope', () => {
+  /**
+   * One row per entry #5367 removed from the route's message list, driven through
+   * the real producer. `listEntry` records the substring that used to classify it
+   * — the audit trail that the deletion and this coverage are the same set.
+   */
+  const CASES: Array<{
+    name: string;
+    listEntry: string;
+    body: unknown;
+    analytics: () => AnalyticsService;
+    message: RegExp;
+  }> = [
+    {
+      name: 'dataset-compiler: an aggregate the v1 runtime cannot lower',
+      listEntry: 'not supported by the v1 dataset runtime',
+      analytics: aggregateAnalytics,
+      body: {
+        dataset: {
+          ...dataset,
+          measures: [{ name: 'names', aggregate: 'string_agg', field: 'name' }],
+        },
+        selection: { dimensions: ['stage'], measures: ['names'] },
+      },
+      message: /measure "names" uses aggregate "string_agg" which is not supported by the v1 dataset runtime/,
+    },
+    {
+      name: 'dataset-compiler: a dimension traversing an undeclared relationship path',
+      listEntry: 'not declared in the dataset',
+      analytics: aggregateAnalytics,
+      body: {
+        dataset: {
+          ...dataset,
+          include: [],
+          dimensions: [{ name: 'region', field: 'account.region', type: 'string' }],
+        },
+        selection: { dimensions: ['region'], measures: ['revenue'] },
+      },
+      message: /"account" is not declared in the dataset's `include`/,
+    },
+    {
+      name: 'dataset-executor: an order key that is not selected',
+      listEntry: 'not a selected dimension or measure',
+      analytics: aggregateAnalytics,
+      body: { dataset, selection: { ...selection, order: { profit: 'desc' } } },
+      message: /order key\(s\) "profit" — not a selected dimension or measure/,
+    },
+    {
+      name: 'dataset-executor: a totals grouping outside the selection',
+      listEntry: 'is not a subset of the selected dimensions',
+      analytics: aggregateAnalytics,
+      body: { dataset, selection: { ...selection, totals: { groupings: [['region']] } } },
+      message: /totals grouping \[region\] is not a subset of the selected dimensions/,
+    },
+    {
+      // The caller-shaped trigger: the DATASET declares no `include`, and the
+      // SELECTION names a dotted dimension, which `lookupMember`'s synthetic
+      // relation fallback turns into a join at alias `account`.
+      name: 'native-sql-strategy: a selection naming a join outside the allowlist',
+      listEntry: 'not backed by a declared relationship',
+      analytics: nativeAnalytics,
+      body: { dataset, selection: { dimensions: ['account.region'], measures: ['revenue'] } },
+      message: /join "account" is not backed by a declared relationship on cube "pipeline"/,
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.name} → 400 DATASET_INVALID`, async () => {
+      const route = buildRoute(async () => c.analytics());
+      const res = await post(route, c.body);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.code).toBe('DATASET_INVALID');
+      // The message survives intact so the author can act on it, and the body is
+      // the 4xx shape (`message`), not the 5xx one (`error`).
+      expect(String(res.body.message)).toMatch(c.message);
+      expect(res.body.error).toBeUndefined();
+      // The defect, asserted as the defect rather than as the fix.
+      expect(res.statusCode).not.toBe(500);
+      expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
+    });
+  }
+
+  it('covers exactly the five entries #5367 deleted from the message list', () => {
+    expect(CASES.map((c) => c.listEntry).sort()).toEqual([
+      'is not a subset of the selected dimensions',
+      'not a selected dimension or measure',
+      'not backed by a declared relationship',
+      'not declared in the dataset',
+      'not supported by the v1 dataset runtime',
+    ]);
+  });
+
+  it('POSITIVE control (aggregate path): the same wiring, a valid selection → 200 with rows', async () => {
+    const route = buildRoute(async () => aggregateAnalytics());
+    const res = await post(route, { dataset, selection });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.rows).toEqual([{ stage: 'won', revenue: 100 }]);
+  });
+
+  it('POSITIVE control (raw-SQL path): a DECLARED relationship still joins → 200 with rows', async () => {
+    // The allowlist case's twin: `include: ['account']` makes the same dotted
+    // selection legal, so case ⑤ above is a verdict about the allowlist rather
+    // than about dotted members being rejected outright.
+    const route = buildRoute(async () => nativeAnalytics());
+    const res = await post(route, {
+      dataset: { ...dataset, include: ['account'] },
+      selection: { dimensions: ['account.region'], measures: ['revenue'] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.rows).toEqual([{ stage: 'won', revenue: 100 }]);
+  });
+});

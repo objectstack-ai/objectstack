@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
@@ -10,6 +11,7 @@ import { PageSchema } from '../ui/page.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
+import { renameConfigKey, renameKey } from './walk.js';
 import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
 
 describe('conversion layer (ADR-0087 D2)', () => {
@@ -136,7 +138,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices).toHaveLength(1);
     });
 
-    it('does not clobber an existing canonical filter', () => {
+    it('does not clobber an existing canonical filter that says something DIFFERENT', () => {
       const { stack, notices } = collectConversionNotices({
         flows: [
           {
@@ -153,7 +155,156 @@ describe('conversion layer (ADR-0087 D2)', () => {
       });
       const node = (stack.flows as any[])[0].nodes[0];
       expect(node.config.filter).toEqual({ keep: true });
-      expect(notices).toHaveLength(0); // canonical present → no conversion
+      // Two different match maps under two names is the ambiguous half of the
+      // #4923 ruling: BOTH survive, so the strict gate can refuse naming both.
+      expect(node.config.filters).toEqual({ drop: true });
+      expect(notices).toHaveLength(0);
+    });
+  });
+
+  /**
+   * The shadowed-alias rule, split by value (#4923).
+   *
+   * `renameKey` used to do nothing whenever the canonical key was already
+   * present, which left the retired spelling sitting in converted metadata
+   * forever — invisible while the node contracts were `.strip`, an execute-time
+   * refusal once #4001 批 9 made them strict. The maintainer ruling splits that
+   * case by whether the two values actually disagree; these tests pin both
+   * halves, because only one of them is a change.
+   */
+  describe('shadowed alias, split by value (#4923)', () => {
+    const crudFlow = (config: Record<string, unknown>) => ({
+      flows: [{ name: 'f', nodes: [{ id: 'a', type: 'create_record', config }] }],
+    });
+    const configOf = (stack: Record<string, unknown>) =>
+      (stack.flows as Array<{ nodes: Array<{ config: Record<string, unknown> }> }>)[0]!.nodes[0]!.config;
+
+    // ── Direction 1: equal values → the twin is deleted, loudly ──────────
+    //
+    // Predicted BEFORE the run, against unmodified code: red. The old
+    // `renameKey` returned `null` the moment `objectName` was present, so the
+    // dead `object` survived into `after` and no notice was emitted at all.
+
+    it('deletes an alias whose value EQUALS the canonical key, and emits a notice', () => {
+      const { stack, notices } = collectConversionNotices(
+        crudFlow({ objectName: 'task', object: 'task' }),
+      );
+      expect(configOf(stack)).toEqual({ objectName: 'task' });
+      expect(configOf(stack)).not.toHaveProperty('object');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({
+        conversionId: 'flow-node-crud-object-alias',
+        from: 'object',
+        to: 'objectName',
+      });
+    });
+
+    it('compares STRUCTURALLY — two separately-authored identical filters are one declaration', () => {
+      // `===` would call these different and keep both; they are the same
+      // authored match map, so the retired spelling carries nothing.
+      const { stack, notices } = collectConversionNotices({
+        flows: [
+          {
+            name: 'f',
+            nodes: [
+              {
+                id: 'a',
+                type: 'delete_record',
+                config: { filter: { status: 'stale' }, filters: { status: 'stale' } },
+              },
+            ],
+          },
+        ],
+      });
+      expect(configOf(stack)).toEqual({ filter: { status: 'stale' } });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('is idempotent in shape AND notices — the deduped result replays to itself', () => {
+      const once = collectConversionNotices(crudFlow({ objectName: 'task', object: 'task' }));
+      expect(once.notices).toHaveLength(1);
+      const twice = collectConversionNotices(once.stack);
+      expect(twice.stack).toEqual(once.stack);
+      expect(twice.notices).toHaveLength(0);
+    });
+
+    // ── Direction 2: different values → BOTH survive ─────────────────────
+    //
+    // Predicted BEFORE the run: GREEN against unmodified code too. Keeping a
+    // differing pair is what the old code already did for every pair, so this
+    // half is a REGRESSION PIN, not a proof of change. What the ruling
+    // actually changed here is the *reason* — and the prescription that reads
+    // it, pinned in the strict-gate test below.
+
+    it('keeps BOTH spellings when the values differ — the upgrade tool does not choose', () => {
+      const before = crudFlow({ objectName: 'task', object: 'ticket' });
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(configOf(stack)).toEqual({ objectName: 'task', object: 'ticket' });
+      expect(notices).toHaveLength(0);
+    });
+
+    it('judges each pair on its own value — one twin dedupes while its neighbour survives', () => {
+      const { stack, notices } = collectConversionNotices(
+        crudFlow({ objectName: 'task', object: 'task', filter: { a: 1 }, filters: { a: 2 } }),
+      );
+      expect(configOf(stack)).toEqual({ objectName: 'task', filter: { a: 1 }, filters: { a: 2 } });
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.from).toBe('object');
+    });
+
+    it('never deletes the only copy when a pair renames a key to itself', () => {
+      // Guard on the new equal-value branch: `from === to` would compare the
+      // value against itself, call it a redundant twin, and delete it. No
+      // registry pair is written that way; this pins that one added later
+      // converts nothing instead of erasing the key.
+      const dict = { objectName: 'task' };
+      expect(renameKey(dict, 'objectName', 'objectName')).toBeNull();
+      expect(renameConfigKey({ config: { ...dict } }, 'objectName', 'objectName')).toBeNull();
+    });
+
+    it('applies the same rule one level up, on a plain dict rename (page header)', () => {
+      // `renameConfigKey` delegates to `renameKey`, so a non-`config` surface
+      // must not develop its own dialect of the rule.
+      const header = (properties: Record<string, unknown>) => ({
+        pages: [{ name: 'p', regions: [{ name: 'header', components: [{ type: 'page:header', properties }] }] }],
+      });
+      const propsOf = (stack: Record<string, unknown>) =>
+        (stack.pages as Array<{ regions: Array<{ components: Array<{ properties: unknown }> }> }>)[0]!
+          .regions[0]!.components[0]!.properties;
+
+      const equal = collectConversionNotices(header({ title: 'T', subtitle: 'One', description: 'One' }));
+      expect(propsOf(equal.stack)).toEqual({ title: 'T', subtitle: 'One' });
+      expect(equal.notices).toHaveLength(1);
+
+      const differs = header({ title: 'T', subtitle: 'One', description: 'Another' });
+      const kept = collectConversionNotices(structuredClone(differs));
+      expect(kept.stack).toEqual(differs);
+      expect(kept.notices).toHaveLength(0);
+    });
+
+    // ── The half the strict gate owns: the prescription names BOTH keys ───
+    //
+    // Predicted BEFORE the run: red against unmodified guidance, which told
+    // the author the surviving twin was "dead" — true under the old rule and
+    // false under the new one, where a survivor means the two values disagree.
+
+    it('the surviving pair is refused by the strict gate with BOTH keys named', () => {
+      const parsed = CreateRecordConfigSchema.safeParse({
+        objectName: 'task',
+        object: 'ticket',
+        fields: { title: 'x' },
+      });
+      expect(parsed.success).toBe(false);
+      const message = parsed.success ? '' : parsed.error.issues.map((i) => i.message).join('\n');
+      // Both spellings, so the author can see the disagreement they authored…
+      expect(message).toContain('`object`');
+      expect(message).toContain('`objectName`');
+      // …and the refusal must NOT claim the survivor is a dead duplicate: the
+      // conversion now deletes those, so a key that reached this parse carries
+      // a value that differs from the canonical one.
+      expect(message).not.toMatch(/already won and this key is dead/i);
+      expect(message).toMatch(/differ|different/i);
     });
   });
 
@@ -446,7 +597,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
         timerDuration: 'PT5M',
         timeoutMs: 60_000,
       });
-      // The shadowed alias is not deleted — same treatment `renameConfigKey` gives one.
+      // The loose counterpart is not deleted. NOTE this is the wait-node LIFT
+      // (a loose key into a declared block), not a `renameKey` alias pair, so
+      // #4923's by-value split does not reach it — see the comment on
+      // WAIT_EVENT_CONFIG_LIFTS.
       expect(waitNodeOf(stack).config).toEqual({ duration: 'PT9M' });
       expect(notices).toHaveLength(1);
     });
@@ -695,12 +849,13 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(componentsOf(stack)[0]!.type).toBe('page-header');
     });
 
-    it('leaves a shadowed `description` alone when `subtitle` is already there (canonical wins)', () => {
-      // The house precedence `renameKey` encodes, same as
-      // flow-node-crud-object-alias: no rewrite, no notice, no deletion.
+    it('keeps a `description` that DISAGREES with an existing `subtitle` (both survive)', () => {
+      // The house precedence `renameKey` encodes since #4923, same as
+      // flow-node-crud-object-alias: two different second lines are the
+      // author's to reconcile, so no rewrite, no notice, no deletion.
       const before = pageWith({
         type: 'page:header',
-        properties: { title: 'Both', subtitle: 'wins', description: 'ignored' },
+        properties: { title: 'Both', subtitle: 'wins', description: 'other' },
       });
       const { stack, notices } = collectConversionNotices(structuredClone(before));
       expect(stack).toEqual(before);

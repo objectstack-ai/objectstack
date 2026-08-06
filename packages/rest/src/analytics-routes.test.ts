@@ -149,7 +149,17 @@ describe('POST /analytics/dataset/query', () => {
   });
 
   it('maps a dataset D-C compile error to 400 (undeclared relationship)', async () => {
-    const queryDataset = vi.fn().mockRejectedValue(new Error("dimension \"region\" references relationship \"account\" via \"account.region\", but \"account\" is not declared in the dataset's `include`."));
+    // [#5367] The refusal now arrives in the ADR-0112 envelope
+    // (`dataset-compiler`'s `datasetInvalidError`) instead of as a bare `Error`
+    // classified by the route's message list — that list's five dataset entries
+    // were deleted once their producers carried the envelope. The outward answer
+    // is unchanged; what changed is which branch produces it.
+    const queryDataset = vi.fn().mockRejectedValue(
+      Object.assign(
+        new Error("dimension \"region\" references relationship \"account\" via \"account.region\", but \"account\" is not declared in the dataset's `include`."),
+        { code: 'DATASET_INVALID', status: 400 },
+      ),
+    );
     const { route } = buildServer(async () => ({ queryDataset }));
     const res = mockRes();
     await route!.handler({ method: 'POST', params: {}, headers: {}, body: { dataset: inlineDataset, selection } } as any, res);

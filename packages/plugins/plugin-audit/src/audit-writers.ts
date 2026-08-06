@@ -177,13 +177,19 @@ function recordLabel(record: any, id: string): string {
 }
 
 /**
- * Field types whose values the engine computes on READ (formula / summary /
- * rollup / autonumber). The `before` snapshot is read back through the query
- * path and therefore carries them, but `after` (`ctx.result`) is the raw
- * write result and does not — so diffing them records a phantom
- * "value → null" change on EVERY update (surfaced by the objectui record
- * History tab). As derived values their changes are implied by their source
- * fields anyway, so they are excluded from the audit diff.
+ * Field types whose values the engine computes rather than storing (formula /
+ * summary / rollup / autonumber). Excluded from the audit diff because a
+ * DERIVED value's change is already implied by the source fields that produced
+ * it — recording both says the same thing twice.
+ *
+ * The original symptom was narrower: `before` came back through the query path
+ * (computed) while `after` (`ctx.result`) was the raw write result (formula
+ * key ABSENT), so every update recorded a phantom "value → null" change on the
+ * objectui record History tab. Since #5504 the write path hydrates formulas
+ * too, so that particular asymmetry is gone and the two sides now agree. The
+ * exclusion is kept on its own merit — the derived-is-implied reason above —
+ * and it is keyed on the field TYPE from `fieldDefs`, never on a key being
+ * missing, which is why the fix one layer down did not disturb it.
  */
 const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
 
