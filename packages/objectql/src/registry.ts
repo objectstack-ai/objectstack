@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, isTenancyDisabled, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -324,9 +324,19 @@ export function applySystemFields(
   schema: ServiceObject,
   opts: { multiTenant: boolean }
 ): ServiceObject {
-  // 1. Hard opt-out at object level (e.g. seed/migration tables).
-  if ((schema as any).systemFields === false) return schema;
+  // WHICH columns this object carries is the spec's derivation
+  // (`resolveInjectedSystemColumns`, #5378) — one answer shared with every
+  // author-time consumer that must resolve a reference to an injected column
+  // but cannot load this runtime (`@objectstack/lint`). This function keeps sole
+  // ownership of WHAT each column looks like, the same split #3786 established
+  // for the audit family. Do NOT re-derive a condition below: a second copy here
+  // is exactly the drift the plan exists to prevent.
+  const plan = resolveInjectedSystemColumns(schema);
 
+  // 1. Hard opt-out at object level (e.g. seed/migration tables).
+  //    Folded into the plan (`systemFields: false` ⇒ every flag false), so the
+  //    cheap path stays cheap without a second reading of the key.
+  //
   // 2. Skip only `better-auth` managed tables. Their column layout is
   //    driven by better-auth's own migrations (sys_user, sys_session,
   //    sys_organization, …) and injecting extra columns here would
@@ -338,13 +348,8 @@ export function applySystemFields(
   //    field-existence safety net dropped `organization_id =
   //    current_user.organization_id` as "field missing", producing
   //    RLS_DENY_FILTER → 0 rows for every non-admin caller).
-  if (schema.managedBy === 'better-auth') return schema;
-
-  const sf =
-    typeof (schema as any).systemFields === 'object' && (schema as any).systemFields !== null
-      ? ((schema as any).systemFields as { tenant?: boolean; audit?: boolean })
-      : undefined;
-
+  //    Both opt-outs are the plan's rows 1-2; the bail below covers them.
+  //
   // Honor explicit opt-out via either `systemFields.tenant === false`
   // OR `tenancy.enabled === false`. The latter is the schema-level
   // declaration that the table is a shared/global catalog (e.g.
@@ -352,7 +357,7 @@ export function applySystemFields(
   // registry would still inject `organization_id`, and the
   // SecurityPlugin's RLS layer would filter every cross-org read down
   // to 0 rows even though the schema explicitly disabled multi-tenancy.
-  const tenancyDisabled = isTenancyDisabled(schema);
+  //
   // The `organization_id` COLUMN is provisioned unconditionally (subject only
   // to the explicit opt-outs above) — its existence no longer depends on the
   // global multi-tenant flag. Decoupling "does the column exist" from "is
@@ -361,9 +366,11 @@ export function applySystemFields(
   // single-tenant stacks: they can always stamp the column, it just stays NULL
   // when no tenant context exists. The multi-tenant flag now governs only
   // whether the column is INDEXED — on a single-tenant DB nothing ever filters
-  // by organization, so the index would be dead weight.
-  const wantTenant = sf?.tenant !== false && !tenancyDisabled;
-  const wantAudit = sf?.audit !== false;
+  // by organization, so the index would be dead weight. That is also why the
+  // plan takes no `multiTenant` input: the flag cannot change what EXISTS, only
+  // what is indexed, so an author-time consumer needs no runtime context.
+  const wantTenant = plan.tenant;
+  const wantAudit = plan.audit;
 
   // Ownership is auto-provisioned by DEFAULT on user-authored business
   // objects (correct-by-default for AI authors). It is withheld only where a
@@ -374,44 +381,40 @@ export function applySystemFields(
   // junction tables). Note this is the SAFE default direction: forgetting the
   // opt-out leaves a harmless spare column, whereas the old opt-IN model let
   // authors silently ship objects with no working ownership at all.
-  // `ownership` is now a declared ObjectSchema field (record-ownership model),
-  // so it reads off the typed schema — no `as any` (#3175).
+  // `ownership` is a declared ObjectSchema field (record-ownership model), read
+  // off the typed schema by the plan — no `as any` (#3175).
   //
-  // [ADR-0117 D1 / #5677] Widened to `string` on purpose. The spec enum is
-  // `'user' | 'org' | 'none'` TODAY; D1's fourth tier `'business_unit'` is
-  // declared in #5678, strictly AFTER this PR — that ordering is the whole
-  // point of #5677: the engine must recognise the tier BEFORE the schema can
-  // emit it, or the tier's first appearance would be judged by the branch
-  // below and get the INVERSE of what D1 declares. Without the widening `tsc`
-  // rejects the comparison as a no-overlap literal test; with it the engine is
-  // ready and the enum lands into a runtime that already honours it.
-  const ownership: string | undefined = schema.ownership;
-
-  // Platform-managed tables and the `sys_*` namespace never carry a per-record
-  // ownership anchor, whichever tier is declared — unchanged, and shared by
-  // both anchors below so they cannot drift apart.
-  const ownershipEligible = !(schema as any).managedBy && !schema.name.startsWith('sys_');
-
-  // [ADR-0117 D1 / #5677] POSITIVE LIST, deliberately — this used to read
-  // `ownership !== 'org' && ownership !== 'none'`, i.e. a DENY-list, so ANY
-  // value outside the two exclusions fell through to "inject `owner_id`".
-  // That default is safe only while the enum has exactly three members: D1's
-  // `business_unit` tier means "owned by a UNIT, not a person" (`owner_id` ❌,
-  // `owning_business_unit_id` ✅), and under the deny-list it would have been
-  // stamped with `owner_id` — the exact inverse. Behaviour for the three
-  // values that exist today is IDENTICAL (`undefined`/`user` inject, `org`/
-  // `none` do not); the change is only that a NEW tier no longer inherits the
-  // owner branch by accident.
-  const wantOwner = ownershipEligible && (ownership === undefined || ownership === 'user');
-
-  // [ADR-0117 D1] The BU anchor covers the owner tiers PLUS `business_unit`:
+  // [ADR-0117 D1 / #5677] The plan treats the value as a `string`, not the
+  // enum, on purpose. The spec enum is `'user' | 'org' | 'none'` TODAY; D1's
+  // fourth tier `'business_unit'` lands in #5678 — the engine must recognise the
+  // tier BEFORE the schema can emit it, or the tier's first appearance would be
+  // judged by a no-overlap literal test and get the INVERSE of what D1 declares.
+  //
+  // [ADR-0117 D1 / #5677] The ownership decision is a POSITIVE LIST, deliberately
+  // — it used to read `ownership !== 'org' && ownership !== 'none'`, i.e. a
+  // DENY-list, so ANY value outside the two exclusions fell through to "inject
+  // `owner_id`". That default is safe only while the enum has exactly three
+  // members: D1's `business_unit` tier means "owned by a UNIT, not a person"
+  // (`owner_id` ❌, `owning_business_unit_id` ✅), and under the deny-list it
+  // would have been stamped with `owner_id` — the exact inverse.
+  //
+  // The `sys_*` / `managedBy` ineligibility and the per-tier table
   //
   //   ownership        owner_id   owning_business_unit_id
   //   undefined/user      ✅              ✅
   //   business_unit       ❌              ✅
   //   org                 ❌              ❌
   //   none                ❌              ❌
-  const wantOwningBusinessUnit = wantOwner || (ownershipEligible && ownership === 'business_unit');
+  //
+  // all live in `resolveInjectedSystemColumns` now, so the author-time linter
+  // reaches the same verdict instead of guessing (#5378).
+  const wantOwner = plan.owner;
+  const wantOwningBusinessUnit = plan.owningBusinessUnit;
+
+  // Nothing to inject and nothing to govern — the cheap path for the two
+  // opt-out rows (`systemFields: false`, `managedBy: 'better-auth'`) and for
+  // objects whose every column is already declared.
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit) return schema;
 
   const additions: Record<string, any> = {};
   // Platform-owned field settings that must WIN over a declared field, rather

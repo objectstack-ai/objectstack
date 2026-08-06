@@ -1973,3 +1973,71 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
 export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJOR)
   .map(Number)
   .sort((a, b) => a - b);
+
+/**
+ * Every authorable key TOMBSTONED at each protocol major, named EXACTLY.
+ *
+ * One entry per key, spelled `${defKey}:${name}` — the same string
+ * `packages/spec/authorable-surface.json` records, minus its `[RETIRED]` mark
+ * (`'automation/Event:type'`, `'ui/App:sharing'`). Not a surface path, not a
+ * prose clause, not a prefix: the literal key.
+ *
+ * ## What reads it
+ *
+ * Check (b) of `scripts/build-schemas.ts` (`check:authorable-surface`): a key
+ * that flips live → retired must appear here, by exact set membership, or the
+ * build fails. Nothing else consumes the table, and nothing infers an entry —
+ * the author writes the key down or the gate stays red.
+ *
+ * ## Why exact keys, and not the conversion `surface`
+ *
+ * Check (b) used to satisfy itself by matching the key's LEAF against every
+ * `surface` registered in {@link CONVERSIONS_BY_MAJOR} / {@link
+ * MIGRATIONS_BY_MAJOR} — `endsWith('.' + name)`, across all majors, ignoring
+ * which def the key belonged to. Any unrelated registration ending in the same
+ * leaf therefore registered a tombstone for free: measured in #4658, tombstoning
+ * `automation/Event:type` passed silently because protocol 11's
+ * `flow-node-http-callout-rename` had registered `flow.node.type`. The exposure
+ * grew with the vocabulary — `type`, `name`, `config`, `filter`, `schema`,
+ * `description` (#5509) are ordinary leaves on hundreds of authorable shapes —
+ * so the gate's whole guarantee had lapsed for the most common keys (#4659).
+ *
+ * A `surface` is deliberately PROSE: it addresses authors in the shape they
+ * write metadata (`flow.nodes[].outputSchema`), which no rule can map back onto
+ * a def key. So the registration moved here instead of being encoded into the
+ * surface — the conversion keeps its prose, and this table carries the machine
+ * fact.
+ *
+ * ## What it does NOT replace
+ *
+ * The D2 conversion (`src/conversions/registry.ts`) and D3 semantic entry stay
+ * the *documentation* channel: `spec-changes.json` (ADR-0087 D4), the generated
+ * upgrade guide and `os migrate meta` are projections of those, not of this
+ * table. An entry here is the *proof the retirement was declared*; the
+ * conversion is the *prescription a consumer follows*. A retirement needs both.
+ *
+ * ## Not a backfill of history
+ *
+ * Check (b) fires only on a NEW live → retired transition — measured against the
+ * committed `authorable-surface.json` baseline, which already records every
+ * older tombstone as `[RETIRED]`. Retirements that landed before this table
+ * existed therefore never re-trigger it and are deliberately absent: this reads
+ * "retirements registered under the exact-key gate", not "every retirement
+ * ever". Do not reconstruct the missing history by leaf-matching the conversion
+ * registry — that is precisely the inference #4659 removed.
+ *
+ * ## Lifecycle
+ *
+ * Entries are permanent. A tombstone ages out after ~two majors and its line
+ * leaves `authorable-surface.json` (check (c)); its entry here stays, and then
+ * names a key the build no longer emits — the expected steady state, not an
+ * error. The one state the gate rejects is an entry naming a key that is still
+ * LIVE: a registration nothing consumed, pre-approving a retirement that has not
+ * happened.
+ *
+ * @see scripts/build-schemas.ts — checks (b)/(b2), the only consumers
+ */
+export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
+  // Empty by design at protocol 17: see "Not a backfill of history" above. The
+  // first entry arrives with the first retirement tombstoned after #4659.
+};

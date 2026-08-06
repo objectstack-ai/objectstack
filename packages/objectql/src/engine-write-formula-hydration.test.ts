@@ -111,6 +111,58 @@ const PLAIN = {
   },
 };
 
+/**
+ * Two `now()` formulas — the determinism surface (#5699).
+ *
+ * `applyFormulaPlan` builds ONE eval context per call and reuses it for every
+ * row × every formula field, so an object declaring two clock formulas is the
+ * smallest shape that can observe the guarantee in both directions at once.
+ * After the zero-caller `nowSnapshot` parameter was retired, this per-call
+ * snapshot is the ONLY thing pinning the function's determinism.
+ */
+const CLOCK = {
+  name: 'wf_clock',
+  label: 'Clock',
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', label: 'Name', type: 'text' as const },
+    seen_at: {
+      name: 'seen_at', label: 'Seen At', type: 'formula' as const,
+      expression: { dialect: 'cel', source: 'now()' },
+    },
+    seen_again: {
+      name: 'seen_again', label: 'Seen Again', type: 'formula' as const,
+      expression: { dialect: 'cel', source: 'now()' },
+    },
+  },
+};
+
+/**
+ * A `defaultValue` Expression AND a `formula`, both reading `now()` — the two
+ * instants #5699 is about.
+ *
+ * `created_at` is `readonly`, the shape the ~100 platform `created_at` /
+ * `updated_at` declarations use; `validateRecord` skips readonly fields, so the
+ * Date the default resolves to reaches the driver unexamined and the test
+ * observes the engine's own snapshot rather than a validator's coercion of it.
+ */
+const STAMPED = {
+  name: 'wf_stamped',
+  label: 'Stamped',
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', label: 'Name', type: 'text' as const },
+    created_at: {
+      name: 'created_at', label: 'Created At', type: 'datetime' as const, readonly: true,
+      defaultValue: { dialect: 'cel', source: 'now()' },
+    },
+    stamped_at: {
+      name: 'stamped_at', label: 'Stamped At', type: 'formula' as const,
+      expression: { dialect: 'cel', source: 'now()' },
+    },
+  },
+};
+
 /** Formula referencing the caller — pins the context passthrough (#1979 status quo). */
 const MEMO = {
   name: 'wf_memo',
@@ -226,7 +278,7 @@ async function makeEngine() {
   const rig = makeStubDriver();
   engine.registerDriver(rig.driver as never, true);
   await engine.init();
-  for (const obj of [ACCOUNT, FORECAST, PLAIN, MEMO]) {
+  for (const obj of [ACCOUNT, FORECAST, PLAIN, MEMO, CLOCK, STAMPED]) {
     engine.registry.registerObject(obj as never);
   }
   const protocol = new ObjectStackProtocolImplementation(engine);
@@ -514,5 +566,98 @@ describe('#5504 — cost threshold: same gate the read path uses', () => {
     // 3 formula fields × 1 row. No `defaultValue` expression on this object, so
     // every evaluation observed here is the hydration's.
     expect(evaluate).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * #5699 — what pins `applyFormulaPlan`'s determinism once its zero-caller
+ * `nowSnapshot?: Date` parameter is gone.
+ *
+ * The parameter was dormant from birth: none of the three call sites (`find`,
+ * `findOne`, and the write hydration this file was written for) ever passed it,
+ * so `?? new Date()` was the only branch that ever ran. Retiring it changes no
+ * behaviour — which is exactly why the guarantee it appeared to provide has to
+ * be pinned somewhere real. It is the per-call snapshot, and nothing else:
+ *
+ *  - ONE `new Date()` per call, shared by every row × every formula field, on
+ *    the write path and the read path alike (they are the same helper);
+ *  - and NOT shared with `applyFieldDefaults` — the insert's `defaultValue`
+ *    instant and the response formula's instant stay independent.
+ *
+ * The second bullet is the observation #5699 recorded rather than changed, and
+ * the last test here is its tripwire: making the two share one snapshot would
+ * hand the write path a determinism guarantee the read path cannot have, so it
+ * is a semantic decision that belongs in that issue, not in a cleanup.
+ */
+describe('#5699 — one `now` per `applyFormulaPlan` call', () => {
+  let rig: Rig;
+  let evaluate: ReturnType<typeof vi.spyOn>;
+  beforeEach(async () => {
+    rig = await makeEngine();
+    evaluate = vi.spyOn(ExpressionEngine, 'evaluate');
+  });
+  afterEach(() => { evaluate.mockRestore(); });
+
+  /** The `now` each observed evaluation was handed, in call order. */
+  const nowsSeen = (): Date[] =>
+    (evaluate.mock.calls as unknown as Array<[unknown, { now?: Date }]>)
+      .map(([, ctx]) => ctx.now as Date);
+
+  it('a batch insert hydrates every row × every formula field from ONE snapshot', async () => {
+    const rows = await rig.engine.insert('wf_clock', [{ name: 'a' }, { name: 'b' }]) as Rec[];
+
+    // 2 formula fields × 2 rows, and `wf_clock` declares no `defaultValue`
+    // expression, so every evaluation observed here is the hydration's.
+    expect(evaluate).toHaveBeenCalledTimes(4);
+
+    // The mechanism: one `new Date()`, handed to all four evaluations by
+    // IDENTITY. A per-evaluation `new Date()` would produce four distinct
+    // objects even when their milliseconds happen to agree — which is why this
+    // is asserted on the object and not on the value.
+    const nows = nowsSeen();
+    expect(nows).toHaveLength(4);
+    expect(nows.every((n) => n === nows[0])).toBe(true);
+
+    // …and the consequence a caller can see.
+    const values = [rows[0].seen_at, rows[0].seen_again, rows[1].seen_at, rows[1].seen_again];
+    expect(values[0]).toBeDefined();
+    for (const v of values) expect(v).toEqual(values[0]);
+  });
+
+  it('a find hydrates every row × every formula field from the SAME one-snapshot rule', async () => {
+    // Same helper, so the read path carries the guarantee for the same reason.
+    // Pinned here next to the write path because the retirement removed the one
+    // parameter that could ever have made the two differ.
+    await rig.engine.insert('wf_clock', [{ name: 'a' }, { name: 'b' }]);
+    evaluate.mockClear();
+
+    const found = await rig.engine.find('wf_clock', {} as never) as Rec[];
+    expect(found).toHaveLength(2);
+    expect(evaluate).toHaveBeenCalledTimes(4);
+
+    const nows = nowsSeen();
+    expect(nows).toHaveLength(4);
+    expect(nows.every((n) => n === nows[0])).toBe(true);
+  });
+
+  it("the insert's `defaultValue` instant and the response formula's instant are INDEPENDENT", async () => {
+    const row = await rig.engine.insert('wf_stamped', { name: 'two clocks' }) as Rec;
+    expect(row.stamped_at).toBeDefined();
+
+    // Exactly two evaluations, and their order is structural rather than
+    // incidental: `applyFieldDefaults` runs at the top of the insert middleware
+    // (pre-write, from the insert's own `nowSnap`), `applyFormulaPlan` runs on
+    // the driver's readback (post-write, from its own clock read).
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    const [defaultNow, formulaNow] = nowsSeen();
+    expect(defaultNow).toBeInstanceOf(Date);
+    expect(formulaNow).toBeInstanceOf(Date);
+
+    // Two `new Date()`s one driver round-trip apart — NOT one shared snapshot.
+    // Status quo, deliberately: see this block's header. If a later change makes
+    // them share one, this line goes red and the decision has to be made out
+    // loud.
+    expect(formulaNow).not.toBe(defaultNow);
+    expect(formulaNow.getTime()).toBeGreaterThanOrEqual(defaultNow.getTime());
   });
 });

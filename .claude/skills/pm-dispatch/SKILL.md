@@ -107,7 +107,7 @@ protocol is identical.)
 
 ## Operational notes(实测坑位)
 
-队列与平台层的九条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+队列与平台层的十二条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
 也不取本地工作树的现状,更不取「看起来相邻」的两行日志** —— 每一条都是在这一步上
 咬过人之后写下来的。
 
@@ -241,6 +241,69 @@ draft、解绑 `Fixes`,免得一个错结论继续被当作已立案的事实引
 边界要记清:duplicate-fix-guard 只拦两个 **PR** 声明同一个 `Fixes #N`(第
 8 条讲过它的覆盖面)—— 两条 **issue** 描述同一个问题,没有任何门禁能看见,
 查重只能发生在立单前、你自己手里。
+
+**10. 合并前认门禁 job 的结论,不认聚合读数 —— advisory 门禁红着合并会毒化全仓。**
+PR #5584 的新测试文件触发 `check:engine-double-contract`(这一族门禁挂在 **ESLint
+job** 里),该 job 19:53Z 结论 `failure`,而 PR 在红了 **19 分钟后照常过队合并**。
+合并后,`main` 上这条红被 merge ref 带进**每一个后续 PR 的 ESLint job**,#5601 等
+直接中招;热修 #5615 才解除,治理侧另立 #5617。两句纪律:
+
+- 合并前必须确认**承载门禁族的 job**(本仓即 ESLint、TypeScript Type Check ——
+  `check:engine-double-contract` / `check:error-code-casing` /
+  `check:route-envelope` 等都跑在 ESLint job 内)已达 **`completed: success`**,
+  而不是「暂时还没出现 failure」。step 7 的 ACCEPT 那句 *once every check on the PR
+  is green* 要读成「每个门禁 job 的**结论**已出且为 success」,`in_progress`
+  不算数。
+- 「队列会把关」只对 **required** 检查成立。一条不在 required 集里的 advisory
+  门禁,merge queue 的 merge_group 检查集同样看不见它 —— 它红着合并进 main 就是
+  **共享损伤**,**任何车道发现都要立即止血 + 立单**(#5615 止血 / #5617 治理即
+  此形)。#5617 是本条的治理半边(required 集怎么配),与本条互补:配置面归它,
+  流程面归这里,两边都到位才关掉这个失效面。
+
+**11. dev 子代理自己死了 ≠ 维护者中止 —— 不得据推断立一道谁也不敢退的门。** #5085 的
+dev 子代理零推送、零分支就没了(子代理正常的 `/compact`/中断死法,step 6 的探活与
+step 5「Handing off an interrupted dev」讲的就是它)。前任 PM 把它**推断**成
+「维护者手动中止」,设了「是否重派等维护者示意」的门:该门从 08-05 07:00Z 立到
+08-06 02:42Z 解除,**近 20 小时**压着一个 p0-邻近的真 bug,直到维护者本人确认
+「没有中止」才发现是误判。两句纪律:
+
+- 子代理消失(零推送 / 零分支 / 无报告)是**子代理的正常死法**,按 step 4 的
+  **stale-claim reclaim** 处理(先探活 / SendMessage 复活,复活不成再回收重派),
+  ⛔ 不得推断为维护者意图。
+- 「维护者中止」只在有**显式信号**的记录时才成立 —— 维护者原话,或宿主明确回报
+  的 *stopped by the user*。同一条 #5085 上两种都出过:08-05 07:00Z 那次是推断
+  (误判,门压近 20 小时),08-06 04:12Z 那次是宿主信号(真中止,维护者两分钟后
+  示意重派、门即解除)。**判据是信号,不是症状**:两次的症状(零推送、无分支)
+  完全一样。没有显式信号就当死认领回收,⛔ 不要立一道没有重启条件的门 —— 那次
+  的门只写在「认领解除」评论里、标签退回了 `pm:queue`,于是队列视图显示可派发而
+  谁也不敢派,比 `pm:on-hold` 更隐蔽(状态机根本读不到它)。真需要 hold 就照
+  状态模型办:`pm:on-hold` + 带**重启条件**的评论成对落地(「A hold without a
+  restart condition is a state nobody can ever legally exit」)。
+
+**12. 判「正文被 sanitizer 截断」必须双读取 —— 单一读法的尾部缺失先算读取端截断。**
+#5148 / #5149(2026-08-05,分诊座位)与 #5164(cli 车道 PM)被判为「正文已被 GitHub
+sanitizer 截断,不可分诊/派发」,据此挂起并要求原作者重贴。事后以两种读法复核 ——
+REST 取 `body`(原文 4321 / 5183 / 4181 字符)+ 取 `body_html`(渲染版)—— **三条
+正文都完整**,`<object>` / `<id>` 一类占位符全部落在行内代码或围栏内、未被吞。
+三条判读均不成立,真因是**读取端(工具输出)截断**被误读成 issue 端截断;代价是
+三条 issue 各白停摆 1–2 天(#5148 是有脚本化复现的可入队缺陷,#5149 / #5164 是
+应当尽早进维护者决策箱的裁决卡),外加三张打给作者的假工单。两句纪律:
+
+- 判截断前必须**双读取**,`body_html` 要带 full 媒体类型才拿得到:
+
+  ```bash
+  curl -s "https://api.github.com/repos/<owner>/<repo>/issues/<n>" \
+    -H 'Accept: application/vnd.github.full+json'   # .body 原文 + .body_html 渲染版
+  ```
+
+  **两者在同一处断掉**才算 issue 端截断;任何单一读法的尾部缺失都先假定是读取端
+  截断(工具输出上限、分页、`[:N]` 切片)。这与 notes 6「零命中必须用一个确定存在
+  的邻近词反查」是同一条纪律的另一半 —— **缺失类读数在下结论前都要先证伪「扫描器
+  坏了」这个解释**。
+- step 0 的 **Repair first** 是**停摆指令**,成本由作者承担,所以它的判据必须比
+  其它分类更硬:误判一次的代价是一条可入队缺陷躺一天,外加一条打给作者的假工单。
+  已发出的重贴指令若事后证伪,**要在同一处公开作废**(同 notes 7:诊断结论一旦
+  公开发出又被推翻,更正要发在同样公开的位置)。
 
 ## Multi-repo coordination (backend / frontend / cloud)
 
@@ -1129,7 +1192,7 @@ attached.
 下面的停摆纠偏处理「带任务中状态的通知到了」;这一条处理更隐蔽的另一半:
 **通知根本不来**。宿主进程重启会把运行中的 subagent 连同其完成通知一起
 静默杀掉 —— 2026-08-05 实测,五个「在飞」dev 里三个(#5050/#5515/#5483)
-已死数小时,批次视图仍显示 5/5,实际吞吐 2/5,零信号。规程三条:
+已死数小时,批次视图仍显示 5/5,实际吞吐 2/5,零信号。规程五条:
 
 - 每次巡检(定时器唤醒、轮间隙)对**每个已派发且尚无远程分支/PR** 的
   dev 发一次状态询问(SendMessage,措辞「回一段简报后继续干活」,不改变
@@ -1140,6 +1203,17 @@ attached.
   优先用它;resume 不可用时才走接手协议。
 - 判据永远取正向证据(远程分支、PR、报告、探活回包),⛔ 绝不把「还没
   收到失败通知」读作「还在跑」。
+- **定时器重挂是每次巡检的第一动作,不是最后一个**(维护者 2026-08-06
+  授权)。巡检执行到一半被打断(穿插提问、事件风暴、会话中断)时,排在
+  末尾的重挂会整个丢失,守夜链就此断裂 —— 2026-08-06 实测:一次漏挂让
+  四连灭批静默了 ~100 分钟而不是探活门槛设计的 ≤45 分钟。先挂后查,链条
+  对中断免疫;挂错了间隔可以在本轮末尾用 delete_trigger + 重挂修正,但
+  「没挂」无法被本轮以外的任何机制补救。
+- **批量在飞期间,主巡检间隔不得长于 45 分钟**(同一授权)。探活门槛是
+  45 分钟,巡检间隔一旦超过它,门槛就成了写在纸上的数字 —— 最坏情形下
+  一个派发后即死的 agent 要等到下一轮巡检才被发现,静默窗口 = 巡检间隔,
+  而非门槛值。在飞清零的待命期可放宽到 60-70 分钟;有任何 dev 在飞即收紧
+  回 ≤45,灭批频发期(如宿主重启风暴)进一步压到 20-30 分钟。
 
 **A stalled subagent is this half's most common failure, and it never
 self-heals.** When a dev stops mid-task reasoning that "a background watcher will
@@ -1206,6 +1280,12 @@ against the report's own claims:
   plainly unrelated to the issue.
 - Test evidence in the report shows the actual commands and passing output,
   not a bare "tests pass".
+- **报告到达 ≠ CI 收敛。** arm auto-merge / 入队前**亲核门禁 job 的结论** —— 不止
+  `pull_request_read get_status` 那个聚合读数,要看 ESLint 与 TypeScript Type Check
+  这两个具体 job 的 `conclusion` 已为 `success`(门禁族都跑在它们里面,Operational
+  notes 10)。dev 可能在自己的 ESLint 还没出结论时就交了「本地绿」的报告 ——
+  #5584 的 advisory 红就是这样漏过复核、红着合并进 main 的;os-dev 定义侧已要求
+  「PR 开出后等 CI 收敛再交报告」,本条是它在复核侧的对账。
 - The diff plausibly satisfies the issue's acceptance criteria.
 - **收益穿过它必经的那道边界之后还在吗?** 判据(不是每单都做):这批工作的价值主张
   是否**依赖某个下游组件如实转发** —— HTTP 错误信封、序列化、日志汇聚、跨进程传输。

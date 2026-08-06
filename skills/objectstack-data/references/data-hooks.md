@@ -58,11 +58,16 @@ ObjectStack provides **8 lifecycle events** organized by operation type:
 > **Why only 8?** The read events fire for `findOne` as well as `find` (the event
 > attaches to record materialization, not the engine method), so one subscription
 > covers every read shape — there is no `beforeFindOne`/`afterFindOne`. Likewise the
-> write events fire on bulk `multi:true` operations (the row-scoping predicate is in
-> `ctx.input.ast`), so there is no `*Many` event. And there is no `beforeCount`/
-> `beforeAggregate`: read authorization and row filtering belong to **RLS / permission
-> rules**, and field masking to **field-level metadata** — declarative mechanisms that
-> apply everywhere, rather than a hook every author must remember to re-attach.
+> write events fire on bulk `multi:true` operations, so there is no `*Many` event. A
+> bulk write hands hooks **no** row-scoping predicate: it lives on the engine-internal
+> `OperationContext.ast` (#2982), so the RLS / sharing filters composed onto it bind
+> the driver call itself, where no handler can widen them — scope a batch through
+> `options.where` at the caller. The `after*` events instead dispatch **once per
+> matched row**, each on a single-record-shaped context whose `input.id` names that
+> row (#5038). And there is no `beforeCount`/`beforeAggregate`: read authorization and
+> row filtering belong to **RLS / permission rules**, and field masking to
+> **field-level metadata** — declarative mechanisms that apply everywhere, rather than
+> a hook every author must remember to re-attach.
 
 ### Before vs After Hooks
 

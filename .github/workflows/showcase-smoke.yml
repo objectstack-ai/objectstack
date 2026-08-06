@@ -45,12 +45,48 @@ jobs:
         working-directory: examples/app-showcase
         run: pnpm exec playwright install --with-deps chromium
       - name: Run showcase smoke
+        id: smoke
         working-directory: examples/app-showcase
         run: pnpm test:smoke
-      - name: Upload report on failure
-        if: failure()
+      # 诊断产物的真实落点是 Playwright 的 `outputDir`,而
+      # examples/app-showcase/playwright.config.ts 没有声明它 —— 于是取默认值
+      # `test-results/`,按 **config 文件所在目录** 解析,即
+      # examples/app-showcase/test-results/。upload-artifact 的 `path` 按仓库根
+      # 解析(`working-directory` 只对 `run:` 步骤生效),所以这里必须写完整的
+      # examples/app-showcase/ 前缀。
+      #
+      # 之前配的 `playwright-report/` 是 HTML reporter 的输出目录,而 CI 的
+      # reporter 是 `[['github'], ['list']]` —— 两个都只写 stdout,那个目录从来
+      # 不会被创建,不是「路径写偏了」而是「路径指向一个不存在的产物」。实测
+      # run 30796529117(2026-08-03,3 failed):
+      #   ##[warning]No files were found with the provided path:
+      #   examples/app-showcase/playwright-report/. No artifacts will be uploaded.
+      # 该 run 的 artifacts 总数为 0,而上传步骤本身仍是绿的 —— 每次失败的
+      # 截图/trace/error-context 都随 runner 回收而丢失(#4931 第 2 缺陷)。
+      #
+      # `if-no-files-found: error` 的前提刻意收窄到「smoke 自己失败了」,而不是
+      # 宽泛的 `failure()`:smoke 失败就一定留下了证据,空的 test-results/ 本身
+      # 就该报警;但若是更早的步骤(pnpm install / vendor Console)倒下,这里
+      # 本来就无物可收,不该再叠一条误导性的红。条件里的 `failure()` 不是装饰
+      # —— GitHub 会给任何不含状态函数的 `if:` 套一层隐式 `success()`,那样
+      # 这个条件永远为假(理由见 scripts/check-workflow-status-functions.mjs)。
+      - name: Upload smoke diagnostics (smoke failed)
+        if: failure() && steps.smoke.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: showcase-smoke-report
-          path: examples/app-showcase/playwright-report/
+          name: showcase-smoke-diagnostics
+          path: examples/app-showcase/test-results/
+          if-no-files-found: error
+          retention-days: 7
+      # 绿也可能是「重试后才绿」(CI 下 `retries: 1`):第一次尝试的 trace 与
+      # 截图就躺在 test-results/…-retry1/ 里,而那正是第 1 缺陷(图表面板时红时
+      # 绿)最需要的证据 —— 只在 red 时收会永远错过 flaky-green。干净的绿则
+      # 无物可收,故用 `ignore`:这一步绝不允许把绿色夜跑弄红。
+      - name: Upload flaky-retry diagnostics (smoke passed)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: showcase-smoke-flaky-diagnostics
+          path: examples/app-showcase/test-results/
+          if-no-files-found: ignore
           retention-days: 7

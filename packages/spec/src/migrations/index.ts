@@ -21,6 +21,7 @@ export {
   MIGRATIONS_BY_MAJOR,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
+  RETIRED_KEYS_BY_MAJOR,
 } from './registry.js';
 export {
   applyMetaMigrations,
