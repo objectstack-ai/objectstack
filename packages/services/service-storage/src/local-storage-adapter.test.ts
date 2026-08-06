@@ -31,7 +31,8 @@ describe('LocalStorageAdapter', () => {
     expect(typeof storage.delete).toBe('function');
     expect(typeof storage.exists).toBe('function');
     expect(typeof storage.getInfo).toBe('function');
-    expect(typeof storage.list).toBe('function');
+    // `list` is deliberately absent: IStorageService no longer declares it
+    // (#5540). The adapter's own `list` implementation goes in #5541.
   });
 
   it('should upload and download a file', async () => {
