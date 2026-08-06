@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
-import { SharingService } from './sharing-service.js';
+import { SharingService, type SharingServiceOptions } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 import { bootRequestContext } from './exec-context-seam.testkit.js';
 
@@ -1206,6 +1206,15 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
     });
   }
 
+  /**
+   * [ADR-0105 D1] The deployment posture, stated the way the `tenancy` service
+   * states it. `single` = no organization wall (the pure single-tenant end of
+   * the spectrum the ADR-0057 D1 proofs boot); `group` / `isolated` = a wall is
+   * in force. Every fixture below says which deployment it is talking about,
+   * because after #5859 the answer to "no active organization" depends on it.
+   */
+  const posture = (p: string) => () => ({ posture: p });
+
   let engine: ReturnType<typeof makeFakeEngine>;
   beforeEach(() => {
     engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
@@ -1233,6 +1242,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
       engine,
       securityService: () => MANAGER_PROBE,
       hierarchyResolver: orgScopedResolver(seen),
+      tenancy: posture('isolated'),
     });
     const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
 
@@ -1252,6 +1262,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
       engine,
       securityService: () => MANAGER_PROBE,
       hierarchyResolver: orgScopedResolver(seen),
+      tenancy: posture('group'),
     });
     const bob = await bootRequestContext({
       userId: 'bob',
@@ -1275,6 +1286,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
     const svc = new SharingService({
       engine,
       hierarchyResolver: orgScopedResolver(seen),
+      tenancy: posture('group'),
       // NO securityService: no `modifyAllRecords` bypass, and no owner-only RLS
       // anywhere — the sharing service is the ONLY gate in this fixture, which
       // is the deployment shape #5852 named as unprotected (the probe app was
@@ -1296,31 +1308,99 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
     expect(filter).toEqual({ owner_id: { $in: ['alice', 'bob'] } });
   });
 
-  it('no active organization is reported as an HONEST null — never the deprecated alias, never a stand-in', async () => {
+  // ── [ADR-0105 D1] The posture fork on "no active organization" ────────
+  // Same caller, same absent org, two deployments, two answers — the same
+  // fork Layer 0 already makes (`computeTenantLayer0Filter`: `single` inert,
+  // walled postures deny). Both directions are pinned; neither is a default.
+
+  it('single posture: no organization at all → DEPTH still widens, and the null is HONEST', async () => {
     const seen: any[] = [];
     const svc = new SharingService({
       engine,
       securityService: () => MANAGER_PROBE,
       hierarchyResolver: orgScopedResolver(seen),
+      // The pure single-tenant end of the spectrum — the shape the verify
+      // harness boots deliberately (`autoDefaultOrganization: false`) and the
+      // ADR-0057 D1 dogfood proofs run in. "No org" here is the one implicit
+      // tenant, not "every org", so refusing would retire DEPTH for every
+      // org-less deployment.
+      tenancy: posture('single'),
     });
-    // A session with no active organization — the supported pure-single-tenant
-    // shape (the verify harness boots it deliberately: `autoDefaultOrganization:
-    // false`), not an anomaly this layer invents a verdict for.
     const orgless = await bootRequestContext({ userId: 'bob', activeOrganizationId: null });
     expect((orgless as any).tenantId).toBeUndefined();
 
-    await svc.canManageShares('account', 'a1', orgless);
+    expect(await svc.canManageShares('account', 'a1', orgless)).toBe(true);
     expect(seen).toHaveLength(1);
-    // `string | null` per the contract: the producer states the absence rather
-    // than omitting the key (which is what let #5852's resolver read
-    // `undefined` and query unscoped without anyone noticing).
+    // `string | null` per the contract: the producer STATES the absence rather
+    // than omitting the key (omission is what let a resolver read `undefined`
+    // and query unscoped without anyone noticing). What a resolver must then do
+    // with that null is its own obligation — cloud#1148's half.
     expect(seen[0]).toHaveProperty('organizationId');
     expect(seen[0].organizationId).toBeNull();
-    // What the resolver must DO with that null is its own contract obligation
-    // ("Fail CLOSED on a missing organization … 'no org' is not 'every org'",
-    // IHierarchyScopeResolver.resolveOwnerIds) — cloud#1148's half. Whether the
-    // OPEN edition should additionally refuse to consult it is the open
-    // tenancy-posture question on #5859; deliberately not decided here.
+  });
+
+  it.each(['group', 'isolated'])(
+    '%s posture: no active organization → the resolver is NOT consulted, loudly',
+    async (p) => {
+      const seen: any[] = [];
+      const warn = vi.fn();
+      const svc = new SharingService({
+        engine,
+        securityService: () => MANAGER_PROBE,
+        hierarchyResolver: orgScopedResolver(seen),
+        tenancy: posture(p),
+        logger: { warn },
+      });
+      const orgless = await bootRequestContext({ userId: 'bob', activeOrganizationId: null });
+
+      // A wall is in force and the caller carries no organization to scope by:
+      // owner-only, never widened — and the resolver is not even asked, so an
+      // out-of-tree implementation cannot answer for every org on its own.
+      expect(await svc.canManageShares('account', 'a1', orgless)).toBe(false);
+      expect(await svc.canEdit('account', 'b1', { ...(orgless as any), __writeScope: 'unit' })).toBe(false);
+      expect(seen).toHaveLength(0);
+      expect(warn).toHaveBeenCalled();
+      const [message, meta] = warn.mock.calls[0];
+      expect(String(message)).toContain('organization wall is in force');
+      expect(String(message)).toContain('ADR-0095 D1 / ADR-0105 D1');
+      expect(meta).toMatchObject({ userId: 'bob' });
+    },
+  );
+
+  it('an UNRESOLVABLE posture is not evidence of `single` — it refuses too', async () => {
+    const orgless = await bootRequestContext({ userId: 'bob', activeOrganizationId: null });
+    const probes: Array<SharingServiceOptions['tenancy']> = [
+      undefined,                                      // no `tenancy` wired at all
+      () => null,                                     // service not registered
+      () => { throw new Error('tenancy unavailable'); },
+      () => ({ posture: 'not-a-posture' }),           // outside the vocabulary
+    ];
+    for (const tenancy of probes) {
+      const seen: any[] = [];
+      const svc = new SharingService({
+        engine,
+        securityService: () => MANAGER_PROBE,
+        hierarchyResolver: orgScopedResolver(seen),
+        tenancy,
+      });
+      expect(await svc.canManageShares('account', 'a1', orgless)).toBe(false);
+      expect(seen).toHaveLength(0);
+    }
+  });
+
+  it('the legacy `isolationActive: false` shape still states "no wall" (single)', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+      // Pre-ADR-0105 `tenancy` shape — a POSITIVE statement that no wall is
+      // enforced, unlike a missing/unknown posture.
+      tenancy: () => ({ isolationActive: false }),
+    });
+    const orgless = await bootRequestContext({ userId: 'bob', activeOrganizationId: null });
+    expect(await svc.canManageShares('account', 'a1', orgless)).toBe(true);
+    expect(seen).toHaveLength(1);
   });
 
   it('fail closed: a THROWING resolver falls back to owner-only and SAYS so', async () => {
@@ -1331,6 +1411,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
       hierarchyResolver: () => ({
         async resolveOwnerIds(): Promise<string[]> { throw new Error('resolver exploded'); },
       }),
+      tenancy: posture('isolated'),
       logger: { warn },
     });
     const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
@@ -1348,6 +1429,7 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
       engine,
       securityService: () => MANAGER_PROBE,
       hierarchyResolver: orgScopedResolver(seen),
+      tenancy: posture('single'),
     });
     const blank = await bootRequestContext({ userId: 'bob', activeOrganizationId: '   ' });
     await svc.canManageShares('account', 'a1', blank);
@@ -1355,5 +1437,18 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
     // A whitespace org is not an organization: it must not reach a resolver as
     // a literal that silently matches no rows and reads as "scoped" in a log.
     expect(seen[0].organizationId).toBeNull();
+  });
+
+  it('a blank organization is ALSO an absent one under a wall (same normalization, refusing side)', async () => {
+    const seen: any[] = [];
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: orgScopedResolver(seen),
+      tenancy: posture('isolated'),
+    });
+    const blank = await bootRequestContext({ userId: 'bob', activeOrganizationId: '   ' });
+    expect(await svc.canManageShares('account', 'a1', blank)).toBe(false);
+    expect(seen).toHaveLength(0);
   });
 });

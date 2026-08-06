@@ -34,5 +34,21 @@ RLS 的部署,跨组织 edit/delete 同样放行**。
 - resolver 抛错的静默回退改为**留声**(`logger.warn`):此前「resolver 炸了」和
   「层级里确实没有别人」在外部完全同形,这也是本缺陷长期不可见的原因之一。
 
-安全收紧:按组织收窄 owner 集合的 resolver(企业版即是)从此真正拿到组织,
-跨组织的 share 管理 / edit / delete / 批量写全部按组织边界闭合。
+## 姿态感知的组织门(user-visible 行为变化)
+
+`SharingService` 新增一个 late-bound 的 `tenancy` 姿态探针(读法与 `SecurityPlugin`
+为 Layer-0 墙读 `tenancy` 服务的完全一致,由 `SharingServicePlugin` 自动接线),
+按 **ADR-0105 D1** 的既有分叉决定「没有活动组织」意味着什么 —— 与
+`computeTenantLayer0Filter` 对同一问题给出的答案逐条同形:
+
+- **`single`**(纯单租户,无组织):**行为不变**,DEPTH 照常widened。此处「没有组织」
+  是那一个隐含租户,不是「所有组织」。
+- **`group` / `isolated`**(有墙):权威组织缺失/空白 → **拒绝**,根本不咨询 resolver,
+  回落 owner-only 并打一条点名 ADR-0095 D1 / ADR-0105 D1 与 #5973 契约义务的 `warn`。
+  即:有墙部署里,缺组织的 owner-scope 解析从「按无租户约束展开」变为「拒绝展开」。
+- **姿态解析不出**(未接线 / 探针抛错 / 词表外的值)→ 按**有墙**处理。未知姿态不是
+  `single` 的证据,否则恰恰在配置已经可疑的部署上恢复了展开。
+
+对已有部署的影响:`single` 部署零变化;`group` / `isolated` 部署中,一个**没有活动
+组织**的调用方将不再通过 DEPTH 拿到跨组织的 owner 集合(共享管理 / edit / delete /
+批量写四条路径同时闭合)。

@@ -449,6 +449,16 @@ export class SharingServicePlugin implements Plugin {
           try { return ctx.getService<any>('security'); }
           catch { return null; }
         },
+        // [ADR-0105 D1 / #5859] Late-bound tenancy posture — read exactly the
+        // way SecurityPlugin reads it for the Layer 0 wall, so the two layers
+        // can never disagree about whether an organization wall is in force.
+        // Absent (no plugin-auth) → the org gate assumes WALLED and refuses to
+        // widen a hierarchy scope that carries no organization; an unresolvable
+        // posture is not evidence of `single`.
+        tenancy: () => {
+          try { return ctx.getService<any>('tenancy'); }
+          catch { return null; }
+        },
       });
       ctx.registerService('sharing', this.service);
 
