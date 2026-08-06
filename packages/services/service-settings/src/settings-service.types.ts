@@ -180,6 +180,29 @@ export type SettingsActionHandler = (input: {
   ctx: SettingsContext;
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
+/**
+ * Minimal logging surface the service needs: just the loud channel.
+ *
+ * Deliberately a structural minimum rather than the full `Logger` contract or
+ * `PluginContext['logger']` — this service is framework-agnostic by design (it
+ * must not learn about the plugin context, see the file header), and a caller
+ * can hand over `ctx.logger`, a spec `Logger`, or a two-line test double
+ * interchangeably. `error` is optional so the lean test kernels that already
+ * call `ctx.logger?.info?.()` defensively are assignable unchanged.
+ *
+ * One string parameter, and no `...rest`: the service deliberately passes no
+ * structured `meta` (a meta field name containing `key` would be redacted away
+ * — see `reportRejectedEnvOverride`), and a `...rest: unknown[]` tail would not
+ * even accept the spec `Logger` it is meant to accept — its `error(message,
+ * error?: Error, meta?)` is narrower than `unknown` in those positions, so the
+ * assignment fails contravariantly. Declaring only what is actually called
+ * keeps `Logger`, `ctx.logger`, `console.error` and a one-line spy all
+ * assignable.
+ */
+export interface SettingsDiagnosticsLogger {
+  error?: (message: string) => void;
+}
+
 export interface SettingsServiceOptions {
   /** Persistence engine. When undefined, an in-memory store is used. */
   engine?: SettingsEngine;
@@ -206,6 +229,15 @@ export interface SettingsServiceOptions {
   env?: Record<string, string | undefined>;
   /** Object name backing the K/V store. Defaults to 'sys_setting'. */
   objectName?: string;
+  /**
+   * Sink for the loud-but-non-fatal diagnostics the service emits — today
+   * exactly one: an `OS_*` override whose value the specifier's `options`
+   * table does not declare (#5204). Optional; falls back to `console.error`
+   * so a service built without a kernel (unit tests, control-plane mock,
+   * bootstrap before the logger exists) still reports rather than going
+   * silent, which is the failure mode #5204 is about.
+   */
+  logger?: SettingsDiagnosticsLogger;
 }
 
 /**
