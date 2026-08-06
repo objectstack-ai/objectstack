@@ -51,7 +51,16 @@ export default class Start extends Command {
     '<%= config.bin %> start --artifact https://cdn.example.com/app.json --port 8080',
     '<%= config.bin %> start --database file:./data/prod.db',
     '<%= config.bin %> start --database postgres://user:pass@host:5432/mydb',
-    '<%= config.bin %> start --database libsql://my-db.turso.io --database-auth-token $TURSO_TOKEN',
+    {
+      // #5602: `libsql://` IS inferred and built — through the OPTIONAL package
+      // `@objectstack/driver-turso`, which the CLI does not bundle (it drags
+      // `@libsql/client`). Without it installed the boot fails loudly with this
+      // exact install command; it never degrades to SQLite. The note belongs in
+      // the example because copy-pasting this line is precisely how an operator
+      // meets the requirement.
+      command: '<%= config.bin %> start --database libsql://my-db.turso.io --database-auth-token $TURSO_TOKEN',
+      description: 'Turso / libSQL — requires the optional driver package: npm install @objectstack/driver-turso',
+    },
     '<%= config.bin %> start --no-ui',
   ];
 

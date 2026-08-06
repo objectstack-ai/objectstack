@@ -20,7 +20,7 @@
  * after `syncObjectSchema` ran, a registration race — the exposure gate was
  * silently skipped AND nothing turned it into a 404. The rows were served.
  *
- * These tests drive a REAL {@link ObjectQL} engine + a minimal in-memory driver
+ * These tests drive a REAL {@link ObjectQL} engine + a minimal stub driver
  * (the same shape `protocol-clone-real-engine.test.ts` uses), because the point
  * is precisely what happens when metadata and physical storage disagree — which
  * an engine double cannot show.
@@ -42,7 +42,7 @@ const registeredObject = {
 /** The object nobody registered. A table by this name exists anyway (case B). */
 const UNREGISTERED = 'gate_ghost';
 
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -122,7 +122,7 @@ describe('#3770 — data-plane object-existence gate (real ObjectQL engine)', ()
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const made = makeMemoryDriver();
+        const made = makeStubDriver();
         stores = made.stores;
         engine.registerDriver(made.driver, true);
         await engine.init();

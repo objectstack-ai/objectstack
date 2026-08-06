@@ -63,22 +63,28 @@
  *
  * ## Why the issues are re-shaped rather than forwarded verbatim
  *
- * Two measured reasons, not taste:
+ * Two measured reasons, not taste. The first has since LAPSED (#5573); the
+ * second carries the decision on its own:
  *
- *   - `ObjectLogger` redacts recursively by substring: its default
- *     `redact: ['password', 'token', 'secret', 'key']` matches any field whose
- *     lowercased name *contains* one of them. A Zod `unrecognized_keys` issue
- *     names the offending keys in a field called `keys`, and `'keys'` contains
- *     `'key'` — forwarding `err.issues` untouched therefore renders
- *     `"keys":"***REDACTED***"`, i.e. it loses the one fact the reader came
- *     for. The field is named `unrecognized` here so the key names survive.
- *     Any field added to this record is subject to the same rule.
- *   - A Zod issue can carry the whole rejected `input` on some codes. A log
- *     record must stay bounded — the boot buffer drops any line that would
- *     overflow its budget, and a shipper truncates — which would resurrect the
- *     very failure mode above. This is also why the seams hand the *cause* here
- *     rather than passing the raw `Error` into the logger's `error` slot: that
- *     would ship the full multi-line dump plus a stack trace on every record.
+ *   - *Historical — superseded by #5573.* `ObjectLogger` used to redact
+ *     recursively by SUBSTRING: its default
+ *     `redact: ['password', 'token', 'secret', 'key']` matched any field whose
+ *     lowercased name merely *contained* one of them. A Zod `unrecognized_keys`
+ *     issue names the offending keys in a field called `keys`, and `'keys'`
+ *     contains `'key'` — so forwarding `err.issues` untouched rendered
+ *     `"keys":"***REDACTED***"` and lost the one fact the reader came for.
+ *     Redaction now matches on camelCase/snake_case WORD boundaries, so a bare
+ *     `keys` is no longer redacted and this reason no longer holds. The rule a
+ *     field added to this record is judged by today: `apiKey` / `api_key` is
+ *     redacted, `keys` / `tokens` is not.
+ *   - *Still load-bearing.* A Zod issue can carry the whole rejected `input`
+ *     on some codes. A log record must stay bounded — the boot buffer drops
+ *     any line that would overflow its budget, and a shipper truncates — which
+ *     resurrects the same failure the bullet above describes: a record that has
+ *     lost the fact the reader came for. This is also why the seams hand the
+ *     *cause* here rather than passing the raw `Error` into the logger's
+ *     `error` slot: that would ship the full multi-line dump plus a stack
+ *     trace on every record.
  *
  * So the fields are named deliberately and the list is capped, with the cap
  * *declared* in the record (`issueCount`) rather than silently applied.
@@ -97,8 +103,10 @@ export interface LoggedCauseIssue {
     message: string;
     /**
      * The rejected key names of an `unrecognized_keys` issue. Named
-     * `unrecognized` rather than `keys` so `ObjectLogger`'s substring redactor
-     * does not replace it with `***REDACTED***`.
+     * `unrecognized` rather than `keys` because `ObjectLogger` redacted by
+     * substring when this was written; #5573 has since narrowed that to word
+     * boundaries, so a field called `keys` would survive today. The name is
+     * kept as-is — renaming a shipped log field back would be pure churn.
      */
     unrecognized?: string[];
 }

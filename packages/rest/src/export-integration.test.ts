@@ -3,7 +3,8 @@
 /**
  * End-to-end export integration: the REAL streaming export route driven by a
  * REAL {@link ObjectQL} engine + {@link ObjectStackProtocolImplementation},
- * an in-memory driver, and real registered objects — no protocol mocks.
+ * a REAL sqlite `:memory:` driver, and real registered objects — no protocol
+ * mocks and, since #5704 批次 3 / #5785, no hand-written storage either.
  *
  * This is the test the mocked `rest.test.ts` export suite could not be: those
  * stubbed `getObjectSchema` (a method with no real implementation) and pre-shaped
@@ -19,102 +20,44 @@
  * Here the readable cells (完成→是, 优先级→高, 负责人→张三) are produced by the
  * real metadata accessor (`getMetaItem`) and a real `$expand` that resolves the
  * lookup id `u1` to its record — exactly the path a deployed server runs.
+ *
+ * Backend note (#5704 批次 3 / #5785): the store was a hand-written Map with a
+ * hand-written `matches()` / `sortRows()` until this file moved to
+ * `@objectstack/driver-sql` + better-sqlite3 `:memory:`. The stub's own comments
+ * record how narrow that ledge was — it had to learn `$or`/`$and` after
+ * "skipping them silently returned every row", and `$contains` after a search
+ * predicate turned out to be a no-op that still passed an "it filtered"
+ * assertion. Every one of those is a class of bug a fixture matcher can have and
+ * the production engine cannot; filter, sort, paging and `$expand` are now
+ * compiled to SQL by the driver the deployed server uses.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import ExcelJS from 'exceljs';
 import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 
 // ---------------------------------------------------------------------------
-// In-memory driver — equality + `$in` (the latter is what `$expand` issues when
-// it batch-fetches referenced records: `where: { id: { $in: [...] } }`).
+// The real backend: better-sqlite3 `:memory:`, constructed the canonical way
+// (`examples/app-crm`, `cli db clean`, PR #5715's `makeDefaultDriver()`).
 // ---------------------------------------------------------------------------
-function makeMemoryDriver() {
-  const stores = new Map<string, Map<string, Record<string, unknown>>>();
-  const storeFor = (o: string) => {
-    let s = stores.get(o);
-    if (!s) { s = new Map(); stores.set(o, s); }
-    return s;
-  };
-  let nextId = 0;
-  const matchOne = (cell: unknown, cond: unknown): boolean => {
-    if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
-      const c = cond as Record<string, unknown>;
-      if ('$in' in c) return Array.isArray(c.$in) && c.$in.some((x) => (cell ?? null) === (x ?? null));
-      if ('$eq' in c) return (cell ?? null) === ((c.$eq as unknown) ?? null);
-      if ('$ne' in c) return (cell ?? null) !== ((c.$ne as unknown) ?? null);
-      // `$search` folds to `{ $or: [{ field: { $contains: term } }] }`, so the
-      // driver must understand `$contains` or a search predicate is a no-op and
-      // an "it filtered" assertion passes for the wrong reason.
-      if ('$contains' in c) return String(cell ?? '').includes(String(c.$contains ?? ''));
-    }
-    return (cell ?? null) === ((cond as unknown) ?? null);
-  };
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    for (const [k, v] of Object.entries(where)) {
-      // Logical nodes — the shape `$search` and a composed `filter` produce.
-      // Skipping them (as this driver used to) silently returns every row.
-      if (k === '$or') { if (!(Array.isArray(v) && v.some((sub) => matches(row, sub)))) return false; continue; }
-      if (k === '$and') { if (!(Array.isArray(v) && v.every((sub) => matches(row, sub)))) return false; continue; }
-      if (k.startsWith('$')) continue;
-      if (!matchOne(row[k], v)) return false;
-    }
-    return true;
-  };
-  const sortRows = (rows: Record<string, unknown>[], orderBy: any): Record<string, unknown>[] => {
-    if (!orderBy) return rows;
-    // Accept {field:'asc'|'desc'} | [['field','asc']] | ['field']
-    const specs: Array<[string, 'asc' | 'desc']> = [];
-    if (Array.isArray(orderBy)) {
-      for (const o of orderBy) {
-        if (Array.isArray(o)) specs.push([String(o[0]), o[1] === 'desc' ? 'desc' : 'asc']);
-        else if (typeof o === 'string') specs.push([o, 'asc']);
-      }
-    } else if (typeof orderBy === 'object') {
-      for (const [f, d] of Object.entries(orderBy)) specs.push([f, d === 'desc' ? 'desc' : 'asc']);
-    }
-    if (specs.length === 0) return rows;
-    return [...rows].sort((a, b) => {
-      for (const [f, d] of specs) {
-        const av = a[f] as any, bv = b[f] as any;
-        if (av === bv) continue;
-        const cmp = av < bv ? -1 : 1;
-        return d === 'desc' ? -cmp : cmp;
-      }
-      return 0;
-    });
-  };
-  const driver: any = {
-    name: 'memory', version: '0.0.0', supports: {},
-    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(o: string, ast: any) {
-      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
-      const sorted = sortRows(rows, ast?.orderBy ?? ast?.sort ?? ast?.order);
-      const skip = Number(ast?.skip ?? ast?.offset ?? 0) || 0;
-      const limit = ast?.limit ?? ast?.top;
-      const sliced = limit != null ? sorted.slice(skip, skip + Number(limit)) : sorted.slice(skip);
-      return sliced;
-    },
-    async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
-    async create(o: string, data: Record<string, unknown>) {
-      nextId += 1; const id = (data.id as string) ?? `r_${nextId}`; const row = { ...data, id }; storeFor(o).set(id, row); return row;
-    },
-    async update(o: string, id: string, data: Record<string, unknown>) {
-      const s = storeFor(o); const cur = s.get(id); if (!cur) throw new Error(`nf ${o}/${id}`);
-      const up = { ...cur, ...data, id }; s.set(id, up); return up;
-    },
-    async upsert(o: string, data: Record<string, unknown>) { const id = data.id as string | undefined; return id && storeFor(o).has(id) ? this.update(o, id, data) : this.create(o, data); },
-    async delete(o: string, id: string) { return storeFor(o).delete(id); },
-    async count(o: string, ast: any) { return (await this.find(o, ast)).length; },
-    async bulkCreate(o: string, rows: Record<string, unknown>[]) { return Promise.all(rows.map((r) => this.create(o, r))); },
-    async bulkUpdate() { return []; }, async bulkDelete() {},
-    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; }, async commit() {}, async rollback() {},
-  };
-  return { driver, stores };
+function makeSqliteDriver() {
+  return new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
 }
+
+/** Engines booted by this file, torn down (and their `:memory:` DBs closed) per test. */
+const liveEngines: ObjectQL[] = [];
+afterEach(async () => {
+  while (liveEngines.length) {
+    try { await liveEngines.pop()?.destroy(); } catch { /* noop */ }
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Objects — object-map `fields` (the engine's real shape), mixed value types.
@@ -181,12 +124,15 @@ function makeBinRes() {
 }
 
 async function boot() {
-  const { driver } = makeMemoryDriver();
   const engine = new ObjectQL();
-  engine.registerDriver(driver, true);
+  liveEngines.push(engine);
+  engine.registerDriver(makeSqliteDriver(), true);
   await engine.init();
   engine.registry.registerObject(USER as any);
   engine.registry.registerObject(TASK as any);
+  // Real DDL through the real path — `user` and `task` are physical tables
+  // before a single row is written.
+  await engine.syncSchemas();
   await engine.insert('user', { id: 'u1', name: '张三' });
   await engine.insert('user', { id: 'u2', name: '李四' });
   // owner stored as a bare id — the readable name must come from a real $expand.
@@ -409,12 +355,13 @@ describe('export route — FLS column projection via getReadableFields (#3547)',
     getReadableFields: (object: string, context?: any) => string[] | undefined;
     tasks?: Array<Record<string, unknown>>;
   }) {
-    const { driver } = makeMemoryDriver();
     const engine = new ObjectQL();
-    engine.registerDriver(driver, true);
+    liveEngines.push(engine);
+    engine.registerDriver(makeSqliteDriver(), true);
     await engine.init();
     engine.registry.registerObject(USER as any);
     engine.registry.registerObject(TASK as any);
+    await engine.syncSchemas();
     await engine.insert('user', { id: 'u1', name: '张三' });
     const tasks = opts.tasks ?? [
       { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' },

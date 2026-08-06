@@ -32,11 +32,13 @@
  * Reading the envelope makes this route classify on what the error SAYS about
  * itself. Three regressions would each be worse than the bug:
  *
- *   1. The message list still classifies the ONE family that remains a bare
- *      `Error` — `read-scope-sql` — so deleting its entry would regress it from
- *      `400 DATASET_INVALID` to 500. (#5352 left six entries here. #5367
- *      enveloped five of the six producers and deleted their entries; the block
- *      near the bottom of this file now pins the deletion in both directions.)
+ *   1. ~~The message list still classifies the families that carry no envelope.~~
+ *      **Retired.** #5352 left six entries here; #5367 enveloped all six
+ *      producers and deleted every entry — five as `DATASET_INVALID` / 400 and,
+ *      after the maintainer's 2026-08-06 ruling, `read-scope-sql`'s ten as
+ *      `READ_SCOPE_COMPILE_FAILED` / 500. The block near the bottom of this file
+ *      pins each deletion in both directions, which is now the only thing
+ *      standing between this catch and a fresh message test.
  *   2. A genuine internal fault must still be a 500 with its `logError` line —
  *      "read the envelope" must not become "call everything a 400".
  *   3. A 5xx-status error is NOT passed through, so an internal fault can never
@@ -46,6 +48,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { RestServer } from './rest-server';
 
 // ── harness ──────────────────────────────────────────────────────────────────
@@ -269,24 +272,44 @@ describe('[#5322] empty combinators are boolean identities at the REST face — 
   }
 });
 
-describe('[#5352 → #5367] the message-sniffing fallback is down to its last entry', () => {
-  // ── The surviving entry ────────────────────────────────────────────────────
-  // `read-scope-sql.ts`'s ten refusals are still bare `Error`s, and #5367
-  // deliberately left them that way: their inputs are an admin-authored RLS
-  // policy and a compiler-generated join alias, not caller input, so
-  // `DATASET_INVALID` may well be the wrong verdict for them and choosing the
-  // right one is a separate judgement. Until it lands, this entry is all that
-  // stands between them and a 500.
-  it('read-scope-sql: a fail-closed read scope → still 400 DATASET_INVALID by the message list', async () => {
-    const message = '[read-scope-sql] unsupported operator "$regex" on "owner" (fail-closed).';
-    const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(new Error(message)) }));
+describe('[#5352 → #5367] the message-sniffing fallback is GONE', () => {
+  // ── The last entry, retired ────────────────────────────────────────────────
+  // ⚠️ RE-JUDGED. This case used to read "read-scope-sql: a fail-closed read
+  // scope → still 400 DATASET_INVALID by the message list", and the comment
+  // above it said the verdict for that family was a separate judgement still
+  // pending. The maintainer made it on 2026-08-06 (option B on #5367's decision
+  // card): the ten refusals are a SERVER fault, they now declare
+  // `READ_SCOPE_COMPILE_FAILED` / 500 themselves, and the list is deleted.
+  //
+  // So the same input is asserted the other way round — and the bare form, which
+  // is what the list used to rescue, is asserted too. Between them they pin that
+  // no message test survives anywhere in this catch.
+  it('read-scope-sql: the DECLARED 500 → 500 ANALYTICS_QUERY_FAILED, policy content withheld', async () => {
+    const message = '[read-scope-sql] unsupported operator "$regex" on "owner_email" (fail-closed).';
+    const err = Object.assign(new Error(message), { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 });
+    const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(err) }));
     const res = await post(route, { dataset, selection });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.code).toBe('DATASET_INVALID');
-    expect(String(res.body.message)).toMatch(/read-scope-sql/);
+    expect(res.statusCode).toBe(500);
+    expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    // The disclosure half: an RLS policy's field name must not come back.
+    expect(String(res.body.error)).not.toMatch(/owner_email/);
+    expect(String(res.body.error)).not.toMatch(/read-scope-sql/);
   });
 
-  // ── The five entries #5367 deleted, pinned in BOTH directions ──────────────
+  it('read-scope-sql: the same message BARE is not sniffed either (500, and readable)', async () => {
+    // Bare = no producer declaration. It still lands on 500 because the list is
+    // gone, not because anything recognised its prose; and it keeps #5667's
+    // tiering, so an undeclared fault stays readable. That difference is the
+    // point of making the withhold depend on the DECLARATION.
+    const message = '[read-scope-sql] unsupported operator "$regex" on "owner_email" (fail-closed).';
+    const route = buildRoute(async () => ({ queryDataset: vi.fn().mockRejectedValue(new Error(message)) }));
+    const res = await post(route, { dataset, selection });
+    expect(res.statusCode).toBe(500);
+    expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    expect(String(res.body.error)).toMatch(/read-scope-sql/);
+  });
+
+  // ── The five entries #5367's first PR deleted, pinned in BOTH directions ────
   // These rows used to assert "a bare `Error` with this message → 400", which is
   // precisely the fragility #5367 removed: the status was a property of the
   // wording. Re-asserting it would now be asserting the defect. So each family
@@ -357,7 +380,7 @@ describe('[#5352] reading the envelope did not turn every failure into a 400', (
     expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
   });
 
-  it('a 5xx-status error is NOT passed through — an internal fault keeps the 500 envelope', async () => {
+  it('a 5xx-status error is NOT passed through — an internal fault keeps the 500 envelope, message withheld', async () => {
     // Deliberate asymmetry: the passthrough is 4xx-only, so a producer cannot
     // re-label a server fault with a code of its own and slip past the
     // `logError` line that makes it visible to operators.
@@ -370,6 +393,12 @@ describe('[#5352] reading the envelope did not turn every failure into a 400', (
 
     expect(res.statusCode).toBe(500);
     expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    // [#5367] Second half of the asymmetry, added with the read-scope ruling: a
+    // producer that DECLARES a server fault has declared that the detail is the
+    // operator's, so the message is withheld here and kept in `logError`. This
+    // case is the generic form of the rule the RLS lowering needed — it applies
+    // to any declared 5xx, not to a list of recognised phrasings.
+    expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
   });
 
   it('a HALF envelope (4xx status, no code) is not honoured — this route invents no code', async () => {

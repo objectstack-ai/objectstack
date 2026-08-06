@@ -298,4 +298,131 @@ describe('ObjectLogger', () => {
             expect(record.connector).toBe('billing');
         });
     });
+
+    // #5573 — the redactor matched by SUBSTRING, so every field whose name
+    // merely contained `password`/`token`/`secret`/`key` was replaced with
+    // `***REDACTED***`: `keys`, `keyword`, `tokens`, `monkey`, `secretary`.
+    // That is worse than dropping the field, because `***REDACTED***` tells the
+    // reader a secret was withheld when there never was one. Matching is now on
+    // camelCase/snake_case word boundaries (maintainer ruling, option A).
+    describe('redaction matches whole words, not substrings (#5573)', () => {
+        const stdoutChunks: string[] = [];
+
+        beforeEach(() => {
+            stdoutChunks.length = 0;
+            vi.spyOn(process.stdout, 'write').mockImplementation(((c: string | Uint8Array) => {
+                stdoutChunks.push(String(c));
+                return true;
+            }) as never);
+        });
+        afterEach(() => vi.restoreAllMocks());
+
+        /** The one JSON record `meta` renders to, under `redact` (default table when omitted). */
+        const recordOf = (meta: Record<string, unknown>, redact?: string[]): Record<string, unknown> => {
+            stdoutChunks.length = 0;
+            const log = createLogger({ level: 'info', format: 'json', ...(redact ? { redact } : {}) });
+            log.info('probe', meta);
+            const lines = stdoutChunks.join('').split('\n').filter(Boolean);
+            expect(lines, 'one call must write exactly one physical line').toHaveLength(1);
+            return JSON.parse(lines[0]) as Record<string, unknown>;
+        };
+
+        /** What the redactor did to a field of this name, carrying a marker value. */
+        const verdictFor = (field: string, redact?: string[]): 'redacted' | 'kept' => {
+            const value = recordOf({ [field]: 'MARKER-VALUE' }, redact)[field];
+            return value === '***REDACTED***' ? 'redacted' : 'kept';
+        };
+
+        // The half that must NOT regress: a real secret stays redacted whatever
+        // convention it is spelled in. Every entry here was redacted before the
+        // change too — this matrix is the guard that word boundaries did not buy
+        // precision by losing coverage.
+        const REAL_SECRETS = [
+            // the redact words themselves
+            'password', 'token', 'secret', 'key',
+            // camelCase
+            'apiKey', 'accessToken', 'refreshToken', 'secretKey', 'privateKey', 'publicKey',
+            'clientSecret', 'sessionToken', 'bearerToken', 'signingKey', 'encryptionKey',
+            'passwordHash', 'dbPassword', 'sshKey', 'jwtSecret',
+            // snake_case
+            'api_key', 'access_token', 'refresh_token', 'secret_key', 'private_key',
+            'client_secret', 'user_password', 'auth_token',
+            // SCREAMING_SNAKE and kebab (headers, env vars)
+            'API_KEY', 'OS_AUTH_SECRET', 'x-api-key', 'x-refresh-token',
+            // all-lowercase / all-caps concatenation — no boundary to split on
+            'apikey', 'APIKEY', 'accesstoken', 'clientsecret', 'privatekey',
+            // plural, inside a compound: `apiKeys: ['sk-…']` is still secrets
+            'apiKeys', 'api_keys', 'accessTokens', 'clientSecrets', 'userPasswords', 'apikeys',
+        ];
+
+        it.each(REAL_SECRETS)('still redacts %s', (field) => {
+            expect(verdictFor(field)).toBe('redacted');
+        });
+
+        // The other half: the symptom this issue was filed for. Every entry was
+        // `***REDACTED***` before the change.
+        const NOT_SECRETS = [
+            // #5573's own repro: Zod's `unrecognized_keys` issue names the keys in `keys`
+            'keys', 'keyword', 'keywords', 'keyboard', 'monkey', 'tokens', 'tokenizer', 'secretary',
+            // other English words ending in a redact word
+            'donkey', 'turkey', 'whiskey', 'hockey',
+            // dispatcher-plugin.ts renamed `key` -> `keyedBy` to dodge the redactor,
+            // and the substring rule ate that too ('keyedby'.includes('key')).
+            'keyedBy',
+            'tokenizerName',
+        ];
+
+        it.each(NOT_SECRETS)('no longer redacts %s', (field) => {
+            expect(verdictFor(field)).toBe('kept');
+        });
+
+        // Honest residual, pinned rather than left for the next reader to
+        // discover: word boundaries cannot tell the *sense* of a word apart.
+        // A field whose words include the SINGULAR `token`/`key` is still
+        // redacted even when it is plainly a counter, and so is a compound
+        // plural (the `apiKeys` rule, applied to `promptTokens`). Both were
+        // redacted before this change as well — nothing regressed — but
+        // neither is fixed by it. Narrowing further needs the maintainer:
+        // it would mean ranking `prompt` against `api` as a qualifier.
+        it.each(['tokenCount', 'promptTokens', 'completionTokens'])(
+            'still redacts %s — word boundaries do not disambiguate word SENSE',
+            (field) => {
+                expect(verdictFor(field)).toBe('redacted');
+            },
+        );
+
+        it('keeps a nested `keys` field readable — the exact #5573 repro', () => {
+            const record = recordOf({
+                issues: [{ code: 'unrecognized_keys', keys: ['visibleIf'], path: ['nodes', 0] }],
+            });
+            expect(record.issues).toEqual([
+                { code: 'unrecognized_keys', keys: ['visibleIf'], path: ['nodes', 0] },
+            ]);
+        });
+
+        it('still reaches a secret nested several levels down', () => {
+            const record = recordOf({ connector: { auth: { apiKey: 'sk-live-123', mode: 'header' } } });
+            expect(record.connector).toEqual({ auth: { apiKey: '***REDACTED***', mode: 'header' } });
+        });
+
+        // Bare plurals are collections or counts, not secrets — that is the
+        // maintainer's ruling on `keys`/`tokens`, applied uniformly. The
+        // plural only names a secret once something qualifies it (`apiKeys`,
+        // above). Pinned because it is a deliberate coverage change, not an
+        // oversight: a host that does log a bare `passwords` list opts back in
+        // with `redact: [..., 'passwords']`.
+        it('leaves a BARE plural alone, and honours an explicit opt-in for it', () => {
+            expect(verdictFor('passwords')).toBe('kept');
+            expect(verdictFor('secrets')).toBe('kept');
+            expect(verdictFor('passwords', ['password', 'passwords'])).toBe('redacted');
+        });
+
+        it('honours a host-configured multi-word pattern, without widening it to its parts', () => {
+            expect(verdictFor('apiKey', ['apiKey'])).toBe('redacted');
+            expect(verdictFor('api_key', ['apiKey'])).toBe('redacted');
+            expect(verdictFor('apikey', ['apiKey'])).toBe('redacted');
+            // `apiKey` is the configured secret; a plain `key` is not one.
+            expect(verdictFor('key', ['apiKey'])).toBe('kept');
+        });
+    });
 });

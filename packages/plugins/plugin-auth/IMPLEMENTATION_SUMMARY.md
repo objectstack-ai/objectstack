@@ -32,7 +32,7 @@ Successfully integrated the Better-Auth library (v1.4.18) into `@objectstack/plu
 - **AuthPlugin class** - Full plugin lifecycle (init, start, destroy)
 - **AuthManager class** - Real implementation with better-auth integration
 - **Lazy initialization** - Better-auth instance created only when needed
-- **Route registration** - HTTP endpoints for login, register, logout, session
+- **Route registration** - the auth base path (`/api/v1/auth/*`) forwarded to better-auth; see [API Routes](#api-routes)
 - **Service registration** - Registers 'auth' service in ObjectKernel
 - **Configuration support** - Uses AuthConfig schema from @objectstack/spec/system
 - **TypeScript types** - Proper typing for IHttpRequest and IHttpResponse
@@ -86,12 +86,36 @@ packages/plugins/plugin-auth/
 6. **Plugin Pattern**: Follows established ObjectStack plugin conventions
 7. **TypeScript-First**: Full type safety with proper interface definitions
 
-## API Routes Registered
+## API Routes
 
-- `POST /api/v1/auth/login` - User login (stub)
-- `POST /api/v1/auth/register` - User registration (stub)
-- `POST /api/v1/auth/logout` - User logout (stub)
-- `GET /api/v1/auth/session` - Get current session (stub)
+The plugin does **not** hand-register a `login` / `register` / `logout` / `session` route
+set. Everything under the auth base path (`/api/v1/auth` by default, `basePath` in the
+plugin options) is forwarded to better-auth through a single catch-all mount, so
+**better-auth's own route table is the route table** — plus a handful of ObjectStack-owned
+routes (`/config`, `/bootstrap-status`, `/admin/*`, …) mounted ahead of it.
+
+**The single source of truth is [`src/auth-route-ledger.ts`](./src/auth-route-ledger.ts)**
+(#3656): the reviewed `AUTH_ROUTE_LEDGER` rows — every route the SDK actually calls, each
+naming its client method — plus the full `BETTER_AUTH_MOUNTED_SURFACE` inventory, both
+verified against the live `auth.api` table by `auth-route-ledger.conformance.test.ts`.
+Read the ledger instead of a copy: a list transcribed into this file drifts the next time
+better-auth is upgraded, and this section is the proof (it advertised four routes that
+never existed).
+
+The core routes, spelled the way better-auth actually serves them — same names as
+[`content/docs/api/plugin-endpoints.mdx`](../../../content/docs/api/plugin-endpoints.mdx):
+
+| Route | SDK method |
+|:------|:-----------|
+| `POST /api/v1/auth/sign-in/email` | `auth.login` |
+| `POST /api/v1/auth/sign-up/email` | `auth.register` |
+| `POST /api/v1/auth/sign-out` | `auth.logout` |
+| `GET /api/v1/auth/get-session` | `auth.me` |
+
+There is no `/auth/login`, `/auth/register`, `/auth/logout` or `/auth/session` route. The
+one legacy explicit `POST /api/v1/auth/login` mount that made the first of them look
+reachable lived in the runtime dispatcher, answered HTTP 500 to every caller, and was
+deleted in #5085.
 
 ## Dependencies
 

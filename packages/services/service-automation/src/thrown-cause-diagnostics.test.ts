@@ -297,21 +297,34 @@ describe('the rendered warning is ONE line that still names the key (#5048)', ()
         expect(lines[0]).not.toContain('REDACTED');
     });
 
-    it('forwarding Zod issues VERBATIM would be redacted — this is why they are re-shaped', () => {
-        // Evidence for the `unrecognized` naming in thrown-cause-diagnostics.ts:
-        // ObjectLogger redacts recursively by SUBSTRING, and its default list
-        // includes `key`, which `keys` contains. A `{ issues: err.issues }` meta
-        // therefore ships `"keys":"***REDACTED***"` — losing the one fact the
-        // reader came for. Pinned so a future "just pass err.issues" cleanup
-        // fails loudly instead of silently re-blinding the diagnostic.
+    it("a verbatim Zod `keys` field is no longer eaten by the redactor (#5573 re-judged this pin)", () => {
+        // RE-JUDGED, by the maintainer's ruling on #5573. Until then
+        // `ObjectLogger` redacted by SUBSTRING and its default list contains
+        // `key`, which `keys` contains — so this same meta rendered
+        // `"keys":"***REDACTED***"` and this test pinned that, as the evidence
+        // for naming the field `unrecognized` here. Redaction now matches on
+        // camelCase/snake_case WORD boundaries: `key` matches `apiKey`/`api_key`,
+        // not `keys`. So the verdict flips, and it flips onto a positive
+        // assertion — the key name is present in the output, not merely
+        // un-redacted-because-empty.
+        //
+        // NB the module docblock of `thrown-cause-diagnostics.ts` still
+        // describes the substring rule in its first bullet; that sentence is
+        // superseded here. The SECOND reason it gives for re-shaping is
+        // untouched and still load-bearing: a raw Zod issue can carry the whole
+        // rejected `input`, and a log record must stay bounded. That is why
+        // this helper keeps flattening issues rather than forwarding them.
         const lines = captureStdout((log) => {
             log.warn('verbatim', {
                 issues: [{ code: 'unrecognized_keys', keys: ['visibleIf'], path: ['nodes', 0] }],
             });
         });
         expect(lines).toHaveLength(1);
-        expect(lines[0]).toContain('REDACTED');
-        expect(lines[0]).not.toContain('visibleIf');
+        expect(lines[0]).not.toContain('REDACTED');
+        expect(lines[0]).toContain('visibleIf');
+        // The whole field survives, not just the name fragment.
+        const record = JSON.parse(lines[0]) as { issues?: unknown };
+        expect(record.issues).toEqual([{ code: 'unrecognized_keys', keys: ['visibleIf'], path: ['nodes', 0] }]);
     });
 
     it('a multi-line NON-Zod message still occupies one line (JSON escapes the newlines)', () => {

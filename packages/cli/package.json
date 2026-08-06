@@ -101,10 +101,19 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
+  "peerDependencies": {
+    "@objectstack/driver-turso": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@objectstack/driver-turso": {
+      "optional": true
+    }
+  },
   "optionalDependencies": {
     "better-sqlite3": "^13.0.2"
   },
   "devDependencies": {
+    "@objectstack/driver-turso": "workspace:*",
     "@oclif/plugin-help": "^6.2.55",
     "@oclif/plugin-plugins": "^5.4.86",
     "@types/better-sqlite3": "^7.6.13",

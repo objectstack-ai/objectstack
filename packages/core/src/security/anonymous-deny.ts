@@ -39,7 +39,49 @@ export const ANONYMOUS_DENY_STATUS = 401 as const;
 export const ANONYMOUS_DENY_CODE = 'UNAUTHENTICATED' as const;
 /** Human-facing message. */
 export const ANONYMOUS_DENY_MESSAGE = 'Authentication is required to access this endpoint.';
-/** The single 401 body shape every seam returns: `{ error, message }`. */
+/**
+ * The **REST seam's** 401 body — flat `{ error, message }`. NOT the platform's
+ * only one; see the two-envelope table below before you reuse this shape.
+ *
+ * Exactly one consumer writes it: `@objectstack/rest`'s `enforceAuth`
+ * (`rest-server.ts` — `res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY)`),
+ * which owns the `/data/*` and `/meta` surfaces.
+ *
+ * ## Two live envelopes, one denial (#5632)
+ *
+ * Every HTTP seam shares the DECISION ({@link shouldDenyAnonymous}) and the
+ * semantics ({@link ANONYMOUS_DENY_STATUS} / {@link ANONYMOUS_DENY_CODE} /
+ * {@link ANONYMOUS_DENY_MESSAGE}). What differs is the **wrapper**:
+ *
+ *  - **REST seam** — `@objectstack/rest` `enforceAuth`, this constant, verbatim:
+ *    `{ error: 'UNAUTHENTICATED', message: '…' }`. The code is the value of the
+ *    top-level `error` key; there is no `success` key and no nesting.
+ *  - **Dispatcher seams** — the five runtime domains `domains/ai.ts`,
+ *    `domains/meta.ts`, `domains/security.ts`, `domains/actions.ts` and
+ *    `domains/automation.ts` do NOT use this constant. Each calls
+ *    `deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE })`,
+ *    so the wire body is the dispatcher's standard wrapper:
+ *    `{ success: false, error: { code, message, httpStatus } }`.
+ *
+ * Both shapes are **live and sanctioned** — ADR-0112's 2026-07-30 amendment
+ * (#4007) records the flat and wrapped envelopes as the two live ones, and
+ * assigns retiring one of them to the envelope-convergence line (#3843 family).
+ * Converging them is a breaking wire change; it is not this module's to make,
+ * and this constant must not be read as if it had already happened.
+ *
+ * ## Reading this from a consumer (human or AI author)
+ *
+ * Read the envelope the seam you called DECLARES — flat from `/data` + `/meta`,
+ * wrapped from a dispatcher-mounted surface. Do **not** write a tolerant
+ * `body.error?.code ?? body.error` chain that swallows both: that fallback is
+ * precisely where an envelope regression hides, and this docstring claiming to
+ * be "the single shape every seam returns" is what used to invite it (#5632).
+ *
+ * Both shapes are pinned against a real booted showcase by
+ * `packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts`,
+ * which classifies every anonymous 401 into exactly one of the two families and
+ * fails on a third dialect or on a seam that changes family.
+ */
 export const ANONYMOUS_DENY_BODY = {
   error: ANONYMOUS_DENY_CODE,
   message: ANONYMOUS_DENY_MESSAGE,

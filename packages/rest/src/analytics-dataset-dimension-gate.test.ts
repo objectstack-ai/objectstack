@@ -281,7 +281,7 @@ describe('[#5520] the 500 body no longer ships driver internals', () => {
     expect(String(res.body.error)).toMatch(/no strategy can handle query/);
   });
 
-  it('does not disturb the 4xx branches #5352 and #5367 own', async () => {
+  it('does not disturb the classification branches #5352 and #5367 own', async () => {
     // ① a producer-declared 4xx envelope still passes through with its own code…
     const enveloped = Object.assign(new Error('Unsupported filter operator "$sortOf" on "stage".'), {
       code: 'INVALID_FILTER',
@@ -318,15 +318,28 @@ describe('[#5520] the 500 body no longer ships driver internals', () => {
     expect(b.body.code).toBe('DATASET_INVALID');
     expect(String(b.body.message)).toMatch(/not declared in the dataset/);
 
-    // …③ and the ONE message-list entry #5367 deliberately left in place still
-    // answers 400 for `read-scope-sql`'s bare fail-closed refusals.
+    // …③ RE-JUDGED. This half asserted that the one remaining message-list entry
+    // still answered 400 for `read-scope-sql`'s bare refusals. The maintainer
+    // ruled on 2026-08-06 that the family is a SERVER fault: it now declares
+    // `READ_SCOPE_COMPILE_FAILED` / 500, the list is deleted, and — because the
+    // messages name RLS policy fields — the 5xx branch withholds the text. So
+    // what this half now guards is that #5520's `looksLikeInternalErrorLeak`
+    // withhold and #5367's declared-server-fault withhold COMPOSE rather than
+    // fight: same 500 code, message withheld, log intact.
     const c = await post(
       buildRoute(async () =>
-        throwingAnalytics(new Error('[read-scope-sql] unsupported operator "$regex" on "owner" (fail-closed).')),
+        throwingAnalytics(
+          Object.assign(
+            new Error('[read-scope-sql] unsupported operator "$regex" on "owner_email" (fail-closed).'),
+            { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 },
+          ),
+        ),
       ),
       { dataset, selection: { measures: ['account_count'], dimensions: ['industry'] } },
     );
-    expect(c.statusCode).toBe(400);
-    expect(c.body.code).toBe('DATASET_INVALID');
+    expect(c.statusCode).toBe(500);
+    expect(c.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    expect(c.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+    expect(String(c.body.error)).not.toMatch(/owner_email/);
   });
 });

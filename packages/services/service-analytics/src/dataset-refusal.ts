@@ -47,25 +47,31 @@
  * Not every `throw` in this package is the caller's mistake, and enveloping one
  * that isn't would be the mirror-image defect — an internal fault re-labelled
  * `400`, which hides it from ops alerting and tells the author to fix something
- * they did not write. Three families stay bare on purpose:
+ * they did not write. Three families are deliberately NOT `DATASET_INVALID`:
  *
- *   - **`read-scope-sql.ts`'s ten fail-closed refusals.** Its inputs are an RLS
- *     `FilterCondition` from the security service and a join alias from the
- *     dataset compiler — neither is caller input, so "the caller sent something
- *     invalid" is the wrong verdict for all ten. Their correct code/status is a
- *     separate judgement, tracked in #5367; the route's list therefore keeps its
- *     `read-scope-sql` entry, and that entry is now the only one left.
+ *   - **`read-scope-sql.ts`'s ten fail-closed refusals** — a SERVER fault, and
+ *     since the maintainer's 2026-08-06 ruling they say so: that module's own
+ *     `readScopeCompileError` gives all ten `READ_SCOPE_COMPILE_FAILED` / **500**.
+ *     Its inputs are an RLS `FilterCondition` the security service compiled from
+ *     an admin-authored policy and a join alias the dataset compiler generated —
+ *     neither is caller input, so `400` both misattributed the fault and echoed
+ *     policy field names back to the tenant. (This bullet said "stays bare,
+ *     verdict pending" until that ruling; the route's message list is now gone
+ *     entirely and #5367's retirement schedule is paid off.)
  *   - **Internal invariants** — e.g. `dataset-compiler.ts`'s "non-derived measure
  *     has no aggregate", which the spec refinement already guarantees. An
- *     arrival there is our bug; `500` is the honest answer.
+ *     arrival there is our bug; an undeclared `500` is the honest answer, and
+ *     staying bare keeps it readable in the response (#5667's tiering) instead of
+ *     withheld like a declared server fault.
  *   - **Producer/consumer drift between two of OUR tables** — the posture
  *     `objectql-strategy.ts`'s display-SQL renderer already states explicitly
  *     ("Deliberately NOT `invalidFilterError`'s 400 envelope: this is drift
  *     between two of our own tables, not a caller-shaped mistake", #5333).
  *
  * So this module is deliberately NOT "the only way this package refuses" — the
- * claim `invalidFilterError` can make about `filter-normalizer.ts`. It is the way
- * this package refuses **the caller**.
+ * claim `invalidFilterError` can make about `filter-normalizer.ts`, and
+ * `readScopeCompileError` about `read-scope-sql.ts`. It is the way this package
+ * refuses **the caller**.
  */
 
 import type { RegisteredErrorCode } from '@objectstack/spec/api';

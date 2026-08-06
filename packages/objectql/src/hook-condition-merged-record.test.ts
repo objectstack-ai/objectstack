@@ -226,12 +226,12 @@ describe('[#4770] hook condition evaluates against stored ⊕ payload', () => {
  *
  * `rm -rf examples/app-showcase/.objectstack && pnpm dev` printed ten
  * `condition evaluation failed` lines for `showcase_audit_task_completion`.
- * This is the same object/hook shape driven through a REAL engine over an
- * in-memory driver that — like a SQL driver — stores only the columns a write
+ * This is the same object/hook shape driven through a REAL engine over a
+ * stub driver that — like a SQL driver — stores only the columns a write
  * actually touched.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
@@ -309,7 +309,7 @@ describe('[#4770] showcase repro — showcase_audit_task_completion over a real 
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
