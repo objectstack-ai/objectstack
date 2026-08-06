@@ -156,7 +156,10 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     await engine.trigger('afterInsert', {
       object: 'sys_attachment',
       event: 'afterInsert',
-      input: { doc: { file_id: 'f1' } },
+      // [#5671] An insert hook's payload arrives under `data` — `doc` was this
+      // fixture's spelling from the old (wrong) contract table, a key no engine
+      // path builds. Pinned in objectql's `hook-input-shape-contract.test.ts`.
+      input: { data: { file_id: 'f1' } },
       result: { id: 'a9', file_id: 'f1' },
     });
 

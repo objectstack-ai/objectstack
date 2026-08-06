@@ -57,7 +57,10 @@ function hookCtx(overrides: Partial<HookContext> = {}): HookContext {
     return {
         object: 'showcase_task',
         event: 'afterUpdate',
-        input: { id: 't1', doc: { status: 'done' } },
+        // `data` is what every engine write path actually builds — see the
+        // objectql pin `hook-input-shape-contract.test.ts` (#5273). The old
+        // spelling here was `doc`, a key no producer ever wrote (#5671).
+        input: { id: 't1', data: { status: 'done' } },
         result: { _id: 't1', status: 'done', assignee: 'u2' },
         previous: { _id: 't1', status: 'open', assignee: 'u1' },
         session: { userId: 'u9' },
@@ -300,7 +303,15 @@ describe('RecordChangeTrigger', () => {
         expect(ctx.params).toEqual(ctx.record);
     });
 
-    it('falls back to input.doc when result is absent (e.g. before-hooks)', async () => {
+    // [#5671] `input.data` is the ONE key a write hook's payload arrives under.
+    // objectql's `hook-input-shape-contract.test.ts` measures that on the engine
+    // ("insert carries `data` — never `doc`"); these two pin that this consumer
+    // reads exactly that key and nothing else. The pair is deliberate: the
+    // positive case alone would stay green if the deleted `doc` alias limb were
+    // put back (`data` sits first in the read, so it wins either way), so the
+    // NEGATIVE case is the one carrying the weight — it goes red the moment any
+    // alias limb returns.
+    it('seeds the record from input.data when result is absent (e.g. before-hooks)', async () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());
         let captured: AutomationContext | undefined;
@@ -312,6 +323,30 @@ describe('RecordChangeTrigger', () => {
         await hooks[0].handler(hookCtx({ event: 'beforeUpdate', result: undefined }));
 
         expect(captured?.record).toEqual({ status: 'done' });
+    });
+
+    it('does NOT read a `doc` alias off input — no engine path produces that key', async () => {
+        const { engine, hooks } = fakeEngine();
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-before-update' }), async (ctx) => {
+            captured = ctx;
+        });
+
+        // `previous` is dropped too, so the seed can only come from the payload:
+        // with `doc` unread there is nothing left and the record is empty.
+        await hooks[0].handler(
+            hookCtx({
+                event: 'beforeUpdate',
+                result: undefined,
+                previous: undefined,
+                input: { id: 't1', doc: { status: 'done' } } as HookContext['input'],
+            }),
+        );
+
+        expect(captured?.record).toEqual({});
+        expect((captured?.record as Record<string, unknown>).status).toBeUndefined();
     });
 
     it('reads the __previous stash when ctx.previous is absent', async () => {

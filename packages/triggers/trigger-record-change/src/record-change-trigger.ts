@@ -277,7 +277,7 @@ export class RecordChangeTrigger implements FlowTrigger {
     /**
      * Build the flow execution context from an ObjectQL hook context. The new
      * record comes from `ctx.result` (after-hooks) or falls back to the
-     * mutation input doc / previous row; the old record from `ctx.previous`
+     * mutation input payload / previous row; the old record from `ctx.previous`
      * (with the `__previous` stash audit also uses as a fallback).
      *
      * Async because the seeded `record` is hydrated with read-time computed
@@ -285,28 +285,29 @@ export class RecordChangeTrigger implements FlowTrigger {
      */
     private async buildContext(binding: FlowTriggerBinding, ctx: HookContext): Promise<AutomationContext> {
         // objectql lifecycle hooks carry the written row under `input.data` (insert /
-        // update payload); `id` is on update. (`doc` kept only as a defensive alias.)
-        const input = (ctx.input ?? {}) as { data?: Record<string, unknown>; doc?: Record<string, unknown>; id?: unknown };
+        // update payload); `id` is on update. `data` is the ONLY spelling any engine
+        // path produces — measured and pinned by objectql's
+        // `hook-input-shape-contract.test.ts` ("insert carries `data` — never `doc`",
+        // #5273). A `doc` alias limb used to sit below this read for a producer that
+        // never existed; removed in #5671 rather than left as a second de-facto
+        // contract (PD #12). before/afterDelete carry no payload at all and fall
+        // through to `previous` below.
+        const input = (ctx.input ?? {}) as { data?: Record<string, unknown>; id?: unknown };
         const after = ctx.result as Record<string, unknown> | undefined;
         const previous =
             (ctx.previous as Record<string, unknown> | undefined) ??
             ((ctx as unknown as { __previous?: Record<string, unknown> }).__previous ?? undefined);
 
-        const inputDoc =
-            input.data && typeof input.data === 'object'
-                ? input.data
-                : input.doc && typeof input.doc === 'object'
-                  ? input.doc
-                  : undefined;
+        const inputData = input.data && typeof input.data === 'object' ? input.data : undefined;
         const record: Record<string, unknown> =
             after && typeof after === 'object'
-                ? // #1872 — overlay the after-row on the input doc so fields the
+                ? // #1872 — overlay the after-row on the input payload so fields the
                   // driver did not echo back (notably `multiple: true` lookups,
                   // stored as an array column) stay visible to the flow's start
                   // condition and `{record.<field>}` interpolation. The after-row
                   // wins for every field it DOES return (id, DB-computed values).
-                  { ...(inputDoc ?? {}), ...after }
-                : inputDoc ?? (previous && typeof previous === 'object' ? previous : {});
+                  { ...(inputData ?? {}), ...after }
+                : inputData ?? (previous && typeof previous === 'object' ? previous : {});
 
         const session = (ctx.session ?? {}) as { userId?: string; organizationId?: string };
 
