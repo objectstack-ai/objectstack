@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1608 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1609 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,7 +20,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 28 | 415 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 28 | 416 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 14 | 77 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 164 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 17 | 155 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **201** | **1608** | 14 protocol modules |
+| **Total** | **201** | **1609** | 14 protocol modules |
 
 ---
 
@@ -61,7 +61,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 415 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 416 schemas**
 
 REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -73,7 +73,7 @@ REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 | [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowSummary`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListFlowsRequest`, `ListFlowsResponse`, `ListRunsRequest`, `ListRunsResponse`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
 | [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
 | [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
-| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `Discovery`, `DiscoveryEnvironment`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
+| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
 | [`dispatcher.zod.ts`](/docs/references/api/dispatcher) | `DispatcherConfig`, `DispatcherErrorCode`, `DispatcherErrorResponse`, `DispatcherRoute` |
 | [`documentation.zod.ts`](/docs/references/api/documentation) | `ApiChangelogEntry`, `ApiDocumentationConfig`, `ApiTestCollection`, `ApiTestRequest`, `ApiTestingUiConfig`, `ApiTestingUiType`, `CodeGenerationTemplate`, `GeneratedApiDocumentation`, `OpenApiSecurityScheme`, `OpenApiServer`, `OpenApiSpec` |
 | [`endpoint.zod.ts`](/docs/references/api/endpoint) | `ApiEndpoint`, `ApiMapping` |
