@@ -53,6 +53,17 @@
  * the change ADDS field entries that were absent, it narrows no rule and
  * removes no `??` limb, so nothing downstream can gain a finding from it.
  * Predicted 8 red / 4 green; measured exactly that.
+ *
+ * ## Amended by #5688
+ *
+ * Two cases here were written as a deliberate FLIP TARGET: the pair that fed a
+ * `timeDimensions` entry carrying only a `dateRange` asserted, verbatim, that
+ * the entry acquired the dataset's default bucket and became a second GROUP BY.
+ * #5688 narrowed that backfill, so both now assert the opposite column set and,
+ * additionally, the grid substance the descriptors describe (one row per owner,
+ * no month split). The reverse verification above is unaffected — reverting
+ * #5537's seam still reds exactly the "all base measures filter-scoped" cases,
+ * and the flipped pair differs only in what the correct column set IS.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -253,27 +264,26 @@ describe('#5537 — the single-query path already described its dimensions (guar
   });
 
   /**
-   * The CONTROL for the `compareTo` case in the next block, and the reason the
-   * expectation there carries an unlabelled `close_date`.
+   * The CONTROL for the `compareTo` case in the next block: the two selections
+   * differ only in whether their measures carry filters, so their descriptors
+   * must agree column for column.
    *
-   * A `timeDimensions` entry that resolves a granularity is GROUPED BY, so it is
-   * a COLUMN of the result and every producer of this shape projects it (#4033),
-   * even when the caller never listed it under `dimensions`. It reaches `fields`
-   * with a `type` and no `label`, because the label enrichment in `queryDataset`
-   * walks `selection.dimensions` — and that is true on THIS path, which never
-   * had the #5537 defect. Pinned here so the pair reads as convergence rather
-   * than as something the fix introduced.
+   * **This pin was FLIPPED by #5688 and now carries the opposite fact.** It used
+   * to assert an unlabelled `close_date` descriptor and three month-split rows,
+   * because a `timeDimensions` entry carrying only a `dateRange` had the
+   * dataset's default granularity filled in — turning a WINDOW into a second
+   * GROUP BY. #5688 narrowed that backfill: a window-only entry stays a filter,
+   * so there is no `close_date` column on either path and `usr_1` is one row
+   * again. Asserted as substance, not as an absence: the row values pin that the
+   * three in-window opportunities landed in ONE `usr_1` bucket rather than being
+   * split across months, which is the defect's actual signature.
    *
-   * That the column exists AT ALL is itself a defect, filed as #5688 and
-   * deliberately not fixed here: a `timeDimensions` entry carrying only a
-   * `dateRange` gets the dataset's default granularity filled in, which turns a
-   * WINDOW into a second GROUP BY — so this selection also comes back split by
-   * month. It reproduces identically on this path, i.e. independently of #5537,
-   * and settling it changes the response SHAPE (a row count, not a label), which
-   * is not a call to make as a rider. Both asserted verbatim so the day #5688
-   * lands, this pair goes red and gets updated on purpose.
+   * The projection rule itself is unchanged (#4033: an entry that DOES resolve a
+   * granularity is grouped, so it is a column) — see
+   * `dataset-window-timedimension-bucketing.test.ts`, which pins both sides of
+   * the narrowed criterion plus the label the projected column now carries.
    */
-  it('a granular `timeDimensions` column is projected here too — unlabelled, on this path as well', async () => {
+  it('a window-only `timeDimensions` entry adds no column here — same as the filtered path', async () => {
     const result = await svc().queryDataset(
       dataset,
       {
@@ -286,18 +296,19 @@ describe('#5537 — the single-query path already described its dimensions (guar
     );
     expect(descriptors(result.fields)).toEqual([
       { name: 'owner', type: 'string', label: 'Owner' },
-      { name: 'close_date', type: 'time' },
       { name: 'opp_count', type: 'number', label: 'Opportunities' },
       { name: 'opp_count__compare', type: 'number', label: 'Opportunities' },
     ]);
-    // #5688, stated as data rather than as prose: `usr_1` is one owner and comes
-    // back as two rows because the window entry acquired a `month` bucket. The
-    // descriptors are honest about the grid — the grid is what is wrong.
-    expect(result.rows.map((r) => [r.owner, r.close_date])).toEqual([
-      ['usr_1', '2026-01'],
-      ['usr_1', '2026-02'],
-      ['usr_2', '2026-02'],
+    // The grid the descriptors describe: one row per owner, the window applied
+    // as a filter. `usr_1` has three in-window opportunities (two in January,
+    // one in February) and they aggregate into a single bucket — before #5688
+    // this was two rows carrying 2 and 1.
+    expect(result.rows).toEqual([
+      { owner: 'usr_1', opp_count: 3, opp_count__compare: 0 },
+      { owner: 'usr_2', opp_count: 1, opp_count__compare: 0 },
     ]);
+    // …and no row carries a column no descriptor mentions.
+    expect(result.rows.every((r) => !('close_date' in r))).toBe(true);
   });
 });
 
@@ -398,14 +409,19 @@ describe('#5537 — all base measures filter-scoped: the dimension is described 
       },
       CTX,
     );
-    // Identical to the control in the previous block, measure for measure —
-    // including the unlabelled `close_date` a granular `timeDimensions` entry
-    // projects on BOTH paths.
+    // Identical to the control in the previous block, column for column —
+    // including the ABSENCE of a `close_date` column, which since #5688 a
+    // window-only `timeDimensions` entry no longer mints on either path.
     expect(descriptors(result.fields)).toEqual([
       { name: 'owner', type: 'string', label: 'Owner' },
-      { name: 'close_date', type: 'time' },
       { name: 'won_count', type: 'number', label: 'Won' },
       { name: 'won_count__compare', type: 'number', label: 'Won' },
+    ]);
+    // Same substance as the control: one row per owner, no month split. The two
+    // paths converge on the grid as well as on the descriptors.
+    expect(result.rows).toEqual([
+      { owner: 'usr_1', won_count: 1, won_count__compare: 0 },
+      { owner: 'usr_2', won_count: 1, won_count__compare: 0 },
     ]);
   });
 

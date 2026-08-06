@@ -95,17 +95,25 @@
  *
  * The FIXTURE half of this work is DONE (#5298): {@link FilterLogicRow.d} is
  * nullable, all eleven harnesses declare and seed it, and the `$null` partition
- * below proves they seeded it as NULL. What remains is two backends, both
- * measured against this fixture on 2026-08-06 rather than assumed:
+ * below proves they seeded it as NULL. What remains is ONE backend, measured
+ * against this fixture on 2026-08-06 rather than assumed:
  *
  * | backend | `{d: {$ne: 'v1'}}` | `{$not: {d: 'v1'}}` | blocker |
  * |---|---|---|---|
  * | `driver-turso` REMOTE | `['2']` | `['2']` | #5903 |
- * | `service-analytics` `filter-normalizer` (Cube) | `['2']` | ✅ | #5298 batch 2 |
  *
  * Everything else already answers `['2','3','4']` on both: `driver-sql`,
  * `driver-sqlite-wasm`, `driver-turso` LOCAL, `read-scope-sql`, `driver-memory`
  * (both surfaces), `driver-mongodb` and `formula`.
+ *
+ * `service-analytics`'s `filter-normalizer` (the Cube face) was the second row
+ * of that table until #5977, answering `['2']` for `$ne` while already answering
+ * `$not` correctly — the #5146 rewrite lived in the normalizer, the three
+ * self-negating operators did not. It now emits the guard as tree STRUCTURE, so
+ * all three compilers of that tree (raw SQL, the ObjectQL engine condition and
+ * the display-SQL echo) answer `['2','3','4']`. That leaves `driver-turso`
+ * remote as the sole blocker for BOTH rows, so `$ne` and `$not` now enrol
+ * together, in #5903's PR.
  *
  * `driver-turso` remote is the interesting one and the reason the pre-#5298
  * version of this note was WRONG where it said "every surface answers this

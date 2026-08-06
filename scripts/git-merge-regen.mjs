@@ -112,10 +112,17 @@ function drive(argv) {
   const dist = entry.readsDist
     ? '\n     (this one is built from dist/*.d.ts — the regeneration will refuse on a stale build)'
     : '';
+  // The json-schema/ tree is gitignored, so a merge never carries it: whatever is
+  // on disk describes one side of the merge. Name the prerequisite here rather
+  // than let the reader discover it from the generator's refusal (#4723).
+  const tree = entry.readsSchemaTree
+    ? '\n     (this one renders from the gitignored packages/spec/json-schema/ tree —'
+      + '\n      run `pnpm --filter @objectstack/spec gen:schema` first, or it will refuse)'
+    : '';
   console.error(
     `  ⟳ ${path}\n`
       + `     not text-merged — it is generated. Regenerate from the merged tree:\n`
-      + `       pnpm --filter @objectstack/spec ${entry.gen}${dist}\n`
+      + `       pnpm --filter @objectstack/spec ${entry.gen}${dist}${tree}\n`
       + `     The pre-commit hook will not let this commit through until you do.`,
   );
   return 0;

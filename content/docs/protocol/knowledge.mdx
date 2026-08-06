@@ -316,10 +316,39 @@ from the event's `after`, and a delete's id from its required `recordId`.
   than per-record events. A knowledge index is a per-record projection and
   `matched: 40` names no record, so there is no upsert or delete to derive —
   the service logs a warning naming the object and count instead of failing
-  silently. Reconciliation against the source object is the durable fix and is
-  tracked in [#4672](https://github.com/objectstack-ai/objectstack/issues/4672):
-  events keep the index *fresh*, reconciliation keeps it *correct*.
+  silently. Repair such an index with an explicit `reindexSource`.
 </Callout>
+
+### Retention deletes are covered by a reap guard
+
+The platform's own predicate delete — `LifecycleService` reaping rows past
+their retention window — is the one bulk path that *is* handled, and it is
+handled at the source rather than after the fact
+([#4672](https://github.com/objectstack-ai/objectstack/issues/4672)).
+
+For every object an `object` source projects, the plugin registers an ADR-0057
+**reap guard** with the lifecycle service. The sweep hands the guard the
+candidate rows before deleting them; the guard deletes each row's document and
+returns the ids it confirms. Rows it does not confirm stay put.
+
+- **Failure direction.** If `adapter.delete` fails, the row is *kept* and
+  retried on the next sweep. A row may outlive its index entry; an index entry
+  must never outlive its row, because an orphan still consumes a `topK` slot
+  ahead of the permission filter and is read straight through by an `isSystem`
+  caller.
+- **Composition.** Guards from different packages compose by intersection, so
+  this one cannot displace another registrar's cleanup (or be displaced by it).
+- **Batching** is the sweep's: 500 rows per batch, 20 batches per sweep, the
+  backlog draining across sweeps.
+- **Opt-out.** `refresh.onRecordChange: false` on a source — or
+  `enableEventSync: false` on the plugin — turns off inline index sync in both
+  directions, event subscription and reap-time de-index alike. An index an
+  external indexer owns is never a reason to hold up another package's
+  retention.
+
+Application-level predicate writes remain uncovered: de-indexing them needs an
+adapter-side enumeration capability that no adapter declares today, and that
+surface stays unbuilt until a real `object` source calls for it.
 
 `file` / `http` sources rely on explicit `reindexSource` calls
 (typically triggered by a cron job, a Console button, or a webhook).

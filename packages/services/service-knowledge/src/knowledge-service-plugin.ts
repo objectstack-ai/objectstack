@@ -9,6 +9,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
+import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 
 /**
  * Configuration options for the `KnowledgeServicePlugin`.
@@ -69,6 +70,7 @@ export class KnowledgeServicePlugin implements Plugin {
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;
+  private logger: KnowledgeLogger | undefined;
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
 
@@ -97,6 +99,7 @@ export class KnowledgeServicePlugin implements Plugin {
       },
     };
 
+    this.logger = logger;
     this.service = new KnowledgeService({
       dataEngine: engine,
       logger,
@@ -121,6 +124,10 @@ export class KnowledgeServicePlugin implements Plugin {
     if (!service) return;
 
     ctx.hook('kernel:ready', async () => {
+      // Reap-path de-indexing first: it is independent of the realtime service,
+      // and the branch below returns early when that one is absent.
+      this.installReapGuards(ctx, service);
+
       let realtime: IRealtimeService | null = null;
       try {
         realtime = ctx.getService<IRealtimeService>('realtime');
@@ -172,17 +179,27 @@ export class KnowledgeServicePlugin implements Plugin {
         // Say so rather than falling through to the `return` below: a silent
         // no-op here reads identically to "nothing happened", which is how the
         // gap stayed invisible before #4639 gave bulk writes an event at all.
-        // The durable fix is a reconciliation pass over the object source
-        // (events keep the index FRESH; reconciliation keeps it CORRECT) —
-        // tracked separately in #4672.
+        //
+        // [#4672] The warn STAYS, and it is deliberately still a warn about a
+        // gap — but a narrower gap than it named before. The platform's own
+        // predicate delete (the retention sweep's reap, and the source this
+        // issue called out as the main one) no longer reaches this handler as a
+        // stale index at all: `installReapGuards` de-indexes those rows before
+        // they are deleted. What is left is APPLICATION-level predicate writes
+        // — a caller's own `multi: true` update/delete — which no guard sits in
+        // front of. That half is honestly uncovered rather than quietly
+        // half-claimed, and stays so until a real object source justifies the
+        // adapter-enumeration surface it would need (#4606's enforced-first
+        // rule). Reporting it accurately is the whole job of this branch.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
           const matched = payload.matched;
           ctx.logger.warn?.(
             `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ` +
               `${typeof matched === 'number' ? matched : 'an unreported number of'} record(s). ` +
               'A bulk event carries a count, not records, so the knowledge index for this object ' +
-              'may now be stale and cannot be repaired from the event stream (#4639; ' +
-              'reconciliation tracked in #4672).',
+              'may now be stale and cannot be repaired from the event stream (#4639). ' +
+              'Retention-sweep deletes are covered separately by the lifecycle reap guard (#4672); ' +
+              'application-level predicate writes are not, and need an explicit reindexSource.',
             { object, type, matched },
           );
           return;
@@ -205,6 +222,75 @@ export class KnowledgeServicePlugin implements Plugin {
       });
       ctx.logger.info?.('KnowledgeServicePlugin: event sync subscription active.');
     });
+  }
+
+  /**
+   * Register the lifecycle reap guard (#4672, ADR-0057 amendment) for every
+   * object an `object` source projects.
+   *
+   * ## Why the guard rather than an event
+   *
+   * The retention sweep deletes rows by predicate, and ADR-0057 §3.3 forbids
+   * fanning that out per record (the cleanup would re-feed the tables it is
+   * draining). Without a guard the rows go and their documents stay: orphans,
+   * keyed by a `sourceRecordId` that resolves to nothing. The ADR's own answer
+   * to this shape is the guard — "a domain callback, not a second sweeper" —
+   * and it arrives batched and interruptible for free (500 rows a batch, 20
+   * batches a sweep), which is the cost bound this work would otherwise owe.
+   *
+   * ## Seams, all pre-existing
+   *
+   * Reached exactly as `service-storage` reaches it for `sys_file` byte
+   * reclaim: duck-typed `ctx.getService('lifecycle')` +
+   * `registerReapGuard(object, guard)`. No spec key, no `IKnowledgeAdapter`
+   * member, no `packages/objectql` change (#4606's zero-addition boundary).
+   * Guards compose by intersection (#5535), so registering here cannot displace
+   * storage's byte-reclaim guard, nor it ours.
+   *
+   * Silent when there is no lifecycle service (a bare kernel): the sweep is
+   * what deletes rows, so no sweeper means no orphans to prevent. Nothing is
+   * concluded about the registry either — this runs at `kernel:ready`, and the
+   * absence is neither cached nor asserted.
+   *
+   * One guard instance serves every object (it resolves its targets from the
+   * `object` it is called with), and re-registering the identical function is a
+   * documented no-op, so re-run wiring cannot double a de-index.
+   *
+   * ## Boundary, stated rather than implied
+   *
+   * The OBJECT SET is read once, here — every object declared by boot time,
+   * which is every object the sources a host composes can name. A source
+   * registered later through `registerSource` for an object that had none at
+   * boot is therefore unguarded, while one for an already-guarded object is
+   * picked up (the guard re-resolves its targets on each call). Making the set
+   * itself dynamic would mean a new notification surface on the service, which
+   * is precisely the addition #4606 rules out until a real `object` source
+   * exists to justify it.
+   */
+  private installReapGuards(ctx: PluginContext, service: KnowledgeService): void {
+    const objects = guardedObjectsFor(service.listSources());
+    if (objects.length === 0) return;
+
+    type LifecycleLike = {
+      registerReapGuard?: (object: string, guard: ReturnType<typeof createKnowledgeReapGuard>) => void;
+    };
+    let lifecycle: LifecycleLike | undefined;
+    try {
+      lifecycle = ctx.getService<LifecycleLike>('lifecycle');
+    } catch {
+      return; // no lifecycle service — nothing reaps, nothing to guard.
+    }
+    if (!lifecycle || typeof lifecycle.registerReapGuard !== 'function') return;
+
+    const guard = createKnowledgeReapGuard(service, this.logger);
+    // Called AS A METHOD, never through a detached reference: the real
+    // `LifecycleService.registerReapGuard` reads `this.reapGuards`, so
+    // `const register = lifecycle.registerReapGuard` throws on the first call.
+    for (const object of objects) lifecycle.registerReapGuard(object, guard);
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: reap guards registered with the lifecycle service for [${objects.join(', ')}] — ` +
+        'rows are de-indexed before the retention sweep deletes them.',
+    );
   }
 
   async stop(ctx: PluginContext): Promise<void> {

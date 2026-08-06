@@ -37,6 +37,28 @@ import { TursoDriver } from './turso-driver.js';
 export { TursoDriver, type TursoDriverConfig, type TursoTransportMode } from './turso-driver.js';
 export { RemoteTransport, type FilterColumnSqlResolver } from './remote-transport.js';
 
+// The remote canonical temporal backfill (#5770 / cloud#1005) — the remote-mode
+// exit from the unindexable read-side repair. `TursoDriver` runs it after every
+// remote schema sync; these are exported so an operator can drive a large table
+// to completion with a bigger budget and read what it actually converged.
+export {
+  backfillRemoteCanonicalColumns,
+  backfillRemoteCanonicalColumn,
+  probeRemoteCanonicalColumns,
+  REMOTE_BACKFILL_DEFAULT_BATCH_SIZE,
+  REMOTE_BACKFILL_DEFAULT_MAX_BATCHES,
+  REMOTE_BACKFILL_EPOCH_MS_MIN,
+  REMOTE_BACKFILL_EPOCH_MS_MAX,
+  type RemoteBackfillClient,
+  type RemoteBackfillColumn,
+  type RemoteBackfillColumnReport,
+  type RemoteBackfillKind,
+  type RemoteBackfillLogger,
+  type CanonicalSqlFor,
+  type RemoteCanonicalBackfillOptions,
+  type RemoteCanonicalBackfillReport,
+} from './remote-canonical-backfill.js';
+
 // Spec / Studio metadata for the Turso driver — published from this package
 // so a host exposes Turso configuration UI without the driver-specific shape
 // landing in the shared `@objectstack/spec` surface.
