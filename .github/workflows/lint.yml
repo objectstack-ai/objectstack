@@ -399,6 +399,33 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
+      # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
+      # registries, the api-surface baselines) from text-merging into a
+      # plausible-looking wrong file: the driver defers the path and records it,
+      # and `.githooks/pre-commit` refuses the commit until the regeneration has
+      # actually happened. Both halves are CONFIG — `.gitattributes` routing on
+      # one side, the table in scripts/regen-artifacts.mjs on the other — and
+      # they drift apart in either direction with nothing failing: a path
+      # declared in the table but unmapped still text-merges, and a path mapped
+      # but undeclared leaves the merge CONFLICTED with no explanation. The
+      # self-test reconciles them both ways, checks the gen:/check: names the
+      # driver advises still resolve, that the hook is executable IN THE INDEX
+      # (git ignores a non-executable hook and says only `advice.ignoredHook`),
+      # that the driver registered in THIS clone resolves here (#4868: it
+      # pointed at a deleted worktree for weeks while every other check stayed
+      # green), and proves the behaviour end to end against real git. The
+      # second half pins the staleness rules' dangerous direction — "says fresh
+      # when stale".
+      # It ran nowhere until now: `pre-commit` runs check-regen-pending's MAIN
+      # path (which exits immediately with no pending marker), never
+      # `--self-test`, and no workflow named the command — so the reconciliation
+      # was verified only when someone happened to run the root script by hand
+      # (#4690's family: a gate archived as "runs elsewhere" that ran nowhere).
+      # Pure git + fs, no build, seconds — so it belongs in this job.
+      - name: Merge-driver wiring gate
+        run: pnpm check:merge-driver
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
