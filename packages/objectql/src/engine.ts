@@ -96,6 +96,12 @@ import {
   ENGINE_DELETE_REJECT_MESSAGE,
   type EngineDeleteDispatchInput,
 } from './engine-delete-dispatch.js';
+import {
+  resolveEngineUpdateDispatch,
+  ENGINE_UPDATE_REJECT_MESSAGE,
+  type EngineUpdateDispatchData,
+  type EngineUpdateDispatchInput,
+} from './engine-update-dispatch.js';
 import { applyHaving } from './having-filter.js';
 import {
   auditDanglingReferences,
@@ -5346,14 +5352,19 @@ export class ObjectQL implements IObjectQLEngine {
      //    (e.g. `WHERE id = {"$in":[...]}`, which SQLite rejects). Leave `id`
      //    undefined in that case so the call routes to updateMany (requires
      //    options.multi=true), where applyFilters compiles the operator.
-     let id = data.id;
-     if (!id && options?.where && typeof options.where === 'object' && 'id' in options.where) {
-         const whereId = (options.where as Record<string, unknown>).id;
-         const t = typeof whereId;
-         if (whereId !== null && (t === 'string' || t === 'number' || t === 'bigint')) {
-             id = whereId;
-         }
-     }
+     //
+     // [#5480] The decision lives in `engine-update-dispatch.ts` — the twin of
+     // the `delete` extraction below (#4550) — so the fake engines that stand
+     // in for this method import it instead of re-deriving it. Same argument,
+     // same failure mode: a double looser than the producer converts a green
+     // suite into no suite at all on exactly the path the double was written
+     // for (#4434), and a predicate update is no less destructive than a
+     // predicate delete — it rewrites every matching row's fields.
+     const dispatch = resolveEngineUpdateDispatch(
+       data as EngineUpdateDispatchData,
+       options as EngineUpdateDispatchInput | undefined,
+     );
+     const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
 
      const opCtx: OperationContext = {
        object,
@@ -5679,7 +5690,12 @@ export class ObjectQL implements IObjectQLEngine {
                result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                isPredicateWrite = true;
            } else {
-               throw new Error('Update requires an ID or options.multi=true');
+               // [#5480] The `reject` verdict of resolveEngineUpdateDispatch,
+               // re-asked here because a beforeUpdate hook may have cleared the
+               // id since — the same shape delete()'s branch below carries, and
+               // the reason the wording lives in one exported constant either
+               // way.
+               throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
            }
 
            hookContext.event = 'afterUpdate';
