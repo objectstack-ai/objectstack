@@ -91,6 +91,13 @@ write state only through these signals:
   发现它的动作。notes 12 的「读取端截断」是本条的读侧对偶:写侧同样不能拿
   「API 返回 200」当「落地内容正确」。
 
+**GitHub 书写语言 —— issue/PR 上的一切新内容用英文(维护者 2026-08-06 指令)。**
+凡写到 GitHub 上的:issue 标题与正文、issue/PR 评论(认领、分诊审计、裁决、
+hold/blocked 注记、让行、座位贴登记与审计)、PR 标题与正文 —— 一律**英文**。
+issue 是仓库的公开持久记录,语言随仓库;中文保留给两个通道:**step 9 的轮次
+报告**(chat,对维护者)与派发令里需要原样传达的中文裁决引文(引文照抄,不翻
+译 —— 改写引文就是改写裁决)。存量中文内容 ⛔ 不追溯改写。
+
 **One-time setup** (idempotent, run at the start of the first round):
 
 ```bash
@@ -449,10 +456,16 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
 **每个座位一张登记贴**:
 
 - **贴 = 座位**(分诊、队列管家、各 `domain:*`、姊妹仓整仓),打标签 **`pm:seat`**,
-  正文三段:**范围 | 当前 PM(会话或 Routine ID) | 说明**。`label:pm:seat`
+  正文三段:**范围 | 当前 PM | 说明**。`label:pm:seat`
   即全量索引(与 `pm:epic` 同构);#4604 只作**指针页**(座位 → 贴的静态索引,
   仅拆域加座位时更新)。**单写手**:贴正文只由**在任座位 PM** 编辑,互吞类
   问题机制性消失,而不是纪律性缓解。
+- **「当前 PM」段固定登记三元(维护者 2026-08-06 要求可辨识 GitHub 用户)**:
+  **GitHub 账号**(会话启动时 `GET /user` / `get_me` 自查 login —— 舰队实际在用
+  多个账号,`os-zhuang`/`qq9340100`/`hotlong`/`baozhoutao` 已各自在岗,「共享单一
+  身份」的旧假设不再全真)+ **会话 ID 或 Routine ID** + **上任时刻**。正文自述
+  之外还有一条**平台盖章的硬读数**:该座位审计/认领评论的**作者字段**就是该
+  会话的 GitHub 用户,不可自述错 —— 接管仲裁与活性判定优先用它对账正文。
 - **接管 / 移交 = 改该座位贴正文 + 在该贴留一条审计评论**;**评论只作交接审计,
   不承载状态** —— 不要靠读评论流对账现状(实测教训:#4604 曾三天累积 79 条登记
   评论,「现状」与「历史」挤在同一通道,对账成本随评论数线性涨)。
@@ -819,8 +832,9 @@ routing isn't already decided:
   itself is a coordination node — **never dispatched to a dev**; it stays
   open as the progress view and the PM closes it with a summary comment when
   the last sub-issue closes.
-- **Leave a one-comment audit trail** on the issue (Chinese), so the
-  maintainer can veto cheaply: 「分诊:落地 objectui;理由:…」.
+- **Leave a one-comment audit trail** on the issue (English, per the
+  language policy), so the maintainer can veto cheaply:
+  "Triage: lands in objectui; rationale: …".
 - Routing is a **technical judgment — never escalate "which repo?" to the
   maintainer.** If after reading the code you genuinely cannot tell where a
   change lands, the issue is underspecified: escalate the *underlying
@@ -916,20 +930,21 @@ execute as **one atomic pair**, in order:
 
 1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
-2. **Claim comment** (Chinese), fixed shape — the branch name is the key,
+2. **Claim comment** (English, per the language policy), fixed shape — the
+   branch name is the key,
    every later artifact (worktree, push, PR) hangs off it. The session ID is
    NOT optional: under the shared identity it is the only line that lets a
    later reader — including your own future self after a context reset —
    answer "is this claim mine?". A claim without it caused the #4555/#4559
    duplicate (#4588): the second session saw its own shared name as assignee
    and could not tell the claim was someone else's.
-   > 认领:PM 循环第 N 轮
-   > 会话:`session_<id>`
-   > 分支:`claude/issue-<n>-<slug>`
-   > Worktree:`<repo>-issue-<n>`
-   > 域:`domain:<x>`
-   > 文件面:`<预计触碰的目录列表>`(越界即停,报告说明)
-   > 串行约束已清:`<点名同文件/同包的前序 PR 与在飞单;无则写「无」>`
+   > Claim: PM loop round N
+   > Session: `session_<id>`
+   > Branch: `claude/issue-<n>-<slug>`
+   > Worktree: `<repo>-issue-<n>`
+   > Domain: `domain:<x>`
+   > File surface: `<directories you expect to touch>` (stop on breach; explain in the report)
+   > Serial constraints cleared: `<name the same-file/same-package predecessor PRs and in-flight claims; "none" if none>`
 
    最后一行是 services 车道一班 28 PR 零合并冲突的机制(#5885):把「查过串行
    约束」从内心活动变成落在评论里的读数,竞态复读与串行判断都成了 30 秒的事 ——
@@ -954,7 +969,7 @@ execute as **one atomic pair**, in order:
    the claim comments' **timestamps are the only tiebreaker**, whatever the
    assignee field seems to say. An earlier claim comment with a *different*
    session ID or branch means you lost: touch nothing of theirs, reply
-   「已有认领,让行」, and pick another issue. First comment wins. #5032 is
+   "already claimed — yielding", and pick another issue. First comment wins. #5032 is
    the 20-second version: claims at 00:39:44 and 00:40:04, the later one
    composed **without re-reading the thread** — and both aimed at
    `pnpm-lock.yaml`, where two parallel re-resolutions produce mutually
@@ -1042,6 +1057,9 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - If your change touches `packages/spec`: spec build(`gen:schema`)会**重写锚点**
   `authorable-surface.base.json` —— 那是预期产物,⛔ 不要 revert、不要手改;
   何时写/往哪写见 #5358/#5370,字节门见 #4650。
+- Everything you post to GitHub — the PR title and body, and any issues you
+  file for out-of-scope findings — is written in ENGLISH (maintainer policy,
+  2026-08-06). Quote existing Chinese rulings verbatim without translating.
 Return ONLY the JSON report defined in your agent definition.
 ```
 
@@ -1453,7 +1471,7 @@ against the report's own claims:
 
 Verdict per issue:
 
-- **ACCEPT** — comment on the issue (Chinese) linking the PR and summarizing
+- **ACCEPT** — comment on the issue (English) linking the PR and summarizing
   what shipped. Then drive it to landing (maintainer policy: review passed +
   CI green ⇒ merge): once every check on the PR is green, mark it ready for
   review and **add it to the merge queue** — the queue rebuilds the PR
@@ -1683,12 +1701,14 @@ is too vague to dispatch, or rework has failed twice:
    the maintainer's inbox (filter `label:needs-user-decision` shows
    everything awaiting them); when they answer, the label comes off and the
    issue re-enters the queue. No bookkeeping issues accumulate. File a
-   separate issue (titled `[决策] <一句话说清要拍板什么>`, same label) ONLY
+   separate issue (titled `[Decision] <one sentence naming what must be
+   decided>`, same label; legacy `[决策]` titles stay as-is) ONLY
    when the decision has no natural anchor — it spans several issues (file
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
-2. The analysis, wherever it lands (Chinese): 背景、具体问题、可选方案、
-   你的建议、关联的 issue / PR / 分支。**每个方案必须沿三条固定评估轴
+2. The analysis, wherever it lands (English, per the language policy):
+   background / the concrete question / options / your recommendation /
+   related issues, PRs, branches。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
    - **实际业务需求** — 每个方案先问:它服务的是**真实存在的业务场景**,
      还是投机性的能力面?判据来源要求**实测**——谁在写这个键、谁在读这个
@@ -1718,7 +1738,8 @@ is too vague to dispatch, or rework has failed twice:
 
 ### 9. Round report, then next round
 
-Print a round report to the maintainer **in Chinese**: a table of
+Print a round report to the maintainer **in Chinese**(chat 通道,语言政策的
+显式例外 —— 报告不落 GitHub): a table of
 issue → verdict → PR link → notes, plus anything escalated. Then start the
 next round at step 1 (rework re-dispatches count against the next round's
 `batch` budget).
