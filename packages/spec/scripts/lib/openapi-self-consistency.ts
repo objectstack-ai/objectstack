@@ -37,6 +37,23 @@
  *    is covered without touching this file.
  * 2. **No schema is silently degraded.** See `assertNoDegradedSchemas`.
  *
+ * ## Rule 1 after #5744 — vacuous today, retained for `$defs`
+ *
+ * Every `$ref` the document carried lived in the hand-written route section
+ * that #5744 removed (its producer is `packages/rest`, at serve time — #5588
+ * ruling C, ADR-0076). The artifact now emits **zero** refs, so rule 1 walks an
+ * empty set and is honestly described as vacuous rather than as coverage.
+ *
+ * It is kept because the shape it guards is one the surviving half can still
+ * reach: `z.toJSONSchema` parks reused and recursive subschemas in a `$defs`
+ * block at the root of the schema it RETURNS, and points at them with
+ * root-relative `#/$defs/…`. Each contract schema is converted independently
+ * and then parked under `components.schemas[Name]`, so such a pointer would
+ * address the OpenAPI document's root — which has no `$defs` — and resolve to
+ * nothing. None of the nine is recursive today; the "resolve by pointer, not by
+ * prefix" choice above is what makes that day cheap instead of a debugging
+ * session. `openapi-self-consistency.test.ts` reproduces it as a mutation.
+ *
  * Both are consulted BEFORE the document is written: a self-inconsistent
  * artifact is never emitted at all, rather than emitted and then complained
  * about. The gate is wired into the generator itself (not a separate `check:`

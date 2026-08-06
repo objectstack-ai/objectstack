@@ -23,6 +23,25 @@
 //      second group is the reverse verification: a gate that has never been
 //      observed failing is not known to be a gate.
 //
+// ── What #5744 changed here, and what it did NOT ──────────────────────────
+// The route section this generator used to hand-write is gone: it hit 0 of its
+// 10 operations on a real boot, and its one legitimate producer is the package
+// that mounts the routes (#5588 ruling C, ADR-0076, #5078). Two consequences,
+// both reflected below rather than papered over:
+//
+//   • All nine `$ref`s the document carried lived in those operations' request
+//     and response bodies, so `assertRefsResolve` on TODAY's artifact is
+//     vacuous — it walks a document with zero refs. The honest reaction is not
+//     to keep a route section alive so the assertion has something to chew on;
+//     it is to say so (`emits a document with no $ref at all`, below) and keep
+//     the reverse verification pointed at a shape the document can still reach.
+//     The mutations therefore inject their dangling ref into `components`, the
+//     surviving surface — including the `#/$defs/…` shape `z.toJSONSchema`
+//     really does emit the day a contract schema becomes recursive.
+//   • "This artifact describes no routes" is now an ownership boundary, not an
+//     accident, so it is pinned as one (`publishes no route section`, below).
+//     Re-adding a `paths` block here goes red on that test.
+//
 // ── Why a sandbox for the subprocess group ────────────────────────────────
 // The script resolves its output dir from its own `__dirname` (`../json-schema`
 // -> the package's real, gitignored artifact) and a concurrent
@@ -147,7 +166,9 @@ describe('assertNoDegradedSchemas', () => {
 let sandbox: string;
 
 /** Run a (possibly mutated) copy of `build-openapi.ts` in an isolated tree. */
-function runGenerator(mutate?: (src: string) => string): { status: number; output: string } {
+function runGenerator(
+  mutate?: (src: string) => string,
+): { status: number; output: string; dir: string; artifact: string } {
   const dir = fs.mkdtempSync(path.join(sandbox, 'gen-'));
   fs.cpSync(path.join(PKG_ROOT, 'scripts'), path.join(dir, 'scripts'), { recursive: true });
   for (const entry of ['src', 'node_modules', 'package.json']) {
@@ -167,8 +188,35 @@ function runGenerator(mutate?: (src: string) => string): { status: number; outpu
     encoding: 'utf-8',
     env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=4096' },
   });
-  return { status: res.status ?? -1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
+  return {
+    status: res.status ?? -1,
+    output: `${res.stdout ?? ''}${res.stderr ?? ''}`,
+    dir,
+    artifact: path.join(dir, 'json-schema', 'openapi.json'),
+  };
 }
+
+/** Read back the artifact a `runGenerator()` call just wrote. */
+function readArtifact(run: ReturnType<typeof runGenerator>): any {
+  expect(fs.existsSync(run.artifact), `the generator wrote no artifact:\n${run.output}`).toBe(true);
+  return JSON.parse(fs.readFileSync(run.artifact, 'utf-8'));
+}
+
+/**
+ * The seven paths the removed hand-written section published. Every one of them
+ * was a phantom — see `packages/rest/src/rest-openapi-route.test.ts`, which
+ * asserts the same list is absent from the SERVED document. Here the claim is
+ * the other half: the static artifact stopped producing them at the source.
+ */
+const REMOVED_BUILTIN_PATHS = [
+  '/api/{object}',
+  '/api/{object}/{id}',
+  '/api/meta',
+  '/api/meta/types',
+  '/api/meta/{type}',
+  '/api/meta/{type}/{name}',
+  '/api/.well-known/objectstack',
+];
 
 describe('build-openapi.ts end to end', () => {
   beforeAll(() => {
@@ -186,24 +234,91 @@ describe('build-openapi.ts end to end', () => {
     expect(status).toBe(0);
   });
 
-  it('writes a document in which every $ref resolves', () => {
-    const { status } = runGenerator();
-    expect(status).toBe(0);
+  it('writes a document whose components are complete and self-contained', () => {
+    const run = runGenerator();
+    expect(run.status).toBe(0);
     // Re-read the artifact the run just produced and check it independently of
     // the generator's own gate.
-    const dirs = fs
-      .readdirSync(sandbox)
-      .map((d) => path.join(sandbox, d, 'json-schema', 'openapi.json'))
-      .filter((p) => fs.existsSync(p));
-    const doc = JSON.parse(fs.readFileSync(dirs[dirs.length - 1], 'utf-8'));
+    const doc = readArtifact(run);
     expect(Object.keys(doc.components.schemas)).toHaveLength(9);
     expect(findDanglingRefs(doc)).toEqual([]);
   });
 
+  it('emits a document with no $ref at all — so the ref gate is vacuous TODAY', () => {
+    // Stated rather than hidden. All nine `$ref`s lived in the route section
+    // #5744 removed, so `findDanglingRefs(doc) === []` above is currently true
+    // because there is nothing to walk, not because a check passed. This test
+    // exists so that fact is written down where the next reader of the ref gate
+    // will see it — and so that the day a contract schema starts emitting
+    // `$defs` pointers, this expectation goes red and points at the reason the
+    // gate was kept (see `build-openapi.ts`'s comment above `assertRefsResolve`).
+    const doc = readArtifact(runGenerator());
+    const refs: string[] = [];
+    const walk = (node: any): void => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) return void node.forEach(walk);
+      for (const [k, v] of Object.entries(node)) {
+        if (k === '$ref' && typeof v === 'string') refs.push(v);
+        else walk(v);
+      }
+    };
+    walk(doc);
+    expect(refs).toEqual([]);
+  });
+
+  it('publishes no route section — those belong to @objectstack/rest (#5588, #5744)', () => {
+    // The ownership boundary, pinned. `paths` is ABSENT rather than `{}`:
+    // OpenAPI 3.1 makes it optional, and an empty object would assert "this API
+    // serves nothing" — false — where an absent key asserts nothing about
+    // routes, which is the only claim this artifact is entitled to make.
+    const doc = readArtifact(runGenerator());
+    expect(doc.paths, 'the static artifact must not describe routes').toBeUndefined();
+    // The three tags described exactly the removed sections; nothing carries
+    // them, and the served document produces its own tag list with its routes.
+    expect(doc.tags).toBeUndefined();
+
+    // Not just the container: none of the seven phantom paths may survive
+    // anywhere in the document, under any key.
+    const serialized = JSON.stringify(doc);
+    for (const phantom of REMOVED_BUILTIN_PATHS) {
+      expect(serialized, `'${phantom}' is still described by the static artifact`).not.toContain(
+        phantom,
+      );
+    }
+    for (const tag of ['CRUD', 'Metadata', 'Discovery']) {
+      expect(serialized).not.toContain(`"${tag}"`);
+    }
+  });
+
+  it('keeps exactly what packages/spec owns', () => {
+    // The other direction of the removal: the surviving half is a whole
+    // document, not a husk. These five keys are what `rest`'s serve-time
+    // pipeline reads out of the artifact (`rest-server.ts`), so a later
+    // "cleanup" that drops one of them changes the SERVED document.
+    const doc = readArtifact(runGenerator());
+    expect(Object.keys(doc).sort()).toEqual(['components', 'info', 'openapi', 'security', 'servers']);
+    expect(doc.openapi).toBe('3.1.0');
+    expect(doc.info.title).toBe('ObjectStack REST API');
+    expect(doc.info.version).toBe(
+      JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf-8')).version,
+    );
+    expect(Object.keys(doc.components.securitySchemes).sort()).toEqual(['apiKey', 'bearerAuth']);
+    expect(doc.security).toEqual([{ bearerAuth: [] }]);
+    // The fallback server entry rest appends behind the live request origin.
+    expect(doc.servers).toEqual([{ url: 'http://localhost:3000', description: 'Local development' }]);
+  });
+
   // ── Reverse verification ────────────────────────────────────────────────
-  // Predicted direction for BOTH: RED (non-zero exit). These are not
+  // Predicted direction for ALL FOUR: RED (non-zero exit). These are not
   // decoration — before #5168 the generator exited 0 on a document with six
   // dangling refs, so "the gate can fail" is the claim under test.
+  //
+  // Since #5744 the ref mutations inject their dangling pointer into
+  // `components` rather than into a path operation: the literals they used to
+  // rewrite (`#/components/schemas/ApiError'` inside `generateCrudPaths`) no
+  // longer exist in the source, so the old mutations would fail
+  // `runGenerator`'s "mutation must actually change the source" guard and
+  // report a broken test rather than a working gate.
 
   it('goes RED when the lazySchema Proxy is rejected again (the original bug)', () => {
     const { status, output } = runGenerator((src) =>
@@ -217,22 +332,50 @@ describe('build-openapi.ts end to end', () => {
     expect(output).toContain('ApiError');
   });
 
-  it('goes RED when a $ref points at a schema that does not exist', () => {
+  it('goes RED when a component $ref points at a schema that does not exist', () => {
+    // A component referencing a sibling that was renamed — the shape the ref
+    // gate now guards, since nothing else in the document carries a `$ref`.
     const { status, output } = runGenerator((src) =>
-      src.replace(/#\/components\/schemas\/ApiError'/g, "#/components/schemas/ApiErrorTypo'"),
+      src.replace(
+        '  return schemas;',
+        "  return { ...schemas, Broken: { $ref: '#/components/schemas/ApiErrorTypo' } };",
+      ),
     );
     expect(status).not.toBe(0);
     expect(output).toMatch(/unresolvable \$ref/);
     expect(output).toContain('#/components/schemas/ApiErrorTypo');
   });
 
-  it('refuses to WRITE the artifact when the document is inconsistent', () => {
-    const dirsBefore = new Set(fs.readdirSync(sandbox));
-    runGenerator((src) =>
-      src.replace(/#\/components\/schemas\/ApiError'/g, "#/components/schemas/ApiErrorTypo'"),
+  it('goes RED on the `$defs` pointer z.toJSONSchema emits for a recursive schema', () => {
+    // The LIVE hazard the gate is retained for, reproduced as the converter
+    // really shapes it: `z.toJSONSchema` parks reused/recursive subschemas in a
+    // `$defs` block at the root of the schema it RETURNS and points at them
+    // with root-relative `#/$defs/…`. Parked under `components.schemas[Name]`,
+    // that pointer addresses the OpenAPI document's root — which has no
+    // `$defs` — so it resolves to nothing for every consumer. None of the nine
+    // contract schemas is recursive today; this is what happens on the day one
+    // becomes so.
+    const { status, output } = runGenerator((src) =>
+      src.replace(
+        '  return schemas;',
+        "  return { ...schemas, Recursive: { type: 'object', " +
+          "properties: { next: { $ref: '#/$defs/Recursive' } } } };",
+      ),
     );
-    const newDir = fs.readdirSync(sandbox).find((d) => !dirsBefore.has(d))!;
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/unresolvable \$ref/);
+    expect(output).toContain('#/$defs/Recursive');
+  });
+
+  it('refuses to WRITE the artifact when the document is inconsistent', () => {
+    const run = runGenerator((src) =>
+      src.replace(
+        '  return schemas;',
+        "  return { ...schemas, Broken: { $ref: '#/components/schemas/ApiErrorTypo' } };",
+      ),
+    );
+    expect(run.status).not.toBe(0);
     // The gate runs before the write, so no half-broken document is published.
-    expect(fs.existsSync(path.join(sandbox, newDir, 'json-schema', 'openapi.json'))).toBe(false);
+    expect(fs.existsSync(run.artifact)).toBe(false);
   });
 });

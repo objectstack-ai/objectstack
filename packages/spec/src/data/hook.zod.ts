@@ -134,10 +134,16 @@ export const HookEvent = z.enum([
 
   // Write — before/after per mutation kind. These fire on BOTH single-id and
   // bulk (`multi: true`) writes: a bulk update/delete runs the SAME
-  // `beforeUpdate`/`beforeDelete`/`afterUpdate`/`afterDelete` with the
-  // row-scoping predicate carried in `input` (there is no per-cardinality
-  // `*Many` event — one write event covers one row or many, Salesforce's
-  // bulk-first model). See #3195.
+  // `beforeUpdate`/`beforeDelete`/`afterUpdate`/`afterDelete` (there is no
+  // per-cardinality `*Many` event — one write event covers one row or many,
+  // Salesforce's bulk-first model). The row-scoping predicate is NOT reachable
+  // from `input` on those write events: it lives on the engine-internal
+  // `OperationContext.ast` (#2982) so that the filters middleware composes onto
+  // it, where no handler can widen it — scope a bulk batch through
+  // `options.where` at the CALLER, or work per row on the `after*` events. Full
+  // per-event shapes in the `HookContextSchema.input` contract table below,
+  // pinned against the real engine by
+  // `packages/objectql/src/hook-input-shape-contract.test.ts`. See #3195.
   'beforeInsert', 'afterInsert',
   'beforeUpdate', 'afterUpdate',
   'beforeDelete', 'afterDelete',

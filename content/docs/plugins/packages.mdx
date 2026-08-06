@@ -331,8 +331,8 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 **Organization Scoping** — Multi-org (a.k.a. "soft" multi-tenant) row-level scoping. Ships as a **separate, closed-source enterprise package** — it is not part of the open framework repo. It composes with the Layer 0 tenant wall in `plugin-security` (`tenant-layer.ts`).
 
-- **Features**: `organization_id` auto-stamp on insert; every query is AND-composed against the tenant wall so rows never leak across organizations
-- **When to use**: Multi-organization SaaS where every row is scoped to an organization. Enable by setting `OS_MULTI_ORG_ENABLED=true` and installing `@objectstack/organizations`; if the flag is set but the package is missing, the platform refuses to boot (override with `OS_ALLOW_DEGRADED_TENANCY=1`)
+- **Features**: `organization_id` auto-stamp on insert; every query is AND-composed against the tenant wall, so no row outside the caller's organization scope is ever returned
+- **When to use**: Multi-organization SaaS where every row is scoped to an organization. Enable by setting `OS_TENANCY_POSTURE` to a walled posture — `group` (union read across every organization the caller belongs to) or `isolated` (the hard per-organization wall) — and installing `@objectstack/organizations`; if a walled posture is requested but the package is missing, the platform refuses to boot (override with `OS_ALLOW_DEGRADED_TENANCY=1`). The legacy `OS_MULTI_ORG_ENABLED` boolean is still honoured, but only as a fallback **input** when `OS_TENANCY_POSTURE` is unset, and it can only ever select `isolated` — never gate application code on it (ADR-0105 D1). See [Tenancy Postures & Membership](/docs/deployment/tenancy-modes) for how the posture resolves
 
 ### @objectstack/plugin-audit
 

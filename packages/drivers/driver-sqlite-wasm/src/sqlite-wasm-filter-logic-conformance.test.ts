@@ -37,6 +37,9 @@ describe('driver-sqlite-wasm — filter logic conformance', () => {
           a: { type: 'string' },
           b: { type: 'string' },
           c: { type: 'string' },
+          // [#5298] Nullable — the DDL this driver generates leaves a plain
+          // string column nullable, which is what rows 3-4 need.
+          d: { type: 'string' },
           owner: { type: 'string' },
           status: { type: 'string' },
           parent_object: { type: 'string' },

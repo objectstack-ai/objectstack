@@ -415,8 +415,8 @@ believe it, and before you file a bug about `main` being red. (Two phantom "brea
 removals" this way while writing this section; `check:generated` now prints this caveat
 inline when that gate is the one failing.)
 
-`check:liveness`, `check:empty-state`, `check:skill-examples`,
-`check:react-declaration-parity`, `check:exported-any` and `check:dual-source-exports` are
+`check:liveness`, `check:empty-state`, `check:skill-examples`, `check:exported-any` and
+`check:dual-source-exports` are
 pure checks with no generator — a failure there is a real finding to fix, not an artifact
 to regenerate. `check:generated` names them as deliberately not run, so its "all up to
 date" never reads as "everything passed". The last one asks the third question about the
@@ -435,6 +435,22 @@ claiming it confirmed the components "ACTUALLY implement" the spec props; it nev
 and #4413 shipped four dead blocks straight through a green run of it. Renamed and
 re-scoped in #4472. The gate is still worth having (`spec-only`, `registry-only` and
 `missing` are real signals) — just don't read it as proof anything renders.
+
+⚠️ **It is also the one gate `check:generated` cannot run at all**, and it says so in its
+own bucket (`EXTERNAL_INPUT_REQUIRED`, "cannot run here") rather than beside the source
+audits that are merely *deliberately* not run. Its right-hand side is objectui's
+`sdui.manifest.json`, and nothing here can produce one: the registry is a browser app, so
+the manifest exists only after `pnpm sdui:manifest` builds objectui at `.objectui-sha` and
+enumerates it in a real browser — `packages/console/dist/` is gitignored, the console
+build deliberately does not dump one, and the published `@objectstack/console` carries
+none either. Until #4690 that combined with a manual run that printed `⚠ manifest
+unavailable` and **exited 0**, so no path existed on which this gate could go red; it now
+**exits 1** when it has no usable manifest, because "could not run" is a failure, not a
+skip (Route & surface ownership §3, *Absence must be loud*). Run it the one way that
+works: `pnpm sdui:manifest` (or `OBJECTUI_ROOT=../objectui pnpm objectui:build` first),
+which dumps the manifest and runs the ratchet against it. Where the manifest *should* come
+from in CI is an open provenance question, tracked separately — do not "fix" the red by
+re-adding a skip.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the

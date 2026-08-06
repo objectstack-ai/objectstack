@@ -1612,6 +1612,121 @@ describe('LifecycleService teardown (#4747)', () => {
     expect(svc.stopped).toBe(true);
   });
 
+  /**
+   * [#5755] The Archiver's batch loop is the reap loop's twin: same 20-page
+   * budget, same "teardown lands mid-loop" exposure — except every page costs
+   * a read AND up to 500 writes on a SECOND datasource. These two tests pin the
+   * loop's two ends: the budget it runs when nothing calls it off, and the stop
+   * it makes when something does.
+   */
+  const ARCHIVED_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      retention: { maxAge: '90d' },
+      // No `keep`: the cold-side prune is a single call AFTER the loop, so
+      // declaring it here would assert a leg these tests do not govern.
+      archive: { after: '90d', to: 'archive' },
+    } as any,
+  };
+
+  /**
+   * A counting hot/cold pair. Every leg the archive loop can issue — the page
+   * read, the per-row copy, the hot delete — is recorded, so "the loop stopped"
+   * is observable per leg instead of inferred from a row count.
+   */
+  function archivePair(rowCount: number, onCopy?: (copied: number) => void) {
+    let remaining: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < rowCount; i++) {
+      remaining.push({ id: `r${i}`, created_at: '2020-01-01T00:00:00.000Z' });
+    }
+    const pageReads: number[] = [];
+    const copied: string[] = [];
+    const hotDeleted: Array<Array<string | number>> = [];
+    return {
+      pageReads,
+      copied,
+      hotDeleted,
+      remaining: () => remaining,
+      hot: {
+        name: 'default',
+        find: async (_object: string, query: any) => {
+          const limit = (query?.limit as number) ?? remaining.length;
+          pageReads.push(limit);
+          return remaining.slice(0, limit);
+        },
+        upsert: async () => ({}),
+        bulkDelete: async (_object: string, ids: Array<string | number>) => {
+          hotDeleted.push(ids);
+          const gone = new Set(ids);
+          remaining = remaining.filter((r) => !gone.has(r.id as string));
+        },
+        deleteMany: async () => 0,
+      },
+      cold: {
+        name: 'archive',
+        find: async () => [],
+        upsert: async (_object: string, row: Record<string, unknown>) => {
+          copied.push(row.id as string);
+          onCopy?.(copied.length);
+          return row;
+        },
+        bulkDelete: async () => {},
+        deleteMany: async () => 0,
+      },
+    };
+  }
+
+  it('an archive nobody calls off runs its whole 20-batch budget', async () => {
+    // The control for the test below: with the abort bit down, the loop is
+    // bounded only by ARCHIVE_MAX_BATCHES_PER_SWEEP (20 × 500), and the rest of
+    // the backlog waits for the next sweep.
+    const pair = archivePair(10_500);
+    const { engine } = captureEngine([ARCHIVED_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(pair.pageReads).toHaveLength(20);
+    expect(pair.copied).toHaveLength(10_000);
+    expect(pair.hotDeleted).toHaveLength(20);
+    expect(pair.remaining()).toHaveLength(500);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(10_000);
+  });
+
+  it('stop() mid-archive ends the batch loop instead of running out the page budget', async () => {
+    // The #4747 shape on the archive side: teardown lands while batch 2 is
+    // copying, so batches 3…20 must issue nothing at all — no hot read, no cold
+    // copy, no hot delete — at two datasources the host is closing.
+    let svc!: LifecycleService;
+    const pair = archivePair(10_500, (copied) => {
+      if (copied === 501) svc.stop(); // first row of batch 2
+    });
+    const { engine } = captureEngine([ARCHIVED_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    // Two pages read, not 20 — the loop stopped at the boundary after the batch
+    // that was in flight, and never asked the hot store for page 3.
+    expect(pair.pageReads).toHaveLength(2);
+    expect(pair.copied).toHaveLength(1000);
+    // The safety rule survives the interruption: the batch in flight completed
+    // its pair, so every id the cold store took was hot-deleted and no id was
+    // hot-deleted that the cold store had not taken — no half batch either way.
+    expect(pair.hotDeleted.map((ids) => ids.length)).toEqual([500, 500]);
+    expect(pair.hotDeleted.flat()).toEqual(pair.copied);
+    // …and the batches never begun are still hot, for the next sweep to move.
+    expect(pair.remaining()).toHaveLength(9500);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1000);
+  });
+
   it('stop() then start() re-arms the service — teardown is not one-way', async () => {
     const { engine } = captureEngine([]);
     let audits = 0;
