@@ -272,7 +272,11 @@ const DEBT = {
       + 'drifts differently from a package: the root program is `scripts/` and the top-level configs '
       + '(everything outside packages/apps/examples), so it grows whenever the repo gains a script -- '
       + 'scripts/check-test-typecheck.mts alone accounts for 29 of the 80, and the analytics-reconcile '
-      + 'tree for 32. Almost all of it is one missing `types:["node"]`, not 80 defects.',
+      + 'tree for 32. Almost all of it is one missing `types:["node"]`, not 80 defects. One wrinkle to '
+      + 'know before reading this number as "the root scripts": `exclude` only drops files from the '
+      + 'initial walk, so example sources IMPORTED by a script are still pulled into the program -- 4 of '
+      + 'the 80 are reported in examples/app-showcase/src, and this entry therefore moves with the '
+      + 'showcase as well as with scripts/.',
   },
 };
 
@@ -890,7 +894,9 @@ function tscErrorCount(project) {
  * the package up.
  */
 function measureDebt(dir) {
-  return tscErrorCount(posix.join(dir, 'tsconfig.json') || 'tsconfig.json');
+  // `dir` is '' for the workspace root, and posix.join('', 'tsconfig.json')
+  // is already 'tsconfig.json' -- no special case needed.
+  return tscErrorCount(posix.join(dir, 'tsconfig.json'));
 }
 
 /**
