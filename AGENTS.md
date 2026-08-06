@@ -29,6 +29,15 @@ workspace package declares a `typecheck` script or carries a measured DEBT/EXEMP
 in `scripts/check-type-check-coverage.mjs`. New packages must arrive covered; a package
 that graduates deletes its ledger entry in the same PR.
 
+The ledger numbers are ratcheted too (`pnpm check:type-check-debt`, run in the same CI
+job after its build step): every DEBT/TEST_DEBT count is re-run through `tsc --noEmit`,
+and a count ABOVE its recorded number fails. Below is only an informational
+"can be lowered" line — improvements never owe CI a bookkeeping edit. Before #5278 the
+gate asserted only that *some* positive number was written down, so the real counts had
+drifted up to 2.25x while it reported success. When a re-measure makes you raise an
+entry, rewrite its `note` as well: the composition drifts too, and a note that still
+names only the old errors reads as "nearly graduated" to the next author.
+
 **Do not `exclude` `*.test.ts` / `*.spec.ts` from a package's `tsconfig.json`.** `tsc
 --noEmit` reads that config, so an exclusion there hides the tests from the check the
 `typecheck` script advertises — a green gate over source nothing read, which is the

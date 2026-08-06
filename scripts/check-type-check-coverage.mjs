@@ -35,7 +35,8 @@
 // purpose). Onboarding a package is supposed to make its `typecheck` mean
 // something, so the casts belong in the diff too.
 //
-//   node scripts/check-type-check-coverage.mjs
+//   node scripts/check-type-check-coverage.mjs                # structural, sub-second
+//   node scripts/check-type-check-coverage.mjs --re-measure   # + runs tsc per ledger entry
 //   node scripts/check-type-check-coverage.mjs --self-test
 //
 // Invariants, per workspace package (the root workspace package included --
@@ -87,6 +88,32 @@
 //   RECONCILED  in both directions: a DEBT/EXEMPT entry for a package that now
 //               declares `typecheck`, or that no longer exists, is an error.
 //               A ledger that can only accrete rots into a list nobody trusts.
+//   MEASURED    (--re-measure only) every DEBT / TEST_DEBT number is RE-RUN, and
+//               a package whose real `tsc --noEmit` count now EXCEEDS its
+//               recorded one is an error. Without this the ledger asserted only
+//               that a positive number was written down: `errors: 28` and
+//               `errors: 1` were equally acceptable, so a package's real count
+//               could grow without bound while the gate reported success
+//               (#5278). Measured drift at filing time, all in one direction:
+//               metadata-protocol 28 -> 63, service-analytics 3 -> 7,
+//               service-automation 2 -> 5.
+//
+//               Asymmetric on purpose. Growth is red -- that is the ratchet.
+//               SHRINKAGE is an informational line, never red: making a package
+//               better must not also make CI fail until someone edits a number,
+//               or the ledger starts charging a toll on exactly the work it
+//               exists to encourage. A count that reaches 0 is reported as a
+//               graduation candidate, and graduating is still a deliberate PR
+//               (add the `typecheck` script, delete the entry -- COVERED and
+//               RECONCILED are what force the pair).
+//
+//               What drifts is not only the NUMBER but the note's COMPOSITION:
+//               service-automation's note named `engine.test.ts:2547/2577` as
+//               the whole debt while three TS2341 in a different file, from an
+//               unrelated PR, had joined it. So when this invariant makes you
+//               raise a count, rewrite the note to match what the pile is now
+//               made of -- and when the delta cannot be attributed, say so in
+//               the note rather than inventing composition.
 //
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
@@ -94,11 +121,12 @@
 //
 // DEBT is frozen debt, not a permission slip. Every entry below was measured
 // by running the package's own `tsc --noEmit` on main (see the issue for the
-// code-tier / config-tier / noise split -- raw counts here include all three).
-// To onboard a package: fix (or config-fix) its errors, add
-// `"typecheck": "tsc --noEmit"` to its package.json, and delete its entry
-// here in the same PR. Deleting the entry without the script fails COVERED;
-// keeping the entry alongside the script fails RECONCILED.
+// code-tier / config-tier / noise split -- raw counts here include all three),
+// and every entry is RE-MEASURED by `--re-measure` (the MEASURED invariant), so
+// "frozen" is now enforced rather than asserted. To onboard a package: fix (or
+// config-fix) its errors, add `"typecheck": "tsc --noEmit"` to its package.json,
+// and delete its entry here in the same PR. Deleting the entry without the
+// script fails COVERED; keeping the entry alongside the script fails RECONCILED.
 //
 // TEST_DEBT is the same discipline for the second hole. The first pass of this
 // gate (#4324) counted a package covered the moment it declared `typecheck` --
@@ -107,7 +135,8 @@
 // a green check. `spec` alone hid 902 across 272 test files. To onboard: drop
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
@@ -129,8 +158,13 @@ const PIN_DIRECTIVE = /^[ \t]*(?:\/\/|\/\*|\*)[ \t]*@ts-expect-error\b/m;
 const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 
 // Package name -> { errors, note? }. `errors` is the raw `tsc --noEmit` count
-// measured per package on main @ b07d829 (2026-07-31), re-measured after the
-// NodeNext repair below.
+// measured per package. Seeded on main @ b07d829 (2026-07-31), re-measured
+// after the NodeNext repair below, and re-measured WHOLESALE on main @ 5ab08428
+// (2026-08-06) when #5278 found the ledger had been drifting untested since:
+// 7 of these 15 entries were understated, none overstated. Notes carry the
+// composition as measured at that sha; where the delta could not be attributed
+// (this repo's clone is shallow, so per-file blame was not available) the note
+// says so rather than inventing a story for it.
 // Raw counts include all three of #4311's tiers -- code-tier (real defects),
 // config-tier (the check itself misconfigured: TS2591/TS2584 missing
 // `types:["node"]`, TS2835/TS2307 module resolution) and noise (TS7006
@@ -155,8 +189,11 @@ const DEBT = {
     note: 'code-tier 11 (TS2493 tuple indexing) + 2 config-tier.',
   },
   '@objectstack/core': {
-    errors: 91,
-    note: 'code-tier 3; the rest is config-tier (TS2835/TS2347 module resolution) and noise (TS7006).',
+    errors: 98,
+    note: 'code-tier 3 (TS18046/TS2739/TS2352); the rest is config-tier 23 (TS2835 x22 / TS2347 module '
+      + 'resolution) and noise 72 (TS7006 x71, TS6133). Re-measured 98 at 5ab08428, up from 91: the '
+      + 'code-tier count is UNCHANGED at 3, so the whole +7 landed in the NodeNext/implicit-any residue '
+      + '-- which is the tier the note at the top of this ledger says to fix first, not last.',
   },
   '@objectstack/hono': {
     errors: 3,
@@ -167,12 +204,20 @@ const DEBT = {
     note: 'code-tier 3 (TS2353) + 1 config-tier (TS2550 lib).',
   },
   '@objectstack/metadata': {
-    errors: 87,
-    note: 'code-tier 31 (TS2345/TS2353); the rest is config-tier (TS2835) and noise (TS7006).',
+    errors: 92,
+    note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '
+      + 'Re-measured 92 at 5ab08428, up from 87. Composition moved as well as the count: the note used to '
+      + 'name TS2353, which is gone, and TS2322 has taken its place. Two thirds of the pile sits in '
+      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16).',
   },
   '@objectstack/metadata-protocol': {
-    errors: 28,
-    note: 'code-tier 9 (was read as 2 at 21 raw); the rest is config-tier (TS2835) and noise (TS7006).',
+    errors: 63,
+    note: 'code-tier 40 (TS2322 x34, TS2532/TS2493 x2 each, TS2353, TS2339); config-tier 10 (TS2835 x9, '
+      + 'TS2550); noise 13 (TS7006). Re-measured 63 at 5ab08428 -- the 2.25x drift that opened #5278, and '
+      + 'the entry whose note was most misleading: it read "code-tier 9, the rest config-tier and noise", '
+      + 'while code-tier alone is now 40. 27 of the TS2322 are in protocol.stored-migration.test.ts and 10 '
+      + 'in seed-loader-multi-value-reference.test.ts, so this is concentrated debt in two files rather '
+      + 'than a package-wide drizzle -- read it as two repairs, not as forty.',
   },
   '@objectstack/observability': {
     errors: 11,
@@ -183,23 +228,33 @@ const DEBT = {
     note: 'code-tier 2 (TS2345).',
   },
   '@objectstack/service-analytics': {
-    errors: 3,
-    note: 'code-tier 2 (TS7053) + 1 noise.',
+    errors: 7,
+    note: 'code-tier 6 (TS2339 x4, TS7053 x2) + 1 noise (TS6133). Re-measured 7 at 5ab08428, up from 3. '
+      + 'The 4 TS2339 are all in __tests__/measure-source-field-gate.test.ts, a file added after the entry '
+      + 'was written -- the package layer of this gate is closed to new debt, the ERROR-COUNT layer was '
+      + 'not, so a new test file walked its errors in past everything (#5278).',
   },
   '@objectstack/service-automation': {
-    errors: 2,
-    note: 'code-tier 2 (TS2741: engine.test.ts:2547/2577 build a descriptor literal missing a required '
-      + 'field, the #4198 discovery that opened #4311). The missing field TS names moved from '
-      + 'resumeAuthority to handlerContract in #5561, which made resumeAuthority optional; both literals '
-      + 'omit both, and TS reports one at a time. The count is unchanged by that.',
+    errors: 5,
+    note: 'code-tier 5. Two are the TS2741 this note used to describe as the whole debt: '
+      + 'engine.test.ts:2547/2577 build a descriptor literal missing a required field, the #4198 discovery '
+      + 'that opened #4311 (the missing field TS names moved from resumeAuthority to handlerContract in '
+      + '#5561, which made resumeAuthority optional; both literals omit both, and TS reports one at a '
+      + 'time). The other 3 are TS2341 in src/nested-region-parity.test.ts, where the tests dot-read the '
+      + 'private `engine.flows` -- not `engine[\'flows\']`, not `as any`. Re-measured 5 at 5ab08428. This is '
+      + 'the specimen #5278 cites for composition drift: an entry reading "2, two descriptor literals" '
+      + 'looks like a free graduation, while the real residue includes a decision about whether tests may '
+      + 'read private state at all.',
   },
   '@objectstack/service-cluster': {
     errors: 1,
     note: 'code-tier 1 (TS2322).',
   },
   '@objectstack/service-knowledge': {
-    errors: 8,
-    note: 'code-tier 3 (TS2339/TS2352/TS2493); the rest config-tier and noise.',
+    errors: 10,
+    note: 'code-tier 3 (TS2339/TS2352/TS2493); config-tier 3 (TS2835); noise 4 (TS7006). Re-measured 10 at '
+      + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
+      + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-settings': {
     errors: 13,
@@ -210,8 +265,14 @@ const DEBT = {
     note: 'code-tier 5 (TS2339/TS2347); the rest is config-tier (TS2835) and noise (TS7006).',
   },
   '@objectstack/spec-monorepo': {
-    errors: 50,
-    note: 'the workspace root itself: code-tier 2 (TS2304); the rest is config-tier (TS2307/TS2591/TS2584 -- the root tsconfig has no `types:["node"]`) and noise.',
+    errors: 80,
+    note: 'the workspace root itself: code-tier 4 (TS2304 x2, TS2339 x2); config-tier 68 '
+      + '(TS2591 x28 / TS2584 x22 -- the root tsconfig still has no `types:["node"]` -- plus TS2307 x17 '
+      + 'and TS2550); noise 8 (TS7006 x7, TS6133). Re-measured 80 at 5ab08428, up from 50. This entry '
+      + 'drifts differently from a package: the root program is `scripts/` and the top-level configs '
+      + '(everything outside packages/apps/examples), so it grows whenever the repo gains a script -- '
+      + 'scripts/check-test-typecheck.mts alone accounts for 29 of the 80, and the analytics-reconcile '
+      + 'tree for 32. Almost all of it is one missing `types:["node"]`, not 80 defects.',
   },
 };
 
@@ -240,30 +301,84 @@ const EXEMPT = {
 // stronger than the frozen package-level number this ledger could hold. The
 // number that used to sit here (272 files / 902 errors) was also stale by 23
 // files, which is the other argument for a measurement the gate derives.
+//
+// Re-measured wholesale on main @ 5ab08428 (2026-08-06) with the DEBT ledger
+// above, for the same reason (#5278): 10 of these 19 `errors` numbers were
+// understated, 2 overstated, 7 exact. `errors` is now re-run by --re-measure;
+// `tests` is not, and it had drifted just as far in the same direction (66 ->
+// 101 for runtime, 87 -> 125 for objectql) because adding a test file to an
+// excluded package is invisible to everything. Both fields are accurate as of
+// that sha; only one of them is enforced, which is filed rather than silently
+// widened here.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    tests: 13,
-    errors: 467,
-    note: 'TS2339 x255, TS2345 x188. Larger than driver-sql; src is clean, so the whole pile is test-only and invisible to every gate today.',
+    tests: 19,
+    errors: 547,
+    note: 'TS2339 x296, TS2345 x213, TS2550 x20, TS18048 x10. Re-measured 547 at 5ab08428, up from 467. '
+      + 'Still larger than driver-sql ever was, and still entirely test-only (src is clean), so nothing '
+      + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
   },
-  '@objectstack/runtime': { tests: 66, errors: 220, note: 'TS18048 x81 (possibly-undefined), TS2345 x26, TS6133 x25. Src graduated in #4311 (declares `typecheck`); this is now purely the hidden test layer.' },
-  '@objectstack/objectql': { tests: 87, errors: 219, note: 'TS2339 x88, TS2554 x28 (wrong arity), TS7006 x25.' },
-  '@objectstack/plugin-auth': { tests: 26, errors: 124, note: 'TS2493 x40 (tuple index out of range), TS18048 x24, TS2740 x18.' },
-  '@objectstack/rest': { tests: 35, errors: 105, note: 'TS2835 x43 (NodeNext extensions), TS7006 x42. Also in DEBT.' },
-  '@objectstack/mcp': { tests: 8, errors: 52, note: 'TS18046 x51 -- `error` is of type unknown, one catch-block idiom repeated.' },
-  '@objectstack/driver-mongodb': { tests: 7, errors: 44, note: 'TS2345 x22, TS2591 x15 (`process` -- the test files need types:["node"] once included).' },
-  '@objectstack/lint': { tests: 39, errors: 26, note: 'TS7006 x20, TS2835 x6.' },
-  '@objectstack/plugin-security': { tests: 32, errors: 20, note: 'TS2739 x8, TS2740 x5 -- incomplete literals.' },
-  '@objectstack/formula': { tests: 13, errors: 12, note: 'TS2345 x3, TS2352 x3, TS2591 x3.' },
-  '@objectstack/trigger-record-change': { tests: 4, errors: 8, note: 'TS2353 x8 -- one unknown-property shape repeated.' },
-  '@objectstack/verify': { tests: 2, errors: 6, note: 'TS7006 x4, TS2835 x2.' },
-  '@objectstack/connector-mcp': { tests: 3, errors: 5, note: 'TS2339 x5.' },
-  '@objectstack/connector-openapi': { tests: 3, errors: 5, note: 'TS2339 x5.' },
-  '@objectstack/platform-objects': { tests: 8, errors: 3, note: 'TS2339 x2, TS7006 x1.' },
-  '@objectstack/plugin-sharing': { tests: 11, errors: 3, note: 'TS6133 x2, TS18048 x1.' },
-  '@objectstack/http-conformance': { tests: 2, errors: 1, note: 'TS2740 x1.' },
-  '@objectstack/service-sms': { tests: 3, errors: 1, note: 'TS2493 x1.' },
-  '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1.' },
+  '@objectstack/objectql': {
+    tests: 125,
+    errors: 333,
+    note: 'TS2339 x114, TS2554 x91 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
+      + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
+      + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
+      + 'went 87 -> 125; src/engine.test.ts alone carries 103.',
+  },
+  '@objectstack/runtime': {
+    tests: 101,
+    errors: 218,
+    note: 'TS18048 x89 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15. Src '
+      + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Re-measured 218 '
+      + 'at 5ab08428, DOWN from 220 -- one of only two entries that shrank. The TS6133 x25 the old note '
+      + 'named is down to x7, so unused-symbol cleanup happened somewhere in the test tree while '
+      + 'possibly-undefined grew; the net -2 hides a much larger churn in both directions.',
+  },
+  '@objectstack/rest': {
+    tests: 56,
+    errors: 136,
+    note: 'TS2835 x61 (NodeNext extensions), TS7006 x54, TS2554 x10, TS2550 x7. Also in DEBT. Re-measured '
+      + '136 at 5ab08428, up from 105. Read the top-of-ledger NodeNext note before sizing this one: TS2835 '
+      + 'and the implicit-any pile it causes are 115 of the 136, and they are one repair, not 115.',
+  },
+  '@objectstack/plugin-auth': {
+    tests: 34,
+    errors: 129,
+    note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9. '
+      + 'Re-measured 129 at 5ab08428, up from 124; composition unchanged in shape. 63 sit in '
+      + 'src/auth-manager.test.ts.',
+  },
+  '@objectstack/mcp': { tests: 8, errors: 52, note: 'TS18046 x51 -- `error` is of type unknown, one catch-block idiom repeated. Re-measured 52 at 5ab08428, exact.' },
+  '@objectstack/driver-mongodb': {
+    tests: 15,
+    errors: 43,
+    note: 'TS2345 x33, TS1309 x7, TS2550 x3. Re-measured 43 at 5ab08428, DOWN from 44 -- but the '
+      + 'composition changed completely: the TS2591 x15 the old note pinned on a missing `types:["node"]` '
+      + 'are all gone, and TS1309 (await in a non-async context) has appeared. A -1 delta over a ledger '
+      + 'entry that turned over two thirds of its content is exactly why counts alone cannot be trusted '
+      + 'to describe debt (#5278).',
+  },
+  '@objectstack/lint': { tests: 61, errors: 30, note: 'TS7006 x20, TS2835 x6, TS6059 x4. Re-measured 30 at 5ab08428, up from 26; the +4 is TS6059 (a file outside rootDir), a class the old note did not list.' },
+  '@objectstack/plugin-security': { tests: 34, errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20.' },
+  '@objectstack/formula': { tests: 16, errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
+  '@objectstack/trigger-record-change': { tests: 5, errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
+  '@objectstack/verify': { tests: 4, errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
+  '@objectstack/connector-mcp': { tests: 3, errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+  '@objectstack/connector-openapi': { tests: 3, errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+  '@objectstack/http-conformance': {
+    tests: 2,
+    errors: 4,
+    note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
+      + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
+      + '(@better-auth/core, @better-fetch/fetch), so this entry moves with the lockfile and not only with '
+      + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
+      + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
+  },
+  '@objectstack/platform-objects': { tests: 9, errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
+  '@objectstack/plugin-sharing': { tests: 13, errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
+  '@objectstack/service-sms': { tests: 3, errors: 1, note: 'TS2493 x1. Re-measured 1 at 5ab08428, exact.' },
+  '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
@@ -693,6 +808,177 @@ function evaluate(packages, root, state) {
   return problems;
 }
 
+// ---------------------------------------------------------------------------
+// MEASURED -- the re-measure half (#5278).
+//
+// Everything above reads package.json / tsconfig.json and finishes in under a
+// second, which is why it sits before the build in lint.yml's typecheck job.
+// Everything below runs the real compiler and therefore needs each package's
+// DEPENDENCIES built (tsc resolves workspace imports through `dist/*.d.ts`) --
+// so it is opt-in behind `--re-measure` and wired into the same job AFTER its
+// build step, rather than made the default and paid for on every gate run.
+// ---------------------------------------------------------------------------
+
+/**
+ * One `tsc --noEmit` diagnostic line, counted the way every number in the
+ * ledgers above was originally counted (`| grep -c "error TS"`). A diagnostic's
+ * elaboration lines are INDENTED and carry no code of their own, so anchoring
+ * at a non-space start is what keeps a single 5-line TS2322 from counting five
+ * times. Global diagnostics (`error TS5055: ...`) have no file prefix at all and
+ * still count -- they are errors the same as any other.
+ */
+const TSC_ERROR_LINE = /^(?!\s)(?:.*\s)?error TS\d+: /;
+
+/**
+ * Diagnostics that mean the MEASUREMENT failed, not that the package has debt.
+ * A missing/unreadable project or an empty file list would otherwise be counted
+ * as one tidy little error and silently *lower* a package's number -- a gate
+ * that measures nothing and reports an improvement is worse than no gate.
+ */
+const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012)\b/;
+
+/** Temp project used to lift a tsconfig's own test exclusion. Never committed. */
+const REMEASURE_CONFIG = 'tsconfig.debt-remeasure.json';
+const REMEASURE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5278';
+
+/** @param {string} output */
+function countTscErrors(output) {
+  let n = 0;
+  for (const line of output.split(/\r?\n/)) if (TSC_ERROR_LINE.test(line)) n++;
+  return n;
+}
+
+/**
+ * Run the repo's own tsc over one project and return its raw error count.
+ * `--pretty false` so the count does not depend on whether a TTY is attached;
+ * cwd is ROOT so reported paths are repo-relative however the gate was invoked.
+ *
+ * @param {string} project repo-relative path to a tsconfig
+ * @returns {number}
+ */
+function tscErrorCount(project) {
+  const bin = join(ROOT, 'node_modules', '.bin', 'tsc');
+  if (!existsSync(bin)) {
+    throw new Error(`--re-measure needs the workspace's own tsc at ${bin}; run \`pnpm install\` first.`);
+  }
+  const run = spawnSync(bin, ['--noEmit', '--pretty', 'false', '-p', project], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (run.error) throw new Error(`tsc could not be run for ${project}: ${run.error.message}`);
+  const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  if (TSC_SETUP_ERROR.test(output)) {
+    throw new Error(`tsc could not read ${project} -- the measurement is invalid, not zero:\n${output.trim()}`);
+  }
+  const errors = countTscErrors(output);
+  // Exit 0 means a clean program; anything else must have produced diagnostics
+  // we recognised. If it did not, tsc failed in a way this parser cannot see,
+  // and reporting 0 would quietly hand the package a graduation certificate.
+  if (run.status !== 0 && errors === 0) {
+    throw new Error(
+      `tsc exited ${run.status} for ${project} but printed no recognisable diagnostics -- ` +
+        `refusing to record 0:\n${output.trim().slice(0, 2000)}`,
+    );
+  }
+  return errors;
+}
+
+/**
+ * The DEBT number: what the package's OWN config reports today, which is exactly
+ * what `pnpm --filter <pkg> exec tsc --noEmit` would print for an author sizing
+ * the package up.
+ */
+function measureDebt(dir) {
+  return tscErrorCount(posix.join(dir, 'tsconfig.json') || 'tsconfig.json');
+}
+
+/**
+ * The TEST_DEBT number: what the package reports once its tsconfig stops
+ * steering tsc away from its own tests. Written as a sibling project that
+ * `extends` the real one and re-declares `exclude` without the test globs --
+ * a sibling, in the package's own directory, because tsconfig resolves
+ * `include`/`outDir`/`rootDir` relative to the file that DECLARES them, so a
+ * config generated anywhere else would silently repoint every one of them.
+ *
+ * Removed in a `finally`: a stray `tsconfig.*.json` left behind would be picked
+ * up by this very script's own tsconfig scan on the next run.
+ */
+function measureTestDebt(dir) {
+  const configPath = join(ROOT, dir, REMEASURE_CONFIG);
+  const raw = readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const parsed = JSON.parse(raw);
+  const kept = (parsed.exclude ?? []).filter((pattern) => !TEST_GLOB.test(pattern));
+  writeFileSync(configPath, `${JSON.stringify({ extends: './tsconfig.json', exclude: kept }, null, 2)}\n`);
+  try {
+    return tscErrorCount(posix.join(dir, REMEASURE_CONFIG));
+  } finally {
+    rmSync(configPath, { force: true });
+  }
+}
+
+/**
+ * Re-run every ledger number. Sequential on purpose: the ledgered packages are
+ * the big ones, and N parallel tsc processes on a 2-core runner trade wall clock
+ * for an OOM risk on the job that also just built the whole workspace.
+ *
+ * @returns {Array<{ledger: 'DEBT'|'TEST_DEBT', name: string, dir: string, recorded: number, actual: number}>}
+ */
+function measureLedgers(packages, rootName, state) {
+  const dirOf = new Map(packages.map((p) => [p.name, p.dir]));
+  dirOf.set(rootName, ''); // the workspace root is a member like any other
+  const measurements = [];
+  for (const [name, entry] of Object.entries(state.debt)) {
+    const dir = dirOf.get(name);
+    if (dir === undefined) continue; // RECONCILED already failed on this one
+    measurements.push({ ledger: 'DEBT', name, dir, recorded: entry.errors ?? 0, actual: measureDebt(dir) });
+  }
+  for (const [name, entry] of Object.entries(state.testDebt)) {
+    const dir = dirOf.get(name);
+    if (dir === undefined) continue;
+    measurements.push({ ledger: 'TEST_DEBT', name, dir, recorded: entry.errors ?? 0, actual: measureTestDebt(dir) });
+  }
+  return measurements;
+}
+
+/**
+ * MEASURED's verdict, pure over already-taken measurements so the self-test
+ * pins the semantics without running a compiler.
+ *
+ * @param {Array<{ledger: string, name: string, recorded: number, actual: number}>} measurements
+ * @returns {{problems: string[], notes: string[]}}
+ */
+function evaluateMeasurements(measurements) {
+  const problems = [];
+  const notes = [];
+  for (const m of measurements) {
+    if (m.actual > m.recorded) {
+      problems.push(
+        `${m.name}: ${m.ledger} records ${m.recorded} raw tsc error(s), \`tsc --noEmit\` now reports ` +
+          `${m.actual} (+${m.actual - m.recorded}). ${m.ledger} is frozen debt, not a permission slip -- ` +
+          `the ledger is a ratchet and may only shrink (${REMEASURE_ISSUE}). Fix the new errors, or, if they ` +
+          `are genuinely irreducible today, raise the entry in ${SELF} AND rewrite its \`note\` to match what ` +
+          `the pile is now made of: the composition drifts too, and a note still naming only the old errors ` +
+          `reads as "nearly graduated" to the next author while something else entirely has moved in. ` +
+          `If the delta cannot be attributed, say that in the note rather than inventing composition.`,
+      );
+    } else if (m.actual === 0 && m.recorded > 0) {
+      notes.push(
+        `${m.name}: ${m.ledger} records ${m.recorded}, and tsc now reports 0 -- graduation candidate. ` +
+          `Onboard it (add \`"typecheck": "tsc --noEmit"\`, or drop the test exclusion, and delete the ` +
+          `ledger entry in the same PR).`,
+      );
+    } else if (m.actual < m.recorded) {
+      notes.push(
+        `${m.name}: ${m.ledger} records ${m.recorded}, tsc now reports ${m.actual} ` +
+          `(-${m.recorded - m.actual}) -- the entry can be lowered. Not an error: an improvement must not ` +
+          `have to pay a bookkeeping toll to land.`,
+      );
+    }
+  }
+  return { problems, notes };
+}
+
 /** The observed non-fixture state. */
 function observed() {
   const turbo = JSON.parse(readFileSync(join(ROOT, 'turbo.json'), 'utf8'));
@@ -946,6 +1232,100 @@ function selfTest() {
     if (got !== c.expect) failures.push(`configCovers — ${c.label}: expected ${c.expect}, got ${got}`);
   }
 
+  // MEASURED (#5278). The whole point of this invariant is a DIRECTION, so both
+  // directions are pinned: up is red, down is a note, equal is silence. A
+  // symmetric implementation would pass a "does it notice a change" test and
+  // still be wrong -- it would make every improvement red.
+  const driftCases = [
+    {
+      label: 'a count that grew is red',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 28, actual: 63 }],
+      problems: [/a: DEBT records 28 raw tsc error\(s\).*now reports 63 \(\+35\)/s],
+      notes: [],
+    },
+    {
+      label: 'a count that grew by one is red too — no tolerance band',
+      measurements: [{ ledger: 'TEST_DEBT', name: 'a', recorded: 2, actual: 3 }],
+      problems: [/a: TEST_DEBT records 2 raw tsc error\(s\).*now reports 3 \(\+1\)/s],
+      notes: [],
+    },
+    {
+      label: 'a count that shrank is a note, never red',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 13, actual: 5 }],
+      problems: [],
+      notes: [/a: DEBT records 13, tsc now reports 5 \(-8\) -- the entry can be lowered/],
+    },
+    {
+      label: 'a count that reached zero is a graduation candidate, not a failure',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 4, actual: 0 }],
+      problems: [],
+      notes: [/a: DEBT records 4, and tsc now reports 0 -- graduation candidate/],
+    },
+    {
+      label: 'an unchanged count is silent — a green run says nothing at all',
+      measurements: [
+        { ledger: 'DEBT', name: 'a', recorded: 91, actual: 91 },
+        { ledger: 'TEST_DEBT', name: 'b', recorded: 467, actual: 467 },
+      ],
+      problems: [],
+      notes: [],
+    },
+    {
+      label: 'each entry is judged on its own — one growing does not mask another shrinking',
+      measurements: [
+        { ledger: 'DEBT', name: 'grew', recorded: 3, actual: 7 },
+        { ledger: 'DEBT', name: 'shrank', recorded: 9, actual: 8 },
+      ],
+      problems: [/grew: DEBT records 3/],
+      notes: [/shrank: DEBT records 9, tsc now reports 8/],
+    },
+  ];
+  for (const c of driftCases) {
+    const got = evaluateMeasurements(c.measurements);
+    const ok =
+      got.problems.length === c.problems.length &&
+      got.notes.length === c.notes.length &&
+      c.problems.every((rx, i) => rx.test(got.problems[i])) &&
+      c.notes.every((rx, i) => rx.test(got.notes[i]));
+    if (!ok) {
+      failures.push(
+        `evaluateMeasurements — ${c.label}: expected ${c.problems.length} problem(s) / ${c.notes.length} note(s) ` +
+          `matching, got ${JSON.stringify(got)}`,
+      );
+    }
+  }
+
+  // The counter is the other half that can be silently wrong: over-count and
+  // main goes red for nothing, under-count and the ratchet hands out free
+  // headroom. Multi-line elaborations are the trap -- one TS2322 can print five
+  // lines, four of them indented.
+  const countCases = [
+    { label: 'no output is no errors', output: '', expect: 0 },
+    {
+      label: 'one diagnostic per line',
+      output: 'packages/a/src/x.ts(1,2): error TS2345: Argument of type X.\npackages/a/src/y.ts(3,4): error TS7006: Parameter implicitly any.',
+      expect: 2,
+    },
+    {
+      label: 'indented elaboration lines belong to the diagnostic above them',
+      output:
+        "packages/a/src/x.ts(1,2): error TS2322: Type 'A' is not assignable to type 'B'.\n" +
+        "  Type 'A' is not assignable to type 'C'.\n" +
+        "    Types of property 'p' are incompatible.\n",
+      expect: 1,
+    },
+    { label: 'a global diagnostic with no file prefix still counts', output: 'error TS5055: Cannot write file.', expect: 1 },
+    {
+      label: 'prose mentioning the phrase mid-line without a code does not count',
+      output: 'Checked 40 files, no error TS reported by the previous run.',
+      expect: 0,
+    },
+  ];
+  for (const c of countCases) {
+    const got = countTscErrors(c.output);
+    if (got !== c.expect) failures.push(`countTscErrors — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
@@ -953,7 +1333,8 @@ function selfTest() {
   }
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
-      `${namedCases.length + coverCases.length} observation case(s) hold.`,
+      `${namedCases.length + coverCases.length} observation case(s) + ` +
+      `${driftCases.length + countCases.length} re-measure case(s) hold.`,
   );
 }
 
@@ -985,3 +1366,25 @@ console.log(
     `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still exclude their own tests ` +
     `(${testDebtFiles} files, ${testDebtErrors} frozen raw errors in TEST_DEBT).`,
 );
+
+// MEASURED runs only when asked, and only after the structural verdict above is
+// clean: a ledger entry naming a package that no longer exists has nothing to
+// measure, and a wall of tsc output would bury the real failure. Reported after
+// the summary so the two verdicts read in the order they were reached.
+if (process.argv.includes('--re-measure')) {
+  const started = Date.now();
+  const measurements = measureLedgers(packages, root.name, state);
+  const { problems: drift, notes } = evaluateMeasurements(measurements);
+  const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+  for (const n of notes) console.log('  ℹ ' + n);
+  if (drift.length) {
+    console.error(`\ncheck-type-check-coverage --re-measure: ${drift.length} ledger entr(ies) drifted upward\n`);
+    for (const p of drift) console.error('  • ' + p);
+    process.exit(1);
+  }
+  const measuredTotal = measurements.reduce((sum, m) => sum + m.actual, 0);
+  console.log(
+    `check-type-check-coverage --re-measure: OK — ${measurements.length} ledger entr(ies) re-measured ` +
+      `in ${elapsed}s, ${measuredTotal} raw tsc error(s) total, none above its recorded number.`,
+  );
+}
