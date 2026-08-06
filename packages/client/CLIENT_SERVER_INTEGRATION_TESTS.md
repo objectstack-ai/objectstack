@@ -638,8 +638,11 @@ export function createMockServer() {
       }));
     }),
     
-    // Auth
-    rest.post('/api/v1/auth/login', (req, res, ctx) => {
+    // Auth — better-auth route names, not `/auth/login`: `client.auth.login`
+    // calls POST /auth/sign-in/email, `register` /auth/sign-up/email, `logout`
+    // /auth/sign-out, `me` GET /auth/get-session. The audited route table is
+    // packages/plugins/plugin-auth/src/auth-route-ledger.ts.
+    rest.post('/api/v1/auth/sign-in/email', (req, res, ctx) => {
       return res(ctx.json({
         success: true,
         data: {

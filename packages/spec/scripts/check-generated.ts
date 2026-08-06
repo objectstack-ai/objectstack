@@ -163,6 +163,31 @@ const UNGATED_GENERATORS: ReadonlyArray<{ gen: string; why: string }> = [
   { gen: 'gen:sbom', why: 'the SBOM is a release artifact, regenerated at publish time rather than checked in' },
 ];
 
+/**
+ * Generators that are DELIBERATE, manual-only acts. Their artifact **is** gated —
+ * `gatedBy` names the gate — so `UNGATED_GENERATORS` would be a false
+ * classification in one direction; but a `GATED` entry would be false in the
+ * other, because `--fix` may not run them and "stale" is not a defect for them.
+ *
+ * The distinction is `authorable-surface.base.json`, and it is the whole of
+ * #5358. That file is not a projection of this package's source — it is a
+ * snapshot of an UPSTREAM commit, the baseline the #4650 deletion gate compares
+ * against precisely because the commit under test cannot rewrite it. Its gate
+ * proves it AUTHENTIC (`baseRev` on origin/main, keys matching that commit), never
+ * current, so lag is expected and green. While `gen:schema` refreshed it as a side
+ * effect, any build of any package with spec in its dependency closure moved the
+ * gate's baseline in the developer's worktree, and a `git add -A` carried the move
+ * into an unrelated PR — observed three times (#4990, #5155, #5660), once at
+ * −110 keys covering a retirement that had just landed.
+ */
+const EXPLICIT_GENERATORS: ReadonlyArray<{ gen: string; gatedBy: string; why: string }> = [
+  {
+    gen: 'gen:authorable-surface-base',
+    gatedBy: 'check:authorable-surface',
+    why: 're-anchors authorable-surface.base.json to the git-resolved baseline — a deliberate act with its own reviewed diff, never a build side effect (#5358)',
+  },
+];
+
 /** This aggregate itself — a `check:` script that gates nothing of its own. */
 const SELF = 'check:generated';
 
@@ -179,7 +204,11 @@ const SELF = 'check:generated';
 function reconcileLedger(scripts: Record<string, string>): void {
   const problems: string[] = [];
   const declaredChecks = new Set([...GATED.map((g) => g.check), ...NO_GENERATOR.map((n) => n.check)]);
-  const declaredGens = new Set([...GATED.map((g) => g.gen), ...UNGATED_GENERATORS.map((u) => u.gen)]);
+  const declaredGens = new Set([
+    ...GATED.map((g) => g.gen),
+    ...UNGATED_GENERATORS.map((u) => u.gen),
+    ...EXPLICIT_GENERATORS.map((e) => e.gen),
+  ]);
 
   for (const name of Object.keys(scripts)) {
     if (name === SELF) continue;
@@ -189,13 +218,27 @@ function reconcileLedger(scripts: Record<string, string>): void {
     }
     if (name.startsWith('gen:') && !declaredGens.has(name)) {
       problems.push(`  \`${name}\` exists in package.json but no GATED entry names it and it is not in UNGATED_GENERATORS.\n` +
-        `    Either wire its gate in, or record why its output is unverified.`);
+        `    Either wire its gate in, record why its output is unverified, or — if it is a\n` +
+        `    deliberate manual-only re-anchoring whose artifact another gate already verifies —\n` +
+        `    declare it in EXPLICIT_GENERATORS with the gate that covers it.`);
     }
   }
   for (const { check } of GATED) if (!scripts[check]) problems.push(`  GATED names \`${check}\`, which package.json no longer has.`);
   for (const { gen } of GATED) if (!scripts[gen]) problems.push(`  GATED names \`${gen}\`, which package.json no longer has.`);
   for (const { check } of NO_GENERATOR) if (!scripts[check]) problems.push(`  NO_GENERATOR names \`${check}\`, which package.json no longer has.`);
   for (const { gen } of UNGATED_GENERATORS) if (!scripts[gen]) problems.push(`  UNGATED_GENERATORS names \`${gen}\`, which package.json no longer has.`);
+  for (const { gen, gatedBy } of EXPLICIT_GENERATORS) {
+    if (!scripts[gen]) problems.push(`  EXPLICIT_GENERATORS names \`${gen}\`, which package.json no longer has.`);
+    // The claim that makes this category honest rather than an escape hatch: the
+    // artifact IS covered. A `gatedBy` naming a gate this ledger does not run
+    // would be a coverage hole wearing a classification's clothes.
+    if (!declaredChecks.has(gatedBy)) {
+      problems.push(
+        `  EXPLICIT_GENERATORS says \`${gen}\` is gated by \`${gatedBy}\`, which this ledger does not declare.\n` +
+          `    An explicit generator is only "covered" if some gate here verifies its artifact.`,
+      );
+    }
+  }
 
   if (problems.length) {
     console.error(`✗ check:generated ledger is out of sync with package.json:\n\n${problems.join('\n')}\n`);
@@ -234,7 +277,8 @@ if (reconcileOnly) {
   console.log(
     `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
       `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
-      `${UNGATED_GENERATORS.length} ungated generators, 1 aggregate).\n` +
+      `${UNGATED_GENERATORS.length} ungated generators, ${EXPLICIT_GENERATORS.length} explicit ` +
+      `manual-only generators, 1 aggregate).\n` +
       `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
   );
   process.exit(0);
@@ -265,6 +309,12 @@ console.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifa
 if (UNGATED_GENERATORS.length) {
   console.log(`Generated but ungated (${UNGATED_GENERATORS.length}): ` +
     UNGATED_GENERATORS.map((u) => u.gen).join(', ') + ' — nothing verifies these are current.');
+}
+// Narrowing is never silent, part two: --fix will not reach these, by design.
+if (EXPLICIT_GENERATORS.length) {
+  console.log(`Explicit, manual-only (${EXPLICIT_GENERATORS.length}): ` +
+    EXPLICIT_GENERATORS.map((e) => `${e.gen} (gated by ${e.gatedBy})`).join(', ') +
+    ' — never run here or by --fix; their artifact may lag and still be green.');
 }
 
 if (!stale.length) {

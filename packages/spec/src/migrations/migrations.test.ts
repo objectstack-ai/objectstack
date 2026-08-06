@@ -52,6 +52,68 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // The rationale is not decoration: `docs/protocol-upgrade-guide.md` is a pure
+  // projection of it (ADR-0087 D4, `gen:upgrade-guide`), so this string IS the
+  // page an author upgrading 16 → 17 reads. A stale present-tense claim here is
+  // published advice, which is why it gets pinned like a prescription.
+  describe('protocol-17 rationale — the app-area section states the CURRENT fact (#5337)', () => {
+    const rationale17 = () => MIGRATIONS_BY_MAJOR[17]!.rationale;
+
+    it('does not repeat the retired "the server does not walk `areas`" claim', () => {
+      // #4722 (same 17.0.0 window) made `filterAppForUser` run the same
+      // `filterNav` over every `areas[].navigation`. The sentence that survived
+      // #4651 told an upgrading author to restructure their navigation tree for
+      // a gate they can now write in place. Same pin as the schema-side
+      // prescriptions carry since #5336 (`packages/spec/src/ui/app.test.ts`).
+      expect(rationale17()).not.toMatch(/does not walk/i);
+      // The rationale still QUOTES the retired boundary — naming what changed
+      // is how a reader who remembers the old advice knows to drop it — so the
+      // pin is on the tense, which is the whole defect: the claim may appear as
+      // history ("was enforced by the shell only"), never as current fact.
+      expect(rationale17()).not.toMatch(/is enforced by the shell only/i);
+      expect(rationale17()).toMatch(/was CLOSED by #4722/);
+    });
+
+    it('names #4722 and the two trees an item gate is now enforced in', () => {
+      const r = rationale17();
+      expect(r).toMatch(/#4722/);
+      expect(r).toMatch(/BOTH trees/);
+      expect(r).toMatch(/areas\[\]\.navigation/);
+    });
+
+    it('does not read as reviving the area-LEVEL keys', () => {
+      // The retirement verdict is untouched: what #4722 enforces are the ITEMS
+      // inside an area, never a gate of the area's own. A rationale that merely
+      // went quiet about `areas[]` would leave the reader with the old boundary;
+      // one that over-corrects would read as an un-retirement.
+      const r = rationale17();
+      expect(r).toMatch(/stay retired/);
+      expect(r).toMatch(/no gate of its own/);
+    });
+
+    it('keeps `visible` client-side only — the half #4722 did NOT change', () => {
+      // The newly tempting false belief is "areas are gated now, so `visible`
+      // is fine". `visible` (CEL) is still evaluated in the browser at every
+      // level, so it hides an entry that has already been served.
+      const r = rationale17();
+      expect(r).toMatch(/client-side ONLY/);
+      expect(r).toMatch(/`visible` \(CEL\)/);
+      expect(r).toMatch(/never in `visible`/);
+    });
+
+    it('still carries the #4651 history the step exists to explain', () => {
+      // The first half is a record of the state AT the retirement and of why
+      // route B (remove) beat route A (enforce). Correcting the caveat must not
+      // erase it — an upgrading author needs to know the keys were fail-open,
+      // not merely unread.
+      const r = rationale17();
+      expect(r).toMatch(/#4651/);
+      expect(r).toMatch(/FAIL-OPEN access gates/);
+      expect(r).toMatch(/At the time of the retirement/);
+      expect(r).toMatch(/must not invent an authorization mechanism/);
+    });
+  });
+
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
       const chain = composeMigrationChain(10, 11);

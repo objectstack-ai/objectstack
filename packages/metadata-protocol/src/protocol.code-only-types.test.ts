@@ -85,6 +85,11 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
     const artifactKeys = new Set(artifacts.map((a) => `${a.type}|${a.name}`));
     const keyOf = (w: Record<string, unknown>) =>
         `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
+    // #5264 — every write the engine is asked for, in order. `rows` alone
+    // cannot tell the two persistence routes apart (both end at
+    // `insert('sys_metadata', …)`); the tell is whether a
+    // `sys_metadata_history` append came with it. See the #5264 block below.
+    const writes: Array<{ op: 'insert' | 'update' | 'delete'; table: string }> = [];
     const engine: any = {
         async findOne(_t: string, opts: { where: Record<string, unknown> }) {
             for (const row of rows.values()) {
@@ -96,14 +101,15 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
         },
         async find() { return []; },
         async insert(_t: string, data: Record<string, unknown>) {
+            writes.push({ op: 'insert', table: _t });
             if (_t !== 'sys_metadata') return { id: 'side_effect_skip' };
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
             rows.set(keyOf(data), row);
             return { id: row.id };
         },
-        async update() { return { id: null }; },
-        async delete() { return { deleted: 0 }; },
+        async update(_t: string) { writes.push({ op: 'update', table: _t }); return { id: null }; },
+        async delete(_t: string) { writes.push({ op: 'delete', table: _t }); return { deleted: 0 }; },
         registry: {
             registerItem: () => {},
             registerObject: () => {},
@@ -115,7 +121,7 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
                 artifactKeys.has(`${type}|${name}`) ? { name, _packageId: 'showcase' } : undefined,
         },
     };
-    return { engine, rows };
+    return { engine, rows, writes };
 }
 
 /**
@@ -132,13 +138,13 @@ const KERNELS: Array<{ label: string; environmentId?: string }> = [
 ];
 
 function makeProtocol(environmentId?: string, artifacts?: Array<{ type: string; name: string }>) {
-    const { engine, rows } = makeStubEngine(artifacts);
+    const { engine, rows, writes } = makeStubEngine(artifacts);
     const protocol = new ObjectStackProtocolImplementation(
         engine,
         () => new Map(),
         environmentId,
     ) as any;
-    return { protocol, rows };
+    return { protocol, rows, writes };
 }
 
 const metaRows = (rows: Map<string, Row>) => Array.from(rows.values());
@@ -318,6 +324,119 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
 
                 expect(err?.code).not.toBe('NOT_CREATABLE');
                 expect(err?.code).not.toBe('NOT_OVERRIDABLE');
+            });
+        }
+    });
+
+    // ── #5264 — one persistence route, and the proof it is the only one ───
+    //
+    // `saveMetaItem` used to end in a legacy raw-engine branch: `engine.insert`
+    // / `engine.update` straight into `sys_metadata`, no `sys_metadata_history`
+    // append, no watch event, no `seq`. It ran exactly when
+    // `isOverlayAllowed(type) || isRuntimeCreateAllowed(type)` was false —
+    // which is the predicate the #5086 gate above throws on, unconditionally,
+    // over the same canonicalized type key. #5264 removed the branch.
+    //
+    // These pins are about the RECEIPT, not the verdict, because the receipt is
+    // the only thing that told the two routes apart from outside: the legacy
+    // one answered `200 {"success":true,"message":"Saved customization overlay
+    // (env-wide) — type=…"}` with no `state=`, no `[seq=…]`, and no history
+    // row. That is precisely the answer #5086 caught the showcase giving for a
+    // `job`. They are green before the removal too — a branch nothing reaches
+    // is what "dead" means — so they are not a regression test for the
+    // deletion; they are the guard that stops a second historyless write path
+    // from being introduced, and they fail loudly if the #5086 gate is ever
+    // narrowed back to `environmentId !== undefined`.
+    describe('#5264 — saveMetaItem persists through the repository or not at all', () => {
+        for (const type of CODE_ONLY_TYPES) {
+            it(`asks the engine for NOTHING when refusing ${type} on a control-plane kernel`, async () => {
+                // The exact condition the deleted branch claimed for itself:
+                // "control-plane bootstrap (environmentId === undefined) for
+                // non-overlay-allowed types". Driven here on purpose — the
+                // refusal lands first, so the write never becomes a write.
+                const probe = PROBES[type]!;
+                const { protocol, rows, writes } = makeProtocol(undefined);
+
+                const err = await protocol
+                    .saveMetaItem({ type, name: probe.name, item: probe.item })
+                    .then(() => null, (e: any) => e);
+
+                expect(err?.status).toBe(403);
+                expect(metaRows(rows)).toEqual([]);
+                // Stronger than "no row landed": no write was even attempted,
+                // so there is nothing for a raw-engine path to have done.
+                expect(writes).toEqual([]);
+            });
+        }
+
+        // One savable type per shape the two-tier model distinguishes.
+        const ACCEPTED: Array<{ type: string; item: Record<string, unknown> }> = [
+            {
+                type: 'view', // allowOrgOverride + allowRuntimeCreate
+                item: {
+                    name: 'rc3_receipt_view',
+                    label: 'Receipt',
+                    object: 'task',
+                    columns: [{ field: 'name', label: 'Name' }],
+                },
+            },
+            {
+                type: 'hook', // allowRuntimeCreate only
+                item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'] },
+            },
+            {
+                type: 'theme', // no static registry entry (plugin-registered)
+                item: { name: 'rc3_receipt_view', label: 'Receipt', tokens: {} },
+            },
+        ];
+
+        for (const { label, environmentId } of KERNELS) {
+            for (const { type, item } of ACCEPTED) {
+                it(`answers a ${type} save with a repository receipt on a ${label}`, async () => {
+                    const { protocol, writes } = makeProtocol(environmentId);
+
+                    const result = await protocol.saveMetaItem({
+                        type,
+                        name: 'rc3_receipt_view',
+                        item,
+                        ...(environmentId ? { organizationId: 'org_alpha' } : {}),
+                    });
+
+                    expect(result.success).toBe(true);
+                    // `seq` and `state` exist only on the repository receipt.
+                    expect(typeof result.seq).toBe('number');
+                    expect(result.state).toBe('active');
+                    expect(result.message).toContain('[seq=');
+                    // And the change log really was appended — the legacy
+                    // branch's defining omission.
+                    expect(writes.some((w) => w.table === 'sys_metadata_history')).toBe(true);
+                });
+            }
+        }
+
+        for (const type of CODE_ONLY_TYPES) {
+            it(`routes ${type} back through the repository once OS_METADATA_WRITABLE unlocks it`, async () => {
+                // The last leg of the unreachability argument: the escape hatch
+                // does not open a second door. Unlocking a type makes
+                // `isOverlayAllowed` true, which is the same predicate the
+                // repository path is chosen by — so an unlocked save is a
+                // repository save, receipt and history row included.
+                const probe = PROBES[type]!;
+                process.env.OS_METADATA_WRITABLE = type;
+                ObjectStackProtocolImplementation.resetEnvWritableCache();
+                resetEnvWritableMetadataTypes();
+
+                const { protocol, writes } = makeProtocol(undefined);
+                const result = await protocol.saveMetaItem({
+                    type,
+                    name: probe.name,
+                    item: probe.item,
+                });
+
+                expect(result.success).toBe(true);
+                expect(typeof result.seq).toBe('number');
+                expect(result.message).toContain('[seq=');
+                expect(writes.some((w) => w.table === 'sys_metadata_history')).toBe(true);
             });
         }
     });

@@ -35,7 +35,7 @@ const taskObject = {
     },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -121,7 +121,7 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver, stores } = makeMemoryDriver();
+        const { driver, stores } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(taskObject as any, 'test-package');

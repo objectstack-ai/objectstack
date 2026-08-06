@@ -134,7 +134,34 @@ function convertWhere(where: CleanedWhere[]): Record<string, any> {
     } else if (condition.operator === 'lte') {
       filter[fieldName] = { $lte: condition.value };
     } else if (condition.operator === 'contains') {
-      filter[fieldName] = { $regex: condition.value };
+      // [#5710] `$contains`, NOT `$regex`. better-auth's `contains` is a
+      // LITERAL substring search (`Where.mode` defaults to `"sensitive"`, and
+      // the value comes straight from a caller — `/admin/list-users`'
+      // `searchValue`), while `$regex` puts that value in a PATTERN position.
+      //
+      // What the bare `$regex` did, per backend, to one `contains('a.b')`:
+      //   - driver-memory: `new RegExp('a.b')` — `.` is a wildcard, so it
+      //     matched `axb`; an unbalanced `(` in the value made the pattern
+      //     illegal (a throw on the mingo path, a silent no-match on the
+      //     reference matcher's).
+      //   - driver-sql / -sqlite-wasm / -turso: compiled to a substring
+      //     `LIKE '%a.b%'` — metacharacters literal.
+      // One operator, two answers, and the divergence only shows up when the
+      // app's tests run on the memory double and production runs SQL (#4706).
+      //
+      // `$contains` is in the spec's `FILTER_OPERATORS` and every backend
+      // evaluates it as a literal substring (SQL side escapes `%`/`_`/`\` and
+      // emits an explicit `ESCAPE`), which is exactly better-auth's meaning.
+      // Case semantics follow the #5701 Q2=A ruling (`$contains` is
+      // case-SENSITIVE at the contract layer; the per-driver alignment is
+      // #5702's budget), which matches better-auth's own `mode: 'sensitive'`
+      // default.
+      //
+      // This is also the last live producer of `$regex` — it is what
+      // `driver-memory/src/filter-refusal.ts` means by "refusing it here would
+      // break a live producer", and the reason #5702's loud refusal is ordered
+      // after this flip.
+      filter[fieldName] = { $contains: condition.value };
     }
   }
 

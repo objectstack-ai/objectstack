@@ -119,7 +119,7 @@ Type: `'public'`
 | **order** | `number` | optional | Order of THIS group within the book |
 | **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |
-| **pages** | `string \| { doc?: string; href?: string; label?: string; badge?: string; … }[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
+| **pages** | `(string \| { doc?: string; href?: string; label?: string; badge?: string; … })[]` | optional | OPTIONAL explicit override — hand-pin a curated order; wins over `include` |
 
 
 ---

@@ -9,7 +9,14 @@ import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
-import { resolveDriverType, resolveStorageDefinition, UnsupportedDriverError } from '../utils/storage-driver.js';
+import {
+  resolveDriverType,
+  resolveStorageDefinition,
+  loadTursoDriverFactory,
+  isTursoDriverId,
+  MissingDriverPackageError,
+  UnsupportedDriverError,
+} from '../utils/storage-driver.js';
 // [ADR-0105 D1] `resolveMultiOrgEnabled` is deliberately NOT imported here: the
 // posture is the authoritative knob and `resolveTenancyPosture()` already folds
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
@@ -1027,6 +1034,11 @@ export default class Serve extends Command {
       if (!hasDriver && config.objects) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
+         // libSQL/Turso's credential is the only one that does NOT ride inside the
+         // URL (`--database-auth-token`, forwarded by `os start` / `os dev` as
+         // OS_DATABASE_AUTH_TOKEN; TURSO_AUTH_TOKEN is the vendor's own name, kept
+         // as-is per Prime Directive #9's third-party exceptions).
+         const databaseAuthToken = process.env.OS_DATABASE_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN;
 
          try {
            // #3826: the fallback no longer constructs a driver — it declares
@@ -1039,11 +1051,22 @@ export default class Serve extends Command {
            // the loosen-only self-heal (#2186, via config.autoMigrate) now run
            // inside the factory at connect.
            const { DriverPlugin, DefaultDatasourcePlugin } = await import('@objectstack/runtime');
-           const resolution = resolveStorageDefinition(driverType, { databaseUrl, isDev });
+           const resolution = resolveStorageDefinition(driverType, { databaseUrl, isDev, authToken: databaseAuthToken });
            if (resolution) {
+             // #5602: libSQL/Turso is the one kind the shared open-core factory
+             // cannot build — `@objectstack/driver-turso` is an OPTIONAL peer, so
+             // the CLI loads it here and injects it through the plugin's documented
+             // host-factory seam. Everything else about the boot is unchanged: same
+             // connect path, same bootCritical verdict, same escape hatch. A missing
+             // package throws MissingDriverPackageError BEFORE the plugin exists, so
+             // the operator sees the install command rather than a connect failure —
+             // and never a silent SQLite fallback.
+             const hostFactory = isTursoDriverId(resolution.driverId)
+               ? await loadTursoDriverFactory()
+               : undefined;
              await kernel.use(new DefaultDatasourcePlugin(
                { driver: resolution.driverId, config: resolution.config },
-               { dev: isDev },
+               { dev: isDev, ...(hostFactory ? { factory: hostFactory } : {}) },
              ));
              trackPlugin(resolution.trackName);
              resolvedDriverLabel = resolution.label;
@@ -1097,14 +1120,20 @@ export default class Serve extends Command {
              }
            }
          } catch (e: any) {
-           // "declared ≠ enforced" guard (#3276-class): a driver that is
-           // RECOGNIZED but the CLI's resolver does not construct — currently
-           // `turso`/libSQL, in-repo since #4645 but unwired — must fail LOUDLY, never silently
-           // fall through to the SQLite default and ignore the selected engine.
+           // "declared ≠ enforced" guard (#3276-class): a selection the CLI
+           // RECOGNIZED but cannot honour must fail LOUDLY, never silently fall
+           // through to the SQLite default and ignore the engine that was asked for.
            // Re-throw so run()'s fatal handler restores output, prints the
            // actionable message, and exits 1 (in dev AND prod). All OTHER driver
            // construction errors keep the prior best-effort silent behavior.
+           //   • UnsupportedDriverError — recognized kind, no usable definition
+           //     (`--database-driver turso` with no URL to connect to).
+           //   • MissingDriverPackageError (#5602) — the optional driver package for
+           //     a `libsql://` selection is not installed. Fatal for the same reason
+           //     and with the same remedy shape: the message carries the exact
+           //     install command, and there is deliberately no SQLite fallback.
            if (e instanceof UnsupportedDriverError) throw e;
+           if (e instanceof MissingDriverPackageError) throw e;
            // Same class of fatal (#3724): a driver that refuses to run in this
            // deployment's tenancy mode — driver-mongodb has no row-level tenant
            // isolation and rejects a non-`single` posture. Swallowing it would

@@ -54,7 +54,7 @@ const ACCOUNT = {
   },
 };
 
-function makeMemoryDriver(opts: { nativeAutonumber?: boolean } = {}) {
+function makeStubDriver(opts: { nativeAutonumber?: boolean } = {}) {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const createdRows: Array<Record<string, unknown>> = [];
   const updatedPayloads: Array<Record<string, unknown>> = [];
@@ -153,7 +153,7 @@ function makeMemoryDriver(opts: { nativeAutonumber?: boolean } = {}) {
 
 async function makeEngine(opts: { nativeAutonumber?: boolean } = {}) {
   const engine = new ObjectQL();
-  const rig = makeMemoryDriver(opts);
+  const rig = makeStubDriver(opts);
   engine.registerDriver(rig.driver, true);
   await engine.init();
   engine.registry.registerObject(ACCOUNT as any);

@@ -47,18 +47,24 @@ Drivers can be selected in two ways:
 | `mongodb://…`, `mongodb+srv://…` | MongoDB | `@objectstack/driver-mongodb` |
 | `postgres://…`, `postgresql://…` | PostgreSQL (Knex `pg`) | `@objectstack/driver-sql` + `pg` |
 | `mysql://…`, `mysql2://…` | MySQL (Knex `mysql2`) | `@objectstack/driver-sql` + `mysql2` |
+| `libsql://…`, `http(s)://*.turso.…` | Turso / libSQL | `@objectstack/driver-turso` (**optional** — install it yourself) |
 | `wasm-sqlite://…`, `*.wasm.db` | SQLite (pure-JS WASM) | `@objectstack/driver-sqlite-wasm` |
 | `file:…`, `sqlite:…`, `:memory:`, `*.db` / `*.sqlite` | SQLite (Knex `better-sqlite3`) | `@objectstack/driver-sql` + `better-sqlite3` |
 | _(unset, dev mode)_ | SQLite (native, falling back to WASM, then in-memory) | `@objectstack/driver-sql` / `-sqlite-wasm` / `-memory` |
 
 <Callout type="info">
-Turso / libSQL (`libsql://`, `*.turso.io`) is **not** inferred from a URL.
-`@objectstack/driver-turso` does live in this repo (`packages/drivers/driver-turso`)
-and you can register it yourself — a datasource with `driver: 'turso'` and
-`config: { url, authToken }` — but the CLI's URL → driver resolver does not
-construct it. A `libsql://` URL therefore fails loudly at boot rather than
-silently degrading to SQLite. Whether the inference table should construct it
-is tracked in issue #5602.
+**Turso / libSQL needs one extra install.** `libsql://` and `*.turso.io` URLs *are*
+inferred, but `@objectstack/driver-turso` is an **optional peer dependency** of the
+CLI — it pulls in `@libsql/client`, so it is not part of a default install:
+
+```bash
+npm install @objectstack/driver-turso
+```
+
+Without it the boot **fails loudly** with that exact command; it never degrades to
+SQLite, which would start the server against an empty local database while your
+libSQL data stayed untouched. Pass the token with `--database-auth-token`
+(`OS_DATABASE_AUTH_TOKEN`, or the vendor's own `TURSO_AUTH_TOKEN`).
 </Callout>
 
 ## Supported Drivers
@@ -70,6 +76,7 @@ is tracked in issue #5602.
 | **SQLite** | `@objectstack/driver-sql` (peer: `better-sqlite3`) | `SqlDriver` | `sqlite` \| `sql` |
 | **SQLite (WASM)** | `@objectstack/driver-sqlite-wasm` | `SqliteWasmDriver` | `sqlite-wasm` \| `wasm-sqlite` \| `wasm` |
 | **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
+| **Turso / libSQL** | `@objectstack/driver-turso` (optional peer of the CLI) | `TursoDriver` | `turso` \| `libsql` |
 | **Memory** | `@objectstack/driver-memory` | `InMemoryDriver` | `memory` |
 
 > All SQL flavours (PostgreSQL / MySQL / SQLite) are served by a single

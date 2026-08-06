@@ -463,9 +463,14 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
     });
 
     it('skips a type with no repository write path rather than rewriting it without history', async () => {
-        // `agent` is allowOrgOverride:false + allowRuntimeCreate:false, so
-        // `saveMetaItem` would take the legacy raw-engine branch: no history row
-        // and a forced `state: 'active'`. Declining beats a silent half-write.
+        // `agent` is allowOrgOverride:false + allowRuntimeCreate:false. The
+        // skip is what this test pins, and it is unchanged; only its rationale
+        // moved. It used to be "`saveMetaItem` would take the legacy raw-engine
+        // branch: no history row and a forced `state: 'active'`" — #5086
+        // (PR #5263) then made `saveMetaItem` refuse a code-only type with 403
+        // before persistence, and #5264 deleted the now-unreachable branch. So
+        // today the pass declines a write that would be refused anyway, which
+        // keeps it a reported `skipped` row instead of `failed` noise.
         const { engine, tables } = makeStubEngine([
             { type: 'agent', name: 'legacy_agent', metadata: { name: 'legacy_agent', label: 'Legacy' } },
         ]);

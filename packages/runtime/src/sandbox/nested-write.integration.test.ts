@@ -8,7 +8,7 @@
  * hook, so the child's nested write fires a SECOND sandbox VM while the child's
  * hook is still in flight — the exact re-entrancy that used to crash the process
  * with `memory access out of bounds` under the old single-suspended-asyncify
- * model. This wires a REAL {@link ObjectQL} engine (in-memory driver) to the
+ * model. This wires a REAL {@link ObjectQL} engine (stub driver) to the
  * real {@link QuickJSScriptRunner} through {@link hookBodyRunnerFactory}, so the
  * whole hook → sandbox → nested-write → nested-hook path is exercised.
  *
@@ -41,7 +41,7 @@ const child = {
   },
 };
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -85,7 +85,7 @@ describe('#1867 nested cross-object write from a hook (real engine + sandbox)', 
 
   beforeEach(async () => {
     engine = new ObjectQL();
-    const { driver } = makeMemoryDriver();
+    const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     for (const o of [parent, child]) engine.registry.registerObject(o as any);

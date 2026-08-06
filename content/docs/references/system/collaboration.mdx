@@ -233,7 +233,7 @@ This schema accepts one of the following structures:
 | **users** | `{ userId: string; sessionId: string; userName: string; userAvatar?: string; … }[]` | ✅ | Active users |
 | **cursors** | `{ userId: string; sessionId: string; documentId: string; userName: string; … }[]` | ✅ | Active cursors |
 | **version** | `integer` | ✅ | Current document version |
-| **operations** | `{ operationId: string; documentId: string; userId: string; sessionId: string; … } \| { operationId: string; replicaId: string; position: integer; insert?: string; … }[]` | optional | Recent operations |
+| **operations** | `({ operationId: string; documentId: string; userId: string; sessionId: string; … } \| { operationId: string; replicaId: string; position: integer; insert?: string; … })[]` | optional | Recent operations |
 | **createdAt** | `string` | ✅ | ISO 8601 datetime when session was created |
 | **lastActivity** | `string` | ✅ | ISO 8601 datetime of last activity |
 | **status** | `Enum<'active' \| 'idle' \| 'ended'>` | ✅ | Session status |
@@ -467,7 +467,7 @@ This schema accepts one of the following structures:
 | **documentId** | `string` | ✅ | Document identifier |
 | **userId** | `string` | ✅ | User who created the operation |
 | **sessionId** | `string` | ✅ | Session identifier |
-| **components** | `{ type: 'insert'; text: string; attributes?: Record<string, any> } \| { type: 'delete'; count: integer } \| { type: 'retain'; count: integer; attributes?: Record<string, any> }[]` | ✅ | Operation components |
+| **components** | `({ type: 'insert'; text: string; attributes?: Record<string, any> } \| { type: 'delete'; count: integer } \| { type: 'retain'; count: integer; attributes?: Record<string, any> })[]` | ✅ | Operation components |
 | **baseVersion** | `integer` | ✅ | Document version this operation is based on |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when operation was created |
 | **metadata** | `Record<string, any>` | optional | Additional operation metadata |

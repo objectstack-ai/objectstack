@@ -17,10 +17,22 @@
  * the engine decides by-id vs `updateMany`, seeds the AST and builds the hook
  * context — so it is the engine, not a fake, that hands the hook a write with
  * no id. Same three lines as the issue's repro.
+ *
+ * Backend note (#5704 批次 3 / #5785): the store under that engine was a
+ * hand-written Map + a hand-written `matches()` until this file was migrated to
+ * `@objectstack/driver-sql` + better-sqlite3 `:memory:`. The file called itself
+ * an integration test while the half that decides whether `$in`/`$and` select
+ * the right rows was fixture code written by the same author as the assertion —
+ * see the deleted stub's own comment ("a fixture that silently matched
+ * everything would prove the opposite of what these tests claim"), which is a
+ * hazard only a hand-written matcher has. The predicates are now compiled and
+ * executed by the SQL builder, so the test proves the lock against the engine
+ * production runs on.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
 
 const opportunity = {
@@ -49,79 +61,18 @@ const approvalRequest = {
 };
 
 /**
- * A memory driver that understands the operators this path actually binds:
- * `$in` (the caller's predicate) and `$and` (the lock's intersection of that
- * predicate with the locked ids). An unknown operator matches nothing rather
- * than comparing an object to a scalar — a fixture that silently matched
- * everything would prove the opposite of what these tests claim.
+ * The real backend: better-sqlite3 `:memory:` through `@objectstack/driver-sql`,
+ * constructed the way the rest of the repo constructs an ephemeral store
+ * (`examples/app-crm`, `cli db clean`, PR #5715's `makeDefaultDriver()`). The
+ * database lives and dies inside the process, so each `beforeEach` starts on a
+ * genuinely empty schema with nothing on the host filesystem.
  */
-function makeMemoryDriver() {
-  const stores = new Map<string, Map<string, Record<string, unknown>>>();
-  const storeFor = (o: string) => {
-    let s = stores.get(o);
-    if (!s) { s = new Map(); stores.set(o, s); }
-    return s;
-  };
-  let nextId = 0;
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    for (const [k, v] of Object.entries(where)) {
-      if (k === '$and') { if (!(v as any[]).every((w) => matches(row, w))) return false; continue; }
-      if (k === '$or') { if (!(v as any[]).some((w) => matches(row, w))) return false; continue; }
-      if (v && typeof v === 'object' && !Array.isArray(v)) {
-        if ('$in' in (v as any)) {
-          if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
-          continue;
-        }
-        if ('$eq' in (v as any)) {
-          if ((row[k] ?? null) !== ((v as any).$eq ?? null)) return false;
-          continue;
-        }
-        return false;
-      }
-      if ((row[k] ?? null) !== (v ?? null)) return false;
-    }
-    return true;
-  };
-  const driver: any = {
-    name: 'memory', version: '0.0.0', supports: {},
-    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
-    async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
-    async create(o: string, data: Record<string, unknown>) {
-      nextId += 1;
-      const id = (data.id as string) ?? `r_${nextId}`;
-      const row = { ...data, id };
-      storeFor(o).set(id, row);
-      return row;
-    },
-    async update(o: string, id: string, data: Record<string, unknown>) {
-      const s = storeFor(o);
-      const cur = s.get(id);
-      if (!cur) throw new Error(`nf ${o}/${id}`);
-      const up = { ...cur, ...data, id };
-      s.set(id, up);
-      return up;
-    },
-    async updateMany(o: string, ast: any, data: Record<string, unknown>) {
-      const s = storeFor(o);
-      const hits = Array.from(s.values()).filter((r) => matches(r, ast?.where));
-      for (const r of hits) s.set(String(r.id), { ...r, ...data, id: r.id });
-      return hits.length;
-    },
-    async upsert(o: string, data: Record<string, unknown>) {
-      const id = data.id as string | undefined;
-      return id && storeFor(o).has(id) ? this.update(o, id, data) : this.create(o, data);
-    },
-    async delete(o: string, id: string) { return storeFor(o).delete(id); },
-    async count(o: string, ast: any) { return (await this.find(o, ast)).length; },
-    async bulkCreate(o: string, rows: Record<string, unknown>[]) { return Promise.all(rows.map((r) => this.create(o, r))); },
-    async bulkUpdate() { return []; },
-    async bulkDelete() {},
-    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
-    async commit() {}, async rollback() {},
-  };
-  return driver;
+function makeSqliteDriver() {
+  return new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
 }
 
 const USER_CTX = { isSystem: false, userId: 'u1', positions: [], permissions: [] };
@@ -147,11 +98,20 @@ describe('approvals record lock — predicate (multi) updates (#4778)', () => {
     }, { context: { isSystem: true } } as any);
   };
 
+  afterEach(async () => {
+    // `:memory:` dies with the connection; closing it keeps the pool from
+    // accumulating one live database per test in a file this size.
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
   beforeEach(async () => {
     engine = new ObjectQL();
-    engine.registerDriver(makeMemoryDriver(), true);
+    engine.registerDriver(makeSqliteDriver(), true);
     await engine.init();
     for (const o of [opportunity, approvalRequest]) engine.registry.registerObject(o as any);
+    // Real DDL through the real path — the tables every write below hits are
+    // created by the driver, not conjured by a store on first write.
+    await engine.syncSchemas();
 
     lockedId = String((await engine.insert('opportunity', { name: 'Deal', amount: 100 })).id);
     freeId = String((await engine.insert('opportunity', { name: 'Other', amount: 100 })).id);

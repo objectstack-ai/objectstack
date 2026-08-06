@@ -82,13 +82,13 @@ const taskObject = {
 };
 
 /**
- * An in-memory driver that really sorts, really projects and really paginates.
+ * A stub driver that really sorts, really projects and really paginates.
  *
  * This matters more than usual here: a driver that ignored `orderBy` would make
  * every "a real sort field works" control vacuously true, and the pins above it
  * would then pass against a completely broken sort axis.
  */
-function makeMemoryDriver() {
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -210,7 +210,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const made = makeMemoryDriver();
+        const made = makeStubDriver();
         const driver = made.driver;
         stores = made.stores;
         engine.registerDriver(driver, true);
@@ -795,7 +795,7 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver, stores } = makeMemoryDriver();
+        const { driver, stores } = makeStubDriver();
         // The issue's transcript runs on the engine's IN-MEMORY aggregation
         // fallback — the path `engine.aggregate` takes for drivers with no
         // native `aggregate` (driver-rest, driver-memory, partial SQL

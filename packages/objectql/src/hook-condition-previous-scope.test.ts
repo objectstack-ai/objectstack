@@ -268,11 +268,11 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Through a REAL engine, over an in-memory driver that — like a SQL driver —
+ * Through a REAL engine, over a stub driver that — like a SQL driver —
  * stores only the columns a write actually touched.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function makeMemoryDriver() {
+function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   /** Every read the engine performs, so "no extra fetch" is measurable. */
   const reads = { findOne: 0, find: 0 };
@@ -355,9 +355,9 @@ describe('[#4784] transition condition over a real engine', () => {
 
   async function boot(hooks: Hook[]) {
     engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    reads = mem.reads;
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    reads = stub.reads;
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
 
@@ -446,15 +446,15 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
    */
   async function bootWith(hooks: Hook[]) {
     const engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:pin',
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     });
-    return { engine, reads: mem.reads };
+    return { engine, reads: stub.reads };
   }
 
   it('reads no prior row at all for a before-hook condition over `record` only', async () => {
@@ -518,8 +518,8 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
 describe('[#5272] a single-record delete binds `previous` through the real engine', () => {
   async function bootDelete(hooks: Hook[]) {
     const engine = new ObjectQL();
-    const mem = makeMemoryDriver();
-    engine.registerDriver(mem.driver, true);
+    const stub = makeStubDriver();
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(taskObject as any);
     const warn = vi.fn();
@@ -529,7 +529,7 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     });
     return {
       engine,
-      reads: mem.reads,
+      reads: stub.reads,
       conditionWarnings: () =>
         warn.mock.calls.filter(([msg]) => String(msg).includes('condition evaluation failed')),
     };

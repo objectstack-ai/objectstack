@@ -68,8 +68,8 @@ const sysMetadataHistoryObject = {
     },
 };
 
-/** Equality-only in-memory driver — same shape as the PR-10d.4 suite. */
-function makeMemoryDriver() {
+/** Equality-only stub driver — same shape as the PR-10d.4 suite. */
+function makeStubDriver() {
     const stores = new Map<string, Map<string, Record<string, unknown>>>();
     const storeFor = (obj: string) => {
         let s = stores.get(obj);
@@ -171,7 +171,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
 
     beforeEach(async () => {
         engine = new ObjectQL();
-        const { driver } = makeMemoryDriver();
+        const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
         engine.registry.registerObject(sysMetadataObject as any);

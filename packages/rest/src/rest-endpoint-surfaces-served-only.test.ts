@@ -140,7 +140,7 @@ async function managerHolding(items: Array<Record<string, unknown>>): Promise<Me
 function mountRest(enumerated: Array<Record<string, unknown>>, authority: unknown | undefined) {
   const protocol: any = {
     getDiscovery: vi.fn().mockResolvedValue({
-      version: 'v0', endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },
+      version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
     }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: any) => {

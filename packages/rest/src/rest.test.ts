@@ -30,7 +30,11 @@ function createMockProtocol() {
   return {
     getDiscovery: vi.fn().mockResolvedValue({
       version: 'v0',
-      endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },
+      // The producer's key is `routes` (`ApiRoutesSchema`, required by
+      // `DiscoverySchema`). `endpoints` was a dispatcher-only verbatim copy of
+      // it, retired in #4828 — a double that spells it is teaching a shape no
+      // producer ever emitted (#5674). Copy this mock, not that one.
+      routes: { data: '', metadata: '', ui: '', auth: '/auth' },
     }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([]),

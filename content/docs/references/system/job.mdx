@@ -16,8 +16,8 @@ Schedule jobs using cron expressions
 ## TypeScript Usage
 
 ```typescript
-import { CronScheduleSchema, IntervalScheduleSchema, JobSchema, JobExecutionSchema, JobExecutionStatus, OnceScheduleSchema, ScheduleSchema } from '@objectstack/spec/system';
-import type { CronSchedule, IntervalSchedule, Job, JobExecution, JobExecutionStatus, OnceSchedule, Schedule } from '@objectstack/spec/system';
+import { CronScheduleSchema, IntervalScheduleSchema, JobSchema, JobExecutionSchema, JobExecutionStatus, OnceScheduleSchema, RetryPolicySchema, ScheduleSchema } from '@objectstack/spec/system';
+import type { CronSchedule, IntervalSchedule, Job, JobExecution, JobExecutionStatus, OnceSchedule, RetryPolicy, Schedule } from '@objectstack/spec/system';
 
 // Validate data
 const result = CronScheduleSchema.parse(data);
@@ -111,6 +111,22 @@ const result = CronScheduleSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `'once'` | ✅ |  |
 | **at** | `string` | ✅ | ISO 8601 datetime when to execute |
+
+
+---
+
+## RetryPolicy
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxRetries** | `integer` | ✅ | Retry attempts after the initial one. 0 (the default) means no retry — state a count to opt in. |
+| **backoffMs** | `integer` | ✅ | Base delay before the first retry (ms); subsequent delays multiply by backoffMultiplier |
+| **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
+| **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
+| **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
+| **retryDelayMs** | `any` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry`, `flow.errorHandling` and an ETL pipeline's `retry`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. `os migrate meta --from 16` rewrites it for you. |
 
 
 ---

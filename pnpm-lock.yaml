@@ -546,6 +546,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/driver-turso':
+        specifier: workspace:*
+        version: link:../drivers/driver-turso
       '@oclif/plugin-help':
         specifier: ^6.2.55
         version: 6.2.55
@@ -1352,6 +1355,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1432,6 +1438,9 @@ importers:
         specifier: ^6.2.5
         version: 6.2.7
     devDependencies:
+      '@objectstack/driver-memory':
+        specifier: workspace:*
+        version: link:../../drivers/driver-memory
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1864,6 +1873,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../drivers/driver-sql
       '@objectstack/metadata':
         specifier: workspace:*
         version: link:../metadata
@@ -2434,6 +2446,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
