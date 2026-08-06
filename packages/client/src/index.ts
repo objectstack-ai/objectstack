@@ -4584,6 +4584,16 @@ export class ObjectStackClient {
       notifications: '/api/v1/notifications',
       ai: '/api/v1/ai',
       i18n: '/api/v1/i18n',
+      // [#5679] `mcp` became a declared `ApiRoutes` key, and this map is
+      // TOTAL over them by design — a new declared route owes a convention.
+      // `/api/v1/mcp` is not a guess: it is what both discovery producers
+      // actually emit, so the fallback agrees with the discovered value
+      // rather than competing with it.
+      //
+      // Note this table is the UNSCOPED convention (every row is `/api/v1/…`),
+      // which suits `mcp` exactly: `/mcp` is mounted bare, so even a
+      // project-scoped discovery response advertises the unscoped path.
+      mcp: '/api/v1/mcp',
     };
     
     return routeMap[type] || `/api/v1/${type}`;

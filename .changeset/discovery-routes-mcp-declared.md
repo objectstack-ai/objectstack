@@ -1,6 +1,7 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/rest": patch
+"@objectstack/client": patch
 ---
 
 feat(spec): declare `routes.mcp` on `ApiRoutesSchema`, and extend the discovery conformance gate one level down (#5679)
@@ -37,6 +38,15 @@ JSON.
   protocol schema. Extended one level, not recursed — full recursion stays out
   of scope, and `capabilities` / `services` are `z.record`s whose keys are open
   by design.
+
+- **`@objectstack/client`'s conventional route table gains an `mcp` row.** That
+  table is `Record<keyof ApiRoutes, string>` — total by design — so a newly
+  declared route owes a convention, and the public `ApiRouteType` (`keyof
+  ApiRoutes`) widens by one member. The path is `/api/v1/mcp`, which is what
+  both producers emit, so the fallback agrees with the discovered value instead
+  of competing with it. Resolution behaviour is unchanged: `getRoute()` still
+  prefers the discovered route, and the pre-existing catch-all already produced
+  the same string.
 
 Corrects one detail of the issue's premise: the runtime dispatcher's
 `getDiscoveryInfo()` **does** also emit `routes.mcp` (its routes literal always
