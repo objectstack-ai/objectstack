@@ -6787,49 +6787,46 @@ export class RestServer {
                     // 4xx ONLY: a 5xx-status error keeps going through the
                     // `ANALYTICS_QUERY_FAILED` envelope below, so an internal
                     // fault can never be re-labelled as the caller's fault (and
-                    // keeps its `logError` line).
+                    // keeps its `logError` line). [#5367] It also has its MESSAGE
+                    // withheld there — declaring a server fault is declaring that
+                    // the detail is the operator's, not the caller's.
                     const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
                     const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
                     if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
                         return res.status(envelopeStatus).json({ code: envelopeCode, message: msg.slice(0, 1000) });
                     }
-                    // ── ② TRANSITIONAL fallback: message sniffing ────────────
-                    // ⚠️ ONE entry left, and it is on a retirement schedule.
+                    // ── ② … is GONE. The message-sniffing list is retired ────
+                    // [#5367] `/analytics/dataset/query` used to classify six
+                    // error families by matching hardcoded substrings of their
+                    // message text, which made their HTTP status a property of
+                    // their WORDING: rephrasing a message — no logic change, no
+                    // test red, no gate red — moved the error from 400 to 500.
+                    // Prime Directive #12 tolerates an accommodation like that
+                    // only while it is declared, loud, tested AND removable on a
+                    // schedule; #5352 shipped the first three and #5367 was the
+                    // schedule. It is now paid off in full:
                     //
-                    // #5352 left this list at six entries because all six
-                    // producers were bare `Error`s. That made the HTTP status of
-                    // six error families a property of their WORDING: rephrasing
-                    // a message — no logic change — moved the error from 400 to
-                    // 500 with no test and no gate going red, which is #5352's
-                    // own fragility surviving in the thing that patched it.
-                    // #5367 is the schedule the accommodation was missing
-                    // (Prime Directive #12: declared, loud, tested AND removable
-                    // on a schedule).
+                    //   - FIVE families throw `datasetInvalidError`
+                    //     (`DATASET_INVALID` / 400) from `service-analytics`'s
+                    //     `dataset-refusal.ts` and are served by ① —
+                    //     `dataset-compiler` (undeclared relationship path,
+                    //     unsupported aggregate), `dataset-executor` (order key,
+                    //     totals grouping), `native-sql-strategy` (join outside
+                    //     the allowlist).
+                    //   - The SIXTH — `read-scope-sql`'s ten fail-closed RLS
+                    //     lowering refusals — was re-judged by the maintainer on
+                    //     2026-08-06 and is now `READ_SCOPE_COMPILE_FAILED` /
+                    //     **500**. Its inputs are an admin-authored policy and a
+                    //     compiler-generated join alias, never the caller's, so
+                    //     `400 DATASET_INVALID` both misattributed the fault and
+                    //     echoed RLS policy field names back to the tenant. A
+                    //     declared 5xx is 4xx-only-① 's business no longer, so it
+                    //     falls to ③ BY DECLARATION.
                     //
-                    // FIVE entries are gone because their producers now carry the
-                    // ADR-0112 envelope and are served by ① — `dataset-compiler`
-                    // (undeclared relationship path, unsupported aggregate),
-                    // `dataset-executor` (order key, totals grouping) and
-                    // `native-sql-strategy` (join outside the allowlist) all throw
-                    // `datasetInvalidError` (`DATASET_INVALID` / 400) from
-                    // `service-analytics`'s `dataset-refusal.ts`.
+                    // ⛔ Do not reintroduce a message test here. Give the refusal
+                    // a `code`/`status` and the branches above and below serve it.
                     //
-                    // `read-scope-sql` is the LAST entry, and deliberately so:
-                    // its ten refusals are fail-closed RLS-lowering failures
-                    // whose inputs are an admin-authored policy and a
-                    // compiler-generated join alias — NOT caller input — so
-                    // `DATASET_INVALID` ("your request is invalid") is very
-                    // possibly the wrong verdict for them and the right one is a
-                    // separate judgement. Until that judgement lands, deleting
-                    // this entry would regress them from `400 DATASET_INVALID` to
-                    // 500, i.e. #5352 again. Tracked as the final item of #5367.
-                    //
-                    // Do not add to this list. Give the new refusal a
-                    // `code`/`status` and ① serves it for free.
-                    if (/read-scope-sql/.test(msg)) {
-                        return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });
-                    }
-                    // ── ③ The 500 — and it does not ship driver internals ────
+                    // ── ③ The 500 — and it does not ship internals ───────────
                     // [#5520] This route built its 5xx body by hand and echoed
                     // the message verbatim, so a driver error arrived here with
                     // the generated statement prefixed to it (knex's format is
@@ -6850,8 +6847,30 @@ export class RestServer {
                     // untouched (still `500 ANALYTICS_QUERY_FAILED`), and the
                     // full text still reaches the operator through `logError`
                     // immediately below — the log line is now the only copy.
+                    //
+                    // [#5367] `looksLikeInternalErrorLeak` is a heuristic over
+                    // SQL/driver PHRASING, and the read-scope refusals do not
+                    // speak it: measured, all ten messages
+                    // (`[read-scope-sql] unsafe field identifier "…"`, …) return
+                    // FALSE from it, so retiring ② alone would have moved the RLS
+                    // policy content from a 400 body to a 500 body instead of
+                    // out of the response. Widening the heuristic to recognise
+                    // them would be more message sniffing — the very thing #5367
+                    // removes. So the withhold is DECLARED instead: a producer
+                    // that says `status >= 500` with a `code` has declared a
+                    // server fault, and a server fault's detail belongs in the
+                    // log, not in the caller's body. That is a structural rule
+                    // over the ADR-0112 envelope, not a guess about prose, and it
+                    // leaves #5667's tiering intact for UNDECLARED 5xx errors —
+                    // a bare `Error` still goes through the heuristic, so a
+                    // self-authored fault ("no strategy can handle query …")
+                    // stays readable.
                     logError('[REST] Analytics dataset query error:', error);
-                    const outward = looksLikeInternalErrorLeak(msg) ? INTERNAL_ERROR_MESSAGE : msg.slice(0, 500);
+                    const declaredServerFault =
+                        envelopeStatus !== undefined && envelopeStatus >= 500 && envelopeCode !== undefined;
+                    const outward = declaredServerFault || looksLikeInternalErrorLeak(msg)
+                        ? INTERNAL_ERROR_MESSAGE
+                        : msg.slice(0, 500);
                     res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });
                 }
             },

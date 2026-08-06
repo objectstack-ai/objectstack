@@ -275,19 +275,26 @@ describe('[#5367] every enveloped refusal carries the ADR-0112 envelope (DATASET
   });
 });
 
-describe('[#5367] what deliberately stays a bare Error — the schedule’s remaining item', () => {
+describe('[#5367] the verdicts that are deliberately NOT DATASET_INVALID', () => {
   /**
    * Two of `read-scope-sql.ts`'s ten fail-closed refusals, as samples of the
    * family: an unsupported operator (the deepest site) and an unsafe identifier
    * (the shallowest).
    *
-   * They stay bare because their INPUTS are not the caller's: the filter is the
-   * RLS `FilterCondition` the security service compiles from an
-   * admin-authored policy, and the alias is a join alias the dataset compiler
-   * generated. `DATASET_INVALID` says "your request is invalid", which for a
-   * broken sharing rule blames the wrong author — so the right code/status is a
-   * separate judgement (#5367's open question), and until it lands the route's
-   * list keeps its one `read-scope-sql` entry.
+   * ⚠️ RE-JUDGED, and this block is the day the previous version predicted.
+   * It used to assert these carried NO envelope, with a comment saying "when this
+   * flips, `rest-server.ts` must lose its last message-list entry in the SAME PR".
+   * The maintainer ruled on 2026-08-06 (option B on #5367's decision card) and
+   * that is what this PR does: all ten now carry `READ_SCOPE_COMPILE_FAILED` /
+   * **500**, and the route's list is gone entirely.
+   *
+   * Why 500 rather than any 4xx: their INPUTS are not the caller's — the filter is
+   * the RLS `FilterCondition` the security service compiled from an admin-authored
+   * policy, the alias is a join alias the dataset compiler generated. So the two
+   * things that can arrive are a broken policy and drift between two of our own
+   * components, and for THIS request's caller both are a server fault. The full
+   * per-site table lives in `read-scope-refusal-envelope.test.ts`; these two rows
+   * stay here so the three verdict classes are visible side by side.
    */
   const READ_SCOPE: Array<{ name: string; run: () => unknown }> = [
     {
@@ -301,26 +308,33 @@ describe('[#5367] what deliberately stays a bare Error — the schedule’s rema
   ];
 
   for (const c of READ_SCOPE) {
-    it(`read-scope-sql: ${c.name} → still refuses, still WITHOUT an envelope`, async () => {
+    it(`read-scope-sql: ${c.name} → READ_SCOPE_COMPILE_FAILED / 500, never DATASET_INVALID`, async () => {
       const err = await refusalFrom(c.run);
       expect(err).toBeInstanceOf(Error);
       expect(String(err?.message)).toContain('[read-scope-sql]');
       expect(String(err?.message)).toContain('(fail-closed)');
-      // ⛔ When this flips, `rest-server.ts`'s analytics catch must lose its last
-      // message-list entry in the SAME PR — that deletion is the final item of
-      // #5367's retirement schedule, and the `[read-scope-sql]` prefix above is
-      // what that entry matches on.
-      expect(err?.code, 'read-scope-sql gained an envelope — retire the route list entry').toBeUndefined();
-      expect(err?.status).toBeUndefined();
+      expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err?.status).toBe(500);
+      // The load-bearing negative: a 4xx here would blame the caller for a policy
+      // they cannot see, and would put its field names in their response body.
+      expect(err?.code).not.toBe('DATASET_INVALID');
+      expect(Number(err?.status)).toBeGreaterThanOrEqual(500);
     });
   }
 
-  it('the dataset-compiler internal invariant stays a 500, not a 400', async () => {
+  it('the dataset-compiler internal invariant stays a bare Error (an UNDECLARED 500)', async () => {
     // "non-derived measure has no aggregate" is guarded defensively behind a
     // spec refinement that already guarantees it. An arrival is OUR bug, so
     // enveloping it as the caller's 400 would be the mirror-image defect —
     // ops alerting stops seeing it and the author is told to fix something they
     // did not write. Reached by bypassing the schema, which is the only way in.
+    //
+    // [#5367] It stays UNDECLARED rather than being given the read-scope 500
+    // envelope, and the difference is observable: `rest-server.ts` withholds the
+    // message of a producer that DECLARES a server fault (the RLS policy content
+    // must not reach the caller) while an undeclared 5xx keeps #5667's tiering
+    // and stays readable. A programming invariant is the operator's own bug
+    // report; there is nothing tenant-sensitive in it to withhold.
     const err = await refusalFrom(() =>
       compileDataset({
         name: 'pipeline',
