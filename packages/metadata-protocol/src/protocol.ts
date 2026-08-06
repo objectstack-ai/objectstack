@@ -10395,11 +10395,44 @@ export class ObjectStackProtocolImplementation implements
      *     writes (422), and the read surfaces badge the row via
      *     `_diagnostics`. This is that same read-side verdict, surfaced once
      *     at boot where operators look.
+     *
+     * #5897 / ADR-0110 D3 — the return value can now say **"the store was not
+     * read at all"**. `loaded: 0` alone cannot: it is equally the truth for an
+     * empty store, an un-provisioned store, and a database this process could
+     * not reach, and the sole consumer
+     * (`ObjectQLPlugin.restoreMetadataFromDb`) therefore logged an outage as
+     * `debug` "No persisted metadata found in database" while the kernel went
+     * on to report ready. `storeUnavailable` is that missing bit, set on
+     * exactly the branch that already prints `DB hydration skipped` — i.e. the
+     * outer read failed for a reason {@link isMissingTableError} does NOT call
+     * benign.
+     *
+     * Three things it deliberately is **not**:
+     *
+     *  - **Not a superset of `errors`.** Per-row hydration failures already
+     *    have their own counter and the rows around them did land. This bit
+     *    means the row set itself never arrived, so the hydration is not
+     *    partial — it is absent. (Named `storeUnavailable` rather than a bare
+     *    `degraded` for that reason: the narrower word cannot be misread as
+     *    "something, somewhere, went wrong".)
+     *  - **Not set for an un-provisioned store.** A first boot before
+     *    migrations genuinely holds no overlay rows (#5841), so `loaded: 0` IS
+     *    the truth there and the bit stays `false`.
+     *  - **Not a control-flow change.** Boot still degrades and continues; what
+     *    changes is that the degradation can be *told apart* from health and is
+     *    reported at the level AGENTS.md "Degradation log levels" prescribes
+     *    for it — persisted state and runtime state disagreeing while the
+     *    system keeps looking healthy is the `error` class.
+     *
+     * It is the boot-side spelling of the same fact `MetadataManager`'s
+     * `loadDiagnosed` reports as `degraded` for the loader plane.
      */
-    async loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid: number }> {
+    async loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid: number; storeUnavailable: boolean }> {
         let loaded = 0;
         let errors = 0;
         let invalid = 0;
+        /** #5897 — see the TSDoc: set only on the non-benign outer-catch branch. */
+        let storeUnavailable = false;
         try {
             // ADR-0005 (revised 2026-05): hydrate only env-wide rows
             // (organization_id IS NULL). Per-org overlays are loaded on
@@ -10492,20 +10525,29 @@ export class ObjectStackProtocolImplementation implements
             // driver that says "no such table" for a different failure got read as
             // benign. One driver quirk, taught to the platform once.
             //
-            // NOT extended here (#5841 fact 2, deliberately left open): every
-            // OTHER failure is still answered with `console.warn` + `loaded: 0`,
-            // so the return shape cannot tell "the store had no overlay rows" from
-            // "the store could not be read" — ADR-0110 D3's rule, on the boot
-            // side. Changing that changes this method's return contract and its
-            // consumer in `ObjectQLPlugin.restoreMetadataFromDb`, so it is
-            // measured and reported separately rather than smuggled in here.
+            // #5897 (was #5841 fact 2, closed here): every OTHER failure is a
+            // read that did not happen, and it now SAYS so in the return value
+            // instead of only in a console line. Before this, the shape could
+            // not tell "the store had no overlay rows" from "the store could
+            // not be read" — ADR-0110 D3's rule, on the boot side — so the one
+            // consumer (`ObjectQLPlugin.restoreMetadataFromDb`) reported an
+            // outage as `debug` "No persisted metadata found in database" and
+            // the kernel went on to report ready.
+            //
+            // The two lines this branch and that consumer print are one event
+            // at two altitudes, not a repetition: this one names the DRIVER
+            // error (the detail an operator debugs with), the consumer's
+            // `error` names what the outage COSTS and how to fix it. Keeping
+            // the technical line here at `warn` is what lets the consumer's
+            // line stay the single loud statement of consequence.
             if (!isMissingTableError(e)) {
+                storeUnavailable = true;
                 console.warn(
                     `[Protocol] DB hydration skipped: ${e instanceof Error ? e.message : String(e)}`,
                 );
             }
         }
-        return { loaded, errors, invalid };
+        return { loaded, errors, invalid, storeUnavailable };
     }
 
     // ==========================================

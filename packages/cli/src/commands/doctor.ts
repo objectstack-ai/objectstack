@@ -874,7 +874,7 @@ interface UniqueScopeAdvisory {
  * carries a `failure` alongside it. The caller distinguishes them; before
  * #5412 nobody could, because one `catch` returned `[]` for both.
  */
-interface InstalledPackageLedgerReading {
+export interface InstalledPackageLedgerReading {
   entries: any[];
   /**
    * Ledger files that exist but could not be turned into entries (#5413).
@@ -956,6 +956,16 @@ interface SkippedLedgerEntry {
  * function's history: now over a reader it could not even start. The two are
  * separated by `loadOptionalPackage()` (`utils/optional-package.ts` carries how,
  * and the measurements behind it); only the genuinely-absent half stays silent.
+ *
+ * Called UNCONDITIONALLY since #5429 — from `run()`, outside the tenancy-posture
+ * gate and outside the config-analysis block. Two consequences worth knowing:
+ * every finding above is now reachable under every posture (which is the whole
+ * point), and this function no longer sits inside a `try` belonging to somebody
+ * else. It must therefore report rather than throw for anything it can hit, so
+ * the directory path is resolved INSIDE the guarded block: `DEFAULT_INSTALLED_
+ * PACKAGES_DIR` comes from a dynamically loaded module, and a `path.join()` over
+ * a non-string export used to be absorbed by the config `catch` and misreported
+ * as "Could not load config for analysis".
  */
 async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackageLedgerReading> {
   // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still run
@@ -974,8 +984,8 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
   }
   const mod: any = load.module;
 
-  const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
   try {
+    const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
     // No directory = nothing was ever installed. Genuinely not a finding.
     if (!fs.existsSync(dir)) return { entries: [], skipped: [] };
     // #5413 — read BOTH halves of the listing. Destructured with no `??`
@@ -989,30 +999,17 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
   }
 }
 
-/** What `findUnscopedGlobalUniques()` hands back — findings AND completeness. */
-interface UniqueScopeReading {
-  advisories: UniqueScopeAdvisory[];
-  /**
-   * Present when the ledger half did not run. The advisory is then INCOMPLETE,
-   * not clean, and the caller must not print its success line (#5412).
-   */
-  ledgerFailure?: { cause: unknown };
-  /**
-   * Ledger entries that could not be parsed (#5413). The advisory is
-   * incomplete in the same way `ledgerFailure` makes it incomplete — just
-   * partially rather than wholly — so it suppresses the success line too. An
-   * unreadable manifest may declare an installation-wide `unique`; nobody can
-   * say it does not.
-   */
-  skippedLedgerEntries: SkippedLedgerEntry[];
-  /**
-   * Present when the ledger half could not even START — the package doctor
-   * reads ledgers through is installed and would not load (#5644). Suppresses
-   * the success line for the same reason `ledgerFailure` does, and is reported
-   * separately because it is a different fact with a different remedy: repair
-   * the INSTALL of `@objectstack/cloud-connection`, not the ledger.
-   */
-  ledgerReaderFailure?: { cause: unknown };
+/**
+ * Whether a ledger reading covers everything it was supposed to (#5412 / #5413
+ * / #5644).
+ *
+ * The D5e advisory's success line is a claim about BOTH of its halves, so any
+ * of the three ways the ledger half can come back short must withhold it. The
+ * three are reported as their own rows, by their own check, above — this
+ * predicate is only about what the ADVISORY may still claim.
+ */
+function ledgerReadingIsComplete(reading: InstalledPackageLedgerReading): boolean {
+  return !reading.failure && !reading.readerFailure && reading.skipped.length === 0;
 }
 
 /**
@@ -1022,29 +1019,35 @@ interface UniqueScopeReading {
  * `group` = the installation IS the customer company).
  *
  * The advisory has TWO halves — this project's own metadata, and the installed
- * packages in the ledger — and #5412 is about the second half being able to
- * fail alone. When it does, the findings collected from the first half are
- * still real and are still returned; what the caller must not do is read the
- * resulting emptiness as a clean bill of health.
+ * packages in the ledger.
+ *
+ * #5429 — the ledger half's ENTRIES arrive here already read, and its FAILURES
+ * are no longer this function's business at all. It used to call
+ * `readInstalledPackageEntries()` itself and hand three failure facts back for
+ * the caller to render, which is what locked those three rows inside this
+ * posture gate: under `single` and `group` the first line below returned before
+ * the read ever happened. The read is now unconditional and lives in `run()`,
+ * `installedPackageLedgerChecks()` renders it, and this function is left with
+ * the one judgment that genuinely depends on the posture. That is also the
+ * dedup: one read, one set of rows, no second reporter.
  */
-async function findUnscopedGlobalUniques(
-  cwd: string,
+function findUnscopedGlobalUniques(
   config: any,
   // #5382 — the posture the caller already resolved, not a fresh parse. This
   // function runs inside doctor's broad config-analysis `try`, so a
   // `resolveTenancyPosture()` here is a throw the wrong `catch` reports as
   // "Could not load config for analysis".
   posture: TenancyPosture,
-): Promise<UniqueScopeReading> {
-  if (!postureGatesGlobalUniques(posture)) return { advisories: [], skippedLedgerEntries: [] };
+  ledgerEntries: any[],
+): UniqueScopeAdvisory[] {
+  if (!postureGatesGlobalUniques(posture)) return [];
 
   const out: UniqueScopeAdvisory[] = [];
   for (const finding of collectGlobalUniques(config?.objects)) {
     out.push({ source: 'this project’s metadata', finding });
   }
 
-  const ledger = await readInstalledPackageEntries(cwd);
-  for (const entry of ledger.entries) {
+  for (const entry of ledgerEntries) {
     const findings = collectGlobalUniques(entry?.manifest?.objects);
     // Subtract what the install ceremony already answered for — an attested
     // install must not be re-reported, or the advisory becomes the recurring
@@ -1053,12 +1056,7 @@ async function findUnscopedGlobalUniques(
       out.push({ source: `installed package '${entry?.manifestId ?? entry?.packageId}'`, finding });
     }
   }
-  return {
-    advisories: out,
-    skippedLedgerEntries: ledger.skipped,
-    ...(ledger.failure ? { ledgerFailure: ledger.failure } : {}),
-    ...(ledger.readerFailure ? { ledgerReaderFailure: ledger.readerFailure } : {}),
-  };
+  return out;
 }
 
 // ─── Filesystem Checks ──────────────────────────────────────────────
@@ -1303,6 +1301,26 @@ export function configLoadFailureCheck(err: unknown): HealthCheckResult {
 }
 
 /**
+ * The name column every installed-package-ledger readability row takes (#5429).
+ *
+ * It used to be `Unique scope`, and that was right while these rows only
+ * existed inside the ADR-0120 D5e advisory: the row an operator scanned for had
+ * to be PRESENT and not a `✓`, so a readability failure wore the advisory's
+ * name rather than leaving it missing.
+ *
+ * #5429 made the readability check posture-independent, and `Unique scope`
+ * stopped being true. Under `single` and `group` there IS no unique-scope
+ * question — `'global'` is unambiguous there — so a row named for it would
+ * announce a check that does not run under that posture and never did. These
+ * rows now say what they are actually about: the installed packages, and
+ * whether doctor could read them at all.
+ *
+ * The `Unique scope` name still exists, still under the D5e block, and still
+ * belongs to the unique-scope verdict alone.
+ */
+const LEDGER_ROW_NAME = 'Installed packages';
+
+/**
  * What doctor reports when the installed-package ledger cannot be read (#5412).
  *
  * The ADR-0120 D5e advisory is the sum of two halves — this project's declared
@@ -1324,10 +1342,9 @@ export function configLoadFailureCheck(err: unknown): HealthCheckResult {
  *   • **Warning, not error.** The environment still runs; what is broken is
  *     doctor's ability to see part of it. Doctor keeps going and keeps exiting
  *     0, exactly as it does for a config it cannot load.
- *   • **It takes the `Unique scope` name column.** Not a new label: the point
- *     is that the row an operator scans for is PRESENT and not a `✓`. A
- *     separately-named row would leave `Unique scope` simply missing, which is
- *     the silence this issue is about wearing a different hat.
+ *   • **It takes the {@link LEDGER_ROW_NAME} name column** — `Unique scope`
+ *     until #5429 moved the check out from under the posture gate; see that
+ *     constant for why the name had to move with it.
  *   • **The cause is quoted, not paraphrased** (#5390 / #5403). `ENOTDIR: not
  *     a directory, scandir '…'` names the file that is in the way; no sentence
  *     doctor could invent would beat it.
@@ -1335,19 +1352,21 @@ export function configLoadFailureCheck(err: unknown): HealthCheckResult {
 export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckResult {
   const cause = describeThrown(err);
   return {
-    name: 'Unique scope',
+    name: LEDGER_ROW_NAME,
     status: 'warning',
-    message:
-      'Could not read the installed-package ledger (installed packages NOT checked for '
-      + `installation-wide uniques) — ${reportRowHeadline(cause)}`,
+    message: `Could not read the installed-package ledger (installed packages NOT checked) — ${reportRowHeadline(cause)}`,
     fix:
-      'This check has two halves and only one of them ran. Uniques declared by THIS\n'
-      + '      project’s metadata were checked and are reported above; uniques declared by\n'
-      + '      INSTALLED PACKAGES were not looked at, so an installed app carrying an\n'
-      + '      installation-wide `unique` would not have appeared.\n'
-      + '      The ledger is the `.objectstack/installed-packages/` directory under the\n'
+      'The ledger is the `.objectstack/installed-packages/` directory under the\n'
       + '      project root; it exists here, which is why this is reported rather than\n'
-      + '      treated as "nothing was ever installed".\n'
+      + '      treated as "nothing was ever installed". Every package it lists is one\n'
+      + '      this runtime ALSO cannot rehydrate at boot — not registered with the\n'
+      + '      kernel, absent from the console’s installed-apps list — so an app missing\n'
+      + '      from this environment is very likely in there.\n'
+      + '      Under the `isolated` tenancy posture it costs the ADR-0120 D5e advisory\n'
+      + '      half its input too: that check has two halves and only one of them ran.\n'
+      + '      Uniques declared by THIS project’s metadata were checked; uniques declared\n'
+      + '      by INSTALLED PACKAGES were not looked at, which is why no `✓ Unique scope`\n'
+      + '      line appears.\n'
       + `      cause: ${indentUnderGutter(cause)}`,
   };
 }
@@ -1360,8 +1379,8 @@ export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckRes
  * fires when the ledger DIRECTORY could not be read at all; this one fires when
  * the directory read fine and some of the files in it did not. Both produce the
  * same false PASS if unreported — `✓ Unique scope` over manifests doctor never
- * parsed — and both therefore take the `Unique scope` name column and withhold
- * the success line, for the reasons written out above.
+ * parsed — and both therefore take the {@link LEDGER_ROW_NAME} name column and
+ * withhold that success line, for the reasons written out above.
  *
  * Why entry-level corruption is a finding at all, rather than something the
  * producer just handles: skipping a corrupt file IS correct — one truncated
@@ -1389,11 +1408,11 @@ export function installedPackageLedgerSkippedEntriesCheck(
   const head = described[0]!;
   const more = n > 1 ? ` (+${n - 1} more)` : '';
   return {
-    name: 'Unique scope',
+    name: LEDGER_ROW_NAME,
     status: 'warning',
     message:
-      `${n} installed-package ledger ${noun} could not be read (those packages NOT checked `
-      + `for installation-wide uniques) — ${reportRowHeadline(`${head.file}: ${head.cause}`)}${more}`,
+      `${n} installed-package ledger ${noun} could not be read (those packages NOT checked) — `
+      + `${reportRowHeadline(`${head.file}: ${head.cause}`)}${more}`,
     fix:
       'The ledger directory was read fine; these files inside it were not. Each one is an\n'
       + '      installed package this runtime ALSO drops at boot — it is not registered with\n'
@@ -1416,8 +1435,9 @@ export function installedPackageLedgerSkippedEntriesCheck(
  * `installedPackageLedgerSkippedEntriesCheck` fires when individual files in it
  * would not parse; this one fires when the reader itself never started. All
  * three produce the identical false PASS if unreported — `✓ Unique scope` over
- * installed packages nobody looked at — so all three take the `Unique scope`
- * name column, hold back the success line, and stay warnings.
+ * installed packages nobody looked at — so all three take the
+ * {@link LEDGER_ROW_NAME} name column, hold back that success line, and stay
+ * warnings.
  *
  * What is deliberately NOT a condition here: whether
  * `.objectstack/installed-packages/` exists. Doctor does not know that it does
@@ -1438,16 +1458,17 @@ export function installedPackageLedgerSkippedEntriesCheck(
 export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCheckResult {
   const cause = describeThrown(err);
   return {
-    name: 'Unique scope',
+    name: LEDGER_ROW_NAME,
     status: 'warning',
     message:
-      'Could not load the installed-package ledger reader (installed packages NOT checked '
-      + `for installation-wide uniques) — ${reportRowHeadline(cause)}`,
+      'Could not load the installed-package ledger reader (installed packages NOT checked) — '
+      + `${reportRowHeadline(cause)}`,
     fix:
       '`@objectstack/cloud-connection` IS installed here — its specifier resolves — and loading\n'
       + '      it threw. That package is how `os doctor` reads `.objectstack/installed-packages/`,\n'
-      + '      so this half of the check never started: an installed app declaring an\n'
-      + '      installation-wide `unique` would not have appeared. Doctor cannot even tell you\n'
+      + '      so nothing about the installed packages was read: whether any of them is\n'
+      + '      unreadable — and, under the `isolated` posture, whether any declares an\n'
+      + '      installation-wide `unique` — went unasked. Doctor cannot even tell you\n'
       + '      whether a ledger is present — the directory’s name is one of that package’s\n'
       + '      exports.\n'
       + '      A checkout that never installed the package says nothing at all, so this row means\n'
@@ -1455,6 +1476,76 @@ export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCh
       + '      (`pnpm --filter @objectstack/cloud-connection build`).\n'
       + `      cause: ${indentUnderGutter(cause)}`,
   };
+}
+
+/**
+ * Every readability finding one ledger reading produced — the whole of the
+ * posture-independent check #5429 promoted out of the D5e block.
+ *
+ * ── What was wrong ───────────────────────────────────────────────────────
+ *
+ * All three rows above were built inside the ADR-0120 D5e advisory, whose entry
+ * condition is `postureGatesGlobalUniques(posture)` — true for `isolated` (and
+ * its legacy alias `multi`), false for `single` and `group` — and
+ * `findUnscopedGlobalUniques()` re-asserted the same gate on its first line. So
+ * under `single` and `group`, {@link readInstalledPackageEntries} was never
+ * called: a ledger that could not be read, or a file inside it that would not
+ * parse, was a question `os doctor` did not ask.
+ *
+ * The default is the blind one. `resolveTenancyPosture()` returns `single` when
+ * `OS_TENANCY_POSTURE` is unset and multi-org is off, so out of the box doctor
+ * said nothing at all about a broken ledger.
+ *
+ * ── Why the posture is the wrong gate for THIS fact ──────────────────────
+ *
+ * "Is this environment's `unique: 'global'` dangerous?" is genuinely a posture
+ * question: `'global'` is unambiguous under `single` (one customer) and `group`
+ * (the installation IS the customer), and only `isolated` makes it a finding.
+ * That gate is correct and stays exactly where it is.
+ *
+ * "Is there a file under `.objectstack/installed-packages/` that cannot be
+ * read?" is not. It is equally true under every posture, and it means the same
+ * thing under every posture: that installed app is dropped at boot. The
+ * maintainer's 2026-08-06 ruling on #5429 (option A) split the two apart —
+ * these rows became their own check, the D5e block kept the unique-scope
+ * verdict alone.
+ *
+ * ── Dedup, structurally rather than by a flag ────────────────────────────
+ *
+ * Under `isolated` both are live, and the same bad ledger must still be
+ * reported once. It is, because the ledger is read ONCE per run: `run()` reads
+ * it, renders these rows, and hands the same reading to
+ * {@link findUnscopedGlobalUniques}, which no longer reads or reports anything
+ * about readability. There is no second read to disagree and no second row to
+ * suppress. What D5e keeps is the CONSEQUENCE for its own verdict — an
+ * incomplete reading still withholds its `✓ Unique scope`, because that line is
+ * a claim about both halves of the advisory and only one of them ran.
+ *
+ * ── Not a duplicate of the boot-side warning ─────────────────────────────
+ *
+ * `rehydrate()` warns per corrupt entry at boot, posture-independently — the
+ * runtime saying what it just dropped while starting. This is the DIAGNOSTIC
+ * command: what someone runs on purpose, possibly without ever booting, to ask
+ * what is wrong. #4801 / cloud#1020 are about those two faces disagreeing;
+ * before #5429 they did.
+ */
+export function installedPackageLedgerChecks(
+  reading: InstalledPackageLedgerReading,
+): HealthCheckResult[] {
+  // The reader never loaded, so neither the directory nor any entry was
+  // reached — mutually exclusive with both rows below rather than a third
+  // independent one (#5644).
+  if (reading.readerFailure) {
+    return [installedPackageLedgerReaderFailureCheck(reading.readerFailure.cause)];
+  }
+  const out: HealthCheckResult[] = [];
+  if (reading.failure) out.push(installedPackageLedgerFailureCheck(reading.failure.cause));
+  // Independent of the row above, not an `else`: `failure` means the directory
+  // could not be enumerated at all, `skipped` means it enumerated fine and
+  // named files inside it would not parse. Each names packages the other does
+  // not (#5412 vs #5413).
+  if (reading.skipped.length > 0) out.push(installedPackageLedgerSkippedEntriesCheck(reading.skipped));
+  return out;
 }
 
 // ─── Command ────────────────────────────────────────────────────────
@@ -1642,6 +1733,24 @@ export default class Doctor extends Command {
       results.push(postureReading.result);
     }
 
+    // ── Installed-package ledger readability (#5429) ─────────────────
+    //
+    // Read ONCE per run, here, and unconditionally.
+    //
+    // Placement is the fix, exactly as it was for the posture reader above.
+    // These rows used to be built inside the ADR-0120 D5e advisory, so
+    // `readInstalledPackageEntries()` only ran under `isolated` and only when a
+    // config loaded. Whether a file under `.objectstack/installed-packages/` can
+    // be read is neither of those things: it is equally true under every
+    // posture, it needs no config to answer, and it means the same thing every
+    // time — that installed app is dropped at boot. Under `single` (the DEFAULT
+    // posture) doctor said nothing about it at all.
+    //
+    // The same reading is handed to the D5e advisory further down instead of
+    // being read a second time, which is what keeps one bad ledger to one row.
+    const ledgerReading = await readInstalledPackageEntries(cwd);
+    results.push(...installedPackageLedgerChecks(ledgerReading));
+
     // Display environment results
     let hasErrors = false;
     let hasWarnings = false;
@@ -1765,12 +1874,12 @@ export default class Doctor extends Command {
         // so nothing is silently lost.
         if (postureReading.ok && postureGatesGlobalUniques(postureReading.posture)) {
           printStep("Checking unique scopes against the 'isolated' tenancy posture...");
-          const {
-            advisories,
-            ledgerFailure,
-            ledgerReaderFailure,
-            skippedLedgerEntries,
-          } = await findUnscopedGlobalUniques(cwd, config, postureReading.posture);
+          // #5429 — the entries were read once, at the top of the run, and the
+          // three ways that read can fail are already reported as their own
+          // `Installed packages` rows. What is left here is the unique-scope
+          // judgment itself, which is the only part of this block that depends
+          // on the posture.
+          const advisories = findUnscopedGlobalUniques(config, postureReading.posture, ledgerReading.entries);
           if (advisories.length > 0) {
             hasWarnings = true;
             for (const { source, finding } of advisories) {
@@ -1778,39 +1887,21 @@ export default class Doctor extends Command {
             }
             console.log(chalk.dim(`      → ${GLOBAL_UNIQUE_ISOLATED_PRESCRIPTION}`));
           }
-          // #5412 — the success line is a claim about BOTH halves of the
-          // advisory, so it may only be printed when both halves ran. A ledger
-          // that exists and could not be read is reported in its place; a
-          // false `✓` here is worse than a missing check, because it is the
-          // one thing that stops the operator looking further.
+          // #5412 / #5413 / #5644 — the success line is a claim about BOTH
+          // halves of the advisory, so it may only be printed when the ledger
+          // half was read in full: a directory that could not be enumerated, a
+          // file inside it that would not parse, and a reader that never loaded
+          // each leave installed packages unexamined, and any of them makes a
+          // `✓` here a false PASS. That is worse than a missing check, because
+          // it is the one thing that stops the operator looking further.
           //
-          // #5413 — entry-level corruption is the same claim failing one layer
-          // down, so it gates the `✓` in exactly the same way. The two are
-          // reported independently rather than as an either/or: a directory
-          // that read fine can still hold three unparseable files, and each
-          // names a different package the advisory could not look at.
-          if (skippedLedgerEntries.length > 0) {
-            hasWarnings = true;
-            renderHealthCheckResult(
-              installedPackageLedgerSkippedEntriesCheck(skippedLedgerEntries),
-              flags.verbose,
-            );
-          }
-          // #5644 — the same claim failing one boundary UP: the reader
-          // package is installed and would not load, so neither the directory
-          // nor the entries were ever reached. Mutually exclusive with the two
-          // above (nothing downstream of a reader that never loaded can also
-          // fail), so it is an `else if` rather than a fourth independent row.
-          if (ledgerReaderFailure) {
-            hasWarnings = true;
-            renderHealthCheckResult(
-              installedPackageLedgerReaderFailureCheck(ledgerReaderFailure.cause),
-              flags.verbose,
-            );
-          } else if (ledgerFailure) {
-            hasWarnings = true;
-            renderHealthCheckResult(installedPackageLedgerFailureCheck(ledgerFailure.cause), flags.verbose);
-          } else if (advisories.length === 0 && skippedLedgerEntries.length === 0) {
+          // #5429 — withholding it is ALL that survives here of those three
+          // issues. The findings themselves are rendered once, above, by the
+          // posture-independent check; re-rendering them here would report the
+          // same bad ledger twice under `isolated` and not at all under the
+          // other postures, which is the pair of defects this arrangement
+          // replaced.
+          if (advisories.length === 0 && ledgerReadingIsComplete(ledgerReading)) {
             printSuccess("Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment");
           }
         }

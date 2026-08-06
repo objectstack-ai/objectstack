@@ -20,7 +20,24 @@ export type { Plugin, PluginContext };
  * `@objectstack/spec`, since it is a server-side bootstrap concern only.
  */
 interface ProtocolWithDbRestore {
-  loadMetaFromDb(): Promise<{ loaded: number; errors: number; invalid?: number }>;
+  loadMetaFromDb(): Promise<{
+    loaded: number;
+    errors: number;
+    invalid?: number;
+    /**
+     * [#5897, ADR-0110 D3] True when the `sys_metadata` read itself failed for
+     * a reason that is NOT "the table has not been provisioned yet" — i.e. the
+     * row set never arrived, so `loaded: 0` is an outage rather than an empty
+     * store. `restoreMetadataFromDb` branches on it to tell the two apart.
+     *
+     * Optional, like `invalid` above and for the same reason: this interface is
+     * structural, matched by {@link hasLoadMetaFromDb} against whatever object
+     * happens to be registered as `protocol`. A shim that predates the field
+     * keeps type-checking and is simply read as "not an outage" — the same
+     * verdict it could express before.
+     */
+    storeUnavailable?: boolean;
+  }>;
 }
 
 /** Type guard — checks whether the service exposes `loadMetaFromDb`. */
@@ -1117,6 +1134,20 @@ export class ObjectQLPlugin implements Plugin {
    * - The protocol service is unavailable (e.g., in-memory-only mode).
    * - `loadMetaFromDb` is not implemented by the protocol shim.
    * - The underlying driver/table does not exist yet (first-run scenario).
+   *
+   * [#5897, ADR-0110 D3] Degrading is not the same as being fine, and this
+   * method used to be unable to say which one happened: `loadMetaFromDb`
+   * answered an unreachable database and an empty one with the same
+   * `loaded: 0`, so a boot that restored nothing because it could not read
+   * `sys_metadata` logged `debug` "No persisted metadata found in database"
+   * and the kernel reported ready. `storeUnavailable` now carries that
+   * distinction, and the outage branch logs at `error` per AGENTS.md
+   * "Degradation log levels" — runtime state silently disagreeing with
+   * persisted state, while the system keeps looking healthy, is exactly the
+   * class that rule reserves `error` for. Control flow is unchanged: boot
+   * still continues in the degraded state (refusing to boot on an unreadable
+   * overlay store would turn a transient outage into an outright outage),
+   * it just no longer claims that state is health.
    */
   private async restoreMetadataFromDb(ctx: PluginContext): Promise<void> {
     // Phase 1: Resolve protocol service (separate from DB I/O for clearer diagnostics)
@@ -1137,14 +1168,36 @@ export class ObjectQLPlugin implements Plugin {
 
     // Phase 2: DB hydration (loads into SchemaRegistry)
     try {
-      const { loaded, errors, invalid = 0 } = await protocol.loadMetaFromDb();
+      const { loaded, errors, invalid = 0, storeUnavailable = false } = await protocol.loadMetaFromDb();
 
-      if (loaded > 0 || errors > 0) {
+      if (storeUnavailable) {
+        // #5897 — FIRST branch on purpose: "we could not read the store" out-
+        // ranks any count taken from a read that did not happen. The line owes
+        // the two things AGENTS.md requires of a durability `error` — the
+        // concrete consequence, and the fix.
+        ctx.logger.error(
+          'sys_metadata could NOT be read at boot — persisted metadata was NOT restored, and this kernel will keep reporting healthy. ' +
+            'Every overlay object, view, app, permission and hook stored in the database is absent from the SchemaRegistry for the life of this process: ' +
+            'registry lookups answer "not declared" rather than "unavailable", so unknown-column query guards, hooks and relationships silently degrade, ' +
+            'and overlay objects get neither a synced table nor a metadata bridge. Authoring against this kernel writes on top of state it never loaded. ' +
+            'Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart. ' +
+            'A store that merely has not been provisioned yet is NOT this case; that first-boot path stays quiet.',
+          // `Logger.error(message, error?: Error, meta?)` — the error slot is
+          // genuinely empty here: `loadMetaFromDb` swallows the driver error
+          // and returns only the verdict, having already printed the driver's
+          // own text at `warn` (`[Protocol] DB hydration skipped: …`). Passing
+          // the counts in the declared meta slot rather than the error slot,
+          // per the contract in `@objectstack/spec/contracts`.
+          undefined,
+          { loaded, errors, invalid },
+        );
+      } else if (loaded > 0 || errors > 0) {
         // `invalid` (#3903): rows registered despite failing the current spec
         // schema AFTER the stored conversion chain — each already warned with
         // `[metadata_spec_invalid]` and carries `_diagnostics` on read.
         ctx.logger.info('Metadata restored from database to SchemaRegistry', { loaded, errors, invalid });
       } else {
+        // Reachable store, nothing in it — the ordinary empty/first-boot case.
         ctx.logger.debug('No persisted metadata found in database');
       }
     } catch (e: unknown) {

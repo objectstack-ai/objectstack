@@ -163,7 +163,10 @@ describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3
         const { engine, registered } = makeStubEngine([legacyObjectRow, legacyActionRow]);
         const protocol = new ObjectStackProtocolImplementation(engine);
         const res = await protocol.loadMetaFromDb();
-        expect(res).toEqual({ loaded: 2, errors: 0, invalid: 0 });
+        // `storeUnavailable: false` (#5897) — a read that happened. The whole
+        // return is asserted rather than the three counts, so a future field
+        // cannot appear here unexamined.
+        expect(res).toEqual({ loaded: 2, errors: 0, invalid: 0, storeUnavailable: false });
 
         const obj = registered.find((r) => r.kind === 'object')!;
         expect(obj.body.fields.amount.requiredWhen).toBe("record.status == 'sent'");
