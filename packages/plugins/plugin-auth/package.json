@@ -33,6 +33,7 @@
     "jose": "^6.2.5"
   },
   "devDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "hono": "^4.12.34",
