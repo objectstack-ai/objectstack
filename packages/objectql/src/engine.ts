@@ -2816,23 +2816,30 @@ export class ObjectQL implements IObjectQLEngine {
 
     const failures: any[] = [];
     for (const name of Object.keys(fields)) {
-      // A `readonly` field is never the caller's to answer for — BY
-      // CONSTRUCTION, not by exemption.
+      // [#4441, narrowing kept by #4743] A `readonly` field is never the
+      // caller's to answer for — BY CONSTRUCTION, not by exemption.
       //
-      // `stripReadonlyFields` removes a non-system caller's value from a
-      // readonly field before the write, and the create ingress does the same
-      // (`stripReadonlyForInsert`, #3043). So any value still sitting in one at
-      // this point was written by the PLATFORM, which puts it outside this
-      // check's own stated scope ("the reference the caller named").
+      // This check answers for exactly one thing: "the reference the CALLER
+      // named". `stripReadonlyFields` removes a non-system caller's value from
+      // a readonly field before the write, and the create ingress does the same
+      // (`stripReadonlyForInsert`, #3043). So a value still sitting in one at
+      // this point was minted by the PLATFORM — outside this check's own stated
+      // scope, whatever it happens to hold. That argument stands on its own and
+      // depends on no particular field: deleting the `continue` would start
+      // rejecting the platform's own writes, which is why it is recorded here
+      // (AGENTS.md PD #13) rather than left to be re-derived.
       //
-      // Found by the dogfood gate rather than by reasoning: `sys_metadata_history.
-      // recorded_by` is `Field.lookup('sys_user', { readonly: true })` that the
-      // metadata repository fills with `actor ?? 'system'` — a SENTINEL STRING,
-      // not a user id, on a write that does not carry `isSystem`. Checking it
-      // rejected ordinary metadata authoring (package create / publish / clone).
-      // The sentinel-in-a-lookup is a real modelling wart and is filed
-      // separately; it is not this change's to fix, and rejecting the
-      // platform's own write is not the way to report it.
+      // Historical note, kept because it is how the narrowing was FOUND (the
+      // dogfood gate, not reasoning) and because the audit next door re-scoped
+      // itself on its removal: `sys_metadata_history.recorded_by` is a
+      // `Field.lookup('sys_user', { readonly: true })` that the metadata
+      // repository once filled with `actor ?? 'system'` — a SENTINEL STRING,
+      // not a user id, on a write carrying no `isSystem`; checking it rejected
+      // ordinary metadata authoring (package create / publish / clone). #4556
+      // replaced that sentinel with NULL, so no platform write puts a non-id in
+      // a reference column any more. The narrowing survives it unchanged
+      // because it never rested on it — but #4551's blanket audit skip did, and
+      // #4743/#5719 duly re-scoped that one (see `inspectDanglingReferences`).
       //
       // This does NOT weaken #4441: the fields the issue names —
       // `sys_position_permission_set.permission_set_id` and
@@ -3000,8 +3007,14 @@ export class ObjectQL implements IObjectQLEngine {
    * with one predicate, so the report can never be more or less strict than the
    * rule it reports on.
    *
-   * See {@link auditDanglingReferences} for the judgments (readonly skip, empty
-   * values, unknown ≠ absent) and the bounded-scan honesty of the report.
+   * See {@link auditDanglingReferences} for the judgments (readonly SPLIT —
+   * `readonly` references are read like any other and their findings filed
+   * under `provenance` / `provenanceUndetermined` since #4743/#5719, not
+   * skipped; empty values; unknown ≠ absent) and for the bounded-scan honesty
+   * of the report, whose incompleteness now has a bucket at every level:
+   * `truncatedObjects` inside a table, `unscannedObjects` for the tables the
+   * budget never reached (#5718), `unreadableObjects` for what the datasource
+   * refused, and `aborted` for a run called off (#4747).
    */
   async inspectDanglingReferences(
     options?: DanglingReferenceAuditOptions,
@@ -5492,25 +5505,23 @@ export class ObjectQL implements IObjectQLEngine {
            let isPredicateWrite = false;
            // Pre-update snapshot. Exposed to after-hooks via `hookContext.previous`
            // (the HookContext contract documents `previous` for update/delete) and
-           // reused for object-level validation rules. Fetched once, only for
-           // single-id updates, when either a rule needs it (ADR-0020:
-           // state_machine / cross_field / script — a PATCH carries only changed
-           // fields) OR an afterUpdate hook is registered. The latter is what makes
-           // record-change flow triggers work: their start-condition gate reads
-           // `previous.*` (e.g. `status == "done" && previous.status != "done"`),
-           // which silently fails when `previous` is absent.
+           // reused for object-level validation rules and the roll-up recompute.
+           // Fetched once, only for single-id updates, and only when something on
+           // THIS object actually consumes it — see `wantsPriorRecord` below.
+           // Binding `previous` is what makes record-change flow triggers work:
+           // their start-condition gate reads `previous.*` (e.g. `status == "done"
+           // && previous.status != "done"`), which fails when `previous` is absent.
            //
            // [#4784] It is ALSO what supplies the `previous` binding to a
            // declarative hook `condition` (`hook-wrappers.ts`), which is how a
            // TRANSITION is expressed there: `previous.done != true &&
-           // record.done == true`. Note this needs NO second demand-driven
-           // fetch — the existing gate already fetches whenever an afterUpdate
-           // hook exists, and afterUpdate is the event whose context carries
-           // `previous`. Deliberately: adding a "does the condition reference
-           // `previous`?" analysis on top would be dead code today. If this
-           // gate is ever NARROWED (e.g. scoped per object), hook conditions
-           // reading `previous` must be counted into the new demand test —
-           // pinned by `hook-condition-previous-scope.test.ts`.
+           // record.done == true`. That needs NO second demand-driven fetch: the
+           // gate fetches whenever this object has an afterUpdate hook, and
+           // afterUpdate is the event whose context carries `previous`. Adding a
+           // "does the condition reference `previous`?" analysis on top would
+           // still be dead code — the demand is uniform across after-hooks, which
+           // #5038 records as a ruling (a hook's cost must not depend on its
+           // condition text).
            let priorRecord: Record<string, unknown> | null = null;
            // [#5038] The matched rows a PREDICATE write fires its per-row
            // `afterUpdate` contexts over — set only when this object actually
@@ -5530,7 +5541,77 @@ export class ObjectQL implements IObjectQLEngine {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
-               if (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {
+               // [#5284] Demand-driven, and the demand is asked PER OBJECT.
+               //
+               // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
+               // — the whole registration list, every object's hooks pooled — so
+               // ONE object being observed made EVERY single-id update on EVERY
+               // object pay an extra `driver.findOne`. The bulk paths next door
+               // already asked the same question per object
+               // (`hasHooksFor('afterUpdate', object)`, #5038), so one file held
+               // two precisions of one question; this is the narrower one, which
+               // `hasHooksFor` answers by mirroring `triggerHooks`' own filter
+               // (an entry with no `object`, or `'*'`, is still global).
+               //
+               // Measured, so the expectation is right: what this saves depends
+               // on how the deployment's hooks are REGISTERED, not on how many
+               // there are. Object-scoped registrants stop taxing their
+               // neighbours — a record-change flow trigger (`object:
+               // binding.object`), plugin-sharing's per-rule recompute, plugin-
+               // auth's `sys_user` snapshot refresh, every metadata-authored
+               // hook. Registrants that pass no `object` at all (plugin-audit's
+               // `writeAudit`, service-storage's file-reference reconcile) DO
+               // reach every object, so where they are loaded this gate stays
+               // true for everything and saves nothing — correctly, since their
+               // handlers really do run. Making those two express in the
+               // registration what their handlers already decide at runtime is
+               // #5846, not this change.
+               //
+               // Every consumer of `priorRecord` on this branch is counted, and
+               // there are exactly three:
+               //   * `needsPriorRecord(updateSchema)` — object validation rules
+               //     (ADR-0020: state_machine / cross_field / script; a PATCH
+               //     carries only changed fields) AND the `readonlyWhen` /
+               //     `requiredWhen` / option-visibility field predicates, which
+               //     it subsumes;
+               //   * an `afterUpdate` hook on THIS object — `hookContext.previous`
+               //     for its handler (plugin-audit, the record-change trigger)
+               //     and for its declarative `condition`;
+               //   * a roll-up `summary` aggregating this object — `previous`
+               //     carries the OLD parent id, so a child that REPOINTS
+               //     recomputes both parents (see `recomputeSummaries` below).
+               //     Without this term the narrowing would have turned an
+               //     incidental read into a silently stale parent summary: today
+               //     a repointed child is only saved by some other object having
+               //     an afterUpdate hook.
+               //
+               // `beforeUpdate` is deliberately NOT counted, and that is the one
+               // place this gate does NOT mirror `delete()`'s (#5272). The two
+               // paths order the read differently: `delete()` reads the pre-image
+               // BEFORE dispatching `beforeDelete` and binds it there, so a
+               // before-phase hook is a real reader of THAT read. `update()`
+               // dispatches `beforeUpdate` first (it may still rewrite the very
+               // payload this read would be compared against) and binds
+               // `hookContext.previous` only after the write — so no
+               // `beforeUpdate` hook can observe this row however the gate is
+               // written, and counting the event here would buy a read with no
+               // reader.
+               //
+               // What a kernel-hosted `beforeUpdate` hook DOES see comes from a
+               // different producer entirely: the `sys_fetch_previous_update`
+               // builtin (`plugin.ts`, `object: '*'`, priority 5) makes its own
+               // `findOne` and assigns `hookContext.previous` before any authored
+               // before-hook runs. That read is untouched by this gate — and it
+               // is why narrowing here cannot take a binding away from the before
+               // phase. It is also a duplicate of this one (plugin-audit's
+               // `captureBefore` makes a third): three reads of one row, filed
+               // as #5846 with the delete-side time-ordering (#5272) as the fix
+               // shape — not something to paper over by widening this gate.
+               const wantsPriorRecord =
+                 needsPriorRecord(updateSchema as any) ||
+                 this.hasHooksFor('afterUpdate', object) ||
+                 this.getSummaryDescriptors(object).length > 0;
+               if (wantsPriorRecord) {
                    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
                    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
                }

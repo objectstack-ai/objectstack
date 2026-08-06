@@ -5,14 +5,14 @@ description: Complete guide to all ObjectStack packages, services, drivers, plug
 
 # Package Overview
 
-ObjectStack is organized into **73 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
+ObjectStack is organized into **72 package manifests** across multiple categories. This guide provides an overview of the framework packages, services, drivers, plugins, and adapters in the [framework repository](https://github.com/objectstack-ai/objectstack/tree/main/packages).
 
 ### Package categories at a glance
 
 | Category | Count | Packages |
 |:---|:---:|:---|
 | **Core runtime** | 9 | `spec`, `core`, `runtime`, `types`, `metadata`, `objectql`, `rest`, `formula`, `platform-objects` |
-| **Client / DX** | 5 | `client`, `client-react`, `cli`, `create-objectstack`, `vscode-objectstack` |
+| **Client / DX** | 4 | `client`, `client-react`, `cli`, `create-objectstack` |
 | **Framework adapters** | 1 | `hono` (other frameworks: build a thin adapter on `HttpDispatcher` — see below) |
 | **Drivers** | 5 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb`, `driver-turso` |
 | **Plugins** | 18 | `plugin-auth`, `plugin-security`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-reports`, `plugin-hono-server`, `plugin-dev`, `plugin-pinyin-search`, `mcp`, trigger plugins (`trigger-api`, `trigger-record-change`, `trigger-schedule`), and knowledge/embedder plugins (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) |
@@ -441,14 +441,6 @@ npx os serve --dev
 ```bash
 npx create-objectstack my-app
 ```
-
-### objectstack-vscode
-
-**VS Code Extension** — IDE support for ObjectStack.
-
-- **Features**: Syntax highlighting, autocomplete, validation for metadata files
-- **When to use**: Enhanced development experience in VS Code
-- **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/vscode-objectstack/README.md)
 
 ---
 

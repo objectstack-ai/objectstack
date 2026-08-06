@@ -439,10 +439,17 @@ describe('[#4784] transition condition over a real engine', () => {
 
 describe('[#4784] a condition that never mentions `previous` costs zero extra fetches', () => {
   /**
-   * The demand-driven prior fetch (`engine.ts`, the `needsPriorRecord(...) ||
-   * afterUpdate hooks exist` gate) is the ONE mechanism that decides whether a
-   * prior row is read; #4784 adds no second one. These two pins are what a
-   * future narrowing of that gate has to keep true.
+   * The demand-driven prior fetch (`engine.ts`, the `wantsPriorRecord` gate) is
+   * the ONE mechanism that decides whether a prior row is read; #4784 adds no
+   * second one. These two pins are what a narrowing of that gate has to keep
+   * true — and #5284 has since narrowed it, from "ANY object has an afterUpdate
+   * hook" to "THIS object does (or its schema needs a prior row, or a roll-up
+   * aggregates it)". Both pins still hold, and the first one carries more
+   * weight than it did: the object it drives has a `beforeUpdate` hook, which
+   * the narrowed gate deliberately does not count (a `beforeUpdate` hook is
+   * dispatched before the read and observes no `previous` on this path, so
+   * counting it would buy a read with no reader — see
+   * `engine-update-prior-read-scope.test.ts`, which measures exactly that).
    */
   async function bootWith(hooks: Hook[]) {
     const engine = new ObjectQL();

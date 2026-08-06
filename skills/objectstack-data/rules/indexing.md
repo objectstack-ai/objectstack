@@ -9,28 +9,37 @@ ObjectStack automatically creates indexes for:
 - Foreign keys (lookup/master_detail fields)
 - Unique constraints
 
-**Only declare non-default values.** `type` defaults to `'btree'` and `unique` defaults to `false` — omit them when using defaults.
+**Only declare non-default values.** `unique` defaults to `false` — omit it when using the default.
 
-## Index Types
+## The declaration surface is exactly three keys
 
-| Type | Default? | When to Use | Performance |
-|:-----|:---------|:------------|:------------|
-| `btree` | ✅ Yes | Equality and range queries (`=`, `<`, `>`, `BETWEEN`) | Excellent |
-| `hash` | No | Exact equality only (`=`) — rare use case | Fast for `=`, poor for ranges |
-| `fulltext` | No | Text search columns (descriptions, notes) | Text search only |
-| `gin` | No | Array / JSONB containment, full-text search | JSONB, arrays, tags |
-| `gist` | No | Geospatial / range types | Location, geometry |
+A declared index has `name`, `fields` and `unique`. That is the whole surface,
+and it is the whole surface *because* it is all the driver materializes:
+`syncDeclaredIndexes` creates every declared index through knex's
+`table.index(fields, name)` / `table.unique(fields, { indexName })`.
+
+| Key | Required | Meaning |
+|:----|:---------|:--------|
+| `fields` | ✅ | The indexed columns, in order (left-to-right rule below) |
+| `unique` | optional | Uniqueness **and its scope** — see ADR-0120 section below |
+| `name` | optional | Custom index name; auto-generated when omitted |
+
+> **Retired at protocol 17 (#5248, #4943): `type` and `partial`.** Both were
+> authorable and neither was ever read by any driver — an authored `type`
+> selected no access method, and an authored `partial` produced a **full**
+> index with the predicate silently discarded. Writing either is now a `tsc`
+> error and a parse error carrying the migration prescription; run
+> `os migrate meta --from 16` to strip them automatically. What to do instead
+> is the subject of "Access methods and partial indexes" below.
 
 ## Syntax
 
 ```typescript
 indexes: [
-  { fields: ['status', 'created_at'] },                // btree (default)
-  { fields: ['email'], unique: 'organization' },       // btree + unique per org
-  { fields: ['hostname'], unique: 'global' },          // btree + unique platform-wide
-  { fields: ['description'], type: 'fulltext' },       // non-default type
-  { fields: ['tags'], type: 'gin' },                   // non-default type
-  { fields: ['location'], type: 'gist' },              // non-default type
+  { fields: ['status', 'created_at'] },                // plain composite
+  { fields: ['email'], unique: 'organization' },       // unique per org
+  { fields: ['hostname'], unique: 'global' },          // unique platform-wide
+  { name: 'idx_acct_status', fields: ['status'] },     // custom name
 ]
 ```
 
@@ -85,7 +94,8 @@ Notes an author has to know:
 1. **Join columns** — Non-foreign-key join fields
 2. **Frequent aggregations** — GROUP BY columns
 3. **Range queries** — Date ranges, numeric ranges
-4. **Partial data** — Use partial indexes for subset queries
+4. **Subset queries** — a partial index can help, but it is a database-layer
+   migration, not a declaration (see below)
 
 ### ❌ Avoid Indexing
 
@@ -127,82 +137,25 @@ indexes: [
 ]
 ```
 
-### Partial Index
-
-```typescript
-indexes: [
-  // Only index active records
-  {
-    fields: ['created_at'],
-    partial: "status = 'active'",
-  },
-
-  // Only index non-deleted records
-  {
-    fields: ['email'],
-    unique: 'organization',
-    partial: "deleted_at IS NULL",
-  },
-]
-```
-
-### Full-Text Index
-
-```typescript
-indexes: [
-  {
-    fields: ['description', 'notes'],
-    type: 'fulltext',
-  },
-]
-```
-
-### GIN Index (JSONB/Array)
-
-```typescript
-indexes: [
-  // JSONB field
-  {
-    fields: ['metadata'],
-    type: 'gin',
-  },
-
-  // Array field
-  {
-    fields: ['tags'],
-    type: 'gin',
-  },
-]
-```
-
-### Geospatial Index (GIST)
-
-```typescript
-indexes: [
-  {
-    fields: ['location'],
-    type: 'gist',
-  },
-]
-```
-
 ## Incorrect vs Correct
 
-### ❌ Incorrect — Redundant Default Values
+### ❌ Incorrect — Retired and Redundant Keys
 
 ```typescript
 indexes: [
-  { fields: ['status'], type: 'btree', unique: false },  // ❌ Redundant defaults
-  { fields: ['email'], type: 'btree', unique: 'organization' },  // ❌ Redundant type
+  { fields: ['status'], type: 'btree', unique: false },  // ❌ `type` retired; `unique: false` redundant
+  { fields: ['description'], type: 'fulltext' },         // ❌ `type` retired (#5248)
+  { fields: ['created_at'], partial: "status = 'active'" },  // ❌ `partial` retired (#5248)
 ]
 ```
 
-### ✅ Correct — Omit Defaults
+### ✅ Correct — Declare Only What the Driver Materializes
 
 ```typescript
 indexes: [
-  { fields: ['status'] },               // ✅ btree and unique: false are defaults
-  { fields: ['email'], unique: 'organization' },  // ✅ btree is default; the scope is required
+  { fields: ['status'] },                         // ✅ unique: false is the default
+  { fields: ['email'], unique: 'organization' },  // ✅ the scope is required
+  { fields: ['description', 'notes'] },           // ✅ plain index; see below for full-text
 ]
 ```
 
@@ -281,35 +234,46 @@ Place most **selective** (unique) fields first, then range/sort fields last.
 { fields: ['created_at', 'status', 'tenant_id'] }
 ```
 
-## Partial Indexes
+## Access methods and partial indexes
 
-Use partial indexes to index only a subset of rows:
+Both are real database capabilities. Neither is part of the **declaration**
+surface, and the keys that used to pretend otherwise (`type`, `partial`) were
+retired at protocol 17 (#5248, #4943) precisely because nothing consumed them.
 
-```typescript
-// Only index active records (common query)
-{
-  fields: ['created_at'],
-  partial: "status = 'active'",
-}
+**Access method (`btree` / `hash` / `gin` / `gist` / `fulltext`).** The driver
+and dialect decide. Postgres defaults to B-tree, which is the right choice for
+the equality, range and sort patterns this guide is about. The specialised
+methods are dialect-specific — `gin`/`gist` are Postgres, `fulltext` is
+MySQL-family — so a portable declaration could not name one anyway. When a
+workload genuinely needs one, issue it from a database-layer migration against
+the dialect you are actually running.
 
-// Only index high-value accounts
-{
-  fields: ['annual_revenue'],
-  partial: "annual_revenue > 1000000",
-}
+**Partial index (`CREATE INDEX … WHERE <predicate>`).** Supported on Postgres
+and SQLite (≥ 3.8.9), absent on MySQL. Because it cannot be expressed
+portably — and because knex's index builders have no way to emit a predicate —
+it is issued as raw SQL from a runtime migration. The platform does exactly
+this for its own overlay uniqueness: `metadata-protocol`'s `ensureOverlayIndex`
+runs
 
-// Only index non-deleted records
-{
-  fields: ['email'],
-  unique: 'organization',
-  partial: "deleted_at IS NULL",
-}
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active
+  ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''))
+  WHERE state = 'active';
 ```
 
-**Benefits:**
+with a plain-index fallback for dialects that reject the predicate. Follow that
+shape: declare the coarse index (or none) in metadata, and build the partial
+form in a migration.
+
+**Benefits of a partial index, when you do build one:**
 - Smaller index size
 - Faster writes (fewer rows to maintain)
 - Faster queries (focused data subset)
+
+> Drift detection understands database-authored partial indexes and leaves them
+> alone — it reads partiality back out of the database's own DDL, so a partial
+> index you create in a migration is not reported as drift and is never
+> targeted by `os migrate apply --allow-destructive`.
 
 ## Performance Trade-offs
 
@@ -367,8 +331,8 @@ SHOW INDEX FROM your_table;
 1. **Index foreign keys** — Always (automatic in ObjectStack)
 2. **Composite for common queries** — Combine frequently filtered columns
 3. **Order matters** — Most selective field first
-4. **Partial for subsets** — Index only relevant rows
-5. **Unique for constraints** — Enforce at DB level
+4. **Partial for subsets** — but build it in a migration, not a declaration
+5. **Unique for constraints** — Enforce at DB level, and always state the scope
 6. **Monitor usage** — Remove unused indexes
 7. **Limit total indexes** — Balance read/write performance
 8. **Avoid over-indexing** — More indexes ≠ better performance
@@ -395,29 +359,18 @@ indexes: [
 ]
 ```
 
-### Text Search
+### Text Search / Containment / Geospatial
+
+These three want a specialised access method (`fulltext`, `gin`, `gist`), which
+is **not** declarable — see "Access methods and partial indexes" above. Declare
+the plain index if the column is also filtered or sorted normally, and create
+the specialised one from a database-layer migration on the dialect you run.
 
 ```typescript
-// Query: WHERE description ILIKE '%keyword%'
+// Declaration: plain, portable, and all the driver can build
 indexes: [
-  { fields: ['description'], type: 'fulltext' },
-]
-```
-
-### Array/JSONB Containment
-
-```typescript
-// Query: WHERE tags @> ['urgent']
-indexes: [
-  { fields: ['tags'], type: 'gin' },
-]
-```
-
-### Location-Based Queries
-
-```typescript
-// Query: WHERE ST_DWithin(location, point, distance)
-indexes: [
-  { fields: ['location'], type: 'gist' },
+  { fields: ['description'] },   // text search: add a fulltext/GIN index in a migration
+  { fields: ['tags'] },          // containment (tags @> [...]): GIN, in a migration
+  { fields: ['location'] },      // ST_DWithin(...): GIST, in a migration
 ]
 ```

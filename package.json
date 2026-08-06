@@ -36,6 +36,7 @@
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs",
     "check:docs-audit-scope": "node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs",
     "check:role-word": "node scripts/check-role-word.mjs",
+    "check:skill-frame-sync": "node scripts/check-skill-frame-sync.mjs --self-test && node scripts/check-skill-frame-sync.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs",
     "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",

@@ -15,6 +15,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
+import { retiredKey } from '../shared/retired-key';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -266,15 +267,50 @@ export const ObjectCapabilities = z.object({
 
 /**
  * Schema for database indexes.
- * Enhanced with additional index types and configuration options
- * 
+ *
+ * The declaration surface is exactly what the driver materializes:
+ * `name` / `fields` / `unique` (ADR-0120 scope). Nothing else — see the
+ * retirement note below.
+ *
  * @example
  * {
  *   name: "idx_account_name",
  *   fields: ["name"],
- *   type: "btree",
  *   unique: true
  * }
+ *
+ * ## `type` / `partial` were RETIRED at protocol 17 (#5248, #4943, ADR-0049)
+ *
+ * Both were authorable and had **zero** DDL consumers.
+ * `SqlDriver.syncDeclaredIndexes` builds every declared index through knex's
+ * `table.unique(fields, { indexName })` / `table.index(fields, name)`, and the
+ * differ's `DeclaredIndexInput` (`driver-sql/src/schema-drift.ts`) carries
+ * `name` / `fields` / `unique` / `nullSafeColumns` — neither key ever reached
+ * a `CREATE INDEX`. `type` was the louder of the two because it also carried
+ * `.default('btree')`, so it appeared in *every* parse output: a knob that had
+ * never influenced a single statement, rendered as live configuration. That is
+ * the exact shape ADR-0078 (no-silently-inert-metadata) and ADR-0049
+ * (enforce-or-remove) exist to delete.
+ *
+ * The maintainer chose **remove** over **enforce** (2026-08-06, #5248):
+ * enforcing would mean per-dialect algorithm mapping (`gin`/`gist` Postgres-only,
+ * `fulltext` MySQL-only), raw-SQL `CREATE INDEX … WHERE` (MySQL has no partial
+ * index at all), and a redesign of how `isSyncReproducibleIndex` excludes
+ * partial indexes from incremental sync — real design cost for a capability
+ * nothing has asked for. If a genuine need appears, it comes back enforce-first.
+ *
+ * Replacements: an index **method** is the driver/dialect's choice, not a
+ * declaration-surface concern. A **partial** index is built at the database
+ * layer (a runtime migration issuing `CREATE UNIQUE INDEX … WHERE`, the way
+ * `metadata-protocol`'s `ensureOverlayIndex` does for `sys_metadata`); drift
+ * detection's exemption for DB-authored partial indexes is unaffected —
+ * `isSyncReproducibleIndex` reads a boolean parsed out of the database's OWN
+ * DDL (`parseIndexDdl`), which never had anything to do with this string.
+ *
+ * ⚠️ The tombstones sit at the BOTTOM of the shape deliberately (#5606): the
+ * docs renderer prints only the first `INLINE_KEY_LIMIT` keys of an inline
+ * shape and has no `z.never()` branch, so a tombstone high in the shape prints
+ * as `any` and reads as a free-form slot.
  *
  * ## ⛔ Deliberately still `.strip()` — #4001 批 20 held this one site
  *
@@ -286,30 +322,18 @@ export const ObjectCapabilities = z.object({
  * (`objectui` → `metadata-admin/EmbeddedItemEditor.tsx`, `FALLBACK_SCHEMAS.index`)
  * ships its own hand-copied JSON-Schema for this shape — the framework does not
  * publish one, because `index` is an embedded-only sub-type with no metadata
- * type of its own. That copy has drifted:
- *
- *   - it offers **`where`** for the partial-index predicate; this schema
- *     declares **`partial`**;
- *   - it offers **`brin`** in the algorithm enum, which this schema does not.
- *
- * The editor splices its form output into `object.indexes[]` and PUTs the whole
- * object, and `saveMetaItem` keeps the body verbatim while validating it. So
- * today an admin who fills in "Partial-index predicate" gets a clean save and a
- * key that this schema silently drops on every later parse — and closing this
- * shape would turn that same click into a 422 on a control the console itself
- * renders (the #5114 class).
- *
- * Closing it is still the right end state, but it is gated on the producer
- * being fixed first (contract-first: the drift is in the copy, not here), and
- * on an ADR-0049 answer for `type`/`partial` (#5247 / #5248) — neither is read by any driver
- * (`syncDeclaredIndexes` in `driver-sql` consumes `name`/`fields`/`unique`
- * only), so pointing an author at `partial` today would be a guidance entry
- * that claims more than the platform delivers (ledger finding 18).
+ * type of its own. That copy has drifted: it offers **`where`** for the partial
+ * predicate and **`brin`** in the algorithm enum. Both of its drifted controls
+ * now edit keys that no longer exist at all, which is #5247's job to delete
+ * (it is `Blocked-by` this retirement). Until that lands, an admin filling in
+ * "Partial-index predicate" still gets a clean save of a key this schema drops
+ * — closing the shape would turn that same click into a 422 on a control the
+ * console itself renders (the #5114 class), so the strip stays until the
+ * producer is fixed (contract-first: the drift is in the copy, not here).
  */
 export const IndexSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Index name (auto-generated if not provided)'),
   fields: z.array(z.string()).describe('Fields included in the index'),
-  type: z.enum(['btree', 'hash', 'gin', 'gist', 'fulltext']).optional().default('btree').describe('Index algorithm type'),
   // Unique scope on a DECLARED index (ADR-0120 D1, amending #3696):
   //
   //   - `'global'` — the VERBATIM contract: materialized over exactly the
@@ -337,7 +361,36 @@ export const IndexSchema = lazySchema(() => z.object({
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
   unique: UniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
-  partial: z.string().optional().describe('Partial index condition (SQL WHERE clause for conditional indexes)'),
+
+  // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
+  // Kept LAST in the shape on purpose — see the #5606 note in the block
+  // comment above. `IndexSchema` is not `.strict()`, so a plain delete would
+  // make Zod strip an authored value silently, which is the same no-op these
+  // keys already were (#3726 / #3733, the ADR-0104 class). The tombstone
+  // makes the removal audible in the two channels an upgrading author
+  // actually reads: `tsc` (input type `never`) and the parse itself.
+  // `object-index-type-partial-removed` strips both from stored/authored
+  // sources on the protocol-17 migration.
+  type: retiredKey(
+    '`indexes[].type` was removed in @objectstack/spec 17.0.0 (#5248, ADR-0049) — no driver ever ' +
+    'read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex\'s ' +
+    '`table.index()` / `table.unique()`, which cannot express an access method, so the value ' +
+    'changed no DDL; its `.default(\'btree\')` merely made an inert knob show up in every parse ' +
+    'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
+    'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
+    'database-layer migration when a workload actually needs one). ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  partial: retiredKey(
+    '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no ' +
+    'driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a ' +
+    'FULL index and the predicate silently did nothing. Delete the key. Partial indexes are ' +
+    'built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … ' +
+    'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
+    '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
+    'reads partiality back from the database\'s own DDL, never from this key. ' +
+    'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
 }));
 
 /**

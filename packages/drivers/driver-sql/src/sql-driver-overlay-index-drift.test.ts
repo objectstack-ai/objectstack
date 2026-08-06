@@ -83,11 +83,17 @@ describe('overlay index drift on a fresh database (#4884)', () => {
         state: { type: 'string' },
       },
       indexes: [
+        // Mirrors `metadata-core`'s sys-metadata.object.ts. It carried
+        // `partial: "state = 'active'"` until #5248 / #4943 retired the key;
+        // the declaration never produced a predicate (knex's `table.unique()`
+        // cannot express one), so dropping it here changes nothing this file
+        // measures — it keeps the fixture honest about what a real boot
+        // declares. The partial UNIQUE the drift cases below care about is the
+        // one `runEnsureOverlayIndex` issues in raw SQL.
         {
           name: 'idx_sys_metadata_overlay_active',
           fields: ['type', 'name', 'organization_id', 'package_id'],
           unique: true,
-          partial: "state = 'active'",
         },
         { name: 'idx_sys_metadata_org_type', fields: ['organization_id', 'type'] },
         { fields: ['state'] },

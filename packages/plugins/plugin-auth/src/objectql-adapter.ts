@@ -2,7 +2,7 @@
 
 import type { IDataEngine } from '@objectstack/core';
 import { createAdapterFactory } from 'better-auth/adapters';
-import type { CleanedWhere } from 'better-auth/adapters';
+import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
 
@@ -108,60 +108,167 @@ function normaliseLegacyDates<T extends Record<string, any> | null | undefined>(
 }
 
 /**
+ * Every better-auth where operator {@link convertWhere} translates.
+ *
+ * `satisfies readonly WhereOperator[]` keeps a typo out; the `never` check in
+ * `convertWhere`'s `default` arm keeps the SWITCH from falling behind this
+ * list; and `auth-where-operator-coverage.test.ts` pins this list against the
+ * runtime `whereOperators` export so it cannot fall behind better-auth's
+ * vocabulary either. All three are needed: the first two only prove the file is
+ * self-consistent, and a vocabulary that grew upstream is exactly the case
+ * #5813 was.
+ *
+ * Ordered as better-auth declares it, so the two lists diff by eye.
+ */
+export const SUPPORTED_WHERE_OPERATORS = [
+  'eq',
+  'ne',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+  'in',
+  'not_in',
+  'contains',
+  'starts_with',
+  'ends_with',
+] as const satisfies readonly WhereOperator[];
+
+/**
  * Convert better-auth where clause to ObjectQL query format.
  *
  * Field names in the incoming {@link CleanedWhere} are expected to already be
  * in snake_case (transformed by `createAdapterFactory`).
+ *
+ * ## The whole vocabulary, or a loud refusal — never a dropped predicate (#5813)
+ *
+ * better-auth's operator vocabulary is a closed list of eleven
+ * (`whereOperators` in `@better-auth/core/db/adapter`). This function used to
+ * translate eight of them and simply *fall off the end* of its `if / else if`
+ * chain for `not_in` / `starts_with` / `ends_with`: no key was written into
+ * `filter`, no warning was raised, and a `where` carrying only such a condition
+ * compiled to `{}`.
+ *
+ * A dropped predicate does not narrow a result set — it WIDENS it, on the
+ * identity tables:
+ *
+ *   - `findMany` / `count` answered over the whole table (bounded only by
+ *     `limit`) — `GET /api/v1/auth/admin/list-users?searchOperator=starts_with`
+ *     returned every user instead of the matching ones;
+ *   - `update` / `delete` / `consumeOne` / `incrementOne` all resolve their
+ *     target with `findOne(filter)` first, so `{}` selected an ARBITRARY row
+ *     (in practice the first) and the write landed on the wrong record.
+ *
+ * So the `default` arm below THROWS rather than skipping. It is the same
+ * restore-invariant discipline the #3948 family applied to driver-memory's
+ * matcher and to objectql's `having`: an operator a layer cannot honour must be
+ * refused by name, because silently answering a DIFFERENT question is the worse
+ * of the two failures. It is also the seam a future vocabulary addition lands
+ * on — better-auth growing a twelfth operator now fails loudly at the first
+ * query instead of quietly widening one.
+ *
+ * Case semantics: `starts_with` / `ends_with` are case-SENSITIVE on both sides
+ * of this translation — better-auth's `Where.mode` defaults to `"sensitive"`,
+ * and `$startsWith` / `$endsWith` are case-sensitive at the contract layer per
+ * the #5701 Q2=A ruling — so the direct translation opens no contract seam.
+ * (`mode: 'insensitive'` is a separate, still-unread field; see #5814. It is
+ * NOT an operator and is deliberately not refused here.)
  */
 function convertWhere(where: CleanedWhere[]): Record<string, any> {
   const filter: Record<string, any> = {};
 
   for (const condition of where) {
     const fieldName = condition.field;
+    // better-auth declares `Where.operator` optional with `@default eq`, and
+    // its factory materialises that default (`operator = "eq"` in
+    // `transformWhereClause`) before an adapter ever sees the clause — which is
+    // why `CleanedWhere` is `Required<Where>`. The raw `createObjectQLAdapter`
+    // below takes a hand-built clause that never passed through the factory, so
+    // the producer's own documented default is applied here rather than
+    // assumed. This is the declared contract, not a lenient alias: any operator
+    // that IS spelled out must be in the vocabulary.
+    const operator = condition.operator ?? 'eq';
 
-    if (condition.operator === 'eq') {
-      filter[fieldName] = condition.value;
-    } else if (condition.operator === 'ne') {
-      filter[fieldName] = { $ne: condition.value };
-    } else if (condition.operator === 'in') {
-      filter[fieldName] = { $in: condition.value };
-    } else if (condition.operator === 'gt') {
-      filter[fieldName] = { $gt: condition.value };
-    } else if (condition.operator === 'gte') {
-      filter[fieldName] = { $gte: condition.value };
-    } else if (condition.operator === 'lt') {
-      filter[fieldName] = { $lt: condition.value };
-    } else if (condition.operator === 'lte') {
-      filter[fieldName] = { $lte: condition.value };
-    } else if (condition.operator === 'contains') {
-      // [#5710] `$contains`, NOT `$regex`. better-auth's `contains` is a
-      // LITERAL substring search (`Where.mode` defaults to `"sensitive"`, and
-      // the value comes straight from a caller — `/admin/list-users`'
-      // `searchValue`), while `$regex` puts that value in a PATTERN position.
-      //
-      // What the bare `$regex` did, per backend, to one `contains('a.b')`:
-      //   - driver-memory: `new RegExp('a.b')` — `.` is a wildcard, so it
-      //     matched `axb`; an unbalanced `(` in the value made the pattern
-      //     illegal (a throw on the mingo path, a silent no-match on the
-      //     reference matcher's).
-      //   - driver-sql / -sqlite-wasm / -turso: compiled to a substring
-      //     `LIKE '%a.b%'` — metacharacters literal.
-      // One operator, two answers, and the divergence only shows up when the
-      // app's tests run on the memory double and production runs SQL (#4706).
-      //
-      // `$contains` is in the spec's `FILTER_OPERATORS` and every backend
-      // evaluates it as a literal substring (SQL side escapes `%`/`_`/`\` and
-      // emits an explicit `ESCAPE`), which is exactly better-auth's meaning.
-      // Case semantics follow the #5701 Q2=A ruling (`$contains` is
-      // case-SENSITIVE at the contract layer; the per-driver alignment is
-      // #5702's budget), which matches better-auth's own `mode: 'sensitive'`
-      // default.
-      //
-      // This is also the last live producer of `$regex` — it is what
-      // `driver-memory/src/filter-refusal.ts` means by "refusing it here would
-      // break a live producer", and the reason #5702's loud refusal is ordered
-      // after this flip.
-      filter[fieldName] = { $contains: condition.value };
+    switch (operator) {
+      case 'eq':
+        filter[fieldName] = condition.value;
+        break;
+      case 'ne':
+        filter[fieldName] = { $ne: condition.value };
+        break;
+      case 'in':
+        filter[fieldName] = { $in: condition.value };
+        break;
+      case 'not_in':
+        filter[fieldName] = { $nin: condition.value };
+        break;
+      case 'gt':
+        filter[fieldName] = { $gt: condition.value };
+        break;
+      case 'gte':
+        filter[fieldName] = { $gte: condition.value };
+        break;
+      case 'lt':
+        filter[fieldName] = { $lt: condition.value };
+        break;
+      case 'lte':
+        filter[fieldName] = { $lte: condition.value };
+        break;
+      case 'starts_with':
+        filter[fieldName] = { $startsWith: condition.value };
+        break;
+      case 'ends_with':
+        filter[fieldName] = { $endsWith: condition.value };
+        break;
+      case 'contains':
+        // [#5710] `$contains`, NOT `$regex`. better-auth's `contains` is a
+        // LITERAL substring search (`Where.mode` defaults to `"sensitive"`, and
+        // the value comes straight from a caller — `/admin/list-users`'
+        // `searchValue`), while `$regex` puts that value in a PATTERN position.
+        //
+        // What the bare `$regex` did, per backend, to one `contains('a.b')`:
+        //   - driver-memory: `new RegExp('a.b')` — `.` is a wildcard, so it
+        //     matched `axb`; an unbalanced `(` in the value made the pattern
+        //     illegal (a throw on the mingo path, a silent no-match on the
+        //     reference matcher's).
+        //   - driver-sql / -sqlite-wasm / -turso: compiled to a substring
+        //     `LIKE '%a.b%'` — metacharacters literal.
+        // One operator, two answers, and the divergence only shows up when the
+        // app's tests run on the memory double and production runs SQL (#4706).
+        //
+        // `$contains` is in the spec's `FILTER_OPERATORS` and every backend
+        // evaluates it as a literal substring (SQL side escapes `%`/`_`/`\` and
+        // emits an explicit `ESCAPE`), which is exactly better-auth's meaning.
+        // Case semantics follow the #5701 Q2=A ruling (`$contains` is
+        // case-SENSITIVE at the contract layer; the per-driver alignment is
+        // #5702's budget), which matches better-auth's own `mode: 'sensitive'`
+        // default.
+        //
+        // This is also the last live producer of `$regex` — it is what
+        // `driver-memory/src/filter-refusal.ts` means by "refusing it here would
+        // break a live producer", and the reason #5702's loud refusal is ordered
+        // after this flip.
+        filter[fieldName] = { $contains: condition.value };
+        break;
+      default: {
+        // Unreachable for the vocabulary this adapter is compiled against —
+        // `operator` narrows to `never` here, so a twelfth member appearing in
+        // better-auth's `whereOperators` with no `case` above is a TYPE error at
+        // the assignment below, caught by `pnpm --filter
+        // @objectstack/plugin-auth typecheck` long before a query runs. At
+        // RUNTIME the value is the real operator string, which is what gets
+        // named in the message.
+        const unhandled: never = operator;
+        throw new Error(
+          `[plugin-auth] Unsupported better-auth where operator ` +
+            `'${String(unhandled)}' on field '${fieldName}'. ` +
+            `Supported operators: ${SUPPORTED_WHERE_OPERATORS.join(', ')}. ` +
+            `Translate it to an ObjectQL operator in convertWhere() ` +
+            `(packages/plugins/plugin-auth/src/objectql-adapter.ts) — refusing ` +
+            `the query rather than dropping the predicate, which would widen ` +
+            `the result set instead of narrowing it (#5813).`,
+        );
+      }
     }
   }
 

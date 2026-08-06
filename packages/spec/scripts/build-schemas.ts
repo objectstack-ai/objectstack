@@ -95,6 +95,80 @@ if (CHECK && UPDATE_BASE) {
   );
   process.exit(1);
 }
+
+/**
+ * The ONE command that (re)writes the in-tree anchor (#5358). Every prescription
+ * about that file names this and nothing else — a message that still said
+ * `gen:schema` would send the reader to a command that no longer touches it.
+ *
+ * Declared up here, above the mode's own refusals, because the earliest of them
+ * runs before this file has read a single schema (#5370).
+ */
+const REANCHOR_COMMAND = 'pnpm --filter @objectstack/spec gen:authorable-surface-base';
+
+/**
+ * The path git itself reports for `$GIT_DIR/MERGE_HEAD`, or null when this is not
+ * a git repository at all (an image-build stage, an unpacked tarball).
+ *
+ * Asked of git rather than assembled by hand: in every linked worktree — which
+ * AGENTS.md §11 requires every agent in this repo to work in — `.git` is a FILE,
+ * and the real per-worktree MERGE_HEAD lives under `.git/worktrees/<name>/`. A
+ * literal `.git/MERGE_HEAD` finds nothing there, so the hand-built path would
+ * leave this guard dead in exactly the checkouts the repo tells people to use.
+ */
+function mergeHeadPath(cwd: string): string | null {
+  const probe = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 60_000,
+  });
+  if (probe.status !== 0) return null;
+  const reported = (probe.stdout ?? '').trim();
+  // Relative to cwd inside a main worktree, absolute inside a linked one.
+  return reported ? path.resolve(cwd, reported) : null;
+}
+
+// ── Re-anchoring mid-merge resolves the WRONG baseline (#5370) ────────
+//
+// `resolveSurfaceBase()` anchors on `merge-base(HEAD, origin/main)`. While a merge
+// is stopped before its commit, HEAD is still the branch tip from BEFORE the
+// merge, so that merge base is the branch's OLD fork point rather than the main
+// tip being merged in. Re-anchoring there moves `baseRev` BACKWARDS.
+//
+// What makes this worth a refusal rather than a warning is that nothing else can
+// catch it: the older rev is a genuine origin/main ancestor and the keys written
+// are that commit's surface verbatim, so the anchor stays AUTHENTIC — the
+// authenticity check, `check:authorable-surface` and the pre-commit os-regen
+// guard all pass on the regressed file. The only trace is a reverse `baseRev`
+// move in the diff, which is the #4650 attack shape, written by the generator
+// itself. Observed on the #5312 sync relay: `baseRev` rolled from main's `1c3da1f`
+// back to `5aae790`, returning the 109 keys #5321 had just retired.
+//
+// `scripts/regen-artifacts.mjs` states the same rule for the merge driver's side —
+// "Re-anchor after the merge is committed, or not at all" — and keeps the driver
+// from ever prescribing this command mid-merge. This is that sentence enforced for
+// the human who types it anyway, and it refuses BEFORE the ~1600-schema
+// generation, like the mutual-exclusion refusal above.
+if (UPDATE_BASE) {
+  const mergeHead = mergeHeadPath(path.resolve(__dirname, '..'));
+  if (mergeHead && fs.existsSync(mergeHead)) {
+    console.error(
+      `\n❌ --update-base refuses to run mid-merge (#5370).\n\n` +
+        `   MERGE_HEAD is present, so this merge has not been committed yet. The baseline this\n` +
+        `   mode re-anchors on is \`merge-base(HEAD, origin/main)\`, and mid-merge HEAD is still\n` +
+        `   the branch tip from before the merge — that merge base is the branch's OLD fork\n` +
+        `   point, not the main tip being merged in. Re-anchoring here moves baseRev BACKWARDS,\n` +
+        `   and nothing downstream reports it: the older rev is a real origin/main ancestor and\n` +
+        `   its keys are that commit's surface verbatim, so the anchor stays AUTHENTIC while\n` +
+        `   silently undoing whatever main had already anchored past — a retirement included.\n\n` +
+        `   Commit the merge first, then re-anchor on the merged tree:\n\n` +
+        `     git commit            # finish the merge\n` +
+        `     ${REANCHOR_COMMAND}\n\n` +
+        `   Re-anchor after the merge is committed, or not at all (scripts/regen-artifacts.mjs).`,
+    );
+    process.exit(1);
+  }
+}
 const SPEC_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8')).version;
 const SCHEMA_BASE_URL = `https://schema.objectstack.io/v${SPEC_VERSION}`;
 
@@ -471,12 +545,9 @@ const AUTHORABLE_SURFACE_PATH = path.resolve(__dirname, '../authorable-surface.j
 const AUTHORABLE_SURFACE_BASE_PATH = path.resolve(__dirname, '../authorable-surface.base.json');
 const SURFACE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_PATH);
 const SURFACE_BASE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_BASE_PATH);
-/**
- * The ONE command that (re)writes the in-tree anchor (#5358). Every prescription
- * about that file names this and nothing else — a message that still said
- * `gen:schema` would send the reader to a command that no longer touches it.
- */
-const REANCHOR_COMMAND = 'pnpm --filter @objectstack/spec gen:authorable-surface-base';
+// `REANCHOR_COMMAND` — the ONE command that writes this file — is declared near
+// the top of this script, next to the `--update-base` flag it names: the merge
+// refusal there quotes it, and that refusal runs before anything here (#5370).
 const RETIRED_MARK = ' [RETIRED]';
 
 interface AuthorableSurface { description: string; keys: string[] }
@@ -914,6 +985,20 @@ function readCommittedSurfaceBase(): { raw: string; doc: AuthorableSurfaceBase }
 type GitRun = (...args: string[]) => { status: number | null; stdout: string; stderr: string };
 
 /**
+ * Git, run in the package directory — the one runner every check below shares
+ * (`resolveSurfaceBase()` used to hold a private copy of it; the anchor's
+ * monotonicity guard needs the same one, at a different point in the script).
+ */
+const gitInPackage: GitRun = (...args: string[]) =>
+  // A network-less environment that BLACKHOLES rather than refuses (proxied
+  // air gaps do) would otherwise hang the whole build in the self-heal fetch.
+  spawnSync('git', args, {
+    cwd: path.dirname(AUTHORABLE_SURFACE_PATH),
+    encoding: 'utf-8' as const,
+    timeout: 60_000,
+  });
+
+/**
  * The in-tree anchor must be an authentic copy of an UPSTREAM commit's baseline,
  * and this is the environment that can prove it (#5235).
  *
@@ -1035,6 +1120,93 @@ function compareAnchorKeys(
 }
 
 /**
+ * The anchor moves FORWARD, or it does not move (#5370).
+ *
+ * Called immediately before the only write, so a re-anchor may replace `baseRev`
+ * only with a commit the committed `baseRev` is an ancestor of. Everything the
+ * gate normally proves is *about a single rev* — that it is on origin/main and
+ * that its keys are that commit's surface — and a rev the branch merely forked
+ * from earlier passes both. So a backwards move is invisible to every other
+ * check: `verifyCommittedSurfaceBase` is green before and after, and so is
+ * `check:authorable-surface`. The loss is real anyway. The anchor main advanced
+ * is replaced by an older one, so a retirement main had already anchored past
+ * comes back, the deletion gate stops seeing it, and the offline consumers of
+ * #5235 get a baseline older than the published one.
+ *
+ * Three exit codes from `merge-base --is-ancestor`, and they must be read as
+ * three answers, not two: 0 is "ancestor", 1 is "not an ancestor", and anything
+ * else (128 with a `fatal:`, or `null` from the timeout) is git declining to
+ * answer. Folded into a `&&`/`||` chain the third collapses into the second and
+ * an ERROR becomes a verdict — the trap cloud#1116 paid for. Here it fails
+ * CLOSED: an ancestry nobody could establish refuses the write.
+ *
+ * Shallow history makes a FOURTH reading necessary, and it is asymmetric. A
+ * truncated walk can only ever LOSE reachability, never invent it, so exit 0 is
+ * proof wherever it appears — while exit 1 in a shallow checkout means nothing at
+ * all (#5358's own first CI run was failed by exactly that answer, about a commit
+ * that plainly was an ancestor; the same false 1 is reproducible today in any
+ * agent container, where the anchor's `baseRev` sits in `.git/shallow` as its own
+ * grafted root). So shallowness is consulted only to decide whether a NEGATIVE
+ * counts — never to discard a positive, which would refuse re-anchors that are
+ * demonstrably fine.
+ */
+function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev: string): void {
+  if (committedRev === resolvedRev) return;
+  const from = committedRev.slice(0, 12);
+  const to = resolvedRev.slice(0, 12);
+  const refuseIndeterminate = (why: string): never => {
+    console.error(
+      `\n❌ --update-base cannot establish which way ${SURFACE_BASE_FILE_NAME} would move (#5370).\n\n` +
+        `   committed baseRev: ${from}\n` +
+        `   resolved baseline: ${to}   (merge base of HEAD with origin/main)\n\n` +
+        `   ${why}\n\n` +
+        `   The anchor may only ever move forward, so an ancestry that could not be established\n` +
+        `   refuses the write instead of defaulting to one of the two answers. Re-anchor from a\n` +
+        `   checkout with walkable history (\`git fetch --unshallow origin\`, or a full clone) and\n` +
+        `   run \`${REANCHOR_COMMAND}\` there.`,
+    );
+    process.exit(1);
+  };
+
+  const probe = git('merge-base', '--is-ancestor', committedRev, resolvedRev);
+  // Reachability was demonstrated. Truncation cannot fake that, so this is the
+  // one answer that stands in every checkout, shallow included.
+  if (probe.status === 0) return;
+  if (probe.status !== 1) {
+    return refuseIndeterminate(
+      `\`git merge-base --is-ancestor ${from} ${to}\` did not answer (exit ${probe.status}):\n` +
+        `   ${(probe.stderr || '').trim().split('\n')[0] || '(no output)'}`,
+    );
+  }
+  // A negative, on the other hand, is only meaningful where history is WALKABLE —
+  // the same truncation `verifyCommittedSurfaceBase` accounts for. There it SKIPS
+  // a verification, which is safe; here it would BLESS a write, which is not.
+  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+    return refuseIndeterminate(
+      'This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n' +
+        `   "not an ancestor" about commits that plainly are one — ${from} is very likely one of\n` +
+        '   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).',
+    );
+  }
+  console.error(
+    `\n❌ --update-base would move ${SURFACE_BASE_FILE_NAME} BACKWARDS (#5370).\n\n` +
+      `   committed baseRev: ${from}\n` +
+      `   resolved baseline: ${to}   (merge base of HEAD with origin/main)\n\n` +
+      `   ${to} is not a descendant of ${from}, so re-anchoring here would replace an anchor main\n` +
+      `   has already advanced with an older one. Both are authentic — ${to} is a real origin/main\n` +
+      `   ancestor and its keys are that commit's surface verbatim — which is exactly why no other\n` +
+      `   gate objects: this file's authenticity check passes, check:authorable-surface passes, and\n` +
+      `   the only trace left is a reverse baseRev move in the diff, indistinguishable at a glance\n` +
+      `   from the #4650 attack shape. What it silently drops is whatever main anchored past in\n` +
+      `   between, a retirement included.\n\n` +
+      `   HEAD's merge base with origin/main is behind the committed anchor. Bring HEAD up to date\n` +
+      `   and COMMIT that first — \`git fetch origin main\` then merge or rebase — and re-anchor on\n` +
+      `   the result: \`${REANCHOR_COMMAND}\`.`,
+  );
+  process.exit(1);
+}
+
+/**
  * Set when THIS run resolved the baseline from git. It is the ONLY input
  * `--update-base` may write the in-tree anchor from: an offline build must never
  * be able to advance the anchor to its own state (#5235). The second half of that
@@ -1066,11 +1238,7 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
  * closes. With no anchor of either kind this still exits 1.
  */
 function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
-  const cwd = path.dirname(AUTHORABLE_SURFACE_PATH);
-  const git: GitRun = (...args: string[]) =>
-    // A network-less environment that BLACKHOLES rather than refuses (proxied
-    // air gaps do) would otherwise hang the whole build in the self-heal fetch.
-    spawnSync('git', args, { cwd, encoding: 'utf-8' as const, timeout: 60_000 });
+  const git = gitInPackage;
   const committed = readCommittedSurfaceBase();
 
   // CI's typecheck job checks out shallow with no branch refs, so fetch the
@@ -1289,6 +1457,13 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     }
     if (UPDATE_BASE) {
       if (drifted) {
+        // Direction first: the anchor moves forward or not at all (#5370). Asked
+        // HERE rather than up front because this is where the rev that would be
+        // written is finally known — and because it is the write, not the run,
+        // that has to be refused: a `--update-base` with nothing to write is not
+        // turned into a failure by a rev comparison. A creating run (no committed
+        // anchor) has no direction to check.
+        if (committed) assertAnchorMovesForward(gitInPackage, committed.doc.baseRev, anchor.rev);
         fs.writeFileSync(AUTHORABLE_SURFACE_BASE_PATH, serializeSurfaceBase(anchor.rev, anchor.keys));
         console.log(
           `\n⚓ ${SURFACE_BASE_FILE_NAME} ${committed ? 'refreshed to' : 'created at'} ` +
