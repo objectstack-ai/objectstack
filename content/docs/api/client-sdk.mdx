@@ -687,7 +687,7 @@ pnpm test:integration
 Integration tests verify end-to-end communication with a live ObjectStack server across the client's API namespaces.
 
 <Callout type="info">
-**Test coverage**: the client's *unit* tests are what cover the API namespaces broadly. Integration tests against a live server are far narrower — only discovery/connection is written today; the remaining namespaces are listed as a backlog in [`packages/client/tests/integration/README.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md). Protocol coverage per method is tracked in the compliance matrix below, not by integration tests.
+**Test coverage**: the client's *unit* tests are what cover the API namespaces broadly. Integration tests against a live server are far narrower — only discovery/connection is written today; the remaining namespaces are listed as a backlog in [`packages/client/tests/integration/README.md`](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md). Per-route coverage is asserted by code in CI — [`packages/runtime/src/route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/runtime/src/route-ledger.ts) plus its conformance tests — not by integration tests and not by a hand-maintained table.
 </Callout>
 
 ---
