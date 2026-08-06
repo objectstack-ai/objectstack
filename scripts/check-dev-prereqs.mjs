@@ -225,11 +225,12 @@ function report(verdict) {
     `\n✗ The workspace is not built — 1 unmet precondition, not a list of problems.\n\n` +
       `    ${missing.length} of ${checked} workspace packages declare an entry point under dist/ that is not on disk:\n\n` +
       `${list}${more}\n\n` +
-      `  Booting anyway never names this. It fails at 'datasource: connect failed'\n` +
-      `  and suggests two fixes that are both wrong for this cause — neither editing the\n` +
-      `  datasource config nor OS_ALLOW_DRIVER_CONNECT_FAILURE=1 builds the missing artifact —\n` +
-      `  and hand-building the named package then prints 20+ TS errors that read like real\n` +
-      `  contract drift and are only a stale dist (objectstack-ai/objectstack#5726).\n\n` +
+      `  Booting anyway never names this. Where that led once it was chased\n` +
+      `  (objectstack-ai/objectstack#5726): a 'datasource: connect failed' whose two\n` +
+      `  suggested fixes are both wrong for this cause — neither editing the datasource\n` +
+      `  config nor OS_ALLOW_DRIVER_CONNECT_FAILURE=1 builds a missing artifact — and then\n` +
+      `  20+ TS errors from hand-building the package, reading exactly like real contract\n` +
+      `  drift while being nothing but a stale dist.\n\n` +
       `  Fix:\n\n` +
       `      ${fix}\n`,
   );
