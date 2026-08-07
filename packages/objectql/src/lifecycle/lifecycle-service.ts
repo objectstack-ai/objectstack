@@ -1072,7 +1072,22 @@ export class LifecycleService {
     }
 
     // Cold-side retention: `keep` bounds the archive itself.
-    if (archive.keep && typeof cold.deleteMany === 'function') {
+    //
+    // [#4747] Leg boundary, after the batch loop — the last leg `archiveObject`
+    // can issue, and the one the per-batch check above does not reach. The loop
+    // may have just broken BECAUSE it read `aborted === true`, so firing a
+    // predicate DELETE at the cold datasource here is not a race teardown lost:
+    // it is a write issued by code that had already been told the engine is
+    // going away. That is what separates this leg from a lone `await` sitting
+    // between two checkpoints (the pre-#5194 reap shape) — there, nothing had
+    // observed the bit, and carrying on was not a decision.
+    //
+    // Deferring costs nothing. The cold prune is pure retention reclaim, not
+    // half of a pair: unlike the loop's `upsert` → `bulkDelete`, which must
+    // finish so the Archiver never hot-deletes a row the cold store has not
+    // taken, nothing is left inconsistent by skipping it. The next sweep
+    // re-derives the same cutoff from the same `keep` and prunes the same rows.
+    if (!this.abort.aborted && archive.keep && typeof cold.deleteMany === 'function') {
       const keepCutoff = new Date(this.now() - parseLifecycleDuration(archive.keep)).toISOString();
       await cold.deleteMany(object, { where: { created_at: { $lt: keepCutoff } } });
     }
