@@ -118,7 +118,7 @@ export const FieldZooViews = defineView({
       ],
       bulkActions: [
         'showcase_zoo_relation_gate',
-      'showcase_zoo_user_gate',
+        'showcase_zoo_user_gate',
         'showcase_zoo_visible_string',
         'showcase_zoo_visible_tagged',
         'showcase_zoo_visible_envelope',
