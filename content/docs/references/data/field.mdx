@@ -73,7 +73,7 @@ const result = AddressSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Machine name (snake_case) |
 | **label** | `string` | optional | Human readable label |
-| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | ✅ | Field Data Type |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | ✅ | Field Data Type |
 | **description** | `string` | optional | Tooltip/Help text |
 | **format** | `string` | optional | Format string (e.g. email, phone) |
 | **required** | `boolean` | optional | Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field. |
@@ -137,6 +137,58 @@ const result = AddressSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Allowed Values: `Field.type`
+
+* `text`
+* `textarea`
+* `email`
+* `url`
+* `phone`
+* `password`
+* `secret`
+* `markdown`
+* `html`
+* `richtext`
+* `number`
+* `currency`
+* `percent`
+* `date`
+* `datetime`
+* `time`
+* `boolean`
+* `toggle`
+* `select`
+* `multiselect`
+* `radio`
+* `checkboxes`
+* `lookup`
+* `master_detail`
+* `tree`
+* `user`
+* `image`
+* `file`
+* `avatar`
+* `video`
+* `audio`
+* `formula`
+* `summary`
+* `autonumber`
+* `composite`
+* `repeater`
+* `record`
+* `location`
+* `address`
+* `code`
+* `json`
+* `color`
+* `rating`
+* `slider`
+* `signature`
+* `qrcode`
+* `progress`
+* `tags`
+* `vector`
 
 
 ---
