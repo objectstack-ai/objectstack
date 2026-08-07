@@ -332,14 +332,29 @@ export const HookContextSchema = lazySchema(() => z.object({
    * live there because only objectql can execute a dispatch, and spec must not
    * depend on it.
    *
-   * - find (also fires for findOne): { ast: QueryAST, options: DriverOptions }
-   * - insert (one context per row, batch inserts included): { data: Record, options: DriverOptions }
-   * - update (single id): { id: ID, data: Record, options: DriverOptions }
-   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: DriverOptions }
+   * - find (also fires for findOne): { ast: QueryAST, options: see PHASE below }
+   * - insert (one context per row, batch inserts included): { data: Record, options: see PHASE below }
+   * - update (single id): { id: ID, data: Record, options: see PHASE below }
+   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: EngineUpdateOptions }
    * - update (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, data: Record, options: DriverOptions }
-   * - delete (single id): { id: ID, options: DriverOptions }
-   * - delete (bulk, multi:true) — before: { id: undefined, options: DriverOptions }
+   * - delete (single id): { id: ID, options: see PHASE below }
+   * - delete (bulk, multi:true) — before: { id: undefined, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
+   *
+   * PHASE — `input.options` is the one slot whose TYPE depends on when you read
+   * it, on every path above. The engine builds the context with the CALLER's
+   * own options bag (`EngineQueryOptions` / `DataEngineInsertOptions` /
+   * `EngineUpdateOptions` / `EngineDeleteOptions`) and only AFTER the `before*`
+   * handlers return — before the driver call — merges the driver-facing keys
+   * onto it (`buildDriverOptions`: transaction, tenantId, timezone, …). So a
+   * `before*` handler reads the CALLER's bag, `where` and `multi` included; an
+   * `after*` handler and the driver read the `DriverOptions` view. The merge is
+   * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
+   * the widening is one-way and nothing a `before*` handler saw disappears.
+   * #5997 corrected the two `before` rows above, which had said `DriverOptions`
+   * (a type that declares no `where` and no `multi`): that is not what the
+   * engine builds there, and not what the two consumers named below read.
+   * Measured and pinned in the same contract test as the rest of this table.
    *
    * A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/
    * `beforeDelete` events as a single-id write, ONCE for the whole batch;
@@ -347,13 +362,26 @@ export const HookContextSchema = lazySchema(() => z.object({
    * there — binding it is precisely the test the engine dispatches on, so a
    * `before*` handler that sets it REROUTES the write onto the single-id path.
    *
-   * The row-scoping predicate is NOT reachable from `input` at all. It lives
-   * on the engine-internal `OperationContext.ast` (#2982) so that the filters
+   * The row-scoping predicate a bulk write EXECUTES is not reachable from
+   * `input` at all. It is the composed `ast`, which lives on the
+   * engine-internal `OperationContext.ast` (#2982) so that the filters
    * middleware composes onto it — RLS write policies, the sharing plugin's
-   * editable-rows filter — bind the driver call itself, where no handler can
-   * widen them. A bulk write therefore hands hooks no queryable predicate:
-   * scope the batch through `options.where` at the CALLER, or work per row on
-   * the `after*` events below.
+   * editable-rows filter — and binds the driver call itself, where no handler
+   * can widen it. What a `before*` handler CAN read is the strictly separate
+   * fact above: the caller's RAW predicate on `input.options.where` (with
+   * `input.options.multi`). The two differ by exactly the middleware's
+   * narrowing, and middleware only ever narrows, never widens — so treating
+   * the caller's predicate as the batch's row set is an UPPER-BOUND
+   * approximation. That is the safe direction for a fail-closed guard (it may
+   * refuse a write that would have touched fewer rows; it can never miss one
+   * that touches more) and the wrong direction for anything that needs the
+   * effective set exactly, which should work per row on the `after*` events
+   * below instead. Both of `plugin-auth`'s break-glass last-admin guards
+   * (#5892 ban half, #5941 delete half) are built on that upper bound, and
+   * objectql's own `isPredicateBulkWrite` (`hook-wrappers.ts`, #5038/#4775)
+   * reads `input.options.multi` from the same slot to tell a batch dispatch
+   * from a per-row one. Do not narrow `input.options` on the `before*` paths
+   * without re-reading all three.
    *
    * Since #5038 (ADR-0058's bulk-write addendum) the `after*` events on a bulk
    * write dispatch ONCE PER MATCHED ROW, each on a single-record-shaped
