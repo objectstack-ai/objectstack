@@ -14,8 +14,10 @@ Filter values in dashboards, views, reports and pages travel as JSON.
 Because JSON cannot evaluate code, callers cannot write `daysAgo(30)`
 inline; they use a tiny placeholder grammar instead:
 
-    { published_at: { $gte: '{last_quarter_start}' } }
-    { signal_at:    { $gte: '{30_days_ago}' } }
+```
+{ published_at: { $gte: '{last_quarter_start}' } }
+{ signal_at:    { $gte: '{30_days_ago}' } }
+```
 
 The placeholders are expanded on **both** sides of the wire, so a
 filter behaves the same wherever it is executed (framework#3582):

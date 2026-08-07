@@ -14,8 +14,10 @@ These are the sibling vocabulary to `{date-macros}`. Filter values in
 dashboards, views, reports and pages travel as JSON, so a user-scoped
 slice cannot call `currentUser().id` inline — it writes a placeholder:
 
-    { owner_id: '{current_user_id}' }
-    [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
+```
+{ owner_id: '{current_user_id}' }
+[{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
+```
 
 Like date macros, the placeholders are expanded on **both** sides of
 the wire (framework#3582): `resolveContextTokens()` in
