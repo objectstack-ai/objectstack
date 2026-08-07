@@ -371,14 +371,27 @@ Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `F
       { "industry": "Healthcare", "revenue_sum": 80000, "count": 3 }
     ],
     "fields": [
-      { "name": "industry", "type": "string", "label": "Industry" },
-      { "name": "revenue_sum", "type": "number", "label": "Revenue Sum", "format": "$0,0" },
-      { "name": "count", "type": "number", "label": "Count" }
+      { "name": "industry", "type": "string" },
+      { "name": "revenue_sum", "type": "number" },
+      { "name": "count", "type": "number" }
     ],
     "sql": "SELECT ..."
   }
 }
 ```
+
+<Callout type="info">
+**`fields[]` describes columns, not presentation.** Each entry carries exactly `name` and
+`type` — that is the whole descriptor `AnalyticsResultResponseSchema` declares, and every
+strategy answering this endpoint emits those two keys and nothing else.
+
+Display name and number format live one layer up, in the **cube's metric/dimension
+definition** (`MetricSchema.label` / `MetricSchema.format`, `DimensionSchema.label`), and
+are read from cube metadata — `GET /analytics/meta` below reports each measure's and
+dimension's declared label as `title`. Reading `data.fields[i].label` or
+`data.fields[i].format` off a query result yields `undefined`; a client that renders table
+headers or formats amounts reads them from the cube metadata instead.
+</Callout>
 
 ### `GET /analytics/meta`
 
