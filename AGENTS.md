@@ -190,20 +190,87 @@ Even inside your own worktree, operate defensively:
    your working-tree change between the edit and the commit. On a real conflict,
    re-apply only *your* lines and let the PR merge integrate the rest.
 6. **Don't rebase or force-update shared branches** to tidy other agents' commits.
-7. **Merge only after remote CI is fully green. Never `gh pr merge --auto`.**
-   Auto-merge can land a still-red PR onto shared `main` and break it for every
-   parallel agent (see #1475). Merge serially; rebase other open branches before
-   merging the next one.
-   **Once the repo's merge queue is enabled, "add to queue" IS the sanctioned
-   path** — it is the opposite of the auto-merge this rule bans: the queue
-   builds your PR *as merged onto the current `main`* and lands it only if that
-   speculative result is green, which is exactly the §10 re-verification, done
-   by the platform, race-free. The manual serial protocol above is the fallback
-   for when the queue is unavailable. (Why this matters: `main` can land a PR
-   every few minutes at peak; a manual merge–reverify loop takes ~25 minutes,
-   so under load it *never* wins the race — one PR went three full green
-   cycles without managing to land. That is a livelock, not a discipline
-   failure.)
+7. **Land through the merge queue: arm auto-merge on a PR that is already
+   green, accepted and non-draft, then let the queue merge it.** Arming is how
+   you enter the queue, and the queue is what makes arming safe — it rebuilds
+   your PR *as merged onto the current `main`*, re-runs the subscribing
+   workflows on that rebuilt generation, and lands it only if the required ones
+   pass. That is the §10 re-verification, done by the platform, race-free.
+
+   **What "the queue validates" means here, measured** (`origin/main`,
+   2026-08-07): three of this repo's 22 workflows carry an `on: merge_group:`
+   trigger — `ci.yml`, `lint.yml`, `spec-liveness-check.yml` — and the Actions
+   API reports **2742** `merge_group` runs, the most recent 30 all on
+   `gh-readonly-queue/main/pr-<n>-<sha>` refs, all three workflows, all green.
+   A fourth workflow, `merge-queue-triage.yml`, is *not* a subscriber: it
+   watches those runs through `workflow_run` and comments the diagnosis on the
+   PR when a queue build goes red (#4859).
+
+   **This supersedes the older "never `gh pr merge --auto`" ban.** Its premise —
+   auto-merge lands a still-red PR on shared `main` (#1475) — is inverted by
+   rebuild-then-land, and the ban forbade what is now the sanctioned path. Its
+   *true half* survives, as a precondition rather than a prohibition: **arm only
+   what is already green and accepted**, where green means the gate-carrying
+   jobs' `conclusion` is `success`, not "no failure yet" — `in_progress` is not
+   a pass. Arming a red PR does not queue it, it hides it: #4852 sat armed from
+   10:15 for **100 minutes** without ever entering the queue, every poll
+   misreading "not on `main` yet" as "queued". So always read *two* things when
+   checking on a landing: the queue branch **and** `origin/main`.
+
+   **The queue enforces only the required set; everything else is advisory and
+   rides through.** #6067's final queue generation
+   (`gh-readonly-queue/main/pr-6067-db0d53c2…`) had `Lint & Type Check` at
+   `completed/failure` — run 31136745851, concluded 01:12:11Z — and merged at
+   01:13Z regardless; the `check:slot-lookup` red it carried then rode `main`'s
+   merge ref into every following PR's ESLint job until it was stanched (#6100,
+   the same shape as #5584 → #5601 → hot-fix #5615). Governance half: **#5617**,
+   under which the maintainer on 2026-08-07 added **ESLint** and **TypeScript
+   Type Check** to both `main`'s required-status-check set and the queue's check
+   set, so those two now block — the audit archived on that issue also lists
+   which other jobs can and cannot safely join them. A gate outside that set
+   stops nothing, which is why "arm only on green" is a rule and not a
+   formality.
+
+   **Three re-arm situations this repo has actually hit.** None of them is a
+   reason to avoid the queue; all are reasons to confirm a PR is still *in* it:
+   - **A red queue build ejects your entry and drops the auto-merge.** The
+     failure is often in a package your PR never touched, because the queue runs
+     the *full* suite while the PR ran affected-only. #6059 was ejected at
+     01:03:02Z on a known flaky (`datasource-pool-support.test.ts`, #6044),
+     diagnosed against the triage comment, re-armed at 01:04:15Z and landed at
+     01:25:00Z. Recognise the signature first, then re-arm once — never re-queue
+     reflexively.
+   - **Collateral eviction is silent by design.** `merge-queue-triage.yml`
+     comments only on `conclusion == failure`; an entry cancelled because
+     something *ahead* of it failed gets nothing, since that outcome says
+     nothing about your PR. A PR that is neither on `main` nor in the queue was
+     dropped — re-arm it.
+   - **Flipping back to draft drops auto-merge and queue membership at once, and
+     neither returns by itself.** The order is therefore fixed: ready *first*,
+     arm *second*. (This one is the repo's standing operating note —
+     `.claude/skills/pm-dispatch/SKILL.md` note 1 — not an API measurement.)
+
+   And one non-fix: **a stale red does not clear by re-running.**
+   `rerun_failed_jobs` reuses the original run's commit and merge ref, so it
+   cannot see a fix that landed on `main` since. Compare the fix's merge time
+   against the run's creation time; if the fix is later, only a new commit
+   (`git merge origin/main`) helps — #4852's red was byte-identical across a
+   rerun until #4856 landed.
+
+   **Not measured here:** whether a direct, non-auto `gh pr merge` is refused
+   with `405 Changes must be made through the merge queue`. Establishing that
+   would mean actually attempting a merge on a live PR, which is not an
+   experiment worth running. objectui returns 405; that is **not** extrapolated
+   to this repo (objectui#3243) — separate rulesets, and #5617's cross-repo
+   audit found the two configured differently.
+
+   **Fallback, when the queue is unavailable:** the old manual protocol — merge
+   serially, only after remote CI is fully green, rebasing other open branches
+   before merging the next one. It is a fallback because it loses under load:
+   `main` can land a PR every few minutes at peak while a manual merge–reverify
+   loop takes ~25 minutes, so one PR went three full green cycles without
+   managing to land. That is a livelock, not a discipline failure — and it is
+   why the queue is the default path rather than an optimisation.
 8. **Testing needs a server? Start your own temporary one — never stop someone
    else's.** A running dev server you didn't start probably belongs to another
    agent or the user; killing it (or its port) breaks their in-flight work. Spin
@@ -253,8 +320,9 @@ Even inside your own worktree, operate defensively:
    - **Full `pnpm typecheck && pnpm test` again only when** the incoming
      commits touch the same packages or the same behavior your diff does, or a
      conflict occurred outside trivially-mechanical files.
-   - CI on the PR (and the merge queue, once enabled) validates the merge
-     commit itself — that second CI round is where joint breakage surfaces, and
+   - CI on the PR, and then the merge queue on its rebuilt generation (§7),
+     validates the merge commit itself — that second CI round is where joint
+     breakage surfaces, and
      the guards in `scripts/check-*.mjs` exist largely because this class of
      breakage is invisible to `git merge`.
 11. **Generated artifacts don't text-merge — a driver defers them and
@@ -765,10 +833,10 @@ it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
 2. **Land it — don't leave passing work in the working tree.** Once tests pass,
-   create a feature branch, commit, push, open a PR, and merge it after remote
-   CI is fully green (see Multi-agent discipline: never straight to `main`,
-   never `gh pr merge --auto`). A finished task = a merged PR, not a dirty
-   working tree.
+   create a feature branch, commit, push, open a PR, and — once remote CI is
+   fully green and the PR is accepted — arm auto-merge so the queue lands it
+   (Multi-agent discipline §7: never straight to `main`; never arm a PR that
+   isn't green yet). A finished task = a merged PR, not a dirty working tree.
 3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
 4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point since #5837); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
