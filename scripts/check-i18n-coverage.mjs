@@ -57,6 +57,23 @@
 // ownership §3): the prerequisite verdict is a HARD failure that states it
 // measured nothing — never a skip, and never anything a reader can mistake for
 // "no config declares an untranslated label".
+//
+// That answered ONE prerequisite. The OTHER one — an example's own workspace
+// dependencies unbuilt — kept the original shape until #6033: three bare `throw`s
+// inside the per-config measurement, an uncaught exception, and a node stack:
+//
+//     Error: os lint failed for examples/app-showcase/objectstack.config.ts:
+//       Cannot find module '…/@objectstack/connector-mcp/dist/index.mjs'
+//         at countI18nIssues (…/check-i18n-coverage.mjs:185:29)
+//
+// That diagnosis did NOT lie — the missing module is real and actionable, which is
+// why #6033 was filed as an observation rather than a defect. What it cost was the
+// other eleven configs: the loop died at the second one, so the remaining ten were
+// never attempted and their causes — which need not be this one — were never seen.
+// #5217's rule is "one cause must not be reported as N results"; this is its
+// converse, and one discipline serves both: measure EVERY config, then report every
+// DISTINCT cause once, with the configs it covers. A config that cannot be linted is
+// now collected (`measureI18nIssues` returns a failure), never thrown.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -75,6 +92,16 @@ const EXAMPLES_DIR = 'examples';
 const BASELINE_PATH = 'scripts/i18n-coverage-baseline.json';
 /** The one command this gate invokes per config, as oclif topic/command parts. */
 const LINT_COMMAND_ID = ['lint'];
+
+/**
+ * The remedy when a config's OWN workspace dependencies were never built (#6033) —
+ * distinct from `CLI_BUILD_FIX`, which clears only the CLI. An example config
+ * imports workspace packages by name, so a tree with just the CLI built still
+ * cannot be linted, and the two remedies must not be confused for each other.
+ */
+const WORKSPACE_BUILD_FIX = 'pnpm build';
+/** …and when the package is not on disk at all, a build alone cannot help. */
+const INSTALL_THEN_BUILD_FIX = 'pnpm install && pnpm build';
 
 const update = process.argv.includes('--update');
 
@@ -121,8 +148,113 @@ function countI18nRuleIssues(report) {
   return issues.filter((i) => typeof i?.rule === 'string' && i.rule.startsWith('i18n/')).length;
 }
 
+/** The command that reproduces one config's failure by hand, for the reader. */
+function rerunFix(configPath) {
+  return `node ${CLI} lint ${configPath} --json`;
+}
+
 /**
- * Untranslated declared strings `os lint` would show for one config.
+ * One bounded, readable line of evidence. A conclusion needs a reading to stand on,
+ * but a reading is not a stack: multi-line output is flattened the way
+ * `looksLikeMissingCliCommand` flattens oclif's wrapping, and a long one is cut.
+ */
+function evidenceLine(text, max = 200) {
+  const flat = String(text ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(' ');
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * The per-config failure classifier (#6033): WHY one config could not be linted,
+ * as a conclusion plus the command that clears it. Pure — string in, verdict out —
+ * so `--self-test` drives it with recorded CLI output instead of a build.
+ *
+ * The one classification worth making is module resolution. On a tree where only
+ * the CLI was built, an example whose config imports a workspace package by name
+ * fails with node's `Cannot find module`, and the useful thing to say is WHICH
+ * package and that the remedy is a build. Everything else keeps the CLI's own
+ * words and sends the reader to run the same command by hand: claiming "not built"
+ * over a genuinely broken config would be the #5862 defect — a confident diagnosis
+ * pointing somewhere innocent — rebuilt one layer down.
+ *
+ * @param {string} configPath the config being measured, for the rerun command
+ * @param {string} text the CLI's own failure text (`report.error`, or a thrown message)
+ * @returns {{ reason: string, evidence: string, fix: string }}
+ */
+function explainConfigFailure(configPath, text) {
+  const evidence = evidenceLine(text);
+  const missing = String(text ?? '').match(/Cannot find (?:module|package) '([^']+)'/);
+  if (missing) {
+    const pkg = packageNameFromSpecifier(missing[1]);
+    // A specifier that reaches INTO a package's build output is installed but
+    // unbuilt; one that names the package alone was never installed at all.
+    if (pkg && /(?:^|\/)dist\//.test(missing[1])) {
+      return {
+        reason: `\`os lint\` could not load the config: \`${pkg}\` is installed but has no build output in this worktree`,
+        evidence,
+        fix: WORKSPACE_BUILD_FIX,
+      };
+    }
+    return {
+      reason: `\`os lint\` could not load the config: ${pkg ? `\`${pkg}\`` : 'a module it imports'} cannot be resolved from this worktree`,
+      evidence,
+      fix: INSTALL_THEN_BUILD_FIX,
+    };
+  }
+  return {
+    reason: '`os lint` failed on this config — the reading below is the CLI\'s own words, not this gate\'s',
+    evidence,
+    fix: rerunFix(configPath),
+  };
+}
+
+/**
+ * The package a failed specifier belongs to, or '' when it names none. Handles the
+ * two shapes node produces: a resolved absolute path (`…/node_modules/@scope/name/
+ * dist/index.mjs`) and a bare specifier (`@scope/name/sub`).
+ */
+function packageNameFromSpecifier(specifier) {
+  const marker = 'node_modules/';
+  const at = String(specifier ?? '').lastIndexOf(marker);
+  const tail = at === -1 ? String(specifier ?? '') : specifier.slice(at + marker.length);
+  if (!tail || tail.startsWith('/') || tail.startsWith('.')) return '';
+  const parts = tail.split('/');
+  const name = parts[0].startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+  return name.endsWith('.mjs') || name.endsWith('.js') || name.endsWith('.ts') ? '' : name;
+}
+
+/**
+ * Distinct CAUSES, each carrying the configs it explains. Keyed on the CONCLUSION
+ * (reason + fix) rather than the raw reading, because one unbuilt package produces
+ * a different absolute path per config and those are the same fact told twelve
+ * times — exactly the "one cause reported as N results" shape #5217 closed on the
+ * neighbouring gate. The first reading is kept as the group's evidence.
+ *
+ * @param {{configPath: string, reason: string, evidence: string, fix: string}[]} failures
+ */
+function groupFailuresByCause(failures) {
+  const groups = new Map();
+  for (const f of failures) {
+    const key = JSON.stringify([f.reason, f.fix]);
+    const group = groups.get(key) ?? { reason: f.reason, fix: f.fix, evidence: f.evidence, configPaths: [] };
+    group.configPaths.push(f.configPath);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Untranslated declared strings `os lint` would show for one config — or WHY that
+ * could not be measured.
+ *
+ * Returns `{ count }` or `{ failure }` and never throws for a per-config problem
+ * (#6033), so one unlintable example cannot hide the eleven configs behind it. The
+ * one thing that still stops the round from in here is the missing-CLI
+ * prerequisite, deliberately: every remaining config would fail for that same
+ * single reason (#5862), so continuing would print one environment fact N times.
  *
  * Captured to a FILE rather than a pipe. Node writes stdout synchronously to a
  * file and asynchronously to a pipe, so a command that exits right after a
@@ -131,7 +263,7 @@ function countI18nRuleIssues(report) {
  * until the `emitJson` fix. A gate must never be able to read a truncated
  * payload and quietly report a smaller number, so it does not use a pipe at all.
  */
-function countI18nIssues(configPath) {
+function measureI18nIssues(configPath) {
   const tmp = join(tmpdir(), `os-lint-${randomUUID()}.json`);
   const fd = openSync(tmp, 'w');
   try {
@@ -175,18 +307,70 @@ function countI18nIssues(configPath) {
       ]);
     }
 
-    if (!raw.trim()) throw new Error(`os lint produced no output for ${configPath}`);
+    // The three ways one config can fail to yield a number. Each is that config's
+    // OWN cause, so each comes back as a collected failure rather than an
+    // exception: the round continues, and the reader gets all of them at once.
+    if (!raw.trim()) {
+      return {
+        failure: {
+          reason: '`os lint` produced no output at all — no JSON payload to count',
+          // stderr is the only reading there is when stdout was empty. It was
+          // already captured for the signature net above; discarding it here would
+          // leave the reader a verdict with nothing under it.
+          evidence: evidenceLine(stderr),
+          fix: rerunFix(configPath),
+        },
+      };
+    }
     let report;
     try {
       report = JSON.parse(raw);
     } catch (err) {
-      throw new Error(`os lint produced unparseable JSON for ${configPath} (${raw.length} bytes): ${err.message}`);
+      return {
+        failure: {
+          reason: `\`os lint\` wrote ${raw.length} byte(s) that are not JSON (${err.message})`,
+          evidence: evidenceLine(raw, 160),
+          fix: rerunFix(configPath),
+        },
+      };
     }
-    if (report.error) throw new Error(`os lint failed for ${configPath}: ${report.error}`);
-    return countI18nRuleIssues(report);
+    if (report.error) return { failure: explainConfigFailure(configPath, report.error) };
+    return { count: countI18nRuleIssues(report) };
   } finally {
     try { unlinkSync(tmp); } catch { /* already gone */ }
   }
+}
+
+/**
+ * The round: measure every config, collect the ones that could not be measured,
+ * and never let one of them end the round (#6033).
+ *
+ * `measure` is injected so `--self-test` can prove the collecting behaviour with no
+ * CLI and no build — the behaviour CI can never observe, because CI builds the whole
+ * workspace before this gate runs and therefore only ever sees the green path.
+ *
+ * The try/catch is the outer net, not the mechanism: `measureI18nIssues` reports its
+ * own failures as values, and anything that still throws (a spawn that fails, an
+ * unreadable temp file) is one more config-shaped failure — never a reason for the
+ * other eleven to go unmeasured.
+ *
+ * @param {string[]} configPaths
+ * @param {(configPath: string) => {count: number} | {failure: {reason: string, evidence: string, fix: string}}} measure
+ */
+function measureAllConfigs(configPaths, measure) {
+  const current = {};
+  const failures = [];
+  for (const configPath of configPaths) {
+    let result;
+    try {
+      result = measure(configPath);
+    } catch (err) {
+      result = { failure: explainConfigFailure(configPath, err?.message ?? String(err)) };
+    }
+    if (result?.failure) failures.push({ configPath, ...result.failure });
+    else current[configPath] = result.count;
+  }
+  return { current, failures };
 }
 
 // ---------------------------------------------------------------------------
@@ -278,12 +462,88 @@ function selfTest() {
   );
   expect('#5862 tolerates an issue-less report', countI18nRuleIssues({}) === 0, 'a clean report is 0, never a crash');
 
+  // -------------------------------------------------------------------------
+  // The per-config failure classifier and the collecting round (#6033). Pinned
+  // here or nowhere, for the same reason as the prerequisite above: CI builds the
+  // whole workspace before this gate runs, so nothing in CI ever reaches this path.
+  // -------------------------------------------------------------------------
+
+  // Recorded VERBATIM from `os lint examples/app-showcase/objectstack.config.ts
+  // --json` on a tree where ONLY `@objectstack/cli` had been built (the #6033
+  // repro), with the absolute worktree prefix normalised to `/repo`. This exact
+  // string is what the CLI puts in `report.error` — i.e. what the gate used to
+  // interpolate into a thrown Error and hand to node as a stack.
+  const REAL_UNBUILT_DEP_ERROR =
+    "Cannot find module '/repo/examples/app-showcase/node_modules/@objectstack/connector-mcp/dist/index.mjs' " +
+    "imported from /repo/examples/app-showcase/objectstack.config.bundled_yqbr4ytyonb.mjs";
+
+  const unbuilt = explainConfigFailure('examples/app-showcase/objectstack.config.ts', REAL_UNBUILT_DEP_ERROR);
+  expect('#6033 blames the package, not the config', unbuilt.reason.includes('@objectstack/connector-mcp'), `got ${JSON.stringify(unbuilt.reason)}`);
+  expect('#6033 concludes "installed but not built"', /has no build output/.test(unbuilt.reason), `got ${JSON.stringify(unbuilt.reason)}`);
+  expect('#6033 prescribes the workspace build', unbuilt.fix === WORKSPACE_BUILD_FIX, `got ${JSON.stringify(unbuilt.fix)}`);
+  expect('#6033 keeps the CLI reading as evidence', unbuilt.evidence.includes('Cannot find module'), 'a conclusion with no reading under it is not auditable');
+  expect('#6033 evidence is one line', !unbuilt.evidence.includes('\n'), 'evidence must be a line, not a stack');
+
+  // A package that is not installed at all cannot be fixed by a build alone.
+  const uninstalled = explainConfigFailure('x/y.ts', "Cannot find package '@objectstack/nope' imported from /repo/x/y.ts");
+  expect('#6033 uninstalled is not unbuilt', uninstalled.fix === INSTALL_THEN_BUILD_FIX, `got ${JSON.stringify(uninstalled.fix)}`);
+
+  // A genuinely broken config must NOT be told to run a build: sending a reader to
+  // a build that changes nothing, over a config that really is at fault, is the
+  // #5862 defect (a confident diagnosis pointing somewhere innocent) inverted.
+  const brokenConfig = explainConfigFailure('examples/app-crm/objectstack.config.ts', "Duplicate object name 'contacts'");
+  expect('#6033 a config error is not a missing build', brokenConfig.fix !== WORKSPACE_BUILD_FIX, `got ${JSON.stringify(brokenConfig.fix)}`);
+  expect('#6033 a config error keeps the CLI words', brokenConfig.evidence.includes("Duplicate object name 'contacts'"), `got ${JSON.stringify(brokenConfig.evidence)}`);
+
+  // Anti-#4690 applied to the fallback branch: an unrecognised cause must still
+  // yield a COMPLETE verdict. A collected failure with a blank reason or no fix is
+  // how this path would go quiet — the report would render an empty bullet and the
+  // round would still exit 1 with nothing for the reader to act on.
+  for (const [name, sample] of [['unknown wording', 'something nobody has recorded yet'], ['empty', ''], ['absent', undefined]]) {
+    const verdict = explainConfigFailure('x/y.ts', sample);
+    expect(`#6033 complete verdict (${name})`, !!verdict.reason && !!verdict.fix, `got ${JSON.stringify(verdict)}`);
+  }
+
+  // The round itself: one config's failure must not end it. Injected `measure`, so
+  // this runs with no CLI and no build. Configs 1 and 3 fail with DIFFERENT causes
+  // (one thrown, one returned), 2 and 4 measure.
+  const visited = [];
+  const round = measureAllConfigs(['a.ts', 'b.ts', 'c.ts', 'd.ts'], (p) => {
+    visited.push(p);
+    if (p === 'a.ts') throw new Error("Cannot find module '/repo/a/node_modules/@objectstack/spec/dist/index.mjs'");
+    if (p === 'c.ts') return { failure: explainConfigFailure(p, "Cannot find module '/repo/c/node_modules/@objectstack/connector-rest/dist/index.mjs'") };
+    return { count: 7 };
+  });
+  expect('#6033 attempts every config', visited.length === 4, `the round stopped after ${visited.length} of 4 config(s)`);
+  expect('#6033 collects both failures', round.failures.length === 2, `got ${round.failures.length}`);
+  expect('#6033 a thrown failure is collected, not escaped', round.failures.some((f) => f.configPath === 'a.ts'), 'an exception ended the round');
+  expect(
+    '#6033 keeps the configs that did measure',
+    Object.keys(round.current).length === 2 && round.current['b.ts'] === 7 && round.current['d.ts'] === 7,
+    `got ${JSON.stringify(round.current)}`,
+  );
+
+  // Two different causes stay two; ONE cause shared by several configs is stated
+  // once, with the configs it covers — #5217's rule, which the collecting shape
+  // must not undo on its way to satisfying #6033.
+  expect('#6033 distinct causes stay distinct', groupFailuresByCause(round.failures).length === 2, `got ${groupFailuresByCause(round.failures).length}`);
+  const sharedCause = groupFailuresByCause(
+    ['a.ts', 'b.ts', 'c.ts'].map((p) => ({
+      configPath: p,
+      // Same missing package, different absolute path per config — the same fact
+      // told three times, which must not become three verdicts.
+      ...explainConfigFailure(p, `Cannot find module '/repo/${p}/node_modules/@objectstack/spec/dist/index.mjs'`),
+    })),
+  );
+  expect('#6033 one cause is stated once', sharedCause.length === 1, `got ${sharedCause.length} cause(s) for one missing package`);
+  expect('#6033 …carrying every config it covers', sharedCause[0]?.configPaths.length === 3, `got ${JSON.stringify(sharedCause[0]?.configPaths)}`);
+
   if (failures.length) {
     console.error(`✗ check:i18n-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log('✓ check:i18n-coverage --self-test — the missing-CLI-build and i18n-rule classifiers both go red, and stay distinct.');
+  console.log('✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, stay distinct, and a failing config does not end the round.');
 }
 
 if (process.argv.includes('--self-test')) {
@@ -330,6 +590,56 @@ function reportPrerequisiteNotMet(headline, detail) {
 }
 
 /**
+ * The collected verdict for configs that could not be measured (#6033) — one
+ * entry per DISTINCT cause, each naming the configs it covers.
+ *
+ * Reached only after the whole round has been attempted, which is the point: the
+ * reader gets every cause at once instead of the first one plus a node stack.
+ *
+ * It preempts the ratchet comparison, and that is deliberate rather than lazy. A
+ * partial round cannot judge this gate's question: an unmeasured config is
+ * indistinguishable from a deleted one, so the DOWN direction would tell the reader
+ * to `--update` — and `--update` runs before any comparison, so it would freeze the
+ * survivors and silently drop the rest, ratcheting real debt out of the baseline.
+ * The same invariant `reportPrerequisiteNotMet` states: nothing measured, nothing
+ * written.
+ *
+ * Exits 1, the same code every other verdict here uses.
+ */
+function reportUnmeasuredConfigs(failures, measuredCount) {
+  const groups = groupFailuresByCause(failures);
+  const total = failures.length + measuredCount;
+  const blocks = groups.map((g, i) =>
+    [
+      `Cause ${i + 1} of ${groups.length} — ${g.configPaths.length} config(s):`,
+      ...g.configPaths.map((p) => `  ${p}`),
+      ``,
+      `  why:  ${g.reason}`,
+      ...(g.evidence ? [`  saw:  ${g.evidence}`] : []),
+      `  fix:  ${g.fix}`,
+    ]
+      .map((l) => (l ? `  ${l}` : ''))
+      .join('\n'),
+  );
+  console.error(
+    `\ncheck-i18n-coverage: COULD NOT MEASURE — ${failures.length} of ${total} config(s) failed to lint ` +
+      `(${groups.length} distinct cause${groups.length === 1 ? '' : 's'})\n\n` +
+      blocks.join('\n\n') +
+      `\n\n  Every config was attempted, so the list above is EVERY one that failed — not\n` +
+      `  merely the first. One config's failure no longer ends the round (#6033), and a\n` +
+      `  cause shared by several configs is stated once, not once per config (#5217).\n\n` +
+      `  Nothing was compared: ${measuredCount} config(s) did lint, but a partial round cannot judge\n` +
+      `  the ratchet — an unmeasured config is indistinguishable from a deleted one, and\n` +
+      `  \`--update\` would freeze the survivors while silently dropping the rest. So this\n` +
+      `  result says NOTHING about whether any declared label went untranslated, and the\n` +
+      `  baseline was left exactly as committed (\`--update\` included).\n` +
+      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
+      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+  );
+  process.exit(1);
+}
+
+/**
  * Answered once, before the per-config loop — so a missing build costs one
  * verdict instead of an exception thrown from inside the first example, and
  * costs zero CLI spawns.
@@ -364,10 +674,13 @@ function checkCliBuildPrerequisite() {
 
 checkCliBuildPrerequisite();
 
-const current = {};
-for (const configPath of [...discoverExamples(), ...discoverPackages()]) {
-  current[configPath] = countI18nIssues(configPath);
-}
+const { current, failures: unmeasured } = measureAllConfigs(
+  [...discoverExamples(), ...discoverPackages()],
+  measureI18nIssues,
+);
+// Before `--update` writes anything, and before any comparison: a round that could
+// not measure every config has no verdict to give and no baseline to rewrite.
+if (unmeasured.length) reportUnmeasuredConfigs(unmeasured, Object.keys(current).length);
 
 if (update) {
   writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + '\n');

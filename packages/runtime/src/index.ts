@@ -100,6 +100,7 @@ export {
     type RateLimitKeyInput,
     type RateLimitKeyKind,
     type RateLimitLogger,
+    type ActorUser,
 } from './security/index.js';
 
 // ── Observability primitives ──────────────────────────────────────────
@@ -157,6 +158,7 @@ export type {
   ScriptResult,
   ScriptRunOptions,
   ScriptSession,
+  ScriptUser,
   QuickJSScriptRunnerOptions,
 } from './sandbox/index.js';
 

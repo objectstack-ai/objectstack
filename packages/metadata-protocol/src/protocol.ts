@@ -4201,9 +4201,17 @@ export class ObjectStackProtocolImplementation implements
             // For now, just keep them roughly in order they appear in schema or priority list
             
             return {
+                // [#5948] `object` sits on the CONTAINER, not on the view member.
+                // `ViewSchema` declares it here ("Object this container binds to")
+                // and `ListViewSchema` / `FormViewSchema` are `strictObject` that
+                // never declared it — so the old member-level copy made the real
+                // response fail its own declared schema with `unrecognized_keys`.
+                // Nothing read it (measured: `useView` passes the body through as
+                // `any`, objectui never calls `meta.getView`), so this is a
+                // relocation, not a removal: readers move up one level.
+                object: request.object,
                 list: {
                     type: 'grid' as const,
-                    object: request.object,
                     label: schema.label || schema.name,
                     columns: columns.map(f => ({
                         field: f,
@@ -4237,10 +4245,14 @@ export class ObjectStackProtocolImplementation implements
                 }));
 
              return {
+                // [#5948] Same relocation as the list branch above. The dropped
+                // `label` is NOT relocated: it was `Edit ${…}` — a rendered UI
+                // string, not metadata, and `FormViewSchema` deliberately has no
+                // `label`. The caller already knows the object it asked for, so
+                // the heading is the UI's to compose.
+                object: request.object,
                 form: {
                     type: 'simple' as const,
-                    object: request.object,
-                    label: `Edit ${schema.label || schema.name}`,
                     sections: [
                         {
                             label: 'General Information',

@@ -20,7 +20,7 @@
 // ## Dead scan roots are a hard error (#4930)
 //
 // Check (1) is a *scan*: it concludes "no duplicate resolver exists" from having
-// read every `.ts` under SCAN_ROOTS. `walk()` used to open with
+// read every TypeScript source under SCAN_ROOTS. `walk()` used to open with
 // `try { entries = readdirSync(dir); } catch { return out; }`, so a root that was
 // renamed, moved or made unreadable produced zero files — and zero files produce
 // zero errors, which is character-for-character the same verdict as a clean
@@ -65,6 +65,28 @@
 // The floor is per-root and never a total: with more than one root, a single
 // populated one would otherwise cover for every evaporated sibling — which is the
 // silent narrowing this assertion exists to stop.
+//
+// ## The extension filter is a family, not a suffix string (#6070)
+//
+// The failure above names its own successor — "sources renamed to an extension `walk`
+// does not collect" — and that case was already live on the day #5916 landed. The
+// collector tested `e.endsWith('.ts')`, and `'x.mts'.endsWith('.ts')` is **false** (the
+// character before `ts` is `m`, not `.`), so every `.mts` / `.cts` source under
+// `packages/` — twelve of them, all build/liveness scripts under `packages/spec/scripts/` —
+// stayed out of the corpus, and check (1)'s "no duplicate resolver exists" was concluded
+// from a set that structurally excluded them.
+//
+// Neither corpus assertion above can see this, by construction. `packages/` resolves,
+// and it yields well over a thousand `.ts` files — far above a per-root floor of one —
+// while every `.mts` under it is invisible. A floor answers "did this root produce
+// anything"; it can never answer "did it produce everything the root declares".
+//
+// So the filter is an extension FAMILY (`SCANNED_EXT` / `EXCLUDED_EXT`), not a suffix
+// string, and the exclusions move with it in the same step — widening only the collector
+// would re-plant the same bug one level down, with `x.test.mts` scannable while
+// `x.test.ts` is not. None of the twelve files trips check (1)'s heuristic, so the wider
+// corpus changes no verdict today; what changes is that the verdict is now drawn from
+// what the gate says it reads.
 
 import {
   mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
@@ -92,6 +114,19 @@ const DELEGATORS = [
 const SCAN_ROOTS = ['packages'];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__']);
+
+/**
+ * The extension family check (1) reads, and the two shapes excluded from it.
+ *
+ * Two regexes, deliberately paired and deliberately parallel. `SCANNED_EXT` replaces an
+ * `e.endsWith('.ts')` that silently skipped `.mts` / `.cts` (see the header, #6070);
+ * `EXCLUDED_EXT` carries the SAME family through the test/declaration exclusions, so the
+ * widening cannot leave them one extension behind. The repo has no `.test.mts` or `.d.cts`
+ * today — the shapes are excluded anyway, because the exclusion states what a test or
+ * declaration file IS, not an inventory of the ones that happen to exist.
+ */
+const SCANNED_EXT = /\.[mc]?ts$/;
+const EXCLUDED_EXT = /\.(?:test|d)\.[mc]?ts$/;
 
 /** A declared scan root that could not be resolved to a directory. Carries the names. */
 class DeadRootError extends Error {
@@ -129,7 +164,8 @@ function assertRootsResolvable(root = ROOT, roots = SCAN_ROOTS) {
 }
 
 /**
- * Every non-test `.ts` file under `dir`, recursively.
+ * Every non-test TypeScript source under `dir`, recursively — `.ts`, `.mts` and `.cts`
+ * alike (`SCANNED_EXT`), minus the test and declaration shapes of each (`EXCLUDED_EXT`).
  *
  * Nothing here is wrapped in a catch: an unresolvable root fails loudly above, and
  * an error *inside* the walk (a vanished file, a permission fault) means the corpus
@@ -141,7 +177,7 @@ function walk(dir, out = []) {
     const p = join(dir, e);
     const st = statSync(p);
     if (st.isDirectory()) walk(p, out);
-    else if (e.endsWith('.ts') && !e.endsWith('.test.ts') && !e.endsWith('.d.ts')) out.push(p);
+    else if (SCANNED_EXT.test(e) && !EXCLUDED_EXT.test(e)) out.push(p);
   }
   return out;
 }
@@ -152,7 +188,7 @@ function walk(dir, out = []) {
  */
 class EmptyRootError extends Error {
   constructor(empty, total) {
-    super(`scan root(s) contributed no scannable .ts file: ${empty.join(', ')} (total scanned: ${total})`);
+    super(`scan root(s) contributed no scannable TypeScript file: ${empty.join(', ')} (total scanned: ${total})`);
     this.name = 'EmptyRootError';
     /** @type {string[]} the roots that yielded nothing. */
     this.roots = empty;
@@ -245,7 +281,7 @@ function reportEmptyRoots(err) {
   console.error(
     `\n${err.total} file(s) were found in total across all of SCAN_ROOTS.` +
     `\n\nEvery entry in SCAN_ROOTS (scripts/check-single-authz-resolver.mjs) must yield at least one` +
-    `\nscannable .ts file. The root still being a directory is not enough — that is all #4930's` +
+    `\nscannable .ts/.mts/.cts file. The root still being a directory is not enough — that is all #4930's` +
     `\ncheck can see. If the sources moved to a new directory, point SCAN_ROOTS at it; if the walk` +
     `\nfilter no longer matches them (a new extension, a widened SKIP_DIRS), fix the filter. Do NOT` +
     `\nlower this to a total count: one populated root would then cover for every evaporated one,` +
@@ -293,8 +329,43 @@ function selfTest() {
     // (1) — the walker must not report test/type files or skipped directories.
     write('packages/rest/src/__tests__/fake.ts', "sys_user_role sys_user_permission_set\n");
     write('packages/rest/src/x.test.ts', "sys_user_role sys_user_permission_set\n");
+    // `.d.ts` was named in this assertion's label from the start but never written, so
+    // the exclusion it claims to cover was never exercised. Added with the .mts/.cts
+    // pass below, which extends that same exclusion to the rest of the family (#6070).
+    write('packages/rest/src/x.d.ts', "sys_user_role sys_user_permission_set\n");
     write('packages/rest/dist/x.ts', "sys_user_role sys_user_permission_set\n");
     expect('tests, .d.ts and dist/ are out of scope', audit(dir).length, 0);
+
+    // (1) — `.mts` / `.cts` are the same corpus (#6070). `'x.mts'.endsWith('.ts')` is
+    // false, so the suffix-string collector walked past every module-extension source
+    // under a root it claims to read in full. Pinned in BOTH directions, because either
+    // one alone is satisfiable by a filter that collects nothing:
+    //   * the corpus must GROW by exactly the collectable fixtures — a count a
+    //     regressed filter cannot reach;
+    //   * and the duplicates written in them must be CAUGHT AND NAMED — a verdict an
+    //     empty corpus produces zero of, which is what made the original miss silent.
+    const beforeExt = collectScanFiles(dir).length;
+    write('packages/rest/src/esm-resolver.mts', "sys_user_role sys_user_permission_set\n");
+    write('packages/rest/src/cjs-resolver.cts', "sys_user_role sys_user_permission_set\n");
+    // The exclusions carry the same family: changing a test's or a declaration's
+    // extension must not make it scannable. The repo has none of these four shapes
+    // today — that is exactly why they are asserted here rather than trusted.
+    for (const excluded of ['x.test.mts', 'x.test.cts', 'x.d.mts', 'x.d.cts']) {
+      write(`packages/rest/src/${excluded}`, "sys_user_role sys_user_permission_set\n");
+    }
+    expect('.mts/.cts join the corpus and their test/declaration shapes stay out',
+      collectScanFiles(dir).length, beforeExt + 2);
+    const extErrors = audit(dir);
+    expect('a duplicate resolver in .mts and one in .cts are both flagged', extErrors.length, 2);
+    expect('the .mts duplicate is named', extErrors.some((e) =>
+      e.startsWith('Possible duplicate authorization resolver: packages/rest/src/esm-resolver.mts')), true);
+    expect('the .cts duplicate is named', extErrors.some((e) =>
+      e.startsWith('Possible duplicate authorization resolver: packages/rest/src/cjs-resolver.cts')), true);
+    for (const f of ['esm-resolver.mts', 'cjs-resolver.cts', 'x.test.mts', 'x.test.cts', 'x.d.mts', 'x.d.cts']) {
+      rmSync(join(dir, 'packages/rest/src', f));
+    }
+    expect('removing the module-extension fixtures restores the green', audit(dir).length, 0);
+    expect('...and restores the corpus to its previous size', collectScanFiles(dir).length, beforeExt);
 
     // (2) — an entry point that stops delegating.
     write(DELEGATORS[0], '// re-inlined the session/role reads here\n');
@@ -406,10 +477,11 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    '✓ check-single-authz-resolver self-test: duplicate detection, delegation, the dead-root ' +
-    'hard error (red when the scan root is renamed, green when restored) and the empty-scan ' +
-    'hard error (red when one declared root yields nothing and when the whole scan does, green ' +
-    'when restored) all hold.',
+    '✓ check-single-authz-resolver self-test: duplicate detection, delegation, the extension ' +
+    'family (.mts/.cts enter the corpus and their duplicates are named; .test./.d. shapes of ' +
+    'every extension stay out), the dead-root hard error (red when the scan root is renamed, ' +
+    'green when restored) and the empty-scan hard error (red when one declared root yields ' +
+    'nothing and when the whole scan does, green when restored) all hold.',
   );
 }
 

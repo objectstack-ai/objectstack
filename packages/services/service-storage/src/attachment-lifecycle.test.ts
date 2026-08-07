@@ -167,6 +167,52 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     expect(engine.updates[0].data).toMatchObject({ id: 'f1', status: 'committed', deleted_at: null });
   });
 
+  // [#5906] `input.data` is the ONE key an insert payload arrives under — measured
+  // on the real engine by objectql's `hook-input-shape-contract.test.ts` ("insert
+  // carries `data` — never `doc`", #5273). The fixture above cannot pin that: it
+  // supplies `result`, which sits FIRST in the handler's read, so it stays green
+  // whatever the limbs below it spell. These two carry the weight instead, and the
+  // NEGATIVE one is the load-bearing half — it goes red the moment the deleted
+  // `input.doc` alias limb is put back (that limb sat ahead of `data`, so a
+  // `doc`-only context would be read again).
+  const tombstonedFile = () => ({
+    id: 'f1',
+    key: 'attachments/f1.bin',
+    scope: 'attachments',
+    status: 'deleted',
+    deleted_at: '2026-01-01T00:00:00Z',
+  });
+
+  it('un-tombstones from input.data when the context carries no result', async () => {
+    const engine = fakeEngine({ attachments: [], files: [tombstonedFile()] });
+    installAttachmentLifecycleHooks(engine, silentLogger());
+
+    await engine.trigger('afterInsert', {
+      object: 'sys_attachment',
+      event: 'afterInsert',
+      input: { data: { file_id: 'f1' } },
+    });
+
+    expect(engine.updates).toHaveLength(1);
+    expect(engine.updates[0].data).toMatchObject({ id: 'f1', status: 'committed', deleted_at: null });
+  });
+
+  it('does NOT read an `input.doc` alias — no engine path produces that key', async () => {
+    const engine = fakeEngine({ attachments: [], files: [tombstonedFile()] });
+    installAttachmentLifecycleHooks(engine, silentLogger());
+
+    await engine.trigger('afterInsert', {
+      object: 'sys_attachment',
+      event: 'afterInsert',
+      // The spelling the deleted limb defended. With it gone the handler finds no
+      // `file_id` at all, so the tombstone stands.
+      input: { doc: { file_id: 'f1' } },
+    });
+
+    expect(engine.updates).toHaveLength(0);
+    expect(engine.tables.sys_file[0].status).toBe('deleted');
+  });
+
   it('a failing lookup never blocks the delete (best-effort)', async () => {
     const engine = fakeEngine({ attachments: [], files: [] });
     engine.findOne = async () => {

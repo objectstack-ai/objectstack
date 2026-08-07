@@ -581,7 +581,8 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
-| `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
+| `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役的行为半边、strictness 台账 —— 判据是**接受面变化**,见下「`spec` 一分为二」 |
+| `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑迁移散文/错误 guidance 与 alias 表 —— 校验不变量卡,changeset 恒 patch,见下「`spec` 一分为二」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
@@ -619,6 +620,36 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 - **座位贴同批新立**:`domain:engine` 那一个座位一分为二,各自的范围段
   照抄上表(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入
   冻结指令锚在 `drivers` 那一行,`formula` / `driver-sql` 不受影响)。
+
+**`spec` 一分为二(维护者 2026-08-07 批准,座位贴 #6298)。** 旧 `domain:spec`
+同时覆盖「改接受面」与「改契约自述文本」两类节律完全不同的活:前者量小、
+风险高、要吃版本窗口裁决;后者量大、机械、天然适合 sweep 打包 —— 混在一席,
+文本债持续积压(truth-sweep 审计开采一天可灌 5-10 张)。切分纪律:
+
+- **判据是接受面,不是包、不是 diff 大小。** 这是 anchoring rule 在
+  `packages/spec` 内的**显式例外**:一包两席,按「合法元数据集合变没变」分派 ——
+  改动前能过校验的输入,改动后逐字节仍然同判 ⇒ `spec-surface`;否则 `spec`。
+  该判据与包归属同样机械(分诊读 diff 落点:语义行 vs 纯文本行)。反向红线:
+  **任何改变接受/拒绝行为的卡,不论多小,归 `domain:spec`**(#6245 size S,
+  但把零校验放行改成 422 ⇒ 协议卡;#6235 只开一个 `visibleWhen` 键 ⇒ 协议卡)。
+- **与 `domain:spec-tooling`(#5163 程序卡,座位贴 #6018)的分界**:surface 改
+  「契约自己说的话」(`packages/spec` 源内文本行),tooling 改「围着契约转的
+  机器」(门禁/生成器/lint 与 docs 手写页;其席位范围 ⛔ 不碰
+  `packages/spec/src/**/*.zod.ts`,与 surface 天然无交集)。同一缺陷两半分治的
+  先例:#6146(文档教了一个求值面从未绑定的根 —— surface)与 #6290(lint 一边
+  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。
+- **产物随源走**:describe/JSDoc 改动会重生成 `content/docs/references/**` 与
+  manifest 的 description 字段 —— 产物变更归触发它的**源 PR**(`check:generated`
+  重生成提交,⛔ 手改);同一生成树在飞重生成 >1 张时按 #4675 四步序串行
+  (#6224 扣压处置即此形,记录在 #6018)。
+- **卡点自报**(座位职责,不等积压被感觉到):① 水位 —— 本车道 `pm:queue`
+  连续 3 天 >15 张或平均滞留 >48h ⇒ 提频/加 batch/按本条款继续拆;② 同一
+  references 树在飞重生成 PR >2 ⇒ 打包成一列发,不加席位;③ 分诊脉冲 ——
+  单次审计灌入 20+ ⇒ 一次性 sweep 专项吃掉,不改常设结构。
+- **迁移**:存量带 `domain:spec` 的文本面 open issue 由**分诊座位**按上述判据
+  一次性重标;拆分时已在飞的打包卡(sweep/工头)由原认领者跟完,不迁移。
+- **运行模式**:surface 席 sweep-first —— 一认领、一 PR、多单 `Fixes`,逐单
+  清单复审、零 rider,把认领/PR/CI/验收的固定开销摊薄到 1/N(试点 #6243)。
 
 **Label discipline —— 单一生产者。** `domain:*` 只由**分诊座位**在 backlog
 sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:分诊座位
@@ -1835,10 +1866,41 @@ dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/an
 第 3 条最容易被省掉,而省掉它就退化成最坏形态:前提不成立时 dev 自行改选,那正是**无人
 裁决**的状态,且没有任何读数会显示它发生过。
 
+**两条元判据 —— 一整族近似单默认不进决策箱(维护者 2026-08-07 决策箱第 2 轮拍板)。**
+上面的「不升级四类」说的是**单张单**自带裁决;这两条说的是**一族形状相同的单**不必逐张
+问 —— 族里第一张已经裁过,后来的默认继承那条裁决。重复立卡不是谨慎,是拿维护者的时间
+买同一个答案。
+
+- **静默丢弃的声明,默认并入既有拒收集。** 适用判据:一个**已声明的键**在组件的某一支上
+  被**静默忽略**,而更早的裁决已把同一个键在**兄弟支**上定成**响亮的编写期错误**。此时
+  新支**默认并入既有拒收集** —— 复用母单的裁决直接入队派发,⛔ 不为它另开决策箱槽位;
+  只有两支之间存在**真实语义差异**时才重开。出处:#5714 把 `pool`-on-sqlite 裁成编写期
+  错误之后,#5931(`memory` 支)仍占了一个槽位,而它只是那条裁决的一词之差的外延;同族
+  重复整周都在发生。⚠️ **边界必须与本条同段读,否则这条捷径会被用过头**:继承的是**裁决
+  连同它的理由**,不是「拒收」两个字 —— 母单的理由**被实测为分支特有**时本条不适用。
+  #5739(维度侧)的理由是「拒收会连带拒掉今天已经能跑的查询」,该理由在**度量面上被
+  证伪**,所以 #5918 另裁一次是对的。判法固定:把母单的理由拿到新支上复核一遍,理由不
+  成立就回正常升级路径,别让「同一个键」这个表面相似度替你做判断。
+- **一个操作两个实现,默认治理侧胜出。** 适用判据:同一个操作存在两处实现,且两处行为
+  不一致。**带治理的那一侧**(权限闸、用户同意、去重、审计留痕)是**默认幸存者**,另一侧
+  **改绑到它并删除** —— 不是两侧对齐,也不是保留双写。反向裁只在**产品语义明确要求**时
+  成立,且必须把那条语义写进裁决正文,而不是默认成立后再补理由。出处:cloud#896
+  (hostname)即此形定案;cloud#1147 的三个待答问题(重装 = UPSERT、卸载 = 软停用、外部
+  词表 = manifest id)按本条全部落在治理侧;objectstack#4636 的 B 选项是同一形状。留着
+  未治理的那一侧等于给权限闸留一条旁路,而「声明即强制」要堵的正是那条旁路。
+
 Whenever a dev returns `needs_decision` that passes the bar above, an issue
 is too vague to dispatch, or rework has failed twice:
 
-1. **Default: the decision lives ON the issue it belongs to — never a new
+1. **先刷新卡片的前提 —— 落卡与复升级都适用。** 决策卡写下的每条前提(某个在飞
+   PR 还没合、某能力还不存在、某文件还是那个形状)都是**有保质期的读数**:main
+   一天 ~18 合并,跨仓事实按小时变。落卡**之前**、以及把一张旧卡重新推到维护者
+   面前**之前**,逐条复核一遍,失效的就地改写或撤卡 —— **隔夜没动过的卡,默认按
+   「前提未经验证」处理,不是按「还在等答复」处理。** 出处是决策箱第 2 轮的实测:
+   cloud#1148 的 A/B 卡在**写下前 ~50 分钟**就已失效(它等的那个上游 PR 已经合了),
+   cloud#812 一张卡带三条过时前提。前提过期的卡比没有卡更贵 —— 维护者会照着一个
+   不存在的世界做裁决,而卡面上没有任何读数会显示这件事发生过。
+2. **Default: the decision lives ON the issue it belongs to — never a new
    issue.** Post the analysis as a comment on that issue, add the
    `needs-user-decision` label, drop it from the active queue. The label is
    the maintainer's inbox (filter `label:needs-user-decision` shows
@@ -1849,7 +1911,7 @@ is too vague to dispatch, or rework has failed twice:
    when the decision has no natural anchor — it spans several issues (file
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
-2. The analysis, wherever it lands (English, per the language policy):
+3. The analysis, wherever it lands (English, per the language policy):
    background / the concrete question / options / your recommendation /
    related issues, PRs, branches。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
@@ -1875,7 +1937,7 @@ is too vague to dispatch, or rework has failed twice:
      绝不让 AI 能声明一个运行时不兑现的能力。
    推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
-3. If the session is interactive, additionally raise it via `AskUserQuestion`;
+4. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer
    a product/architecture question on the maintainer's behalf.
 

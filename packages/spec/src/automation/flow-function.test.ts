@@ -66,8 +66,28 @@ describe('FlowFunctionEntrySchema', () => {
     expect(FlowFunctionEntrySchema.safeParse({ handler: () => 1, effect: 'writes' }).success).toBe(true);
   });
 
-  it('rejects a declaration whose handler is not callable', () => {
-    expect(FlowFunctionEntrySchema.safeParse({ handler: 'scoreLead' }).success).toBe(false);
+  it('rejects a declaration whose handler is neither a callable nor a ref', () => {
+    // Narrowed in #4976, and the narrowing is the point rather than a
+    // concession. This assertion used to read `{ handler: 'scoreLead' }` —
+    // "handler is not callable" — but a string handler is exactly what
+    // `objectstack build` emits for a declared entry, so the union now accepts
+    // it (see the lowered-declaration cases below). What survives is the
+    // verdict on a handler that is neither: no callable, no name.
+    expect(FlowFunctionEntrySchema.safeParse({ handler: 42 }).success).toBe(false);
+    expect(FlowFunctionEntrySchema.safeParse({ handler: '' }).success).toBe(false);
+    expect(FlowFunctionEntrySchema.safeParse({ effect: 'writes' }).success).toBe(false);
+  });
+
+  it('accepts a hand-authored `{ handler: <name> }` for the same reason it accepts a bare name', () => {
+    // The inversion #4976 causes, stated plainly rather than left as a
+    // surprise. Hand-authoring the lowered form registers nothing — but that
+    // was ALREADY true of the bare string member (`functions: { foo: 'foo' }`),
+    // which has been accepted since #4343 with exactly that caveat. Rejecting
+    // the record spelling while accepting the string spelling of one mistake
+    // was two dialects for one contract; the loud failure is the same either
+    // way, at execute: "no function named '…' is registered" (#1870).
+    expect(FlowFunctionEntrySchema.safeParse({ handler: 'scoreLead' }).success).toBe(true);
+    expect(FlowFunctionEntrySchema.safeParse('scoreLead').success).toBe(true);
   });
 
   // #4343 — what `objectstack build` produces. The CLI lowers every inline
@@ -82,10 +102,48 @@ describe('FlowFunctionEntrySchema', () => {
     expect(FlowFunctionEntrySchema.safeParse('').success).toBe(false);
   });
 
-  it('drops a lowered ref when normalizing — it names a function without carrying one', () => {
+  // #4976 — the other half of what `objectstack build` emits. #4396 taught
+  // `lowerCallables` to keep a declared entry's declaration beside its lowered
+  // ref; this union was not extended in the same change, so the artifact
+  // `{ syncBilling: { handler: 'syncBilling', effect: 'writes' } }` failed the
+  // build with `invalid_union: Invalid input` — no path past `functions`, no
+  // key named. An author who cannot read that error deletes the declaration and
+  // ships an undeclared writer, which is the exact state `effect` exists to
+  // prevent (#4354).
+  it('accepts a lowered DECLARATION, the other form a built artifact carries', () => {
+    expect(FlowFunctionEntrySchema.safeParse({ handler: 'syncBilling', effect: 'writes' }).success).toBe(true);
+    expect(FlowFunctionEntrySchema.safeParse({ handler: 'syncBilling', effect: 'pure' }).success).toBe(true);
+  });
+
+  it('applies the pure default to a lowered declaration that states no effect', () => {
+    // `defineStack`'s parse normally materialises `effect` before the lowering
+    // ever runs, but `{ strict: false }` skips that parse — so the member must
+    // accept the shape without it, or that path keeps the failure this fixes.
+    const parsed = FlowFunctionEntrySchema.parse({ handler: 'syncBilling' });
+    expect(parsed).toEqual({ handler: 'syncBilling', effect: 'pure' });
+  });
+
+  it('keeps the declaration strict once lowered — a typo in a built artifact still names itself', () => {
+    // Derived from `FlowFunctionDeclarationSchema` rather than re-typed, so the
+    // surface name, the alias table and the prescription travel with it.
+    const result = FlowFunctionEntrySchema.safeParse({ handler: 'syncBilling', efect: 'writes' });
+    expect(result.success).toBe(false);
+    const messages = JSON.stringify(result.error!.issues);
+    expect(messages).toContain('`functions` entry');
+    expect(messages).toContain('`efect` → `effect`');
+    // And a value the runtime has no meaning for is still refused.
+    expect(FlowFunctionEntrySchema.safeParse({ handler: 'syncBilling', effect: 'write' }).success).toBe(false);
+  });
+
+  it('drops BOTH lowered shapes when normalizing — each names a function without carrying one', () => {
     // The callable for that name comes from the sidecar ESM module the build
-    // emits; binding the string would register a name pointing at nothing.
+    // emits; binding the ref would register a name pointing at nothing. This is
+    // not where `effect` is lost on the built path — `mergeRuntimeModule` has
+    // already re-attached the callable to the declaration by the time a boot
+    // normalizes anything (pinned in `packages/runtime`'s
+    // `artifact-function-declarations.test.ts`).
     expect(normalizeFlowFunctionEntry('scoreLead')).toBeUndefined();
+    expect(normalizeFlowFunctionEntry({ handler: 'syncBilling', effect: 'writes' })).toBeUndefined();
   });
 });
 
