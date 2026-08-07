@@ -375,8 +375,19 @@ function renderProse(text: string, ctx: FileDescriptionContext): string {
   // the whole of #6136's fix: the untitled `{@link}` branch above emits
   // `[<path>](<route>)`, whose link text is the path itself, so a rewriter run
   // over the raw string matched it a second time and nested a link in a link.
+  //
+  // The `\b` sits AFTER the `../` prefix rather than before it (#6229). A word
+  // boundary needs a word character on one side, and every character of `../`
+  // is a non-word one, so a leading `\b` could not match at the `.` — the match
+  // started at the first path segment instead and the prefix was left OUTSIDE
+  // the link it belongs to (`../../[system/cache.zod.ts](route)`, published on
+  // `api/http-cache` and `system/cache`). The prefix group was therefore dead
+  // for every realistic input, not merely capped at one level: widening it to
+  // `*` without moving the `\b` changes nothing, since a group that is never
+  // reached repeats zero times either way. Both halves are load-bearing —
+  // moving the `\b` alone would still strand the outer level of a `../../`.
   out = mapProse(out, ['text'], s =>
-    s.replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m, p: string) => {
+    s.replace(/(?<!\()((?:\.\.\/)*\b[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m, p: string) => {
       const route = sourcePathToDocsRoute(p);
       return route ? `[${p}](${route})` : `\`${p}\``;
     }));

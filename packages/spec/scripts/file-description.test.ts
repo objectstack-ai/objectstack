@@ -442,13 +442,11 @@ describe('renderFileDescription — #6136: the bare-path rewriter skips formed l
     // skipping paths, and a rewriter that stopped doing its job would pass the
     // two cases above for the wrong reason.
     //
-    // Spelled WITHOUT a `../` prefix on purpose. A bare path that carries one
-    // is mis-linked by a defect this PR does not touch — the rewriter's leading
-    // `\b` cannot match at the `.` of `../`, so the prefix is left outside the
-    // link (`../../[system/cache.zod.ts](route)`, live on `api/http-cache` and
-    // `system/cache`). That is a different input shape from #6136 (no `{@link}`
-    // is involved) and it is filed separately; asserting the broken spelling
-    // here would ratify it, so this case steers around it the way #5059's did.
+    // Spelled WITHOUT a `../` prefix on purpose: when this was written the
+    // prefixed spelling was mis-linked by a defect #6136 did not touch, and
+    // asserting the broken output here would have ratified it, so the case
+    // steered around it the way #5059's did. #6229 has since fixed it — the
+    // prefixed spellings are pinned in their own block below, correctly.
     const source = [
       '/**',
       ' * The connector lives in integration/connector.zod.ts today.',
@@ -459,6 +457,98 @@ describe('renderFileDescription — #6136: the bare-path rewriter skips formed l
     ].join('\n');
     expect(renderFileDescription(source, ctx)).toBe(
       'The connector lives in [integration/connector.zod.ts](/docs/references/integration/connector) today.',
+    );
+  });
+});
+
+/**
+ * #6229 — a `../` prefix belongs INSIDE the link, not beside it.
+ *
+ * The rewriter opened with `\b((?:\.\./)?…)`. A word boundary needs a word
+ * character on one side and every character of `../` is a non-word one, so the
+ * `\b` could never match at the `.`: the match began at the first path segment
+ * and the prefix was stranded next to the link it belongs to, published as
+ * `See also: ../../[system/cache.zod.ts](route)`.
+ *
+ * Measured rather than assumed: the prefix group was DEAD for every realistic
+ * input, not capped at one level as first recorded. `../x/y.zod.ts` lost its
+ * prefix exactly like `../../x/y.zod.ts` did, and the only spelling that ever
+ * reached the group was `x../y/z.zod.ts` — a word character before the dots,
+ * which nobody writes. So the two halves of the fix are not independent: `?`
+ * to `*` alone is a no-op on a group that is never reached, and moving the
+ * `\b` alone still strands the outer level of a `../../`. Both cases below
+ * therefore pin a spelling that a one-sided fix leaves red.
+ *
+ * No `{@link}` appears anywhere here — this link is produced entirely by the
+ * bare-path step, which is why the shape survived #6136.
+ */
+describe('renderFileDescription — #6229: a bare path keeps its `../` prefix inside the link', () => {
+  const ctx = {
+    // Mirrors `build-docs.ts`'s `sourcePathToDocsRoute`: `$`-anchored with a
+    // `(?:^|/)` head, so a `../` prefix on the way IN already resolves to the
+    // same page. The defect was never in route resolution — only in how much
+    // of the path the rewriter handed it.
+    sourcePathToDocsRoute: (t: string) => {
+      const m = /(?:^|\/)(system|api)\/([\w-]+)\.zod\.ts$/.exec(t);
+      return m ? `/docs/references/${m[1]}/${m[2]}` : null;
+    },
+  };
+
+  const describedBy = (line: string) =>
+    renderFileDescription(['/**', ` * ${line}`, ' */', '', "import { z } from 'zod';", ''].join('\n'), ctx);
+
+  it('keeps a two-level `../../` prefix inside the link', () => {
+    // `packages/spec/src/api/http-cache.zod.ts:35` verbatim — the exact input
+    // behind `content/docs/references/api/http-cache.mdx`, which published
+    // `See also: ../../[system/cache.zod.ts](/docs/references/system/cache) …`.
+    expect(describedBy('@see ../../system/cache.zod.ts for application-level caching')).toBe(
+      'See also: [../../system/cache.zod.ts](/docs/references/system/cache) for application-level caching',
+    );
+  });
+
+  it('keeps the `../../` prefix inside the link on the second published page', () => {
+    // `packages/spec/src/system/cache.zod.ts:28` verbatim — the other half of
+    // the pair, so neither page can regress on its own.
+    expect(describedBy('@see ../../api/http-cache.zod.ts for HTTP-level caching')).toBe(
+      'See also: [../../api/http-cache.zod.ts](/docs/references/api/http-cache) for HTTP-level caching',
+    );
+  });
+
+  it('keeps a single-level `../` prefix inside the link', () => {
+    // NOT a case that already worked before #6229 — see the block comment. It
+    // is pinned because it is the spelling the rest of the corpus uses inside
+    // `{@link}` tags, so a bare one is a matter of time.
+    expect(describedBy('The application cache lives in ../system/cache.zod.ts today.')).toBe(
+      'The application cache lives in [../system/cache.zod.ts](/docs/references/system/cache) today.',
+    );
+  });
+
+  it('keeps an arbitrarily deep prefix inside the link', () => {
+    // `*`, not a second `?`: the depth is whatever the author wrote.
+    expect(describedBy('Declared in ../../../system/cache.zod.ts for the record.')).toBe(
+      'Declared in [../../../system/cache.zod.ts](/docs/references/system/cache) for the record.',
+    );
+  });
+
+  it('still links an unprefixed path — the fix must not narrow the common case', () => {
+    expect(describedBy('The application cache lives in system/cache.zod.ts today.')).toBe(
+      'The application cache lives in [system/cache.zod.ts](/docs/references/system/cache) today.',
+    );
+  });
+
+  it('prints an unroutable prefixed path as code, prefix included', () => {
+    // The null-route fallback has to carry the prefix too, or the page would
+    // show `../../` beside a code span the way it used to show it beside a link.
+    expect(describedBy('Declared in ../../nowhere/absent.zod.ts for now.')).toBe(
+      'Declared in `../../nowhere/absent.zod.ts` for now.',
+    );
+  });
+
+  it('still refuses to start mid-word', () => {
+    // The `\b` moved, it did not go away: `xsystem/…` is one token, so the
+    // rewriter must not carve a link out of its tail.
+    expect(describedBy('Declared in xsystem/cache.zod.ts for now.')).toBe(
+      'Declared in `xsystem/cache.zod.ts` for now.',
     );
   });
 });
@@ -648,6 +738,23 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       if (/\[[^\]]*\]\([^)]*\)\]\(/.test(out) || /\[[^\][]*\[[^\]]*\]\(/.test(out)) {
         offenders.push(rel);
       }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never strands a `../` prefix outside the link it belongs to (#6229)', () => {
+    // The corpus half of the unit block above, and the assertion behind the
+    // issue's own acceptance grep (`\.\./\[` over `content/docs/references/`,
+    // which this re-derives from source instead of from the artifact). The
+    // published shape was `See also: ../../[system/cache.zod.ts](route)` on
+    // `api/http-cache` and `system/cache`: the rewriter began matching at the
+    // first path SEGMENT, so the prefix stayed behind as bare text beside the
+    // construct that names it. The code-span fallback lost it the same way
+    // (`../../` + a backtick), so both closers are checked.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      const stranded = out.match(/(?:\.\.\/)+[[`]/);
+      if (stranded) offenders.push(`${rel}: ${stranded[0]}`);
     }
     expect(offenders).toEqual([]);
   });
