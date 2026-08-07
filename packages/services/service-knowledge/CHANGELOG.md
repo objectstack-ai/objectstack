@@ -1,5 +1,160 @@
 # @objectstack/service-knowledge
 
+## 17.0.0-rc.4
+
+### Patch Changes
+
+- 44106d9: 知识索引在保留期回收(reap)删除行之前先去索引,不再留下孤儿条目(#4672)。
+
+  `object` 知识源是**逐记录投影**,而 `LifecycleService` 的保留期回收按谓词删行 ——
+  ADR-0057 §3.3 又禁止把它扇出成 N 条逐记录事件(清理会回灌正在清空的表)。结果是行没了、
+  文档还在:孤儿条目仍会占掉 `topK` 名额(权限过滤发生在适配器返回之后),`isSystem`
+  调用方还会直接读到它们。
+
+  现在 `KnowledgeServicePlugin` 会为每个被 `object` 源投影的对象注册一个 ADR-0057
+  **reap guard**:sweep 在删除前把候选行交给 guard,guard 按 id 删除对应文档,只确认删除
+  成功的行。
+
+  - **失败方向**:`adapter.delete` 失败 ⇒ 该行本轮**保留**,下次 sweep 重试。允许「行比索引
+    条目活得久」,绝不允许反过来。
+  - **组合语义**:多个 guard 按交集组合(#5535),因此它既不会顶掉 `service-storage` 的字节
+    回收 guard,也不会被其顶掉。
+  - **分批**沿用 sweep 自身的约束(每批 500 行、每轮 20 批)。
+  - **退出开关**:源上的 `refresh.onRecordChange: false` 或插件的 `enableEventSync: false`
+    会同时关掉两个方向的内联同步(事件订阅与 reap 去索引)。
+
+  零新增契约面:未新增任何 spec 键、`IKnowledgeAdapter` 成员或 `packages/objectql` 改动 ——
+  经由既有的 `ctx.getService('lifecycle')` duck-type + `registerReapGuard` seam 接入,与
+  `service-storage` 回收 `sys_file` 字节的方式一致。
+
+  应用层谓词写(调用方自己的 `multi: true` 写)**仍不覆盖**,#4639 的 warn 保留并已改写为
+  准确描述这条分界。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

@@ -1,5 +1,390 @@
 # @objectstack/verify
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 02dc076: feat(types,cli,verify)!: 只解析 host app 声明过的包 —— `NODE_PATH` 不再算数,ADR-0093 D5 那道墙从此与启动方式无关 (#4719)
+
+  **问题:契约写下了,但从没被检查过。** `@objectstack/types/node` 的
+  `createHostRequire` 返回一个 CJS `createRequire`,而 CJS 解析认 `NODE_PATH`
+  (`Module.globalPaths`)。pnpm 生成的 bin shim 第一件事就是
+  `export NODE_PATH=<workspace>/node_modules/.pnpm/node_modules`,于是任何被工作区里
+  **任意一个包**传递依赖到的包都能"从 host app 解析成功" —— 跟这个 app 声明了什么毫无关系。
+
+  实测(cloud `apps/objectos-ee`,当时未声明 `@objectstack/organizations`):
+  `pnpm start`(经 shim)boot 成功、插件表里有 `Organizations`、ADR-0093 D5 一声不吭;
+  `node node_modules/@objectstack/cli/bin/run.js serve`(不经 shim)则
+  `✖ FATAL: tenancy posture 'isolated' was requested…` 并 exit 1。同一个 app、同一份
+  `package.json`、同一个 posture,**只因为进程是怎么被拉起来的**,走出两种结果。
+  而 D5 的报错一直在教 operator "declare it in the app's package.json" —— 那正是
+  CLI 从来没检查过的那件事。
+
+  **改法:声明即执行。** 解析前先读 `<hostRoot>/package.json`;只有包名出现在
+  `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`
+  的 **键**里,才去 host 的 `node_modules` 里查它。仅仅"能被解析到"不再算数 ——
+  那正是让契约失效的那个偶然。未声明的包退回到 importing package 自身的解析
+  (ESM,不认 `NODE_PATH`),框架自有的包加载路径不受影响。
+
+  **两种失败从此分开报。** 今天它们都塌成同一条 `MODULE_NOT_FOUND`,补救办法却相反:
+
+  - **未声明** —— 指向"在 app 的 `package.json` 里声明并安装",并说明为什么
+    hoisting / `NODE_PATH` 不被接受;
+  - **声明了但解析不到** —— 明确说这是**安装**问题(`pnpm install`、生产 prune
+    砍掉了它、dist 没构建),别再让人回去重看那份已经写对的 `package.json`。
+
+  分类经新导出的 `hostImportFailureKind(err)` 暴露给调用方;两种错误都仍带
+  `code: 'MODULE_NOT_FOUND'`,`isModuleNotFoundError` 的既有判定不变。
+
+  **BREAKING — 哪类部署会从假绿变红,以及怎么修。**
+
+  1. **靠 hoisting 苟着的部署。** 一个 app 请求了 walled tenancy posture
+     (`OS_TENANCY_POSTURE=group` / `isolated` 或 `OS_MULTI_ORG_ENABLED=1`)、
+     却没在自己的 `package.json` 里声明 `@objectstack/organizations`,过去经 pnpm
+     shim 启动能正常 boot —— 现在会命中 ADR-0093 D5 并 exit 1。
+     **修法:在那个 app 的 `package.json` 里声明该依赖并安装。**
+     这些部署本来就在未声明状态下运行,红的是一直存在的事实,不是新引入的故障:
+     同一个 app 不经 shim 启动今天就已经是 exit 1。
+     (同样适用于 `@objectstack/service-ai` / `@objectstack/service-ai-studio`,以及
+     `bootStack({ multiTenant: true })`、dogfood 的 enterprise 门。)
+
+  2. **`createHostImporter` 的签名变了**,因为它现在需要 host 的**根目录**才能读到
+     那份 manifest,而一个 `NodeRequire` 无法被问出它锚在哪里:
+
+     ```diff
+     - createHostImporter(createHostRequire(hostRoot))
+     + createHostImporter(hostRoot)                     // 省略参数 = process.cwd(),同旧默认
+     ```
+
+     `createHostRequire` 本身保持不变,仍然导出。
+
+  新增导出(`@objectstack/types/node`):`HOST_DECLARATION_FIELDS`、
+  `HostDeclarationField`、`HostDeclaration`、`readHostDeclaration`、
+  `isDeclaredByHost`、`packageNameFromSpecifier`、`HostImportFailureKind`、
+  `HOST_IMPORT_FAILURE_KIND`、`hostImportFailureKind`。
+
+- de113a4: BREAKING(auth): `organization/create` 改判**实际生效的** tenancy posture —— 没有组织墙的部署不再能创建组织 (#5261)
+
+  `POST /api/v1/auth/organization/create` 的闸门此前判的是操作者**请求的** posture
+  (`postureEnforcesWall(resolveTenancyPosture())`,一次纯 env 读)。现在判 `tenancy` 服务给出的
+  **生效** posture —— `tenancy?.posture ?? resolveTenancyPosture()`,与 `/auth/config` 的
+  `features.multiOrgEnabled` 是**同一次求值**。
+
+  ## 为什么
+
+  两个站点此前只在一种形状下分叉,而那种形状恰恰是最不该放行的一种 —— ADR-0093 D5 **降级态**:
+  请求了 `isolated`/`group`,但企业包 `@objectstack/organizations` 缺席,于是 `tenancy.posture`
+  解析为 `single` 且 `degraded=true`。此时:
+
+  - 闸门读「请求」→ **放行**;
+  - `/auth/config` 读「生效」→ `multiOrgEnabled=false`,console 把「创建组织」入口**藏起来**。
+
+  结果是 UI 没有按钮而 API 打得通,并且建出来的每一个组织都是**没有任何引擎强制的租户边界** ——
+  声明了但没强制,ADR-0049 最讨厌的那一类,只不过发生在部署层。改判生效 posture 之后两者同解、
+  永不分叉:**没有墙,就没有组织**,无论这个部署是从未要过墙,还是要了没拿到。
+
+  ## 破坏性影响(有意为之)
+
+  **没有安装企业包 `@objectstack/organizations` 的部署将完全无法创建组织**,任何 env 组合都不行 ——
+  `OS_TENANCY_POSTURE=isolated`、`OS_MULTI_ORG_ENABLED=true`、两个一起设,都不再能把闸门说通。
+  这是一次实打实的能力收缩,不是 knob 纠正,所以搭 v17 主版本车。
+
+  | 部署形状                                          | 改前   | 改后          |
+  | ------------------------------------------------- | ------ | ------------- |
+  | 有企业包,posture `isolated` / `group`(墙真的立着) | 200    | **200**(不变) |
+  | **请求了墙但企业包缺席(D5 降级态)**               | 200    | **403** ⚠️    |
+  | `single` / 两个 knob 都不设                       | 403    | 403(不变)     |
+  | 未注册 `tenancy` 服务的精简嵌入(回落 env 解析)    | 按 env | 按 env(不变)  |
+
+  `serve.ts` 本来就在降级态**默认拒绝启动**(要 `OS_ALLOW_DEGRADED_TENANCY=1` 才走),所以这条收缩
+  命中的是一个已经需要显式选择才能到达的形状:从此那里的 org-create 路由也一并拒绝,而不是半通不通。
+  cloud 控制面与任何装了企业包的部署不受影响。
+
+  **迁移**:需要多组织能力的部署安装并声明 `@objectstack/organizations`(ADR-0081 D2)。仅靠 env
+  声明一个墙、而没有实现它的运行时,不再被当作多组织部署对待。
+
+  ## `@objectstack/verify`(minor,新增)
+
+  `BootOptions.multiTenant` 增加 `'posture-only'` 取值:注册一个内置的 `org-scoping` 服务替身,
+  让 `tenancy` 服务解析出真实、**非降级**的 `isolated` posture,从而打开受 posture 把守的路由 ——
+  供那些「组织墙是**前置条件**而非被测对象」的 fixture 使用(#3624 的 `org-create-default-team`
+  dogfood 就是为它而建:那条回归此前靠「boot 后翻 env、闸门 live 读」开路,本次收缩把这个绕法关死了)。
+
+  ⛔ 它**不做任何租户隔离**:不 stamp `organization_id`,不 scope 任何查询 —— 它让部署的
+  **posture** 为真,不是让**墙**为真。跨租户隔离的唯一诚实证明仍然是 `multiTenant: true` +
+  真实的企业包,这也是那些 gate 在本仓继续 skip 而不是假装通过的原因。
+
+### Patch Changes
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [da5d1b4]
+- Updated dependencies [d4e0809]
+- Updated dependencies [739f496]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [c637387]
+- Updated dependencies [c113690]
+- Updated dependencies [705efeb]
+- Updated dependencies [978fed2]
+- Updated dependencies [c36abfe]
+- Updated dependencies [9ecdca9]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [1792384]
+- Updated dependencies [2f6516e]
+- Updated dependencies [e6b1bb0]
+- Updated dependencies [a7b854f]
+- Updated dependencies [f56ebea]
+- Updated dependencies [64cd010]
+- Updated dependencies [f522e95]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [628b028]
+- Updated dependencies [b857356]
+- Updated dependencies [fce4c73]
+- Updated dependencies [f6385c7]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [7a40b7a]
+- Updated dependencies [7cf1531]
+- Updated dependencies [586d6f7]
+- Updated dependencies [9f747ee]
+- Updated dependencies [2d14b35]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [c497d26]
+- Updated dependencies [bbdbf28]
+- Updated dependencies [93929c2]
+- Updated dependencies [2e284b2]
+- Updated dependencies [3905c00]
+- Updated dependencies [4335497]
+- Updated dependencies [43ca399]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [02a8256]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [846ed1f]
+- Updated dependencies [947d4f9]
+- Updated dependencies [d8f65fe]
+- Updated dependencies [58ffcab]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [1f0e7cb]
+- Updated dependencies [8dbd2a8]
+- Updated dependencies [99d7a93]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [f205c32]
+- Updated dependencies [7bf3d1c]
+- Updated dependencies [9ce0ca9]
+- Updated dependencies [db9c331]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [217b791]
+- Updated dependencies [fd8521f]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [2b63a00]
+- Updated dependencies [18b8eaa]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [9c4f174]
+- Updated dependencies [37e38d1]
+- Updated dependencies [cc5b048]
+- Updated dependencies [78adc2e]
+- Updated dependencies [81e2744]
+- Updated dependencies [277eb36]
+- Updated dependencies [41e605e]
+- Updated dependencies [2649ccb]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [a70cd0a]
+- Updated dependencies [c52e608]
+- Updated dependencies [96d3d4d]
+- Updated dependencies [afa6aa5]
+- Updated dependencies [afb83d3]
+- Updated dependencies [4022b78]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [c7406b0]
+- Updated dependencies [85d95e7]
+- Updated dependencies [8108787]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [d97f2a2]
+- Updated dependencies [d9cac60]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [dfa8bad]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [290d944]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [88a6bed]
+- Updated dependencies [a6b3ee7]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [5d3ced9]
+- Updated dependencies [9fa6bab]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [61dc08e]
+- Updated dependencies [8dcf607]
+- Updated dependencies [b691ba9]
+- Updated dependencies [1eadac0]
+- Updated dependencies [7c2f7dd]
+- Updated dependencies [9b26699]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [8597a7d]
+- Updated dependencies [594508e]
+- Updated dependencies [ff39e63]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [1cae606]
+- Updated dependencies [4addd9d]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b9cc17d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [75f82f3]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [1203bb2]
+- Updated dependencies [7d27da0]
+- Updated dependencies [de113a4]
+- Updated dependencies [caf144a]
+- Updated dependencies [db8c285]
+- Updated dependencies [0d24078]
+- Updated dependencies [089767f]
+- Updated dependencies [5b8f95b]
+- Updated dependencies [dadf542]
+- Updated dependencies [2ddba89]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [ef7845a]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [2cca98b]
+- Updated dependencies [07f1822]
+- Updated dependencies [37a8f2b]
+- Updated dependencies [441d79f]
+- Updated dependencies [7f955e5]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [dc6abfd]
+- Updated dependencies [39396bd]
+- Updated dependencies [577cd27]
+- Updated dependencies [5897552]
+- Updated dependencies [91ec1ea]
+- Updated dependencies [2d25303]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [0cd08d5]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [2680cd3]
+- Updated dependencies [c5a5996]
+- Updated dependencies [cba7454]
+- Updated dependencies [b40f81c]
+- Updated dependencies [82a06af]
+- Updated dependencies [6e66cbe]
+- Updated dependencies [f226605]
+- Updated dependencies [c272e48]
+- Updated dependencies [db2ea82]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [1216dcc]
+- Updated dependencies [9c90ea0]
+- Updated dependencies [41c3b48]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [ef8b1ff]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [d56bcdb]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [5aaa6fc]
+- Updated dependencies [dca5bd3]
+- Updated dependencies [488b66c]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [90fa077]
+- Updated dependencies [946a131]
+- Updated dependencies [909895d]
+- Updated dependencies [c183a12]
+- Updated dependencies [69a89ce]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+- Updated dependencies [c42a19a]
+- Updated dependencies [f0d98e1]
+- Updated dependencies [229d29e]
+- Updated dependencies [b508244]
+- Updated dependencies [2b52bc8]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/runtime@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/service-analytics@17.0.0-rc.4
+  - @objectstack/rest@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/plugin-hono-server@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/plugin-auth@17.0.0-rc.4
+  - @objectstack/service-settings@17.0.0-rc.4
+  - @objectstack/objectql@17.0.0-rc.4
+  - @objectstack/service-automation@17.0.0-rc.4
+  - @objectstack/plugin-security@17.0.0-rc.4
+  - @objectstack/service-datasource@17.0.0-rc.4
+  - @objectstack/plugin-sharing@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

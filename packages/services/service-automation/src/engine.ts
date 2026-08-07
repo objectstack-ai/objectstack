@@ -24,6 +24,7 @@ import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictN
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type {
     Connector,
+    ConnectorActionEffect,
     ConnectorProviderFactory,
     ConnectorOrigin,
     ConnectorState,
@@ -1818,6 +1819,23 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Resolve what a connector action does upstream (#4395), so the
+     * `connector_action` node can COUNT its step instead of reporting it as
+     * uncountable. `undefined` means the connector declared nothing — the
+     * honest third answer, and still the default.
+     *
+     * Read from the registered connector's stored `def` rather than from
+     * {@link getConnectorDescriptors}: the def is what `registerConnector`
+     * validated through `ConnectorSchema`, and the descriptor list is a
+     * projection of it built for HTTP discovery. Both the plugin path and the
+     * ADR-0097 declarative materialization path store their def here, so one
+     * lookup covers both origins.
+     */
+    resolveConnectorActionEffect(connectorId: string, actionId: string): ConnectorActionEffect | undefined {
+        return this.connectors.get(connectorId)?.def.actions?.find((a) => a.key === actionId)?.effect;
+    }
+
+    /**
      * Wire the engine to the host's named-function registry (#1870). The
      * automation plugin calls this in `start()` with a resolver backed by
      * ObjectQL's `resolveFunction` (populated from `bundle.functions` /
@@ -1955,6 +1973,11 @@ export class AutomationEngine implements IAutomationService {
                 description: a.description,
                 inputSchema: a.inputSchema,
                 outputSchema: a.outputSchema,
+                // #4395 — the declared upstream effect travels to the designer
+                // too, not only to the executor: `GET /connectors` is where a
+                // flow author picks the action, and "this one writes" is a fact
+                // about the pick.
+                effect: a.effect,
             })),
         }));
     }

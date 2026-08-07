@@ -1,5 +1,179 @@
 # @objectstack/service-messaging
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 9c90ea0: feat(sms): 短信全局日发送配额 —— 成本总量闸 (#2814)
+
+  #2780 给 OTP 端点落了**按号码**的防滥用（60s 冷却 + 每号码 5 条/小时）。那挡住的是「一个号码花多少钱」，挡不住「这套部署一天花多少钱」：攻击者轮换上万个不同号码时，每个号码都稳稳待在自己的预算里，而日累计账单没有任何上限——这正是 SMS pumping / toll fraud 的典型打法。更要紧的是，按号码那道闸住在 better-auth 的 `hooks.before` 里，只看得见 auth 端点：`notify(channels:['sms'])` 与邀请短信从旁边直接走过去，一条都不计数。
+
+  本次新增一道**总量**闸，扣减点放在所有出站短信本来就必经的那一处 —— `SmsService.send()`。OTP、邀请、messaging `sms` channel 三条路无论从哪扇门进来，都记在同一本账上。
+
+  ## 新增设置项
+
+  `sms` 命名空间新增 `daily_quota`（Daily send limit，number，默认 `0` = 不限）：这套部署每个 **UTC 自然日**允许发出的短信总条数。超出后拒发，直到 00:00 UTC。env 覆盖沿用既有的每键机制，无需额外接线：`OS_SMS_DAILY_QUOTA=2500`。
+
+  `0` 是出厂姿态，所以升级本身不改变任何现有部署的发送行为——闸门要由运营者显式配置才会闭合。
+
+  ## Observable behaviour change
+
+  **配置配额后，发送可能被拒**，两条路径的表现分别是：
+
+  - OTP / 邀请路径 —— `SendSmsResult.status='failed'`，`error` 为 `TOO_MANY_REQUESTS: daily SMS quota exhausted`。刻意与按号码闸抛出的 `TOO_MANY_REQUESTS` 用同一个码，且**不带任何剩余额度细节**：从外面看，两道墙必须长得一样，攻击者不该能试探出自己撞的是哪一道。
+    ⚠️ 但这个码**目前到不了 HTTP 调用方**：`AuthManager.deliverPhoneOtp` 把它重抛成普通 `Error`，而 better-call 对非 `APIError` 一律回 500（实测，见 #6039）。也就是说 OTP 端点上，按号码闸回 429、总量闸回 500。补齐要动 plugin-auth，已单独立案。
+  - messaging `sms` channel —— `SendResult.ok=false`，且 `classifyError` 返回 `'rate_limited'`（此前一律 `'retryable'`）。投递落进 outbox 走退避重试 / 死信，不会被静默丢弃；`rate_limited` 与 `retryable` 走同一条重试阶梯，但把「额度用尽」与「网关抖动」在投递记录上区分开。
+
+  ## 计数落在哪里
+
+  复用仓内唯一那份定窗计数（`incrementFixedWindow`）与它的惰性存储解析（`createLazyCounterStore`，#4772/#4790），不写第三份：
+
+  - 有 kernel `cache` 服务时计在共享 cache（集群共享与否取决于 cache 本身）；
+  - 解析不到时降级为有界的进程内计数，并由解析器**点名**打一条 warn，说明降级的代价（N 节点部署最多可花 N× 配额）；
+  - 解析在**计数被消费时**发生，而非插件 init —— 后注册的 cache 也能在下一次发送时被接上（#4772 的坑）。
+
+  窗口是 UTC 自然日，且由两个机制同时保证：计数键带 UTC 日期（`sms-daily-sends:2026-08-06`），窗口开启时的 TTL 恰为距下一个 UTC 午夜的秒数。任一机制单独也能翻窗，合起来则不可能互相矛盾。
+
+  ## 两条刻意的姿态
+
+  - **fail-open**：计数存储读不到时，闸门**放行**并打一次 warn。短信成本闸不能把登录拖下水（#2814 诉求 4）。
+  - **配额值的钳制在消费侧**：manifest 上的 `min: 0` 今天并不被 `validatePatch` 执行（#5932），所以负值 / `NaN` / `Infinity` / 非数字都会原样抵达读取方。这些一律降级为 `0`（不限）并**点名**打 warn，而不是拒发、也不是替运营者编一个别的默认值——一个设置表单里的手误不该变成手机登录的全站故障，而编一个没人声明过的上限只会把手误藏进看似合理的行为里。
+
+  ## 不在本次范围
+
+  诉求中的**每租户日配额**（`daily_quota_per_tenant`）未实现：`SendSmsInput`（`@objectstack/spec/contracts`）不携带任何租户标识，而在 service 侧另造一个只此一家的拼法就是 Prime Directive #12 明令禁止的影子契约。租户维度要么落在 spec 契约上，要么不落——详见 #2814 上的讨论。
+
+### Patch Changes
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

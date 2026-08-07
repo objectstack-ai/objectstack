@@ -1,5 +1,256 @@
 # @objectstack/plugin-audit
 
+## 17.0.0-rc.4
+
+### Patch Changes
+
+- c5e7bd9: fix(plugin-audit): say where the audit system tables were provisioned, and stop skipping provisioning silently (#4887)
+
+  `AuditPlugin.provisionSystemTables()` created `sys_audit_log` / `sys_activity` /
+  `sys_comment` at `kernel:ready` and then said **nothing** — not on success, and
+  not when it skipped the work entirely (`typeof engine.syncObjectSchema !==
+'function'` returned silently). `syncObjectSchema()` itself returns `void` and
+  has three silent exits of its own — the object is not in the registry, no driver
+  resolves for it, or the resolved driver has no `syncSchema` — none of which
+  throw. So "provisioned three tables" and "provisioned nothing at all" produced
+  byte-identical logs, and the only way to tell them apart was to go looking in a
+  database.
+
+  #4887 is what that costs. `sys_audit_log` and `sys_activity` were reported as
+  never provisioned because they were absent from the primary SQLite file, with
+  the silent `typeof` bail named as the likely cause. Neither was true:
+  `sys_audit_log` (`lifecycle.class: 'audit'`) and `sys_activity`
+  (`lifecycle.class: 'telemetry'`) are routed by **ADR-0057 §3.6** to the
+  dedicated `telemetry` datasource whenever one is registered, and `os dev`
+  registers one by default as a _sibling file_ (`dev.db` → `dev.telemetry.db`).
+  Both tables had been created — in the other store. `sys_comment` carries no
+  lifecycle class, stays on the primary, and was the one that "existed". Nothing
+  in the log connected those three facts.
+
+  Provisioning now reports itself:
+
+  - **Wholesale skip is a `warn`, naming the consequence** — the tables stay
+    lazy-created on first WRITE, so an env that READS one first (the home page
+    activity feed queries `sys_activity` before any mutation) logs "no such
+    table" until something writes.
+  - **One `info` line per boot listing where each table landed** —
+    `sys_audit_log→telemetry, sys_activity→telemetry, sys_comment→sqlite`,
+    resolved through the engine's own `getDriverForObject`, so the log states the
+    routing rather than leaving it to be inferred.
+  - **A second `info` line when the ADR-0057 split is in effect**, saying
+    explicitly that those tables live in a different store — on SQLite, a
+    different _file_ — and that anything reading them without naming the object
+    (raw SQL against the default datasource) will report "no such table" even
+    though provisioning succeeded.
+  - **An object that resolves to no driver is a `warn`** — `syncObjectSchema()`
+    returns without issuing any DDL in that case and throws nothing, so the
+    per-object `catch` never fires; from outside the engine this is the only place
+    it can be observed.
+
+  Behaviour is otherwise unchanged: the same three objects are synced, per-object
+  failures stay isolated, and an engine without on-demand DDL still degrades
+  instead of failing `start()`.
+
+- 0162c81: fix(plugin-audit): stop mirroring `sys_job_queue` traffic into the audit ledger (#5193)
+
+  `SKIP_OBJECTS` in `audit-writers.ts` excludes operational telemetry / plumbing
+  from `sys_audit_log` and `sys_activity` — ADR-0057 decision 5, _"stop the
+  amplifier"_. Its group (2) already listed `sys_job`, `sys_job_run` and
+  `sys_automation_run`; `sys_job_queue` — the highest-volume table of that same
+  family — was the one sibling missing, so every durable queue message was
+  mirrored into both sinks.
+
+  The audit hooks register for **all** objects (`afterInsert` / `afterUpdate` /
+  `afterDelete`) and there is no "writes made under a system context are not
+  audited" exemption, so `DbQueueAdapter`'s own writes were recorded like user
+  edits. One message costs at least three of them — the publish insert, the lease
+  `pending → running` update and the terminal `→ completed` update, plus one retry
+  update per failure and the reaper's periodic DELETE of completed rows — each
+  producing an `sys_audit_log` **and** an `sys_activity` row. Since queue-backed
+  email delivery landed, that ran on every single mail. Each `beforeUpdate` also
+  paid an extra `findOne` snapshot of the row it was about to change.
+
+  `sys_job_queue` is engine-owned plumbing (`managedBy: 'engine-owned'`,
+  `enable.apiMethods: ['get', 'list']`, `lifecycle.class: 'transient'`) that no
+  user can write, so those rows carried no compliance value — only noise and write
+  amplification. Nothing else changes: the exemption is one name in one list, and
+  ordinary business objects are audited exactly as before.
+
+  Operators who charted queue throughput off `sys_activity` should read
+  `sys_job_queue` directly instead — it is the system of record for queue state,
+  and unlike the audit sinks it is exposed for reading (`get` / `list`).
+
+- 055f0c9: fix(plugin-audit): stop mirroring chunked-upload progress into the audit ledger (#5202)
+
+  `SKIP_OBJECTS` in `audit-writers.ts` excludes operational telemetry / plumbing
+  from `sys_audit_log` and `sys_activity` — ADR-0057 decision 5, _"stop the
+  amplifier"_. `sys_upload_session` was the second table missing from group (2)
+  for the same reason `sys_job_queue` was (#5193): it declares
+  `lifecycle.class: 'transient'` and its own object comment says what the rows are
+  worth — _"an upload session is ephemeral state, never business truth"_
+  (ADR-0057 / #2970 item 4) — but nothing connected that declaration to the
+  exemption list, which is hand-written.
+
+  The audit hooks register for **all** objects and there is no "writes made under
+  a system context are not audited" exemption, so `StorageMetadataStore`'s own
+  writes were recorded like user edits. A chunked upload of N parts costs 1 + N
+  writes — the `createSession()` insert plus one `updateSession()` per chunk — and
+  then a terminal status update and the row's removal, each producing an
+  `sys_audit_log` **and** an `sys_activity` row: 2 × (1 + N) rows for one file,
+  with a `beforeUpdate` snapshot read apiece. Each of those rows was also unusually
+  fat, because `updateSession()` writes the merged **full** record, so the `parts`
+  JSON blob that grows with every chunk rode along in each diff's `old_value` /
+  `new_value`.
+
+  Nothing else changes: the exemption is one name in one list, and ordinary
+  business objects are audited exactly as before. In particular `sys_file` stays
+  audited — it declares `transient` too, but only to reap tombstones and
+  unfinished uploads; its rows are mostly permanent business truth and keep their
+  compliance value.
+
+  Operators who tracked upload activity through `sys_activity` should read
+  `sys_upload_session` (in-progress state) and `sys_file` (the durable record of
+  what was actually stored) instead.
+
+- e18e3da: 审计行写失败改为 `error` 级,并只报一次
+
+  按 AGENTS.md「Degradation log levels」的判据,审计写失败属 **durability / data-consistency** 类而非 functional 类:被审计的那次写入本身成功、数据已落库、接口返回 200,从外面看一切正常,只有记录「谁做的」的 `sys_audit_log` 行没有落地,而且没有任何重试。这正是 #4420 在合规账本上的同一形状,因此原先的 `WARN Audit write failed` 升级为 `error`。
+
+  这条 `error` 同时给出**后果**与**修复方向**:审计轨迹已不完整;`sys_audit_log` 受 ADR-0057 §3.6 生命周期分流,注册了 `telemetry` 数据源时会被路由过去(`os dev` 默认以兄弟 SQLite 文件形式提供一个),所以出现 "no such table" 通常意味着该次写入执行在了与建表处**不同**的数据源连接上;`OS_TELEMETRY_DB=0` 可让所有 lifecycle-classed 对象留在主数据源。
+
+  审计写发生在**每一次**数据变更上,因此该 `error` 全进程**只报一次**(后续失败降为 `debug`,细节仍可通过提高日志级别取回)—— 每次失败都报一遍会训练所有人略过 `error`,而这正是当初让 #4420 的 `warn` 无人阅读的反射。
+
+  写入点提取为具名的 `persistAuditTrailRow`,并登记进 `scripts/check-durability-degradation-log-level.mjs` 的 `DURABILITY_CRITICAL_CALLEES`,由 `pnpm check:durability-log-level` 守住该级别,防止日后被悄悄改回 `warn`。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

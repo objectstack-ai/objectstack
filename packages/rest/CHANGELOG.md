@@ -1,5 +1,970 @@
 # @objectstack/rest
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- d9cac60: **BREAKING** — `GET /meta/:type/:name` now answers exactly one body shape: the
+  `GetMetaItemResponseSchema` envelope `{ type, name, item, … }` that
+  `packages/spec` has always declared for it. On the default configuration this
+  endpoint used to answer the **bare metadata document** instead (#5563).
+
+  ### What changed, and why it is breaking
+
+  The route had two mutually exclusive branches with different response
+  structures. The cached branch — reached whenever `metadata.enableCache` is on,
+  which is the **default** (`enableCache: z.boolean().default(true)`) — served
+  `getMetaItemCached`'s `result.data`, and that value has the envelope already
+  stripped. The uncached branch served `getMetaItem`'s envelope. So the one shape
+  the spec declared was the one a default deployment could not obtain, and the
+  envelope surfaced only when the cache was off or when the read structurally
+  bypassed it (`app`, `doc`, `book`, `?state=draft`, `?preview=draft`,
+  `?package=`). Consumers had no correct static type — they sniffed at runtime or
+  reached for `as any` (#5545 was blocked on exactly this).
+
+  The dispatcher's `/meta` domain had the same split one layer down: the protocol
+  resolver answered the envelope while the ObjectQL-registry and MetadataService
+  fallbacks answered bare documents. Both fallbacks now wrap what they found,
+  taking `type`/`name` from the request.
+
+  ### Migration
+
+  `GET /api/v1/meta/object/customer`, default configuration:
+
+  ```jsonc
+  // before — the bare document
+  { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+
+  // after — the declared envelope; the document is verbatim under `item`
+  {
+    "type": "object",
+    "name": "customer",
+    "item": { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+  }
+  ```
+
+  - **Reading the body directly** (`fetch`, `client.meta.getItem`,
+    `client.meta.getCached().data`): read the document at `.item`. Nothing inside
+    it changed. `type` is the canonical singular metadata type name, so
+    `/meta/objects/customer` and `/meta/object/customer` answer the same `type`.
+  - **`useObject` / `useFields` (`@objectstack/client-react`)**: `useObject().data`
+    is now the envelope — `data.item.label`, `data.item.fields`, where it used to
+    be `data.label` / `data.fields`. `useFields()` is unchanged (it already
+    returns the flattened field list) and is the shorter path when fields are all
+    you need.
+  - **`isMetaEnvelope`, exported from `@objectstack/rest`, is REMOVED.** It
+    existed only to tell the two shapes apart. There is one shape now, so the
+    replacement for `isMetaEnvelope(r) ? r.item : r` is `r.item`.
+  - **Not converged, deliberately**: `?layers=true` still answers the layered
+    diagnostic projection `{ type, name, code, overlay, overlayScope, effective,
+validation }`. Collapsing three layers into one `item` would delete the
+    diagnostic. Unaffected unless you pass that flag.
+
+### Minor Changes
+
+- 96d3d4d: The two machine-readable endpoint surfaces announce only the declarations the runtime actually serves
+
+  `GET {basePath}/meta/api` and `GET {basePath}/openapi.json` enumerated declared `api` items
+  through the metadata protocol (ObjectQL SchemaRegistry + `sys_metadata`). Whether a declared
+  route is SERVED is decided by a different reader — `IMetadataService.matchEndpoint` and the
+  endpoint matcher behind it, which sees the metadata manager's registry and its registered
+  loaders. A real boot measured the two disagreeing: an `api` row written through
+  `PUT /meta/api/{name}` was enumerated by both surfaces — the OpenAPI document publishing it as
+  a path with `security: []`, i.e. as needing no credentials — while every request to it answered 404.
+
+  Both surfaces now ask the matcher, per declaration, and announce only what comes back. An
+  `/openapi.json` is what SDKs, codegen and AI clients generate from, so an endpoint advertised
+  there that does not exist propagates into everything built on top of it.
+
+  **What changes for you:** an `api` declaration that this runtime will not serve disappears from
+  both surfaces. That covers a row created by a runtime/Studio metadata write rather than
+  published from a stack artifact, and one excluded at load by the ADR-0121 publish gates (for
+  example `authRequired: false` with no armed `rateLimit`). If a declaration you expected has
+  vanished, it was already answering 404 — the surface has stopped mis-reporting it, and the
+  server log now names each omitted declaration, its route, and why. Publish it through a gated
+  path (a stack artifact, or `publishPackage` with the package's `manifest.namespace`) to make it
+  real. Endpoints declared in a stack artifact are unaffected: they are served, so they are still
+  listed and still documented in full.
+
+  Two surfaces deliberately keep their previous behaviour: `GET /meta/api?preview=draft` answers
+  "what is pending", which is by construction not the served set, and the single-item
+  `GET|PUT|DELETE /meta/api/{name}` routes stay reachable so an unserved declaration can still be
+  inspected and removed.
+
+  Hosts that embed `RestServer` directly get a new optional final constructor argument,
+  `metadataServiceProvider`, resolving the `metadata` service. `rest-api-plugin` wires it; a host
+  that does not pass it keeps the old enumerate-everything behaviour and logs, once, that the
+  surfaces can no longer promise they describe only served routes.
+
+- 75f82f3: **`/openapi.json` 的 built-in 路由段改由 rest 按自身路由事实产出(#5588,维护者裁定 C 第一棒)**
+
+  发布出去的 `GET {apiPath}/openapi.json` 里,built-in 路由那一段**一条都不存在**:真实 boot 逐条探测,7 条 path / 10 个 operation **0/10 命中**。段落由 `packages/spec/scripts/build-openapi.ts` 按字面量 `basePath = '/api'` 手写,于是路径全部缺 `/v1`(CRUD 还缺 `/data`);`PUT {object}/{id}` 写错动词,服务器对 `PUT` 明确回 405;`/api/meta/types` 全仓无此路由;`/api/.well-known/objectstack` 是 runtime dispatcher 的路由、服务在**根路径**上而非 API base 下。照这份文档生成客户端,每一个数据调用都 404。
+
+  这个座位上也不可能写对:`apiPath` 是部署级配置(`api.apiPath ?? api.basePath + '/' + api.version`),随包发布的静态 JSON 无法为所有部署拼对前缀。
+
+  **改法**:built-in 段的属主是**挂载这些路由的包**(ADR-0076 一路由一属主;本文档的属主由 #5078 的真实 boot 坐实为 `packages/rest`)。serve 期流水线现在从 `routeManager.getAll()`——路由器自己用来匹配请求的那张表,请求时读取——产出该段,并**丢弃**静态产物里带来的 `paths` 而不是与之合并(合并等于把错误的段再发布一次;spec 侧的生成要到第二棒 #5744 才摘除)。同一张表既决定「谁被服务」又决定「谁被描述」,幽灵行因此在结构上不可能存在:四条 bulk 路由只在 protocol 实现了 `batchData` / `createManyData` 时注册,于是也只在那时被描述。
+
+  - 路径前缀跟随实际配置的 `apiPath`,project-scoped 镜像有自己的文档(不再把每条路径写两遍);
+  - 动词是注册时的动词(`PATCH` 就是 `PATCH`);
+  - 覆盖面:该 base 下经本服务器 `RouteManager` 挂载的**全部**路由(默认 boot 78 条,对比旧段的 10 个 operation),`rest-route-ledger.ts` 中 `source: 'route-manager'` 的各 family 全含,不按 `disposition` 裁剪——`server-only` / `public` 也是被服务的 HTTP 面。**不含**两个 `direct-mount` registrar(`package-routes.ts` / `external-datasource-routes.ts`,9 行):它们绕过 `RouteManager` 直接注册且受服务开关约束,本服务器**不持有**它们本次 boot 是否挂载的事实,而凭空补上正是本单要修的那类缺陷;也不含其它包挂载的路由(dispatcher 根路由、`service-storage`、`service-i18n`);
+  - 不编造:请求/响应 schema、状态码、query 参数一律不生成(旧段的 `CreateRequest` / `UpdateRequest` `$ref` 除了挂在 404 的路径上,连线上形状都是错的——`{ data }` 信封 vs 裸记录体,spec 自己的路由目录 `plugin-rest-api.zod.ts` 里已记录这一点)。每个 operation 只写从注册读出的 `summary` / `tags`、从路径机械推导的 `operationId` 与 path 参数,响应写 `default`(成功状态是逐 handler 的事实,写 `200` 对 201/204 的路由就是错的);
+  - 逐 operation 的 `security` 只在注册带 `public` 标签时写 `[]`(匿名表单),其余继承文档级要求——对 `/discovery`、`/openapi.json` 这类实际匿名的路由属于**故意少说**:注册没有携带鉴权事实,而「不需要凭据」是写错会漏数据的那个方向。
+
+  `{object}` 展开与声明式端点合并两步原样保留,只是展开的模板终于是真实存在的路由(`/api/v1/data/{object}` 及其同族)。`components.schemas` / `info` / `securitySchemes` 仍来自 `@objectstack/spec` 并原样保留——那是它真正拥有的部分。
+
+- 1203bb2: **声明式端点进 OpenAPI 文档;`/openapi.json` 的影子属主摘除(#5040 E6,并入 #5078)**
+
+  `GET {basePath}/openapi.json` 只有一个属主,而且实测坐实是 `packages/rest`(#5078:真实 boot 拿到 355KB 的 OpenAPI 3.1 文档,`servers[0]` 按 Host 注入、`{object}` 展开出 199 条 paths、两条 `x-template` —— 三个指纹全部是 rest-server 的行为)。因此 `apis:` 端点的文档面加入 **rest-server 既有的 enrichment 管线**(与 `{object}` 展开同根、同一次请求、同样 best-effort),而**不是**在某个 metadata service 上实现 `generateOpenApi` —— 那会造出 ADR-0076 第 1 条明令禁止的第二属主。E1 的契约成员因此已剔除。
+
+  每条声明贡献一个 path 条目:`path` 原样、`method` 小写作为 Operation 键、`operationId` = `name`,以及词表**真正带有**的两个文档字段 `summary` / `description`(缺省即缺省,不生成替身)。除此之外只写「执行器会怎么对待这条声明」的事实,逐条注明出处:`object_operation` 的 `get`/`update`/`delete` 记录 id 取 `query.id`(词表无路径模板语法)、`create` 答 201 其余 200、`script` / `proxy` 与缺 `objectParams` 的 `object_operation` 答 **501**。不编造任何 request/response schema —— 出厂文档的 `components.schemas` 是空的,凭空写 `$ref` 只会得到悬空引用。
+
+  `authRequired` 由 schema parse 物化(缺省即 `true`),为 true 的条目引用**从文档自身读出**的 security 方案(不在 rest 里硬写方案名,否则就是第二处需要保持正确的地方),为 false 的条目写显式 `security: []` —— 这是 review 时一眼能看见的那个形状。不满足 `ApiEndpointSchema` 的存量条目**响亮跳过**并点名(与端点匹配器的装载门同一姿态);同 `method+path` 撞车时按「`name` 字典序在前者胜」裁决,与匹配器**同一条规则**,否则文档会指认一个运行时并不执行的端点;撞上内建路径时内建保留,声明被略过并报错。
+
+  同时摘除 `http-dispatcher.ts` 里的 `generateOpenApi` 探测死分支:该方法在本仓与两个兄弟仓**零实现**,且 boot 实测**没有任何路由**把 `/openapi.json` 送进 `dispatch()` —— 双重死。`route-ledger.ts` 里对应的行与 `LEGACY_CHAIN_PREFIXES` 条目一并移除(原注记「falls through when metadata service lacks a generator」把「从来没有」写成了「有时没有」,正是 #5078 立单的失准点;把 prefix 留在一张自述为「if-chain 分支」的清单里,会在同一个 PR 里再造一次同样的谎)。该路由的唯一台账行在 `packages/rest/src/rest-route-ledger.ts`,一直是准的。
+
+  **现网行为零变更**:publish / validate 对非空 `apis:` 仍然硬拒(E7 前不撤),所以今天枚举出的是空集,enrichment 原样返回同一个文档对象 —— 服务出去的字节与本次改动前逐字节相同,并有测试钉住。
+
+### Patch Changes
+
+- 978fed2: fix(analytics,rest): five dataset refusals declare `DATASET_INVALID` / 400 themselves, and the route's message-sniffing list shrinks to one entry (#5367)
+
+  `POST /analytics/dataset/query` answered `400 DATASET_INVALID` for six error
+  families because the route recognised their **prose**, not because the errors
+  said anything about themselves. #5352 gave the catch an ADR-0112 envelope branch
+  (`error.code` + a 4xx `error.status`, read first) and had to leave a hardcoded
+  list of message substrings behind it, since all six producers were still bare
+  `throw new Error(…)`:
+
+  ```
+  /not declared in the dataset|not backed by a declared relationship|
+   not supported by the v1 dataset runtime|read-scope-sql|
+   not a selected dimension or measure|is not a subset of the selected dimensions/
+  ```
+
+  That made the HTTP status of six families a property of their wording.
+  Rephrasing `dataset-compiler`'s "is not declared in the dataset's `include`" —
+  no logic change — moved that refusal from 400 to 500, i.e. re-opened #5352 for a
+  different family, and no test and no gate would have gone red. Prime Directive
+  #12 permits an accommodation like that only while it is declared, loud, tested
+  **and removable on a schedule**; #5366 delivered the first three and nothing
+  carried the fourth.
+
+  **Five producers now declare their own verdict.** A new
+  `dataset-refusal.ts` in `@objectstack/service-analytics` exports
+  `datasetInvalidError` — the same shape as that package's existing
+  `invalidFilterError` (`INVALID_FILTER` / 400) and `assertDimensionFields`
+  (`INVALID_FIELD` / 400) — and five sites throw through it:
+
+  - `dataset-compiler.ts` — a measure whose aggregate the v1 runtime cannot lower;
+    a dimension/measure traversing a relationship path the dataset never declared
+    in `include`;
+  - `dataset-executor.ts` — an `order` key that is not a selected dimension or
+    measure; a `totals` grouping that is not a subset of the selected dimensions;
+  - `native-sql-strategy.ts` — a join outside the dataset's declared allowlist.
+
+  Their five entries are gone from the route's list, which is now a single
+  `read-scope-sql` test.
+
+  **`read-scope-sql` deliberately stays.** Its ten fail-closed refusals are RLS
+  read-scope lowering failures whose inputs are an admin-authored policy and a
+  compiler-generated join alias — not caller input — so `DATASET_INVALID` ("your
+  request is invalid") may well be the wrong verdict and choosing the right one is
+  a separate judgement, still tracked by #5367. Deleting the entry before that
+  judgement lands would regress those ten from `400 DATASET_INVALID` to 500.
+
+  **No outward behaviour change for the five.** They answered
+  `400 DATASET_INVALID` before and answer `400 DATASET_INVALID` now, with the same
+  message; what changed is the mechanism, from message-matching to the producer's
+  own declaration. The one visible difference is for a bare `Error` that merely
+  _resembles_ one of those messages: it is no longer promoted to a 400. That is the
+  point — a phrase is no longer a classification.
+
+  `DATASET_INVALID` is registered in `ERROR_CODE_LEDGER` under
+  `@objectstack/service-analytics` as well as `@objectstack/rest` (provenance, per
+  ADR-0112 D3; the code itself is unchanged and the union does not grow), and the
+  constructor types it as `RegisteredErrorCode` so an unregistered code is a
+  compile error rather than a body some route rejects at runtime.
+
+  Coverage: `dataset-refusal-envelope.test.ts` (service-analytics) pins each of the
+  five refusals against its real producer — the refusal SET first, green before and
+  after, then the envelope; `analytics-dataset-refusal-envelope.test.ts` (rest)
+  drives all five end-to-end through a real `AnalyticsService` with positive
+  controls on both the aggregate and raw-SQL paths; and
+  `analytics-filter-refusal-envelope.test.ts` pins the deletion in both directions
+  — the five messages answer 400 when enveloped and 500 when bare, so re-adding a
+  regex entry turns it red.
+
+- c36abfe: fix(service-analytics,rest): an analytics dimension over a missing field answers 400 INVALID_FIELD, not a driver 500 (#5520)
+
+  #4437 gave a **measure** over a non-existent field a `400 INVALID_FIELD` naming
+  the field, because a driver error class must never be the caller's `error.code`
+  for a caller-shaped mistake (ADR-0112). It covered the measure half only, so the
+  identical typo one request key over still reached the driver as a `GROUP BY`
+  column:
+
+  ```
+  POST /analytics/query {"cube":"account_metrics","measures":["account_count"],"dimensions":["bogus_dim"]}
+  → 500 {"code":"SQLITE_ERROR","message":"Internal server error"}
+
+  # the control group on the same route, already fixed by #4437
+  POST /analytics/query {"cube":"account_metrics","measures":["bogus_measure"]}
+  → 400 {"code":"INVALID_FIELD","message":"Measure 'bogus_measure' … Valid measures: …"}
+  ```
+
+  **The gate.** `ensureCube` now runs `assertDimensionFields` alongside
+  `assertMeasureFields` on every path, so a dimension whose source column the
+  backing object does not have is refused **before** any SQL is built, with the
+  same envelope the measure gate uses: `INVALID_FIELD` / 400 plus
+  `field` / `object` / `param`, a message naming the field, the valid dimensions,
+  and the object's known field list. `query`, `generateSql` and `queryDataset` are
+  all covered, and a rejected query leaves nothing behind in the cube registry.
+  `timeDimensions` are covered too — they resolve through the same
+  `cube.dimensions` bag and produced the same 500 — with `param` reporting which
+  request key carried the bad name.
+
+  **What deliberately did not change:** grouping by a REAL field the cube never
+  declared as a dimension (`dimensions: ["phone"]`) still works. The gate asks
+  "does the _object_ have this field", never "did the cube declare this
+  dimension". A cube whose `sql` is an expression, a dotted relation dimension,
+  and a host that wires no field-name probe are all stood down on, exactly as the
+  measure gate stands down.
+
+  **The SQL echo, same request.** `POST /analytics/dataset/query` composed its own
+  5xx body and echoed the error message verbatim. Knex prefixes the offending
+  statement to its message, so the caller received the generated SQL — physical
+  table and column names included:
+
+  ```
+  500 {"code":"ANALYTICS_QUERY_FAILED",
+       "error":"SELECT bogus_dim AS \"bogus_dim\", COUNT(*) AS \"account_count\"
+                 FROM \"crm_account\" GROUP BY bogus_dim - no such column: bogus_dim"}
+  ```
+
+  The sibling face never leaked it: `/analytics/query` exits through the
+  dispatcher, which has applied the shared `looksLikeInternalErrorLeak` predicate
+  to every >= 500 message since #3867. That same predicate now guards this route's
+  500 body. Classification is untouched — the status stays 500, the code stays
+  `ANALYTICS_QUERY_FAILED`, the ADR-0112 envelope branch and the transitional
+  message list are unchanged — and the full text still reaches server logs. A 500
+  whose message does not look like driver output keeps its prose.
+
+- 2f6516e: fix(analytics,rest): an analytics filter refusal reaches the caller as `400 INVALID_FILTER`, not `500 ANALYTICS_QUERY_FAILED` (#5352)
+
+  Misspell an operator in a dashboard widget's filter and analytics refuses it —
+  correctly, and loudly, which is the posture #3948 / #5240 / #5325 / #5334 each
+  argued for one refusal at a time: dropping a predicate the compiler cannot
+  express does not narrow the query, it **widens** it to rows the author excluded,
+  and a chart drawn over the whole dataset looks like a working chart.
+
+  The refusal never reached the author. It landed as `500 ANALYTICS_QUERY_FAILED`
+  — read as "the platform is broken" rather than "your filter has a typo", and
+  counted by ops alerting as a 5xx. The identical mistake on `find()` has answered
+  `400 INVALID_FILTER` since #3948, so one authoring error had two wire shapes,
+  chosen by which face happened to catch it.
+
+  **One defect, two halves — either alone leaves it unfixed.**
+
+  - **Producer** (`filter-normalizer.ts`): seven of its nine refusals were bare
+    `throw new Error(…)` carrying no `code`/`status`. All nine now go through the
+    `invalidFilterError` helper #5334 introduced (`INVALID_FILTER` / 400), which
+    becomes the module's only way to refuse.
+  - **Consumer** (`rest-server.ts`, `POST /analytics/dataset/query`): the catch
+    discarded `error.code` / `error.status` and re-derived the classification from
+    a hardcoded list of message substrings — so a producer that took ADR-0112
+    seriously was punished for it. It now reads the envelope **first**; the
+    substring list is demoted to a fallback for the families that still carry no
+    envelope.
+
+  **Observable behaviour change — read this if you alert or retry on status.**
+  The same request that returned `500 ANALYTICS_QUERY_FAILED` now returns
+  `400 INVALID_FILTER` (and, for two neighbouring conditions whose producers
+  already declared an envelope this route was discarding, `400 INVALID_FIELD` for
+  a measure over a field the object does not have, `404 CUBE_NOT_FOUND` for an
+  unregistered cube). Monitoring that counted these as server faults will see the
+  5xx rate drop and a 4xx rate appear; a client that retries on 5xx will stop
+  retrying a request that could only ever fail the same way. Both are the intended
+  correction — the condition was always the caller's mistake — but they are
+  visible, so they are stated rather than buried.
+
+  **Which inputs are refused did not change.** This changes the SHAPE of the
+  error and nothing about the judgement that produced it: no refusal condition
+  was touched, no input that used to compile now refuses, and no input that used
+  to refuse now compiles. That claim is pinned input-by-input (refusals _and_
+  accepted inputs with their compiled trees) in
+  `filter-refusal-envelope.test.ts`, which is green both before and after the
+  change — only the envelope assertions move.
+
+  The message-substring list survives on purpose. All six of its entries were
+  re-verified as bare `Error`s (`dataset-compiler.ts`, `native-sql-strategy.ts`,
+  `dataset-executor.ts`, `read-scope-sql.ts`), so deleting it would regress those
+  families from `400 DATASET_INVALID` to 500. It is a placeholder for their
+  enveloping, not a second classification mechanism, and it is now documented as
+  such: a new refusal should carry a `code`/`status` and be served by the
+  envelope branch for free. The passthrough is deliberately **4xx-only** and
+  requires **both** `code` and `status`, so an internal fault can never be
+  re-labelled as the caller's fault, and this route never invents a code a
+  producer failed to supply.
+
+- 64cd010: fix(runtime,types)!: `/analytics/query` no longer echoes RLS policy field names — the declared-server-fault withhold is shared by both HTTP boundaries (#5811)
+
+  **Observable behaviour change — read this if you read, log, or assert on
+  `error.message` from a dispatcher-plugin route.** An error that **declares a
+  server fault** in the ADR-0112 envelope (`status >= 500` _and_ a non-empty
+  `code`) now leaves `dispatcher-plugin.errorResponseBase` with its message
+  replaced by `"Internal server error"`. It previously reached the caller verbatim
+  unless it happened to _sound_ like a SQL/driver dump. This applies to every route
+  that plugin mounts — `/analytics`, `/packages`, `/i18n`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`, … — not only the one that motivated it. Nothing a
+  machine reads changed: the producer's `code` still arrives in the response
+  (`error.code`, promoted there from `details` by the shared envelope builder,
+  #3842), the status is untouched, and the full original text still goes to the
+  server log and `errorReporter` via `__obsRecordedError`.
+
+  ## What was wrong
+
+  #5367 (maintainer ruling 2026-08-06) made `read-scope-sql.ts`'s ten fail-closed
+  RLS lowering refusals `READ_SCOPE_COMPILE_FAILED` / 500 and taught
+  `POST /analytics/dataset/query` to withhold their message, because those messages
+  name the field names and comparands of an **administrator's** sharing rule:
+
+  ```
+  [read-scope-sql] unsafe field identifier "secret_policy_field" — refusing to
+  build read scope (fail-closed).
+  ```
+
+  The caller never wrote that field name and must not be able to read it out of an
+  error body. But the **sibling** analytics face was never closed.
+  `compileScopedFilterToSql` runs on both `NativeSQLStrategy.applyReadScope` and
+  `ObjectQLStrategy`'s echoed SQL, both of which serve `POST /analytics/query`,
+  which exits through `dispatcher-plugin.errorResponseBase`. That exit's only
+  message guard was `looksLikeInternalErrorLeak` — a heuristic over SQL/driver
+  _phrasing_ — and all eleven read-scope message shapes return `false` from it.
+  Measured at that boundary: **11 of 11 echoed verbatim**, at 500, with the policy
+  content in `error.message`. A real reachable disclosure, not a theoretical one.
+
+  ## What changed
+
+  - **`@objectstack/types` gains `declaresServerFault(err)`**, exported from
+    `error-leak.ts` beside `looksLikeInternalErrorLeak`. The heuristic asks whether
+    a message _sounds_ internal; the declaration asks whether the producer _said
+    so_. `error-leak.ts`'s own file header already states the principle — "do not
+    ship driver internals to clients" is a property of the HTTP boundary, not of
+    one router — and this is the second predicate that principle asks for.
+  - **Both boundaries read it.** `dispatcher-plugin.errorResponseBase` gains the
+    withhold (the fix); `rest-server.ts`'s `/analytics/dataset/query` catch drops
+    its in-line copy of the same test in favour of the shared one. #5808 wrote that
+    rule in-line on purpose — promoting a rule with one consumer is a speculative
+    surface — and this is the second consumer, so it was promoted rather than
+    duplicated (`#3843`/`#3867` paid for the two-implementations shape twice).
+    The REST face's verdict is unchanged in every case: same `status >= 500` plus
+    non-empty `code` test, over the same two fields.
+
+  ## What deliberately did NOT change
+
+  - ⛔ **This is not "withhold every 5xx".** #5667 kept **undeclared** 5xx errors
+    legible on purpose: a bare `Error` from our own code ("no strategy can handle
+    query …") is the operator's own bug report, names nothing tenant-sensitive, and
+    still falls to `looksLikeInternalErrorLeak` alone. A 5xx carrying only half an
+    envelope (a status with no code) is likewise still readable — inventing the
+    withhold for it would be the consumer-side leniency Prime Directive #12 removes.
+  - **4xx is untouched.** `declaresServerFault` requires `status >= 500`, so a
+    deliberate business/validation answer can never be swallowed by it.
+  - **`statusCode` is not accepted as a substitute for `status`.** `status` is the
+    channel ADR-0112 declares; making a disclosure rule depend on which spelling a
+    producer reached for would be the same leniency in a different place.
+  - **The heuristic was not taught to recognise `[read-scope-sql]`.** That would be
+    more prose sniffing — the mechanism #5352/#5367 exist to remove — and would only
+    ever cover the family someone remembered to add.
+
+  Coverage: `analytics-query-read-scope-withhold.test.ts` (runtime) drives six RLS
+  policy shapes end-to-end through a **real** `AnalyticsService` on the real
+  native-SQL path and the real mounted route, asserting the 500, that the whole
+  serialized body contains no policy detail, that `error.code` still carries
+  `READ_SCOPE_COMPILE_FAILED`, and that the full text is still on the
+  `__obsRecordedError` side-channel — plus a positive control and both sides of the
+  declared-vs-undeclared tiering. `error-leak.test.ts` (types) pins the predicate
+  directly, including that all eleven read-scope shapes stay invisible to the
+  heuristic. The REST face's existing `analytics-read-scope-refusal-envelope.test.ts`
+  is green before and after, unchanged, which is the pin on the refactor.
+
+- fb3d99b: fix(analytics,rest)!: an RLS read-scope lowering failure is a `500`, not the caller's `400` — and its policy detail no longer reaches the response (#5367)
+
+  **Observable behaviour change — read this if you alert, retry, or assert on status.**
+  A request whose dataset carries an RLS read scope that `read-scope-sql.ts` cannot
+  lower used to answer `400 DATASET_INVALID` with the refusal message echoed
+  verbatim. It now answers `500 ANALYTICS_QUERY_FAILED` with the message withheld
+  (`"Internal server error"`); the full text goes to the server log. Monitoring that
+  counted these as client errors will see a 4xx disappear and a 5xx appear, and a
+  client retrying on 5xx will now retry a request that cannot succeed until an
+  administrator fixes the policy. Both follow from the correction below and are
+  stated rather than buried.
+
+  ## What was wrong
+
+  These ten fail-closed refusals were the last family `/analytics/dataset/query`
+  classified by **prose** — the final entry of the hardcoded message-substring list
+  #5352 introduced, which #5367's first PR had already shrunk from six entries to
+  one. Two defects in one verdict:
+
+  - **Misattribution.** `compileScopedFilterToSql(filter, alias)` receives an RLS
+    `FilterCondition` the security service compiled from an **administrator's**
+    sharing rule / permission set, and a join alias the **dataset compiler**
+    generated. Neither is caller input — the caller's own predicate goes through
+    `filter-normalizer.ts` and has answered `INVALID_FILTER` / 400 since #5352. So
+    what can arrive here is a broken policy, or drift between two of our own
+    components (#5557's `$regex` was literally the second case). For this request's
+    caller both are a **server** fault; `400` told them to fix a request that was
+    never wrong and kept the real fault out of 5xx alerting.
+  - **Disclosure.** A 400 echoed the message, so
+    `unsafe field identifier "secret_policy_field"` and
+    `unsupported operator "$regex" on "owner_email"` handed a tenant the field names
+    and comparands of the RLS policy governing them.
+
+  The maintainer ruled on 2026-08-06 (option B on #5367's decision card; option A
+  was `READ_SCOPE_INVALID` / 422, rejected because no consumer reads a code on this
+  path, a 4xx misreports a condition the client cannot fix, and 422 would have left
+  the disclosure question to be re-decided message by message).
+
+  ## What changed
+
+  - `read-scope-sql.ts` gains a module-local `readScopeCompileError` — the twin of
+    `filter-normalizer.ts`'s `invalidFilterError`, and likewise **the only way the
+    module refuses**. All ten sites carry `READ_SCOPE_COMPILE_FAILED` / **500**.
+    `:104`'s alias-vs-field split (option C on the card) collapses under B: both
+    branches answer the same verdict, pinned so the collapse is a recorded decision.
+  - `rest-server.ts` loses branch ② entirely. **The message-sniffing mechanism is
+    fully retired** — nothing in this catch reads prose any more, and #5367's
+    Prime-Directive-#12 retirement schedule ("declared, loud, tested AND removable
+    on a schedule") is paid off.
+  - The route's 5xx branch now withholds the message of any producer that
+    **declares** a server fault (`status >= 500` with a `code`). This was needed
+    rather than inherited: `looksLikeInternalErrorLeak` (#3867/#5520) is a heuristic
+    over SQL/driver _phrasing_, and measured, every read-scope message returns
+    `false` from it — so retiring the list alone would have moved the policy content
+    from a 400 body into a 500 body instead of out of the response. Teaching that
+    heuristic to recognise `[read-scope-sql]` would have been _more_ message
+    sniffing, so the rule keys on the ADR-0112 envelope instead. **Undeclared** 5xx
+    errors keep #5667's tiering, so a self-authored fault ("no strategy can handle
+    query …") stays readable.
+  - `READ_SCOPE_COMPILE_FAILED` is registered in `ERROR_CODE_LEDGER` under
+    `@objectstack/service-analytics` (ADR-0112 D3) and typed as
+    `RegisteredErrorCode` at the constructor, so an unregistered code is a compile
+    error. It is legible on the wire through the sibling `/analytics/query` exit,
+    which puts a thrown `err.code` in `error.details.code` (#3842).
+
+  **Which inputs are refused did not change.** No refusal condition moved: nothing
+  that used to lower now throws, and nothing that used to throw now lowers. That is
+  pinned input-by-input — refusals _and_ accepted read scopes with their compiled
+  SQL and bind params — in `read-scope-refusal-envelope.test.ts`, which is green both
+  before and after; only the envelope assertions move.
+
+  Coverage: `read-scope-refusal-envelope.test.ts` (service-analytics) drives all ten
+  sites through the real compiler; `analytics-read-scope-refusal-envelope.test.ts`
+  (rest) drives five policy shapes end-to-end through a real `AnalyticsService`,
+  asserting the 500, that the body contains no policy detail, and that the withheld
+  text is present in the log — plus a positive control and both sides of the
+  declared-vs-undeclared withhold.
+
+- c001422: feat(spec): declare `routes.mcp` on `ApiRoutesSchema`, and extend the discovery conformance gate one level down (#5679)
+
+  `/discovery` advertises `routes.mcp`, `objectui` reads it, and
+  `ApiRoutesSchema` never declared it. This is #4828's defect one level down —
+  with the opposite disposition: `endpoints` was retired because a census found
+  no reader, while `mcp` has two real ones (`ConnectAgentWidget.tsx` and
+  `AgentConnectSection.tsx` both gate the Integrations connect card on it), and
+  it is in fact the only `routes.*` key anything in `objectui` reads. So it is
+  declared, not removed.
+
+  Why it was a defect and not tidiness: `ApiRoutesSchema` is a plain `z.object`,
+  which **strips** unknown keys. Any consumer parsing `/discovery` through the
+  spec dropped `routes.mcp` silently — the connect card would blank with no
+  error. Nothing broke yet only because those two readers happen to read raw
+  JSON.
+
+  - **`ApiRoutesSchema` declares `mcp: z.string().optional()`**, as measured off
+    both producers rather than guessed: a path string (`/api/v1/mcp`), always the
+    **unscoped** base — `/mcp` is mounted bare, so a scoped mount advertising
+    `/api/v1/environments/env_alpha/data` still advertises `/api/v1/mcp` — and
+    `optional`, not `nullable`: the key is absent (rest-server `delete`s it, the
+    dispatcher leaves it `undefined`) when MCP is disabled or unserveable.
+    Neither producer ever emits `null`.
+  - **`@objectstack/rest` drops the two `as any` casts** at the emit site. That is
+    type-only — the emitted body is byte-identical — but the cast's disappearance
+    is the structural proof: with the key undeclared, removing it produced two
+    `TS2339 Property 'mcp' does not exist`; with it declared, `tsc --noEmit`
+    returns to its ratcheted baseline.
+  - **The #4828 conformance gates now cover `routes` keys**, not just top-level
+    ones, in all three producer packages, deriving the allowance from
+    `ApiRoutesSchema` the same way the top-level check derives it from the
+    protocol schema. Extended one level, not recursed — full recursion stays out
+    of scope, and `capabilities` / `services` are `z.record`s whose keys are open
+    by design.
+
+  - **`@objectstack/client`'s conventional route table gains an `mcp` row.** That
+    table is `Record<keyof ApiRoutes, string>` — total by design — so a newly
+    declared route owes a convention, and the public `ApiRouteType` (`keyof
+ApiRoutes`) widens by one member. The path is `/api/v1/mcp`, which is what
+    both producers emit, so the fallback agrees with the discovered value instead
+    of competing with it. Resolution behaviour is unchanged: `getRoute()` still
+    prefers the discovered route, and the pre-existing catch-all already produced
+    the same string.
+
+  Corrects one detail of the issue's premise: the runtime dispatcher's
+  `getDiscoveryInfo()` **does** also emit `routes.mcp` (its routes literal always
+  carries the key, holding the path or `undefined`), so both producers were
+  affected, not just REST — and the new gate went red on both before the fix.
+
+- aeb9b27: **发布出去的 OpenAPI 文档 `components.schemas` 不再是空的,6 个 `$ref` 不再悬空(#5168)**
+
+  `GET /api/v1/openapi.json` 的 base spec 由 `packages/spec/scripts/build-openapi.ts` 生成,它把九个契约 schema(`CreateRequest` / `ApiError` / `ListRecordResponse` / …)转成 JSON Schema 填进 `components.schemas`。收集判据写的是 `typeof schema === 'object' && '_zod' in schema`,而这九个 schema 全部经 `lazySchema()` 包装 —— 其 Proxy target 是 `function lazyZod() {}`,于是 `typeof` 是 `'function'` 而不是 `'object'`,判据第一段就短路,九个一个都没进去。`paths` 里那 6 个 `$ref` 是手写字面量,不受影响照常写出,结果是**一份 `components.schemas` 为 `{}`、6 个 `$ref` 全部悬空的文档被发布出去**,覆盖 `/api/{object}` 与 `/api/{object}/{id}` 上全部 CRUD 操作的请求体与响应体。
+
+  判据放宽为同时接受 `'object'` 与 `'function'`。`'_zod' in schema` 那一段对 Proxy 本来就是有效的 —— `lazySchema` 专门维护了 `_zod` facade 供 `toJSONSchema` 遍历 —— 所以 `lazySchema` 本身不需要改动。对照实验坐实了唯一变量就是 Proxy:同一份源码下 `npx tsx scripts/build-openapi.ts` 得到 `Components: 0`,而 `OS_EAGER_SCHEMAS=1`(`lazySchema` 自带的绕过 Proxy 应急开关)得到 `Components: 9`。修复后不带任何环境变量即为 `Components: 9`。
+
+  两类消费者直接受益:`GET /api/v1/docs` 的 Scalar viewer 现在有 schema 可渲染;从该文档做客户端代码生成的集成方(openapi-generator / orval / …)不再在解析期撞上 unresolvable reference。
+
+  **同时补上防复发的门禁。** 这个缺陷三个层次同时可见(空 components、悬空 ref、控制台明晃晃的 `Components: 0`)却没有任何一处红 —— `gen:openapi` 是全仓两个完全无门禁的生成器之一。生成器现在在**写盘之前**自检两条,任一不满足即以非零码退出,自恰不了的文档根本不会被写出来:
+
+  1. **每个本地 `$ref` 都必须解析得到。** 按 JSON Pointer 解析而不是按 `#/components/schemas/` 前缀匹配,将来新增的 `#/$defs/…` 引用自动被覆盖;报错逐条点名悬空的 `$ref` 及其在文档中的位置,并把「已定义的 schema 列表」一并打出来 —— 哪一侧是空的是读者最先需要的信息。
+  2. **没有 schema 被静默降级。** 九个契约 schema 是一张字面清单,某个名字没产出东西永远是缺陷而不是「这个可选」。原先的循环写成 `if (像 zod) { 收 }` 且没有 `else`,正是这个「静默跳过」的形状让九次跳过发布成了空文档;现在**声明即强制**,漏掉的名字会被点名。`z.toJSONSchema()` 抛错时原先会塞一个 `{type:'object'}` 占位描述冒充契约,这条同样改为响亮失败 —— 当前九个全部干净转换,零占位。
+
+  门禁接在生成器内部而不是单独的 `check:` 脚本,因为 `packages/spec/json-schema/` 是 gitignore 的、每次 `pnpm build` 重新生成,独立检查脚本无论如何都要先跑一次生成器才有东西可查。「产物自恰」这类断言比「产物最新」更便宜,且不需要任何基线快照。
+
+  `packages/rest` 侧无行为改动:声明式端点的 enrichment 仍然只写 `type: object` 而不编造 `$ref` —— 九个契约 schema 是通用 CRUD 信封,不是某个具体对象的 body 形状 —— 但三处以现在时陈述「`components.schemas` 是空的」的注释已按事实更新。
+
+- 39396bd: REST 的显式状态直通:4xx 错误消息超过 500 字符时**截断**,不再整条替换成 `Request failed`
+
+  `mapDataError` 与 `resolveErrorResponse`(`sendError` 的取值端)两处 4xx 直通分支,过去都以 500 字符为界把整条 message 换成字面量 `Request failed` —— `status` 和 `code` 照常落地,正文一个字不剩。这把激励方向弄反了:驱动层那些拒收信息**唯一的存在意义**就是告诉作者哪个操作符/字段写错了、协议是怎么声明的,而 driver-sql 里写得最细的两条(#5158 未降解的 `FilterArray`、#5347 非布尔 `$null` 比较值)恰好都越过 500 字符,于是客户端只收到 `{ "code": "INVALID_FILTER", "error": "Request failed" }`。更反直觉的是:这两条**不带** `status` 时反而能原文直达(走 `mapDataError` 末尾的 `{ status: 400, body: { error: raw } }`),#4436 给它们加 `status: 400` 是为了赋予 ADR-0112 的 wire 身份,却在这一档让可读性变差了。
+
+  现在超长消息按 `message.slice(0, 499) + '…'` 截断,与驱动侧 `safeShapePreview` 同源。这些消息把主句(操作符、字段、path、收到了什么、协议怎么声明)放在最前,被截掉的是尾部的归因和 issue 号 —— 本就该留在日志里而非响应里的部分。上限仍是 500,变的是**到达上限时的处理方式**;短于 500 的消息逐字不变。
+
+  影响面不止过滤器:任何携带 4xx `status` 的领域错误同享此修复,包括 metadata save 校验的 422(实测一条五 issue 的 `INVALID_METADATA` 就在这条线上下)、plugin-sharing 的 record-scope 403 等。
+
+  `sendError` 一侧的直通区间是 400–599,其中 **5xx 的整条替换刻意保持不变**:4xx 的正文是写给调用方的补救说明,5xx 的正文是服务端故障的日志诊断 —— 这与 `mapDataError` 同族分支「deliberately limited to 4xx」的既有取向一致。
+
+- 577cd27: fix(rest): a declared 5xx no longer ships its own message to the client (#5437)
+
+  **Behaviour change — read this if you operate a deployment or parse REST error
+  bodies.** An error that carries an explicit `status` of 500 or above now reaches
+  the client as `{ "error": "Internal server error", "code": "<the producer's
+code>" }`. The status and the code are unchanged; only the free-text message is
+  withheld, and the full original text is written to the server log.
+
+  **What was wrong.** `sendError` — the error path of the metadata, UI, discovery
+  and batch routes — passed an explicit status straight through for the whole
+  400-599 band, so a declared 5xx returned `error.message` verbatim without
+  passing through any of the sanitizing heuristics (`isSqlLeak`,
+  `looksLikeInternalErrorLeak`, the `Internal data error` envelope). The sibling
+  branch in `mapDataError` stops at 4xx on purpose, with the reason written down:
+  "5xx messages keep going through the sanitizing heuristics below so
+  internal/SQL details never reach the client verbatim". Two opposite verdicts on
+  one question, and the routes that report through `sendError` got the permissive
+  one.
+
+  That was reachable, not theoretical. `metadata-protocol` interpolates the raw
+  driver error into two client-facing 500s — the customization-overlay persist and
+  delete failures — so a real driver line such as `SQLITE_ERROR: no such table:
+sys_metadata`, `relation "sys_metadata" does not exist`, or a unique-constraint
+  payload naming physical columns was returned to whoever made the request. The
+  only thing standing in the way was a 500-character bound, and driver errors are
+  far shorter than that. Length was never a proxy for leakage; on this side of the
+  bound it failed open.
+
+  **Accepted cost.** A 5xx message written _for_ the caller now reaches them as
+  the generic sentence plus its code. Two concrete examples: the overlay-persist
+  failure's "In-memory registry was updated but will be lost on restart", and the
+  atomic-batch refusal's "retry without options.atomic, or probe
+  capabilities.transactionalBatch on /discovery first". Both remain fully readable
+  in the server log, and the machine-readable `code` (`OVERLAY_PERSISTENCE_FAILED`,
+  `NOT_IMPLEMENTED`) still rides on the response, so a client keying on codes is
+  unaffected. If you were surfacing 5xx `error` text in an operator console, read
+  it from the log instead — `[REST] Unhandled error` for a genuine fault, and a
+  new `[REST] 5xx message withheld from client` line for the 502/503 lifecycle
+  statuses that the unhandled-error predicate deliberately keeps quiet.
+
+  The message is dropped unconditionally rather than filtered by keyword: a
+  predicate would only move the question to "does the heuristic know this
+  dialect", which is the failure mode that produced the bug. 4xx behaviour is
+  untouched — an over-long client message is still truncated rather than erased
+  (#5423 / #5436).
+
+- 5897552: fix(rest): expected 4xx no longer logged as "[REST] Unhandled error" with a stack (#4886)
+
+  Opening Studio flooded the server log with stack traces. The designer probes
+  `GET /meta/:type/:name?state=draft` on every panel to decide whether to show
+  "unsaved draft" state, and "no draft exists" is the overwhelmingly common
+  answer — true of every artifact nobody is currently editing. `getMetaItem`
+  throws a structured `{ code: 'NO_DRAFT', status: 404 }`, the client got a clean
+  404 and handled it fine, but the route logged it anyway:
+
+  ```
+  [REST] Unhandled error: Error: [no_draft] No pending draft exists for app/showcase_app.
+      at _ObjectStackProtocolImplementation.getMetaItem (…)  { code: 'NO_DRAFT', status: 404 }
+  ```
+
+  **45 of these in one browsing session** — by far the dominant entry in the log,
+  which is how a genuine 500 goes unnoticed, and it misreports severity: nothing
+  was broken.
+
+  The metadata routes had 29 catch blocks logging unconditionally. The data
+  routes already consulted `isExpectedDataStatus` / `isExpectedQueryRejection` —
+  but in four different open-coded spellings across 12 sites, and
+  `isExpectedQueryRejection`'s docblock records an earlier lap of exactly this
+  drift (the filter and sort codes shipped without joining the list, so every
+  rejection they produced was logged as unhandled too).
+
+  Both families now decide through one predicate behind one door,
+  `handleRouteError(res, error, object?)`: it resolves the response once — the
+  same structured-status passthrough or `mapDataError` envelope `sendError`
+  already produced — logs only when that resolved response is a genuine fault,
+  then sends it. `isExpectedDataStatus` and `isExpectedQueryRejection` have no
+  other callers left, so the two families cannot drift apart again.
+
+  Expected now means an explicitly recognised client or lifecycle outcome:
+  403/404/409/502/503, the client-caused 400 query-rejection vocabulary, and
+  `VALIDATION_FAILED`. It deliberately does **not** mean "any 4xx" —
+  `mapDataError` degrades an error it recognised nothing about to an un-coded
+  400, and that bucket is where a real handler bug lands, so it stays loud.
+
+  **No wire responses change** — every status and body is byte-for-byte what it
+  was; this only decides whether the log line is printed. Two operator-visible
+  log deltas beyond the metadata fix:
+
+  - the cross-object transactional batch route judged on `status >= 500` alone,
+    which also swallowed that un-coded 400 — a handler `TypeError` inside a batch
+    transaction used to vanish, and now prints;
+  - `updateMany` / `deleteMany` / clone / global search / the public-form routes
+    stop logging normal 404s, 403s and query rejections.
+
+- 91ec1ea: fix(rest): an unclassified route error answers a sanitised 500, not a 400 (#5489)
+
+  **升级须知 — 状态码行为变化。** `@objectstack/rest` 的错误映射 `mapDataError`
+  在所有分类分支都不匹配时,原先的终局兜底是
+  `{ status: 400, body: { error: <原始 message> } }`。这一支现在改为一个消毒过的
+  服务端故障信封:
+
+  ```
+  500 {"error":"Internal server error","code":"INTERNAL_ERROR"}
+  ```
+
+  **为什么。** 400 的语义是「你请求错了」——SDK、fetch 封装、代理和重试策略都据此
+  判定「不要重试,调用方得改点什么」。而真正落到这一支的错误恰恰相反:元数据存储
+  读不到时 `matchEndpoint` 按契约抛错(它抛就是为了让 outage 不伪装成「没有声明
+  任何 endpoint」,ADR-0110 D3),或者干脆是处理器自身的 `TypeError`。两者调用方都
+  修不了,且都**应该**重试。实测:`GET /api/v1/meta/api` 对着一个抛
+  `Error('metadata store unreachable')` 的存储,返回 HTTP 400。
+
+  同时,原始 message 是逐字下发的——而这偏偏是全文件里最没有证据表明可以下发的一
+  条路径:走到这里的前提就是 `looksLikeInternalErrorLeak` 什么都没匹配上,而
+  #5462 已经记过「关键词启发式沉默不等于安全」。实测到的一例:一个声明了
+  `status: 502`、message 为 `connect ECONNREFUSED 10.0.0.5:5432 (internal pool)`
+  的错误,经由数据路由直接调用 `mapDataError` 时,以 400 携带主机与端口下发。
+  沿用 #5464 的纪律:原文进服务端日志,不进客户端(500 不在
+  `isExpectedDataStatus` 内,`handleRouteError` 会打印完整错误对象)。
+
+  **真正的客户端错误一个都没有改变。** 改动前先做了测绘:给这一支加桩,跑完
+  `@objectstack/rest` 全套(48 文件 / 719 用例),落到这一支的只有 6 个错误——本单
+  的存储 outage、两个 502 的 ECONNREFUSED、三个 `TypeError`,没有一个是客户端
+  错误。历史上唯一骑在这条兜底上的客户端错误家族(driver-sql 无法编译的 filter
+  拒绝)已由 #4436 在**生产者侧**声明 `status: 400` + `INVALID_FILTER` 迁走。
+  validation / permission / unknown object / unknown field / not-null 漂移 /
+  unique 冲突 / 沙箱业务拒绝等全部仍由各自分支给出原本的 4xx。
+
+  **`INTERNAL_ERROR` 而非 `DATABASE_ERROR`。** #5462 的 `DATA_STORE_FAULT`
+  (`500 DATABASE_ERROR`)用在证据**指名**了存储故障的地方(驱动的 missing-relation
+  措辞、`looksLikeInternalErrorLeak` 命中);而这一支的定义性事实是「没有任何证据」,
+  把处理器的 `TypeError` 报成 `DATABASE_ERROR` 会把运维指向一个其实健康的数据库。
+  `INTERNAL_ERROR` 是 `standardErrorCodeForHttpStatus(500)` 的取值
+  (`@objectstack/spec` 的 `HttpStatusErrorCodeMap`)——目录自己为「500 且无更具体
+  code」定义的下限,不是第三套措辞;message 复用的也是
+  `resolveErrorResponse` 声明式 5xx 分支已在用的 `INTERNAL_ERROR_MESSAGE`。
+
+  **如果你的客户端把这条兜底当 400 处理过**:它现在是 5xx,可以重试;若你有生产者
+  依赖「不声明 status 即可把 message 原文送达调用方」,请改为在抛出点声明
+  `status` 与 `code`(契约优先),那是唯一仍会把措辞交给调用方的路径。
+
+- 2d25303: fix(rest): 联合类型分支里的拒绝理由现在能到达调用方,不再只剩 `Invalid input` (#5014)
+
+  zod 会把一个失配的 `z.union([...])` 折叠成**一条**顶层 `invalid_union` issue,它自己的
+  `message` 是裸的 `"Invalid input"`;每个分支真正的抱怨——包括 #4001 那批 `strictObject`
+  写下的处方文案——躺在 `issue.errors` 里(每分支一个数组)。`zodIssuesToFields` 过去只映射
+  顶层 issue,于是 `POST /api/v1/data/:object/query` 对着
+  `{"search": {"fields": ["name"]}}` 只回一条
+
+  ```
+  { "field": "query.search", "code": "invalid_shape", "message": "Invalid input" }
+  ```
+
+  ——说清「缺的是 `query` 这个键」的那句话被生产出来,然后被丢掉。同一个坑在
+  `QuerySchema.groupBy` 的联合分支上一样:`dateGranularity` 写错值,作者拿不到那份
+  「可选 day/week/month/quarter/year」的清单。
+
+  现在 `fields[]` 会在联合条目**之后**追加解释它的分支条目,`field` 用分支路径拼上联合自身
+  的路径(`query.search.query`),`code` 照常走 ADR-0114 D3 的目录映射——所以缺键报
+  `required` 而不是 `invalid_type`(这一判定要走绝对路径去读入参,分支路径是相对的)。
+
+  分支选择策略直接沿用 #4971 给 CLI/spec 侧 `formatZodError` 落的那一套:只报根部
+  KIND 不匹配的分支整支丢弃(全部如此则不展开,输出和以前逐字一致);剩下的**报得最少的
+  分支胜出**——这条是防止「一个拼错的键被 N 个分支各报一遍」的机制本身;`unrecognized_keys`
+  破平局;声明顺序破剩下的;真正并列的分支全部输出(上限 3 条);跨分支重复的相同结论只
+  出现一次;嵌套联合按绝对路径递归,深度上限 3。两侧必须给出**同一个判定**,否则同一个错误
+  从终端发布和从 API 提交会得到两套说法。
+
+  对 wire 而言这是**纯追加**:原有的每一条 `fields[]` 条目——包括联合自身那条——`field` /
+  `code` / `message` 和相对次序都不变,新条目插在它解释的那条之后。信封形状仍与
+  `mapDataError` 同形(ADR-0114),数组长度从来不是契约的一部分。
+
+- 1216dcc: fix(rest): sweep the REST composition root's slot lookups — 16 sites typed (#4251 B4)
+
+  Batch B4 of the #4251 sweep: every service-lookup erasure in the REST
+  composition root. `rest-api-plugin.ts` (15) and `external-datasource-routes.ts`
+  (1) now pass the slot's contract type instead of annotating the result `any`;
+  the ratchet baseline drops **159 → 143 sites, 34 → 32 files**, and both files
+  leave the grandfather list. No behaviour change.
+
+  **Every contract named here is evidenced by an `implements`.** `email`,
+  `sharing`, `sharingRules`, `reports`, `approvals` and `external-datasource` had
+  a written `packages/spec` contract all along, and the class each provider
+  registers into the slot declares `implements` on it (`EmailService implements
+IEmailService`, `ExternalDatasourceService implements IExternalDatasourceService`,
+  …). So the compiler verifies the shape on the producer side on every build and
+  this file only has to name it — the #4404 discipline that replaced seven
+  unchecked local stand-ins with one checked claim. `auth`, `objectql`, `i18n`,
+  `analytics`, `security` and `metadata` come from the `ServiceSlotContracts`
+  ledger; `objectql` is `IObjectQLEngine`, not `IDataEngine`, because the consumer
+  reaches the full engine (the `transaction` probe behind the batch routes).
+
+  **The wrapper return annotations went with them.** Ten of these lookups sit
+  inside `async (environmentId?) => Promise<any | undefined>` providers, and
+  typing only the lookup would have re-erased the contract one line later — the
+  KNOWN RESIDUAL shape the rule documents and cannot see. Each provider now
+  returns its slot's contract.
+
+  **Three slots have no contract, and say so three different ways rather than one
+  `any`.** `env-registry` is typed as `RestEnvRegistry`, the shape `RestServer`'s
+  own constructor declares for that parameter, so the argument is checked rather
+  than waved through. `settings` gets a named local surface (`SettingsReadSurface`)
+  following B2's decision for this slot — `service-settings` is optional, so the
+  REST layer must not depend on it — carrying the one method the platform consumes
+  (`get`, through `resolveLocalizationContext`'s cascade) with the public
+  `ResolvedSettingValue` as its return type. `default-project` gets a narrow slice
+  declaring only the field this file reads. And the service-existence probe, whose
+  slot name is a runtime argument, is `unknown`: it asks whether something
+  occupies the slot and never touches its shape, which is exactly what `unknown`
+  says and `any` does not.
+
+  **No dead probe this batch — reported rather than implied.** Every earlier batch
+  in this line found one (#4361's `getMetaItem` on a service that never had it,
+  #4321's `registerInMemory`), so each probe the typed consumers make was checked
+  against its contract: `emailService.send`, `authService.getApi` /
+  `isAuthGateActive`, `svc.queryDataset`, `ql.transaction`, the six approval
+  verbs, the five security methods and the five federation methods all name real
+  members at real arities. The `external-datasource` route probes are now visibly
+  redundant-but-correct — the contract's methods are required, so `svc?.method` is
+  truthy whenever the service resolved, and the 503 path is reached only by the
+  service being absent, which is what it is for.
+
+  The new pin is a runtime test, deliberately. `packages/rest` excludes its test
+  files from `tsconfig.json` and declares no `typecheck` script, so no tsc program
+  compiles them and a type-level assertion there would evaluate never — the
+  phantom-check shape #5286 / #5449 paid for. What is checkable is the wiring, and
+  that is the risk this change actually carries: the providers are positional
+  arguments 6..19 of a twenty-argument constructor, all with the same
+  `(environmentId?) => Promise<unknown>` shape, so a provider resolving the wrong
+  slot is assignable everywhere and invisible to the compiler. The test drives
+  each provider and asserts it hands back the instance registered in ITS slot,
+  pins the exact set of slot names the boot resolves, and pins the degraded path
+  where every optional slot is empty.
+
+- 90fa077: fix(rest): a missing relation is only an unknown OBJECT when it IS the object asked for (#5462)
+
+  `mapDataError`'s unknown-object heuristic asked whether a driver error mentioned
+  `no such table` / `relation … does not exist` — never **which** table was
+  missing. A business object that was never registered and the metadata plane
+  collapsing entirely produce the same two words, so `sys_metadata` becoming
+  unreachable came back to the caller as:
+
+  ```
+  404 {"error":"Object not found","code":"OBJECT_NOT_FOUND"}
+  ```
+
+  The caller was told to check the object name they typed while the real answer
+  was "the metadata store is gone". And because 404 is an `isExpectedDataStatus`,
+  `handleRouteError` printed no `[REST] Unhandled error` — so a total outage of
+  the metadata plane left **not one line** in the server log. Reproduced in
+  process on a real `ObjectQL` + `ObjectStackProtocolImplementation` whose driver
+  fails every access with `SQLITE_ERROR: no such table: sys_metadata`:
+  `PUT /api/v1/meta/object/acct` answered 404 with zero log lines.
+
+  **The rule now: a missing-relation message is an unknown-object verdict only
+  when the relation it names is the object the request named.** Attribution takes
+  both halves — a request object, and a relation name the phrasing actually
+  carries (`no such table: main.acct`, `relation "public.acct" does not exist`;
+  the schema qualifier is stripped and the compare is case-insensitive). Prime
+  Directive #6 is what makes that comparison sound rather than a guess: the object
+  `name` **is** the table name, with no `tableName` mapping to launder it.
+
+  Anything unattributable — a different table than the one asked for, an auxiliary
+  table, no request object at all (which is every metadata / UI / discovery route,
+  since they call `handleRouteError(res, error)` without one), or a phrasing that
+  names no relation — is now the sanitised data-store fault the SQL-leak branch
+  has always emitted: `500 { "error": "Internal data error", "code":
+"DATABASE_ERROR" }`. 500 sits outside `isExpectedDataStatus`, which is what buys
+  back the log line the silent 404 never had; the driver's own words still never
+  reach the client.
+
+  Deliberately unchanged:
+
+  - **A genuine unknown object is still a quiet `404 OBJECT_NOT_FOUND`.** Both
+    producers still land on one envelope (#3770): the protocol's registry gate,
+    and the driver limb when the missing table is the requested object. It still
+    logs nothing — an unknown object is a client mistake, not a fault (#4886).
+  - **The engine-authored limbs.** `unknown object`, `object not found`,
+    `[ObjectQL] No driver available for object '<name>'` and the quoted-name
+    catch-all are ObjectStack's own vocabulary about a named object; they mean
+    what they say. Only the DATABASE-authored limbs, which cannot know which table
+    the caller wanted, needed attribution.
+  - **The declared-status band.** #5437/#5464 (a declared 5xx is withheld and
+    logged) and #5423/#5436 (a 4xx is truncated, not erased) answer in
+    `resolveErrorResponse` before the heuristic is reached at all. That fix
+    covered producers that declare `status: 500`; this path never reached it,
+    because `saveMetaItem` rethrows the driver's `Error` with no `status` and no
+    `code` — which is why the message text was judging it.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+  - @objectstack/service-package@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

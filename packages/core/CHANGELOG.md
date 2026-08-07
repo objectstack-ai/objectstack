@@ -1,5 +1,507 @@
 # @objectstack/core
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- 29c6c9d: feat(spec,core,runtime)!: declarative `apis:` refuses loudly instead of parsing into silence; the `ApiRegistry` family retires (#4936, #4939)
+
+  The declarative API-endpoint surface was **zero-execution end to end**, and said nothing
+  about it. Metadata loading worked perfectly — a stack declared `apis:`, `defineStack`
+  accepted it, and `GET /api/v1/meta/api` returned every endpoint with every key intact.
+  The execution side never fired once. On a real boot (showcase, 47 plugins) both declared
+  paths answered a bare `404 {"error":"Not found"}` — not even the dispatcher's semantic
+  404, because **no route was ever mounted** for a declared path, so the request died at
+  Hono's `notFound`. Behind that, the dispatcher's `handleApiEndpoint` branch resolved the
+  metadata service and called `matchEndpoint` on it — a method **no implementation in the
+  repo has ever provided**. The branch returned "not handled" on every request ever served.
+
+  So every key on `ApiEndpointSchema` was declared ≠ enforced: `path`/`method` (never
+  mounted), `type`/`target`/`objectParams` (never executed), `cacheTtl`,
+  `inputMapping`/`outputMapping`, `rateLimit`, `summary`/`description` — and
+  **`authRequired`**, a security semantic that parsed green and gated nothing at all. That
+  is false compliance, the failure ADR-0049 exists to stop, not debt.
+
+  ## BREAKING — a non-empty `apis:` is now rejected
+
+  Metadata that parsed cleanly before is now **refused at publish/validate**, with the
+  prescription in the rejection itself:
+
+  ```
+  apis: `apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime,
+  so a non-empty array is rejected instead of silently accepted (#4936). …
+  ```
+
+  **FROM → TO.** `apis: [ …endpoints… ]` → `apis: []` (or delete the key; both are still
+  accepted, and an empty array is not a special case). To actually serve the route today,
+  mount it **in code** — a plugin manifest `contributes.routes` entry, or an `http.server`
+  route. That is now the only honest path, and the one `examples/app-showcase` uses
+  (`src/system/server/recalc-endpoint.ts`).
+
+  The refusal lives on `ObjectStackDefinitionSchema` itself, which is the single choke
+  point every path runs through — `defineStack`, the metadata plugin's artifact ingestion,
+  `os validate`, the lint scorer and `EnvironmentArtifactSchema`. There is no path that
+  forgot to check.
+
+  **The `ApiEndpoint` vocabulary is deliberately KEPT.** Retiring it was considered and
+  rejected: endpoint shapes are an industry-stable form, so a retirement would only mean
+  re-introducing the identical schema later. Your endpoint definitions stay valid TypeScript
+  and stay in the spec; only _authoring them into a stack_ is refused, and only until the
+  executor lands. Keep them commented next to your stack — that is what the showcase does.
+  The executor (route mounting + endpoint matching + per-key wiring for
+  `authRequired`/`cacheTtl`/`inputMapping`/`outputMapping`/`rateLimit`) is tracked by
+  **#5040**, which replaces this rejection with real execution.
+
+  ## BREAKING — the `ApiRegistry` / `ApiEndpointRegistration` family is removed (#4939)
+
+  The repo carried a **second**, unrelated declaration shape for "an API endpoint":
+  `ApiEndpointRegistrationSchema` and the ~500-line `ApiRegistry` service that
+  `createApiRegistryPlugin()` registered under `api-registry`. Nothing composed it — every
+  assembly site lived in `packages/core/examples/`, with no registration in
+  `packages/runtime`, `packages/cli` or any `examples/app-*`, and a real boot carried no
+  such service. The whole family was therefore inert, including
+  `ApiEndpointRegistration.requiredPermissions`, whose docs promised **in the present tense**
+  that "the gateway layer automatically validates these permissions" while no gateway read
+  it. Two declaration shapes, both dead; this retirement converges them on one.
+
+  Removed from `@objectstack/spec/api`: `ApiEndpointRegistration(Schema)`,
+  `ApiRegistry(Schema)`, `ApiRegistryEntry(Schema)`, `ApiMetadataSchema`,
+  `ApiParameterSchema`, `ApiResponseSchema`, `ApiDiscoveryQuerySchema`,
+  `ApiDiscoveryResponseSchema`, `ApiProtocolType`, `HttpStatusCode`,
+  `ObjectQLReferenceSchema`, `SchemaDefinition` (12 JSON-Schema defs, 67 authorable keys).
+  Removed from `@objectstack/core`: `ApiRegistry`, `createApiRegistryPlugin`.
+  Removed from `@objectstack/plugin-hono-server`: the `useApiRegistry` option — it was
+  defaulted to `true` and read by nothing, configuring a service that was never composed.
+
+  **FROM → TO.** There is no replacement shape to migrate to, because nothing executed the
+  old one: delete the registration objects. If you were assembling an `ApiRegistryEntry`,
+  you were building a value only your own code read — keep it as your own type. Declarative
+  endpoints have one vocabulary now, `ApiEndpointSchema`.
+
+  `ConflictResolutionStrategy` **survives** the removal and moved to
+  `@objectstack/spec/api`'s `router.zod` — same name, same four values
+  (`error`/`priority`/`first-wins`/`last-wins`), same import path. It is pinned there by two
+  independent ratchets and is not part of the retired surface.
+
+  ## Also in this change
+
+  - **BREAKING (`@objectstack/runtime`):** `HttpDispatcher.handleApiEndpoint()` is deleted,
+    along with its now-orphaned private `callData` delegate, and `/__api-endpoint` leaves
+    `LEGACY_CHAIN_PREFIXES` and the route ledger. The method was public, so this is an API
+    removal — but it returned `{ handled: false }` for every call it ever received, so no
+    caller can observe a behaviour change beyond the missing symbol. Delete the call.
+    Absence is now loud (ADR-0076): the surface is refused at authoring rather than 404ing
+    at runtime with dead code behind it.
+  - `examples/app-showcase` no longer declares endpoints, and its coverage manifest no
+    longer claims the capability is `demonstrated` — that entry read "executed by the runtime
+    dispatcher (handleApiEndpoint)", which was exactly the advertise-what-you-don't-deliver
+    claim Prime Directive #10 forbids.
+  - The endpoint-level `rateLimit` tracking pointers left by #4910/#5006 now name **#5040**,
+    the live executor card, instead of #4936, which closes with this change.
+
+### Minor Changes
+
+- 0f2fdcd: fix(core)!: a throwing `kernel:bootstrapped` / `kernel:listening` handler fails the boot on LiteKernel too (#5257)
+
+  **A failed `listen()` no longer yields a false "✅ Bootstrap complete".**
+
+  #5170 (PR #5258) unified `kernel:ready`: a handler that throws fails the boot on
+  `ObjectKernel` and `LiteKernel` alike. It deliberately ruled that one hook only,
+  leaving the other lifecycle hooks split — `ObjectKernel` propagates their
+  failures (its `context.trigger` is a bare awaited loop that never catches) while
+  `LiteKernel` routed them through the isolating dispatcher, logging
+  `Hook handler failed: <name>` and carrying on. This closes the two boot-path
+  hooks that were left: `kernel:bootstrapped` and `kernel:listening` now use the
+  propagating dispatcher (`triggerHookOrThrow`) on `LiteKernel`, in the same shape
+  #5258 established — the remaining handlers for that hook are skipped, the later
+  boot hooks never fire, the original error reaches the caller **unwrapped**,
+  `state` is left `'stopped'` rather than `'running'`, and the success line is
+  never logged.
+
+  The concrete failure this removes: `HonoServerPlugin` opens its socket inside a
+  `kernel:listening` handler — `await this.server.listen(port)`, with no try/catch
+  of its own, deliberately. When that rejected on `LiteKernel` (EACCES on a
+  privileged port, a failure inside the port-fallback logic itself, a serverless /
+  edge host where `listen` is not available at all) the throw was swallowed,
+  `bootstrap()` resolved normally, and the process printed
+  `✅ Bootstrap complete` while **nothing was listening**. The same plugin code on
+  `ObjectKernel` failed the boot. The health check that came next was the first
+  thing to notice, and it had already been told startup succeeded. Plain "port is
+  in use" was never affected — `server.listen` falls back to a random port
+  internally — which is exactly why this stayed invisible.
+
+  `kernel:bootstrapped` carries reconcile and audit work (objectql's
+  `announceOpenMigrationGates`, service-automation's node-type / trigger-binding
+  audits, the sharing plugin's boot backfills); a swallowed failure there is a
+  quieter version of the same lie — the audit silently does not run.
+
+  **`kernel:shutdown` keeps fail-soft dispatch**, now as an explicit per-hook
+  judgement recorded in a comment at the dispatch site rather than an inherited
+  default. On the teardown path there is no "refuse to proceed" left to buy, and
+  the handlers queued behind a failing one — plus the reverse-order `destroy()`
+  pass after them — are what flush buffers, close connections and release locks.
+  Aborting that sequence would convert one bad handler into leaked resources and
+  unflushed writes.
+
+  **Who is affected.** Hosts that boot through `LiteKernel` — vitest, serverless,
+  edge (Workers) — and register a `kernel:bootstrapped` or `kernel:listening`
+  handler that can throw. Such a host previously came up "successfully" with the
+  work of that handler silently skipped; it now refuses to start and surfaces the
+  original error. If a handler of yours performs best-effort work whose failure
+  genuinely must not stop the boot, it needs its own `try/catch` — which is what
+  the in-repo `kernel:bootstrapped` subscribers already do, per handler, with the
+  reason written down. Nothing in this repo relied on the swallow: the core (426),
+  client, runtime, http-conformance, connector-{rest,mcp,slack} and
+  service-automation (665) suites pass unchanged.
+
+  Boot assertions still belong in `kernel:ready`: it is the earliest hook at which
+  the service registry is finished filling.
+
+- 8ffa8b9: fix(core)!: a throwing `kernel:ready` handler now fails the boot on **LiteKernel** too (#5170)
+
+  **Behaviour change — read this if you run `LiteKernel` (vitest harnesses,
+  serverless functions, edge workers).** A `kernel:ready` handler that throws now
+  **rejects `bootstrap()`** on `LiteKernel`, exactly as it always has on
+  `ObjectKernel`. Before this change the throw was caught inside the kernel,
+  written out as one `Hook handler failed: kernel:ready` error log, and the boot
+  continued to "✅ Bootstrap complete".
+
+  **Why it mattered.** The two kernels ran the same hook through two different
+  dispatchers: `ObjectKernel` used `context.trigger` (a bare awaited loop that
+  never catches), `LiteKernel` used `triggerHook` (per-handler try/catch,
+  "continue with other handlers even if one fails"). Same hook name, same plugin
+  code, opposite failure semantics — which is `declared ≠ enforced` in the
+  kernel's own lifecycle contract.
+
+  `kernel:ready` is the only correct moment for a plugin to assert that a
+  precondition it _declared_ was actually delivered: the service registry is
+  still filling during `init()`, so a boot gate has nowhere earlier to run. Every
+  "declare it and we refuse to start if we cannot honour it" gate in this repo
+  therefore lives there — and on `LiteKernel` those gates were being downgraded to
+  a log line while the process came up and served traffic without the guarantee it
+  had announced. `EmailServicePlugin`'s `queueDelivery: true` gate (#5160) is the
+  worked example: on `ObjectKernel` the boot failed, on `LiteKernel` the server
+  came up and quietly fell back to inline delivery. Serverless is exactly where
+  "do not start misconfigured" matters most.
+
+  **Who is affected.** Any `LiteKernel` host whose `kernel:ready` handler throws
+  on a healthy boot. That boot previously "succeeded"; it now fails loudly with
+  the original error, and the kernel is left `stopped` rather than `running`. The
+  failure was never silent — it was already an `ERROR` line in your logs — so
+  check for `Hook handler failed: kernel:ready` in existing logs to find hosts
+  that will now refuse to start. If the handler's work is genuinely optional,
+  catch inside the handler and log there; the kernel no longer decides that for
+  you. The full test surface in this repo that boots `LiteKernel` (core, client,
+  runtime, http-conformance, the connectors, service-automation) passes unchanged
+  — nothing was relying on the swallow.
+
+  Scope: **`kernel:ready` only.** `kernel:bootstrapped`, `kernel:listening` and
+  `kernel:shutdown` keep `LiteKernel`'s isolating dispatch, pinned by a test.
+
+### Patch Changes
+
+- b746aa0: fix(service-automation): connector 物化失败的软路径改用结构化 `meta`;顺带修好 `ObjectLogger.error` 丢弃契约第三参的缺陷 (#5575)
+
+  ## service-automation:`fail(msg, cause)`
+
+  `reconcileDeclaredConnectors` 的报错器有两条路径(ADR-0097):冷启动 `throw`(fatal),
+  `metadata:reloaded` 之后 —— Studio publish、`os dev` 重编译 —— 记日志并让旧 connector
+  继续服务(soft)。其中两个调用点把**外来**的 `err.message` 插进那条日志 message:
+  `resolveInstanceAuth` 失败处,以及 provider factory 抛错处。这两个 message 都不是我们
+  自己的:credential resolver 由宿主提供
+  (`AutomationServicePluginOptions.credentialResolver`),provider factory 更是 ADR-0097
+  明确鼓励第三方去写的代码 —— 第一个用严格 Zod schema 校验 `providerConfig` 的 factory
+  抛出的就是 `ZodError`,它的 `.message` 是 issue 数组的多行 JSON dump,第一行是一个 `[`。
+
+  `ObjectLogger` 每次调用只写一条 `<ts> <LEVEL> <msg>` 记录,带换行的 message 会溢出到
+  不带等级头的后续物理行,于是运行时 stderr 的每一个按行工作的消费者 —— 文件 sink、
+  `docker logs`/journald 送进日志采集、一次 `grep ERROR` —— 都会把那些续行读成无法归属的
+  垃圾记录:一条诊断散成 N 个碎片。与 #5048 在 flow 绑定接缝上是同一类,也是同一条 #4632
+  原则:被搅烂的诊断比没有诊断更贵。
+
+  改法与 PR #5572 同源:`fail(msg, cause?)` —— message 是不含换行的自足句子,cause 按路径
+  分别渲染。soft 路径把 cause 交给 logger 的**结构化 meta**(`issues[]` / `error`);fatal
+  路径把 cause 文本接在抛出的 message 后面(`… cause: <text>`),因为 throw 不是日志记录,
+  内核失败通道原样打印,多行 ZodError dump 在终端里本来就好读 —— 同一个 cause,两种受众,
+  刻意不共用一种形状。`#5048` 引入的内部模块随之从 `flow-bind-diagnostics.ts` 更名为
+  `thrown-cause-diagnostics.ts`(`describeThrownForLog`),因为它从来不是 flow 专属的:
+  主题是日志管线,不是 metadata 类型。被拒键名仍放在 `unrecognized` 而不是 Zod 原本的
+  `keys`(`ObjectLogger` 的脱敏表按子串匹配,`keys` 含 `key`)。
+
+  **一处订正**:#5575 的 issue 正文把此处的危害归给了 `serve` 的启动诊断缓冲
+  (`BootLogCapture`)。那个缓冲看不到这条路径 —— `ObjectLogger` 把 `warn` 送 stdout(启动
+  静默窗口只包了 `process.stdout.write`),`error`/`fatal` 送 **stderr**,而且 soft 路径在
+  `metadata:reloaded` 之后才跑,窗口早已恢复。危害是上面那串按行消费者,以及日志查询根本
+  无法按字段过滤;机制写进了模块文档,连同 `warn`/`error` 下游不同这件事本身。
+
+  ## core:`ObjectLogger.error`/`fatal` 兑现契约声明的 `meta`
+
+  `Logger` 契约声明 `error(message, error?: Error, meta?)`。`ObjectLogger` 按形状分派,
+  所以 meta 也允许出现在 `error` 位 —— 这份宽容没问题;**丢掉一个自己声明的参数**有问题:
+  `error === undefined` 时旧代码走 `write(level, message, errorOrMeta)`,第三个参数从未被
+  读取。于是每一个按契约书写的 `logger.error(msg, undefined, { … })` 都只输出一条裸 message,
+  事实全部静默消失 —— `metadata`、`metadata-protocol`、`client`、`core/security` 里约 15 处
+  调用点今天就是这样(其中 `metadata/src/endpoint-matcher.ts` 送的正是一个 Zod issue 数组)。
+  契约的另外两个实现(`@objectstack/observability` 的 `ConsoleLogger`/`JsonLogger`)都老老实实
+  用了这个位置,所以是契约对、这一个实现错:declared ≠ enforced。
+
+  三种形状现在都被兑现,两个位置同时带值时以更靠后的 `meta` 为准。这一处修好之后,上述
+  调用点的诊断自动恢复(`client` 的 `HTTP request failed` 记录重新带上
+  `{method, url, status, error}`)。connector 接缝改用契约的第三参而非第二参,是刻意的:
+  把原始 error 塞进第二位会让每条记录都附带完整堆栈,ZodError 还会附带整段多行 dump ——
+  正是我们要消灭的无界形状。
+
+- eb3e650: fix(core): 健康检查的超时守卫在 race 落定时被清除,周期性检查不再堆积孤儿定时器 (#4875)
+
+  `PluginHealthMonitor.performHealthCheck()` 里那条 race 的守卫由 `timeout()` armed 之后就被
+  扔掉:插件的 `checkMethod` 赢下 race 之后,那根 `setTimeout` 既没 `clearTimeout` 也没
+  `unref()`,带着 ref 一直挂满整个 `config.timeout`。这与 #4813 修掉的两处(内核 init/start
+  守卫,PR #4874)是同一种漏法。
+
+  差别在于**健康检查是周期性的**:内核那两处是启动时一次性的固定份额(4 个插件 = 8 根),这里
+  则是**每个插件每一轮各留一根**,`interval` 越密、`timeout` 越长,堆得越高 —— 一个
+  `interval: 30s` / `timeout: 5s` 的插件在任意时刻都挂着若干根本该在毫秒级就回收的定时器。
+  今天这条还没发作,只是因为 `startMonitoring()` 目前没有被内核启动流程调用;一旦健康监控被接进
+  宿主,它就是 #4813 的放大版。
+
+  修法与 #4874 同形:`timeout()` 换成私有 helper `raceCheckTimeout()`,`try { await
+Promise.race(...) } finally { clearTimeout(guard) }`。
+
+  **为什么是 `clearTimeout` 而不是 `unref()`。** `unref()` 让定时器不再钉住事件循环的同时,
+  也让它不再是一个守卫 —— 若检查永不 settle 且没有别的东西撑着事件循环,Node 会在定时器触发
+  之前退出,超时被静默吞掉。守卫必须在 race 未决期间保持 ref'd、在落定那一刻被回收,这正是
+  `finally { clearTimeout(guard) }` 表达的语义。回归测试因此是三条:守卫赢不了时不留 ref'd
+  定时器、连跑多轮不累积(fake timers 下计数,能识破 `unref()` 式的假修复)、以及检查真的挂住时
+  超时照常上报。
+
+  超时时长(`config.timeout`)一个都没动 —— 问题从来不在时长,而在没人回收。
+
+- 674ac99: fix(core): one throwing `kernel:shutdown` handler no longer skips every plugin `destroy()` and kills the process under a false "Shutdown timed out" (#5274)
+
+  **On `ObjectKernel`, a single bad shutdown subscriber used to end the entire teardown
+  and `process.exit(1)` the host — reporting a timeout that never happened.**
+
+  `performShutdown()` dispatched `kernel:shutdown` through `context.trigger` (a bare
+  awaited loop that never catches), so the first handler that threw propagated out to
+  `shutdown()`'s `Promise.race` catch. That catch was written for the timeout race alone
+  and treated every exception as one, producing three consequences at once:
+
+  1. the remaining `kernel:shutdown` handlers never ran;
+  2. **every** plugin's `destroy()` was skipped — the reverse-order destroy pass sits
+     after the trigger in `performShutdown()`, so it was never reached;
+  3. the process was killed by `process.exit(1)` under the log line
+     `Shutdown timed out — forcing exit`, while nothing had timed out — sending whoever
+     read it to the `shutdownTimeout` config for a handler bug.
+
+  Two changes, matching the reasoning #5257 recorded at `LiteKernel`'s shutdown dispatch
+  site:
+
+  - **`kernel:shutdown` now dispatches ISOLATING on `ObjectKernel` too.** A handler that
+    throws is logged as `Hook handler failed: kernel:shutdown` and the remaining handlers
+    still run, followed by the reverse-order `destroy()` pass and the `onShutdown()`
+    handlers — both of which already isolated per plugin and per handler. What is queued
+    behind a failing shutdown handler is the cleanup that flushes buffers, closes
+    connections and releases locks, so one bad handler must not amplify into leaks and
+    unflushed writes. The BOOT-path hooks are untouched: `kernel:ready`,
+    `kernel:bootstrapped` and `kernel:listening` still propagate and still fail the boot
+    (#5170, #5257).
+  - **The timeout catch now handles only a genuine timeout**, discriminated by identity on
+    the timer's own rejection — not by message, not by type, so nothing a plugin throws
+    can impersonate it. A genuine `shutdownTimeout` overrun is **unchanged**: it still
+    logs `Shutdown timed out — forcing exit` and still calls `process.exit(1)`, because
+    teardown really is hung and the process would otherwise hold what it failed to
+    release. Any other exception is logged at `error` and follows the normal path —
+    `state = 'stopped'`, return — with no `process.exit`, leaving an embedding host
+    (cloud auth-proxy, CLI, a test runner) its own chance to finish cleanly.
+
+  `shutdown()` still never rejects, so no existing caller changes. Telling the two paths
+  apart is the point of the fix, and both are pinned by named tests.
+
+- 46365ab: fix(core): `ObjectLogger` 的脱敏表按**词边界**匹配,不再按子串吃掉 `keys`/`tokens` 这类普通字段 (#5573)
+
+  `redactSensitive` 此前的判定是 `key.toLowerCase().includes(pattern)` —— 只要字段名
+  **含有** `password`/`token`/`secret`/`key` 子串,整个值就被换成 `***REDACTED***`。
+  于是 `keys`、`keyword`、`keywords`、`keyboard`、`monkey`、`tokens`、`tokenizer`、
+  `secretary` 全部中招:读者不但丢了事实,还被告知"这里挡住了一个秘密",比字段直接
+  缺失更误导。仓库里已经有活的命中 —— `dispatcher-plugin.ts` 为了躲开脱敏器特意把
+  `key` 改名成 `keyedBy`,而 `'keyedby'.includes('key')` 依然为真,那条限流日志的
+  `keyedBy` 一直是 `***REDACTED***`。
+
+  匹配语义 FROM → TO:
+
+  |                                                        | FROM(子串 `includes`) | TO(词边界)           |
+  | :----------------------------------------------------- | :-------------------- | :------------------- |
+  | `apiKey` / `api_key` / `API_KEY` / `x-api-key`         | 脱敏                  | 脱敏(不变)           |
+  | `apikey` / `APIKEY`(全小写连写)                        | 脱敏                  | 脱敏(不变,见下)      |
+  | `apiKeys` / `refresh_tokens`(复合词里的复数)           | 脱敏                  | 脱敏(不变)           |
+  | `keys` / `tokens` / `keyword` / `monkey` / `secretary` | **脱敏**              | **不脱敏**           |
+  | `keyedBy` / `tokenizerName`                            | **脱敏**              | **不脱敏**           |
+  | `passwords` / `secrets`(裸复数)                        | **脱敏**              | **不脱敏**           |
+  | `api_key` 字段 + `redact: ['apiKey']` 配置             | **不脱敏**            | **脱敏**(跨拼法命中) |
+
+  字段名按 camelCase / snake_case / kebab-case / 字母-数字边界分词后逐词比对。默认脱敏表
+  (`['password','token','secret','key']`)本身**没有变**,`packages/spec` 的 schema 默认值
+  也没有变 —— 变的只是这张表怎么用。
+
+  两个边角是显式取舍,不是遗漏:
+
+  - **全小写连写**没有词边界可分,`apikey` 分词后只有一个词。不能用"以 `key` 结尾"救,
+    因为 `monkey`/`turkey`/`whiskey` 也以它结尾 —— 那正是本单要去掉的误报。所以连写只在
+    前缀是一张显式限定词表(`api`/`access`/`refresh`/`client`/`private`/`session`/…)里的
+    词时才算命中;表外的连写(`foobarkey`)不脱敏,按仓库命名惯例写成 `fooBarKey` /
+    `foo_bar_key` 即可通用命中。只认**后缀**连写,所以 `secretary`、`keyword` 保持干净。
+  - **裸复数**是集合或计数而不是秘密(`keys` 来自 Zod 的 `unrecognized_keys` issue,
+    `tokens` 来自 LLM 用量),按维护者裁决不脱敏;复数**出现在复合词里**时仍然是秘密
+    (`apiKeys: ['sk-…']`),照常脱敏。确实要脱敏裸复数的 host,写
+    `redact: [..., 'passwords']` 显式加回。
+
+  **影响面**:host 侧自定义 `redact` 配置的匹配行为随之收紧 —— 依赖子串宽匹配"顺手"挡住
+  某个字段的部署,需要把该字段名(或它的词)显式写进 `redact`。反向的收益是同一个词现在
+  跨拼法命中:配 `redact: ['apiKey']` 也会挡住 `api_key` 和 `apikey`。
+
+- c5adfe1: fix: 节点执行与热重载 shutdown 的超时守卫在 race 落定时被清除,不再留下孤儿定时器 (#4952)
+
+  #4813(PR #4874,内核 init/start)与 #4875(PR #4950,周期性健康检查)修掉的是同一种漏法:
+  守卫 armed 之后就被扔掉 —— 被守护的一方赢下 race 之后,那根 `setTimeout` 既没 `clearTimeout`
+  也没 `unref()`,带着 ref 一直把事件循环钉满整个超时预算。本次清仓剩下的两处生产实例:
+
+  - **`AutomationEngine.executeWithTimeout()`**(`service-automation`)—— 三处里量级最大的一处:
+    **每个声明了 `timeoutMs` 的流程节点各一根**,孤儿数随流程节点数 × 触发频率线性增长;一次性进程
+    (`os` CLI 跑到 flow 的路径)干完活之后还会被最长的那根守卫按住到超时才退出。
+  - **`HotReloadManager.reloadPlugin()`**(`core`)—— 插件 `destroy()` 的 shutdown 守卫,与 #4813
+    修掉的两处一字不差:一次毫秒级完成的热重载,照样把循环钉满 `shutdownTimeout`。
+
+  两处修法与 #4874 / #4950 同形,不新造变体:私有 helper +
+  `try { return await Promise.race([...]) } finally { clearTimeout(guard) }`。`hot-reload.ts` 的
+  helper 把入参放宽到 `T | PromiseLike<T>`(Plugin 契约允许同步 `destroy()`);`engine.ts` 的不放宽
+  (`NodeExecutor.execute` 声明返回 `Promise`)。
+
+  **为什么是 `clearTimeout` 而不是 `unref()`。** `unref()` 让定时器不再钉住事件循环的同时,也让它
+  不再是一个守卫 —— 若被守护的一方永不 settle 且没有别的东西撑着事件循环,Node 会在定时器触发之前
+  退出,超时被静默吞掉。守卫必须在 race 未决期间保持 ref'd、在落定那一刻被回收,这正是
+  `finally { clearTimeout(guard) }` 表达的语义。两处的回归测试各自沿用 #4950 的双向写法:
+  真实定时器下不留 ref'd 定时器、fake timers 下连跑多轮不累积(计数能看见 `unref()` 过的定时器,
+  因此识破 `unref()` 式的假修复)、以及被守护方真的挂住时超时照常上报。
+
+  超时时长(`timeoutMs` / `shutdownTimeout`)一个都没动 —— 问题从来不在时长,而在没人回收。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

@@ -1,5 +1,195 @@
 # @objectstack/client-react
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- d9cac60: **BREAKING** — `GET /meta/:type/:name` now answers exactly one body shape: the
+  `GetMetaItemResponseSchema` envelope `{ type, name, item, … }` that
+  `packages/spec` has always declared for it. On the default configuration this
+  endpoint used to answer the **bare metadata document** instead (#5563).
+
+  ### What changed, and why it is breaking
+
+  The route had two mutually exclusive branches with different response
+  structures. The cached branch — reached whenever `metadata.enableCache` is on,
+  which is the **default** (`enableCache: z.boolean().default(true)`) — served
+  `getMetaItemCached`'s `result.data`, and that value has the envelope already
+  stripped. The uncached branch served `getMetaItem`'s envelope. So the one shape
+  the spec declared was the one a default deployment could not obtain, and the
+  envelope surfaced only when the cache was off or when the read structurally
+  bypassed it (`app`, `doc`, `book`, `?state=draft`, `?preview=draft`,
+  `?package=`). Consumers had no correct static type — they sniffed at runtime or
+  reached for `as any` (#5545 was blocked on exactly this).
+
+  The dispatcher's `/meta` domain had the same split one layer down: the protocol
+  resolver answered the envelope while the ObjectQL-registry and MetadataService
+  fallbacks answered bare documents. Both fallbacks now wrap what they found,
+  taking `type`/`name` from the request.
+
+  ### Migration
+
+  `GET /api/v1/meta/object/customer`, default configuration:
+
+  ```jsonc
+  // before — the bare document
+  { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+
+  // after — the declared envelope; the document is verbatim under `item`
+  {
+    "type": "object",
+    "name": "customer",
+    "item": { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+  }
+  ```
+
+  - **Reading the body directly** (`fetch`, `client.meta.getItem`,
+    `client.meta.getCached().data`): read the document at `.item`. Nothing inside
+    it changed. `type` is the canonical singular metadata type name, so
+    `/meta/objects/customer` and `/meta/object/customer` answer the same `type`.
+  - **`useObject` / `useFields` (`@objectstack/client-react`)**: `useObject().data`
+    is now the envelope — `data.item.label`, `data.item.fields`, where it used to
+    be `data.label` / `data.fields`. `useFields()` is unchanged (it already
+    returns the flattened field list) and is the shorter path when fields are all
+    you need.
+  - **`isMetaEnvelope`, exported from `@objectstack/rest`, is REMOVED.** It
+    existed only to tell the two shapes apart. There is one shape now, so the
+    replacement for `isMetaEnvelope(r) ? r.item : r` is `r.item`.
+  - **Not converged, deliberately**: `?layers=true` still answers the layered
+    diagnostic projection `{ type, name, code, overlay, overlayScope, effective,
+validation }`. Collapsing three layers into one `item` would delete the
+    diagnostic. Unaffected unless you pass that flag.
+
+### Patch Changes
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [aa25a81]
+- Updated dependencies [3a18e24]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/client@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

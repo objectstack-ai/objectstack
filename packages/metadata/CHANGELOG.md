@@ -1,5 +1,794 @@
 # @objectstack/metadata
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- ecc61ab: feat(metadata): 端点匹配器 —— `MetadataManager.matchEndpoint` 惰性索引实现 (#5089)
+
+  `IMetadataService.matchEndpoint?` 的契约在 #5080/#5097 落地(声明先行),本变更补上
+  `metadata` 槽位占位者 `MetadataManager` 的实现:把已声明的 `api` 元数据条目编成
+  **METHOD → 精确路径 → 端点** 的惰性索引,供 HTTP 分发器在「没有内建域认领这条路径」
+  与「回答语义 404」之间做一次查表。这是 #5040 端点执行器程序的 E2 单。
+
+  **结构性不可达,零行为变更。** 17.x 里没有任何东西会调用 `matchEndpoint`:挂载 seam
+  是 #5090 的面,而 publish/validate 对非空 `apis:` 仍然硬拒(#4936)。新代码在真实组合
+  里不暴露任何 HTTP 行为;测试直接驱动服务,这正是 #5040 设计选定的验收姿态。
+
+  实现要点(逐字实现契约文本,`packages/spec/src/contracts/metadata-service.ts`):
+
+  - **匹配维度**:`method` 大写规整后比较(请求动词大小写不敏感);`path` 去掉**一个**
+    尾斜杠后**整串精确**比较,两侧同规则。17.x 不做百分号解码、不做 Unicode 规整、
+    不做大小写折叠 —— 原串即键。词表(ADR-0121)未定义任何路径模板语法,因此
+    `params` **恒为 `{}`**;此处不发明只存在于实现里的方言。
+  - **答案是 parse 后的形状**:每条经 `ApiEndpointSchema.safeParse`,默认值已物化 ——
+    作者省略 `authRequired` 时消费方拿到的是 `true`,不可能把「缺省」误读为放行。
+  - **坏条目响亮缺席**:解析失败的存量条目被跳过并以 `error` 级点名(说明该路由将回 404
+    及如何修),绝不返回半合法形状,也绝不牵连同批的好条目。
+  - **重复声明确定性收敛**:两条条目声明同一 METHOD+path 时,`name` 字典序在前者保留
+    路由,被弃者连同规则一并 `error` 级点名 —— 不是静默 last-write-wins,每个节点、每次
+    启动的解析结果一致。
+  - **断存储抛错,不伪装 404**:`undefined` 只表示「无声明拥有这条路由」;读不到存储时
+    抛出(与 `loadDiagnosed` 的 miss/outage 之分同源,ADR-0110 D3),因为 miss 会变成
+    404,而故障不得伪装成 404。构建失败不缓存,下次调用重试。
+  - **失效**:挂在仓内既有机制上,不新造事件系统 —— `invalidateListCache('api')` 覆盖
+    全部本地写入(含 artifact 装载 / HMR 的 `{ notify: false }` 写入,这些按构造不经过
+    watcher),`subscribe('api', …)` 覆盖集群对端回放(它只经 `notifyWatchersLocal`)。
+    失效后下次调用整体重建。
+
+  `ApiEndpointSchema` 与 `packages/spec` 未做任何改动(词表冻结)。
+
+- c52e608: fix(metadata,spec): the endpoint publish gates now guard the metadata write path too (#5189, #5040 E7b)
+
+  #5111 (E7) hung the five per-endpoint `apis:` gates on
+  `ObjectStackDefinitionSchema`, which every path that parses a **stack** runs
+  through — `defineStack`, `os validate`, the lint scorer, artifact ingest,
+  `EnvironmentArtifactSchema.metadata`. #5189 proved a stored `api` item need
+  never have been part of a stack: `MetadataManager.publishPackage`, a direct
+  `metadata.register()` and a Studio metadata write each mint one item at a time
+  and saw no gate at all.
+
+  Three of the five gates degrade safely when bypassed — the executor answers a
+  structured 501 naming the item, and a path outside the `apps/<namespace>/`
+  carve-out simply matches nothing. **ADR-0121 D6 has no runtime counterpart**:
+  the runtime honours `authRequired: false` faithfully and `deriveBucketConfig`
+  returns `null` for a budget whose `enabled` is not `true`, so the bypass minted
+  an anonymous, zero-quota execution entry point — the exact shape D6 exists to
+  forbid.
+
+  Two doors now, both running the SAME gate function rather than a second copy of
+  the criteria:
+
+  - **Publish** — `MetadataManager.publishPackage` runs
+    `validateApiEndpointDeclarations` over the package's `api` items and fails
+    the publish, naming each endpoint and the key to fix, on the same
+    `validationErrors` surface it already uses. This pass is **not** governed by
+    `options.validate`: an opt-out on a security gate is the bypass this fixed.
+  - **Load** — the endpoint matcher's index build re-applies the _identity-free_
+    subset (supported subset, mapping, policy/D6) to every stored item. A
+    declaration that never passed publish is EXCLUDED from the index and named at
+    `error` level, so a bypassed endpoint answers 404 with a loud log instead of
+    answering anonymously and unmetered. The namespace and uniqueness gates are
+    deliberately not applied there — both need a stack identity a stored row does
+    not carry.
+
+  **New in `@objectstack/spec/api`** (the module was package-internal in #5111,
+  whose only consumer was one file away):
+  `validateApiEndpointDeclarations`, `identityFreeEndpointGateFailure`,
+  `EndpointGateIssue`, `EndpointGateIdentity`.
+
+  **New option — `publishPackage(id, { namespace })`.** `MetadataManager` indexes
+  items by `packageId` and carries no manifest, so it cannot prove a namespace on
+  its own and will **not** infer one from the items it is judging (an
+  author-supplied value would make the ADR-0121 D1/D2 carve-out gate vacuous).
+  Callers that hold the package manifest pass its explicit `manifest.namespace`;
+  without it the namespace gate fails and the package's `api` items do not
+  publish — which is the rule, not a limitation: a publish that cannot prove a
+  namespace must not mint a URL under one. Packages that declare no `api` items
+  are untouched.
+
+### Patch Changes
+
+- d21c001: feat(spec)!: declarative `apis:` publishes again — the blanket refusal narrows to per-endpoint publish gates, and declared endpoints go LIVE (#5111, #5040 E7)
+
+  ⚠️ **Read this as a security note, not a schema note.** Declarative endpoints
+  **execute** from protocol 17. Before this release the surface was inert end to
+  end — nothing mounted a declared `path`, no matcher existed, and every key
+  including `authRequired` parsed green and gated nothing — which is why #4936
+  refused a non-empty `apis:` outright. The #5040 E-series built the executor
+  (mount seam, endpoint matcher, policy keys, execution targets, mapping keys,
+  OpenAPI enrichment), so the refusal's premise is gone and keeping it would be
+  the lie in the other direction.
+
+  ## BREAKING — the refusal narrows, and what passes it is served
+
+  `apis: [ …endpoints… ]` no longer fails wholesale. Each entry is now gated
+  individually, and **an endpoint that passes the gate is mounted and answers
+  real requests as soon as the stack is published.**
+
+  **Before you upgrade, review every historical `apis:` block** — including any
+  you restored, generated from an older doc, or left in place because it was
+  known to do nothing. Pay particular attention to any entry that explicitly
+  declares **`authRequired: false`**: the schema default is `true`, so an
+  _omission_ is safe and needs no review, while an explicit `false` is the only
+  thing that opens **anonymous** access to that endpoint. ADR-0121 D6 now pairs
+  it with a mandatory armed rate limit — and "armed" means
+  `rateLimit: { enabled: true, … }`, because `enabled` defaults to `false`, so a
+  budget written without it meters nothing.
+
+  ## The gates, each rejecting with its own prescription
+
+  | gate                           | rejected shape                                                                                                                                                                                                                                                                  |
+  | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | **namespace** (ADR-0121 D1/D2) | a `path` that is not `/api/v1/apps/<manifest.namespace>/<subpath>`, or a stack that declares `apis:` without an explicit `manifest.namespace` (no derivation from `manifest.id`)                                                                                                |
+  | **supported subset**           | `type: 'script'` / `'proxy'`; an `object_operation` missing `objectParams.object` or `.operation`; a `flow` with an empty `target`                                                                                                                                              |
+  | **mapping**                    | any `transform`; an unusable `source`/`target` path (empty, empty segment `a..b`, `__proto__`/`prototype`/`constructor`); two entries whose `target`s collide (same path, or one inside another); `inputMapping` on a `find`/`get`/`delete` operation, which never reads a body |
+  | **policy**                     | `authRequired: false` without `rateLimit.enabled === true`; an armed budget with `maxRequests`/`windowMs` ≤ 0; a negative `cacheTtl`; `cacheTtl` on a non-GET method                                                                                                            |
+  | **uniqueness**                 | two endpoints in one stack claiming the same METHOD + path (one trailing slash trimmed, the matcher's own rule)                                                                                                                                                                 |
+
+  **FROM → TO.** `path: '/api/v1/<anything>/thing'` →
+  `path: '/api/v1/apps/<manifest.namespace>/thing'`, with `manifest.namespace`
+  declared explicitly. `authRequired: false` → either delete the key (the safe
+  default `true` applies) or keep it **and** add
+  `rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 }`. Every other
+  key is unchanged: the `ApiEndpoint` vocabulary is frozen — this release adds,
+  removes and renames nothing on it. The gates are validation logic over the keys
+  that already existed.
+
+  The runtime keeps its own refusals for a declaration that reached the store
+  without passing publish (a direct `metadata.register()`), so the two ends agree:
+  what publish accepts is exactly what the executor serves.
+
+  `normalizeEndpointPath` is now exported from `@objectstack/spec/api` and is the
+  one canonical form of a declared path — the publish gate and the endpoint
+  matcher (`@objectstack/metadata`) read the same rule instead of each carrying a
+  copy, so a stack can never publish a duplicate the matcher would silently
+  resolve to a single winner.
+
+- 533a0a4: fix(metadata): 集群对端的元数据写入现在会失效本节点的 `listCache` / registry (#5109)
+
+  多节点部署下,节点 A 改一条 `view` / `permission` / `flow`,节点 B 收到
+  `metadata.changed` 广播后**只叫醒了 watcher,却没有失效自己的缓存**。
+  `attachClusterPubSub()` 的订阅回调此前只做一件事 —— `notifyWatchersLocal()`,
+  既不碰 `this.registry` 也不碰 `this.listCache`。后果是 B 上任何走 `list(type)`
+  的读在 `LIST_CACHE_TTL_MS`(30 秒)窗口内继续返回改动前的清单;更糟的是,被叫醒的
+  watcher(ObjectQL SchemaRegistry 桥、Studio HMR SSE)如果回头调 `list()` 重新拉取,
+  拉到的还是旧的 —— 一份「失效通知」附带着失效数据。单机部署完全无感,只有多节点才暴露。
+
+  这与该通道自己声明的用途相反(`ClusterMetadataChangedPayload`:"consumed by peers
+  to **invalidate their local caches**",另见 `content/docs/kernel/cluster.mdx` §6.2
+  与 `metadata-lifecycle.mdx`);现在实现与声明一致。
+
+  修法沿用同文件里 `applyRepoEvent()` 自 ADR-0008 PR-6 起就用对的那条路径,并把两条
+  「外部写入」缝(仓库 watch 循环、集群对端回放)收敛到同一个私有方法
+  `invalidateForForeignWrite(type, name)`:
+
+  - **删除而不预填。** 即便事件带着 body,也只删除 registry 条目而不写入 ——
+    那份 body 是别人那次写入的快照,可能已被后续写入取代,预填会与真实 head 竞态,
+    并要求我们去规范化一份自己没有加载过的定义。删除后 `get()` 自然穿透到 loader /
+    repository,也就是真相所在。
+  - **同步失效,先失效再通知。** 失效发生在收到消息的当拍(不在 `setImmediate` 内),
+    通知仍然延迟派发。`setImmediate` 的存在理由是不让**消费方的 watcher 回调**背压
+    pubsub 派发循环;而失效只是两次 `Map.delete`,不执行任何消费方代码,没有需要延迟的
+    东西——把它一起延迟只会留下「已收到广播、尚未失效」的读窗口,请求处理器里任何一个
+    `await` 都足以撞进去。先失效后通知也与本文件其他写入路径
+    (`register` / `unregister` / `applyRepoEvent`)一致,于是回头 `list()` 的 watcher
+    拿到的是写后清单。
+  - **无名事件只失效清单缓存。** `MetadataWatchEvent.name` 在 spec 里是可选的,无名事件
+    无法定位 registry 条目;此时不会把整个 type 的 registry 一并清掉 —— 那会驱逐
+    `registerInMemory()` 注册的、任何 loader 都无法恢复的代码态构件(如 `origin:'code'`
+    的 datasource)。
+
+  回环抑制(`originNode`)仍然先于失效判断,本节点自己的广播不会让自己白白重建缓存。
+
+- 3133cda: fix(metadata): `DatabaseLoader` 的读故障不再被吞成「什么都没声明」(#5108)
+
+  `DatabaseLoader` 的五个读方法此前都把**任何**存储异常 `catch {}` 成各自的空值 ——
+  `load` → `null`、`loadMany` → `[]`、`exists` → `false`、`stat` → `null`、
+  `list` → `[]`。于是 `sys_metadata` 所在库不可达时,`loadMany('permission')` 与
+  「这个环境一条 permission 都没声明」返回**完全一样的值**,而且异常是在 loader 内部
+  就被抹掉的:`MetadataManager` 那几个 `try/catch` 降级分支拿到的是一次「成功的空读」,
+  根本不会触发,整条链上没有任何一处会说出「读失败了」。
+
+  现在按**错误类型**判决(#4632 立的规矩,#4728 / #4825 已经在同一个文件里用过两次的
+  形状,判据复用现成的 `isMissingTableError`):
+
+  - 唯一良性的失败原因是 `sys_metadata` 尚未 provisioned —— 那时确实没有行,
+    「什么都没声明」就是事实,首次启动照旧返回空值、不报错、不缓存;
+  - 其余全部原因(连接断开、超时、权限不足、查询出错)意味着行还在、只是这次没读到,
+    一律把驱动原始异常**原样抛出**,由调用方决定降级姿态。判据保守:无法正面识别为
+    「表不存在」的错误一律当作真故障。
+
+  由此上层三个已有的机制第一次真的生效:
+
+  - `MetadataManager.list()` 的降级分支会真的进,并且**升级到 `error`**
+    (AGENTS.md「Degradation log levels」:系统看着正常、它声称掌握的清单其实是残缺的),
+    日志写明后果与修法,每次故障只说一次、恢复时再说一次;`list()` 仍然尽力返回可读
+    loader 的内容 —— 这个 best-effort 姿态是刻意保留的。兄弟方法
+    `MetadataManager.loadMany()` 的同一条缝走同一个判决,不让同一次故障在同一个文件里
+    报出两个级别;
+  - `MetadataManager.loadDiagnosed()`(ADR-0110 D3)对 `DatabaseLoader` 终于能报出
+    `degraded` / `errors`,而不是把 outage 报成 miss;
+  - `listForIndex()` / `matchEndpoint`(#5089)契约要求「读不到存储必须抛出,不得伪装成
+    miss(miss 会变成 404)」—— 这条此前对 `MemoryLoader` / `RemoteLoader` 有效、对
+    `DatabaseLoader` 无效,现在对真实的 datasource loader 也成立了。
+
+  **行为变化**:`MetadataManager.exists()` 与 `listNames()` 本来就没有 `try/catch`,
+  所以存储故障现在会从它们抛出,而不再静默答「不存在」/「空清单」。这正是本次修复要的
+  姿态 —— 可用性故障不是一次「没有」。
+
+- c794f78: fix(metadata): a known-partial `list()` result is cached as degraded, on a 2s TTL instead of 30s (#5184)
+
+  Since #5108 a loader that cannot read its store throws rather than answering
+  `[]`, so `MetadataManager.list()` catches, reports the outage once at `error`,
+  and keeps serving what the reachable loaders hold. That best-effort posture is
+  deliberate. What was not deliberate is what happened on the next line: the
+  known-short result went into `listCache` on the same 30s TTL as a complete read,
+  with nothing on the entry to say it was partial.
+
+  The consequences were all invisible from outside. That one `error` line covered a
+  **30s window in which the failing loader was never asked again** — no retry, no
+  second signal, the manager simply re-served a set it already knew was short. When
+  the store came back, nothing noticed for up to another 30s, so #5108's recovery
+  line (`reportLoaderReadRecovered`) arrived that late too. And because the entry
+  carried no marker, no consumer of the cache — including that once-only report —
+  could tell a partial answer from a complete one.
+
+  Not caching degraded reads at all was considered and rejected on evidence. The
+  `listCache` field comment records why the cache exists: security middleware
+  calling `list('permission')` from inside a user-initiated DB transaction, where
+  `DatabaseLoader`'s `engine.find('sys_metadata', …)` tries to take a second knex
+  connection while the transaction holds SQLite's only one, and knex waits out
+  `acquireConnectionTimeout` (60s). That hazard was re-verified against the current
+  driver stack and is still live — `DatabaseLoader._find()` still does not thread
+  the caller's transaction, `driver-sql` still models SQLite as a
+  single-connection pool (`activeTransactions`, `assertBareKnexSafe`, the latter a
+  dev/test guard that no-ops in production), and `plugin-audit` still threads the
+  transaction by hand for the same reason. Skipping the cache would have traded one
+  30s silent window for a fresh 60s stall per call.
+
+  So the entry is still cached, but as what it is:
+
+  - `listCache` entries carry a `degraded` flag, set when at least one loader threw
+    while the result was being assembled. It lives on the entry rather than in a
+    side table, so every reader can distinguish a complete answer from a partial
+    one; entries are read through a single `readCachedList()` helper that applies
+    the flag and its TTL in one place.
+  - A degraded entry expires after **2s** (`DEGRADED_LIST_CACHE_TTL_MS`) instead of
+    30s. The burst of repeated lookups inside one transaction is still absorbed —
+    those are milliseconds apart — while the window in which a known-short set is
+    served without re-asking anyone shrinks 15×, and recovery is noticed (and
+    logged) within seconds of the store healing.
+  - A complete read is unchanged: cached, not degraded, 30s TTL.
+  - The outage message now names the degraded TTL as the retry interval, since it
+    previously promised the 30s one.
+
+  Also closes a `declared ≠ enforced` defect in the same field's comment: it claimed
+  the cache kept "only positive (non-empty) hits or repeated hits with a stable miss
+  signature". No such condition ever existed in `cacheListResult()`. The comment now
+  describes the policy the code actually implements, and the behaviour it claims
+  (an empty complete read _is_ cached) is pinned by a test.
+
+  Internal caching policy only — no change to the `IMetadataService` contract or to
+  any public export.
+
+- 2b2175b: fix(metadata): an unreadable file is no longer announced as `data: null` (#5228)
+
+  `NodeMetadataManager.handleFileEvent()` — the chokidar handler behind
+  `watch: true` — wrapped its re-read in a `try/catch` that logged
+  "Failed to load changed file" and returned without announcing. That `catch` was
+  **unreachable for the failure it was written to catch**. `load()` is
+  `(await loadDiagnosed(...)).data`, and `loadDiagnosed` (ADR-0110 D3)
+  deliberately absorbs a loader throw: it records the message in `errors[]` and
+  answers `{ data: null, degraded: true }`. `FilesystemLoader.load()` does throw
+  on an unparseable file — the throw simply died one frame below the handler, so
+  the `catch` never ran and the `logger.error` inside it never printed once.
+
+  What went out instead was a watch event carrying `data: null`, which is the wire
+  shape of "this metadata legitimately holds nothing". A file the loader could not
+  read and a file the author had emptied reached every subscriber in exactly the
+  same shape — the miss/outage distinction ADR-0110 D3 exists to preserve, erased
+  at the one call site that had picked the variant which throws it away.
+
+  The handler now reads through `loadDiagnosed` and splits on `degraded`:
+
+  - **Degraded** (a loader threw and none answered — an unreadable or unparseable
+    file): take the road the dead `catch` meant to take. Log `filePath`, the
+    metadata type and name, and `loadDiagnosed`'s `errors[]`, and announce
+    nothing. A developer who breaks a metadata file now gets told; before, the
+    event claimed the definition had been emptied and nothing was logged.
+  - **Clean miss** (`data: null`, no loader threw — the file is gone or
+    legitimately empty): unchanged, announced exactly as before.
+  - **Deleted** events never read, so a deletion can never be degraded and is
+    always announced.
+
+  Cache invalidation is unaffected and deliberately runs **before** the read, so
+  the read's verdict can never decide whether the caches are dropped. #5218's
+  contract holds in full: an unreadable file is still a real change to the stored
+  set (`loadMany` skips it), so `listCache` and the `registry` entry still go, and
+  the `api` endpoint index still rebuilds — `invalidateListCache` is that index's
+  first invalidation seam (#5089), so suppressing the announcement costs it
+  nothing.
+
+  No in-repo subscriber loses invalidation or reload correctness: the endpoint
+  index is covered by the seam above, `ObjectQLPlugin`'s `subscribe('object', …)`
+  answers events by re-reading (an unreadable file yields nothing to re-read
+  either way), and the email-template bridge falls through `event.data ?? get(...)`
+  to the same empty result. One behaviour does change for the dev HMR/SSE stream:
+  a file left permanently unparseable no longer wakes the Studio, which keeps
+  showing the last known-good definition until the next event instead of watching
+  it vanish.
+
+- 729a43a: fix(metadata): 文件系统改动同样失效本节点的 `listCache`/`registry`,不再只叫醒 watcher (#5218)
+
+  `NodeMetadataManager.handleFileEvent()` 在 chokidar 报告 `add` / `change` /
+  `unlink` 之后只做两件事:重新 `load()` 一次文件内容,然后 `notifyWatchers()`。
+  它既不碰 `listCache` 也不碰 `registry` —— 而 `load()` 是纯读路径(它委托给
+  `loadDiagnosed`,后者只遍历 loader),两个缓存都不写。
+
+  后果是**同一个 manager 的两个读接口互相矛盾**。手改 `rootDir` 下的
+  `view/<name>.json` 之后:
+
+  - `get(type, name)` 是新的 —— 它穿透到 `FilesystemLoader`;
+  - `list(type)` 在 `LIST_CACHE_TTL_MS`(30 秒)窗口内继续返回改动前的清单 ——
+    REST `/api/v1/metadata/:type`、Studio 左栏、`listViews()` 等一切走 `list()`
+    的读都受影响。
+
+  更糟的是被这次事件叫醒的消费者(Studio HMR/SSE 流、ObjectQL SchemaRegistry
+  桥)正是通过回头拉 `list()` 来响应的,于是这次唤醒**递回了它自己刚刚宣告已失效
+  的那份数据**。
+
+  这与 #5109(集群对端写入不失效本节点缓存)是同一形状、不同触发源,因此复用该
+  修复落地的 `invalidateForForeignWrite(type, name)`(可见性由 `private` 放宽为
+  `protected`):文件改动正是「不是经由本 manager 写接口发生的写入」,没有任何东西
+  替它刷新过缓存,delete-而非-预填 的语义也正好对上 —— 穿透回 loader 读到的就是
+  文件的真相。
+
+  两点与基类其余写路径一致的约束:
+
+  - **先失效,再通知**(`register` / `unregister` / `applyRepoEvent` / 集群订阅者
+    都是这个次序),使 watcher 不可能同时观察到事件与事件前的缓存;
+  - **registry 条目一并删除**,不只是列表缓存。FS 加载的条目本来就不进 registry,
+    通常无可删;但当同名条目此前被 `register()` / `registerInMemory()` 写过时,
+    它在 `get()` 和 `list()` 中都会**遮蔽** loader,只删列表缓存会让那份陈旧副本
+    一直应答下去。
+
+  命中面主要是开发期:`MetadataPlugin` 默认 `watch: true`,在
+  `bootstrap: 'artifact-only'` 下被强制关闭,`standalone-stack` 显式传
+  `watch: false`。因此 artifact 模式的 `os dev` 与 standalone 不受影响,非 artifact
+  的默认 `MetadataPlugin` 装配受影响。
+
+  `type === 'api'` 的行为不变:端点索引此前已由 #5089 装的 `subscribe('api', …)`
+  那条缝覆盖,本次改动把 `invalidateListCache` 那条缝也接上,两条缝对称。
+  `EndpointMatcher.invalidate()` 是两次赋 `undefined`,重复失效幂等。
+
+- 95b4f0d: fix(metadata): `list()` reads are single-flight, so the "one loader hit per TTL window" promise finally holds for concurrent callers too (#5253)
+
+  `MetadataManager.list()` was a bare "read the cache → walk the loaders → write
+  the cache" sequence. The cache is written only once a read has **finished**, so
+  it absorbed the caller that arrived second in _time_ but never the caller that
+  arrived second in _flight_: every `list(type)` issued while the first read was
+  still walking the loaders missed, and each one walked every loader itself. The
+  `listCache` field comment states the guarantee the cache exists to provide —
+  "the loader is only hit once per TTL window" — and that guarantee held for
+  sequential callers only.
+
+  That is not a rounding error on the path the cache was built for. The comment
+  names it: security/permission middleware calling `list('permission')` on the
+  request path while `DatabaseLoader`'s read sits inside a transaction that holds
+  SQLite's only connection, waiting out knex's `acquireConnectionTimeout` (60s).
+  Every concurrent request arriving during those 60s used to burn its own 60s,
+  because nothing had been written to the cache yet. The everyday version is
+  milder but constant: cold start, and the small burst of concurrent `list()`
+  calls that follows every invalidation point — `register()` / `unregister()`, a
+  cluster peer's write (#5109), a filesystem change (#5218) — each repeated the
+  full loader walk.
+
+  Reads of one metadata type are now single-flight. A `list(type)` that finds a
+  read already running for that type joins it instead of starting a second
+  identical walk.
+
+  - **Sharers share the outcome — as an explicit contract, not an accident.**
+    Every caller joining an in-flight read receives that read's exact result,
+    including when a loader was unreadable and the answer is known-partial.
+    `list()` is the best-effort listing seam and does not throw (the strict
+    counterparts remain `listForIndex()` and `loadDiagnosed()`), so a lost loader
+    is not an error to fail over from — it is the answer, and re-running the read
+    privately for a joiner would walk the same loaders against the same outage in
+    the same window.
+  - **#5184's degraded judgment is unchanged and is not bypassed.** A shared read
+    that lost a loader is still memoized `degraded: true` on the 2s TTL, never
+    laundered onto the 30s healthy TTL by having been shared, and every sharer
+    received that same partial set.
+  - **A write landing mid-read wins.** `invalidateListCache()` now retracts the
+    in-flight read as well as the finished entry. The retracted read keeps running
+    for the callers already waiting on it — they asked before the write — but it
+    loses the right to memoize its pre-write answer, so that answer cannot outlive
+    the write it predates; and a caller arriving after the write starts a fresh
+    read rather than joining a pre-write one. That second half is #5219 / #5229's
+    ordering bar restated for concurrency: a consumer woken by a metadata change
+    must not observe the event and pre-event state together.
+  - The in-flight map is self-cleaning — an entry is dropped when its read
+    settles, by that read only, so a fresh read that replaced it keeps its slot.
+
+  Internal caching policy only — no change to the `IMetadataService` contract or to
+  any public export. Sequential callers behave exactly as before.
+
+- 1c625ca: metadata: `getDiagnosed` — a metadata read that FAILED stops arriving as "nobody declared this"
+
+  `MetadataManager.loadDiagnosed` computes the ADR-0110 D3 verdict (a MISS and an OUTAGE
+  are different facts with opposite security meanings) and `get()` discarded it two hops
+  later: `load()` kept only `.data`, `get()` turned that `null` into `undefined`. Every
+  consumer of `get()` therefore received one `undefined` for two opposite facts and could
+  not have told them apart even if it had wanted to.
+
+  **New read.** `MetadataManager.getDiagnosed(type, name)` returns
+  `{ data, degraded, errors }` — the registry-first counterpart of `loadDiagnosed`, declared
+  as an optional member of `IMetadataService`. A registry hit is never degraded (it
+  consulted no loader); a clean miss is never degraded (every loader answered).
+
+  **`get()` is unchanged — zero breaking.** Same signature, same answer, same behaviour for
+  every existing caller, including the microtask-level ordering `register()`'s watchers
+  depend on. Only callers that ASK for the verdict pay for it. Making `get()` throw on
+  `degraded` was deliberately not done: the boot path degrades on purpose.
+
+  **Consumers switched**, each with a disposition argued for its own context rather than one
+  blanket rule:
+
+  - `getMetaItem` / `getMetaItemCached` — a degraded MetadataService read with nothing in
+    the registry now raises `503 SERVICE_UNAVAILABLE` instead of falling through to
+    `404 RESOURCE_NOT_FOUND`. This is the half that made the existing `#5532` comment ("
+    reaching here now means a real miss") untrue.
+  - `getMetaItemLayered` — the `code` layer joins the rule its `overlay` layer already
+    followed. `code: null` is a positive claim, and `lockSource = code ?? overlay ?? {}`
+    derives from it, so an outage could render an item the packager locked
+    (`_lock: 'full'`) as `editable: true, deletable: true`.
+  - `ObjectQLPlugin`'s `object` metadata-event refresh — logs `warn` naming the consequence
+    (the registry keeps the previous definition; nothing retries) and the fix, instead of
+    `debug` "metadata service has no fresh body". `warn` and not `error` because the write
+    already landed; only a re-read failed.
+
+  Hosts whose `metadata` slot is a shim that predates `getDiagnosed` are read as
+  "not degraded" — exactly what they could express before — so their behaviour is unchanged.
+
+- b5459bc: fix(metadata): `capabilities.write` now means BOTH directions — a writable datasource loader must implement `delete()` (#5276)
+
+  `MetadataLoader` declared `save?` and no `delete`, so `capabilities.write` meant
+  two different things at the two ends of an item's life: to `register()` it meant
+  "persist into me", and to `unregister()` it guaranteed nothing at all.
+  `unregister()` duck-typed `delete` at the call site and, when a loader had none,
+  **silently skipped it** — then dropped the registry entry, invalidated the list
+  cache and announced a `deleted` event anyway. The caller (Studio/Setup, REST
+  DELETE, the CLI, a package teardown) was told the delete succeeded while the row
+  stayed in the loader's store, was read straight back out by the next
+  `list()`/`get()`, and survived every restart with nothing to retry it.
+
+  Two changes, both making the declaration binding instead of decorative:
+
+  - **`MetadataLoader` now declares `delete?(type: string, name: string): Promise<void>`.**
+    The capability is stated on the contract, next to `save?`, instead of being
+    guessed at by each caller. A loader implemented against the interface can now
+    see that the method exists.
+  - **`MetadataManager.registerLoader()` rejects the combination that cannot
+    honour it.** A loader declaring `protocol: 'datasource:'` **and**
+    `capabilities.write: true` **without** a `delete()` method is refused at
+    registration with an error naming the loader, the consequence, and both
+    repairs. `registerLoader()` is the sole writer of the loader map — the
+    constructor's `config.loaders` funnel through it — so the combination can no
+    longer reach the runtime and lose a deletion there.
+
+  **Does this affect you?** Only if you register a custom metadata loader that
+  declares `protocol: 'datasource:'` with `capabilities.write: true`. If it does
+  and has no `delete()`, registration now throws where it previously succeeded and
+  quietly discarded your deletions. Two ways to fix it, both stated in the error:
+
+  1. implement `async delete(type: string, name: string): Promise<void>` on the
+     loader, removing the item from its store (`DatabaseLoader` in this package is
+     the reference implementation); or
+  2. if the loader is genuinely read-only, declare `capabilities.write: false` — a
+     read-only `datasource:` loader registers without complaint and is never
+     written to in the first place.
+
+  Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are
+  unaffected in either direction: `MetadataManager` never persists to them at
+  runtime, so it has no deletion of its own to take back, and they may declare
+  `capabilities.write` without a `delete()` exactly as before. The one
+  `datasource:` loader shipped in this package, `DatabaseLoader`, has always
+  implemented `delete()` and is unchanged.
+
+- 1624f4a: fix(metadata): `capabilities.write` now also binds `save()` — a writable datasource loader must implement both halves of the write (#5654)
+
+  #5276 (shipped in v17.0.0-rc) made `capabilities.write` binding on `delete()`:
+  a loader declaring `protocol: 'datasource:'` with `capabilities.write: true`
+  and no `delete()` is refused at registration, because `unregister()` used to
+  skip it silently and announce the deletion anyway. The gate stopped there, so
+  **one declaration was binding at one end of an item's life and decorative at
+  the other**.
+
+  `MetadataManager.register()` had the identical hole one direction over. Its
+  persistence loop read `loader.save &&` first, so a `datasource:` loader
+  declaring `capabilities.write: true` **without** a `save()` method was
+  **silently skipped** — no warn, no error. `register()` then wrote the in-memory
+  registry, invalidated the list cache, announced `created`/`updated` and notified
+  watchers, so the caller (Studio/Setup, REST PUT, the CLI, a package publish) was
+  told the write succeeded. The item read back correctly for the life of the
+  process and was **gone at the next restart**, with nothing to retry it — a
+  durability degradation that leaves the system looking entirely healthy.
+
+  `registerLoader()`'s gate (renamed `assertWritableLoaderContract`) now requires
+  **both** `save()` and `delete()` for that combination, and rejects with one
+  message naming which method is missing, the consequence, and both repairs.
+  `registerLoader()` is the sole writer of the loader map — the constructor's
+  `config.loaders` funnel through it — so the combination can no longer reach the
+  runtime and lose a write there. The `save` short-circuit inside `register()`
+  survives as defensive code whose unreachability is now guaranteed by
+  construction, exactly like `unregister()`'s.
+
+  **Does this affect you?** Only if you register a custom metadata loader that
+  declares `protocol: 'datasource:'` with `capabilities.write: true`. If it does
+  and has no `save()`, registration now throws where it previously succeeded and
+  quietly discarded your writes. Two ways to fix it, both stated in the error:
+
+  1. implement
+     `async save(type: string, name: string, data: any, options?: MetadataSaveOptions): Promise<MetadataSaveResult>`
+     on the loader, persisting the item into its store (`DatabaseLoader` in this
+     package is the reference implementation); or
+  2. if the loader is genuinely read-only, declare `capabilities.write: false` — a
+     read-only `datasource:` loader registers without complaint and is never
+     written to in the first place.
+
+  Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are
+  unaffected: `MetadataManager` never persists to them at runtime, so they may
+  declare `capabilities.write` without a `save()`/`delete()` exactly as before.
+  The one `datasource:` loader shipped in this package, `DatabaseLoader`, has
+  always implemented both and is unchanged.
+
+- dca25e1: fix(metadata-protocol): `SysMetadataRepository` 的 `event_seq` / `version` 不再从一次失败的读里凭空发号 —— 只有「表还没建」可以从 1 开始 (#4867)
+
+  `SysMetadataRepository.nextEventSeq()` 与 `nextItemVersion()` 各有一个同形的 `catch`,把读
+  `sys_metadata_history` 的**全部**失败折成同一个答案:
+
+  ```ts
+  } catch {
+    // Table not provisioned yet (fresh DB) — start at 1.
+    return 1;
+  }
+  ```
+
+  这是 #4825 刚在 `DatabaseLoader`(TSDoc 自称 legacy、非事务的那条路径)上修掉的形状,原样长在
+  **canonical 路径**上 —— #4825 正文把 `SysMetadataRepository` 称作「历史写入应当收敛过去的地方」。
+  而且这里有两个数字:
+
+  - **`event_seq`** —— 历史排序与 rollback 定位的依据。表里已有 N 行时,一次瞬时读失败(连接抖动、
+    超时、权限)让下一条拿到 `1`,与既有行撞号;
+  - **`version`** —— `nextItemVersion()` 的 TSDoc 明说它刻意从 history 取 MAX「so delete + recreate
+    continues incrementing instead of restarting at 1」。一次读失败正好把它**恢复成它明确要避免的那个
+    行为**:lineage 从 1 重启并与既有 lineage 撞号,而 `MetadataManager.rollback(type, name, version)`
+    与 `POST /api/v1/meta/:type/:name/rollback` 正是按这个数字定位快照 —— 撞号之后回滚可能落到另一条
+    记录的同号版本上。
+
+  关键危害与 #4825 相同,是「**落盘的字节是错的**」而不是「字节没落盘」:insert 成功、日志一行没有、
+  系统对外完全正常,重试不修、重启也不修。
+
+  **「在事务里」并不能挡住它。** 事务解决的是*并发*撞号;它对「从一次失败的读推导出来的数字」没有任何
+  意见,一个成功提交的事务照样把错号提交得同样持久。事务真正给出的是干净的补救:抛出去,整笔写入回滚,
+  而不是提交一个编造的号。
+
+  现在按**错误类型**判别,复用 #4825 落地的那套判别器(不另起一套):
+
+  - **良性的「表还没建」** —— 没有行,就没有可撞的号,`1` 确实是下一个号,静默返回,fresh DB 照常启动;
+  - **其余一切读失败** —— 按 AGENTS.md「Degradation log levels」以 `error` 上报**后果**(写入已被中止、
+    事务回滚、什么都没提交;若按旧行为发 `1` 会与既有行撞号,使版本顺序不可信、回滚目标可能指向另一条
+    记录的同号版本,且无人能发现、重启也修不回来)与**修复动作**(修数据源/驱动错误后重试写入),然后
+    **原样抛出**,让事务回滚。一次故障只说一次,恢复时补一条 `info`。
+
+  ### `@objectstack/metadata` 新增子路径导出 `@objectstack/metadata/errors`
+
+  判别器 `isMissingTableError()`(#4728/#4825 家族)此前是 `@objectstack/metadata` 的内部工具,而本次
+  消费者在另一个包。三个选项中选了「从现有归属地**显式导出**」:在 `metadata-protocol` 里复制一份会重建
+  #4825 刚消灭的双源问题(同一个问题两套「哪些驱动错误算良性」的词汇表,谁先学会一个驱动怪癖谁就先漂移);
+  下沉到公共依赖本轮不可行(`packages/spec` 冻结、`packages/types` 有并行改动),且本次导出并不妨碍维护者
+  之后再下沉。
+
+  新增的是一个**叶子子路径**而不是包入口导出:`@objectstack/metadata` 的根入口会拖进 manager、全部
+  loader 与其 YAML/文件系统依赖,只为一个 40 行谓词付这个重量,正是把下一个作者推回「复制一份」的原因。
+  `@objectstack/metadata/errors` 只 re-export 一个叶子模块,跨包依赖边因此仍是叶子边,也是将来下沉时
+  一个可 grep、可删除的单点。仅导出 `isMissingTableError`;同族的 `isSchemaAlreadyExistsError` 在包外
+  没有消费者,保持内部(导出一个无人 import 的符号是白许的承诺)。
+
+  无 API 破坏、无 schema 变更、无 `packages/spec` 改动。
+
+- e92e2c3: fix(metadata): `unregister()` invalidates the list cache AFTER the storage delete lands (#5259)
+
+  `MetadataManager.unregister()` dropped the registry entry and called
+  `invalidateListCache(type)` **before** awaiting `loader.delete()`. Those two steps
+  are separated by a real await window — one DB round-trip per writable loader — and
+  inside it the manager held a state that exists nowhere else: **registry already
+  empty, loader not yet empty**. `list()` merges the two, so a read arriving in that
+  window missed the just-cleared cache, assembled the still-stored row into its
+  answer, and memoized it as a _complete_ read — the full 30s healthy TTL, because no
+  loader threw and #5184's 2s degraded TTL therefore never applied.
+
+  Nothing invalidated again once the delete landed (`notifyWatchers()` does not touch
+  `listCache`), so an item that was gone from storage kept being enumerated for up to
+  half a minute. `list()` is the enumeration seam behind `GET /api/v1/metadata/:type`,
+  the Studio left rail, sync/export and every consumer that decides existence from a
+  declared set — and `get()`, which never reads that cache, said the item was gone the
+  whole time. For a gating type (`permission`, `api`) the two faces of one manager
+  answered opposite questions about whether a declaration exists.
+
+  **Fixed by ordering, not by an extra invalidation.** `register()` never had this
+  defect because it writes the registry _first_ and the registry outranks every loader
+  in the merge, so its own save window already shows the post-write state. The
+  invariant is therefore not "invalidate early" but _invalidate last, once every store
+  already holds the announced state_. `unregister()` now deletes from storage first,
+  then drops the registry entry and invalidates with **nothing awaited between them**,
+  then publishes and announces — #5219's invalidate-before-notify discipline unchanged.
+  A `list()` racing the delete now either sees a coherent pre-delete state (the delete
+  has not landed and has not been announced — that answer is the truth) or the
+  post-delete state; it can no longer cache the pre-delete answer past the delete.
+
+  This composes with #5253's single-flight rather than duplicating it: a read still
+  _in flight_ when the delete lands cannot be reached by dropping `listCache` — it has
+  not written its entry yet and would write the pre-delete answer afterwards.
+  `invalidateListCache()` also retracts that read's `inflightListReads` registration,
+  so it resolves for the callers already waiting on it but loses the right to memoize,
+  while a caller arriving later starts a fresh read.
+
+  **A storage delete that fails is now loud.** It used to `logger.warn('Failed to
+delete …')` and continue. Per AGENTS.md "Degradation log levels" this is
+  durability/consistency degradation, not functional: `unregister()` resolves
+  normally, the caller is told the delete succeeded, and the surviving row is read
+  straight back out of storage by the very next `list()`/`get()` — permanently, since
+  nothing retries it. It now logs at `error`, once per un-deleted item, naming the
+  consequence and the fix. The registry entry is still dropped in that case,
+  deliberately: the loader still holds the row so the item is served either way, and
+  keeping the entry would only pin an in-memory copy on top of a stored row nobody
+  maintains — dropping it makes the next read fall through to storage, which is the
+  actual truth after a failed delete, and makes it visible immediately instead of at
+  the next restart.
+
+  No API change. `unregister()` still resolves rather than throwing when a loader
+  refuses the delete.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [db0d53c]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [946a131]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+  - @objectstack/metadata-fs@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

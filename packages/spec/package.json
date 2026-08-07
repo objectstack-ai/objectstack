@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/spec",
-  "version": "17.0.0-rc.3",
+  "version": "17.0.0-rc.4",
   "description": "ObjectStack Protocol & Specification - TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "license": "Apache-2.0",
   "main": "dist/index.js",
@@ -213,7 +213,7 @@
     "check:empty-state": "tsx scripts/liveness/check-empty-state.mts",
     "check:variant-docs": "tsx scripts/check-variant-docs.mts",
     "gen:strictness-ledger": "tsx scripts/build-strictness-ledger-counts.mts",
-  "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
+    "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",

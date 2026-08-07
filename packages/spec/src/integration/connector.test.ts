@@ -21,6 +21,10 @@ import {
   ConnectorTypeSchema,
   ConnectorStatusSchema,
 
+  // Action + its declared upstream effect (#4395)
+  ConnectorActionSchema,
+  ConnectorActionEffectSchema,
+
   // Error Mapping
   ErrorMappingConfigSchema,
   ErrorMappingRuleSchema,
@@ -343,6 +347,51 @@ describe('RetryConfigSchema', () => {
     expect(() => RetryConfigSchema.parse({ maxAttempts: -1 })).toThrow();
     expect(() => RetryConfigSchema.parse({ maxAttempts: 11 })).toThrow();
     expect(() => RetryConfigSchema.parse({ maxAttempts: 5 })).not.toThrow();
+  });
+});
+
+// ============================================================================
+// Connector Action Effect (#4395)
+// ============================================================================
+
+describe('ConnectorActionSchema.effect (#4395)', () => {
+  it('declares exactly read | write — the two countable answers', () => {
+    expect(ConnectorActionEffectSchema.options).toEqual(['read', 'write']);
+  });
+
+  it('is optional, and absent stays absent (the uncountable default)', () => {
+    const parsed = ConnectorActionSchema.parse({ key: 'push', label: 'Push' });
+    expect(parsed.effect).toBeUndefined();
+    expect('effect' in parsed).toBe(false);
+  });
+
+  it('carries a declared effect through ConnectorSchema.parse, which is the ONLY producer', () => {
+    // The regression this pins: `ConnectorSchema` is a non-strict `z.object`,
+    // so before #4395 an authored `effect` was SILENTLY STRIPPED here. The
+    // engine stores this parsed def and both the `connector_action` executor
+    // and `GET /connectors` read the declaration back out of it — a descriptor
+    // field alone could never have been populated by anything.
+    const parsed = ConnectorSchema.parse({
+      name: 'crm',
+      label: 'CRM',
+      type: 'saas',
+      actions: [
+        { key: 'push_opportunity', label: 'Push Opportunity', effect: 'write' },
+        { key: 'lookup_account', label: 'Lookup Account', effect: 'read' },
+        { key: 'legacy', label: 'Legacy' },
+      ],
+    });
+    expect(parsed.actions?.map((a) => a.effect)).toEqual(['write', 'read', undefined]);
+  });
+
+  it('rejects a value outside the enum instead of coercing it', () => {
+    // `writes` is the `FlowFunctionEffectSchema` (#4396) spelling — the nearest
+    // wrong word an author already knows. It must fail loudly here rather than
+    // parse to something the executor then counts.
+    expect(ConnectorActionEffectSchema.safeParse('writes').success).toBe(false);
+    expect(ConnectorActionEffectSchema.safeParse('reads').success).toBe(false);
+    expect(ConnectorActionEffectSchema.safeParse('pure').success).toBe(false);
+    expect(() => ConnectorActionSchema.parse({ key: 'k', label: 'L', effect: 'write ' })).toThrow();
   });
 });
 

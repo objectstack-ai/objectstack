@@ -1,5 +1,1409 @@
 # @objectstack/metadata-protocol
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- f61c8cf: feat(spec,metadata-protocol)!: a sort node spelling its direction `direction` is a 400, not a silently reversed page (#4721)
+
+  **FROM → TO:** `orderBy: [{ field: 'updated_at', direction: 'desc' }]` →
+  `orderBy: [{ field: 'updated_at', order: 'desc' }]`. One word. If you are on the
+  `{field, direction}` shape because you moved code over from
+  `IReportService.orderBy`, that contract is unchanged — it is `orderBy` on the
+  QueryAST / `EngineQueryOptions` axis that has always been `{field, order}`.
+
+  ## What was wrong
+
+  `SortNodeSchema` was a plain `z.object`, so zod's default `.strip` applied.
+  Measured on `main` before this change:
+
+  ```
+  SortNodeSchema.parse({ field: 'updated_at', direction: 'desc' })
+    →  { field: 'updated_at', order: 'asc' }
+  ```
+
+  `direction` was discarded and `order` fell back to its `asc` default. The sort
+  therefore ran in the **opposite** direction and the request succeeded. Paired
+  with `limit` — which is how a caller asks for "the latest N" — that is not a
+  reordered page but a **different set of rows**, returned under an ordinary 200
+  with nothing in the response to distinguish it from the answer that was asked
+  for.
+
+  `direction` is not a typo. It is the live vocabulary of a neighbouring contract,
+  `IReportService.orderBy` (`@objectstack/spec/contracts`), and
+  `plugin-auth/objectql-adapter.ts` already translates between the two by hand — a
+  translation known to be necessary and enforced nowhere, which is the ADR-0049
+  shape.
+
+  ## What changed
+
+  Both doors onto that shape, in one change:
+
+  1. **`SortNodeSchema`** (`spec/src/data/query.zod.ts`) is now `strictObject`
+     with `aliases: { direction: 'order' }`. An unknown key is rejected, and
+     `direction` specifically gets the translation in the error message — edit
+     distance can never bridge `direction` → `order`, so a bare "unrecognized key"
+     would leave the caller exactly where the silent strip did.
+  2. **`normalizeSortNodes`** (`metadata-protocol/src/protocol.ts`), the ingress
+     every REST/RPC `orderBy` funnels through, refuses `{ field, direction }` with
+     `400 INVALID_SORT` naming `order` and quoting the corrected node. Closing only
+     the schema would repeat the door asymmetry of #1535/#4522: `SortNodeSchema` is
+     reachable by three paths the REST normalizer never sees.
+
+  | `orderBy` you send                                     | Before                      | After                                                       |
+  | :----------------------------------------------------- | :-------------------------- | :---------------------------------------------------------- |
+  | `[{ field: 'x', order: 'desc' }]`                      | descending                  | unchanged — descending                                      |
+  | `[{ field: 'x', direction: 'desc' }]`                  | **200, ascending**          | `400 INVALID_SORT`, message names `order`                   |
+  | `[{ field: 'x', order: 'desc', direction: 'asc' }]`    | 200, descending             | `400 INVALID_SORT`                                          |
+  | `'-x'` / `['-x']` / `{ x: 'desc' }`                    | descending                  | unchanged                                                   |
+  | `{ direction: 'desc' }` (the `{field: direction}` map) | sorts by column `direction` | unchanged — a column may legitimately be called `direction` |
+
+  Scope is deliberately narrow: **`QuerySchema`'s top level is untouched** and
+  still accepts undeclared keys (`QuerySchema.safeParse({ object: 'sales',
+nonsenseKey: 1 }).success === true`). That is tracked in the #4001 campaign map
+  for its own batch, not smuggled in here.
+
+  Related: #4674, #4720, #4363, #4371, #4001, ADR-0049.
+
+### Minor Changes
+
+- 77022a9: feat(spec,runtime,metadata-protocol)!: one schema for both discovery producers — `capabilities` canonical, `features`/`endpoints` retired, `scoping` declared (#4828)
+
+  `/discovery` is a machine-readable surface, but nothing compared what the two
+  producers emit against what `packages/spec` declares. The only schema the
+  protocol layer referenced was `GetDiscoveryResponseSchema` —
+  `DiscoverySchema.partial().required({version}).extend({apiName})` — so
+  `.partial()` hid every missing REQUIRED key while zod's default unknown-key
+  strip hid every UNDECLARED emitted one. The two producers then drifted in
+  opposite directions through the same blind spot.
+
+  `DiscoverySchema` is now authoritative for producers, and each producer package
+  carries a `discovery-schema-conformance.test.ts` that parses its LIVE shape
+  against it and checks its emitted key set against the protocol schema's shape.
+
+  **Breaking for anyone reading the dispatcher's `/.well-known/objectstack` body:**
+
+  - `features` → **`capabilities`**, the name `DiscoverySchema` has always
+    declared, in the declared `{ enabled }` shape. The same flags survive. This
+    fixes a real defect: the SDK's `client.capabilities` getter reads
+    `discoveryInfo.capabilities`, so against a dispatcher-served host it returned
+    `undefined` for every flag while the answers sat one key away under `features`.
+  - `endpoints` — **removed**. It duplicated `routes` verbatim as a
+    "backward compatibility" alias; a consumer census across `objectstack`,
+    `objectui` and `cloud` found no reader. Use `routes`.
+  - `environment` is now **mapped** into its declared enum instead of passing
+    `NODE_ENV` through raw (`test` → `development`, `staging` → `sandbox`,
+    unrecognized → `development`, never `production` on a guess). `NODE_ENV=test`
+    and `staging` previously advertised values outside the declared enum.
+
+  **Additive elsewhere:**
+
+  - `DiscoverySchema` declares `scoping` (optional) — the environment-scoping
+    posture the REST endpoint has always emitted and `packages/client` has always
+    consumed, now part of the contract instead of an undeclared extra.
+  - The REST `/discovery` body gains the required `name` / `environment` /
+    `locale`, so it can satisfy `DiscoverySchema` at all. `locale` is derived from
+    the registered i18n service, the same way the dispatcher derives it.
+  - `name` is canonical on both producers. `apiName` remains as a deprecated alias
+    carrying the identical value and is **scheduled for removal in protocol 18**.
+  - New exports: `DiscoveryEnvironmentSchema`, `DiscoveryEnvironment`,
+    `resolveDiscoveryEnvironment`.
+
+- aac90a5: feat(spec,runtime,metadata-protocol,client)!: one closed capability vocabulary — every discovery producer emits every key (#5672)
+
+  `#4828` renamed the runtime dispatcher's top-level `features` map to the
+  canonical `capabilities`, which collapsed the _spelling_ split between the two
+  discovery producers. It did not touch the deeper one: the two went on filling
+  **disjoint key sets**.
+
+  | producer                                                                             | keys it filled                                                                        |
+  | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+  | `getDiscovery()` — `@objectstack/metadata-protocol`, upstream of REST `/discovery`   | `comments` `automation` `cron` `search` `export` `chunkedUpload` `transactionalBatch` |
+  | `getDiscoveryInfo()` — `@objectstack/runtime` dispatcher, `/.well-known/objectstack` | `search` `websockets` `files` `analytics` `ai` `notifications` `i18n`                 |
+
+  Only `search` overlapped. `DiscoverySchema.capabilities` was an open
+  `z.record`, so both shapes parsed clean and no gate could see the split — while
+  `packages/client`'s `capabilities` getter **asserted** the result was a
+  `WellKnownCapabilities`. Against a dispatcher-served host
+  `client.capabilities.transactionalBatch` was therefore statically `boolean` and
+  actually `undefined`, as were `comments`, `cron`, `export` and `chunkedUpload`.
+
+  Per the maintainer's 2026-08-06 ruling, the vocabulary is now closed and
+  mandatory.
+
+  **What a consumer sees.** Before: which capability flags exist depended on
+  which kind of host answered, and a flag you were typed to receive could simply
+  be missing. After: every discovery response carries **every** flag, always a
+  boolean. A capability the host does not deliver is `enabled: false` — never an
+  absent key — so a client can read a flag without knowing whether it reached a
+  dispatcher, the REST endpoint, or anything else. `client.capabilities` no longer
+  asserts its own return type: it enumerates the spec's key list, so the type is
+  true by construction, and it reads a key an older server omits as `false`
+  (fail-closed, matching the wire rule).
+
+  **`@objectstack/spec`.** `WellKnownCapabilitiesSchema` becomes the one
+  vocabulary and gains the six flags that were previously the dispatcher's alone
+  (`websockets`, `files`, `analytics`, `ai`, `notifications`, `i18n`) — all six
+  were already real answers on the wire, so this declares them rather than
+  inventing them. `DiscoverySchema.capabilities` changes from an optional open
+  record to a **required closed object** derived from that vocabulary, one entry
+  per key. New exports: `WELL_KNOWN_CAPABILITY_KEYS` (the key list, derived from
+  the schema so nothing can hand-list a fourth dialect) and
+  `CapabilityDescriptorSchema` / `CapabilityDescriptor` (the `enabled` +
+  optional `features` / `description` entry shape, previously inline).
+
+  Required, not optional, is the `scoping` precedent read the other way round:
+  `scoping` is optional because only one producer can honestly answer it, whereas
+  every producer can answer `capabilities` — and an optional block would leave a
+  consumer back at `undefined` for every flag.
+
+  **Producers.** Each answers all thirteen keys from its own facts, with the basis
+  recorded per key in the code. The dispatcher now measures `comments` off the
+  `sys_comment` object in the registry it already resolves for its `/data` domain,
+  and `automation` / `cron` / `export` / `chunkedUpload` off the same service
+  predicates that gate its route advertisements. Its one honest `false` is
+  `transactionalBatch`: the atomic cross-object `/batch` route is mounted by
+  `@objectstack/rest`, and this dispatcher has no batch branch at all, so claiming
+  the runtime's `transaction()` here would advertise an endpoint the host does not
+  serve. `getDiscovery()` answers the six new flags off the service registry it
+  already reads, gated on serveability so a self-declared stub does not advertise
+  a capability it cannot back.
+
+  **Gates.** The three `discovery-schema-conformance.test.ts` suites built by
+  `#5682` and extended to `routes` by `#5743` gain a fullness criterion — every
+  vocabulary key present, every `enabled` a real boolean, no key outside the
+  vocabulary — with the allowance derived from the schema rather than written out.
+
+  **Upgrading.** A producer or fixture that builds a `DiscoverySchema`-shaped
+  document must now include a complete `capabilities` block; build it from
+  `WELL_KNOWN_CAPABILITY_KEYS` rather than by hand. Consumers need no change:
+  they receive strictly more keys than before, and any flag they already read
+  keeps its meaning. The lenient wire wrapper `GetDiscoveryResponseSchema` still
+  allows the block to be absent, so a response from an older server still parses.
+
+### Patch Changes
+
+- 29c6c9d: feat(spec,core,runtime)!: declarative `apis:` refuses loudly instead of parsing into silence; the `ApiRegistry` family retires (#4936, #4939)
+
+  The declarative API-endpoint surface was **zero-execution end to end**, and said nothing
+  about it. Metadata loading worked perfectly — a stack declared `apis:`, `defineStack`
+  accepted it, and `GET /api/v1/meta/api` returned every endpoint with every key intact.
+  The execution side never fired once. On a real boot (showcase, 47 plugins) both declared
+  paths answered a bare `404 {"error":"Not found"}` — not even the dispatcher's semantic
+  404, because **no route was ever mounted** for a declared path, so the request died at
+  Hono's `notFound`. Behind that, the dispatcher's `handleApiEndpoint` branch resolved the
+  metadata service and called `matchEndpoint` on it — a method **no implementation in the
+  repo has ever provided**. The branch returned "not handled" on every request ever served.
+
+  So every key on `ApiEndpointSchema` was declared ≠ enforced: `path`/`method` (never
+  mounted), `type`/`target`/`objectParams` (never executed), `cacheTtl`,
+  `inputMapping`/`outputMapping`, `rateLimit`, `summary`/`description` — and
+  **`authRequired`**, a security semantic that parsed green and gated nothing at all. That
+  is false compliance, the failure ADR-0049 exists to stop, not debt.
+
+  ## BREAKING — a non-empty `apis:` is now rejected
+
+  Metadata that parsed cleanly before is now **refused at publish/validate**, with the
+  prescription in the rejection itself:
+
+  ```
+  apis: `apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime,
+  so a non-empty array is rejected instead of silently accepted (#4936). …
+  ```
+
+  **FROM → TO.** `apis: [ …endpoints… ]` → `apis: []` (or delete the key; both are still
+  accepted, and an empty array is not a special case). To actually serve the route today,
+  mount it **in code** — a plugin manifest `contributes.routes` entry, or an `http.server`
+  route. That is now the only honest path, and the one `examples/app-showcase` uses
+  (`src/system/server/recalc-endpoint.ts`).
+
+  The refusal lives on `ObjectStackDefinitionSchema` itself, which is the single choke
+  point every path runs through — `defineStack`, the metadata plugin's artifact ingestion,
+  `os validate`, the lint scorer and `EnvironmentArtifactSchema`. There is no path that
+  forgot to check.
+
+  **The `ApiEndpoint` vocabulary is deliberately KEPT.** Retiring it was considered and
+  rejected: endpoint shapes are an industry-stable form, so a retirement would only mean
+  re-introducing the identical schema later. Your endpoint definitions stay valid TypeScript
+  and stay in the spec; only _authoring them into a stack_ is refused, and only until the
+  executor lands. Keep them commented next to your stack — that is what the showcase does.
+  The executor (route mounting + endpoint matching + per-key wiring for
+  `authRequired`/`cacheTtl`/`inputMapping`/`outputMapping`/`rateLimit`) is tracked by
+  **#5040**, which replaces this rejection with real execution.
+
+  ## BREAKING — the `ApiRegistry` / `ApiEndpointRegistration` family is removed (#4939)
+
+  The repo carried a **second**, unrelated declaration shape for "an API endpoint":
+  `ApiEndpointRegistrationSchema` and the ~500-line `ApiRegistry` service that
+  `createApiRegistryPlugin()` registered under `api-registry`. Nothing composed it — every
+  assembly site lived in `packages/core/examples/`, with no registration in
+  `packages/runtime`, `packages/cli` or any `examples/app-*`, and a real boot carried no
+  such service. The whole family was therefore inert, including
+  `ApiEndpointRegistration.requiredPermissions`, whose docs promised **in the present tense**
+  that "the gateway layer automatically validates these permissions" while no gateway read
+  it. Two declaration shapes, both dead; this retirement converges them on one.
+
+  Removed from `@objectstack/spec/api`: `ApiEndpointRegistration(Schema)`,
+  `ApiRegistry(Schema)`, `ApiRegistryEntry(Schema)`, `ApiMetadataSchema`,
+  `ApiParameterSchema`, `ApiResponseSchema`, `ApiDiscoveryQuerySchema`,
+  `ApiDiscoveryResponseSchema`, `ApiProtocolType`, `HttpStatusCode`,
+  `ObjectQLReferenceSchema`, `SchemaDefinition` (12 JSON-Schema defs, 67 authorable keys).
+  Removed from `@objectstack/core`: `ApiRegistry`, `createApiRegistryPlugin`.
+  Removed from `@objectstack/plugin-hono-server`: the `useApiRegistry` option — it was
+  defaulted to `true` and read by nothing, configuring a service that was never composed.
+
+  **FROM → TO.** There is no replacement shape to migrate to, because nothing executed the
+  old one: delete the registration objects. If you were assembling an `ApiRegistryEntry`,
+  you were building a value only your own code read — keep it as your own type. Declarative
+  endpoints have one vocabulary now, `ApiEndpointSchema`.
+
+  `ConflictResolutionStrategy` **survives** the removal and moved to
+  `@objectstack/spec/api`'s `router.zod` — same name, same four values
+  (`error`/`priority`/`first-wins`/`last-wins`), same import path. It is pinned there by two
+  independent ratchets and is not part of the retired surface.
+
+  ## Also in this change
+
+  - **BREAKING (`@objectstack/runtime`):** `HttpDispatcher.handleApiEndpoint()` is deleted,
+    along with its now-orphaned private `callData` delegate, and `/__api-endpoint` leaves
+    `LEGACY_CHAIN_PREFIXES` and the route ledger. The method was public, so this is an API
+    removal — but it returned `{ handled: false }` for every call it ever received, so no
+    caller can observe a behaviour change beyond the missing symbol. Delete the call.
+    Absence is now loud (ADR-0076): the surface is refused at authoring rather than 404ing
+    at runtime with dead code behind it.
+  - `examples/app-showcase` no longer declares endpoints, and its coverage manifest no
+    longer claims the capability is `demonstrated` — that entry read "executed by the runtime
+    dispatcher (handleApiEndpoint)", which was exactly the advertise-what-you-don't-deliver
+    claim Prime Directive #10 forbids.
+  - The endpoint-level `rateLimit` tracking pointers left by #4910/#5006 now name **#5040**,
+    the live executor card, instead of #4936, which closes with this change.
+
+- c497d26: fix(objectql): `autonumber` 是运行时拥有的字段,写路径不再接受调用者提交的单号 (#5503)
+
+  `autonumber` 的值一直被文档声明为运行时所有 —— `applyAutonumbers` 的注释写着
+  "the runtime owns the value, not the client",两个记录校验器也正是因此在 insert
+  与 update 上都豁免了 `required` 检查。缺的是另一半:**没有任何一层写路径阻止客户端
+  自己填这个值**。于是一个普通的 REST 调用者可以:
+
+  - `POST /data/:object` 携带显式单号 → 原样落库,序列被绕过;
+  - `PATCH /data/:object/:id` 携带该字段 → 200 且改写落库,业务单号被篡改。
+
+  这与已修复的 #4447(`created_at` 可被普通 PATCH 伪造)是同一缺陷族。区别在于:
+  声明了 `readonly: true` 的字段早已被 #2948 / #3043 的剥离机制保护,而 `autonumber`
+  字段身上根本没有这个标记,剥离循环从它旁边直接走过去了。
+
+  **修法:在引擎/校验层把 `type: 'autonumber'` 视为隐含 readonly,insert 与 update
+  同权。** 非 system 上下文提交的单号,在派发给任何驱动之前就被剥离:
+
+  - **UPDATE** —— `stripReadonlyFields`(`packages/objectql`)的判定从"作者声明的
+    `readonly: true`"扩展为"作者声明的 **或** 运行时拥有的字段类型"
+    (`isRuntimeOwnedField`,当前恰好只有 `autonumber`)。单行更新与 `multi` 批量更新
+    共用这一个剥离点,因此两条路径同时被覆盖。
+  - **INSERT** —— 引擎新增一个更窄的 `stripRuntimeOwnedFields`,只剥离运行时拥有的
+    字段。它**不**接管作者声明的 `readonly` 在 insert 上的语义:那条防线按 #3413 的
+    设计留在 DataProtocol 入口(#3043),因为 create 确实可能合法地写入只读列,而直接
+    调用 `engine.insert` 的可信内部写入者(身份预置、元数据仓库、事件游标)必须不受影响。
+    单号没有这种两可性 —— 谁都不该在 create 时自带单号。
+
+  剥离发生在引擎里、派发之前,这正是修复**与驱动无关**的原因:声明
+  `supports.autonumber === true` 的 SQL 驱动(持久序列)拿到的行里根本没有这个键,
+  所以它的序列必然胜出 —— 没有任何驱动需要改动一行代码。测试直接断言递交给
+  `driver.create` 的负载,而不是打补丁到驱动上。
+
+  **豁免语义保持不变**,与 update 侧原有的白名单完全一致:
+
+  - `isSystem` 写入(seed 回放、迁移、内部预置)整体跳过剥离;
+  - `preserveAudit`(#3493)的"历史数据导入"仍可写入原始单号 —— 把遗留系统的历史
+    单号迁移进来正是这个白名单存在的业务场景,而 `autonumber` 属于作者声明的业务字段
+    (`system !== true`),恰好落在 `isPreservableUnderAudit` 允许的范围内;
+  - `beforeInsert` / `beforeUpdate` 钩子计算出的值不受影响 —— 只有**调用者提交**的键
+    才是剥离候选。
+
+  **这是一次静默剥离,所以它被上报而不是被吞掉。** 引擎 insert 路径上的
+  `onFieldsDropped`(#3407)此前只是为了与 `update()` 对称而存在、从不触发,并留了一
+  句"若 insert 将来出现静默剥离,必须在剥离点接上监听器"——现在正是那个剥离点。
+  事件沿用既有的 `readonly` 原因码(对调用者而言,隐含只读与声明只读被丢弃的理由完全
+  相同,不值得为一个没有消费者会区分的差别在 `packages/spec` 里分叉词表)。
+  `createManyData` 与 `insertManyData` 也补上了监听器转发:后者保持**逐行精度**——
+  引擎事件是整批的并集,但剥离只会移除**行自身提交过**的键,因此可以准确归属回具体行。
+  导入器优先走的正是 `insertManyData` 这条部分成功路径。
+
+  **与 `strictReadonlyWrites`(#5126 / #5610)叠加。** 该开关是"剥离即拒绝"的进程内出路,
+  本次改动使它自然覆盖单号,两条路径同权:
+
+  - **UPDATE 无需新代码** —— autonumber 限肢走的正是 `stripReadonlyFields` →
+    `reportDroppedFields` → `assertNoStrictDrops` 这条 #5126 已经铺好的接缝,因此 strict
+    开启时,调用者提交的单号与声明 `readonly` 的字段一样被拒绝,整笔写入不落库;
+  - **INSERT 需要接上** —— #5126 当时把该开关在 insert 上留作惰性,并写下条件:"insert
+    一旦有了剥离,两个成员就在那个剥离点一起接上"。本次正是那个剥离点,于是
+    `onFieldsDropped` 与 `strictReadonlyWrites` 一并兑现:默认剥离+上报,strict 开启则在
+    任何驱动调用之前抛 `ERR_READONLY_FIELD_REJECTED`,且**监听器不触发**(被拒绝的写入
+    并未完成,这是 #5126 自己的设计要点)。
+
+  接缝处**没有新增任何策略**:#5126 明确写着 strict "不引入第二套策略,它只是把既有策略
+  报出来",且"剥离拿不走的字段也不会被拒绝"。照此逐字适用,`isSystem` 与 `preserveAudit`
+  两个豁免在 strict 下依旧被接受(它们根本不会走到剥离分支)。
+
+  `ReadonlyFieldRejectedError` 新增可选的 `operation`(默认 `'update'`,#5126 的 UPDATE
+  文案逐字节不变):动词与补救办法确实因操作而异 —— INSERT 的拒绝必然关于运行时拥有的值,
+  其合法写入者是 `isSystem` 与历史导入 `preserveAudit`,而 `readonlyWhen` 在 create 上
+  根本锁不住任何东西。
+
+  **升级影响。** 普通(非历史)导入若把遗留单号列映射到 `autonumber` 字段,该值现在会
+  被丢弃并改由序列发号,同时在响应的 `droppedFields` 里上报、在服务端日志里留下一条
+  带补救办法的 `warn`。要保留原始单号,请把导入标记为历史导入
+  (`treat_as_historical` → `preserveAudit`),这与 #3493 为只读业务字段确立的划分一致。
+
+  `packages/spec` 未改动:`autonumber` builder 是否应当直接注入 `readonly: true` 是
+  spec 层的独立议题,与这条引擎侧防线不冲突。
+
+- e96ad55: fix(metadata-protocol): `batchData`'s upsert fork decides update-or-insert by EXISTENCE, not caller visibility (#5099)
+
+  The fork asked `findOne` under the CALLER's context — the read RLS/sharing
+  narrows (#3455). An existing row outside the caller's read scope therefore
+  answered `null` and took the INSERT arm: on a store with a unique id constraint
+  the insert duplicate-keyed (an authorization/update scenario reported as a key
+  collision — the same misdirection class as #5088), and on a store without one
+  it wrote a **second row** for an id that already exists.
+
+  The fork now uses the same existence probe (`probeRecord`, system context) as
+  the single-record path and the update/delete bulk faces (#4620: one reading per
+  file). Whether the caller may WRITE the row it proves stays exactly where it
+  was — #1994's pre-image check inside `engine.update` — so the row's outcome is
+  the write policy's own answer instead of a spurious `duplicate key` error.
+
+  **Observable change under row-level visibility**: upserting an id that exists
+  outside your read scope no longer attempts an insert. The row now answers
+  whatever the by-id update path answers for that record (for a masked pre-image
+  check, the same 404 a direct update returns). The existence oracle is not
+  widened: the previous duplicate-key failure already revealed that the id
+  exists.
+
+  The non-atomic fallback (update threw → blind insert) is removed with it, on
+  both arms. With existence decided before the fork, the fallback could only
+  bury a real update failure under the duplicate-key error of inserting a row
+  just proven to exist — the same masking ADR-0119 D4 already forbade inside the
+  atomic arm. A row whose update fails now reports that failure.
+
+  Cost note: each by-id upsert row now performs one existence read before the
+  write — the same probe cost #4435 accepted for the single-record path and
+  #5088 accepted for the update/delete bulk faces.
+
+- bbdbf28: fix(metadata-protocol,objectql): a boot that could not read `sys_metadata` says so at `error`, instead of reporting "no persisted metadata" at debug (#5897)
+
+  `loadMetaFromDb` — the boot step that hydrates `sys_metadata` overlay rows into
+  the SchemaRegistry — returned `{ loaded, errors, invalid }`, and no field in
+  that shape could express **"this hydration never read the store"**. An
+  unreachable database and a genuinely empty one both answered `loaded: 0`.
+
+  Its only production consumer, `ObjectQLPlugin.restoreMetadataFromDb`, therefore
+  had nothing to branch on: its single branch chose between two log lines, and
+  the "nothing came back" side was
+  `logger.debug('No persisted metadata found in database')`. So a kernel that
+  could not read a word of its persisted metadata stated at **debug** level that
+  there was none, and went on to report ready.
+
+  What that costs is not hypothetical — it is written into the plugin's own
+  Phase 2 comment. With the registry empty, `registry.getObject` answers "not
+  declared" where the truth is "we could not look": unknown-column query guards,
+  hooks and relationships silently degrade, and overlay objects get neither a
+  synced table nor a metadata bridge. This is ADR-0110 D3 (an outage is not a
+  miss) on the boot side, after the same rule landed for `DatabaseLoader`
+  (#5108), `listForIndex` (#5089) and the overlay reads (#5532 / #5707).
+
+  **What changed**
+
+  - `loadMetaFromDb` returns `storeUnavailable: boolean`, set on exactly the
+    branch that already prints `[Protocol] DB hydration skipped` — a read that
+    failed for a reason `isMissingTableError` does _not_ call benign. A store
+    that has merely not been provisioned yet (first boot, before migrations)
+    keeps `storeUnavailable: false`, because `loaded: 0` genuinely is the truth
+    there (#5841).
+  - `restoreMetadataFromDb` reads it and logs at **`error`**, naming the
+    consequence (nothing was restored, the kernel keeps reporting healthy, and
+    which capabilities silently degrade) and the fix (check the datasource behind
+    `sys_metadata` — connection, credentials, table existence — then restart).
+    Per AGENTS.md "Degradation log levels": persisted state and runtime state
+    disagreeing while the system still looks healthy is the `error` class. An
+    empty-but-readable store keeps its quiet debug line, so first boots do not
+    start emitting durability errors.
+
+  **Not changed**: control flow. Boot still degrades and continues — refusing to
+  boot on an unreadable overlay store would turn a transient outage into an
+  outright one. What changes is that the degradation is now distinguishable from
+  health, and reported as such.
+
+  **Impact on duck-typed `ProtocolWithDbRestore` implementers**: none required.
+  `ObjectQLPlugin` matches the `protocol` service structurally, and the new field
+  is declared **optional** on its side of the contract, exactly as `invalid`
+  already is. A shim that predates the field keeps type-checking and is read as
+  "not an outage" — the only verdict it was able to express before — so its
+  behaviour is byte-for-byte what it was. The trade-off is deliberate and worth
+  naming: an optional field cannot _force_ a third-party shim to start reporting
+  outages, so such a shim stays as silent as it is today. Requiring the field
+  would have made that impossible to ignore at the cost of breaking every
+  external implementer for a bit only one in-repo producer sets; the in-repo
+  producer (`ObjectStackProtocolImplementation`) declares and returns it
+  **required**, so the path that actually runs in every ObjectStack kernel is
+  fully covered.
+
+- 75bb3af: fix(metadata-protocol): the by-id BULK write faces refuse a row that names no record (#5088)
+
+  `updateMany`, and `batch`'s `update` and `delete` branches, now answer
+  `RECORD_NOT_FOUND` (404) for a row whose id resolves to nothing — the same code
+  and the same message (`Record <id> not found in <object>`) the single-record
+  `PATCH` / `DELETE` have answered since #4435.
+
+  Before this, #4435's "a write that touched zero rows must not report success"
+  was live on only 2 of the 5 write faces in `protocol.ts` (`updateData`'s
+  existence probe and `deleteMany`'s `deleted === false`). The three bulk faces
+  went straight to the engine, with two visible consequences:
+
+  - **`updateMany` / `batch.update`** — a stale id entered the write pipeline.
+    With no stored row to overlay, #4770's record materialisation (stored ⊕
+    payload) produced a payload-only record, a hook `condition` reading any
+    untouched field found it absent, and #4775's unevaluable-condition abort
+    fired. The row failed `INTERNAL_ERROR` with a diagnostic accusing a _correct_
+    hook of naming an undeclared field, so an operator with one stale id in a
+    batch was told their hook was broken and pointed at the object's field list.
+    Under `atomic: true` that row also poisoned the batch, taking every later row
+    to `NOT_ATTEMPTED`. Hooks, automation and audit rows no longer fire at all for
+    a record that does not exist.
+  - **`batch.delete`** — discarded the driver's return and reported
+    `success: true` unconditionally, so a batch of typo'd ids reported every one
+    of them deleted. It now reads the driver contract's positive not-found value
+    (`=== false`), exactly as `deleteMany` does.
+
+  Existence is asked with the same `probeRecord` the single-record path uses: it
+  answers EXISTENCE, not visibility, so the by-id write policy stays #1994's
+  decision inside `engine.update` and the `rls-by-id-write` proof can still go
+  red. `upsert` is deliberately unchanged (a missing id still inserts), as are
+  the predicate bulk writes (`multi: true`, no per-row id) and the `atomic`
+  response shape — the causal row keeps its position, later rows stay
+  `NOT_ATTEMPTED`, and rows with real ids behave exactly as before.
+
+  Note for high-volume callers: each by-id row in these three faces now costs one
+  extra existence read before its write.
+
+- 43ca399: fix(runtime): `callData`'s ObjectQL fallback answers a missing record id with 404 `RECORD_NOT_FOUND` (#5138)
+
+  `callData` (the data bridge behind `/data`, the MCP bridge and the declarative
+  endpoint executor) is protocol-first with an ObjectQL fallback. The fallback
+  gave **three different answers to one fact** — that `id` names no row:
+
+  | verb     | before                                                      | on the wire             |
+  | -------- | ----------------------------------------------------------- | ----------------------- |
+  | `get`    | `return … : null`                                           | `200 { data: null }`    |
+  | `update` | `throw new Error('[ObjectStack] Not Found')` — no `.status` | **500**                 |
+  | `delete` | no existence check at all                                   | `200 { deleted: true }` |
+
+  The protocol path has answered `404 RECORD_NOT_FOUND` on all three verbs since
+  #4435 (re-asserted for the batch path by #5088), so the answer to the same
+  request depended on something no caller can see: whether the deployment
+  registered the `protocol` slot (`MetadataPlugin` / `@objectstack/metadata-protocol`).
+  All three fallback branches now throw the SAME envelope the protocol throws.
+
+  Two of these were actively harmful. `update` reported a caller mistake as an
+  internal fault — every dispatcher exit reads `.status` → `.statusCode` → 500, so
+  a 4xx fact entered error reporting and alerting as a 5xx. `delete` reported
+  success for a row that never existed, which is the hardest class to notice: an
+  integrator reading `200` records the cleanup as done.
+
+  The envelope is not re-spelled. `recordNotFoundError` is now exported from
+  `@objectstack/metadata-protocol` and imported by the fallback, so there is one
+  construction point and the two paths behind one `callData` cannot drift apart
+  again.
+
+  **Upgrade note.** If you run an assembly WITHOUT the metadata-protocol plugin
+  (lean hosts, and the MCP multi-env path that threads a raw driver), these three
+  calls change their answer for a missing id — from `200`/`200`/`500` to `404
+{ code: 'RECORD_NOT_FOUND', message: 'Record <id> not found in <object>' }`.
+  Deployments that DO register the protocol slot are unaffected: they already
+  answered `404` and this release does not touch that path. A client that
+  branched on `data === null` from `GET /data/:object/:id` should branch on the
+  `404` instead; a client that treated `DELETE` as idempotent should treat `404`
+  as "already gone". Declarative endpoints (`object_operation`) inherit the same
+  answer, since they reuse `/data`'s delegation.
+
+  `delete`'s existence check is a `find` probe, not a read of what `ql.delete`
+  returned: `IDataDriver.delete` declares `Promise< boolean >` and the protocol
+  can read it, but `IDataEngine.delete` declares `Promise< any >` and the engine
+  returns its driver's result through the hook chain — testing that for `false`
+  would be reading a signal the contract does not promise, and it fails in the
+  direction this fixes.
+
+- 1f82d1e: fix(metadata-protocol): `allowRuntimeCreate: false` is enforced on every kernel — `PUT /meta` no longer creates `job` / `agent` items the registry declares code-only (#5086)
+
+  #4509 set `allowRuntimeCreate: false` on `job` and promised the refusal without
+  qualification — _no "create job" in Studio or via `PUT /meta`_. ADR-0063 §2 says
+  the same for `agent`. The gate that keeps that promise existed, and worked, but
+  it sat behind `environmentId !== undefined`:
+
+  ```ts
+  if (this.environmentId !== undefined) {
+    // …not_overridable / not_creatable…
+  }
+  ```
+
+  `environmentId` is a **row-scoping key**, not an authorization signal. Every
+  kernel assembled without one ran with the entire ADR-0005 authorization gate
+  disengaged — and that is not an exotic topology. The CLI's lightweight
+  assembler builds exactly that for a host config (`isHostConfig` → the
+  `createStandaloneStack` branch is skipped → `new ObjectQLPlugin()` with no
+  `environmentId`), which is the flagship showcase and every self-hosted app
+  server shaped like it. On those, the issue's repro answered:
+
+  ```
+  PUT /api/v1/meta/job/rc3_runtime_job
+      {"name":"rc3_runtime_job","label":"J",
+       "schedule":{"type":"cron","expression":"0 0 * * *"},"handler":"nope"}
+  → 200 {"success":true,"message":"Saved customization overlay (env-wide) — type=job, …"}
+  ```
+
+  `handler: "nope"` names no function in any compiled bundle. The row persists,
+  lists, and can never be scheduled — the record #4509 exists to prevent, saved
+  and reported as success. It is the ADR-0049 failure mode one level up: the
+  _enforcement flag itself_ was the silently-inert declaration, and Studio (which
+  reads the flag to hide "create") honoured a rule the API underneath did not.
+
+  **What changed.** A type whose registry entry sets BOTH `allowRuntimeCreate:
+false` AND `allowOrgOverride: false` declares that it has no runtime write
+  channel at all. `saveMetaItem` now refuses it on every kernel, before
+  persistence, in draft mode as well as publish:
+
+  | write                                       | before        | now                   |
+  | ------------------------------------------- | ------------- | --------------------- |
+  | `PUT /meta/job/*` on a single-kernel host   | `200 success` | `403 NOT_CREATABLE`   |
+  | `PUT /meta/agent/*` on a single-kernel host | `200 success` | `403 NOT_CREATABLE`   |
+  | same, over a name a code package ships      | `200 success` | `403 NOT_OVERRIDABLE` |
+  | project-scoped (cloud) kernels              | `403`         | `403` (unchanged)     |
+
+  The refusal names the type, the flags that produced the verdict, the source
+  file pattern to declare it in (read from the type's own registry entry, so a
+  newly-flagged type carries an accurate hint the day it is flagged) and the
+  `OS_METADATA_WRITABLE` escape hatch.
+
+  **Scope, deliberately.** The rest of the ADR-0005 two-tier gate keeps its
+  single-kernel carve-out: that ADR's "single-kernel deployments keep their
+  existing behaviour" sentence is about the _overlay whitelist_, predates
+  `allowRuntimeCreate` entirely, and a type that stays runtime-creatable
+  (`object`, `hook`, `field`, `seed`, `mapping`, …) is untouched here. So is
+  `deleteMetaItem` — removing a code-only row that predates this refusal is
+  repair and must stay possible. `OS_METADATA_WRITABLE` remains the one door:
+  unlocking a type there unlocks it here too.
+
+  **Upgrading.** If a deployment relies on runtime-created `job` or `agent` rows,
+  move them into source (`**/*.job.ts`, `**/*.agent.ts`) and redeploy — a `job`
+  authored at runtime never had a reachable `handler` in the first place. To keep
+  writing them while migrating, set `OS_METADATA_WRITABLE=job,agent`.
+
+- 65159ae: fix(metadata-protocol): 分层读的 overlay 读失败不再被画成「这一项没有定制」(#5707)
+
+  `getMetaItemLayered` 是 Studio「code / overlay / effective」对比视图背后的那次读
+  (`GET /api/v1/meta/:type/:name?layers=true`)。它的 `sys_metadata` overlay 读裹着一个
+  裸 `catch`,注释写着 "DB unavailable — overlay stays null" 然后照「没有 overlay 行」
+  返回。
+
+  那不是一个中性的兜底值。这个信封在**同一次响应里同时给出三个正面断言**,而且是 200:
+
+  - `overlay: null` —— 「这一项从来没有被定制过」;
+  - `overlayScope: null` —— 「org 和 env 两个作用域都没有行」;
+  - `effective === code` —— 「现在生效的就是打包件原样」。
+
+  对比视图存在的意义正是回答作者「我改过什么」。故障期它回答「什么都没改过」——
+  和 #5532 同一个错误(可用性故障被讲成作者的声明事实),只是落在 diff 视图而不是 404 上。
+  本次沿用 #5532 / PR #5705 的判定,补上该 PR 按 scope 刻意没有覆盖到的这一处读。
+
+  **改了什么**:这一处 `catch` 改为调用同文件的 `rethrowUnlessMetadataStoreUnprovisioned`
+  —— `isMissingTableError`(表尚未建 → 确实没有 overlay 行)良性放行,其余上抛
+  `status: 503` / `code: SERVICE_UNAVAILABLE`,驱动原始错误挂在 `cause` 上。没有新增
+  判定逻辑,也没有新的返回形状:分层信封仍是 code / overlay / effective 三**层**,而不是
+  每层三**态** —— 「读不到」不是一层,所以照失败上报,不再冒充某一层的取值。
+
+  **wire 可见变化**
+
+  | 场景                           | 之前                                                                | 之后                                                     |
+  | ------------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------- |
+  | `sys_metadata` 不可达          | `200` + `overlay: null` / `overlayScope: null` / `effective = code` | `503` + `SERVICE_UNAVAILABLE`(`cause` 带驱动报文),可重试 |
+  | org 作用域读失败、env 行本可读 | `200`,连那行 env overlay 也一并报告为「没有」                       | `503`,同上                                               |
+  | `sys_metadata` 尚未建表        | `200` + 只有 code 层                                                | 不变                                                     |
+  | 存储正常                       | 不变                                                                | 不变                                                     |
+
+  REST 侧无需改动:`?layers=true` 与普通读共用同一个 `handleRouteError`,#5437 / #5464
+  的消毒与日志口原样接住。已测量的消费方处置也都已就位:objectui 的
+  `MetadataClient.layered()` 对非 2xx 一律 `throw`(只有 404 映射为空信封),
+  ResourceEditPage 的加载 `try/catch` 把它渲染成错误态而不是空白页;
+  `plugin-security` 的三个消费点里,两处本就有 `catch` 兜底,唯一没有的
+  `projectPermissionMutation` 在 503 化后反而更安全 —— 此前的静默 `null` 会让权限集
+  投影悄悄退回打包基线(`customized: false`),没有 declared body 时甚至会把记录
+  retire,而协议的 `runMutationProjector` 契约是 never throws,会把 503 收敛成
+  `projectionApplied: { success: false }`。
+
+- 877545c: `MetadataProtocol.listCommits` 不再把 commit store 读不到答成「这个 package 没有提交历史」
+
+  `listCommits` 读 `sys_metadata_commit` 的 `catch` 此前对任何失败都返回 `[]`,零日志、不按错误类型区分 —— 它的 JSDoc 甚至把这写成了设计(“Returns [] if the commit store is unavailable”)。于是 ADR-0067 的提交时间线上,「确实没有历史」与「有历史但库读不到」返回值完全一致,而这条时间线正是 `revertCommit` 的选择面:故障期间 UI 显示「无可回滚项」,`rollbackToPackageCommit` 更会在一次都没回滚的情况下返回 `success: true`。
+
+  现在按错误类型区分,与本文件既有的 `sys_metadata` 覆盖层读法(#5532 / #5707 / #5840)同一处方:表未 provision(首启)仍返回 `[]`;其余失败一律包成 503 `SERVICE_UNAVAILABLE` 上抛,驱动原始错误挂在 `cause` 上。调用方由此能把 outage 与 miss 分开。
+
+  行为变化:`GET /packages/:id/commits` 在 commit store 故障时返回 503 而不再是 `{ commits: [] }`。
+
+- 444a07c: fix(metadata-protocol): boot hydration classifies "store not provisioned yet" by error type, not by a copied message regex (#5841)
+
+  `loadMetaFromDb` — the boot step that hydrates `sys_metadata` overlay rows into
+  the SchemaRegistry — decided whether a failed read was the benign first-boot
+  case by running its own `/no such table/i` over `e.message`. That was a second,
+  hand-copied vocabulary of "which driver errors are benign", sitting a few
+  thousand lines below the first: the same file already imports
+  `isMissingTableError` from `@objectstack/metadata/errors` and asks it in
+  `rethrowUnlessMetadataStoreUnprovisioned` (#5532), as do this package's
+  `SysMetadataRepository` (#4867) and `DatabaseLoader` (#5108).
+
+  A copy is wrong in both directions, and only one of them is loud:
+
+  - **SQLite** says `no such table: sys_metadata`, which the copy matched — by
+    luck of which driver the author was running.
+  - **PostgreSQL** says `relation "sys_metadata" does not exist` (SQLSTATE
+    `42P01`) and **MySQL/MariaDB** says `Table 'app.sys_metadata' doesn't exist`
+    (errno 1146). Neither matches the regex, so a perfectly healthy first boot on
+    either driver printed `[Protocol] DB hydration skipped: …` — a warning about
+    a working system that no operator can act on.
+  - Conversely, any driver phrasing a _different_ failure as "no such table" was
+    read as benign and swallowed without a line.
+
+  The seam now asks `isMissingTableError`, so the classification follows driver
+  `code` / `errno` / message / one step down the `cause` chain, and a driver quirk
+  is taught to the platform once. Observable change for operators: no spurious
+  first-boot warning on Postgres/MySQL, and a real failure that happens to be
+  worded like a missing table is no longer silently benign. The warning line also
+  reports non-`Error` rejections properly instead of printing `undefined`.
+
+  Not changed here: a non-benign read failure is still answered with a
+  `console.warn` plus `{ loaded: 0, errors: 0, invalid: 0 }`, so the return value
+  still cannot distinguish "the store holds no overlay rows" from "the store could
+  not be read" (ADR-0110 D3, on the boot side). That is a change to the method's
+  return contract and to its consumer in `ObjectQLPlugin.restoreMetadataFromDb`,
+  and is tracked separately as #5841 fact 2.
+
+- 288e5a4: fix(metadata-protocol): the ADR-0010 lock gate refuses an uncertain write instead of allowing it (#5706)
+
+  `getEffectiveLock` is the single source of truth for the ADR-0010 §3.3 lock
+  gate, and both of its callers are write-path admission — `assertLockAllowsWrite`
+  (save / publish / rollback) and `assertLockAllowsDelete`. Its overlay read was
+  wrapped in a bare `catch` that fell through to `lock: 'none'`.
+
+  `'none'` is not a neutral placeholder there. It is the verdict "the author
+  declared no protection", and `evaluateLockForWrite` / `evaluateLockForDelete`
+  turn it straight into "allow". So a `sys_metadata` read that **failed** became a
+  write that was **performed**, on an item whose overlay row declared it
+  protected. Measured before the fix, with the overlay row carrying `_lock` and
+  only the gate's own read rejecting: `saveMetaItem` returned `success: true`
+  after updating a `_lock: 'no-overlay'` item, and `deleteMetaItem` returned
+  `success: true` after deleting a `_lock: 'no-delete'` one — while the very same
+  rows, read successfully, produce `403 ITEM_LOCKED`. The audit trail did not
+  record the miscarriage either: the allowed path writes its ordinary
+  `outcome: 'allowed'` row, so nothing afterwards showed the write should have
+  been denied.
+
+  **Wire-visible change.** When the lock state cannot be read, `save`, `publish`,
+  `rollback` and `delete` now fail with `503` / `SERVICE_UNAVAILABLE` (the driver
+  error attached as `cause`) instead of proceeding as if the item were unlocked.
+  Refusing one uncertain write is the intended trade against performing one that
+  had to be refused. Callers that retry on 503 need no change; callers that
+  treated a successful save as proof the item was unlocked never had that
+  guarantee.
+
+  The discrimination reuses `rethrowUnlessMetadataStoreUnprovisioned`, introduced
+  in #5705 for this file's overlay reads, rather than inventing a second
+  predicate: an unprovisioned `sys_metadata` genuinely has no overlay row, so
+  `'none'` is the truth and first boot still saves normally; every other error is
+  an outage.
+
+  Unaffected, and covered by regression tests: artifact-level locks (answered from
+  the in-memory registry before the overlay read is reached), a genuine miss on a
+  healthy store (still allowed), and control-plane kernels (`environmentId`
+  undefined), which never enter either gate.
+
+- 1c625ca: metadata: `getDiagnosed` — a metadata read that FAILED stops arriving as "nobody declared this"
+
+  `MetadataManager.loadDiagnosed` computes the ADR-0110 D3 verdict (a MISS and an OUTAGE
+  are different facts with opposite security meanings) and `get()` discarded it two hops
+  later: `load()` kept only `.data`, `get()` turned that `null` into `undefined`. Every
+  consumer of `get()` therefore received one `undefined` for two opposite facts and could
+  not have told them apart even if it had wanted to.
+
+  **New read.** `MetadataManager.getDiagnosed(type, name)` returns
+  `{ data, degraded, errors }` — the registry-first counterpart of `loadDiagnosed`, declared
+  as an optional member of `IMetadataService`. A registry hit is never degraded (it
+  consulted no loader); a clean miss is never degraded (every loader answered).
+
+  **`get()` is unchanged — zero breaking.** Same signature, same answer, same behaviour for
+  every existing caller, including the microtask-level ordering `register()`'s watchers
+  depend on. Only callers that ASK for the verdict pay for it. Making `get()` throw on
+  `degraded` was deliberately not done: the boot path degrades on purpose.
+
+  **Consumers switched**, each with a disposition argued for its own context rather than one
+  blanket rule:
+
+  - `getMetaItem` / `getMetaItemCached` — a degraded MetadataService read with nothing in
+    the registry now raises `503 SERVICE_UNAVAILABLE` instead of falling through to
+    `404 RESOURCE_NOT_FOUND`. This is the half that made the existing `#5532` comment ("
+    reaching here now means a real miss") untrue.
+  - `getMetaItemLayered` — the `code` layer joins the rule its `overlay` layer already
+    followed. `code: null` is a positive claim, and `lockSource = code ?? overlay ?? {}`
+    derives from it, so an outage could render an item the packager locked
+    (`_lock: 'full'`) as `editable: true, deletable: true`.
+  - `ObjectQLPlugin`'s `object` metadata-event refresh — logs `warn` naming the consequence
+    (the registry keeps the previous definition; nothing retries) and the fix, instead of
+    `debug` "metadata service has no fresh body". `warn` and not `error` because the write
+    already landed; only a re-read failed.
+
+  Hosts whose `metadata` slot is a shim that predates `getDiagnosed` are read as
+  "not degraded" — exactly what they could express before — so their behaviour is unchanged.
+
+- e6db317: fix(metadata-protocol): 元数据存储读不到不再被讲成「这一项不存在」(#5532)
+
+  `sys_metadata` 整体不可达时,`GET /api/v1/meta/object/acct` 会回一个「不存在」——
+  真相是「读不到」。两个事实的处置方向完全相反(去建一个 / 去修后端),而 Studio、
+  Setup 在元数据库故障期就是照前者渲染的:每一个对象都显示成「不存在」。
+
+  根因在产出方:`getMetaItems` / `getMetaItem` 的四处 customization-overlay 读各自
+  裹着一个裸 `catch {}`,注释写着 "DB not available" 然后照 miss 处理。空值一路穿过
+  读链,每个消费方给它起了一个不同却同样错的名字:
+
+  - `getMetaItemCached` → `Metadata item <type>/<name> not found`
+  - `?state=draft` → `NO_DRAFT` / 404「没有待发布的草稿」(发布流程读作「没什么可发的」)
+  - `getMetaItems` → `items: []`「这个环境一个都没声明」
+
+  ADR-0110 D3 已经为这件事立过规矩:miss 与 outage 是两个不同的事实、安全含义相反。
+  #5108 按这条修掉了 `DatabaseLoader` 的复数读,#5089 修掉了 `listForIndex`;本次是
+  同一条规矩在协议自己的 overlay 读上,单数与复数一并覆盖。
+
+  **改了什么**
+
+  1. **区分按错误类型判定,不按异常猜。** 唯一良性的读失败是「`sys_metadata` 还没被
+     创建」——那时确实没有 overlay 行,落回 registry 就是真相,首次启动也不该爆炸。
+     判定走 `isMissingTableError`,与 `DatabaseLoader`(#5108)、本包
+     `SysMetadataRepository`(#4867)同一个谓词,一个驱动怪癖只教给平台一次。其余
+     一律视为故障。
+  2. **故障照实上报。** 上抛 `status: 503` / `code: SERVICE_UNAVAILABLE`
+     (`HttpStatusErrorCodeMap[503]`,ADR-0112 的标准目录码,不新造词汇),驱动原始
+     错误挂在 `cause` 上。REST 层现有的 #5437 / #5464 消毒与日志口原样接住:客户端拿
+     到 503 + code(文案按 5xx 规则 withheld),运维在日志里拿到完整的驱动报文。
+  3. **终末 not found 结构化。** 真 miss 现在带 `status: 404` /
+     `code: RESOURCE_NOT_FOUND`。
+
+  **wire 可见变化**(把错误答案改成对的答案):
+
+  | 场景             | 之前                                                            | 之后                                 |
+  | ---------------- | --------------------------------------------------------------- | ------------------------------------ |
+  | 元数据存储不可达 | `404`/`400`/`500` 说「不存在」「没有草稿」「什么都没声明」      | `503` + `SERVICE_UNAVAILABLE`,可重试 |
+  | 真的没有这一项   | `500` + `INTERNAL_ERROR`(#5489 之前是 `400` 且内部措辞逐字上线) | `404` + `RESOURCE_NOT_FOUND`         |
+
+  `sys_metadata` 尚未建表这一路径行为不变:仍旧落回 registry / MetadataService,
+  真查不到时回结构化 404。
+
+- da538b1: seed-loader: a pass-2 back-fill dropped for a missing source-record id is now reported, not silently discarded
+
+  `resolveDeferredUpdates()` looked the source record's internal id up in `insertedRecords`
+  and, when it was not there, ran off the end of an `if` with no `else`. Pass 2 had already
+  RESOLVED the target, and the back-fill then evaporated: no write, no entry in
+  `errors`/`allErrors` (so the load still reported `success: true`), no `errored`, and not
+  one log line. The only trace was the `referencesDeferred` the record booked in pass 1 and
+  never gave back — a dangling number with nothing in the result explaining it, while the
+  declared association stayed absent forever.
+
+  It now records the loss through `recordDeferredError` (→ `errors`/`allErrors` + `errored`,
+  so the load reports `success: false`) and logs it once at `error`, per the same objective
+  criterion applied in #4729/#4997 and the "Degradation log levels" rule. The two ways to
+  get here are worded differently because they are different failures: an EMPTY
+  `recordExternalId` — `externalIdKey` returns `''` when any component of a composite
+  externalId is blank — is the pure silent loss, where the row wrote perfectly, nothing else
+  in the load reports anything and the reference stays NULL forever; a real key that is
+  simply absent from the map means the source row never landed, and that write failure was
+  already reported at `error`, so this line points at it instead of restating it.
+
+  A load that hits this path previously returned `success: true` with clean counters and now
+  returns `success: false` with the loss counted — the seed data was always incomplete; it
+  just was not saying so.
+
+- 79822b5: fix(metadata-protocol): stop `promoteDraft`'s draft drain from swallowing every failure (#4981)
+
+  Publishing a draft is two writes: a transactional `put` that promotes the body onto
+  the active row, then a `delete` that drains the now-redundant `state='draft'` row.
+  The drain was guarded by a bare `catch {}` whose comment named exactly one cause —
+  "a concurrent publisher may have already drained the draft" — while its behaviour
+  covered **all** of them: connection drops, statement timeouts, missing privileges,
+  driver faults, `parentVersion` mismatches.
+
+  The result was a silent, self-perpetuating inconsistency. `publishDraft` returned
+  success, the active row was correct and durable, and a stale `state='draft'` row
+  stayed in `sys_metadata` holding the body that had just been published. Nothing
+  logged it and nothing retried it, so Studio/Setup kept reporting "unpublished
+  changes" for an artifact that had none, and the next publish of that artifact
+  promoted the same already-published body again — which overwrites the active row if
+  anything published or reverted in between.
+
+  **The drain now discriminates by cause.** `ConflictError` — the only error
+  `delete()` raises from its own pre-driver row lookup — stays silent, because both of
+  its arms are genuinely benign: `actualHead === null` is the concurrent-publisher
+  race the old comment described, and a differing head means a _newer_ draft was saved
+  while the publish was in flight, so the surviving row is real pending work that must
+  not be dropped. Every other failure is reported at `error` level (per the
+  `warn`-vs-`error` rule: the system keeps looking healthy while something it claims to
+  have cleaned up is still there), naming the orphaned artifact, the consequence, and
+  the remedy, with the original cause attached.
+
+  **`promoteDraft` still returns success, deliberately.** The drain runs _after_ the
+  `put` has committed, so throwing would misreport a durably successful publish as a
+  failure and invite the caller to retry — and a retried publish is precisely the
+  harmful path, because it re-promotes the stale draft. The failure is surfaced
+  without lying about the publish instead: alongside the log, the result carries a new
+  optional `draftDrainFailed` field (`{ ref, draftHash, cause }`, exported as
+  `DraftDrainFailure`) so callers can react without parsing logs. It is an additive
+  optional field on an existing result object — absent on every clean publish — so no
+  existing caller changes.
+
+  No protocol or spec shape changed. The drain seam is registered with
+  `pnpm check:durability-log-level` (as the named callee `dropPromotedDraftRow`) so
+  the catch cannot quietly go back to swallowing everything.
+
+- 15e61fb: fix(metadata-protocol): `publishPackageDrafts` 现在对 `api` draft 跑 ADR-0121 端点发布门 (#5206 step 2)
+
+  `protocol.publishPackageDrafts` 是 Studio「全部发布」的真实入径(ADR-0033 /
+  ADR-0067 D2)。在此之前,它唯一的按类型前置检查是对象命名空间前缀
+  (`validateObjectNamespacePrefix`,仅 `d.type === 'object'`),于是一条 `api`
+  draft **不经任何一道门**就被提升为 `active` —— 与 #5189 在
+  `MetadataManager.publishPackage` 上修掉的是同一形状、另一条路。
+
+  安全后果早已被 PR #5203 的装载期兜底挡住:端点匹配器在建索引时用同一个
+  `firstFailure` 重判每一条存量条目,没过门的被排除出索引并 `error` 点名。所以
+  这次修的是**拒绝得太晚**:ADR-0121 的原文是「publish 拒绝」,作者应当在
+  publish 当场拿到点名 key 的处方,而不是到装载期日志里才发现自己的端点在答
+  404。
+
+  **判据只有一份。** 本改动调用 `@objectstack/spec/api` 导出的
+  `validateApiEndpointDeclarations`(#5203 公开)—— 就是 stack schema 跑的那个
+  函数、`publishPackage` 跑的那个函数、装载期兜底跑的那个 `firstFailure`。拒绝
+  文案直接用门函数自己的消息(已包含端点名、越界的 key 和改法),本包不复述任何
+  一条「什么算可服务」的规则。
+
+  与 `publishPackage` 不同,这条路**有身份**:包的 `manifest.namespace` 本来就
+  为对象前缀规则读过了,所以这里跑的是**全量门**,命名空间门(ADR-0121 D1/D2)
+  包含在内。命名空间门**不**以「包声明了 namespace」为条件 —— 门函数自己的前置
+  判据(声明了 `apis:` 的 stack 必须显式声明 `manifest.namespace`)本身就是一条
+  判据,对「压根没有 namespace」的包跳过它,等于给最不可能过编译期的那批包留一
+  个洞。对象前缀规则对无 namespace 的包网开一面,是因为一个裸对象名只是命名气味;
+  一个无命名空间的端点是一个**无主 URL**。
+
+  **行为变化(用户可见)**:
+
+  - 一条 `api` draft 若违反端点门(最典型:ADR-0121 D6 —— `authRequired: false`
+    却没有 `rateLimit.enabled: true` 的预算),`publishPackageDrafts` 现在返回
+    `success: false` / `publishedCount: 0`,该条目进入 `failed[]`,`code`
+    为 `ENDPOINT_GATE`;body 连 `ApiEndpointSchema` 都不满足的,`code` 为
+    `ENDPOINT_SCHEMA`(解析是判定的前置,不是第六道门 —— 判不了的形状也服务不
+    了)。
+  - **失败粒度沿用既有语义,未发明新的批次语义**:与命名空间前缀违规完全一致,
+    这是一次**提升任何东西之前**的前置拒绝,整批不落地(`published: []`),同批
+    的健康 draft 保持 draft 态。这既是 ADR-0067 D2 的「一次 commit 不能落一半」,
+    也是 #5189 在另一条路上的同一姿势(`itemsPublished: 0`)。两类违规现在合并
+    在**同一份报告**里返回,作者一次往返就能看全。
+  - 判定范围是**本批被提升的 draft**,与紧邻它的对象前缀规则一致。与同包已
+    `active` 的端点撞车不在此拦截 —— 匹配器对全库重复声明有确定性裁决并 `error`
+    点名(`buildEndpointIndex`);把范围扩到整包 active 集合意味着「因为你没在发
+    布的东西而拒绝这次发布」,那是另一份契约,不是一个 bug 修复。
+
+  装载期兜底(#5203)原样保留,未移除也未削弱:publish 是**更早**的那道门,不是
+  最后那道门的替代品。
+
+  `api` 进 `DEFAULT_METADATA_TYPE_REGISTRY` / `BUILTIN_METADATA_TYPE_SCHEMAS`
+  (即 Studio 直写路径的 422)是 #5206 的第 1 步,拆在子单 #5271(spec 车道);
+  本改动**不依赖**它落地。
+
+- 72bd873: fix(metadata-protocol): 保存成功的回执不再一律自称 "customization overlay"
+
+  `saveMetaItem` 的成功 `message` 原本只有两种句式,都写死了 "customization
+  overlay"。但 `DEFAULT_METADATA_TYPE_REGISTRY` 里有一批类型声明
+  `supportsOverlay: false` 而按设计可以运行时写入(`object` / `field` / `hook` /
+  `seed` / `mapping` / `flow` / `action`),对它们的一次全新创建并没有覆盖任何
+  artifact,却也被回执成 "saved a customization overlay"。
+
+  判据不是 `supportsOverlay`,也不是 `allowOrgOverride`(spec 的 TSDoc 把这两件事
+  分得很清楚:前者是 loader 的合并能力,后者是运行时写入的许可),而是写路径**早已
+  算出**的 `isArtifactBacked` —— 也就是 `intent: 'override-artifact' |
+'runtime-only'` 的来源。回执现在只说这条已知事实,不新增任何读路径查询。
+
+  |                                 | FROM                                                                       | TO                                                  |
+  | :------------------------------ | :------------------------------------------------------------------------- | :-------------------------------------------------- |
+  | 覆盖了 code package 的 artifact | `Saved customization overlay (org=…, state=…) — type=…, name=… [seq=N]`    | 逐字不变                                            |
+  | 无 artifact 的运行时写入        | `Saved customization overlay (env-wide, state=…) — type=…, name=… [seq=N]` | `Saved <type> '<name>' (env-wide, state=…) [seq=N]` |
+
+  org 维度照旧在括号里(`org=<id>` / `env-wide`),`state=` 与 `[seq=N]` 两个分支都
+  保留,所以读取 `seq`(HMR 游标)或 `state` 的消费方不受影响;`message` 本身没有
+  任何消费方解析,仅作 toast 展示。
+
+  回执不区分「新建」与「更新既有 DB-only 行」:唯一可用的事实 `parentVersion ===
+null` 的作用域是 `(state, packageId)`,一个已有 active 行的首个 draft 也会读成
+  "没有父版本",据此写 `Created …` 只是把一句假话换成另一句假话。中性动词
+  "Saved" 如实,且不为一句文案发明新的查询。
+
+- dde9202: fix(metadata-protocol): 读路径 `_diagnostics` 保留 union 分支给出的真实拒绝理由 (#5598)
+
+  `computeMetadataDiagnostics` 给 `getMetaItems()` / `getMetaItem()` 服务出去的每份
+  文档挂 `_diagnostics` 信封,模块头写明它的用途是让 Studio 渲染 validity badge、
+  **内联字段错误**和治理看板。但它把 zod 的 `error.issues` 直接 `.map()` 成信封条目,
+  而 zod 会把一个失败 `z.union` 的**全部分支**折叠成一条顶层 issue —— `path` 是 `''`,
+  message 是字面量 `"Invalid input"`。`ViewMetadataSchema` 顶层本身就是 union
+  (`z.preprocess(stripViewConsoleDecorations, z.union([...]))`),所以库里**每一个**
+  有缺陷的 view 文档读出来都退化成这一条没有字段名的记录,内联字段错误无处可标。
+
+  这不只是"少了点信息",而是**同一份文档在两条路径上判决不一致**:#5364(PR #5596)
+  修好写路径之后,作者**保存**一个有缺陷的 view 能看到出错的键名,**打开**同一份已存
+  在库里的文档却仍然只得到一条 `Invalid input`。
+
+  改法是复用而不是再抄一份策略:读路径改调同包 #5596 已落地的
+  `zodIssuesToMetadataIssues`,分支选取口径(丢弃只报根部 KIND 不匹配的分支;报得最少
+  的分支胜出;`unrecognized_keys` 破平局;并列全出且有上限;嵌套 union 按绝对路径递归)
+  由该函数**单点定义**,读写两路径按构造一致。这是同一机制的第 5 个消费者
+  (#4971 / #5014 / #5341 / #5364 是前四个)。
+
+  对消费者是**纯增量**:union 自己那条记录仍然排在 `errors[0]`,只是后面跟上了解释它的
+  分支条目,所以任何读 `errors[0]` 的既有代码读到的还是同一条。没走 union 的普通字段级
+  拒绝(`path` / `message` / `code`)逐字节不变;spec 合法的文档仍然是 `{ valid: true }`,
+  展开不会凭空造出拒绝。
+
+- 5ab0842: refactor(metadata-protocol): 删除 `saveMetaItem` 里已不可达的 legacy raw-engine 写入分支 (#5264)
+
+  `saveMetaItem` 过去有两条持久化路径:repository 写入路径(追加
+  `sys_metadata_history`、发 watch 事件、带单调 `seq`),以及其后的 legacy
+  raw-engine 分支(直接 `engine.insert` / `engine.update` 写 `sys_metadata`,
+  没有 history 行、没有 watch 事件、没有 `seq`,回执形如
+  `Saved customization overlay (env-wide) — type=…`)。后者的进入条件是
+  `isOverlayAllowed(type) || isRuntimeCreateAllowed(type)` 为假。
+
+  **没有行为变化 —— 这条分支在运行时已经到不了。** #5086(PR #5263)把
+  code-only 类型的拒绝提到了同一方法更早的位置,并且不再以 `environmentId`
+  为条件:它抛错的判据与上面那个条件恰好互为反面,读的还是同一个规范化后的
+  类型键(`canonicalizeMetaRequestType` 在方法开头折叠单复数,两个标志读取器
+  内部又各自折叠一次)。`OS_METADATA_WRITABLE` 也不是缺口:在那里解锁一个
+  类型会让 `isOverlayAllowed` 为真,从而走回 repository 路径。因此凡是能走到
+  分叉点的写入,一律走 repository 路径。
+
+  保留 `useRepoPath` 的代价不是多几行代码,而是它是一份 grep 得到、读起来
+  像活代码的样板:照它推理会得出「`sys_metadata` 存在一个不写 history 的
+  合法写入口」——现在没有了。
+
+  `deleteMetaItem` 里结构对称的那条 legacy 分支**一行未动**:它在
+  control-plane kernel(`environmentId === undefined`)上删除 code-only 遗留行
+  时仍然可达且必要(#5263 特意没有收紧删除侧,因为删除是修复动作),该分支上
+  新增了说明它为何还活着的注释。
+
+- d275c10: fix(metadata-protocol): 元数据保存的 422 保留 union 分支处方,Studio 重新拿得到字段名 (#5364)
+
+  `saveMetaItem` 的 spec-conformance 检查在自己的注释里承诺 "structured Zod issues
+  so the Studio form can highlight the offending field"。顶层 `z.union` 让这句承诺
+  彻底落空:zod 把一个失败 union 的**所有**分支折叠成**一条**顶层 issue,`path` 是
+  空串、`message` 是字面量 `"Invalid input"`,而旧代码的 `parsed.error.issues.map(…)`
+  映射的正是这一条。
+
+  代价不是"文案不够好",而是**字段定位本身消失了**。`ViewMetadataSchema` 顶层就是一个
+  union(`view.zod.ts` 的 `z.preprocess(…, z.union([…]))`),所以**每一次** view 保存
+  失败都退化成:
+
+  ```json
+  [{ "path": "", "message": "Invalid input", "code": "invalid_union" }]
+  ```
+
+  一个字段名都没有到达作者,Studio 表单没有任何东西可以高亮;422 的摘要行也只是
+  `... failed spec validation: <root>: Invalid input`。被丢掉的分支里躺着的恰恰是
+  #4001 那批策展处方(点名真实键名的 unrecognized_keys)和带绝对路径、带合法枚举的
+  逐槽位判决。
+
+  现在这些分支被展开进 `issues[]`:union 自己那条**保留不动**(展开是严格叠加的,
+  今天读 `issues[0]` 的消费者不会少读到任何东西),后面跟上真正解释这次拒绝的分支,
+  路径按绝对路径拼好——分支 issue 的 `path` 是**相对于 union** 的,这是 #5014 付过
+  学费的坑。422 的 `message` 摘要行随之变得可读。
+
+  分支选择策略与已落地的两处**逐条一致**:丢弃只报根部 kind 不匹配的分支;报得最少
+  的分支胜出;`unrecognized_keys` 破平局;声明顺序决定其余;并列的全部输出(上限 3);
+  嵌套 union 递归展开(上限 3 层)。这是同一机制的**第三份**拷贝——`packages/spec`
+  的 `formatZodError`(#4971)只导出字符串渲染器,`packages/rest` 的
+  `zodIssuesToFields`(#5014)产出 ADR-0114 的 `{field, code}` 目录条目,而本处的信封
+  是 `{path, message, code}` 且 `code` 透传 zod 原码——形态不同,**判决必须相同**,
+  否则同一个错误会因为作者是从终端发布、还是 POST 数据 API、还是在 Studio 里保存,
+  拿到三套说法。
+
+  行为边界:合法的元数据照常保存,非法的元数据照常被 422 拒绝且不落库;变的只是
+  `issues[]` 从"一条无字段的 `Invalid input`"变成"那一条 + 真正解释它的分支"。
+
+- 1d29e6d: fix(metadata-protocol): a seed failure that is COUNTED as an error now logs at `error` (#4729)
+
+  `SeedLoaderService`'s pass-2 deferred back-fill carried a comment stating that a
+  failed back-fill "must be a reported, counted error, **never** a silent warning"
+  — and the line under it called `logger.warn`. The count was right (the failure
+  lands in `result.errors`, flips `success: false`) but the level contradicted it,
+  and that log line is the only trace a seed leaves in a host's console. `warn` is
+  the level #4420 proved nobody reads.
+
+  **What changed**
+
+  - The failed back-fill logs at **`error`**, and the line now owes what
+    AGENTS.md → "Degradation log levels" requires of one: the **consequence**
+    (`<object>.<field>` stays NULL on a named record, the row itself was seeded so
+    every row counter reads clean, the circular relationship is half-written) and
+    the **fix** (nothing retries it — repair the write error, which is either a
+    transient failure that outlasted the retry budget or a validation rule vetoing
+    the update, then re-run the seed).
+  - The rest of the file was audited against the same criterion — _is this failure
+    counted in the load's `errors` (i.e. does it make `success: false`)?_ Five more
+    sites answered yes while logging `warn`, and were raised to `error`: a failed
+    batch insert row, a record dropped because its `cel` expression could not
+    resolve, the two invalid-reference paths that DROP a reference field (the row
+    lands without its association and the row counters stay clean — framework#3932),
+    and the two write-failure catches on the sequential/update paths. The two
+    dropped-reference lines also gained the consequence and fix in the message.
+  - Deliberately left at `warn`, and now documented as audited: "Halting on first
+    error" (a control-flow notice about failures already reported at `error`), the
+    `NODE_ENV` scope warning (a functional, fail-open degradation), and the
+    roll-up-summary recompute (records _were_ written; whether a stale summary
+    column is the same class is #4998).
+  - The seam is now pinned by CI, not only by tests: the back-fill write was
+    extracted as `writeDeferredReference` and added — with `writeRecord` — to
+    `DURABILITY_CRITICAL_CALLEES` in `scripts/check-durability-degradation-log-level.mjs`,
+    so `pnpm check:durability-log-level` fails if either catch is ever quietened
+    again.
+
+  No API, schema or result-object change: the same errors are reported in
+  `SeedLoaderResult` exactly as before. What changed is the level and the wording
+  of what a seeding host sees in its log.
+
+- c5a5996: fix(seed-loader): a roll-up summary left stale by a seed is now loud and counted
+
+  The loader recovers a post-write roll-up summary recompute that exhausts its
+  retries (`ERR_SUMMARY_RECOMPUTE`), and that recovery is correct: the rows WERE
+  written, so re-writing them would duplicate them (framework#3147). What was
+  wrong was the rank of the consequence. A roll-up summary is a **persisted
+  derived column** on the parent record, so after this the database is internally
+  inconsistent — the detail rows say one thing and the column that summarizes them
+  says another — and nothing recomputes it until some later write happens to touch
+  the same parent, which after a seed may never happen.
+
+  The entire event used to be one `warn` line reading _"records were written
+  (summary values may be stale)"_. It named no object, counted nothing, and left
+  `success: true` with every row counter clean, so no operator could see which
+  aggregate was wrong and no caller could detect it at all
+  ([#4998](https://github.com/objectstack-ai/objectstack/issues/4998)).
+
+  **It now logs at `error`**, naming the seeded object and the exact stale column
+  (`account.total_billed`), stating the consequence (the summary and its detail
+  rows disagree, nothing self-heals, and the seed still reports success) and the
+  remedy (fix the recompute error and re-run the seed, or trigger any write on the
+  affected parent to force a recompute), with the original cause attached. This is
+  the AGENTS.md "Degradation log levels" rule (#4632): persisted state and runtime
+  state disagreeing while everything looks normal is `error`, not `warn`.
+
+  **And it is counted** — `SeedLoadResult.summariesStale` and
+  `SeedLoaderResult.summary.totalSummariesStale`, mirroring `referencesDropped` /
+  `totalReferencesDropped`, which exists for the same shape one layer down ("the
+  row was written, something derived from it was lost"). A log line is not
+  something a caller can branch on; these counters are.
+
+  `success` deliberately stays `true`. It answers _"did the rows land"_, and they
+  did — every consumer treats `success: false` as "the write failed", so flipping
+  it would hand the protocol seed-apply surface a `false` with an **empty** errors
+  array and fail package/marketplace installs that in fact wrote every row. The
+  counter carries the signal instead; a caller that wants to treat a stale
+  aggregate as fatal reads `summary.totalSummariesStale > 0`.
+
+  Both counters are additive with a `0` default, so an existing producer or
+  consumer of `SeedLoaderResult` is unaffected — a payload written before this
+  release still parses, with `0`.
+
+- 5ea8e1e: fix(metadata-protocol): a seed record dropped for an unresolvable reference now says so at `error` (#4997)
+
+  When a seed's `lookup` / `master_detail` / `user` reference could not be
+  resolved and no pass 2 would run (`multiPass: false`), the loader dropped the
+  **whole record** — the right call, since writing it would put the raw
+  natural-key string into the FK column or, on an upsert UPDATE, corrupt the row
+  already there. The drop was counted (`errored`) and reported
+  (`result.errors` → `success: false`), and the code comment above it claimed
+  "LOUD", but the branch made **no logger call at all**. On the console a seed
+  that silently dropped N records was indistinguishable from a clean one, and the
+  `packages/runtime` seed call sites that only `await` the load never look at
+  `result.success` — so the loss surfaced later as "the app installed but the data
+  isn't there".
+
+  That branch now logs at `error`, per AGENTS.md → "Degradation log levels"
+  (#4632): the line names the record (`<object>` record #i), the field, the target
+  `<object>.<field>` it could not find, and the **consequence** (the whole record
+  was not seeded — not merely the association), followed by all three **remedies**
+  — seed the target object first, enable `multiPass` so pass 2 back-fills the
+  reference, or fix the natural key in the seed data.
+
+  The same objective criterion (does the outcome enter `errors`/`allErrors`?)
+  found one more never-logged branch in the same file and aligned it: a **deferred
+  reference still unresolved after pass 2** was counted exactly like its sibling
+  whose back-fill _write_ fails — which has logged at `error` since #4729 — and
+  logged nowhere. It now reports that the row was seeded while the relationship is
+  permanently missing, and how to complete it.
+
+  The **dry-run** branch stays deliberately quiet and is pinned that way by test:
+  a dry run writes nothing, its caller is by definition reading the result object,
+  and an `error` line about a simulated outcome only trains readers to skim
+  `error`. No counters, result shapes or messages in `result.errors` changed —
+  this is console output that was missing, not a contract change.
+
+- dca25e1: fix(metadata-protocol): `SysMetadataRepository` 的 `event_seq` / `version` 不再从一次失败的读里凭空发号 —— 只有「表还没建」可以从 1 开始 (#4867)
+
+  `SysMetadataRepository.nextEventSeq()` 与 `nextItemVersion()` 各有一个同形的 `catch`,把读
+  `sys_metadata_history` 的**全部**失败折成同一个答案:
+
+  ```ts
+  } catch {
+    // Table not provisioned yet (fresh DB) — start at 1.
+    return 1;
+  }
+  ```
+
+  这是 #4825 刚在 `DatabaseLoader`(TSDoc 自称 legacy、非事务的那条路径)上修掉的形状,原样长在
+  **canonical 路径**上 —— #4825 正文把 `SysMetadataRepository` 称作「历史写入应当收敛过去的地方」。
+  而且这里有两个数字:
+
+  - **`event_seq`** —— 历史排序与 rollback 定位的依据。表里已有 N 行时,一次瞬时读失败(连接抖动、
+    超时、权限)让下一条拿到 `1`,与既有行撞号;
+  - **`version`** —— `nextItemVersion()` 的 TSDoc 明说它刻意从 history 取 MAX「so delete + recreate
+    continues incrementing instead of restarting at 1」。一次读失败正好把它**恢复成它明确要避免的那个
+    行为**:lineage 从 1 重启并与既有 lineage 撞号,而 `MetadataManager.rollback(type, name, version)`
+    与 `POST /api/v1/meta/:type/:name/rollback` 正是按这个数字定位快照 —— 撞号之后回滚可能落到另一条
+    记录的同号版本上。
+
+  关键危害与 #4825 相同,是「**落盘的字节是错的**」而不是「字节没落盘」:insert 成功、日志一行没有、
+  系统对外完全正常,重试不修、重启也不修。
+
+  **「在事务里」并不能挡住它。** 事务解决的是*并发*撞号;它对「从一次失败的读推导出来的数字」没有任何
+  意见,一个成功提交的事务照样把错号提交得同样持久。事务真正给出的是干净的补救:抛出去,整笔写入回滚,
+  而不是提交一个编造的号。
+
+  现在按**错误类型**判别,复用 #4825 落地的那套判别器(不另起一套):
+
+  - **良性的「表还没建」** —— 没有行,就没有可撞的号,`1` 确实是下一个号,静默返回,fresh DB 照常启动;
+  - **其余一切读失败** —— 按 AGENTS.md「Degradation log levels」以 `error` 上报**后果**(写入已被中止、
+    事务回滚、什么都没提交;若按旧行为发 `1` 会与既有行撞号,使版本顺序不可信、回滚目标可能指向另一条
+    记录的同号版本,且无人能发现、重启也修不回来)与**修复动作**(修数据源/驱动错误后重试写入),然后
+    **原样抛出**,让事务回滚。一次故障只说一次,恢复时补一条 `info`。
+
+  ### `@objectstack/metadata` 新增子路径导出 `@objectstack/metadata/errors`
+
+  判别器 `isMissingTableError()`(#4728/#4825 家族)此前是 `@objectstack/metadata` 的内部工具,而本次
+  消费者在另一个包。三个选项中选了「从现有归属地**显式导出**」:在 `metadata-protocol` 里复制一份会重建
+  #4825 刚消灭的双源问题(同一个问题两套「哪些驱动错误算良性」的词汇表,谁先学会一个驱动怪癖谁就先漂移);
+  下沉到公共依赖本轮不可行(`packages/spec` 冻结、`packages/types` 有并行改动),且本次导出并不妨碍维护者
+  之后再下沉。
+
+  新增的是一个**叶子子路径**而不是包入口导出:`@objectstack/metadata` 的根入口会拖进 manager、全部
+  loader 与其 YAML/文件系统依赖,只为一个 40 行谓词付这个重量,正是把下一个作者推回「复制一份」的原因。
+  `@objectstack/metadata/errors` 只 re-export 一个叶子模块,跨包依赖边因此仍是叶子边,也是将来下沉时
+  一个可 grep、可删除的单点。仅导出 `isMissingTableError`;同族的 `isSchemaAlreadyExistsError` 在包外
+  没有消费者,保持内部(导出一个无人 import 的符号是白许的承诺)。
+
+  无 API 破坏、无 schema 变更、无 `packages/spec` 改动。
+
+- 38f53a0: fix(metadata-protocol): `updateMany` classifies an id-less row as a caller error, matching `batchData`'s update branch (#5100)
+
+  `runUpdateManyLoop` lacked the `!record.id` guard #4793 gave `runBatchDataLoop`'s
+  update branch, so the two by-id update faces classified the same malformed row
+  differently: `VALIDATION_FAILED`/400 on batch, but on `updateMany` the row fell
+  through to the #5088 existence probe as `{ id: undefined }` and came back
+  `RECORD_NOT_FOUND`/404 with `undefined` interpolated into the message — a
+  request-shape error reported as a data-state one, with the row's fate left to
+  each driver's undefined-where-key handling.
+
+  Not reachable over REST (`UpdateManyRecordSchema` requires `id`, #3939) — the
+  change is observable only to in-process callers of the protocol method, whose
+  id-less rows now answer `VALIDATION_FAILED`/400 (`Record id is required for
+update`) before any engine round-trip, identically on both faces (#4620: one
+  classification per file, enforced by a cross-face parity test). `record.data`
+  handling is aligned to the batch branch's `record.data || {}` in the same
+  change.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [c1e67e0]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [533a0a4]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [3133cda]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c794f78]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [641363a]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [ecc61ab]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [db0d53c]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [06ffad3]
+- Updated dependencies [811c30c]
+- Updated dependencies [2b2175b]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [d4edb5d]
+- Updated dependencies [eb26126]
+- Updated dependencies [be59695]
+- Updated dependencies [b2e1057]
+- Updated dependencies [ec6fad8]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [729a43a]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [123067c]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [5d3ced9]
+- Updated dependencies [4b50be4]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [461ccda]
+- Updated dependencies [5582e18]
+- Updated dependencies [58f3220]
+- Updated dependencies [f238970]
+- Updated dependencies [06fc07a]
+- Updated dependencies [61fde5e]
+- Updated dependencies [95b4f0d]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [b5459bc]
+- Updated dependencies [1624f4a]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [2f1e2a5]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [b821b29]
+- Updated dependencies [af96af6]
+- Updated dependencies [089767f]
+- Updated dependencies [5b8f95b]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [73580e7]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [da1a64c]
+- Updated dependencies [5e3c83b]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ddd6650]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [dca25e1]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [20963e7]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [e92e2c3]
+- Updated dependencies [946a131]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/lint@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/metadata@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

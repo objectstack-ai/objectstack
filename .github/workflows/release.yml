@@ -1,25 +1,124 @@
 name: Release
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TWO LANES, ONE INVARIANT: ONLY A HUMAN PUBLISHES. (#6170)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Maintainer ruling, 2026-08-07 (verbatim, do not translate):
+#
+#   「刚才我也没提出要求,是哪个ai自己替我发了 rc.4,版本发布必须是人工的。
+#     这个要写入规范。」
+#
+# WHAT THIS FILE USED TO DO, AND WHY IT MINTED TWO RELEASES NOBODY ASKED FOR
+# --------------------------------------------------------------------------
+# One job, triggered `on: push: branches: [main]`, so EVERY merge-queue landing
+# started it. Inside it, two steps in sequence:
+#
+#   1. changesets/action@v1 with a `publish:` script. With pending changesets it
+#      takes the version-PR path, which is (its own source, v1):
+#           git checkout -b changeset-release/main
+#           git reset --hard <github.context.sha>
+#           pnpm run version                     # ← bumps every package.json
+#           git add . && git commit -m 'chore: version packages'
+#           git push origin HEAD:changeset-release/main --force
+#      It never restores the workspace. The job therefore continues on the
+#      FRESHLY VERSIONED tree, not on main's state.
+#   2. "Ensure this version actually shipped" (`recover-publish`) read
+#      `packages/cli/package.json` FROM THAT WORKSPACE. It documented itself as
+#      "a no-op on the normal path, where main's version IS the last released
+#      one" — but after step 1 the workspace carries the NEXT version, which is
+#      ALWAYS absent from npm. So its repair branch fired and ran the real
+#      publish: 69 packages to npm + an atomic tag push at a commit that only
+#      ever existed on `changeset-release/main`.
+#
+# Twice, platform-stamped, with no human anywhere in the trigger chain:
+#   17.0.0-rc.3 — 2026-08-03, version commit c6a52d3  (cleanup #6135 → #6149)
+#   17.0.0-rc.4 — 2026-08-07, version commit a10cbc77 (cleanup #6169)
+# Run 31146224227 is the rc.4 receipt: event `push`, actor
+# `github-merge-queue[bot]`. The 4 quiet days in between are the same mechanism
+# reporting green — the computed next version happened to already be on npm.
+#
+# HOW THE LANES ARE SPLIT NOW
+# ---------------------------
+#   push to main  →  `version-pr`         keeps the "chore: version packages" PR
+#                                          (#4935) current. Carries NO publish
+#                                          capability: the changesets step is
+#                                          invoked WITHOUT a `publish:` script,
+#                                          so the action's publish branch is
+#                                          unreachable by construction, not by
+#                                          an `if:` someone can get wrong.
+#                 →  `release-integrity`   audits ONLY the version at
+#                                          `github.sha`. Never publishes, never
+#                                          pushes a tag. May backfill GitHub
+#                                          Releases / the ADR-0087 D4 asset /
+#                                          the runtime image — but only for a
+#                                          version ALREADY fully on npm, which
+#                                          is repair that cannot mint anything.
+#   workflow_dispatch → `publish`          the ONLY path that runs
+#                                          `changeset publish` or pushes a
+#                                          version tag. A dispatch event cannot
+#                                          be produced by a push, a bot merge or
+#                                          a queue landing — someone with write
+#                                          access clicks Run workflow and types
+#                                          the exact version. Additionally gated
+#                                          by `environment: release`.
+#
+# ⚠️ ONE-TIME MAINTAINER SETUP — the environment's teeth are NOT in this file.
+# `environment: release` below only creates the deployment gate; an environment
+# with no protection rules passes AUTOMATICALLY and silently. The approval click
+# exists only after a maintainer configures it:
+#     Settings → Environments → release → Required reviewers → add reviewer(s)
+# Until then the load-bearing guarantee is the `workflow_dispatch` trigger
+# itself, which already cannot fire without a human. Stated plainly rather than
+# implied, because an unprotected environment reads exactly like a protected one
+# in the run log.
+#
+# WHAT IS DELIBERATELY STILL AUTOMATIC
+# ------------------------------------
+# Version-PR maintenance (this file's `version-pr` job) stays on push runs —
+# harmless bookkeeping, and #4935 must keep regenerating. Release/D4/image
+# backfill for an already-published version stays on push runs — it is the
+# #4900 repair, and it cannot mint a version. `npm publish` and `git push --tags`
+# live in exactly one job, and that job has exactly one trigger.
+
 on:
   push:
     branches:
       - main
+  # The human lane. `workflow_dispatch` is the guarantee: no push, no merge
+  # queue landing, no bot token and no schedule can synthesise this event.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Exact version to publish, e.g. 17.0.0-rc.5. Must equal
+          packages/cli/package.json on the selected branch (main). Typing it is
+          the human confirmation the 2026-08-07 ruling requires — a mismatch
+          fails the run before anything is published.
+        required: true
+        type: string
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+# Per-lane groups, NOT one shared group. GitHub keeps at most ONE pending run per
+# group: when a second run queues behind a running one, the older PENDING run is
+# cancelled. Under one group a burst of main pushes would therefore evict a
+# maintainer's queued publish silently — the click would simply evaporate. Split
+# by event so the two lanes can never displace each other; still no
+# `cancel-in-progress`, so same-lane runs serialise instead of racing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Release
+  # ══════════════════════════════════════════════════════════════════════════
+  # PUSH LANE 1 — version-PR bookkeeping. Structurally cannot publish.
+  # ══════════════════════════════════════════════════════════════════════════
+  version-pr:
+    name: Version PR maintenance
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-    outputs:
-      # Either publish path counts (see the recovery step below) — the Docker
-      # image must ship for a release the fallback rescued just as much as for
-      # one the Changesets action published itself.
-      published: ${{ steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.published == 'true' }}
-      cli-version: ${{ steps.cli-version.outputs.version || steps.recover-publish.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -27,9 +126,6 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Cannot go below 22: the downstream hotcrm smoke below clones
-          # hotcrm@v1.2.0, whose manifest pins engines.node >=22. pnpm install
-          # aborts with ERR_PNPM_UNSUPPORTED_ENGINE under that.
           node-version: '22'
 
       - name: Enable Corepack
@@ -51,10 +147,298 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      # This job ran the full workspace build cold on every main push (~4½
-      # min) — the same omission lint.yml's typecheck job had. Same key scheme
-      # as ci.yml. Runs only on main pushes, so plain save+restore is right
-      # here (this job is one of the cache seeders).
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Decides WHAT the version pass will bump, so it belongs on this lane too
+      # (the publish lane runs it again — a gate on one lane is not a gate on
+      # the other).
+      - name: Verify Changesets "fixed" group covers every public package
+        run: node scripts/check-changeset-fixed.mjs
+
+      # `pnpm run version` = changeset version + sync-protocol-version +
+      # sync-template-versions. All three are pure file rewrites; none reads a
+      # built artifact. The workspace build, the vendored Console build and the
+      # live hotcrm smoke that used to run here were PRE-PUBLISH gates — they
+      # moved to the `publish` job below, where the publish they gate now lives.
+      # Leaving them here would gate nothing and cost ~9 minutes of every main
+      # push.
+      # Quoted because the name embeds `: ` — YAML would otherwise read it as a
+      # nested mapping (caught by check:workflow-status-functions' self-test).
+      - name: 'Create or update the "chore: version packages" PR'
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          # ⛔ THERE IS NO `publish:` INPUT HERE, AND THAT IS THE FIX. ⛔
+          #
+          # Not an oversight and not a style choice — it is what makes this lane
+          # structurally unable to publish, per #6170. changesets/action@v1
+          # branches on `hasPublishScript = !!publishScript` (src/index.ts):
+          #
+          #     case !hasChangesets && !hasPublishScript:
+          #       core.info("No changesets present or were removed by merging
+          #                  release PR. Not publishing because no publish
+          #                  script found.");
+          #       return;
+          #     case hasChangesets:
+          #       await runVersion({...});   // version PR only
+          #
+          # With no publish script, `runPublish` is not reachable from any input
+          # state the action can observe. Adding one back here re-arms the exact
+          # lane that minted rc.3 and rc.4 without a human.
+          version: pnpm run version
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+          # No-op without a publish script. Kept so that re-adding one can never
+          # silently resurrect #4900: the action posts each package's raw
+          # CHANGELOG section as the Release body, and @objectstack/spec's
+          # section for a single v17 RC is ~343k characters against the API's
+          # 125,000 limit. Releases are created by scripts/release-github-releases.mjs.
+          createGithubReleases: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # PUSH LANE 2 — release integrity audit. Reads github.sha ONLY. Never mints.
+  # ══════════════════════════════════════════════════════════════════════════
+  release-integrity:
+    name: Release integrity (audit + no-mint backfill)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      # `contents: write` is for GitHub Releases, never for refs: this job runs
+      # no `git push` of any kind.
+      contents: write
+    outputs:
+      # "the docker job must build" — set only when npm ALREADY has this
+      # version and its runtime image is missing.
+      published: ${{ steps.audit.outputs.image-missing }}
+      cli-version: ${{ steps.audit.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # ──────────────────────────────────────────────────────────────────────
+      # R2 — the probe may only ever see the version main ACTUALLY carries.
+      #
+      # This job deliberately does not contain the changesets action, so no step
+      # can re-version its workspace. Belt and braces on top of that: the version
+      # is read out of the OBJECT DATABASE at `github.sha`, not off disk, and a
+      # tripwire fails the run if the two ever disagree. Had this shape existed
+      # on 2026-08-03 the run would have gone red instead of publishing rc.3.
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Audit the release that main actually carries
+        id: audit
+        env:
+          SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(git show "${SHA}:packages/cli/package.json" | jq -r '.version')
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::could not read @objectstack/cli version at ${SHA}"
+            exit 1
+          fi
+
+          # Tripwire, not decoration: this is the exact assertion the old
+          # recover-publish step lacked. A workspace that disagrees with
+          # github.sha means something re-versioned the tree, and that is the
+          # #6170 mechanism — refuse to act on it rather than probe it.
+          tree_version=$(jq -r '.version' packages/cli/package.json)
+          if [ "$tree_version" != "$version" ]; then
+            echo "::error::workspace carries @objectstack/cli@${tree_version} but ${SHA} carries ${version} — something re-versioned this workspace (#6170). Refusing to audit a version main does not have."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "main (${SHA}) carries @objectstack/cli@${version}"
+
+          # ── npm ───────────────────────────────────────────────────────────
+          if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
+            # ⛔ A push run NEVER publishes (#6170 R3). Between merging the
+            # version PR and a maintainer running the publish lane this is the
+            # NORMAL, expected state — so it is reported, loudly, and the run
+            # stays green. Red here would fire on every push for hours or days
+            # and train everyone to ignore it.
+            echo "::warning::main carries @objectstack/cli@${version}, which is NOT on npm. This lane cannot publish it — that is deliberate (#6170). Run it: Actions → Release → Run workflow → version = ${version}."
+            {
+              echo "## Release pending a human"
+              echo
+              echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is not on npm."
+              echo
+              echo "This is expected right after the \`chore: version packages\` PR merges."
+              echo "Push runs are structurally unable to publish (#6170); to ship it:"
+              echo
+              echo "1. **Actions → Release → Run workflow**, branch \`main\`"
+              echo "2. version = \`${version}\`"
+              echo "3. Approve the \`release\` environment if required reviewers are configured"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "npm: @objectstack/cli@${version} is present."
+
+          # From here on, every repair is over an ALREADY-PUBLISHED version, so
+          # none of it can mint anything. This is the #4900 case — published,
+          # then died before the Releases / D4 asset / image existed.
+
+          # ── GitHub Releases + the ADR-0087 D4 asset ───────────────────────
+          # Two anchors, not all 69: @objectstack/cli is the fixed group's
+          # canary and @objectstack/spec is both the historical failure (its
+          # ~343k body hit the API's 125k limit) and D4's mount point. The
+          # backfill itself is idempotent create-or-update across the whole set.
+          releases_ok=true
+          gh release view "@objectstack/cli@${version}"  >/dev/null 2>&1 || releases_ok=false
+          gh release view "@objectstack/spec@${version}" >/dev/null 2>&1 || releases_ok=false
+          if [ "$releases_ok" = true ]; then
+            gh release view "@objectstack/spec@${version}" --json assets \
+              --jq '.assets[].name' 2>/dev/null | grep -qx 'spec-changes.json' || releases_ok=false
+          fi
+          if [ "$releases_ok" = true ]; then
+            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
+          else
+            echo "::warning::@objectstack/cli@${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
+            echo "releases-missing=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # ── runtime image ─────────────────────────────────────────────────
+          # A failed probe counts as MISSING on purpose: a redundant rebuild
+          # costs a few minutes, a wrongly-skipped one leaves a published npm
+          # version with no image and nothing to say so.
+          if token=$(curl -fsS "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY}:pull&service=ghcr.io" 2>/dev/null) \
+            && token=$(node -p 'JSON.parse(process.argv[1]).token' "$token" 2>/dev/null) \
+            && curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
+                 -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                 -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+                 "https://ghcr.io/v2/${GITHUB_REPOSITORY}/manifests/$version" 2>/dev/null
+          then
+            echo "ghcr: image for $version is present — release is complete."
+            exit 0
+          fi
+          echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
+          echo "image-missing=true" >> "$GITHUB_OUTPUT"
+
+      # Everything below is skipped on the overwhelmingly common path (nothing to
+      # repair), which is why the install is here rather than at the top of the job.
+      - name: Enable Corepack
+        if: steps.audit.outputs.releases-missing == 'true'
+        run: corepack enable
+
+      - name: Install dependencies
+        if: steps.audit.outputs.releases-missing == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Backfill GitHub Releases (bodies truncated to the API limit)
+        if: steps.audit.outputs.releases-missing == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No publish happened in this run, so there is no publishedPackages
+          # JSON. RELEASE_VERSION drives the whole publishable workspace — the
+          # Changesets `fixed` group releases every public package at one
+          # version, which check-changeset-fixed.mjs gates.
+          RELEASE_VERSION: ${{ steps.audit.outputs.version }}
+        run: node scripts/release-github-releases.mjs
+
+      - name: Backfill spec-changes.json on the GitHub Release (ADR-0087 D4)
+        # Ordering is load-bearing: `gh release upload` needs the Release the
+        # step above creates.
+        if: steps.audit.outputs.releases-missing == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.audit.outputs.version }}
+        run: bash scripts/release-spec-changes.sh
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # HUMAN LANE — the ONLY job in this repository that publishes.
+  # ══════════════════════════════════════════════════════════════════════════
+  publish:
+    name: Publish to npm (human-initiated)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # ⚠️ An environment with NO protection rules passes automatically — see the
+    # one-time setup note in this file's header. The trigger above is what
+    # guarantees a human today; this adds the approval click once
+    # Settings → Environments → release → Required reviewers is configured.
+    environment: release
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      cli-version: ${{ steps.guards.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Cannot go below 22: the downstream hotcrm smoke below clones
+          # hotcrm@v1.2.0, whose manifest pins engines.node >=22. pnpm install
+          # aborts with ERR_PNPM_UNSUPPORTED_ENGINE under that.
+          node-version: '22'
+
+      # ──────────────────────────────────────────────────────────────────────
+      # The publish lane may only ever ship a commit that is ALREADY on main.
+      # That is the other half of #6170's title: rc.3 and rc.4 tagged commits
+      # that lived only on `changeset-release/main`, so main kept stale versions
+      # and every later release recomputed an npm-occupied number. Nothing here
+      # runs `changeset version`; this job publishes what the ref carries, or it
+      # fails.
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Guard the dispatch (branch, version, human confirmation)
+        id: guards
+        env:
+          # Human-supplied text: read through env, never interpolated into the
+          # shell.
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::the publish lane may only run on main (got ${GITHUB_REF}). Publishing from any other ref would tag and ship code that never landed."
+            exit 1
+          fi
+
+          declared=$(jq -r '.version' packages/cli/package.json)
+          if [ "$REQUESTED" != "$declared" ]; then
+            echo "::error::you asked to publish '${REQUESTED}' but main carries @objectstack/cli@${declared}. Merge the 'chore: version packages' PR (#4935) first, or re-run with the version main actually has."
+            exit 1
+          fi
+
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
+          echo "Publishing @objectstack/cli@${declared} from ${GITHUB_SHA} (confirmed by ${GITHUB_ACTOR})."
+          {
+            echo "## Publishing ${declared}"
+            echo
+            echo "- ref: \`${GITHUB_REF}\` @ \`${GITHUB_SHA}\`"
+            echo "- requested by: \`${GITHUB_ACTOR}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Mostly a CONSUMER now, not a seeder: this job used to run on every main
+      # push and warmed the cache for everyone; it now runs only when a human
+      # publishes. lint.yml's "Save Turbo cache (main only)" is the seeder. The
+      # key is namespaced by `github.job`, which changed from `release` to
+      # `publish` — the first release after this PR builds cold once.
       - name: Setup Turbo cache
         uses: actions/cache@v6
         with:
@@ -70,19 +454,35 @@ jobs:
       - name: Verify Changesets "fixed" group covers every public package
         run: node scripts/check-changeset-fixed.mjs
 
+      # ──────────────────────────────────────────────────────────────────────
+      # R4 (#6170) — the gate the old lane skipped, now ON the publish path.
+      #
+      # `check:objectui-pin-fresh` (#3340) was required on the Version Packages
+      # PR only, so a lane that published without going through that PR never
+      # ran it: rc.4 shipped `.objectui-sha = f995a452` and dropped the 7-changeset
+      # objectui window (#6159) out of the release record. A gate that is required
+      # on a PR the publishing lane can skip is not a gate.
+      #
+      # ENFORCING here, deliberately: a stale pin means the release record is
+      # about to be wrong, and the remedy is to bump the pin (`pnpm
+      # objectui:refresh`), never to bypass this. There is no override input on
+      # purpose. Note this runs the SCRIPT directly — it is NOT added to any
+      # branch-protection required set, which #6121 warns would deadlock the
+      # merge queue until objectui-pin-freshness.yml grows a `merge_group:`
+      # trigger.
+      - name: Console pin is fresh (#3340 — enforcing on the publish path)
+        env:
+          # Only ITEMIZES an already-established lag (`git ls-remote` decides the
+          # verdict); the token keeps the API off the 60/hr anonymous limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm check:objectui-pin-fresh
+
       - name: Build
         run: pnpm run build
 
-      # The vendored Console dist is a pure function of the objectui pin (and
-      # of the build script itself) — yet it was cloned + vite-built from
-      # scratch on every main push (~3 min). Cache the finished dist keyed on
-      # exactly those inputs; the stamp check below still verifies whatever
-      # dist ends up in place, restored or fresh.
-      #
       # ci.yml's Console Pin Gate (#4290) uses this exact key, so the pin bump's
       # PR run and this job share one build — keep the two in step if either
-      # input set changes. That gate is now what proves the pin builds; by the
-      # time this job runs the SHA has already merged.
+      # input set changes.
       - name: Cache vendored Console dist (keyed on the objectui pin)
         id: console-dist-cache
         uses: actions/cache@v6
@@ -93,25 +493,17 @@ jobs:
       - name: Build vendored @objectstack/console SPA
         # Clones objectstack-ai/objectui at the SHA pinned in .objectui-sha,
         # builds @object-ui/console, and copies dist/ into
-        # packages/console/dist/. Must run before publish so the
-        # prepublishOnly guard in @objectstack/console passes. Skipped when the
-        # cache above restored a dist built from the same pin.
+        # packages/console/dist/. Must run before publish so the prepublishOnly
+        # guard in @objectstack/console passes.
         if: steps.console-dist-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-console.sh
 
-      # Belt-and-suspenders for the cache path: build-console.sh stamps the
-      # objectui SHA it built from into dist/.objectui-sha; check:console-sha
-      # fails loudly if the dist in place (restored or fresh) drifts from the
-      # pin.
       - name: Verify Console dist stamp matches pin
         run: pnpm check:console-sha
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must
         # not break a real third-party consumer pinned to a published release.
-        # Clones objectstack-ai/hotcrm@${HOTCRM_REF}, installs it (published
-        # deps), overlays the freshly-built spec dist, and runs hotcrm's own
-        # typecheck + `objectstack validate`. A red here blocks the publish.
         # The deterministic in-repo floor is @objectstack/downstream-contract;
         # this is the live ceiling.
         #
@@ -120,12 +512,8 @@ jobs:
         # major train exists precisely to ship deliberate surface removals, and
         # a hotcrm release migrated off them cannot exist until the rc.N
         # artifacts it would migrate against are published — blocking here
-        # deadlocks the train (observed 2026-07-27: every Release run red on
-        # the v17 window's removals, so the changesets step never even created
-        # the Version Packages PR). The gate re-arms by itself the moment
-        # `changeset pre exit` lands (mode flips / pre.json is consumed) —
-        # exactly when a migrated hotcrm must exist and HOTCRM_REF gets bumped
-        # per the note below.
+        # deadlocks the train. The gate re-arms by itself the moment
+        # `changeset pre exit` lands.
         env:
           # v2.1.0: hotcrm upgraded to ObjectStack 14.7 (hotcrm#448) and
           # dropped the agent `visibility` field that spec 15 removes as
@@ -145,204 +533,81 @@ jobs:
             bash scripts/downstream-smoke.sh
           fi
 
-      - name: Create Release Pull Request or Publish to npm
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          # publish (pnpm run release) ends in scripts/release-publish.sh,
-          # which pushes all new version tags in ONE atomic git push. This
-          # pre-empts changesets/action's own concurrent per-tag pushes, which
-          # otherwise race GitHub's ref backend (remote: fatal error in
-          # commit_refs) and reject ~half the tags on a large fixed-group bump (#2191).
-          publish: pnpm run release
-          version: pnpm run version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
-          # GitHub Releases are created by the step below instead (#4900). The
-          # action posts each package's raw CHANGELOG section as the Release
-          # body, and @objectstack/spec's section for a single v17 RC is ~343k
-          # characters against the API's 125,000 limit — so the POST 422'd,
-          # INSIDE runPublish and therefore BEFORE `published` was set. npm had
-          # already published; the step went red anyway, `published` stayed
-          # false, and the docker job was skipped. The section only grows, so it
-          # failed identically every release in the window: spec has no Release
-          # for 17.0.0-rc.0/rc.1/rc.2 (all 404), while 16.0.0 and 16.1.0 — 62,886
-          # and 1,523 characters — have theirs, with the ADR-0087 D4
-          # spec-changes.json asset that uploads onto it.
-          #
-          # NOTE this also disables the action's own per-tag `git push` — those
-          # calls live inside the same `if (createGithubReleases)` block in
-          # runPublish. That is a bonus, not a loss: scripts/release-publish.sh
-          # already pushes every tag in ONE atomic `git push origin --tags`
-          # precisely because the action's concurrent per-tag pushes raced
-          # GitHub's ref backend (#2191). The workaround's own cause is now gone.
-          createGithubReleases: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Ensure this version actually shipped (npm + runtime image)
-        id: recover-publish
-        # `!cancelled()` is load-bearing, not decoration. GitHub wraps an `if:`
-        # naming no status function in an IMPLICIT success(), so the first
-        # version of this step — `if: steps.changesets.outputs.published !=
-        # 'true'` — could not fire in one of the two cases it exists for: the
-        # changesets step itself failing. On 89d2a4e it did exactly that. npm
-        # publish and the atomic tag push both succeeded, then creating the
-        # @objectstack/spec GitHub Release failed on the API's 125k body limit
-        # (#4900); the step went red, `published` stayed false, this step was
-        # skipped, and the 17.0.0-rc.2 runtime image was silently lost.
-        if: ${{ !cancelled() && steps.changesets.outputs.published != 'true' }}
-        # It also guards an INVARIANT rather than performing an action: the
-        # version in this repo must be on npm AND must have a matching runtime
-        # image. "Publish whatever is missing" — the first contract — was not
-        # enough: 89d2a4e's version was already on npm, so a publish-only step
-        # would have no-opped and lost the image just the same.
-        #
-        # The two ways the invariant breaks, both observed within one day:
-        #   - nothing published at all: changesets/action reaches its publish
-        #     branch only with ZERO pending changesets, and an EMPTY changeset
-        #     still counts, so a main carrying only empty ones prints "All
-        #     changesets are empty; not creating PR" and returns — no version
-        #     PR, no publish, and a GREEN run (#4898);
-        #   - published, then died before reporting it (#4900, above).
-        # `changeset publish` skips versions already on the registry, so the
-        # repair is idempotent and the whole step is a no-op on the normal path,
-        # where main's version IS the last released one and its image exists.
+      # ──────────────────────────────────────────────────────────────────────
+      # The publish itself. `pnpm run release` = build + build-console +
+      # scripts/release-publish.sh, which is `changeset publish` followed by ONE
+      # atomic `git push origin --tags` (#2191: the action's concurrent per-tag
+      # pushes raced GitHub's ref backend and lost ~half the tags).
+      #
+      # changesets/action is NOT used here, and that is deliberate: handed a
+      # workspace with pending changesets it would take the VERSION path and mint
+      # a commit. `changeset publish` can only ever publish the versions the
+      # checked-out package.json files already declare — the versions the guard
+      # step above proved main carries.
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Publish to npm + push version tags
+        id: publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.guards.outputs.version }}
         run: |
-          version=$(node -p "require('./packages/cli/package.json').version")
-          # Emitted unconditionally: the two facts this step can establish —
-          # "npm needed repairing" and "the image is missing" — are independent,
-          # and both consumers need the version regardless of which fired.
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # ── npm ─────────────────────────────────────────────────────────────
-          if npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-            echo "npm: @objectstack/cli@$version is present."
-          else
-            echo "::warning::@objectstack/cli@$version is versioned in this repo but absent from npm, and the Changesets action did not publish it (#4898) — publishing it now."
-            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            pnpm run release
-            if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-              echo "::error::publish ran but @objectstack/cli@$version is still not on npm"
-              exit 1
-            fi
-            echo "::warning::Recovered npm packages and git tags. The GitHub Releases and the ADR-0087 D4 spec-changes attachment are created by the steps below, which follow this recovery path too (#4900)."
-            # Distinct from `published` below, which means "the docker job must
-            # build". This one means "a publish happened here", which is what
-            # the Release/D4 steps key off — an npm repair whose image happens to
-            # exist still owes its GitHub Releases.
-            echo "npm-published=true" >> "$GITHUB_OUTPUT"
+          pnpm run release
+
+          # `changeset publish` skips versions already on the registry, so a
+          # re-dispatch over a partially-published release is a repair, not a
+          # duplicate. What is NOT optional is that the version is on npm when
+          # this step ends.
+          if ! npm view "@objectstack/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::publish ran but @objectstack/cli@$VERSION is still not on npm"
+            exit 1
           fi
-
-          # ── runtime image ───────────────────────────────────────────────────
-          # Reported through the job outputs so the `docker` job builds it. A
-          # failed probe counts as MISSING on purpose: a redundant rebuild costs
-          # a few minutes, a wrongly-skipped one leaves a published npm version
-          # with no image and nothing to say so.
-          if token=$(curl -fsS "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY}:pull&service=ghcr.io" 2>/dev/null) \
-            && token=$(node -p 'JSON.parse(process.argv[1]).token' "$token" 2>/dev/null) \
-            && curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
-                 -H 'Accept: application/vnd.oci.image.index.v1+json' \
-                 -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-                 "https://ghcr.io/v2/${GITHUB_REPOSITORY}/manifests/$version" 2>/dev/null
-          then
-            echo "ghcr: image for $version is present — release is complete."
-            exit 0
-          fi
-
-          echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Releases (bodies truncated to the API limit)
-        id: github-releases
-        # Replaces the Changesets action's own createGithubReleases (#4900).
-        # Same tag, name, prerelease rule and changelog-entry body — the body
-        # extractor is a direct port of the action's getChangelogEntry, verified
-        # to reproduce the real @objectstack/cli@17.0.0-rc.2 release body exactly
-        # — plus the three properties it lacked: bodies truncated to fit the
-        # 125,000-character limit with a link to the full CHANGELOG entry,
-        # idempotent create-or-update so a re-run over a partially-created set
-        # cannot 422, and per-package isolation so one bad package no longer
-        # abandons the rest of the fixed group (the action ran them under a
-        # single Promise.all).
-        #
-        # `!cancelled()` for the same reason the recovery step above carries it:
-        # a bare `if:` is implicitly wrapped in success(), which would skip this
-        # for exactly the failures it exists to survive.
-        #
-        # Runs on BOTH publish paths. `npm-published` — not `published`, which
-        # means "the docker job must build" — is the recovery path's signal that
-        # packages went out and therefore owe Releases.
-        if: ${{ !cancelled() && (steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.npm-published == 'true') }}
+        # `!cancelled()` rather than the implicit success(): npm is already
+        # public by the time this runs, so a failure upstream must not be the
+        # reason the release record stays empty (#4900).
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Authoritative when the action published. Empty on the recovery path,
-          # where RELEASE_VERSION drives the whole publishable workspace instead
-          # (the Changesets `fixed` group bumps every public package in lockstep,
-          # which scripts/check-changeset-fixed.mjs gates).
-          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
-          RELEASE_VERSION: ${{ steps.recover-publish.outputs.version }}
+          # The fixed group releases every public package at one version, so the
+          # version alone drives the whole publishable workspace.
+          RELEASE_VERSION: ${{ steps.guards.outputs.version }}
         run: node scripts/release-github-releases.mjs
 
       - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
-        # Rebuilds the change manifest with the api-surface diff against the
-        # previously PUBLISHED spec (reusing the ADR-0059 §3 gate artifact) and
-        # uploads it to the @objectstack/spec release the step above created.
-        # The npm artifact carries the registry-derived copy.
-        #
-        # This is the D4 mount point, and it is why #4900 could not be answered
-        # by simply turning createGithubReleases off: `gh release upload` needs a
-        # Release to upload ONTO. Measured while fixing this — spec has no
-        # Release for 17.0.0-rc.0/rc.1/rc.2, so D4 has in fact been unmounted for
-        # the whole v17 RC window; 16.0.0 and 16.1.0 both carry the asset.
-        # Ordering is load-bearing: this step must follow the one above.
-        if: ${{ !cancelled() && (steps.changesets.outputs.published == 'true' || steps.recover-publish.outputs.npm-published == 'true') }}
+        # Ordering is load-bearing: `gh release upload` needs the Release the
+        # step above created.
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
-          RELEASE_VERSION: ${{ steps.recover-publish.outputs.version }}
+          RELEASE_VERSION: ${{ steps.guards.outputs.version }}
         run: bash scripts/release-spec-changes.sh
 
-      - name: Extract published @objectstack/cli version
-        id: cli-version
-        if: steps.changesets.outputs.published == 'true'
-        # The fixed group bumps every public package in lockstep, so the CLI
-        # is always in publishedPackages when a publish happened. Passed via
-        # env (not inline interpolation) to avoid shell-quoting the JSON.
-        env:
-          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
-        run: |
-          version=$(jq -r '.[] | select(.name=="@objectstack/cli") | .version' <<<"$PUBLISHED")
-          if [ -z "$version" ]; then
-            echo "::error::publish succeeded but @objectstack/cli is missing from publishedPackages"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
+  # ══════════════════════════════════════════════════════════════════════════
+  # Runtime image — fed by either lane. Building an image for a version that is
+  # already on npm cannot mint anything, so the push lane may request it.
+  # ══════════════════════════════════════════════════════════════════════════
   docker:
     name: Docker image
-    needs: release
-    # Publish the official runtime image (ghcr.io/objectstack-ai/objectstack)
-    # for every npm release. Called as a reusable workflow so the same build
-    # can be re-run manually via workflow_dispatch (e.g. base-image CVE
-    # rebuilds) — see docker-publish.yml.
+    needs: [release-integrity, publish]
+    # Publish the official runtime image (ghcr.io/objectstack-ai/objectstack).
+    # Called as a reusable workflow so the same build can be re-run manually via
+    # workflow_dispatch (e.g. base-image CVE rebuilds) — see docker-publish.yml.
     #
-    # `!cancelled()` rather than the default implicit success(): the release job
-    # can publish to npm and THEN fail (89d2a4e died creating the spec GitHub
-    # Release, #4900). A dependent job guarded by success() is skipped for any
-    # upstream failure, so the image was lost to a fault that happened after the
-    # packages were already public. The `published` output — which the recovery
-    # step above sets when an image is missing — is the real gate; the job's
-    # exit status is not.
-    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
+    # `!cancelled()` rather than the default implicit success(): exactly one of
+    # the two upstream jobs runs on any given event, so the other is always
+    # SKIPPED — under the implicit success() this job would then never run at
+    # all. It also survives a publish job that reached npm and then died
+    # (#4900). The outputs are the gate; the jobs' statuses are not.
+    if: ${{ !cancelled() && (needs.release-integrity.outputs.published == 'true' || needs.publish.outputs.published == 'true') }}
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/docker-publish.yml
     with:
-      version: ${{ needs.release.outputs.cli-version }}
+      version: ${{ needs.publish.outputs.cli-version || needs.release-integrity.outputs.cli-version }}

@@ -1,5 +1,374 @@
 # @objectstack/types
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 28ad90e: feat(types,cloud-connection,lint,cli): ADR-0120 17.x 收尾 —— `isolated` 安装期姿态硬门(D5e)、D5c 重拼写 advisory、成文契约扫荡与三姿态 conformance (#5081)
+
+  ADR-0120 17.x 波的第三块,也是最后一块。前两块已在 main 上:#5212(driver 侧
+  D3+D4 —— `COALESCE(organization_id, '__global__')` 物化、drift 两侧同步、重复预检)
+  与 #5208(spec 词汇 `'organization'` + D5a/D5b lint)。本次补齐三件事:安装期的
+  姿态决策点、剩余的成文契约、以及把「一个 app 包跑遍三种姿态」从假设变成测试。
+
+  **D5e —— 装进 `isolated` 环境时的硬门。** 词汇本身是姿态无关的:作者说的是业务
+  边界(`'organization'` 一个组织一份 / `'global'` 整个安装一份),没有任何索引形状
+  读姿态。唯一的残留在一个方向上:`isolated` 下组织就是**不同客户**,此时 app 业务
+  对象上的 `'global'` 唯一既跨客户过度约束,又变成跨客户的存在性预言机(S10/S14)。
+  维护者裁定这是**硬门而非 advisory**:把带 `'global'` 唯一(非 `sys` 对象)的 app
+  装进 `isolated` 环境会**停下来并逐索引列出**,安装者(通常是 AI agent)要么确认它
+  确实是平台级的,要么改写为 `'organization'`;确认按 ADR-0104 attestation 风格
+  留痕在安装清单里(`InstalledManifestEntry.globalUniqueAttestation` —— 确认了什么、
+  谁确认的、何时、在哪个姿态下问的),**之后不复问**。
+
+  - 停下的安装**什么都不留**:先于 hot-register 和任何 ledger 写入,所以作者改完
+    元数据可以直接重试,不需要先卸载。
+  - 逐索引确认是有牙齿的:`confirmGlobalUniques` 收 `true` 或明确的 id 数组,只确认
+    其中一条仍会在剩下的那条上停住。
+  - 升级引入的**新**约束会被问,老的答案继续算数。
+  - 另一个姿态下给出的确认**不算同意** —— `isolated` 那个问题在 `single` 下从未被
+    问过,所以按「未确认」处理(唯一不会静默放行跨客户约束的方向)。
+  - ⛔ **永不做成启动期告警**(#4884 纪律)。boot 时的 rehydrate 不评估此门;门够不到
+    的两类存量 —— 门禁上线前的安装、装后姿态变更的环境 —— 由 `os doctor` 与
+    `os migrate plan` 的 advisory 形态覆盖。
+
+  判定里有三条是承重的,别「简化」掉:声明索引上的裸 `unique: true` **算**(D1 说它
+  就是 `'global'` 的位置式拼写,排除它等于让整个 17.x 可以靠拼写绕过);字段级
+  `true` **不算**(它是 `'organization'`,永久合法);`sys_`/`base_` 对象**不算**
+  (S5 那批引擎幂等键天然就是平台级的,每次安装都问一遍就是 #4884 的误报类)。
+
+  CLI: `os package install` 新增 `--confirm-global-uniques`,并把 409 渲染成可读的
+  逐条清单而不是一句 "Install failed (409)"。
+
+  **D5c —— 遗留手写组织复合索引的 advisory。** 新规则
+  `unique/legacy-organization-composite`:声明的唯一索引自己列出了组织列
+  (`{ fields: ['name','organization_id'], unique: true }`)—— 这是词汇出现之前手写
+  per-organization 的写法。它读起来像「每组织唯一」,物化出来却是普通复合索引,而
+  SQL UNIQUE 是 NULL-distinct 的:组织列为 NULL 的行上它**什么都不约束**(#5030),
+  在单组织部署上那就是每一行。改写成 `unique: 'organization'`(`fields` 原样保留,
+  driver 会把已列出的组织列**就地**变成 NULL-safe 形式)正是补上这个洞的动作。
+  **永远只是 advisory,永远不自动修**:老拼写永久合法、零强制 drift,而 opt-in 是
+  真实的物理收紧,要走 D4 的 `recreate_index` + 重复预检。
+
+  **D6 —— 成文契约扫荡。** `content/docs/data-modeling/indexing.mdx` 的
+  §Two ways to say "unique" 全节按新词汇重写(含 `os:check` 代码块);
+  `content/docs/protocol/objectql/schema.mdx` 的 §Uniqueness and tenancy 重写为
+  §Uniqueness and scope —— 其中那句「单租户部署不受影响,租户列是常量,复合索引
+  退化为单列索引」是 #5030 **证伪过的原话**,现已替换为 D3 的 NULL-safe 事实;
+  `content/docs/deployment/cli.mdx` 的 `replace_unique_index` / `recreate_index`
+  条目补上 NULL-safe 形状与重复预检;`content/docs/references/**` 经
+  `gen:schema && gen:docs` 再生成,未手改。
+
+  按 ADR-0120 Resolved #2 的非规范性引导(官方示例/脚手架/生成器在新代码中输出
+  显式拼写),`skills/objectstack-data/**` 的索引与校验规则整体扫过:声明索引一律
+  说清 scope,并新增一节完整讲 `'organization'` 的 NULL-safe 语义与「永远不写姿态」。
+  顺带修掉那里长期使用的 `tenant_id` —— 平台的列叫 `organization_id`。
+  `examples/**`、`create-objectstack` 模板与 `os generate` 经核查**根本没有声明任何
+  唯一约束**,故无可扫;这是核查结论,不是遗漏。
+
+  **三姿态 conformance(ADR §Acceptance tests)。** 同一个 fixture app 在
+  `single | group | isolated` 三姿态下启动,逐 S 行用**真实的违规插入**断言 enforcement
+  (S1/S2/S3/S4/S5/S6/S7/S8/S9/S11/S12),并逐姿态捕获物化出的索引键,断言三者
+  **逐字节相同** —— 「没有任何索引形状读姿态」这句话一旦有两者不同就是假的。相同性
+  断言配了一条正向断言(对着期望的键形状),这样「三次都什么都没建」不会读成「一致」。
+  外加 ADR 只要的那一条 transition smoke:在 `single` 下建库、`isolated` 下重新打开,
+  drift op 为零。
+
+  对既有部署的影响:除新增的安装期确认外,本次不改变任何已有物化行为。字段级
+  `unique: true` 一如既往合法。
+
+- 64cd010: fix(runtime,types)!: `/analytics/query` no longer echoes RLS policy field names — the declared-server-fault withhold is shared by both HTTP boundaries (#5811)
+
+  **Observable behaviour change — read this if you read, log, or assert on
+  `error.message` from a dispatcher-plugin route.** An error that **declares a
+  server fault** in the ADR-0112 envelope (`status >= 500` _and_ a non-empty
+  `code`) now leaves `dispatcher-plugin.errorResponseBase` with its message
+  replaced by `"Internal server error"`. It previously reached the caller verbatim
+  unless it happened to _sound_ like a SQL/driver dump. This applies to every route
+  that plugin mounts — `/analytics`, `/packages`, `/i18n`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`, … — not only the one that motivated it. Nothing a
+  machine reads changed: the producer's `code` still arrives in the response
+  (`error.code`, promoted there from `details` by the shared envelope builder,
+  #3842), the status is untouched, and the full original text still goes to the
+  server log and `errorReporter` via `__obsRecordedError`.
+
+  ## What was wrong
+
+  #5367 (maintainer ruling 2026-08-06) made `read-scope-sql.ts`'s ten fail-closed
+  RLS lowering refusals `READ_SCOPE_COMPILE_FAILED` / 500 and taught
+  `POST /analytics/dataset/query` to withhold their message, because those messages
+  name the field names and comparands of an **administrator's** sharing rule:
+
+  ```
+  [read-scope-sql] unsafe field identifier "secret_policy_field" — refusing to
+  build read scope (fail-closed).
+  ```
+
+  The caller never wrote that field name and must not be able to read it out of an
+  error body. But the **sibling** analytics face was never closed.
+  `compileScopedFilterToSql` runs on both `NativeSQLStrategy.applyReadScope` and
+  `ObjectQLStrategy`'s echoed SQL, both of which serve `POST /analytics/query`,
+  which exits through `dispatcher-plugin.errorResponseBase`. That exit's only
+  message guard was `looksLikeInternalErrorLeak` — a heuristic over SQL/driver
+  _phrasing_ — and all eleven read-scope message shapes return `false` from it.
+  Measured at that boundary: **11 of 11 echoed verbatim**, at 500, with the policy
+  content in `error.message`. A real reachable disclosure, not a theoretical one.
+
+  ## What changed
+
+  - **`@objectstack/types` gains `declaresServerFault(err)`**, exported from
+    `error-leak.ts` beside `looksLikeInternalErrorLeak`. The heuristic asks whether
+    a message _sounds_ internal; the declaration asks whether the producer _said
+    so_. `error-leak.ts`'s own file header already states the principle — "do not
+    ship driver internals to clients" is a property of the HTTP boundary, not of
+    one router — and this is the second predicate that principle asks for.
+  - **Both boundaries read it.** `dispatcher-plugin.errorResponseBase` gains the
+    withhold (the fix); `rest-server.ts`'s `/analytics/dataset/query` catch drops
+    its in-line copy of the same test in favour of the shared one. #5808 wrote that
+    rule in-line on purpose — promoting a rule with one consumer is a speculative
+    surface — and this is the second consumer, so it was promoted rather than
+    duplicated (`#3843`/`#3867` paid for the two-implementations shape twice).
+    The REST face's verdict is unchanged in every case: same `status >= 500` plus
+    non-empty `code` test, over the same two fields.
+
+  ## What deliberately did NOT change
+
+  - ⛔ **This is not "withhold every 5xx".** #5667 kept **undeclared** 5xx errors
+    legible on purpose: a bare `Error` from our own code ("no strategy can handle
+    query …") is the operator's own bug report, names nothing tenant-sensitive, and
+    still falls to `looksLikeInternalErrorLeak` alone. A 5xx carrying only half an
+    envelope (a status with no code) is likewise still readable — inventing the
+    withhold for it would be the consumer-side leniency Prime Directive #12 removes.
+  - **4xx is untouched.** `declaresServerFault` requires `status >= 500`, so a
+    deliberate business/validation answer can never be swallowed by it.
+  - **`statusCode` is not accepted as a substitute for `status`.** `status` is the
+    channel ADR-0112 declares; making a disclosure rule depend on which spelling a
+    producer reached for would be the same leniency in a different place.
+  - **The heuristic was not taught to recognise `[read-scope-sql]`.** That would be
+    more prose sniffing — the mechanism #5352/#5367 exist to remove — and would only
+    ever cover the family someone remembered to add.
+
+  Coverage: `analytics-query-read-scope-withhold.test.ts` (runtime) drives six RLS
+  policy shapes end-to-end through a **real** `AnalyticsService` on the real
+  native-SQL path and the real mounted route, asserting the 500, that the whole
+  serialized body contains no policy detail, that `error.code` still carries
+  `READ_SCOPE_COMPILE_FAILED`, and that the full text is still on the
+  `__obsRecordedError` side-channel — plus a positive control and both sides of the
+  declared-vs-undeclared tiering. `error-leak.test.ts` (types) pins the predicate
+  directly, including that all eleven read-scope shapes stay invisible to the
+  heuristic. The REST face's existing `analytics-read-scope-refusal-envelope.test.ts`
+  is green before and after, unchanged, which is the pin on the refactor.
+
+- 02dc076: feat(types,cli,verify)!: 只解析 host app 声明过的包 —— `NODE_PATH` 不再算数,ADR-0093 D5 那道墙从此与启动方式无关 (#4719)
+
+  **问题:契约写下了,但从没被检查过。** `@objectstack/types/node` 的
+  `createHostRequire` 返回一个 CJS `createRequire`,而 CJS 解析认 `NODE_PATH`
+  (`Module.globalPaths`)。pnpm 生成的 bin shim 第一件事就是
+  `export NODE_PATH=<workspace>/node_modules/.pnpm/node_modules`,于是任何被工作区里
+  **任意一个包**传递依赖到的包都能"从 host app 解析成功" —— 跟这个 app 声明了什么毫无关系。
+
+  实测(cloud `apps/objectos-ee`,当时未声明 `@objectstack/organizations`):
+  `pnpm start`(经 shim)boot 成功、插件表里有 `Organizations`、ADR-0093 D5 一声不吭;
+  `node node_modules/@objectstack/cli/bin/run.js serve`(不经 shim)则
+  `✖ FATAL: tenancy posture 'isolated' was requested…` 并 exit 1。同一个 app、同一份
+  `package.json`、同一个 posture,**只因为进程是怎么被拉起来的**,走出两种结果。
+  而 D5 的报错一直在教 operator "declare it in the app's package.json" —— 那正是
+  CLI 从来没检查过的那件事。
+
+  **改法:声明即执行。** 解析前先读 `<hostRoot>/package.json`;只有包名出现在
+  `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`
+  的 **键**里,才去 host 的 `node_modules` 里查它。仅仅"能被解析到"不再算数 ——
+  那正是让契约失效的那个偶然。未声明的包退回到 importing package 自身的解析
+  (ESM,不认 `NODE_PATH`),框架自有的包加载路径不受影响。
+
+  **两种失败从此分开报。** 今天它们都塌成同一条 `MODULE_NOT_FOUND`,补救办法却相反:
+
+  - **未声明** —— 指向"在 app 的 `package.json` 里声明并安装",并说明为什么
+    hoisting / `NODE_PATH` 不被接受;
+  - **声明了但解析不到** —— 明确说这是**安装**问题(`pnpm install`、生产 prune
+    砍掉了它、dist 没构建),别再让人回去重看那份已经写对的 `package.json`。
+
+  分类经新导出的 `hostImportFailureKind(err)` 暴露给调用方;两种错误都仍带
+  `code: 'MODULE_NOT_FOUND'`,`isModuleNotFoundError` 的既有判定不变。
+
+  **BREAKING — 哪类部署会从假绿变红,以及怎么修。**
+
+  1. **靠 hoisting 苟着的部署。** 一个 app 请求了 walled tenancy posture
+     (`OS_TENANCY_POSTURE=group` / `isolated` 或 `OS_MULTI_ORG_ENABLED=1`)、
+     却没在自己的 `package.json` 里声明 `@objectstack/organizations`,过去经 pnpm
+     shim 启动能正常 boot —— 现在会命中 ADR-0093 D5 并 exit 1。
+     **修法:在那个 app 的 `package.json` 里声明该依赖并安装。**
+     这些部署本来就在未声明状态下运行,红的是一直存在的事实,不是新引入的故障:
+     同一个 app 不经 shim 启动今天就已经是 exit 1。
+     (同样适用于 `@objectstack/service-ai` / `@objectstack/service-ai-studio`,以及
+     `bootStack({ multiTenant: true })`、dogfood 的 enterprise 门。)
+
+  2. **`createHostImporter` 的签名变了**,因为它现在需要 host 的**根目录**才能读到
+     那份 manifest,而一个 `NodeRequire` 无法被问出它锚在哪里:
+
+     ```diff
+     - createHostImporter(createHostRequire(hostRoot))
+     + createHostImporter(hostRoot)                     // 省略参数 = process.cwd(),同旧默认
+     ```
+
+     `createHostRequire` 本身保持不变,仍然导出。
+
+  新增导出(`@objectstack/types/node`):`HOST_DECLARATION_FIELDS`、
+  `HostDeclarationField`、`HostDeclaration`、`readHostDeclaration`、
+  `isDeclaredByHost`、`packageNameFromSpecifier`、`HostImportFailureKind`、
+  `HOST_IMPORT_FAILURE_KIND`、`hostImportFailureKind`。
+
+### Patch Changes
+
+- 08f93bc: fix(auth): `organization/create` gates on the authoritative `OS_TENANCY_POSTURE`, not the demoted `OS_MULTI_ORG_ENABLED` (#5233)
+
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — mounted the entire organization wall and still
+  answered `403 Creating additional organizations is disabled on this deployment.`
+  to `POST /api/v1/auth/organization/create`. Org-less users had no way to create
+  their workspace, so the guided "Create your workspace" path was a dead end.
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the canonical knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  Two sites in `AuthManager` kept reading the demoted boolean directly, so both
+  reported "single-org" on a deployment that had asked for a wall and got one:
+
+  - `organizationHooks.beforeCreateOrganization` — the 403 above. It now judges
+    `postureEnforcesWall(resolveTenancyPosture())`, matching the knob `serve.ts`'s
+    own ADR-0093 D5 boot guard keys on. Intent is unchanged (single-org still
+    refuses); only the knob is corrected.
+  - `/auth/config`'s `features.multiOrgEnabled` — its no-tenancy-service fallback
+    read the same boolean. It now falls back to the resolved posture, so a lean
+    embedding advertises the capability its own gate allows.
+
+  **No configuration change is needed anywhere.** Deployments that set only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  workaround people used to unblock themselves stays valid. Deployments that set
+  only `OS_TENANCY_POSTURE` can now drop the redundant boolean.
+
+  `resolveMultiOrgEnabled()`'s doc comment in `@objectstack/types` — which still
+  instructed "the auth manager's `/auth/config` feature flag and org-create guard
+  … MUST call this", written before the demotion — now says the opposite: ask the
+  posture, and never gate on this boolean. Its behaviour is unchanged.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

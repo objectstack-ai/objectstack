@@ -1,5 +1,1946 @@
 # @objectstack/cli
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- bcfebb0: fix(cli,plugin-email)!: `OS_EMAIL_PROVIDER=resend/postmark` without an API key now fails the boot instead of silently becoming the log transport (#5132)
+
+  **BREAKING for one configuration: a delivery provider selected without the
+  credential it needs.** `os serve` used to answer that by rewriting `provider` to
+  `log`, printing a warning, and booting normally. The result was a server that
+  accepted every send, recorded each one in `sys_email` as sent, and delivered
+  nothing — the warning scrolled past in CI logs and the truth surfaced when a
+  user reported never receiving a verification code. #5087 closed exactly this gap
+  inside `@objectstack/plugin-email` (`makeTransport` throws rather than
+  substituting a transport); the CLI's own capability assembly kept doing it one
+  layer up, for `resend` / `postmark`.
+
+  `resolveEmailCapabilityArg` now refuses every mail configuration it cannot
+  deliver through, the way its neighbouring `smtp` arm already did:
+
+  - `resend` / `postmark` with no `OS_EMAIL_API_KEY` (or `config.email.apiKey`);
+  - a `provider` tag outside `log` / `smtp` / `resend` / `postmark` — including
+    the retired `sendgrid` / `ses`, which get their SMTP migration in the message.
+
+  **Who is affected:** deployments (typically CI or preview environments) that set
+  `OS_EMAIL_PROVIDER=resend` or `=postmark` without a key and relied on the
+  fallback to boot. Nothing else changes — a complete configuration is passed
+  through untouched, and an unset `OS_EMAIL_PROVIDER` still defaults to `log`.
+
+  **Migration — one line, either direction:**
+
+  - the environment is _not_ meant to send mail → `OS_EMAIL_PROVIDER=log`
+    (that explicit value is the supported way to say so, and why refusing the
+    others is fair);
+  - the environment _is_ meant to send mail → set `OS_EMAIL_API_KEY` (or
+    `config.email.apiKey`).
+
+  Both errors name the consequence and both fixes, per AGENTS.md's
+  degradation-log-level rule.
+
+  `@objectstack/plugin-email` gains the vocabulary the CLI reads instead of
+  restating: `API_KEY_EMAIL_PROVIDERS`, `emailProviderRequiresApiKey()` and the
+  `ApiKeyEmailProvider` type, alongside `EMAIL_TRANSPORT_PROVIDERS` /
+  `isEmailTransportProvider` / `unsupportedProviderFix` from #5094. One vocabulary,
+  two consumers, pinned by a contract test — a second literal list in the CLI is
+  how the settings dropdown and the transports drifted apart in the first place.
+
+- de770bf: fix(cli,service-sms)!: `OS_SMS_PROVIDER=twilo` now fails the boot instead of silently becoming the log transport (#5713)
+
+  **BREAKING for one configuration: a provider tag no SMS transport can build.**
+  `os serve` used to hand `OS_SMS_PROVIDER` (or `config.sms.provider`) straight to
+  `SmsServicePlugin` with nothing to compare it against. The plugin then caught the
+  `makeSmsTransport: unknown provider 'twilo'` throw, substituted `LogSmsTransport`,
+  and booted normally — measured, not inferred:
+
+  ```
+  new SmsServicePlugin({ provider: 'twilo' }).init(ctx)
+    booted_without_throw: true            transport_class: 'LogSmsTransport'
+    isConfigured():       false           logger.warn × 1, logger.error × 0
+    service.send(…)    →  { status: 'sent', messageId: 'dev-sms-…' }
+  ```
+
+  So a phone-OTP sign-in answered "code sent", the user waited for an SMS that was
+  never dispatched, and the one `warn` line scrolled past in the boot log. That is
+  the declared-but-not-delivered shape of Prime Directive #10, and the same one
+  #5132 closed for **mail** in the neighbouring arm of the very same capability
+  loop.
+
+  Three gates already guard the `sms` provider value and none of them could see
+  this path: the `sms` settings namespace declares `provider` as a `select` with an
+  options table, #5131 enforces that table on the write path, and #5204 closed the
+  `SettingsService` env-override branch. All three live behind `SettingsService` —
+  this read happens while the kernel is being assembled, _before_ a settings
+  service exists.
+
+  **`resolveSmsCapabilityArg` now refuses a provider tag outside
+  `log` / `aliyun` / `twilio`**, the way its neighbouring `resolveEmailCapabilityArg`
+  already did, and the capability loop turns that into the loud failure it should
+  be — a hard boot error when the app declared `requires: ['sms']`, otherwise a
+  `console.error` and no SMS service.
+
+  **What it deliberately does NOT do:** demand credentials. Unlike mail, SMS
+  provider credentials are not a boot-time input — the `sms` settings namespace
+  binds them at `kernel:ready`, and that is their documented home. A bare
+  `OS_SMS_PROVIDER=twilio` on a host whose Twilio keys live in Settings is a
+  complete configuration and passes through untouched. `SmsServicePlugin`'s own
+  fallback is likewise untouched: for a _known_ provider with incomplete
+  constructor credentials it is correct (the settings bind can still swap in a
+  working transport), and it remains the last line of defence for hosts that
+  construct the plugin themselves. `os serve` simply stops feeding it input it can
+  never use.
+
+  **Who is affected:** deployments that set `OS_SMS_PROVIDER` (or
+  `config.sms.provider`) to a value outside the supported three — in practice a
+  typo, or a provider that was never implemented — and relied on the fallback to
+  boot. An unset `OS_SMS_PROVIDER` still defaults to `log`; every supported tag
+  still boots with or without credentials.
+
+  **Migration — one line, either direction:**
+
+  - the environment is _not_ meant to send SMS → `OS_SMS_PROVIDER=log` (that
+    explicit value is the supported way to say so, and why refusing the others is
+    fair);
+  - the environment _is_ meant to send SMS → fix the tag to `aliyun` or `twilio`
+    and put the credentials in Settings → SMS Delivery (or
+    `config.sms.providerOptions`).
+
+  The error names the consequence and both fixes, per AGENTS.md's
+  degradation-log-level rule.
+
+  `@objectstack/service-sms` gains the vocabulary the CLI reads instead of
+  restating: `SMS_TRANSPORT_PROVIDERS` and `isSmsTransportProvider()`, with
+  `SmsProviderTag` now derived from the array rather than declared beside it. One
+  vocabulary, two consumers — a second literal list in the CLI is how the mail
+  settings dropdown and the mail transports drifted apart in the first place
+  (#5094).
+
+### Minor Changes
+
+- 28ad90e: feat(types,cloud-connection,lint,cli): ADR-0120 17.x 收尾 —— `isolated` 安装期姿态硬门(D5e)、D5c 重拼写 advisory、成文契约扫荡与三姿态 conformance (#5081)
+
+  ADR-0120 17.x 波的第三块,也是最后一块。前两块已在 main 上:#5212(driver 侧
+  D3+D4 —— `COALESCE(organization_id, '__global__')` 物化、drift 两侧同步、重复预检)
+  与 #5208(spec 词汇 `'organization'` + D5a/D5b lint)。本次补齐三件事:安装期的
+  姿态决策点、剩余的成文契约、以及把「一个 app 包跑遍三种姿态」从假设变成测试。
+
+  **D5e —— 装进 `isolated` 环境时的硬门。** 词汇本身是姿态无关的:作者说的是业务
+  边界(`'organization'` 一个组织一份 / `'global'` 整个安装一份),没有任何索引形状
+  读姿态。唯一的残留在一个方向上:`isolated` 下组织就是**不同客户**,此时 app 业务
+  对象上的 `'global'` 唯一既跨客户过度约束,又变成跨客户的存在性预言机(S10/S14)。
+  维护者裁定这是**硬门而非 advisory**:把带 `'global'` 唯一(非 `sys` 对象)的 app
+  装进 `isolated` 环境会**停下来并逐索引列出**,安装者(通常是 AI agent)要么确认它
+  确实是平台级的,要么改写为 `'organization'`;确认按 ADR-0104 attestation 风格
+  留痕在安装清单里(`InstalledManifestEntry.globalUniqueAttestation` —— 确认了什么、
+  谁确认的、何时、在哪个姿态下问的),**之后不复问**。
+
+  - 停下的安装**什么都不留**:先于 hot-register 和任何 ledger 写入,所以作者改完
+    元数据可以直接重试,不需要先卸载。
+  - 逐索引确认是有牙齿的:`confirmGlobalUniques` 收 `true` 或明确的 id 数组,只确认
+    其中一条仍会在剩下的那条上停住。
+  - 升级引入的**新**约束会被问,老的答案继续算数。
+  - 另一个姿态下给出的确认**不算同意** —— `isolated` 那个问题在 `single` 下从未被
+    问过,所以按「未确认」处理(唯一不会静默放行跨客户约束的方向)。
+  - ⛔ **永不做成启动期告警**(#4884 纪律)。boot 时的 rehydrate 不评估此门;门够不到
+    的两类存量 —— 门禁上线前的安装、装后姿态变更的环境 —— 由 `os doctor` 与
+    `os migrate plan` 的 advisory 形态覆盖。
+
+  判定里有三条是承重的,别「简化」掉:声明索引上的裸 `unique: true` **算**(D1 说它
+  就是 `'global'` 的位置式拼写,排除它等于让整个 17.x 可以靠拼写绕过);字段级
+  `true` **不算**(它是 `'organization'`,永久合法);`sys_`/`base_` 对象**不算**
+  (S5 那批引擎幂等键天然就是平台级的,每次安装都问一遍就是 #4884 的误报类)。
+
+  CLI: `os package install` 新增 `--confirm-global-uniques`,并把 409 渲染成可读的
+  逐条清单而不是一句 "Install failed (409)"。
+
+  **D5c —— 遗留手写组织复合索引的 advisory。** 新规则
+  `unique/legacy-organization-composite`:声明的唯一索引自己列出了组织列
+  (`{ fields: ['name','organization_id'], unique: true }`)—— 这是词汇出现之前手写
+  per-organization 的写法。它读起来像「每组织唯一」,物化出来却是普通复合索引,而
+  SQL UNIQUE 是 NULL-distinct 的:组织列为 NULL 的行上它**什么都不约束**(#5030),
+  在单组织部署上那就是每一行。改写成 `unique: 'organization'`(`fields` 原样保留,
+  driver 会把已列出的组织列**就地**变成 NULL-safe 形式)正是补上这个洞的动作。
+  **永远只是 advisory,永远不自动修**:老拼写永久合法、零强制 drift,而 opt-in 是
+  真实的物理收紧,要走 D4 的 `recreate_index` + 重复预检。
+
+  **D6 —— 成文契约扫荡。** `content/docs/data-modeling/indexing.mdx` 的
+  §Two ways to say "unique" 全节按新词汇重写(含 `os:check` 代码块);
+  `content/docs/protocol/objectql/schema.mdx` 的 §Uniqueness and tenancy 重写为
+  §Uniqueness and scope —— 其中那句「单租户部署不受影响,租户列是常量,复合索引
+  退化为单列索引」是 #5030 **证伪过的原话**,现已替换为 D3 的 NULL-safe 事实;
+  `content/docs/deployment/cli.mdx` 的 `replace_unique_index` / `recreate_index`
+  条目补上 NULL-safe 形状与重复预检;`content/docs/references/**` 经
+  `gen:schema && gen:docs` 再生成,未手改。
+
+  按 ADR-0120 Resolved #2 的非规范性引导(官方示例/脚手架/生成器在新代码中输出
+  显式拼写),`skills/objectstack-data/**` 的索引与校验规则整体扫过:声明索引一律
+  说清 scope,并新增一节完整讲 `'organization'` 的 NULL-safe 语义与「永远不写姿态」。
+  顺带修掉那里长期使用的 `tenant_id` —— 平台的列叫 `organization_id`。
+  `examples/**`、`create-objectstack` 模板与 `os generate` 经核查**根本没有声明任何
+  唯一约束**,故无可扫;这是核查结论,不是遗漏。
+
+  **三姿态 conformance(ADR §Acceptance tests)。** 同一个 fixture app 在
+  `single | group | isolated` 三姿态下启动,逐 S 行用**真实的违规插入**断言 enforcement
+  (S1/S2/S3/S4/S5/S6/S7/S8/S9/S11/S12),并逐姿态捕获物化出的索引键,断言三者
+  **逐字节相同** —— 「没有任何索引形状读姿态」这句话一旦有两者不同就是假的。相同性
+  断言配了一条正向断言(对着期望的键形状),这样「三次都什么都没建」不会读成「一致」。
+  外加 ADR 只要的那一条 transition smoke:在 `single` 下建库、`isolated` 下重新打开,
+  drift op 为零。
+
+  对既有部署的影响:除新增的安装期确认外,本次不改变任何已有物化行为。字段级
+  `unique: true` 一如既往合法。
+
+- 29f30c0: feat(cli): `libsql://` URLs boot a Turso driver — via an optional package, never a silent SQLite fallback (#5602)
+
+  `os start --database libsql://my-db.turso.io --database-auth-token $TURSO_TOKEN`
+  是 `os start --help` 自己列出的 example,但在此之前它必然 `exit 1`:CLI 的
+  URL → driver 推断认得 `libsql://`,却当场抛 `UnsupportedDriverError` —— 而 runtime 的
+  环境 provisioning 把 turso 排在偏好第一位。两处口径相反的原因(driver 不在开源分发里)
+  已随 #4645 把 `@objectstack/driver-turso` 迁回本仓而消失。
+
+  现在这条 example 成真:
+
+  - **识别即构造。** `libsql://` / `*.turso.io` 解析为 `turso` datasource 定义,
+    `--database-auth-token`(`OS_DATABASE_AUTH_TOKEN`,回落到 vendor 自己的
+    `TURSO_AUTH_TOKEN`)进入 driver 配置 —— 该 flag 此前只被转发进子进程环境、无人读取。
+  - **可选依赖 + 动态 import。** `@objectstack/driver-turso` 声明为 CLI 的
+    **optional peer**(它会拖入 `@libsql/client`),默认安装体积不变;只有真正选了 libSQL
+    的启动才会动态 import 它,并通过 `DefaultDatasourcePlugin` 既有的 host-factory 接缝注入。
+    连接路径、`bootCritical` 失败裁决、`OS_ALLOW_DRIVER_CONNECT_FAILURE` 逃生舱与
+    Setup → Datasources 的状态留存因此与其他 driver 完全一致(#3826)。
+  - **包缺席时响亮失败。** 抛 `MissingDriverPackageError`,消息给出精确安装命令
+    (`npm install @objectstack/driver-turso`)、说明它是 optional peer,并说明为什么
+    ⛔ 不回退 SQLite:静默降级会让服务器对着一个空的本地库启动,而你的 libSQL 数据原封不动,
+    每一次写入都落在错误的数据库里(#3276 的教训)。
+  - **仍然拒收的形状。** `--database-driver turso` 但没有任何 URL —— libSQL 没有可猜的默认值,
+    这条继续抛 `UnsupportedDriverError`,而不是悄悄用 SQLite 默认值顶上。
+
+  `os start` 的 example 加了「需安装 driver 包」注记,Drivers / Self-hosting /
+  Environment variables / CLI 四处文档同步为「可选包支持」口径。
+
+- db9c331: fix(runtime,cli): 未设置 `NODE_ENV` 时 `/discovery` 不再自称 `development`,统一按 `production` 解读 (#5673)
+
+  同一个「宿主没有设置 `NODE_ENV`」的事实,仓里原本有两套相反的默认:`os start` 未设时强制
+  `NODE_ENV='production'`(`start.ts:248`),`os serve` 与 `os doctor` 按
+  `NODE_ENV || 'production'` 解析 `.env*` 级联,而 `/discovery` 的 `environment` 字段
+  直接把缺省读成 `development`。
+
+  **为什么这个方向的错报是危险的那个。** `environment` 是**机器可读面**上的字段,客户端
+  拿它回答「我在不在生产环境」,并可能据此不显示生产警示、放宽破坏性操作的二次确认。一个
+  忘记设 `NODE_ENV` 的真实生产部署,过去会拿到 `development` —— 两种错法里代价更高的那种。
+  按 maintainer 2026-08-06 裁定,缺省统一收敛到保守值 `production`。
+
+  **迁移说明(行为变更,请对照自己的部署方式读)**
+
+  - **生产部署忘设 `NODE_ENV`**:`/discovery` 的 `environment` 由 `development` 变为
+    `production`。这正是本次修复的目标 —— 报的是实情,不需要任何动作。
+  - **本地开发**:不受影响。`os dev` 会 spawn `serve --dev`,而 `serve` 在 `--dev` 且
+    `NODE_ENV` 未设时就地设 `NODE_ENV='development'`(`serve.ts:490-491`),所以
+    `pnpm dev` / `pnpm dev:showcase` / `dev:crm` / `dev:todo` 链路上 `NODE_ENV` 早已是
+    显式的 `development`,`/discovery` 仍报 `development`。没有任何脚本因此改动。
+  - **需要 `development` 却不走 `os dev` 的场景**(裸 `os serve`、以库形式内嵌运行时、
+    自建容器入口):现在必须显式 `NODE_ENV=development`。这是本次唯一需要动手的一类。
+  - **已设置的合法拼法一律不变**:`production`/`prod` → `production`,
+    `staging`/`sandbox` → `sandbox`,`development`/`dev`/`test` → `development`。
+  - **无法识别的拼法处置不回退**:`qa`、`preview`、`uat` 这类**设了但认不出**的值仍然
+    降级为 `development`,#4828 的「绝不凭猜测宣称 production」保持原样。缺省不是猜测,
+    是宿主选择不说 —— 两条是不同的规则,本次只动前者。
+
+  **`os doctor` 新增一行提示。** `NODE_ENV` 未设时报
+  `NODE_ENV  Not set — this environment is being treated as production`(warning,不影响
+  退出码),`--verbose` 展开显式设置的两条命令。已设置的环境完全没有这一行,报告与从前
+  逐字一致。统一默认让缺省变得**安全**,但也让「疏忽」和「有意的生产部署」变得无法区分;
+  这一行是唯一能把两者分开的地方。
+
+  **已知残留(已另开 #5936 跟进,本次不动)。** `/discovery` 有两个生产者。本次改的是
+  `@objectstack/runtime` 的 `HttpDispatcher.getDiscoveryInfo()`;经 `@objectstack/rest`
+  暴露的 `MetadataProtocol.getDiscovery()`(`packages/metadata-protocol`)把真实缺省原样
+  递给共享映射函数,该函数对缺省仍返回 `development`。裁定把落点限定在 runtime 侧、把
+  `packages/metadata-protocol` 标为跨域文件面,所以此处如实记录而非顺手绕过。
+
+- 9c4f174: feat(plugin-email): durable email delivery through `sys_job_queue`, opt-in (#5160)
+
+  `IEmailService.send()` has always delivered **inline**: the SMTP session ran
+  inside the caller's `await`, and `EmailService`'s retry loop lived in the same
+  process — so a crash between the attempt and the retry dropped the message with
+  no trace beyond a `sys_email` row stuck at `queued`. The pieces for a durable
+  path all existed (`sys_job_queue`, the `DbQueueAdapter`, an `email.send.async`
+  subscriber) but nothing in the repo ever published to that topic.
+
+  **New: `queueDelivery`.** With it on, `send()` persists the `sys_email` row,
+  publishes an `email.send.async` job **referencing that row**, and returns
+  `{ status: 'queued' }` immediately. A worker delivers the row and finalizes it
+  in place (`sent` + `message_id`, or `failed` + `error`); the queue retries with
+  exponential backoff (1s → 5min cap) and dead-letters the job when the attempts
+  run out, so a restart resumes delivery instead of losing it. The `'queued'`
+  status was already in `EmailDeliveryStatus` — no spec change.
+
+  Three ways to turn it on, all default-off:
+
+  - `new EmailServicePlugin({ queueDelivery: true })`
+  - `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) on `os serve`
+  - Settings → Mail → **Durable queue delivery**, hot-applied without a restart
+
+  **One retry budget, not two.** `retries` keeps its meaning — total attempts are
+  `retries + 1` in both modes. Inline it drives the in-process loop; queued it
+  becomes the queue's `maxAttempts` and the per-row loop is pinned to one attempt
+  per delivery. Turning the toggle on changes _where_ a retry happens (durable,
+  backed off) and never _how many_ happen, so the two layers cannot multiply.
+
+  **Fixed in the same change: the `email.send.async` subscriber inserted a new
+  `sys_email` row per delivery.** It called `send()` with the message, so a job
+  the queue retried five times left five rows — four permanently `failed`, none
+  carrying the real attempt count. It now delivers the referenced row via
+  `deliverPersistedRow`, so one message is one row and `attempt_count`
+  accumulates on it. Messages published in the old shape (a bare `SendEmailInput`)
+  are still accepted and delivered inline for a migration window.
+
+  Boundaries worth knowing before you switch it on:
+
+  - **"Send test email" always sends inline**, in every mode — the button has to
+    report the provider's own answer (`535 …`), and "queued" is exactly the
+    non-answer #5087 removed from it.
+  - **Messages with attachments or custom headers are delivered inline**, because
+    `sys_email` has no columns for them and a queued copy would arrive stripped.
+    Queueing them is tracked separately; this ships the loss-free behaviour.
+  - **A declaration that cannot be honoured fails the boot.** `queueDelivery: true`
+    from the constructor or `OS_EMAIL_QUEUE_ENABLED` with no durable queue
+    registered (or with `persist: false`) throws on `kernel:ready`, naming the
+    fix — the #5132 judgement, applied to durability. The **settings toggle** is
+    the opposite trade: it logs at `error` and keeps sending inline, because one
+    save must not stop the mail.
+  - The kernel's built-in in-memory `queue` fallback does **not** count as a
+    durable queue: it delivers synchronously with no retry or DLQ, so publishing
+    to it would report `queued` for a message nothing could ever recover. Mount
+    `@objectstack/service-queue` over an ObjectQL engine (the `queue` capability
+    does this on `os serve`) to get the `sys_job_queue`-backed adapter.
+
+  Leaving `queueDelivery` unset keeps today's behaviour byte for byte.
+
+- 02dc076: feat(types,cli,verify)!: 只解析 host app 声明过的包 —— `NODE_PATH` 不再算数,ADR-0093 D5 那道墙从此与启动方式无关 (#4719)
+
+  **问题:契约写下了,但从没被检查过。** `@objectstack/types/node` 的
+  `createHostRequire` 返回一个 CJS `createRequire`,而 CJS 解析认 `NODE_PATH`
+  (`Module.globalPaths`)。pnpm 生成的 bin shim 第一件事就是
+  `export NODE_PATH=<workspace>/node_modules/.pnpm/node_modules`,于是任何被工作区里
+  **任意一个包**传递依赖到的包都能"从 host app 解析成功" —— 跟这个 app 声明了什么毫无关系。
+
+  实测(cloud `apps/objectos-ee`,当时未声明 `@objectstack/organizations`):
+  `pnpm start`(经 shim)boot 成功、插件表里有 `Organizations`、ADR-0093 D5 一声不吭;
+  `node node_modules/@objectstack/cli/bin/run.js serve`(不经 shim)则
+  `✖ FATAL: tenancy posture 'isolated' was requested…` 并 exit 1。同一个 app、同一份
+  `package.json`、同一个 posture,**只因为进程是怎么被拉起来的**,走出两种结果。
+  而 D5 的报错一直在教 operator "declare it in the app's package.json" —— 那正是
+  CLI 从来没检查过的那件事。
+
+  **改法:声明即执行。** 解析前先读 `<hostRoot>/package.json`;只有包名出现在
+  `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`
+  的 **键**里,才去 host 的 `node_modules` 里查它。仅仅"能被解析到"不再算数 ——
+  那正是让契约失效的那个偶然。未声明的包退回到 importing package 自身的解析
+  (ESM,不认 `NODE_PATH`),框架自有的包加载路径不受影响。
+
+  **两种失败从此分开报。** 今天它们都塌成同一条 `MODULE_NOT_FOUND`,补救办法却相反:
+
+  - **未声明** —— 指向"在 app 的 `package.json` 里声明并安装",并说明为什么
+    hoisting / `NODE_PATH` 不被接受;
+  - **声明了但解析不到** —— 明确说这是**安装**问题(`pnpm install`、生产 prune
+    砍掉了它、dist 没构建),别再让人回去重看那份已经写对的 `package.json`。
+
+  分类经新导出的 `hostImportFailureKind(err)` 暴露给调用方;两种错误都仍带
+  `code: 'MODULE_NOT_FOUND'`,`isModuleNotFoundError` 的既有判定不变。
+
+  **BREAKING — 哪类部署会从假绿变红,以及怎么修。**
+
+  1. **靠 hoisting 苟着的部署。** 一个 app 请求了 walled tenancy posture
+     (`OS_TENANCY_POSTURE=group` / `isolated` 或 `OS_MULTI_ORG_ENABLED=1`)、
+     却没在自己的 `package.json` 里声明 `@objectstack/organizations`,过去经 pnpm
+     shim 启动能正常 boot —— 现在会命中 ADR-0093 D5 并 exit 1。
+     **修法:在那个 app 的 `package.json` 里声明该依赖并安装。**
+     这些部署本来就在未声明状态下运行,红的是一直存在的事实,不是新引入的故障:
+     同一个 app 不经 shim 启动今天就已经是 exit 1。
+     (同样适用于 `@objectstack/service-ai` / `@objectstack/service-ai-studio`,以及
+     `bootStack({ multiTenant: true })`、dogfood 的 enterprise 门。)
+
+  2. **`createHostImporter` 的签名变了**,因为它现在需要 host 的**根目录**才能读到
+     那份 manifest,而一个 `NodeRequire` 无法被问出它锚在哪里:
+
+     ```diff
+     - createHostImporter(createHostRequire(hostRoot))
+     + createHostImporter(hostRoot)                     // 省略参数 = process.cwd(),同旧默认
+     ```
+
+     `createHostRequire` 本身保持不变,仍然导出。
+
+  新增导出(`@objectstack/types/node`):`HOST_DECLARATION_FIELDS`、
+  `HostDeclarationField`、`HostDeclaration`、`readHostDeclaration`、
+  `isDeclaredByHost`、`packageNameFromSpecifier`、`HostImportFailureKind`、
+  `HOST_IMPORT_FAILURE_KIND`、`hostImportFailureKind`。
+
+- 123067c: fix(cli): the i18n walker collects `objects.<o>._sections` — section headings are gated and scaffolded like every other label (#5405)
+
+  An object's SECTION headings were the one declared, resolved, rendered
+  translation surface the shared i18n walker had no kind for.
+  `ExpectedEntry['source']` listed `object | field | option | view | action |
+globalAction | app | navigation | dashboard | widget | page` plus two
+  `metadataForm*` kinds — and those two cover **Studio metadata forms**
+  (`metadataForms.<type>.sections.*`, hidden behind `--include-platform`), not app
+  objects. So `objects.<o>._sections.<s>.label` was structurally unreachable in
+  both directions: `os i18n extract` never scaffolded a heading, and
+  `os lint` could not report one missing.
+
+  The surface itself was never in doubt. `ObjectTranslationDataSchema` declares
+  `_sections` (with `sections` as an authoring alias), and `@object-ui/i18n`'s
+  `sectionLabel` resolves it for `record:details`, for `ObjectForm`/`ModalForm`
+  and for the field-group designer. Only the walker disagreed — which is exactly
+  the drift `collectExpectedEntries` was consolidated to prevent (#3370).
+
+  Measured downstream before this landed: 85 sections across 15 objects, **2 of
+  85** translated in `ja-JP` and in `es-ES` — English headings on essentially
+  every record page and form — with `objectstack lint` reporting **zero** i18n
+  warnings for both locales.
+
+  **What is collected.** A `section` kind, from the two independent surfaces that
+  both resolve to the same key — a heading is expected if _either_ declares it,
+  and one heading is one expected key however many declare it:
+
+  - **`fieldGroups` × field `group`** — the fields decide which sections exist and
+    `fieldGroups[].label` supplies the source text. Membership is read through
+    `deriveFieldGroupLayout` (ADR-0085 §5), the same shared derivation the
+    renderers consume, so a group nothing visible references — or a `group:` no
+    `fieldGroups` entry declares — produces no heading and therefore no expected
+    key. The trailing ungrouped bucket renders without chrome and is skipped.
+  - **A named `sections[]`** on a form view (including a view container's default
+    `form`) or inside a record page's component tree.
+
+  A section with no `name` is skipped: every renderer guards the lookup on it
+  (`s?.name ? sectionLabel(…) : s?.label`), so it is untranslatable by
+  construction and demanding a bundle entry for it would be noise. A group that
+  declares no `label` still yields a scaffold key seeded from its own name, but no
+  coverage finding — nobody authored that text.
+
+  **What you get.** `os lint` gains an `i18n/missing-section` category — user
+  metadata, so it is reported without `--include-platform` — and `os i18n
+extract` scaffolds the headings for free, because the gate and the extractor
+  read the one walker. A project that declares no locales still reports nothing;
+  the gate stays opt-in.
+
+  **`@objectstack/lint`** now exports its shared page traversal
+  (`walkPageComponents`, `isSourceAuthoredPage`, `WalkedComponent`) so the CLI
+  consumes it instead of growing a private copy — that walk exists precisely
+  because duplicating it produced a dead rule once already (#3583). Reusing it is
+  also what makes the page half correct rather than merely present: it reaches
+  `slots.<slot>` and the untyped nesting a record page really uses
+  (`page:tabs` → `properties.items[].children[]` → `record:details`), skips
+  source-authored pages whose `regions` are a derived cache, and resolves each
+  component's OWN binding (`dataSource.object` → `properties.object` → the page's
+  `object`) — so a re-bound `record:details` keys its headings under the object it
+  actually shows.
+
+- b3c1f3c: i18n 提取器改用运行时视图身份来命名 `_views` 翻译键(#5164 第 1 棒 / cli 段)
+
+  **BREAKING(已发布翻译包的键):容器默认 `list` 的 `_views` 键由 `list` 改为运行时裸键。**
+
+  `objectstack i18n extract` / `os lint` 过去用 `view.list.name ?? 'list'` 推导一个
+  `defineView` 容器默认列表的翻译键,而运行时注册表(`expandViewContainer`,
+  `packages/spec/src/ui/view.zod.ts`)给同一个视图的身份是 `<object>.default`。两者是
+  两个不同的字符串,于是「只声明了默认 `list`、没有 `listViews`」的应用会拿到一份键为
+  `list` 的翻译骨架、一个键为 `default` 的运行时视图,界面上永远显示英文原文 —— 无论作者
+  按哪一侧编写都命中不了。
+
+  提取器现在**向组装器本身查询**这个键,而不是第二次自行推导。因此它同时继承了组装器
+  仅有的两条规则:
+
+  - 无 `name` 的默认列表键为 `default`(不再是 `list`);带 `name` 的沿用作者的 `name`;
+  - 结构上与某个 `listViews` 条目**完全相同**的默认列表会被组装器按签名折叠进该条目,
+    因此它没有自己的键 —— 提取器不再为它多写一个谁也读不到的骨架条目
+    (`examples/app-crm` 正是这个形状:`list` 与 `listViews.all` 同签名,真实键是 `all`)。
+
+  维护者 2026-08-06 裁决:`_views` 翻译键的 canonical 拼写 = 运行时身份的裸键。
+
+  ## 升级:翻译包键的 FROM → TO
+
+  只影响用 `defineView({ list: … })` 声明了**默认列表**、且为它写过翻译的包。
+
+  | 容器形状                                    | FROM                             | TO                                  |
+  | ------------------------------------------- | -------------------------------- | ----------------------------------- |
+  | 默认 `list`,无 `name`                       | `objects.<object>._views.list.*` | `objects.<object>._views.default.*` |
+  | 默认 `list`,带 `name: 'x'`                  | `objects.<object>._views.x.*`    | 不变                                |
+  | 默认 `list` 与某个 `listViews.<k>` 结构相同 | `objects.<object>._views.list.*` | 删除(`_views.<k>.*` 已经覆盖它)     |
+
+  一行修法:把 `_views.list` 改名为 `_views.default`;如果同一对象下已经有一个与默认列表
+  `type`/`label`/`columns` 完全一致的 `listViews` 条目,则直接删掉 `_views.list`。
+  重新跑一次 `objectstack i18n extract`(merge 模式保留已有译文)会得到正确的骨架。
+
+  本仓库自带示例已随迁:`examples/app-showcase` 5 个块、`examples/app-todo` 2 个语言包
+  改名为 `default`;`examples/app-crm` 3 个折叠形状的 `_views.list` 块删除。
+  `check:i18n-coverage` 棘轮基线经实测无需调整(需求侧与译文侧同批改名,覆盖数不变)。
+
+  `packages/lint` 的 `collectViewRecord` 收窄(#6038)与 objectui `viewSuffixes` 去第二
+  候选(objectui#3502)是本裁决的第 2、3 棒,不在本次变更内。
+
+### Patch Changes
+
+- b11a7e3: fix(cli): the boot banner's `Tenancy:` row now reports the resolved posture, not the superseded boolean (#4801)
+
+  `printServerReady` printed `Tenancy: multi-tenant | single-tenant` from a boolean
+  `multiTenant` that `serve` filled with `resolveMultiOrgEnabled()` — i.e. from
+  `OS_MULTI_ORG_ENABLED`. [ADR-0105 D1] replaced that knob with
+  `OS_TENANCY_POSTURE`, keeping the boolean only as the fallback
+  `resolveTenancyPosture()` consults when the posture is unset, and **the runtime
+  wiring in `serve` already keys off the posture**. So the banner and the server it
+  describes read two different sources for one fact, and they drifted exactly where
+  it hurts: booting with `OS_TENANCY_POSTURE=isolated` and `OS_MULTI_ORG_ENABLED`
+  unset printed
+
+  ```
+    Tenancy: single-tenant
+    Plugins: 40 loaded
+             …, Organizations, …
+  ```
+
+  — the banner claiming single-org one line above the plugin table that proves the
+  organization wall is up (observed on a real boot in cloud#1020, where the lie was
+  only caught by hand-comparing the plugin list).
+
+  This is not cosmetic. It is the "declared ≠ enforced" class (ADR-0049) landing on
+  the **diagnostic** surface, which is the worst place for it: a banner that can be
+  wrong costs every later investigation an extra lap proving whether it is.
+
+  **What changes for users.** The row now prints the posture verbatim — `Tenancy:
+single`, `Tenancy: group`, `Tenancy: isolated` — sourced from the same
+  `resolveTenancyPosture()` call the runtime wiring uses. The old `multi-tenant` /
+  `single-tenant` vocabulary is gone. That vocabulary was itself part of the defect:
+  tenancy has been a three-valued spectrum since ADR-0105, and a boolean has no
+  spelling for `group` at all, so a `group` deployment could only ever be
+  misreported.
+
+  **The internal `multiTenant` option is removed, not deprecated.** With the posture
+  authoritative, a retained boolean could only ever be a field the printer ignores —
+  and a field that exists but cannot be believed is precisely how this bug was
+  authored in the first place. `ServerReadyOptions.tenancyPosture` is typed as
+  `TenancyPosture`, so re-wiring the banner to the legacy boolean now fails to
+  compile (`resolveMultiOrgEnabled()` returns `boolean`) instead of producing a
+  plausible-looking wrong line. The interface is package-internal — `format.ts` is
+  not re-exported from `@objectstack/cli`'s entry point — so no consumer code needs
+  a change.
+
+  Regression-pinned in `packages/cli/src/utils/format.tenancy.test.ts`, which asserts
+  the printed token **is** `resolveTenancyPosture()`'s answer across the cases that
+  made the old code wrong: posture set with the boolean unset, posture unset with the
+  boolean true, both set and contradicting (either direction), the legacy `multi`
+  spelling, and `group`.
+
+- 3d94141: fix(cli): `os validate` / `os build` print the union branch's prescription, not a bare `invalid_union: Invalid input` (#5341)
+
+  Zod folds every branch of a failed `z.union` into ONE top-level issue whose own
+  `message` is the literal `"Invalid input"`; each branch's real rejection —
+  required-property and unknown-key prescriptions alike — sits in `issue.errors[]`
+  with paths relative to the union's own. The CLI's `formatZodErrors`
+  (`packages/cli/src/utils/format.ts`) walked only the top level, so an author who
+  mistyped a key inside a union member read:
+
+  ```
+    views:
+      ✗ views.0.list.sort
+        invalid_union: Invalid input
+  ```
+
+  …while the branch that names the key, and the fix, was produced on every run and
+  delivered on none. Three commands print through that one function — `os
+validate`, `os build` (compile) and `os plugin build` — so the terminal was the
+  one surface where the #4001 campaign's curated prose never arrived. It now
+  reads:
+
+  ```
+    views:
+      ✗ views.0.list.sort
+        invalid_union: Invalid input
+          ✗ views.0.list.sort.0.order: Invalid option: expected one of "asc"|"desc"
+          ✗ views.0.list.sort.0: Unrecognized key(s) on this sort entry: `direction`. … Did you mean `direction` → `order`?
+  ```
+
+  This is the same defect's **third** consumer, and it reuses the branch-selection
+  policy the first two landed rather than re-deriving it: drop branches that only
+  say "wrong kind of value", prefer the branch complaining least so one stray key
+  is not reported once per branch (the #4001 批 6c regression), break ties on
+  `unrecognized_keys`, absolute paths, bounded expansion depth. `formatZodError`
+  (spec, #4971) and `zodIssuesToFields` (the REST wire, #5014) already carry it;
+  because the terminal needs exactly the string spec already exports, this one is
+  a plain `formatZodIssue` import instead of a third copy — so one mistake cannot
+  get three different prescriptions depending on which surface the author hit.
+
+  Strictly additive: the union's own `✗ path` / `invalid_union: Invalid input`
+  lines still print, non-union issues render byte-for-byte as before, and the
+  `N validation error(s) total` footer still counts `error.issues` — one union is
+  one issue however many lines explain it, which keeps the footer agreeing with
+  the `--json` payload beside it. The `--json` path is untouched; it passes
+  `error.issues` through and always carried the whole tree.
+
+- 0b720de: CLI: load the SQL driver's schema-work classifier lazily, so an unbuilt driver no longer breaks command discovery (#5726)
+
+  `packages/cli/src/utils/schema-migrate.ts` statically value-imported
+  `isInPlaceSchemaWork` from `@objectstack/driver-sql`. oclif's `findCommand`
+  `import()`s every command module on every CLI invocation, and nine commands
+  reach that file (`meta:resync`, `migrate`, and seven `migrate:*`), so a
+  workspace whose `packages/drivers/driver-sql/dist` was not built printed nine
+  `MODULE_NOT_FOUND` blocks — naming nine commands the operator never invoked —
+  in front of whatever command they actually ran, and dropped all nine out of the
+  command table (`os migrate plan` answered `Command migrate:plan not found.`).
+
+  The import is now `await import('@objectstack/driver-sql')` at the point of use,
+  inside the two renderers that need the classifier. The classifier keeps its one
+  definition in the driver — it is a fact about `PendingSchemaWorkKind` and a copy
+  in the CLI could disagree, listing a row rewrite under the heading that promises
+  the work is never data-losing.
+
+  No user-visible behaviour change: this is local/worktree developer experience
+  only, and CI always builds before running the CLI. `renderPendingSchemaWork` and
+  `summarizePendingSchemaWork` — internal helpers, not part of the package's
+  public entry — are now `async`.
+
+- aa25a81: fix(client)!: `DeleteDataResult` declares the schema it names — `success`, not `deleted` (#5638)
+
+  `DeleteDataResult` — the return type of `client.data.delete()` and of the
+  project-scoped `client.project(id).data.delete()` — carried the comment
+  `Spec: DeleteDataResponseSchema` above a declaration that contradicted it:
+
+  ```ts
+  /** Spec: DeleteDataResponseSchema */
+  export interface DeleteDataResult {
+    object: string;
+    id: string;
+    deleted: boolean; // ← the schema declares `success`
+  }
+  ```
+
+  `DeleteDataResponseSchema` (`packages/spec/src/api/protocol.zod.ts`) declares
+  `{ object, id, success }`. `deleted` has never been declared by any schema, and
+  no server path has ever returned it on `/data/:object/:id`.
+
+  **The old key was never readable at runtime — this rename reveals a defect, it
+  does not break working code.** Both `delete` surfaces are pure `unwrapResponse`
+  / `_unwrap` passthroughs: the SDK returns the server's body untouched, so this
+  interface is a _claim_ about the wire, never a rewrite of it. The claim was
+  false in the one direction that matters — the compiler endorsed the wrong
+  spelling:
+
+  ```ts
+  const r = await client.data.delete('task', id);
+  if (r.deleted) { … }   // compiled; `undefined` at runtime; branch never taken
+  if (r.success) { … }   // rejected by the compiler; correct on the wire
+  ```
+
+  ## What to change
+
+  `r.deleted` → `r.success`. That is the whole migration. Nothing about the
+  request, the route, the status codes or the error shapes changes, and no server
+  needs upgrading: the value you are now allowed to read is the one that was
+  already arriving.
+
+  ⛔ **Do not write `r.success ?? r.deleted`.** There is one producer shape, and a
+  consumer that accepts two spellings is the shape contract-first exists to
+  prevent — the same ruling #5581 applied on the producer side. No deprecated
+  `deleted?: boolean` transition key ships for the same reason; a transition
+  period is for keys that _worked_, and this one never did.
+
+  ## Why the type was wrong on every deployment, not just some
+
+  The protocol path (`deleteData`) has always answered `success`. #5581 / PR
+  #5641 brought the ObjectQL fallback — the path a slim assembly without
+  `MetadataPlugin` takes — to the same shape. So before that fix the declaration
+  was wrong on ordinary deployments and accidentally right on slim ones; after
+  it, both paths answer `{ object, id, success }` and the declaration was simply
+  wrong everywhere. The consumer-side correction had to follow the producer, not
+  lead it.
+
+  ## `os data delete` was reading the phantom key too
+
+  `packages/cli/src/commands/data/delete.ts` built its `--format json` / `--format
+yaml` payload with `deleted: result.deleted`. That evaluated to `undefined`, and
+  `JSON.stringify` drops undefined values — so the `deleted` key the command has
+  always declared **never appeared in a single run**. It now carries
+  `result.success`, the server's own verdict.
+
+  Observable change: `os data delete --format json` gains `deleted: true` (YAML
+  likewise) on a successful delete. The key name stays `deleted` deliberately —
+  it is the CLI's output key, not the protocol's, and the payload's top-level
+  `success` already means something different (the CLI envelope's "the command
+  completed"). Conflating the two is the hazard #5641 called out when it noted
+  that `body.success` and `body.data.success` are different facts. Scripts
+  reading `.deleted` from this command were reading `undefined` before and get a
+  boolean now; nothing that worked stops working.
+
+  ## Downstream
+
+  `objectui`'s `ObjectStackDataSource.delete()` is a live victim of the old
+  declaration — it guards `emitMutation` on `result.deleted`, so the delete
+  mutation event has never fired against a real server and the method returns
+  `undefined` where it declares `boolean`. Its own suite stayed green because the
+  fixture mocks `{ deleted: true }`, a body no server produces. Filed as
+  objectstack-ai/objectui#3412, which is blocked on this package publishing —
+  its fix is a type unblock, not a behaviour change, since `success` is already
+  what arrives.
+
+  ## Pins
+
+  `packages/client/src/data-delete-result-shape.test.ts` asserts mutual
+  assignability between `DeleteDataResult` and the spec's `DeleteDataResponse`,
+  so a rename on either side (or a re-added optional `deleted`) fails
+  `check:test-typecheck`. `client.hono.test.ts` gains the delete case this live
+  server suite never had: a real DELETE over HTTP whose body is read as
+  `deleted.success` and whose key set is asserted literally — `z.object` strips
+  unknown keys, so a passing parse alone cannot prove no stray `deleted` rode
+  along.
+
+- 9c4a14c: `os dev --fresh` states the isolation it actually delivers (#5594)
+
+  The `--fresh` block promised its tempdir "owns ALL persistent state for this
+  run". After #4968 that is true of everything the CLI itself places — the dev
+  SQLite DB (`OS_HOME` → `<home>/data/dev.db`, published as `OS_DATABASE_URL`),
+  the uploads root (published on the settings service's own name
+  `OS_STORAGE_LOCAL_ROOT`), and any plugin state keyed off `OS_HOME` — but it was
+  never true of state an **app** reaches by a relative path it declares itself.
+  Such a path is resolved by its own consumer against the process working
+  directory, which `--fresh` does not move, so the file lands in the project tree
+  and is still there after the run exits.
+
+  The live specimen is deliberate authoring, not a bug: the showcase's
+  `showcase-external` datasource declares
+  `filename: '.objectstack/data/showcase_external.db'` and documents that the path
+  resolves against the project cwd — so a `--fresh` showcase run leaves that file
+  (plus `-wal`/`-shm`) behind.
+
+  No behaviour changed. The `--fresh` flag help, the source comments, and the
+  `os dev` flag table in the CLI docs now name the covered surface
+  (`OS_HOME`-keyed state plus the env channels the CLI publishes) and state
+  plainly what falls outside it, with a docs note on declaring an absolute path
+  when a datasource should follow `--fresh`.
+
+  Re-anchoring app-declared relative paths on `OS_HOME` is a behaviour change
+  resting on an open contract question ("relative to cwd" vs "relative to this
+  run's home") and is deliberately not taken here.
+
+- 36fc938: fix(cli): `objectstack dev` restarts the server after each rebuild — the running server can no longer silently disagree with `dist/objectstack.json` (#5148)
+
+  The dev watcher rebuilt `dist/objectstack.json` on every source change and
+  printed `✓ recompiled — server will auto-reload`, but the running serve child
+  only **partially** received the rebuilt artifact: MetadataPlugin's own
+  artifact watcher re-ingests the metadata registry, syncs DDL + seeds for
+  newly-appearing objects and broadcasts the SSE HMR event — while hook bodies
+  and already-registered view metadata from the compiled bundle are applied at
+  **boot only**. #5148 measured both staying stale: the old hook kept executing
+  and `/api/v1/meta/views` kept serving the old view after a confirmed on-disk
+  rebuild, with no error and no warning. That made every dev edit/verify loop
+  capable of a false conclusion in either direction ("my fix doesn't work" /
+  "this code isn't load-bearing").
+
+  `objectstack dev` now supervises its serve child nodemon-style:
+
+  - **Auto-restart (default-on).** After a rebuild lands on disk, the serve
+    child is SIGTERMed (the kernel shuts down gracefully), and a replacement is
+    spawned once it exits — boot-time load is the one path that applies the
+    whole artifact. Restarts coalesce (rapid saves produce one restart), a
+    child that ignores SIGTERM is force-killed after 8s, a replacement that
+    fails to come up is loud and exits dev, and parent SIGINT/SIGTERM is
+    forwarded to the child so no orphan server outlives dev.
+  - **`--no-restart` opt-out.** The watcher then only rebuilds the artifact —
+    and every rebuild now says explicitly that the running server keeps the
+    build it booted with. The watch banner states the active mode instead of
+    implying a hot reload the runtime only partially performs.
+  - **Boot-time staleness warning (#5148 startup variant).** When
+    `objectstack.config.ts` / `src/**` are newer than the artifact at boot
+    (edited while the server was down), dev warns loudly that the boot serves
+    the stale build, names the newest source file and the remedy
+    (`objectstack build`, `--compile`, or save a watched file). The boot is
+    never gated — the silence is removed, not the start.
+
+- 235b94a: fix(cli): `os doctor` 按 `os serve` 的环境载入 `objectstack.config.ts`(#5397)
+
+  #5387 让 doctor **读**到了 `os serve` 的那份 `.env*` cascade,但 overlay 只套在一处读取上:
+  env 派生检查(posture,以及以它为闸门的 ADR-0120 D5e 建议)。`loadConfig()` 留在了外面。
+  于是两条命令仍然在**两份不同的环境**下打包同一个配置文件:
+
+  ```
+  # .env
+  OS_DATABASE_URL=postgres://…
+
+  # objectstack.config.ts —— 顶层读环境变量是常见写法,不是刁钻写法
+  const url = process.env.OS_DATABASE_URL;
+  if (!url) throw new Error('OS_DATABASE_URL is required');
+
+  $ os serve    # dotenvFlow.config()(serve.ts:520)→ 之后才 bundleRequire → 正常启动
+  $ os doctor   # 无 overlay 直接 bundleRequire → 抛错 → 被 config 分析那个很宽的 try 吞掉
+                # → 「⚠ Could not load config for analysis (config checks skipped)」,warning,exit 0
+  ```
+
+  两种危害,安静的那种更糟:
+
+  1. **响的** —— 上面那句话把责任推给配置文件,而配置文件没问题,同一个目录 `os serve`
+     正常启动。它正是 #5382 判定为「归因错误」的那句,残存在 #5387 刻意没动的这条路径上。
+  2. **哑的** —— 配置文件只要**按环境值分支**(条件声明的 object / datasource),它对 doctor
+     和对服务器就声明了不同的形状,于是下面每一项检查(循环依赖、未引用对象、孤儿视图、
+     仪表盘完整性、spec 版本)判定的都是一份**服务器不会运行**的配置。全程不打印任何东西。
+     这一半没有任何 warning 会浮现出来。
+
+  **现在的行为。** `loadConfig()` 套上 `run()` 顶部已经解析好的**同一份** `dotenvReading`
+  (不是第二次 `readDotenvFiles()` —— 一轮 doctor 只解析一次 cascade,否则 `Environment files`
+  那一行就未必是 config 载入真正看到的那份)。
+
+  `withDotenvOverlayAsync` 而不是既有的同步版:配置文件的顶层跑在 `bundleRequire` 的动态
+  `import()` 里面,同步版的 `finally` 会在 `loadConfig()` 交回 pending promise 的那一刻就把
+  overlay 摘掉 —— 套上了,又在被读之前摘掉,等于没套。两者共用同一套 apply/revert
+  (dotenv-flow 自己 `unload()` 的判定:只删掉仍然等于写入值的那些),不是抄一份。
+
+  **判定面的变化是本单的修复内容,不是副作用**(与 #5398 对 D5e 建议的处理同一姿态)。
+  可观察的差异有三类,都如实呈现:
+
+  - 此前因缺值抛错而被跳过的配置,现在**载入成功**,那句归因错误的 warning 不再出现,而
+    下面那一整组 config 检查**开始运行** —— 因此可能新增此前从未打印过的 warning
+    (真机复现:`⚠ Object "account" is defined but not referenced by any view, flow, app, or lookup field`,
+    在修复前整块被跳过,一条都看不到);
+  - 按环境值分支的配置,doctor 判定的对象/视图集合改为与 `os serve` 一致;
+  - 配置**确实**坏掉时,`Could not load config for analysis (config checks skipped)`
+    **照旧触发**。套上 cascade 之后仍然载入不了的配置,`os serve` 同样载入不了 —— 这句话
+    从此归因正确,而不是被消音。把它一并静默,等于用「没有 warning」换掉「归因错误的
+    warning」。
+
+  **来源口径不变:只报来源,从不报值。** 这一点在本次改动后更吃重:overlay 现在携带的是
+  配置文件想读的**任意**变量,而不再是 `DOCTOR_ENV_INPUTS` 这个声明过的子集,而 `.env` 正是
+  密钥的常见住处。变量名无法预先枚举,提供它们的**文件**可以 —— `Environment files` 仍是
+  报告 cascade 的唯一一处,并在其中说明这些文件同样施加于配置载入:
+
+  ```
+        These files are also applied while objectstack.config.ts is loaded, so a config
+        that reads process.env at top level sees the values `os serve` gives it.
+  ```
+
+  overlay 的边界也照旧:它在配置文件**载入**期间有效,而不是常驻整轮运行 —— doctor 分析的
+  一切都是模块求值时读出的普通值,载入结束即摘除(回调抛出时同样摘除,有测试钉住)。
+
+- 533d73f: fix(cli): `os doctor` 说出配置载入失败的**原因**,不再只说一句「载入不了」(#5403)
+
+  config 分析那个很宽的 `catch` **不带绑定**(`catch {`),error 对象在被捕获的那一刻当场丢弃。
+  于是配置真坏掉时,报告里没有任何线索:
+
+  ```
+  $ cat objectstack.config.ts
+  throw new Error('this config is genuinely broken');
+
+  $ os doctor
+    → Loading configuration for analysis...
+    ⚠ Could not load config for analysis (config checks skipped)
+
+  ⚠️  Environment is functional but has some warnings.
+  ```
+
+  `this config is genuinely broken` 一个字都不出现,`--verbose` 也没有 —— 这句话是裸
+  `printWarning` 直接打的,不是 `HealthCheckResult`,所以根本没有 `fix` 可供展开,没有任何
+  旗标能让操作者看到更多。而 `os serve` 在同一个目录会把这个错误**完整**打出来。诊断命令在
+  它最该出力的一刻(配置坏了),给出的信息**严格少于**直接跑 `os serve`。
+
+  这与前三单是同一句话的不同侧面:#5382 / #5387 / #5397 修的是这句话的**归因**(先把
+  posture 的抛错挪出这个 catch,再让 env 派生检查读到 serve 的环境,最后让配置载入也在
+  serve 的环境下进行)。三单之后这句话触发时配置**确实**坏了。本单修的是它归因正确之后
+  **说了什么**。
+
+  **现在的行为。** 这条路径不再是裸 `printWarning`,而是一条常规 `HealthCheckResult`,与
+  `Environment files` / `Tenancy posture` 走**同一个渲染器**、同一条 `--verbose` 展开规则:
+
+  ```
+  $ os doctor
+    → Loading configuration for analysis...
+    ⚠ Config load          Could not load config for analysis (config checks skipped) — this config is genuinely broken
+
+  $ os doctor --verbose
+    ⚠ Config load          Could not load config for analysis (config checks skipped) — this config is genuinely broken
+        → `os serve` loads this same file the same way — bundle-require, under the `.env*`
+          cascade named above (#5397) — and prints this error in full, so a config that
+          lands here is one the server cannot boot either.
+          The config-aware checks were SKIPPED, not passed: spec version, circular
+          dependencies, unused objects, orphan views, dashboard integrity.
+          cause: this config is genuinely broken
+  ```
+
+  四条刻意的取舍:
+
+  - **原话照引,不改写。** 与 #5390 引 `resolveTenancyPosture()` 原话同一体例:抛错方拥有措辞。
+    配置载入的失败可能来自四个不同的权威(用户自己的 `throw`、esbuild 的打包诊断、Node 的
+    模块解析、`loadConfig()` 自己的 "no default export"),doctor 没有立场把它们总结得比它们
+    自己更好。
+  - **cause 进 `message`,而不只进 `fix`。** `Environment files` 把 cause 只放在 `fix` 里是对的
+    —— 那一行本身已经把结论说完整了,cause 是脚注。这里 cause **就是**结论:没有它,这一行
+    只说了「出了点没被指名的问题」。所以平铺一行放收敛后的引文(多行折叠成一行、超长截断),
+    `--verbose` 给未截断的原文。折叠而不是取首行,是因为 esbuild 的首行恰好是它最没信息量的
+    一句(`Build failed with 1 error:`,文件与原因在下一行)。
+  - **档位不变。** 仍是 warning,doctor 仍然跑完其余检查,仍然 exit 0。本单让这句话说得更多,
+    不是说得更响。
+  - **那句话本身原样保留**,作为该行的开头。它被两份 changeset 引用、被本文件四处注释引用,
+    也是操作者会去 grep 的字符串;更要紧的是,兄弟测试用它的**缺席**来表示「配置载入成功」,
+    改写它会让那些断言在「没有任何东西能匹配」的空理由下继续变绿。
+
+  顺带消掉的是一条旁路:渲染规则此前只存在于环境检查那个 `forEach` 的循环体里,任何在它之后
+  产生的结论都只能自己再手打一遍格式 —— 而手打的那份没有 `fix` 通道,`--verbose` 对它无效。
+  渲染规则现在是一个具名函数,两处共用。
+
+- 98369a8: fix(cli): `os doctor` 按 `os serve` 的顺序读 `.env*`,并逐值注明来源(#5387)
+
+  `serve` / `dev` / `start` 三条命令都在读第一个 `OS_*` 变量之前用 dotenv-flow 载入
+  `.env*`(`serve.ts:520`、`dev.ts`、`start.ts`);`doctor` **一个都不载入** ——
+  `grep -n dotenv packages/cli/src/commands/doctor.ts` 此前只匹配到一句「我不载入」的注释。
+  于是被诊断的环境和诊断者看到的环境,不是同一个环境:
+
+  ```
+  # .env,提交进仓库、团队共享
+  OS_TENANCY_POSTURE=isolatd
+
+  $ os doctor      # 看不到 .env,posture 解析成 single,报绿,exit 0
+  $ os serve       # 载入 .env,读到 isolatd,FATAL 拒绝启动(PR #5381 的闸门)
+  ```
+
+  `.env` 恰恰是这个变量最常见的来源 —— PR #5381 把 serve 的闸门刻意放在 dotenv 载入
+  **之后**,理由正是这个。在 #5382 之前 doctor 没有任何 env 派生检查,这条不一致不产生
+  可观察差异;#5382 加了第一项(posture),它才有了落点,也才成为「诊断面与运行时不一致」
+  (#4801 / cloud#1020 家族)在 `.env` 这条来源上的残留。
+
+  **现在的行为。** doctor 用 dotenv-flow 自己的 `listFiles()` 取到 `os serve` 会载入的
+  同一份文件清单(`node_env` 按 serve 同款推导:`NODE_ENV || production`;doctor 没有
+  `--dev`,serve 表达式里的 `'test'` 分支在 `flags.dev` 为假时是恒等的),逐个文件解析,
+  让每个变量记住它是在**哪个文件**里胜出的。两条约束是这次改动的实质:
+
+  - **不静默合并进 `process.env`。** 文件里的值只在需要它的那一次读取周围套上(
+    `withDotenvOverlay`),`finally` 里再摘掉 —— 用的是 dotenv-flow 自己 `unload()` 的判定
+    (只删掉仍然等于写入值的那些),所以回调故意改写的值不会被误删。运行中后续的一切
+    (config 打包、外部命令)不会莫名其妙继承一个跟昨天不一样的环境。
+  - **逐值注明来源。** 报告新增一行常驻体检项,说明载入了哪些文件、以及每个 env 输入来自
+    shell 还是哪个文件:
+
+  ```
+    ✓ Environment files    .env, .env.production (node_env=production), the cascade `os serve` loads — OS_TENANCY_POSTURE from .env.production, OS_MULTI_ORG_ENABLED from .env
+  ```
+
+  只静默合并、不注明来源,只是把盲区从「doctor 没读我的 `.env`」平移成「doctor 到底信了我
+  四个 `.env*` 里的哪一个」—— 同一类缺陷往前挪一层。该行**只报来源、从不报值**,所以
+  `DOCTOR_ENV_INPUTS` 将来加入带密钥的变量也不会因此泄露(唯一被打印的值是**非法**的
+  `OS_TENANCY_POSTURE`,由 posture 那条 finding 原样引回给作者看自己的拼写)。
+
+  **posture 那条 finding 的文案随之改写。** #5382 写的是「unlike `os serve`, `os doctor`
+  does not load `.env*` files」—— 在当时如实,也正是 #5387 被开出来的原因。现在同一个位置
+  说的是它**读到了什么**:
+
+  ```
+        Read from .env.production — `os doctor` loaded the same `.env*` cascade
+        `os serve` does (node_env=production: .env, .env.production).
+  ```
+
+  优先级与 serve 一致:shell 里已存在的变量胜过所有文件(dotenv-flow 用 `hasOwnProperty`
+  判定,所以 shell 里显式写空 `OS_TENANCY_POSTURE=` 也胜过 `.env` 里的值),cascade 里靠后
+  的文件胜过靠前的。
+
+  **一个如实说明的影响面:** 本改动改变的是 doctor **每一项 env 派生检查**的输入。今天落在
+  两处 —— posture 报告,以及 ADR-0120 D5e 的 unique-scope 建议(它只在 posture 为
+  `isolated` 时运行,所以一个只写在 `.env` 里的 `isolated` 现在会让它在 doctor 里跑起来,
+  和 `os serve` 一致)。这正是本单要修的东西,不是副作用。用户配置文件(
+  `objectstack.config.ts`)自身读 `process.env` 的那条路径**没有**套上 overlay,以免改变既有
+  config 检查的判定,另行记录。
+
+- 9fad07f: fix(cli): `os doctor` no longer prints `✓ Unique scope` when it could not read the installed-package ledger (#5412)
+
+  `readInstalledPackageEntries()` wrapped two unrelated facts in one un-bound
+  `catch` and returned an empty entry list for both:
+
+  - **`@objectstack/cloud-connection` does not resolve** — the optional package is
+    not installed. Silence is correct here and stays: `os doctor` must run to
+    completion in a checkout that never had it.
+  - **The ledger directory exists and could not be read** — `fs.existsSync()` had
+    already confirmed the directory is there, and producing its entry list threw
+    (the path is occupied by a file, the filesystem refused, the read failed).
+
+  The second was handled as the first. It reached the ADR-0120 D5e unique-scope
+  advisory as "no installed packages", the advisory found nothing to report, and
+  the run printed:
+
+  ```
+    ✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment
+  ```
+
+  So an environment **with** installed packages, whose ledger doctor could not
+  read, got a clean bill of health for the one constraint the `isolated` posture
+  makes dangerous. That is worse than a missing check: a false PASS is what stops
+  an operator looking further.
+
+  The two are now separate. The `import()` failure keeps its own silent `catch`;
+  a ledger read failure comes back as a cause the caller can report, and the
+  success line is withheld — it is a claim about **both** halves of the advisory
+  (this project's metadata, and the manifests of installed packages), so it may
+  only be printed when both halves ran. In its place doctor prints an ordinary
+  `HealthCheckResult` through the same renderer every other check uses:
+
+  ```
+    ⚠ Unique scope          Could not read the installed-package ledger (installed packages NOT
+                            checked for installation-wide uniques) — ENOTDIR: not a directory, …
+  ```
+
+  **Warning, not error**, and the exit code is unchanged: the environment still
+  runs; what broke is doctor's ability to see part of it. The cause is quoted from
+  the thrower rather than paraphrased, and `--verbose` expands the untruncated
+  original plus which half of the check did not run — both free from reusing
+  `renderHealthCheckResult()`.
+
+  Findings from the half that **did** run are still reported: a ledger failure
+  does not swallow the uniques this project's own metadata declares.
+
+  **Not covered by this change**: a single _corrupt entry_ inside an otherwise
+  readable ledger. `LocalManifestSource.list()` skips unparseable files in its own
+  per-file `catch`, so a truncated manifest is dropped inside the producer and the
+  call succeeds with a short list that no consumer can distinguish from a complete
+  one. Fixing that is a change to `@objectstack/cloud-connection`'s own contract
+  and is tracked separately; the boundary is pinned by a test so it is not
+  mistaken for covered.
+
+- 214f67c: fix(cli): `os doctor` no longer treats a broken `@objectstack/cloud-connection` install as "not installed" (#5644)
+
+  `readInstalledPackageEntries()` reached the installed-package ledger through a
+  dynamic `import('@objectstack/cloud-connection')` whose `catch` meant "the
+  optional package is not installed". That is right for one of the two things it
+  caught:
+
+  - **The specifier does not resolve** — the optional package really is not
+    there. Silence is correct and unchanged: `os doctor` must run to completion in
+    a checkout that never had it.
+  - **The package is installed and will not load** — a pruned or unbuilt `dist/`,
+    an interrupted install, an artefact that throws while it evaluates, a
+    transitive dependency missing under it. It threw too, so it was answered with
+    the same silence.
+
+  The ADR-0120 D5e unique-scope advisory then saw "no installed packages", found
+  nothing to report, and the run printed:
+
+  ```
+    ✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment
+  ```
+
+  Measured: with the package present-but-unloadable and a ledger declaring an
+  installation-wide `unique`, that line was printed and the finding appeared
+  nowhere, `--verbose` included. It is the same false PASS #5412 removed at the
+  `readdir` boundary and #5413 at the entry boundary, one boundary further up —
+  and `os serve`, loading the same package in the same directory, has always named
+  the failure out loud.
+
+  The two states are now separated by **resolution**, not by the `import()` having
+  thrown (`isModuleNotFoundError()` first — an error that is not a module-not-found
+  error came from the package itself, so it is present by definition; then
+  `import.meta.resolve()`, which answers "is the package there" without stating its
+  entry file, unlike `createRequire().resolve()`). Only the genuinely-absent half
+  is silent. The other prints an ordinary `HealthCheckResult` through the same
+  renderer every other check uses:
+
+  ```
+    ⚠ Unique scope          Could not load the installed-package ledger reader (installed packages
+                            NOT checked for installation-wide uniques) — Cannot find module …
+  ```
+
+  **Warning, not error**, and the exit code is unchanged, matching its two
+  siblings: the environment still runs; what broke is doctor's ability to see part
+  of it. The cause is quoted from the thrower, and `--verbose` expands it together
+  with the remedy — reinstall, or build the package in a monorepo checkout.
+
+  The row is **not** conditional on `.objectstack/installed-packages/` existing.
+  Doctor cannot honestly say a ledger is absent when the constant naming the
+  ledger's location is an export of the package that would not load.
+
+  One consequence worth stating: in a monorepo checkout where
+  `packages/cloud-connection` has not been built, `os doctor` under the `isolated`
+  posture now prints this warning instead of a clean bill. That state is exactly
+  what sent #5612 chasing a report face that had never regressed.
+
+- ccba1bb: fix(cli): `os doctor` 指名道姓报告非法 `OS_TENANCY_POSTURE` 并以非零码退出,不再报成一句「Could not load config」(#5382)
+
+  `resolveTenancyPosture()`(`@objectstack/types`)对无法识别的值抛错。doctor 有两处读
+  posture —— ADR-0120 D5e 的 unique-scope 闸门,以及 `findUnscopedGlobalUniques()` ——
+  **两处都在 config 分析那个很宽的 `try` 里**,而它的 catch 只会打印
+
+  ```
+    ⚠ Could not load config for analysis (config checks skipped)
+  ```
+
+  并记一个 warning。于是一个 `os serve` 会**拒绝启动**的环境,`os doctor` 报成:
+
+  ```
+  ⚠️  Environment is functional but has some warnings.     EXIT=0
+  ```
+
+  全程不出现 `OS_TENANCY_POSTURE` 这个词。一行里两个缺陷:**归因错了**(配置本身没问题,
+  被指着的是配置),**严重级也错了**(exit 0 意味着任何把 `os doctor` 放进 CI/健康检查的
+  地方,都不会因为这个「环境根本起不来」的配置错误变红)。这正是 #4801 / cloud#1020 那类
+  「诊断面与运行时不一致」,而且落在最糟的位置 —— `os doctor` 就是运维在 `serve` 起不来
+  之后会去跑的那条命令。
+
+  **现在的行为。** posture 在 `run()` 顶部、**任何 `try` 之外**解析一次。非法值产出一条
+  普通的 `error` 体检项:
+
+  ```
+    ✗ Tenancy posture      OS_TENANCY_POSTURE="isolatd" is not a recognized tenancy posture — `os serve` refuses to boot this environment
+        → Set one of the accepted values:
+          • OS_TENANCY_POSTURE=single — one organization, no organization wall — the default
+          • OS_TENANCY_POSTURE=group — organization wall enforced by the open engine, one shared database
+          • OS_TENANCY_POSTURE=isolated — organization wall + the enterprise @objectstack/organizations runtime …
+          • or unset OS_TENANCY_POSTURE entirely — the posture then derives from
+            OS_MULTI_ORG_ENABLED (true ⇒ isolated, anything else ⇒ single)
+        Read from this process's environment only: unlike `os serve`, `os doctor` does not
+        load `.env*` files, so a value set in one is not visible here.
+        cause: Invalid OS_TENANCY_POSTURE="isolatd". …
+  ```
+
+  修法清单由 `@objectstack/spec/security` 的 `TENANCY_POSTURES` 生成,不是第二份字面量,
+  新增一个 posture 不会让这段建议悄悄过期;`cause` 直接引用解析器自己的那句话,doctor 不
+  维护会跟它跑偏的第二份措辞。
+
+  **与 #5359 / PR #5381 给 `serve` 加的闸门同形,但裁决不同,且是刻意的**:serve 是**拒绝**
+  (FATAL + 在任何启动动作之前 `process.exit(1)`),doctor 是**报告** —— 报告照常跑完,由
+  doctor 自己的错误汇总给出非零退出码。doctor 的语义是「把所有问题一次说清」,不是「停下」。
+
+  两处读 posture 的地方现在复用同一个已解析值,不再各自重新解析。
+
+  **顺带修好的一个更大的洞:** 那两处读取此前都在 `if (configExists())` 之内 —— 一个没有
+  `objectstack.config.ts` 的环境**从来没读过** posture,连那句归因错误的 warning 都不会有。
+  现在与是否存在配置文件无关。
+
+  **一个如实说明的残留:** `os doctor` 不加载 `.env*`(`serve`/`dev`/`start` 用 dotenv-flow
+  加载),所以写在提交进仓库的 `.env` 里的非法 posture 仍然到得了服务器、到不了这份报告。
+  文案里明说了这一点,不冒充自己检查过 —— 该跨命令不一致另行记录为 #5387。
+
+- cd2efe6: `config.email.persist` now actually reaches the email plugin (#5447)
+
+  `EmailServiceConfigSchema` has always declared `persist` — the generated
+  reference documents it as "Persist to sys_email (default true)" — and
+  `EmailServicePlugin` has always honoured the constructor option, building no
+  `EmailPersistence` when `persist === false`. What did not exist was the segment
+  between them: `resolveEmailCapabilityArg` in `os serve` is the only reader
+  `config.email` has, and it read every declared key except this one.
+
+  So a deployment that wrote `email: { persist: false }` to keep message bodies
+  out of the database type-checked, parsed, and read as configured — and went on
+  writing every subject, body and recipient to `sys_email`. Operators who
+  switched persistence off for PII reasons were not getting what the contract
+  promised. **If you rely on that row being written, no action is needed; if you
+  had declared `persist: false` and audited on the assumption it took effect,
+  those rows exist and are worth reviewing.**
+
+  Resolution order, per setting, matching the rest of this resolver:
+
+      OS_EMAIL_PERSIST_ENABLED  >  config.email.persist  >  default (persist ON)
+
+  `OS_EMAIL_PERSIST_ENABLED` is new, and reads the same truth table as
+  `OS_EMAIL_QUEUE_ENABLED` (`1`/`true`/`yes`/`on`, case- and space-insensitive);
+  that table is now one shared helper instead of two copies. Unlike the queue
+  flag it is default-ON, because it does not enable a capability — it is the off
+  switch for one that has always been on. A deployment that declares neither
+  source is byte-for-byte unchanged: the key is left out of the plugin's
+  constructor options entirely and the plugin's own default decides.
+
+- 736519d: fix(cli): `OS_APP_NAME` overrides `config.email.defaultTemplateContext.appName` again (#5448)
+
+  `resolveEmailCapabilityArg` computed the email template context's `appName`
+  first and then spread the whole `config.email.defaultTemplateContext` over it.
+  A config that spelled `defaultTemplateContext: { appName: 'Acme Dev' }`
+  therefore made `OS_APP_NAME` inert — silently, with nothing logged — even
+  though this resolver's stated contract ("`OS_EMAIL_*` environment variables
+  override per setting", the header of `EmailServiceConfigSchema` and of the
+  generated `references/system/email-config` page) holds for every other key it
+  reads: `apiKey`, `defaultFrom`, `retries`, `queueDelivery`, `persist`, SMTP.
+
+  One `objectstack.config.ts` deployed to several environments has exactly one
+  per-environment lever, and it did nothing: production kept sending mail branded
+  with the repo-pinned name, and because the fallback sender is slugged from the
+  same value, the envelope said `no-reply@acme-dev.local` too.
+
+  `appName` is now resolved after the spread, in the order
+  `OS_APP_NAME` > `config.email.appName` >
+  `config.email.defaultTemplateContext.appName` > top-level `config.appName` >
+  `'ObjectStack'`. Every other key of `defaultTemplateContext` is unchanged — it
+  has no env or dedicated-config carrier, so the author's context is still spread
+  through wholesale.
+
+  **Behaviour change, accepted deliberately.** A deployment that relied on
+  `defaultTemplateContext.appName` beating `OS_APP_NAME` will now see the env
+  value in mail subjects, bodies and the derived fallback sender. Unset
+  `OS_APP_NAME` in that environment, or move the intended name into
+  `config.email.appName`, to keep the old result. Note that
+  `defaultTemplateContext.appName` stays in the chain rather than losing to the
+  two dedicated sources outright: a config that spells only the context form is
+  still honoured and is not demoted to `'ObjectStack'`.
+
+- 55dbbba: feat(spec,runtime,hono): `server.security.rateLimit` — an authored budget that actually returns 429 (#4910, #4937)
+
+  Rate limiting in ObjectStack was three shapes with nothing between them. `packages/spec`
+  declared `RateLimitConfig` in three places and the whole repo had **zero readers** for any
+  of them, so an author wrote a budget, it parsed, and nothing happened (#4686).
+  `@objectstack/runtime` shipped a token bucket whose comments claimed, in the present tense,
+  that the dispatcher called it and short-circuited with 429 — it had **zero call sites**
+  outside its own unit test, and the `DispatcherPluginConfig.rateLimit` field it told you to
+  tune did not exist (#4937). Neither half was broken; they were simply never connected, and
+  both were documented as if they were.
+
+  They are connected now, along one narrow path.
+
+  ## What you write
+
+  ```ts
+  export default defineStack({
+    manifest: {
+      /* … */
+    },
+    server: {
+      security: {
+        rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 600 },
+      },
+      trustProxy: false,
+    },
+  });
+  ```
+
+  `server:` is a **new** top-level stack key. Nothing declared it before, so no existing
+  stack changes behaviour on upgrade — there is no configuration that was inert yesterday
+  and starts throttling today.
+
+  It is deliberately **narrow**: it carries `security.rateLimit` and `trustProxy` and
+  nothing else, because those are the two keys with a consumer. It is NOT the nine-key
+  `HttpServerConfigSchema` — the other seven have no reader and no authoring surface, and
+  mounting them here would have made seven dead keys writable in one move (their
+  enforce-or-remove fate stays with #4938). It is strict from birth (#4001), so a misspelled
+  budget is rejected with the correction rather than silently defaulted, and `maxRequests: 0`
+  is refused at `defineStack` rather than at 3am.
+
+  **No `server.port`.** The listening socket belongs to the deployment, not the artifact, and
+  `objectstack serve -p` already owns it. The precedence rule is recorded in the schema and
+  the docs in advance, so it cannot be re-litigated per caller: **CLI flag > `server:` >
+  built-in default.**
+
+  ## What happens
+
+  Every inbound request the server routes — REST, dispatcher, service routes, anything
+  mounted on that transport — consumes from a token bucket sized `capacity = maxRequests`,
+  refilling at `maxRequests / (windowMs / 1000)` per second. An empty bucket answers **429**
+  with a `Retry-After` computed from the bucket itself and the standard error envelope
+  (`code: "RATE_LIMIT_EXCEEDED"`). `OPTIONS` preflights are never metered.
+
+  The bucket is keyed by **resolved principal**, falling back to the caller's **IP** for
+  anonymous traffic — so one abusive session cannot spend another user's budget, and
+  credential-stuffing traffic (which has no principal yet) is still metered per source. That
+  IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `trustProxy: true` is declared**;
+  otherwise it is the transport's own peer address. Undeclared, those headers are attacker
+  input: honouring them by default would hand anyone an unlimited supply of fresh buckets and
+  let them drain a chosen victim's.
+
+  Counters live in the kernel `cache` service when one is registered, so a multi-node
+  deployment enforces one budget instead of one per node (ADR-0069 D2), resolved lazily at
+  consume time so a cache plugin that registers later is still picked up (#4772). With no
+  cache service at all it falls back to a per-process store and says so once, naming the
+  consequence: the effective limit becomes the declared budget multiplied by the number of
+  nodes, and nothing about the deployment looks wrong.
+
+  ## Also in this change
+
+  - **`IHttpServer.use()` is a real middleware seam.** The Hono adapter's implementation
+    passed `{}` for both `req` and `res` and called `next()` unconditionally, so a registered
+    middleware could not read the request, write a response, or decline to continue — a
+    declared seam with no execution behind it, unnoticed because nothing called it. It now
+    delivers method/path/query/headers plus the transport peer address
+    (`IHttpRequest.remoteAddress`, new), and honours a short-circuit. Middleware must be
+    registered before the routes it guards; the kernel's two-phase boot makes that automatic
+    (`init()` before every `start()`).
+  - **`packages/runtime/src/security/rate-limit.ts` no longer describes an execution chain it
+    does not have** (#4937). The token-bucket arithmetic is extracted so the synchronous
+    in-process limiter and the new shared-store one cannot drift, and `DEFAULT_RATE_LIMITS` is
+    now labelled as the reference material it always was rather than as live defaults.
+
+  ## Explicitly NOT wired
+
+  `ApiEndpointSchema.rateLimit` and `ApiEndpointRegistrationSchema.rateLimit` remain
+  **known-unwired**. Declaring them still changes nothing. They are not retired here either:
+  the fate of the whole declarative `apis:` surface is undecided (#4936), and retiring one
+  key of a surface that may yet be implemented would only have to be undone. Tracked, not
+  silent.
+
+- dd98cba: `os doctor` reports an unreadable installed-package ledger under EVERY tenancy posture
+
+  The three rows that say doctor could not read `.objectstack/installed-packages/`
+  — the directory could not be enumerated, a file inside it would not parse, or
+  the package that reads ledgers would not load — were all produced inside the
+  ADR-0120 D5e unique-scope advisory, whose entry condition is
+  `postureGatesGlobalUniques(posture)`. That is true only for `isolated` (and its
+  legacy alias `multi`), so under `single` and `group` the ledger was never read
+  at all and `os doctor` said nothing about it. `OS_TENANCY_POSTURE` unset
+  resolves to `single`, so the silent posture was the default one.
+
+  Whether an environment's `unique: 'global'` is dangerous IS a posture question,
+  and that gate is unchanged. Whether a file in the ledger can be read is not: it
+  is equally true under every posture and means the same thing under every one —
+  that installed app is dropped at boot, absent from the kernel and from the
+  console's installed-apps list.
+
+  Ledger readability is now its own check, run unconditionally, independent of
+  both the posture and of whether an `objectstack.config.ts` loaded. The D5e block
+  keeps the unique-scope judgment alone, consuming the same reading rather than
+  taking a second one, so one bad ledger produces one row under `isolated` too. An
+  incomplete reading still withholds `✓ Unique scope` there — that line is a claim
+  about both halves of the advisory and only one of them ran.
+
+  **Report face:** the three readability rows now take the `Installed packages`
+  name column instead of `Unique scope`, and drop `for installation-wide uniques`
+  from the message's parenthetical — under `single` and `group` there is no
+  unique-scope check to name. This supersedes the sentence in the pending
+  `quiet-ledgers-speak-up` changeset that called it a `Unique scope` warning row.
+  The `Unique scope` name still exists, under the D5e block, for the unique-scope
+  verdict alone. A readable ledger prints nothing new under any posture.
+
+  This is the diagnostic-command half only. The runtime's own signal — the
+  `rehydrate()` warning per dropped entry at boot — is unchanged and stays
+  posture-independent; the two are separate channels for separate moments and
+  neither substitutes for the other.
+
+- 8c5a87c: `os lint`: dedup actions on their real engine key, not the bare name
+
+  `naming/namespace-prefix` deduplicated every bare-named type on `name` alone.
+  For actions that is not the key they occupy: the engine registers an action
+  under `objectName:name` (`ObjectQLPlugin.actionObjectKey`, with the canonical
+  object-less key `global` since #3913), so a package that declares one
+  `log_call` per object occupies one distinct key per object and nothing shadows
+  anything.
+
+  The bare-name dedup therefore flagged that shape as an intra-package duplicate
+  and the noise grew linearly with the object count — 12 fixed warnings per run
+  on HotCRM (5 objects x 3 activity actions), where following the "rename one"
+  prescription would have broken the shared i18n keys the shape depends on.
+  Actions now dedup on `objectName:name`; the other six types keep bare-name
+  dedup and their message text verbatim.
+
+  Genuine shadowing is still reported: two actions sharing one `objectName`, two
+  object-less actions sharing a name, and an action on an object literally named
+  `global` meeting an object-less one all still warn — with a remedy calibrated
+  for actions, which offers separating them by `objectName` before renaming.
+
+- 2ddba89: fix(tenancy): eight sites answered "is this deployment multi-org?" with the demoted `OS_MULTI_ORG_ENABLED` (#5262)
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the authoritative knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — therefore reads `false` from
+  `resolveMultiOrgEnabled()` while running a fully mounted organization wall.
+  #5233 corrected two sites in `plugin-auth`; a census found eight more, all
+  written before that function's doc comment was corrected. Third recurrence of
+  the shape (cloud#1020, #5233).
+
+  Each site was judged separately for **which** posture answers its question —
+  what the operator REQUESTED, or what the `tenancy` service reports is actually
+  IN FORCE — rather than converted mechanically:
+
+  - `objectql` `SchemaRegistry` — the env-derived multi-tenant default. Reads the
+    REQUESTED posture (it is constructed below the kernel, with no service
+    registry to ask). The `organization_id` column was always provisioned; what
+    diverged is its INDEX, so a posture-only deployment ran the Layer 0 wall's
+    hottest predicate unindexed while SecurityPlugin compiled that same wall.
+  - `plugin-dev` — whether to load the enterprise `@objectstack/organizations`.
+    REQUESTED posture, mirroring `serve.ts`: this branch is what mounts the wall,
+    so asking whether the wall is up would be circular. A posture-only dev stack
+    previously never loaded the package at all and served traffic unwalled. Its
+    diagnostic now names the posture that was requested instead of asserting
+    `OS_MULTI_ORG_ENABLED=true` at an operator who never set it.
+  - `runtime` `AppPlugin` (inline seed + hot-reload seeder) — EFFECTIVE posture,
+    via the `tenancy` service. These ask "will the per-org replay run instead of
+    me?", and on an ADR-0093 D5 degraded boot that replay does not exist, so
+    keying on the request would defer to a replay that can never happen. Walled
+    deployments previously inline-seeded exactly the NULL-organization rows the
+    code's own comment exists to avoid.
+  - `cloud-connection` marketplace local install (install-time seed + rehydrate
+    heal) — EFFECTIVE posture, same reasoning. The install path is a write path:
+    a walled deployment wrote every sample row with no `organization_id`, landing
+    the app's data outside the wall its own reads apply.
+  - `driver-sql` `isMultiTenantMode()` — REQUESTED posture (a driver has no
+    kernel to ask, and a suppressed warning is the costlier error for a
+    diagnostic). It also no longer memoises into `_multiTenantMode`: that froze a
+    process-level fact into a per-instance verdict on whichever write landed
+    first. The gate now resolves live, which is affordable because
+    `auditMissingTenant` consults it only after the `tenantId` early-out.
+  - `cli` `os verify` — REQUESTED posture. This one produced a green verification
+    run over an unverified property: a posture-only deployment silently skipped
+    every multi-tenant proof and exited 0.
+
+  **No configuration change is needed anywhere.** Deployments setting only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  belt-and-braces configuration stays valid. Deployments that set only
+  `OS_TENANCY_POSTURE` can now drop the redundant boolean. Single-org behaviour is
+  unchanged at every site; only the knob each one reads is corrected.
+
+- 7127b48: `LocalManifestSource.list()` now reports the ledger entries it could NOT read
+
+  A truncated, unreadable or unparseable file under
+  `.objectstack/installed-packages/` was skipped in an un-bound per-file `catch`
+  and `list()` returned a bare array, so a short list was indistinguishable from a
+  complete one — no difference in the return value, no log, no count. Three
+  consumers gave a confidently wrong answer: the installed app was never
+  registered at boot (gone from the app switcher, its objects nonexistent) with
+  nothing in the log, the console's installed-apps list came back short with
+  `success: true`, and `os doctor` printed `✓ Unique scope` over manifests it had
+  never parsed.
+
+  Skipping a corrupt file stays correct — one bad manifest must not stop a runtime
+  booting the packages that are fine. Skipping it _silently_ was the defect.
+
+  **Breaking (`@objectstack/cloud-connection`):** `LocalManifestSource.list()`
+  returns `{ entries, skipped }` instead of `InstalledManifestEntry[]`.
+
+  - FROM: `const entries = source.list();`
+  - TO: `const { entries, skipped } = source.list();`
+
+  `skipped` is `Array< { file: string; cause: unknown } >` — the file's basename
+  and the object reading or parsing it threw, unwrapped. Callers that only want
+  the old behaviour read `.entries`; the point of the shape is that dropping
+  `skipped` is now something a caller has to do on purpose. Two new exported
+  types, `InstalledManifestListing` and `SkippedManifestEntry`.
+
+  Enumerating the ledger DIRECTORY still throws out of `list()` — unchanged, and a
+  different fact from "some files in it would not parse".
+
+  `os doctor` reports unparseable entries as a `Unique scope` warning row naming
+  each file with its cause, and withholds the `✓` success line, alongside the
+  directory-level row it already had.
+
+- df54254: fix(cli): 非法 `OS_TENANCY_POSTURE` 在 `serve` 最开头被显式拒绝,不再先伪装成「AuthPlugin 加载失败」(#5359)
+
+  `resolveTenancyPosture()`(`@objectstack/types`)对无法识别的值抛错,文案自称
+  「Refusing to boot rather than silently falling back to a posture with no
+  organization wall」。**拒绝本身一直是对的,错的是这个拒绝怎么传出去。**
+
+  `serve` 过去没有单独解析 posture,而是让抛错从「第一处读到它的地方」自然逃逸,而那个
+  位置恰好在 AuthPlugin 那个很宽的 `try` 里 —— 它的 catch 只打印一句黄字就继续。于是一个
+  env 拼写错误的第一现场是:
+
+  ```
+    ⚠ AuthPlugin failed to load: Invalid OS_TENANCY_POSTURE="bogus". Expected one of: …
+  ```
+
+  把环境变量拼错报成了插件加载问题。启动随后**带伤继续**:整个 capability slate 照常装载,
+  本地 crypto 密钥被生成并**持久化到磁盘**,直到下一处没有被 `try` 包住的读取
+  (ObjectQL `SchemaRegistry` 构造,内核 bootstrap 阶段一)才让 `runtime.start()` 中止,
+  最终由通用 `printError` 把解析器那句话裸着打出来 —— 退出码对,别的都不对。
+
+  **现在的行为。** `serve.run()` 在 `dotenv-flow` 载入之后、读取配置文件之前、任何 `try`
+  之外解析一次 posture。非法值走 ADR-0093 D5 同款形状的显式拒绝 —— FATAL + 完整修法清单 +
+  `process.exit(1)`(不是 throw,throw 正是会被下游 catch 降级成 warning 的那种东西):
+
+  ```
+    ✖ FATAL: OS_TENANCY_POSTURE="bogus" is not a recognized tenancy posture.
+      Refusing to boot. …
+
+      No config has been loaded, no plugin has been mounted, and the HTTP server was
+      never started — this deployment has not served a single request.
+
+      Fix one of:
+        • set OS_TENANCY_POSTURE=single — …
+        • set OS_TENANCY_POSTURE=group — …
+        • set OS_TENANCY_POSTURE=isolated — …
+        • unset OS_TENANCY_POSTURE entirely — …
+
+      cause: Invalid OS_TENANCY_POSTURE="bogus". …
+  ```
+
+  修法清单由 `@objectstack/spec/security` 的 `TENANCY_POSTURES` 生成,不是第二份字面量,
+  所以新增一个 posture 不会让这段建议悄悄过期。文案里点名 `.env` —— 该变量常常来自提交进
+  仓库的 `.env*` 而不是 shell,这也是把闸门放在 dotenv 载入**之后**的原因。
+
+  `serve` 内后续所有 posture 读取(组织插件装载判断、启动横幅的 `Tenancy:` 行)改为复用
+  闸门解析出的那一个值,不再各自重新解析。横幅那处尤其值得说:它此前是非法 posture 的
+  **最后一道防线**,等于让一个诊断输出承担安全属性 —— 现在闸门拥有这个拒绝,横幅只负责
+  汇报闸门的结论。
+
+  **一处订正。** #5359 的静态追踪认为进程「在报错前已经 listen 过」。实测并非如此:逃逸的
+  抛错发生在内核 bootstrap **阶段一**(插件 init),而监听套接字在**阶段四**的
+  `kernel:listening` 钩子才打开,所以端口从未被绑定过 —— 修复前后都是如此。本次真正改变的
+  是:拒绝成为第一条也是唯一一条输出、归因正确、带处方,且启动不再留下任何副作用
+  (修复前那次「被拒绝」的启动会在磁盘上留下持久化的 dev crypto key)。
+
+- 41c3b48: feat(plugin-email): real SMTP delivery — `SmtpTransport`, settings hot-swap, and a `mail/test` that actually sends (#5087)
+
+  The **Mail Delivery** settings page has always defaulted to SMTP and offered a
+  full host / port / TLS / username / password form. Nothing behind it delivered:
+  `applyMailSettings` treated `provider: 'smtp'` as a no-op ("transport
+  unchanged"), `mail/test` answered `ok: true, "Configuration looks valid … Wire
+@objectstack/plugin-mail for actual delivery"` — a success toast for a message
+  nobody sent, naming a package that has never existed — and the code pointed
+  operators at `@objectstack/plugin-mail-smtp`, which is not in this repo or on
+  npm. A workspace that selected SMTP got a green form, a green test button, and
+  mail that only ever reached the log and the `sys_email` table. For deployments
+  in China this left **no** working channel at all: Resend and Postmark are
+  overseas HTTPS SaaS with unreliable reach and deliverability to QQ / 163 /
+  enterprise mailboxes, where SMTP is the normal path (Aliyun DirectMail, Tencent
+  SES, corporate mail servers).
+
+  **`SmtpTransport` now ships in `@objectstack/plugin-email`** (ADR-0012: SMTP in
+  core, implemented with `nodemailer`). `nodemailer` is a real dependency but is
+  imported **lazily on the first send**, so deployments that never select SMTP —
+  and non-Node runtimes — never load `node:net` / `node:tls`.
+
+  Three doors reach it, all sharing one options reader so they cannot drift:
+
+  - **Settings → Mail** (`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+    `smtp_password`) hot-swaps the live transport on save, no restart.
+  - **`os serve`** via `OS_EMAIL_PROVIDER=smtp` plus the new `OS_EMAIL_SMTP_HOST` /
+    `_PORT` / `_SECURE` / `_USER` / `_PASSWORD` (or `config.email.options`).
+  - **Constructor**: `new EmailServicePlugin({ provider: 'smtp', providerOptions:
+{ host, port, secure, user, password } })`.
+
+  TLS is one toggle with the wire behaviour derived from the port, as providers
+  document it: on `465` implicit TLS (SMTPS); on any other port a **required**
+  STARTTLS upgrade, so a server that refuses to upgrade fails the send instead of
+  leaking credentials over a cleartext socket; `secure: false` connects in the
+  clear and upgrades only when STARTTLS is offered.
+
+  **Failure is loud everywhere, because a silent fallback is the bug this fixes.**
+  On the construction path (CLI / plugin options) a `smtp` provider with no host
+  **throws** and the boot fails — it no longer degrades into a LogTransport that
+  reports every send as successful. On the settings hot-swap path a save can never
+  kill a running server, so the previous transport is kept — but the failure is
+  logged at `error` naming the consequence and the fix, and **`mail/test` now
+  performs a real delivery** through the settings on screen and reports the SMTP
+  server's own words (`535 … authentication failed`) instead of a green toast. The
+  built-in fallback `mail/test` handler (used only when no email plugin is
+  mounted) answers `ok: false` and says plainly that nothing was sent.
+
+  Nothing to migrate: `log`, `resend` and `postmark` behave exactly as before, and
+  a deployment that never selects `smtp` is unaffected.
+
+- a287d1c: fix(cli): `OS_STORAGE_ROOT` now actually takes effect — renamed to `OS_STORAGE_LOCAL_ROOT`, the name the settings service reads (#4968)
+
+  The CLI and the settings service spelled the local storage root differently.
+  The CLI wrote its own invented name, `OS_STORAGE_ROOT`; the settings service
+  derives the env name for the same value from the namespace it owns —
+  `envKeyOf('storage', 'local_root')` = `OS_STORAGE_LOCAL_ROOT` — and nothing in
+  the repo ever set that. So the two channels never met: `os serve` constructed a
+  local adapter at the root the operator named, `StorageServicePlugin` re-resolved
+  from settings at `kernel:ready`, found only the manifest's **schema default**,
+  and swapped the adapter to `./.objectstack/data/uploads`.
+
+  `OS_STORAGE_ROOT` therefore took effect for exactly one value — the one that
+  happens to equal that default — which is why plain `pnpm dev` never showed it.
+  Every other value was constructed and then discarded:
+
+  - **Production**: `OS_STORAGE_ROOT=/srv/uploads` was ignored and uploads landed
+    under the process cwd. An operator following `backup-restore.mdx` backed up an
+    empty directory.
+  - **`dev --fresh`**: the tempdir was documented to own all state for the run;
+    uploads actually went to the project cwd and survived process exit.
+  - Every clean boot logged a data-loss-grade "adapter swapped … existing files
+    were NOT migrated" warning. That warning was **accurate** — the swap really
+    happened — and is untouched here. It stops firing because the swap stops.
+
+  The fix is at the producer, not as a tolerant read in the consumer: `dev.ts`
+  publishes `OS_STORAGE_LOCAL_ROOT`, and `serve.ts` resolves the root through one
+  channel (`resolveStorageLocalRootEnv`), shared with `os migrate`'s storage
+  bootstrap so the CLI materialises bytes exactly where the server would.
+
+  `OS_STORAGE_ROOT` keeps working for **one release** via
+  `readEnvWithDeprecation('OS_STORAGE_LOCAL_ROOT', 'OS_STORAGE_ROOT')`, warning
+  once per process, and is then removed. When the legacy name supplies the value
+  it is also stamped onto the canonical name, because the settings service only
+  ever looks up `OS_STORAGE_LOCAL_ROOT` — without the stamp a deployment on the
+  old spelling would keep the original defect in full.
+
+  Storage settings now resolve `source: 'env'` at the value the adapter was built
+  with, so Setup → Settings → File Storage shows the directory actually in use.
+  No change to `packages/services/service-storage` — the swap predicate is correct
+  and stays as is.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [da5d1b4]
+- Updated dependencies [d4e0809]
+- Updated dependencies [739f496]
+- Updated dependencies [c1e67e0]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [c637387]
+- Updated dependencies [c113690]
+- Updated dependencies [f7df82c]
+- Updated dependencies [705efeb]
+- Updated dependencies [978fed2]
+- Updated dependencies [c36abfe]
+- Updated dependencies [9ecdca9]
+- Updated dependencies [cfc293f]
+- Updated dependencies [d085670]
+- Updated dependencies [de70b42]
+- Updated dependencies [1792384]
+- Updated dependencies [2f6516e]
+- Updated dependencies [e6b1bb0]
+- Updated dependencies [a7b854f]
+- Updated dependencies [01c0bae]
+- Updated dependencies [f56ebea]
+- Updated dependencies [64cd010]
+- Updated dependencies [f522e95]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [628b028]
+- Updated dependencies [b857356]
+- Updated dependencies [fce4c73]
+- Updated dependencies [f6385c7]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [7e5ac28]
+- Updated dependencies [19e1a8f]
+- Updated dependencies [553a47f]
+- Updated dependencies [c5e7bd9]
+- Updated dependencies [0162c81]
+- Updated dependencies [055f0c9]
+- Updated dependencies [7a40b7a]
+- Updated dependencies [7cf1531]
+- Updated dependencies [586d6f7]
+- Updated dependencies [9f747ee]
+- Updated dependencies [2d14b35]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [c497d26]
+- Updated dependencies [e96ad55]
+- Updated dependencies [bbdbf28]
+- Updated dependencies [93929c2]
+- Updated dependencies [2e284b2]
+- Updated dependencies [3905c00]
+- Updated dependencies [4335497]
+- Updated dependencies [75bb3af]
+- Updated dependencies [43ca399]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [bcfebb0]
+- Updated dependencies [de770bf]
+- Updated dependencies [aa25a81]
+- Updated dependencies [3a18e24]
+- Updated dependencies [533a0a4]
+- Updated dependencies [1f82d1e]
+- Updated dependencies [a019e52]
+- Updated dependencies [02a8256]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [ce1155c]
+- Updated dependencies [846ed1f]
+- Updated dependencies [947d4f9]
+- Updated dependencies [d8f65fe]
+- Updated dependencies [58ffcab]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [3133cda]
+- Updated dependencies [1f0e7cb]
+- Updated dependencies [8dbd2a8]
+- Updated dependencies [99d7a93]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c794f78]
+- Updated dependencies [f205c32]
+- Updated dependencies [7bf3d1c]
+- Updated dependencies [9ce0ca9]
+- Updated dependencies [db9c331]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [217b791]
+- Updated dependencies [fd8521f]
+- Updated dependencies [641363a]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [2b63a00]
+- Updated dependencies [06ba036]
+- Updated dependencies [18b8eaa]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [9c4f174]
+- Updated dependencies [d25f20b]
+- Updated dependencies [205e81b]
+- Updated dependencies [37e38d1]
+- Updated dependencies [cc5b048]
+- Updated dependencies [78adc2e]
+- Updated dependencies [0f17114]
+- Updated dependencies [81e2744]
+- Updated dependencies [277eb36]
+- Updated dependencies [41e605e]
+- Updated dependencies [ecc61ab]
+- Updated dependencies [2649ccb]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [a70cd0a]
+- Updated dependencies [c52e608]
+- Updated dependencies [96d3d4d]
+- Updated dependencies [afa6aa5]
+- Updated dependencies [afb83d3]
+- Updated dependencies [4022b78]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [06ffad3]
+- Updated dependencies [811c30c]
+- Updated dependencies [2b2175b]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [c7406b0]
+- Updated dependencies [85d95e7]
+- Updated dependencies [8108787]
+- Updated dependencies [168f60f]
+- Updated dependencies [d4edb5d]
+- Updated dependencies [eb26126]
+- Updated dependencies [be59695]
+- Updated dependencies [b2e1057]
+- Updated dependencies [ec6fad8]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [729a43a]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [d97f2a2]
+- Updated dependencies [d9cac60]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [dfa8bad]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [290d944]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [123067c]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [88a6bed]
+- Updated dependencies [a6b3ee7]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [5d3ced9]
+- Updated dependencies [4b50be4]
+- Updated dependencies [9fa6bab]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [61dc08e]
+- Updated dependencies [8dcf607]
+- Updated dependencies [b691ba9]
+- Updated dependencies [65159ae]
+- Updated dependencies [1eadac0]
+- Updated dependencies [7c2f7dd]
+- Updated dependencies [9b26699]
+- Updated dependencies [461ccda]
+- Updated dependencies [5582e18]
+- Updated dependencies [58f3220]
+- Updated dependencies [f238970]
+- Updated dependencies [06fc07a]
+- Updated dependencies [61fde5e]
+- Updated dependencies [95b4f0d]
+- Updated dependencies [877545c]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [444a07c]
+- Updated dependencies [288e5a4]
+- Updated dependencies [46365ab]
+- Updated dependencies [e18e3da]
+- Updated dependencies [b508244]
+- Updated dependencies [8597a7d]
+- Updated dependencies [5a45b9b]
+- Updated dependencies [594508e]
+- Updated dependencies [60a7a2d]
+- Updated dependencies [ff39e63]
+- Updated dependencies [1c625ca]
+- Updated dependencies [b5459bc]
+- Updated dependencies [1624f4a]
+- Updated dependencies [e6db317]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [1cae606]
+- Updated dependencies [2f1e2a5]
+- Updated dependencies [4addd9d]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b9cc17d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [340a34f]
+- Updated dependencies [a9f32df]
+- Updated dependencies [75f82f3]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [1203bb2]
+- Updated dependencies [7d27da0]
+- Updated dependencies [b821b29]
+- Updated dependencies [af96af6]
+- Updated dependencies [de113a4]
+- Updated dependencies [caf144a]
+- Updated dependencies [db8c285]
+- Updated dependencies [0d24078]
+- Updated dependencies [089767f]
+- Updated dependencies [5b8f95b]
+- Updated dependencies [da538b1]
+- Updated dependencies [dadf542]
+- Updated dependencies [2ddba89]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [79822b5]
+- Updated dependencies [15e61fb]
+- Updated dependencies [ef7845a]
+- Updated dependencies [72bd873]
+- Updated dependencies [7127b48]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [73580e7]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [dde9202]
+- Updated dependencies [2cca98b]
+- Updated dependencies [07f1822]
+- Updated dependencies [37a8f2b]
+- Updated dependencies [441d79f]
+- Updated dependencies [7f955e5]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [9c5abf4]
+- Updated dependencies [dc6abfd]
+- Updated dependencies [39396bd]
+- Updated dependencies [577cd27]
+- Updated dependencies [5897552]
+- Updated dependencies [91ec1ea]
+- Updated dependencies [2d25303]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [da1a64c]
+- Updated dependencies [5e3c83b]
+- Updated dependencies [0cd08d5]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5ab0842]
+- Updated dependencies [5c94f83]
+- Updated dependencies [d275c10]
+- Updated dependencies [f98fa65]
+- Updated dependencies [73e576f]
+- Updated dependencies [2680cd3]
+- Updated dependencies [1d29e6d]
+- Updated dependencies [c5a5996]
+- Updated dependencies [5ea8e1e]
+- Updated dependencies [cba7454]
+- Updated dependencies [b40f81c]
+- Updated dependencies [82a06af]
+- Updated dependencies [6e66cbe]
+- Updated dependencies [f226605]
+- Updated dependencies [c272e48]
+- Updated dependencies [ddd6650]
+- Updated dependencies [db2ea82]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [1216dcc]
+- Updated dependencies [9c90ea0]
+- Updated dependencies [41c3b48]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [193cd5c]
+- Updated dependencies [5aae790]
+- Updated dependencies [07f1822]
+- Updated dependencies [ef8b1ff]
+- Updated dependencies [1f1edc0]
+- Updated dependencies [718b229]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [d56bcdb]
+- Updated dependencies [f104bab]
+- Updated dependencies [dca25e1]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [5aaa6fc]
+- Updated dependencies [dca5bd3]
+- Updated dependencies [488b66c]
+- Updated dependencies [20963e7]
+- Updated dependencies [c89d18c]
+- Updated dependencies [acf34e3]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [90fa077]
+- Updated dependencies [e92e2c3]
+- Updated dependencies [946a131]
+- Updated dependencies [909895d]
+- Updated dependencies [38f53a0]
+- Updated dependencies [c183a12]
+- Updated dependencies [69a89ce]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+- Updated dependencies [c42a19a]
+- Updated dependencies [f0d98e1]
+- Updated dependencies [229d29e]
+- Updated dependencies [b508244]
+- Updated dependencies [2b52bc8]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/runtime@17.0.0-rc.4
+  - @objectstack/lint@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/cloud-connection@17.0.0-rc.4
+  - @objectstack/driver-sql@17.0.0-rc.4
+  - @objectstack/service-analytics@17.0.0-rc.4
+  - @objectstack/driver-memory@17.0.0-rc.4
+  - @objectstack/rest@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/plugin-hono-server@17.0.0-rc.4
+  - @objectstack/metadata-protocol@17.0.0-rc.4
+  - @objectstack/metadata@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/plugin-approvals@17.0.0-rc.4
+  - @objectstack/plugin-audit@17.0.0-rc.4
+  - @objectstack/plugin-auth@17.0.0-rc.4
+  - @objectstack/service-settings@17.0.0-rc.4
+  - @objectstack/objectql@17.0.0-rc.4
+  - @objectstack/plugin-email@17.0.0-rc.4
+  - @objectstack/service-sms@17.0.0-rc.4
+  - @objectstack/client@17.0.0-rc.4
+  - @objectstack/service-automation@17.0.0-rc.4
+  - @objectstack/console@17.0.0-rc.4
+  - @objectstack/plugin-security@17.0.0-rc.4
+  - @objectstack/service-datasource@17.0.0-rc.4
+  - @objectstack/driver-mongodb@17.0.0-rc.4
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/verify@17.0.0-rc.4
+  - @objectstack/service-queue@17.0.0-rc.4
+  - @objectstack/trigger-record-change@17.0.0-rc.4
+  - @objectstack/plugin-sharing@17.0.0-rc.4
+  - @objectstack/mcp@17.0.0-rc.4
+  - @objectstack/service-messaging@17.0.0-rc.4
+  - @objectstack/service-storage@17.0.0-rc.4
+  - @objectstack/account@17.0.0-rc.4
+  - @objectstack/setup@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+  - @objectstack/plugin-reports@17.0.0-rc.4
+  - @objectstack/plugin-webhooks@17.0.0-rc.4
+  - @objectstack/service-cache@17.0.0-rc.4
+  - @objectstack/service-job@17.0.0-rc.4
+  - @objectstack/service-package@17.0.0-rc.4
+  - @objectstack/service-realtime@17.0.0-rc.4
+  - @objectstack/trigger-api@17.0.0-rc.4
+  - @objectstack/trigger-schedule@17.0.0-rc.4
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

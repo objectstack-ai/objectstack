@@ -1,5 +1,894 @@
 # Changelog
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- de113a4: BREAKING(auth): `organization/create` 改判**实际生效的** tenancy posture —— 没有组织墙的部署不再能创建组织 (#5261)
+
+  `POST /api/v1/auth/organization/create` 的闸门此前判的是操作者**请求的** posture
+  (`postureEnforcesWall(resolveTenancyPosture())`,一次纯 env 读)。现在判 `tenancy` 服务给出的
+  **生效** posture —— `tenancy?.posture ?? resolveTenancyPosture()`,与 `/auth/config` 的
+  `features.multiOrgEnabled` 是**同一次求值**。
+
+  ## 为什么
+
+  两个站点此前只在一种形状下分叉,而那种形状恰恰是最不该放行的一种 —— ADR-0093 D5 **降级态**:
+  请求了 `isolated`/`group`,但企业包 `@objectstack/organizations` 缺席,于是 `tenancy.posture`
+  解析为 `single` 且 `degraded=true`。此时:
+
+  - 闸门读「请求」→ **放行**;
+  - `/auth/config` 读「生效」→ `multiOrgEnabled=false`,console 把「创建组织」入口**藏起来**。
+
+  结果是 UI 没有按钮而 API 打得通,并且建出来的每一个组织都是**没有任何引擎强制的租户边界** ——
+  声明了但没强制,ADR-0049 最讨厌的那一类,只不过发生在部署层。改判生效 posture 之后两者同解、
+  永不分叉:**没有墙,就没有组织**,无论这个部署是从未要过墙,还是要了没拿到。
+
+  ## 破坏性影响(有意为之)
+
+  **没有安装企业包 `@objectstack/organizations` 的部署将完全无法创建组织**,任何 env 组合都不行 ——
+  `OS_TENANCY_POSTURE=isolated`、`OS_MULTI_ORG_ENABLED=true`、两个一起设,都不再能把闸门说通。
+  这是一次实打实的能力收缩,不是 knob 纠正,所以搭 v17 主版本车。
+
+  | 部署形状                                          | 改前   | 改后          |
+  | ------------------------------------------------- | ------ | ------------- |
+  | 有企业包,posture `isolated` / `group`(墙真的立着) | 200    | **200**(不变) |
+  | **请求了墙但企业包缺席(D5 降级态)**               | 200    | **403** ⚠️    |
+  | `single` / 两个 knob 都不设                       | 403    | 403(不变)     |
+  | 未注册 `tenancy` 服务的精简嵌入(回落 env 解析)    | 按 env | 按 env(不变)  |
+
+  `serve.ts` 本来就在降级态**默认拒绝启动**(要 `OS_ALLOW_DEGRADED_TENANCY=1` 才走),所以这条收缩
+  命中的是一个已经需要显式选择才能到达的形状:从此那里的 org-create 路由也一并拒绝,而不是半通不通。
+  cloud 控制面与任何装了企业包的部署不受影响。
+
+  **迁移**:需要多组织能力的部署安装并声明 `@objectstack/organizations`(ADR-0081 D2)。仅靠 env
+  声明一个墙、而没有实现它的运行时,不再被当作多组织部署对待。
+
+  ## `@objectstack/verify`(minor,新增)
+
+  `BootOptions.multiTenant` 增加 `'posture-only'` 取值:注册一个内置的 `org-scoping` 服务替身,
+  让 `tenancy` 服务解析出真实、**非降级**的 `isolated` posture,从而打开受 posture 把守的路由 ——
+  供那些「组织墙是**前置条件**而非被测对象」的 fixture 使用(#3624 的 `org-create-default-team`
+  dogfood 就是为它而建:那条回归此前靠「boot 后翻 env、闸门 live 读」开路,本次收缩把这个绕法关死了)。
+
+  ⛔ 它**不做任何租户隔离**:不 stamp `organization_id`,不 scope 任何查询 —— 它让部署的
+  **posture** 为真,不是让**墙**为真。跨租户隔离的唯一诚实证明仍然是 `multiTenant: true` +
+  真实的企业包,这也是那些 gate 在本仓继续 skip 而不是假装通过的原因。
+
+### Minor Changes
+
+- 7cf1531: fix(auth): an unrecognised membership policy is refused by both reconcilers, not auto-bound by one of them (#5205)
+
+  **The sign-up path used to bind anyway.** `reconcileMembership` and
+  `backfillMemberships` — both public exports of `@objectstack/plugin-auth` — read
+  the same `policy` field and judged it with opposite predicates. Sign-up tested
+  `policy === 'invite-only'`, so any _other_ value fell through to the `auto`
+  branch and auto-bound the new user; the backfill tested `policy !== 'auto'` and
+  refused. One input, two opposite postures, and the fail-open half was the one
+  that runs per sign-up. A caller who wrote `'inviteOnly'` — or any host passing
+  the policy from JavaScript, past the `MembershipPolicy` type — got auto-binding
+  while believing they had switched it off, with nothing in the logs to say so.
+
+  Both entry points now check `isMembershipPolicy()` before any policy semantics
+  and refuse: nothing is bound, and the refusal names the offending value at
+  `error` level (and on the returned result, so it survives a caller that passed
+  no logger). This is the posture #5152 took one layer up at the settings
+  boundary — an unrecognised value is rejected loudly, never coerced to `auto`.
+
+  **Contract change — `ReconcileOutcome` gains `'invalid-policy'`, and
+  `BackfillMembershipsResult.reason` gains the same member.** Both are exported
+  types, so a consumer that switches exhaustively over them (a `never`-checked
+  `default`, or a `Record< ReconcileOutcome, … >`) must handle the new member.
+  The new verdict is deliberately _not_ a reuse of the existing `policy-skip` /
+  `'policy'`: those mean "a valid policy said no", and reporting them for "this
+  is not a policy" sends whoever is debugging a missing bind to inspect a
+  deployment setting that is fine. `BackfillMembershipsResult` also gains an
+  optional `error?: string`, and the `logger` shape on `ReconcileMembershipDeps`
+  gains an optional `error?` method (it falls back to `warn`).
+
+  **No behaviour change for the two real policies.** `auto` binds and
+  `invite-only` skips exactly as before, on both paths — the framework's own
+  callers resolve the policy through `AuthManager.getMembershipPolicy()`, whose
+  return type is `MembershipPolicy`, so nothing on a supported path can reach the
+  new branch. This closes the dormant divergence on the export surface.
+
+- 586d6f7: feat(auth): `membership_policy` is a platform setting, and sign-up and backfill read one source (#5152)
+
+  **What a new user joins is now configurable at runtime.** ADR-0093's
+  `membershipPolicy` decides whether a freshly created user is auto-bound to the
+  deployment's default organization (`auto`) or gets membership only from an
+  explicit act — creating a workspace, accepting an invitation, an admin adding
+  them, SSO just-in-time provisioning (`invite-only`). Until now it was settable
+  **only** as an `AuthPlugin` constructor option, and the AuthPlugin a self-hosted
+  stack gets is injected by the CLI, which passes no such option and has no env
+  fallback. Every self-hosted deployment therefore ran `auto`, with no way to say
+  otherwise. `invite-only` was, in practice, unreachable outside a custom host.
+
+  It is now `auth.membership_policy` in the platform settings — a two-value select
+  (`auto` / `invite-only`, default `auto`) alongside `signup_enabled`, which it
+  pairs with: one says whether people may self-register, the other says what they
+  join when they do. Set it in Setup → Authentication → Membership, or pin it
+  per-deployment with `OS_AUTH_MEMBERSHIP_POLICY`. It applies **without a
+  restart** — the existing `settings.subscribe('auth', …)` re-application seam
+  carries it, the same one the password-policy keys ride.
+
+  **No behaviour changes unless you set it.** Only an _explicit_ value applies;
+  the manifest's `auto` default is a UI default and never masks a deployment that
+  configured the policy in code. A stack that sets nothing keeps today's
+  auto-binding exactly.
+
+  **Bug fix — the two membership paths read one source.** Sign-up (the reconciler
+  in better-auth's `user.create.after`) read the AuthManager's live config, while
+  the ADR-0093 D6 backfill of pre-existing member-less users read the plugin's
+  **constructor options**. Wiring a setting to the first and not the second would
+  have produced "sign-up honours the new policy, backfill still runs the old one"
+  — and the backfill binds in **bulk**, so it is the more dangerous half. Both now
+  resolve the policy through the new `AuthManager.getMembershipPolicy()`, and the
+  backfill waits for the settings namespace to bind before its first pass (the two
+  `kernel:ready` hooks fire in registration order, which was the wrong order).
+
+  **An invalid value is rejected, not coerced.** `PUT /api/settings/auth` refuses
+  a policy outside the declared option table (`invalid_option`, naming the allowed
+  set). A value arriving from `OS_AUTH_MEMBERSHIP_POLICY` — which bypasses that
+  validation — is logged at `error` and **ignored**, leaving the deployment's
+  current policy in force; it is never silently read as `auto`, because that would
+  leave an operator believing a wall is up while every sign-up is auto-bound.
+
+  New public API on `@objectstack/plugin-auth`: `AuthManager.getMembershipPolicy()`,
+  plus `MEMBERSHIP_POLICIES` and `isMembershipPolicy()` from `reconcile-membership`.
+
+- 61dc08e: feat(plugin-auth): break-glass — a ban may never leave the environment with zero administrators (#5892)
+
+  `sys_user.banned = true` is where every deprovision lands: better-auth's admin
+  plugin writes it, and `@better-auth/scim` maps a SCIM `active: false` onto that
+  same admin ban. Nothing checked what the write left behind — so **banning the
+  last administrator was allowed, reported success, and locked the organization
+  out of its own environment permanently.** SCIM makes that a realistic accident
+  rather than a hypothetical one: the write is driven by an external system, so
+  nobody reads the payload before it commits, and one mis-scoped IdP group is
+  enough.
+
+  **New guard (`last-admin-ban-guard.ts`, cloud ADR-0024 D5.2).** A `beforeUpdate`
+  hook on `sys_user` refuses any write that turns `banned` on when it would leave
+  the environment with **no unbanned administrator**. It sits on the write, not on
+  an endpoint, so it holds for the admin ban endpoint, the SCIM adapter write, an
+  import, a script, and anything added later — by-id **and** predicate/`multi`
+  writes alike.
+
+  Who counts as an administrator is exactly what the rest of the platform already
+  counts: a platform admin (an unscoped, in-window `admin_full_access` grant —
+  the same evidence `resolveAuthzContext` derives `platform_admin` from) or an
+  organization `owner`/`admin` membership. `delegated_admin` does not count
+  (ADR-0105 D8: it can reach an endpoint, it carries no authority), an expired
+  grant does not count, and the non-loginable `usr_system` account does not count.
+
+  Three consequences worth knowing before you upgrade:
+
+  - The refusal is a **403** carrying `PERMISSION_DENIED` and a message that names
+    the user, the invariant, and the fix (grant someone else `admin_full_access`
+    or an owner/admin membership first — and if an IdP drove the ban, the SCIM
+    deprovision is too broad). On the auth pipeline it now surfaces as a proper
+    `APIError` instead of an opaque 500.
+  - It **fails closed**: if the administrator population cannot be read, or is too
+    large to enumerate, the ban is refused rather than guessed at. The failure
+    mode being prevented is a permanent lockout.
+  - Writes that do not turn `banned` on — unbans, profile edits, re-banning an
+    already-banned admin — are untouched, and so is banning anyone who is not an
+    administrator.
+
+  The other half of the same invariant (`enforced` SSO must never disable the last
+  local admin's **password** — the escape hatch for an IdP outage) was already
+  implemented and is now pinned by tests rather than reimplemented:
+  `emailAndPassword.enabled` stays `true` under enforced SSO while sign-up is
+  forced off, and the last local `credential` account still cannot be banned,
+  removed or deleted.
+
+- 8dcf607: feat(plugin-auth): break-glass — the last administrator cannot be DELETED either (#5941)
+
+  #5892 closed the _ban_ half of ADR-0024 D5.2's break-glass invariant. The
+  **delete** half was still open, and it was reachable end to end: in an enforced
+  SSO environment the last administrator is typically IdP-managed and holds no
+  local password, so when the IdP drops them from the admin group the resulting
+  SCIM `DELETE /Users/{id}` (or `/admin/remove-user`, or `/delete-user`) removed
+  the row and **left the environment with nobody able to administer it** — quite
+  possibly with a password-holding non-admin still able to sign in and change
+  nothing. There is no recovery path from inside the product once that happens.
+
+  The pre-existing HTTP guard on those three endpoints did not cover it: it
+  protects the last holder of a local `credential` account, so it skips the
+  credential-less (IdP-managed) target entirely. It is unchanged and keeps
+  enforcing its own invariant.
+
+  **What changed.** The guard module now enforces one invariant on _both_ writes
+  that can take the last administrator away, off one administrator enumeration:
+
+  | write                       | hook                     |
+  | :-------------------------- | :----------------------- |
+  | `sys_user.banned = true`    | `beforeUpdate` (#5892)   |
+  | deleting the `sys_user` row | `beforeDelete` (**new**) |
+
+  The delete half is the ban half's twin in every property that matters: it sits
+  on the **write**, so it holds for the SCIM adapter delete, better-auth's admin
+  remove-user, an import and a script alike; it covers by-id **and**
+  predicate/`multi` deletes (including the unpredicated `multi` that would empty
+  the table); it applies to **every** context, `isSystem` included, because the
+  deprovision path that actually locks organizations out is the system one; and it
+  **fails closed** — an administrator population that cannot be read, or is too
+  large to enumerate, refuses the delete rather than guessing.
+
+  The refusal is a **403** carrying `PERMISSION_DENIED` and names the operation
+  the caller actually attempted ("Refusing to delete 'usr\_…'"), the invariant
+  (ADR-0024 D5.2), and the fix — grant someone else `admin_full_access` or an
+  owner/admin membership first, and if an IdP drove it, the SCIM deprovision is
+  too broad. On the auth pipeline it surfaces as an `APIError`, not an opaque 500.
+
+  Untouched: deleting anyone who is not an administrator, deleting an
+  administrator while another unbanned one remains, and deleting an administrator
+  who is already banned (that account could not sign in either way).
+
+  **Rename.** The module is now `last-admin-guard.ts` and the exported registration
+  function is `registerLastAdminGuard` (was `last-admin-ban-guard.ts` /
+  `registerLastAdminBanGuard`, added in the same unreleased cycle) — it registers
+  both hooks, so the old name would have understated what it installs. Hosts that
+  wire the guard onto their own ObjectQL engine rename the import; there is no
+  other change to its signature or behaviour.
+
+  Not covered, tracked separately (#5978): revoking the _standing_ that makes
+  someone an administrator — deleting or downgrading their `sys_member` row,
+  removing the `admin_full_access` grant — leaves the user row in place and writes
+  a different table, so neither hook sees it.
+
+### Patch Changes
+
+- 7a40b7a: fix(plugin-auth): better-auth 的 `contains` 下译为 `$contains`,比较值不再当正则求值 (#5710)
+
+  `convertWhere()` 把 better-auth 的 `contains` 译成 `{ field: { $regex: value } }`,
+  于是一个**未转义、来自调用方**的比较值(`/admin/list-users` 的 `searchValue`、
+  SCIM 过滤值)坐进了正则的**模式位**。它的含义随后端分叉:
+
+  - `driver-memory` 用 `new RegExp(value)` 求值 —— `contains('a.b')` 命中 `axb`,
+    `^x` 变成锚定,而值里一个不配对的 `(` 让模式非法(mingo 查询路径直接抛
+    `SyntaxError`,参考匹配器则吞成静默零命中);
+  - `driver-sql` / `driver-sqlite-wasm` / `driver-turso` 编成子串
+    `LIKE '%value%'`(`%`/`_`/`\` 有转义、带显式 `ESCAPE`),元字符是字面量。
+
+  同一个认证查询,在应用测试常用的内存替身上和生产的 SQL 后端上给出**不同答案**,
+  且分叉发生在认证路径上。
+
+  现在这一支发出 `$contains` —— 协议 `FILTER_OPERATORS` 里的算子,五后端都必须按
+  **字面子串**求值,正是 better-auth `contains` 的本意(其 `Where.mode` 默认
+  `"sensitive"`,与 #5701 Q2=A 裁定的 `$contains` 大小写敏感契约同向)。
+
+  **对使用方的影响**:凭 `/admin/list-users?searchValue=…` 之类接口依赖「元字符按正则
+  生效」的调用会改变结果 —— 那是本次修复的缺陷本身,不是可依赖的行为。搜索
+  `a.b` 从此只命中含字面 `a.b` 的行,不再命中 `axb`;含非法正则字符的搜索值不再
+  报错或静默返回空,而是按字面子串匹配。
+
+- 2d14b35: fix(plugin-auth): `convertWhere()` 补齐 `not_in` / `starts_with` / `ends_with`,未识别算子改为响亮拒收 (#5813)
+
+  `convertWhere()` 的分支链只覆盖 better-auth 十一个算子里的八个。
+  `not_in` / `starts_with` / `ends_with` 落在链尾之外:**`filter` 里不写任何键**,
+  不告警,链尾也没有 `else` 兜底。一个只带这类条件的 `where` 因此编成 `{}`。
+
+  **丢谓词不是把结果变窄,是变宽 —— 而且发生在身份表上**(#3948 反复论证过的形状,
+  driver-memory 的匹配器 `default:` 臂与 objectql 的 `having` 都为此改成了拒收):
+
+  - `findMany` / `count` 变成**全表**(仅受 `limit` 截断)。已挂载的
+    `GET /api/v1/auth/admin/list-users`(`auth-route-ledger.ts:161`)把查询参数直接
+    推进 `where`,而 `searchOperator` 的枚举是 `contains | starts_with | ends_with`、
+    `filterOperator` 的枚举**就是整张算子表**。于是
+    `?searchValue=abc&searchOperator=starts_with` 返回的是「全部用户」而不是「以 abc
+    开头的用户」,`?filterField=email&filterOperator=not_in&filterValue=…` 不排除任何人。
+    管理台的用户检索是它的主要消费者。
+  - `update` / `delete` / `consumeOne` / `incrementOne` 走的是「先 `findOne(filter)`
+    再按 id 写」,`{}` 让 `findOne` 返回**任意一行**(实测是第一行),于是写到了错误的
+    记录上。实测证据:对四行表执行「删除 `name` 以 `zed` 开头的用户」,修复前删掉的是
+    `u_abc1`(第一行),不是 `u_zed`。
+
+  ## 改了什么
+
+  **一、三个算子按词表直译**(三个 ObjectQL 算子都在 `FILTER_OPERATORS` 里,
+  五后端都必须求值):
+
+  | better-auth   | ObjectQL      |
+  | :------------ | :------------ |
+  | `not_in`      | `$nin`        |
+  | `starts_with` | `$startsWith` |
+  | `ends_with`   | `$endsWith`   |
+
+  大小写语义两侧同向,直译不开契约缝:better-auth 的 `Where.mode` 默认
+  `"sensitive"`,`$startsWith` / `$endsWith` 按 #5701 Q2=A 在契约层也是大小写敏感。
+
+  **二、链尾未识别算子响亮抛错**,不再静默丢。错误信息带算子名、字段名与受支持算子
+  清单,本身就是操作指引。这是 restore-invariant:否则 better-auth 下次加算子时,
+  这个洞会以完全相同的方式重开一次。
+
+  ## 对使用方的影响
+
+  - 用上述三个算子的查询**从「返回全表 / 写错行」变成「按谓词正确过滤」**。这是缺陷
+    修复,不是可依赖行为的移除 —— 但依赖「`starts_with` 检索能列出全部用户」的脚本会
+    看到结果变化。
+  - 传入**词表之外**的算子从「静默忽略该条件」变成**抛错**。今天没有活体调用方能命中
+    这一支(`/admin/list-users` 的两个参数都由 better-auth 自己的 zod 枚举把关),它面向
+    的是将来:better-auth 长出第十二个算子时,查询会在第一次执行就失败,而不是悄悄放大。
+    该分支同时是编译期哨兵(`never` 收敛),`pnpm --filter @objectstack/plugin-auth
+typecheck` 会先一步报错。
+  - `Where.mode: 'insensitive'` **不在**本次范围内,也不会被这条拒收波及 —— `mode` 是
+    `operator` 的兄弟字段而非算子,今天仍被忽略(#5814,决策箱中)。
+
+- 93929c2: fix(plugin-auth): break-glass 不变量补上第三条路径 —— 撤销「管理员身份」的写(`sys_member` 降级/删行、`admin_full_access` 授权删/改)同样被拒 (#5978)
+
+  cloud ADR-0024 D5.2 的不变量是「环境永远至少留一个能登录的管理员」。此前它由两个引擎钩子守着,
+  **都装在 `sys_user` 上**:`banned = true`(#5892 / PR #5939)与删 `sys_user` 行(#5941 / PR #5993)。
+
+  但「谁是管理员」这件事根本不存在 `sys_user` 上 —— 它由另外两张表推导(`resolveAdminUserIds`
+  正是从这两张表反向枚举的)。于是第三条写法完全绕开两个守卫:**用户行原封不动,把他的管理员身份拿掉**。
+
+  - 把最后一个管理员的 `sys_member.role` 降到 admin 等级之下(better-auth 的 `updateMemberRole`、
+    一次 SCIM 组映射变更、导入、脚本),或直接删掉那条 `sys_member` 行;
+  - 删掉那条 `admin_full_access` 的 `sys_user_permission_set` 授权,或把它改到不再生效
+    —— 改指向别的权限集、加上 `organization_id` 组织作用域、把 ADR-0091 有效期窗口改过去。
+
+  三者事后状态与「删掉最后一个管理员」完全等价:所有人都还在,没有任何人能管理任何东西,
+  产品内部无恢复路径。
+
+  **新增的拒写语义。** 守卫现在按同一形状扩到 `sys_member` 与 `sys_user_permission_set` 的
+  `beforeUpdate` / `beforeDelete`(共六个钩子,同 `packageId`、同 priority 20)。判据就是 issue 的原话
+  ——**枚举、模拟、再枚举**:先枚举当前管理员,再把这次写落地后的行拿同一个枚举函数跑一遍,
+  若第二次为空而第一次不为空则拒写。两次枚举是同一份实现,「谁是管理员」不可能对写前问题和写后问题
+  给出两个答案。
+
+  - **全覆盖,不是只拦自降级**:真正会发生的是 IdP 组映射改别人的角色,不是管理员给自己降级。
+  - **谓词/批量写照判**:一次 `where` 命中多行的 update/delete 会先解析出整个匹配行集再做写后模拟,
+    而不是一律拒绝;只有匹配集本身解析不出来(读失败,或超过 `maxScan`)才响亮拒写。
+  - **fail-closed**:枚举失败或形状不确定一律拒写并点名 ADR-0024 D5.2,与既有两半同向。
+  - 模拟是**单向**的 —— 只会拿走身份,不会授予身份(把 role 从 `member` 升到 `admin`、把授权改指向
+    `admin_full_access` 这类写,模拟看不见新增的管理员),因此每一处取整都倒向「拒写」而非「放行」。
+
+  **不拦的**:降级到**另一个** admin 等级(`owner` → `admin`,或逗号拼写 `member,admin`)—— 等级未失;
+  已被 ban 的管理员的身份被撤(本来就不能登录,没有东西被拿走);非管理员的 membership/授权;
+  以及不触及 `role` / `user_id`(membership)或权限集/作用域/有效期(授权)的 payload —— 这类写
+  静态可证不改变枚举结果,一次读都不做。
+
+  有效期语义按 `resolveAdminUserIds` 现有的 `isGrantActive`(ADR-0091 D2)**原样消费**,本次不新造
+  (#5893 才是那个问题的归属单)。等级判定全程只问 `isOrgAdminGrade` 这把唯一的尺(#5939 / #5942),
+  守卫内没有任何手抄的 role 解析。
+
+- 08f93bc: fix(auth): `organization/create` gates on the authoritative `OS_TENANCY_POSTURE`, not the demoted `OS_MULTI_ORG_ENABLED` (#5233)
+
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — mounted the entire organization wall and still
+  answered `403 Creating additional organizations is disabled on this deployment.`
+  to `POST /api/v1/auth/organization/create`. Org-less users had no way to create
+  their workspace, so the guided "Create your workspace" path was a dead end.
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the canonical knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  Two sites in `AuthManager` kept reading the demoted boolean directly, so both
+  reported "single-org" on a deployment that had asked for a wall and got one:
+
+  - `organizationHooks.beforeCreateOrganization` — the 403 above. It now judges
+    `postureEnforcesWall(resolveTenancyPosture())`, matching the knob `serve.ts`'s
+    own ADR-0093 D5 boot guard keys on. Intent is unchanged (single-org still
+    refuses); only the knob is corrected.
+  - `/auth/config`'s `features.multiOrgEnabled` — its no-tenancy-service fallback
+    read the same boolean. It now falls back to the resolved posture, so a lean
+    embedding advertises the capability its own gate allows.
+
+  **No configuration change is needed anywhere.** Deployments that set only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  workaround people used to unblock themselves stays valid. Deployments that set
+  only `OS_TENANCY_POSTURE` can now drop the redundant boolean.
+
+  `resolveMultiOrgEnabled()`'s doc comment in `@objectstack/types` — which still
+  instructed "the auth manager's `/auth/config` feature flag and org-create guard
+  … MUST call this", written before the demotion — now says the opposite: ask the
+  posture, and never gate on this boolean. Its behaviour is unchanged.
+
+- 55dbbba: feat(spec,runtime,hono): `server.security.rateLimit` — an authored budget that actually returns 429 (#4910, #4937)
+
+  Rate limiting in ObjectStack was three shapes with nothing between them. `packages/spec`
+  declared `RateLimitConfig` in three places and the whole repo had **zero readers** for any
+  of them, so an author wrote a budget, it parsed, and nothing happened (#4686).
+  `@objectstack/runtime` shipped a token bucket whose comments claimed, in the present tense,
+  that the dispatcher called it and short-circuited with 429 — it had **zero call sites**
+  outside its own unit test, and the `DispatcherPluginConfig.rateLimit` field it told you to
+  tune did not exist (#4937). Neither half was broken; they were simply never connected, and
+  both were documented as if they were.
+
+  They are connected now, along one narrow path.
+
+  ## What you write
+
+  ```ts
+  export default defineStack({
+    manifest: {
+      /* … */
+    },
+    server: {
+      security: {
+        rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 600 },
+      },
+      trustProxy: false,
+    },
+  });
+  ```
+
+  `server:` is a **new** top-level stack key. Nothing declared it before, so no existing
+  stack changes behaviour on upgrade — there is no configuration that was inert yesterday
+  and starts throttling today.
+
+  It is deliberately **narrow**: it carries `security.rateLimit` and `trustProxy` and
+  nothing else, because those are the two keys with a consumer. It is NOT the nine-key
+  `HttpServerConfigSchema` — the other seven have no reader and no authoring surface, and
+  mounting them here would have made seven dead keys writable in one move (their
+  enforce-or-remove fate stays with #4938). It is strict from birth (#4001), so a misspelled
+  budget is rejected with the correction rather than silently defaulted, and `maxRequests: 0`
+  is refused at `defineStack` rather than at 3am.
+
+  **No `server.port`.** The listening socket belongs to the deployment, not the artifact, and
+  `objectstack serve -p` already owns it. The precedence rule is recorded in the schema and
+  the docs in advance, so it cannot be re-litigated per caller: **CLI flag > `server:` >
+  built-in default.**
+
+  ## What happens
+
+  Every inbound request the server routes — REST, dispatcher, service routes, anything
+  mounted on that transport — consumes from a token bucket sized `capacity = maxRequests`,
+  refilling at `maxRequests / (windowMs / 1000)` per second. An empty bucket answers **429**
+  with a `Retry-After` computed from the bucket itself and the standard error envelope
+  (`code: "RATE_LIMIT_EXCEEDED"`). `OPTIONS` preflights are never metered.
+
+  The bucket is keyed by **resolved principal**, falling back to the caller's **IP** for
+  anonymous traffic — so one abusive session cannot spend another user's budget, and
+  credential-stuffing traffic (which has no principal yet) is still metered per source. That
+  IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `trustProxy: true` is declared**;
+  otherwise it is the transport's own peer address. Undeclared, those headers are attacker
+  input: honouring them by default would hand anyone an unlimited supply of fresh buckets and
+  let them drain a chosen victim's.
+
+  Counters live in the kernel `cache` service when one is registered, so a multi-node
+  deployment enforces one budget instead of one per node (ADR-0069 D2), resolved lazily at
+  consume time so a cache plugin that registers later is still picked up (#4772). With no
+  cache service at all it falls back to a per-process store and says so once, naming the
+  consequence: the effective limit becomes the declared budget multiplied by the number of
+  nodes, and nothing about the deployment looks wrong.
+
+  ## Also in this change
+
+  - **`IHttpServer.use()` is a real middleware seam.** The Hono adapter's implementation
+    passed `{}` for both `req` and `res` and called `next()` unconditionally, so a registered
+    middleware could not read the request, write a response, or decline to continue — a
+    declared seam with no execution behind it, unnoticed because nothing called it. It now
+    delivers method/path/query/headers plus the transport peer address
+    (`IHttpRequest.remoteAddress`, new), and honours a short-circuit. Middleware must be
+    registered before the routes it guards; the kernel's two-phase boot makes that automatic
+    (`init()` before every `start()`).
+  - **`packages/runtime/src/security/rate-limit.ts` no longer describes an execution chain it
+    does not have** (#4937). The token-bucket arithmetic is extracted so the synchronous
+    in-process limiter and the new shared-store one cannot drift, and `DEFAULT_RATE_LIMITS` is
+    now labelled as the reference material it always was rather than as live defaults.
+
+  ## Explicitly NOT wired
+
+  `ApiEndpointSchema.rateLimit` and `ApiEndpointRegistrationSchema.rateLimit` remain
+  **known-unwired**. Declaring them still changes nothing. They are not retired here either:
+  the fate of the whole declarative `apis:` surface is undecided (#4936), and retiring one
+  key of a surface that may yet be implemented would only have to be undone. Tracked, not
+  silent.
+
+- 9fa6bab: fix(plugin-auth): sign JWTs with an algorithm the host can actually use (#3585)
+
+  On any host whose WebCrypto lacks Ed25519 — StackBlitz/WebContainer is the
+  reported one — **every authenticated request 500'd as soon as the OIDC provider
+  was enabled**, which is the default whenever the MCP server is on. Sign-in
+  succeeded, then the first `/api/v1/auth/get-session` returned 500 with
+  `OperationError … cfrgGenerateKey`. An app that never asked for OIDC got an
+  unusable login, and the only escape was `OS_OIDC_PROVIDER_ENABLED=false`.
+
+  The cause was an inherited default: `plugin-auth` registered better-auth's `jwt`
+  plugin without `jwks.keyPairConfig`, so better-auth's **EdDSA / Ed25519** default
+  applied and jose asked WebCrypto for an algorithm the host does not have. It hit
+  ordinary cookie login rather than just OAuth clients because the plugin's `after`
+  hook signs a `set-auth-jwt` header for _every_ session.
+
+  **Three changes, no configuration required:**
+
+  - **The signing algorithm is now chosen by capability, not by inheritance.** At
+    instance build the plugin asks WebCrypto whether it can generate an Ed25519
+    key pair — using the exact algorithm descriptor jose uses — and pins
+    `keyPairConfig` to `EdDSA`/`Ed25519` when it can, or falls back to **ES256**
+    when it cannot. Hosts with Ed25519 behave exactly as before.
+  - **Deployments that already minted an EdDSA key keep working.** Choosing ES256
+    for _new_ keys is not sufficient on its own: better-auth's `resolveSigningKey`
+    falls back to _any_ stored key when none matches the configured algorithm, so
+    an existing EdDSA key in `sys_jwks` would still be selected and then fail in
+    `importJWK`. On a host without Ed25519 the plugin now installs better-auth's
+    `adapter.getJwks` keyring seam and hides keys this host cannot import, so a
+    fresh ES256 key is minted and the deployment converges on a working state.
+    Hidden rows are **never deleted** — move back to a host with Ed25519 and they
+    are used again. Such a host also stops advertising those keys in
+    `/api/v1/auth/jwks`, since it can neither sign nor verify with them.
+  - **A signing failure can no longer take down the session path.** If signing
+    fails anyway (neither algorithm usable, an unwritable `sys_jwks`, or a rotated
+    `OS_AUTH_SECRET` that cannot decrypt the stored key), `/get-session` now
+    returns the session normally and simply omits the `set-auth-jwt` header,
+    instead of 500ing. The failure is reported once with an error that names the
+    algorithm, says what still works, and points at the opt-out — and is queryable
+    via `getDegradedAuthFeatures()` under the new `jwtSigning` key.
+
+  No configuration changes and no migration. Deployments on hosts with Ed25519 are
+  unaffected: the keyring override is installed only where it is needed.
+
+- b691ba9: fix(plugin-auth): break-glass 守卫扩到 `sys_permission_set`,并把「零管理员」从引导期豁免里分辨出来 (#6084)
+
+  break-glass 不变量(cloud ADR-0024 D5.2)此前守三张表:`sys_user`(ban/删行,#5892/#5941)与
+  `sys_member`/`sys_user_permission_set`(撤销 standing,#5978)。**第四条写法绕开全部三条**:
+  「谁是 platform admin」是**按名字**解析的——`resolveAdminUserIds` 先
+  `where: { name: 'admin_full_access' }` 取那条 `sys_permission_set` 行,再去读指向它 id 的授权行。
+  删掉那一行、或把它改个名字,授权行、`sys_user` 行、`sys_member` 行**一个都没动**,而所有
+  platform admin 同时不再是管理员。
+
+  ## 放大缺陷:这一条写法还会顺手关掉守卫本身
+
+  两个判据都以「这个环境有管理员吗?没有就放行」开场——引导期本就没有 break-glass 账号可保护,
+  在那个窗口里拒绝一切身份写会是守卫拿一个空测量值自造政策。可是 `admin_full_access` 行没了的环境
+  **读起来正是零管理员**,于是豁免生效,ban / 删用户 / 降级 / 撤授权**一并放行**。所以这一条写法
+  不只是锁死环境,还在锁死的路上把 #5892 / #5941 / #5978 三条守卫一起解除。
+
+  ## 两处改动
+
+  **① 同形状扩到第四张表。** `sys_permission_set` 的 `beforeUpdate` + `beforeDelete`,复用 #5978 的
+  `enforceStanding` / `applyPending`,`PendingStandingWrite` 多认一张表;枚举的第一段 scan 现在也对
+  pending 做模拟并**重测 `name`**——与 grant 半边重测 `permission_set_id` 同理,scan 自己的 `where`
+  只证明了写**之前**那行叫什么。静态跳过键只有 `name` 一个:枚举只读这一列,所以每一次 projection
+  回填、每一次 `os meta resync`、每一次 Setup 里编辑权限集(写的是 `label`/`description`/权限 JSON)
+  一次读都不花。数据门自己已经拒绝改名(ADR-0094),这道守卫覆盖的是不经数据门的引擎级与
+  system-context 写。
+
+  **② 收紧引导期豁免。** 「零管理员」拆成它本来混在一起的两种状态:
+
+  - **真引导期**——没有任何证据说这里曾经有过 platform admin。照旧放行。
+  - **刚被清空**——仍存在无组织范围、有效期内的 `sys_user_permission_set` 授权行,而它指向的
+    `sys_permission_set` 行已经不在了。fail-closed 拒写,并在报文里点名那些悬空授权行。
+
+  判据选的是**悬空授权行**,因为它在正常路径上根本写不出来:每一个生产者都先插权限集、再读回 id 写
+  授权行(`bootstrapPlatformAdmin` 第 1 步 seed 权限集、第 2 步才提拔第一个用户,权限集缺席时返回
+  `admin_permission_set_missing` 而不是发授权),所以**全新环境的可写性按构造不变**——测试里有一条
+  「真引导期照常放行」的钉专门量这一点。改名不留下悬空授权行,这条判据看不见它;那条路径改由 ① 在
+  写入处拦下,残留因此只剩一种状态:守卫尚未注册时落下的改名。曾考虑把判据放宽成「不存在
+  `admin_full_access` 行 且 存在无组织范围授权行」,被否掉——它会改变「seed 顺序先写授权行」的全新
+  环境的答案,而不改变全新环境的答案正是这条判据唯一不能碰的红线。
+
+  `sys_permission_set` 的拒绝报文结尾不走 SCIM 那句:IdP 不写这张表,写它的是元数据删除、
+  `os meta` 与包卸载,报文点名的是这些门。
+
+- 4addd9d: feat(driver-sql)!: organization-scoped uniques are NULL-safe — `COALESCE(organization_id, '__global__')` key part + `unique: 'organization'` on declared indexes (ADR-0120 D3/D4, #5030)
+
+  SQL UNIQUE is NULL-distinct, so the `(organization_id, field)` composite #3696
+  introduced enforced **nothing** on rows whose organization is NULL — which on a
+  single-tenant stack (where the kernel injects the column and never fills it) is
+  **every row**: field-level `unique: true` was a silent no-op there, measured in
+  #5030. Per ADR-0120 D3, every organization-scoped unique now materializes its
+  organization key part as `COALESCE(organization_id, '__global__')`: NULL-organization
+  rows collapse into one platform bucket, unique among themselves; non-NULL rows
+  are untouched. Storage stays NULL — the sentinel exists only inside the index
+  key, and it is the same word the autonumber sequence table already uses
+  (`GLOBAL_TENANT`), so a constraint-violation error reads as "the platform
+  bucket collided", not as corrupt data.
+
+  What changes, concretely:
+
+  - **Field-level `unique: true`** (and the new explicit synonym
+    `'organization'`) on a tenant-scoped object → composite
+    `(COALESCE(tenantField, '__global__'), field)`. `unique: 'global'` and
+    tenant-less objects are unchanged.
+  - **Declared indexes gain the ADR-0120 D1 scope vocabulary at the driver**:
+    `unique: 'organization'` prepends the NULL-safe organization key part to the
+    listed columns (degrading to the listed columns on a tenant-less object; a
+    listed tenant column is made NULL-safe in place instead — the S6 respelling).
+    `unique: true` / `'global'` on a declared index stays **verbatim** — the
+    #3696 contract, now the `'global'` arm; the nine engine dedup/idempotency
+    keys keep their exact physical shape. (The spec/lint side of the vocabulary
+    lands separately via #4986; the driver deliberately merges first.)
+  - **Drift detection reads both sides through one normalization**
+    (the #4884 discipline, extended to the tenant key part): the physical
+    `COALESCE(organization_id, <literal>)` form is attributed to the column,
+    compared **literal-agnostically**, and recognised as the sync's own
+    vocabulary — a healthy database reports zero drift on every dialect.
+  - **Existing bare composites migrate through the ceremony (ADR-0120 D4)**:
+    `(organization_id, X) → (COALESCE(organization_id, '__global__'), X)`
+    surfaces as a `recreate_index` drift op — a pure tightening — gated by a
+    **duplicate pre-flight probe**. Clean probe → the op grades `safe` and dev
+    `autoMigrate: 'safe'` / a plain `os migrate apply` applies it. Duplicates
+    (data the void constraint wrongly admitted) → the op is **blocked** with a
+    per-group row report, the old index stays in place, and apply re-probes so
+    even `--allow-destructive` cannot drop a constraint whose replacement is not
+    creatable. Deduplicate, re-plan, apply.
+  - **`'__global__'` is reserved at the organization-minting seam**
+    (plugin-auth): an organization whose id or slug equals the sentinel is
+    rejected at creation with a prescriptive error (ADR-0120 D3 guardrail).
+
+  Migration note for operators: on databases with pre-existing
+  organization-composite uniques, the first `os migrate plan` after upgrading
+  shows one `recreate_index` per affected index. On healthy data it auto-applies
+  in dev and is a no-op content-wise; a blocked op means the #5030 defect
+  admitted real duplicate rows — resolve the listed rows first. MySQL < 8.0.13 /
+  MariaDB cannot express the functional key part: the driver degrades to the
+  bare composite, says exactly what is not enforced at `error` level, and keeps
+  reporting the tightening as drift for after the server upgrade.
+
+- db8c285: fix(plugin-auth): 短信日配额拒发时,OTP / 邀请短信按 429 TOO_MANY_REQUESTS 作答,不再是 500 (#6039)
+
+  #2814 把短信总量成本闸落在 `SmsService.send()` —— 它是内核服务,不知道调用方是谁,
+  所以超限时**返回**一条失败结果,把码写在服务层既有的 `CODE: message` 信封上:
+  `TOO_MANY_REQUESTS: daily SMS quota exhausted`。把 HTTP 语义还原回去是 auth 端点的
+  职责,而 `AuthManager` 此前没有做:`deliverPhoneOtp()` / `sendPhoneInviteSms()` 对
+  任何 `status === 'failed'` 一律抛普通 `Error`。
+
+  better-auth 的路由层 better-call 只把 `APIError` 映射成真实状态码
+  (`isAPIError = err instanceof APIError || err?.name === 'APIError'`,
+  better-call@1.3.7 `dist/utils.mjs:57`,消费点在 `dist/router.mjs:93`),其余一律走
+  `console.error` + **500、响应体 `null`** 的分支。于是配额拒发对外是 500,
+  `TOO_MANY_REQUESTS` 只留在服务端日志里;而**同一个端点**上按号码冷却闸
+  (`assertPhoneOtpSendAllowed`,在 admission hook 里)抛的是
+  `APIError('TOO_MANY_REQUESTS')`,正常回 429 —— 一个端点两种口径,正是 #2814
+  「两道墙从外面看应当一样」的反面。
+
+  现在两处失败分支都先识别信封上的 `TOO_MANY_REQUESTS:` **前缀**,改抛
+  `APIError('TOO_MANY_REQUESTS')`:
+
+  - **只有码跨包**。识别用的 `TOO_MANY_REQUESTS` 在 plugin-auth 本地写死并注明出处
+    (`SMS_QUOTA_EXCEEDED_CODE`,`packages/services/service-sms/src/sms-daily-quota.ts`)——
+    `@objectstack/service-sms` 已经依赖本包(它的日计数器从这里 import
+    `InProcessCounterStore`),反向 import 会成环;这与 service-sms 里
+    `normalizeSmsRecipient` 就地重述 plugin-auth 形状规则是同一个取舍的另一半。
+    跨包重述的只是一个 ADR-0112 闭集错误码,冒号后的措辞归服务层所有,可以自由改写。
+  - **不泄露预算**。429 文案沿按号码闸的措辞形状,不含上限、剩余量与重置时刻
+    (按号码闸报自己的重试窗口,是因为它算得出;配额闸不承诺它给不出的时间)。
+  - **不顺手收紧**。传输故障(provider 宕机等)仍抛普通 `Error`,500 语义原样不变;
+    仅仅在文中提到该码而不以之开头的 provider 报错同样保持 500。
+
+  对外可见的变化:`POST /phone-number/send-otp`、
+  `POST /phone-number/request-password-reset` 在部署日配额耗尽时,由
+  **500 + 空响应体**变为 **429 TOO_MANY_REQUESTS**,与按号码冷却闸同形。
+  邀请短信路径同样返回 `APIError`;仓内唯一调用方(admin import-users)按行捕获它并
+  记为 `INVITE_SMS_FAILED`,该路径的变化是行内报错不再携带服务层原始信封。
+
+- b40f81c: docs(plugin-auth): the session of record is always `sys_session` — cache backs rate-limit counters only (#4785)
+
+  Settles an architectural question that had been answered two different ways by
+  the code and the docs. **Nothing about the runtime changes**: this records the
+  decision, proves the behaviour that depends on it, and corrects the docs that
+  described the road not taken.
+
+  **The decision.** ObjectStack's session of record is always the `sys_session`
+  table. The kernel `cache` service serves authentication as the ADR-0069 D2
+  rate-limit counter store and nothing else. It is never bound as better-auth's
+  `secondaryStorage`, because that option is not a counter store — handing
+  better-auth one also relocates sessions into it (`createSession` skips the
+  `sys_session` row; `findSession` answers from the cached snapshot without
+  reading the database). ADR-0069 D4's three session controls — idle timeout,
+  absolute lifetime, concurrent-session cap — all revoke by writing that row, so a
+  cache-backed session store would silently disable every one of them. Dual-writing
+  (`session.storeSessionInDatabase: true`) was considered and rejected as the worst
+  of the options: the row exists, so the controls _appear_ to work, while the read
+  path still answers from the cache.
+
+  **Why this needed settling rather than just fixing.** The conflict had never
+  fired — the cache lookup that would have wired `secondaryStorage` ran before the
+  cache service registered, so the binding never took in a standard composition.
+  The declaration and the runtime disagreed for a month and no test could tell,
+  because no test asserted that a D4 control ends a _live session_; they asserted
+  at most that a row got stamped. A stamped row nobody reads is exactly the failure
+  mode in question.
+
+  **What is new.** `session-of-record.test.ts` drives the real better-auth pipeline
+  end to end and proves each of the three D4 controls actually de-authenticates a
+  live session cookie — not that a column was written. It also pins the
+  counter-factual: with a `secondaryStorage` bound, `sys_session` stays empty and
+  the idle timeout never fires. Two facts that make the guarantee hold for real
+  deployments are pinned with it — `AuthManager` does not plumb
+  `storeSessionInDatabase`, so the rejected dual-write shape is unreachable through
+  configuration; and the default composition (OIDC provider on) makes better-auth
+  _refuse to boot_ with a `secondaryStorage` rather than degrade quietly.
+
+  **For hosts.** `cacheSecondaryStorage()` remains exported for anyone who wants
+  better-auth's cached session store deliberately. It now says plainly what it
+  costs: opting in disables the ADR-0069 D4 session controls, and a revoked session
+  stays usable until its cached copy expires. Moving sessions into the cache
+  platform-wide would be a new decision requiring its own revocation-consistency
+  requirements, not a configuration change.
+
+  ADR-0069's D2 "shared store" is scoped to rate-limit counters, D4 records
+  `sys_session` as a precondition rather than a deployment preference, and the
+  `ICacheService` contract page no longer lists session storage among the cache's
+  uses.
+
+- ef8b1ff: fix(plugin-auth): `/sso/register` 的管理员门禁改用唯一那把等级尺,不再手抄一份大小写敏感的判据 (#5942)
+
+  ADR-0024 的 `POST /sso/register` 门禁问的是「这个 membership 是不是本组织的管理员」。
+  它此前用的是一份手抄判据:
+
+  ```ts
+  raw
+    .split(",")
+    .map((s) => s.trim())
+    .some((r) => r === "owner" || r === "admin");
+  ```
+
+  同一个问题在 plugin-auth 内还有另一把尺 —— `invitation-role-cap.ts` 的等级尺
+  (`parseOrgRoles()` 会 `.trim().toLowerCase()`,`isOrgAdminGrade()` 据此评级),
+  break-glass ban 守卫(`last-admin-ban-guard.ts`,ADR-0024 D5.2)用的就是它。
+  两把尺在大小写上不一致:`sys_member.role` 若存成 `Owner` / `ADMIN`,ban 守卫把这一行
+  算作**管理员**,而 `/sso/register` 门禁算作**非管理员**。同一条安全路径上的两个答案
+  互相矛盾,而且两个方向的错都不出声。
+
+  现在门禁改问 `isOrgAdminGrade(m.role)` —— 「哪种 membership 算管理员」在 plugin-auth
+  内只剩一个答案,两处自此同尺。
+
+  **用户可见的行为变化,只有一个方向:放宽,且只放宽在此前判错的取值上。**
+  `sys_member.role` 为大小写非常规值(`Owner` / `ADMIN` / `Admin`,以及
+  `member,Owner` 这类逗号拼写)或数组拼写(`['owner']`)的成员,此前会被
+  `/sso/register` **误拒**,现在正确判为管理员并放行。**没有任何收窄**:此前被判为管理员
+  的取值,换尺后仍然是管理员(已逐值实测,见 PR)。
+
+  ADR-0108 的封闭词表(`owner` / `admin` / `delegated_admin` / `member`)全为小写,UI 与
+  better-auth 写入的也是小写,所以正常部署下答案逐值不变 —— 这也是为什么它此前只是一条
+  静默分歧,而不是线上故障。要撞上分歧得有一条绕过表单的写入(导入、外部写入、手工 SQL)。
+
+  `isOrgOrPlatformAdmin` 名字里的 platform_admin 半边**未改动**,仍由
+  `packages/core/src/security/resolve-authz-context.ts` 权威推导;那几处实现的合流是
+  另一个决策件。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [c36abfe]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [2f6516e]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [96d3d4d]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [d9cac60]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [75f82f3]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [1203bb2]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [39396bd]
+- Updated dependencies [577cd27]
+- Updated dependencies [5897552]
+- Updated dependencies [91ec1ea]
+- Updated dependencies [2d25303]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [1216dcc]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [90fa077]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/rest@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

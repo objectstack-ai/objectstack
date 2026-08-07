@@ -1,5 +1,448 @@
 # @objectstack/plugin-hono-server
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- 29c6c9d: feat(spec,core,runtime)!: declarative `apis:` refuses loudly instead of parsing into silence; the `ApiRegistry` family retires (#4936, #4939)
+
+  The declarative API-endpoint surface was **zero-execution end to end**, and said nothing
+  about it. Metadata loading worked perfectly — a stack declared `apis:`, `defineStack`
+  accepted it, and `GET /api/v1/meta/api` returned every endpoint with every key intact.
+  The execution side never fired once. On a real boot (showcase, 47 plugins) both declared
+  paths answered a bare `404 {"error":"Not found"}` — not even the dispatcher's semantic
+  404, because **no route was ever mounted** for a declared path, so the request died at
+  Hono's `notFound`. Behind that, the dispatcher's `handleApiEndpoint` branch resolved the
+  metadata service and called `matchEndpoint` on it — a method **no implementation in the
+  repo has ever provided**. The branch returned "not handled" on every request ever served.
+
+  So every key on `ApiEndpointSchema` was declared ≠ enforced: `path`/`method` (never
+  mounted), `type`/`target`/`objectParams` (never executed), `cacheTtl`,
+  `inputMapping`/`outputMapping`, `rateLimit`, `summary`/`description` — and
+  **`authRequired`**, a security semantic that parsed green and gated nothing at all. That
+  is false compliance, the failure ADR-0049 exists to stop, not debt.
+
+  ## BREAKING — a non-empty `apis:` is now rejected
+
+  Metadata that parsed cleanly before is now **refused at publish/validate**, with the
+  prescription in the rejection itself:
+
+  ```
+  apis: `apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime,
+  so a non-empty array is rejected instead of silently accepted (#4936). …
+  ```
+
+  **FROM → TO.** `apis: [ …endpoints… ]` → `apis: []` (or delete the key; both are still
+  accepted, and an empty array is not a special case). To actually serve the route today,
+  mount it **in code** — a plugin manifest `contributes.routes` entry, or an `http.server`
+  route. That is now the only honest path, and the one `examples/app-showcase` uses
+  (`src/system/server/recalc-endpoint.ts`).
+
+  The refusal lives on `ObjectStackDefinitionSchema` itself, which is the single choke
+  point every path runs through — `defineStack`, the metadata plugin's artifact ingestion,
+  `os validate`, the lint scorer and `EnvironmentArtifactSchema`. There is no path that
+  forgot to check.
+
+  **The `ApiEndpoint` vocabulary is deliberately KEPT.** Retiring it was considered and
+  rejected: endpoint shapes are an industry-stable form, so a retirement would only mean
+  re-introducing the identical schema later. Your endpoint definitions stay valid TypeScript
+  and stay in the spec; only _authoring them into a stack_ is refused, and only until the
+  executor lands. Keep them commented next to your stack — that is what the showcase does.
+  The executor (route mounting + endpoint matching + per-key wiring for
+  `authRequired`/`cacheTtl`/`inputMapping`/`outputMapping`/`rateLimit`) is tracked by
+  **#5040**, which replaces this rejection with real execution.
+
+  ## BREAKING — the `ApiRegistry` / `ApiEndpointRegistration` family is removed (#4939)
+
+  The repo carried a **second**, unrelated declaration shape for "an API endpoint":
+  `ApiEndpointRegistrationSchema` and the ~500-line `ApiRegistry` service that
+  `createApiRegistryPlugin()` registered under `api-registry`. Nothing composed it — every
+  assembly site lived in `packages/core/examples/`, with no registration in
+  `packages/runtime`, `packages/cli` or any `examples/app-*`, and a real boot carried no
+  such service. The whole family was therefore inert, including
+  `ApiEndpointRegistration.requiredPermissions`, whose docs promised **in the present tense**
+  that "the gateway layer automatically validates these permissions" while no gateway read
+  it. Two declaration shapes, both dead; this retirement converges them on one.
+
+  Removed from `@objectstack/spec/api`: `ApiEndpointRegistration(Schema)`,
+  `ApiRegistry(Schema)`, `ApiRegistryEntry(Schema)`, `ApiMetadataSchema`,
+  `ApiParameterSchema`, `ApiResponseSchema`, `ApiDiscoveryQuerySchema`,
+  `ApiDiscoveryResponseSchema`, `ApiProtocolType`, `HttpStatusCode`,
+  `ObjectQLReferenceSchema`, `SchemaDefinition` (12 JSON-Schema defs, 67 authorable keys).
+  Removed from `@objectstack/core`: `ApiRegistry`, `createApiRegistryPlugin`.
+  Removed from `@objectstack/plugin-hono-server`: the `useApiRegistry` option — it was
+  defaulted to `true` and read by nothing, configuring a service that was never composed.
+
+  **FROM → TO.** There is no replacement shape to migrate to, because nothing executed the
+  old one: delete the registration objects. If you were assembling an `ApiRegistryEntry`,
+  you were building a value only your own code read — keep it as your own type. Declarative
+  endpoints have one vocabulary now, `ApiEndpointSchema`.
+
+  `ConflictResolutionStrategy` **survives** the removal and moved to
+  `@objectstack/spec/api`'s `router.zod` — same name, same four values
+  (`error`/`priority`/`first-wins`/`last-wins`), same import path. It is pinned there by two
+  independent ratchets and is not part of the retired surface.
+
+  ## Also in this change
+
+  - **BREAKING (`@objectstack/runtime`):** `HttpDispatcher.handleApiEndpoint()` is deleted,
+    along with its now-orphaned private `callData` delegate, and `/__api-endpoint` leaves
+    `LEGACY_CHAIN_PREFIXES` and the route ledger. The method was public, so this is an API
+    removal — but it returned `{ handled: false }` for every call it ever received, so no
+    caller can observe a behaviour change beyond the missing symbol. Delete the call.
+    Absence is now loud (ADR-0076): the surface is refused at authoring rather than 404ing
+    at runtime with dead code behind it.
+  - `examples/app-showcase` no longer declares endpoints, and its coverage manifest no
+    longer claims the capability is `demonstrated` — that entry read "executed by the runtime
+    dispatcher (handleApiEndpoint)", which was exactly the advertise-what-you-don't-deliver
+    claim Prime Directive #10 forbids.
+  - The endpoint-level `rateLimit` tracking pointers left by #4910/#5006 now name **#5040**,
+    the live executor card, instead of #4936, which closes with this change.
+
+### Minor Changes
+
+- 2649ccb: feat(runtime,hono): 挂载 seam —— `setFallbackHandler` 实现 + 声明式端点派发步(#5040 E3, #5090)
+
+  给声明式 `apis:` 端点铺上**唯一一条**能进入处理器的通路,并且这条通路在构造上不可能遮蔽任何
+  已注册路由。执行器本身尚未落地,本次改动**零现网行为变更**:任何 stack 目前都无法发布非空
+  `apis:`(publish 硬拒,直到 #5040 E7 翻转),所以这里新增的一切在真实组合里结构性不可达。
+
+  **`@objectstack/plugin-hono-server` —— `IHttpServer.setFallbackHandler` 的实现**
+
+  契约(#5080 落在 `@objectstack/spec/contracts`)的四条保证逐条兑现:
+
+  - 映射到 Hono 的 `app.notFound` 钩子,**不是**通配路由。这是全部要点:通配路由要与之后注册
+    的每一条路由竞争,而 Hono 按先注册者赢裁决,归属就变成插件 `start()` 顺序的函数 ——
+    ADR-0076 D11 正是为此存在。兜底器只在全部显式路由未命中后运行,**零注册顺序依赖**。
+  - handler 拿到的 `req.body` **可读**(与 `use()` 中间件 seam 相反,后者的契约明确不填充
+    body),按 content-type 解析,与真实路由处理器走同一段代码。
+  - 重复安装即**替换**,不成链。
+  - handler 不写响应 → 适配器既有的未命中答案(404,或方法不匹配时 405 + `Allow`)原样保留。
+
+  配套的一处属主收敛:404/405 应答此前由 `HonoServerPlugin.start()` 直接写在
+  `getRawApp().notFound(...)` 上。`app.notFound` 是后调用者覆盖,兜底 seam 落在同一个钩子上,
+  两个写入方意味着幸存者由插件启动顺序决定 —— 应答本体因此移入 `HonoHttpServer`
+  (`installNotFoundSeam()` / `setFallbackHandler()` 在其中组合),一个钩子一个属主。行为
+  逐字节不变(`notfound-405.test.ts` 原样通过)。
+
+  顺带修好同一段代码上的两处不一致:适配器构造的 `IHttpRequest` 现在一律带
+  `remoteAddress`(此前只有中间件 seam 有,同一个契约有两种形状);处理器**同步**抛出与
+  异步 reject 现在报同一种结果(此前同步抛出会逃到 Hono 自己的错误页)。
+
+  **`@objectstack/runtime` —— dispatcher 端点派发步**
+
+  dispatcher-plugin 在 `start()` 中探测 `typeof server.setFallbackHandler === 'function'`
+  并注册兜底器。对落在 ADR-0121 D1 保留段 `<prefix>/apps/<命名空间>/<子路径>` 下的请求,
+  探测 `metadata` 服务的 `matchEndpoint`(#5089 的实现在并行开发,探测缺席即穿透):
+
+  - **命中** → `501 NOT_IMPLEMENTED`,包络说明执行器随 17.x 落地(#5040 E4–E5 接策略键与
+    执行目标);
+  - **未命中 / 无 matcher / 无 metadata 服务 / 路径不在挂载前缀下** → **不写任何响应**,
+    传输层既有的 404/405 答案原样成立(有回归测试逐字节钉住);
+  - `matchEndpoint` 抛错按 5xx 出口应答,不降级为 404 —— 故障不得伪装成「没有这条路由」。
+
+  派发步**不重入** `dispatch()`:那条管线会解析环境与 `executionContext`、跑匿名拒绝门、并以
+  语义 404 收尾,把全部未命中请求灌进去会改变今天未命中请求的答案。裸 404 与语义 404 的收口
+  是另一个决定,本次刻意不做。
+
+  `route-ledger.ts` 新增 `* /apps/**` 登记行与 `NON_DISPATCH_MOUNT_PREFIXES`(本包在
+  `dispatch()` 之外挂载的前缀),注记如实描述已接线的部分与**尚未**接线的执行部分;新增
+  一致性测试钉住 ADR-0121 D1 赖以成立的事实 —— `/apps` 不属于任何内建域。
+
+- 55dbbba: feat(spec,runtime,hono): `server.security.rateLimit` — an authored budget that actually returns 429 (#4910, #4937)
+
+  Rate limiting in ObjectStack was three shapes with nothing between them. `packages/spec`
+  declared `RateLimitConfig` in three places and the whole repo had **zero readers** for any
+  of them, so an author wrote a budget, it parsed, and nothing happened (#4686).
+  `@objectstack/runtime` shipped a token bucket whose comments claimed, in the present tense,
+  that the dispatcher called it and short-circuited with 429 — it had **zero call sites**
+  outside its own unit test, and the `DispatcherPluginConfig.rateLimit` field it told you to
+  tune did not exist (#4937). Neither half was broken; they were simply never connected, and
+  both were documented as if they were.
+
+  They are connected now, along one narrow path.
+
+  ## What you write
+
+  ```ts
+  export default defineStack({
+    manifest: {
+      /* … */
+    },
+    server: {
+      security: {
+        rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 600 },
+      },
+      trustProxy: false,
+    },
+  });
+  ```
+
+  `server:` is a **new** top-level stack key. Nothing declared it before, so no existing
+  stack changes behaviour on upgrade — there is no configuration that was inert yesterday
+  and starts throttling today.
+
+  It is deliberately **narrow**: it carries `security.rateLimit` and `trustProxy` and
+  nothing else, because those are the two keys with a consumer. It is NOT the nine-key
+  `HttpServerConfigSchema` — the other seven have no reader and no authoring surface, and
+  mounting them here would have made seven dead keys writable in one move (their
+  enforce-or-remove fate stays with #4938). It is strict from birth (#4001), so a misspelled
+  budget is rejected with the correction rather than silently defaulted, and `maxRequests: 0`
+  is refused at `defineStack` rather than at 3am.
+
+  **No `server.port`.** The listening socket belongs to the deployment, not the artifact, and
+  `objectstack serve -p` already owns it. The precedence rule is recorded in the schema and
+  the docs in advance, so it cannot be re-litigated per caller: **CLI flag > `server:` >
+  built-in default.**
+
+  ## What happens
+
+  Every inbound request the server routes — REST, dispatcher, service routes, anything
+  mounted on that transport — consumes from a token bucket sized `capacity = maxRequests`,
+  refilling at `maxRequests / (windowMs / 1000)` per second. An empty bucket answers **429**
+  with a `Retry-After` computed from the bucket itself and the standard error envelope
+  (`code: "RATE_LIMIT_EXCEEDED"`). `OPTIONS` preflights are never metered.
+
+  The bucket is keyed by **resolved principal**, falling back to the caller's **IP** for
+  anonymous traffic — so one abusive session cannot spend another user's budget, and
+  credential-stuffing traffic (which has no principal yet) is still metered per source. That
+  IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `trustProxy: true` is declared**;
+  otherwise it is the transport's own peer address. Undeclared, those headers are attacker
+  input: honouring them by default would hand anyone an unlimited supply of fresh buckets and
+  let them drain a chosen victim's.
+
+  Counters live in the kernel `cache` service when one is registered, so a multi-node
+  deployment enforces one budget instead of one per node (ADR-0069 D2), resolved lazily at
+  consume time so a cache plugin that registers later is still picked up (#4772). With no
+  cache service at all it falls back to a per-process store and says so once, naming the
+  consequence: the effective limit becomes the declared budget multiplied by the number of
+  nodes, and nothing about the deployment looks wrong.
+
+  ## Also in this change
+
+  - **`IHttpServer.use()` is a real middleware seam.** The Hono adapter's implementation
+    passed `{}` for both `req` and `res` and called `next()` unconditionally, so a registered
+    middleware could not read the request, write a response, or decline to continue — a
+    declared seam with no execution behind it, unnoticed because nothing called it. It now
+    delivers method/path/query/headers plus the transport peer address
+    (`IHttpRequest.remoteAddress`, new), and honours a short-circuit. Middleware must be
+    registered before the routes it guards; the kernel's two-phase boot makes that automatic
+    (`init()` before every `start()`).
+  - **`packages/runtime/src/security/rate-limit.ts` no longer describes an execution chain it
+    does not have** (#4937). The token-bucket arithmetic is extracted so the synchronous
+    in-process limiter and the new shared-store one cannot drift, and `DEFAULT_RATE_LIMITS` is
+    now labelled as the reference material it always was rather than as live defaults.
+
+  ## Explicitly NOT wired
+
+  `ApiEndpointSchema.rateLimit` and `ApiEndpointRegistrationSchema.rateLimit` remain
+  **known-unwired**. Declaring them still changes nothing. They are not retired here either:
+  the fate of the whole declarative `apis:` surface is undecided (#4936), and retiring one
+  key of a surface that may yet be implemented would only have to be undone. Tracked, not
+  silent.
+
+### Patch Changes
+
+- dfa8bad: 修复:逃出路由 handler 的抛出不再被静默丢弃 —— 适配器接缝现在有诊断出口
+
+  `HonoHttpServer.runHandler()` 的兜底 `.catch` 此前把 rejection 显式丢弃(参数名就是 `_err`),`wrap()` 随后回一个 `{ error: 'No response from handler' }` 的 500。净效果是:**任何**逃出 handler 的抛出,在以本适配器为 transport 的 host 上都表现为一个不带原因的裸 500,而且**任何地方都没有日志** —— 连 stack 都没有。
+
+  现在该接缝会按 `Logger` 契约打一条 `error` 记录,带上原始 `message` / `stack` 与定位所需的请求上下文(`method` + `path`)。
+
+  - **`Error` 走契约的 `error` 形参槽**,不塞进结构化 meta。`Error` 的 `message` / `stack` 是 non-enumerable,直接进 meta 会序列化成 `{}` —— 那比没有日志更糟,因为它会报告成功。跨 realm 的 `Error`(`instanceof` 不成立)会按 `name`/`message`/`stack` 重建;`throw 'boom'` 这类非 `Error` 抛出会被描述进 message 而不是丢掉。
+  - **请求体不入日志** —— 只有 `method` 和 `path`。
+  - **默认就有日志出口。** 未接线时适配器用 `createLogger()`,而不是静默:直接内嵌 `HonoHttpServer` 的 host(serverless 入口)正是本问题的生产现场,静默默认会对它们原样复现该 bug。`HonoServerPlugin.init()` 会用 `ctx.logger` 替换掉默认值;要静默须显式传 `NoopLogger`。
+
+  新增 `HonoHttpServer.setLogger(logger)`(纯新增,不改 `IHttpServer` 契约)。
+
+  ⚠️ **响应形状一字未改**:兜底 body 仍是 `{ error: 'No response from handler' }` + 500,已加测试钉住。把它收成声明信封会改变线上响应形状,属另一项尚未裁决的契约决策,不随本次改动附带。
+
+- caf144a: ci(deps): OSV security batch 2026-08 — undici to 7.29.0, hono to 4.12.34,
+  fast-uri to 3.1.5, so `Validate Package Dependencies` stops failing on every PR (#5032)
+
+  Eight advisories (2 high, 6 medium) matched packages resolved in `main`'s
+  `pnpm-lock.yaml`, and all eight name a fixed version:
+
+  | advisory              | CVSS | package    | resolved         | fixed   |
+  | --------------------- | ---- | ---------- | ---------------- | ------- |
+  | `GHSA-7p8r-x3mc-p8w7` | 7.5  | `fast-uri` | 3.1.4            | 3.1.5   |
+  | `GHSA-8j4g-w8fx-2239` | 5.3  | `hono`     | 4.12.32, 4.12.33 | 4.12.34 |
+  | `GHSA-4cwx-7wf7-3272` | 7.4  | `undici`   | 7.28.0           | 7.29.0  |
+  | `GHSA-jr45-8vmc-qm54` | 5.9  | `undici`   | 7.28.0           | 7.29.0  |
+  | `GHSA-8xcm-r25x-g524` | 4.8  | `undici`   | 7.28.0           | 7.29.0  |
+  | `GHSA-v3r7-h72x-cjcm` | 4.8  | `undici`   | 7.28.0           | 7.29.0  |
+  | `GHSA-m8rv-5g2x-5cg5` | 4.2  | `undici`   | 7.28.0           | 7.29.0  |
+
+  The OSV-Scanner step in `.github/workflows/validate-deps.yml` reads
+  `pnpm-lock.yaml` directly and exits non-zero on any match, so the job was red on
+  `main` itself and attached that red to every PR touching a manifest or the
+  lockfile, whatever the PR contained (observed on #5027, whose own lockfile delta
+  is three lines and resolves no new package). A permanently red gate is worse
+  than no gate: the next PR that really does introduce a vulnerable dependency
+  looks exactly like all the others.
+
+  `undici` repeats the trap #4945 taught. The existing pin
+  (`undici@>=7.23.0 <7.28.0: ^7.28.0`, added for `GHSA-vmh5-mc38-953g`) had
+  settled on 7.28.0 — the version these five advisories affect — and its exclusive
+  upper bound no longer covered it, so the override sat there doing nothing.
+  Selector and target move together, to `<7.29.0` / `^7.29.0`. Transitive-only via
+  `@vscode/vsce` > `cheerio`; `@ai-sdk/provider-utils` already resolved 7.29.0, so
+  the two dedupe onto one copy. `jsdom`'s `undici` 8.9.0 is outside the selector
+  and untouched.
+
+  `fast-uri` is transitive-only through `ajv@8.20.0` (declares `^3.0.1`), reaching
+  `@modelcontextprotocol/sdk`, `@objectstack/objectql`, `secretlint` and `table`;
+  a `fast-uri@<3.1.5: ^3.1.5` override covers all of them.
+
+  `hono` is the one that is not transitive-only, which is why this changeset
+  releases something. Two versions were resolved: 4.12.32 from our own packages
+  and 4.12.33 pulled by `@modelcontextprotocol/sdk`. The override moves the
+  transitive copy and the declared ranges move with it — `@objectstack/plugin-hono-server`
+  `dependencies.hono` to `^4.12.34` (the published-manifest change this patch
+  covers), plus the `@objectstack/hono` and `@objectstack/plugin-auth`
+  devDependencies. Overrides do not ship with published packages, so a declared
+  range left behind would mean downstream resolves a version CI never ran —
+  exactly what `scripts/check-override-consistency.mjs` exists to catch. The
+  `@objectstack/hono` **peer** range stays the permissive `^4.12.8` on purpose: a
+  peer states which host `hono` the adapter works against, and a host that pins an
+  old one owns that copy. After the bump the workspace resolves a single
+  `hono@4.12.34`.
+
+  Scope is the eight advisories #5032 lists and nothing else. #4965 (advisories
+  with no fix available, and the `osv-scanner.toml` exemption conventions that
+  answer them) is a separate question — every advisory here has a fix, so this is
+  an upgrade, not an exemption.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

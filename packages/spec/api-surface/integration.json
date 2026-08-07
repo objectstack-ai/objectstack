@@ -8,6 +8,8 @@
     "CircuitBreakerConfigSchema (const)",
     "Connector (type)",
     "ConnectorActionDescriptor (interface)",
+    "ConnectorActionEffect (type)",
+    "ConnectorActionEffectSchema (const)",
     "ConnectorActionSchema (const)",
     "ConnectorConflictResolution (type)",
     "ConnectorConflictResolutionSchema (const)",

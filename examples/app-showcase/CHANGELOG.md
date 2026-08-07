@@ -1,5 +1,258 @@
 # @objectstack/example-showcase
 
+## 0.3.14-rc.3
+
+### Patch Changes
+
+- 3905c00: feat(objectql)!: a predicate bulk write evaluates and fires after-hooks PER ROW (#5038)
+
+  The 2026-08-04 maintainer ruling on #4800 / #4862, recorded as ADR-0058's
+  bulk-write addendum: **a bulk write is N record changes**, so every record-scoped
+  declaration on it is evaluated per row — `record` = that row's state, `previous` =
+  that row's pre-write state. Validation predicates have worked this way since
+  #3106; hook `condition`s and the record-change flow triggers riding the same
+  lifecycle hooks now join them.
+
+  **What was broken.** A `multi: true` update reaches `driver.updateMany`, which
+  resolves an affected COUNT. The lifecycle hook fired **once**, `previous` was
+  never assigned (only the single-id branch fetched a prior row), and `record`
+  degraded to the write's bare payload. So the transition condition the docs, the
+  formula skill and ten showcase flows all teach —
+  `status == "done" && previous.status != "done"` — could not be evaluated on a
+  bulk write. Hook conditions rejected the write (#4775/#5037); record-change flow
+  triggers were **silent**, firing zero times or once for a record that did not
+  exist. A missing audit row is the one failure nobody goes looking for.
+
+  **What changed.** The engine's bulk `update` / `delete` branches now read the
+  matched row set **once** — the same `driver.find` #3106 already issues, with
+  "this object has after-hooks" added to its demand test — and dispatch
+  `afterUpdate` / `afterDelete` once per matched row, each on a context with the
+  **single-record shape**: `input.id` = the row, `previous` = its pre-image,
+  `result` = its state. That is #2922's batch-INSERT ruling restated, and it is why
+  this fix has no code in the consumers: `hook-wrappers`' `record`/`previous`
+  bindings, the record-change trigger's context builder and plugin-audit's diff all
+  read those same fields and became correct at the producer.
+
+  - **Per-row dispatch is uniform across after-hooks.** It is deliberately NOT
+    keyed on whether a condition mentions `previous` — the ruling rejected that as
+    a hidden rule that would make a hook's firing count depend on its condition
+    text.
+  - **`ctx.result` per row is the ROW**, composed as `row ⊕ payload` from the
+    pre-image already in hand, so the batch still costs one extra query, not one
+    per row. A bulk DELETE has no post-state: its per-row context sets no `result`,
+    and consumers fall back to `previous`.
+  - **`onError` needed no new meaning** — it governs a handler on a record-scoped
+    context, which is now what it always gets: `abort` fails the operation, `log`
+    swallows that row and the batch continues.
+  - **A ceiling, enforced as a refusal.** Past 10 000 matched rows a predicate
+    write against an object with after-hooks is rejected _before_ the driver call
+    (`ERR_BULK_PER_ROW_HOOK_LIMIT`), so nothing is written. It is never downgraded
+    to one dispatch for the batch — that would skip the hook for N-1 rows silently.
+
+  **Breaking for hook authors, in the direction the contract declares.** An
+  after-hook on an object that takes predicate writes now runs once per matched row
+  instead of once per batch: a notification hook sends N messages, a
+  cache-invalidation hook runs N times. Objects with no after-hooks are untouched
+  and pay for no extra read. The write's own contract is unchanged — a predicate
+  write still resolves the affected count and still publishes ONE aggregate
+  `data.records.updated` (#4639).
+
+  **`before*` hooks stay batch-scoped, and that is not a gap.** `beforeUpdate` /
+  `beforeDelete` fire once for the whole batch because they may still rewrite the
+  payload, and one `updateMany` carries one payload. #5037's `HookConditionError`
+  and its `limitation` discriminator therefore **survive, rescoped to that
+  dispatch** — with a message that no longer promises an expiry that has already
+  happened, names the phase as the reason, and points at the matching `after*`
+  event where the same condition evaluates per row as authored. It also now names a
+  record-change flow trigger as a real route: #5037 refused to, on measured
+  evidence that the trigger shared the same unbound `previous`; that fact changed.
+
+  Docs (`data-modeling/formulas.mdx`) and `skills/objectstack-formula` §5 are
+  updated to teach one transition shape for both write forms, with the `before*`
+  exception called out.
+
+- 9f41ee6: test(e2e,showcase): showcase 的 `apis:` 回迁,并由真实 boot 探针证明它真的在服务(#5040 E8)
+
+  #4936 把 showcase 的两条声明式端点注释掉,不是因为它们写错了,而是因为当时整条端点链零执行:没有任何路由为声明的 `path` 挂载,没有匹配器,每一个键 —— 包括 `authRequired` —— 解析通过而不生效。那时候留着它们就是在演示一个运行时不兑现的能力(Prime Directive #10)。
+
+  #5040 的 E1–E7 把执行器建起来、把整面硬拒收窄成逐端点 publish 门之后,那条理由不复存在。本单按**原意**恢复这两条 —— 同名、同 target、同 `authRequired`、同 `cacheTtl` —— 只做 ADR-0121 D1 要求的一处修改:路径迁进本应用的命名空间保留区。
+
+  ```
+  - path: '/api/v1/showcase/tasks'
+  + path: '/api/v1/apps/showcase/tasks'
+
+  - path: '/api/v1/showcase/inquiries/purge'
+  + path: '/api/v1/apps/showcase/inquiries/purge'
+  ```
+
+  这处修改不是装饰:`manifest.namespace: 'showcase'` 从此是发布的前置条件(声明了 `apis:` 却没有显式 namespace 会被 publish 拒绝),而 `apps/{namespace}/` 这一段让路由归属变成结构性的 —— 没有任何内建域住在 `apps/` 下,两个包也不可能因为 namespace 不同而撞车。
+
+  **匿名面没有增加**:两条历史声明本来就都是 `authRequired: true`,回迁后仍然是。一个例子不该长出它从来没有过的公开面。
+
+  coverage 清单里 `apis` 从 `waived` 翻回 `demonstrated`,理由重写为「由真实 boot 测量」而不是「声明即证明」—— 后者正是 #4936 抓到的那类假覆盖。支撑它的是两份新的真实 boot e2e:showcase 那份走真实 artifact 摄入路径,证明匹配命中执行(find 的 data 与内建 `/data` 路由逐字节相同)、匿名 401、`cacheTtl` 只随成功答案上线、挂载点下未声明路径与挂载点外的裸 404 完全一致、`/meta/api` 与 `/openapi.json` 描述的正是挂载的东西;fixture 那份补上 ADR-0121 D6 的匿名分支 —— 省略 `authRequired` 拒绝匿名、显式 `false` 服务匿名、已装配预算耗尽后 429 且 `Retry-After` 真的在线上。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [da5d1b4]
+- Updated dependencies [d4e0809]
+- Updated dependencies [739f496]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [9f747ee]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [43ca399]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [99d7a93]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [7bf3d1c]
+- Updated dependencies [db9c331]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [217b791]
+- Updated dependencies [fd8521f]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [06ba036]
+- Updated dependencies [18b8eaa]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [78adc2e]
+- Updated dependencies [0f17114]
+- Updated dependencies [81e2744]
+- Updated dependencies [277eb36]
+- Updated dependencies [41e605e]
+- Updated dependencies [2649ccb]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [a70cd0a]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [c7406b0]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [d9cac60]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [5a45b9b]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [4addd9d]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [1203bb2]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [2ddba89]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [ef7845a]
+- Updated dependencies [7127b48]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [9c5abf4]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [0cd08d5]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [f98fa65]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [cba7454]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [193cd5c]
+- Updated dependencies [5aae790]
+- Updated dependencies [07f1822]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [5aaa6fc]
+- Updated dependencies [dca5bd3]
+- Updated dependencies [c89d18c]
+- Updated dependencies [acf34e3]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/runtime@17.0.0-rc.4
+  - @objectstack/cloud-connection@17.0.0-rc.4
+  - @objectstack/driver-sql@17.0.0-rc.4
+  - @objectstack/service-datasource@17.0.0-rc.4
+  - @objectstack/connector-mcp@17.0.0-rc.4
+  - @objectstack/connector-openapi@17.0.0-rc.4
+  - @objectstack/connector-rest@17.0.0-rc.4
+  - @objectstack/connector-slack@17.0.0-rc.4
+
 ## 0.3.14-rc.2
 
 ### Patch Changes

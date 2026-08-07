@@ -1,5 +1,277 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- e98fb14: fix(service-queue): `sys_job_queue` no longer grows forever — `completed` rows expire on a declared 7-day retention (#5179)
+
+  `DbQueueAdapter` marked a delivered message `status: 'completed'` and then
+  **nothing ever touched that row again**. `purge()` had zero production callers
+  (tests only), `purgeFailed()` is a manual dead-letter API, and the object
+  declared no lifecycle policy at all — so every queue delivery left a permanent
+  row, which since #5160 means one permanent row per queued email.
+
+  `sys_job_queue` now declares an ADR-0057 policy and the platform
+  `LifecycleService` enforces it on its existing hourly sweep:
+
+  ```ts
+  lifecycle: {
+    class: 'transient',
+    retention: { maxAge: '7d', onlyWhen: { status: 'completed' } },
+  }
+  ```
+
+  **Only `completed` rows are swept.** `pending` / `running` are live work, and
+  `failed` / `dlq` are the dead-letter queue — they exist to wait for a human, so
+  they are never deleted automatically at any age. `listFailed()` / `replay()` /
+  `purgeFailed()` remain the only way a dead letter leaves the table. This is
+  also why the policy is `retention` (age + row filter) rather than a `ttl` on
+  `completed_at`: TTL has no row filter, and `dlq` rows stamp `completed_at` too.
+
+  **No new configuration, and no new sweeper.** ADR-0057 §3.3 puts one reaper in
+  the platform rather than one per plugin — the same call the sibling
+  `sys_job_run` (30d) already makes. Any kernel with a data engine already runs
+  it, its per-sweep `[lifecycle] sweep: … ~N rows reaped` line now accounts for
+  this table too, and the window is overridable per environment through the
+  `lifecycle` settings namespace without touching code.
+
+  **The dedup window is now an enforced invariant, not a coincidence.** Publish
+  dedups against a terminal row by comparing its `created_at` to
+  `idempotencyWindowMs` (default 24h), and the reaper cuts off on that same
+  `created_at` axis — so retention (7d) ≥ dedup window is what keeps "duplicate
+  publishes inside the window are suppressed" true. `DbQueueAdapter` reads the
+  declared window (new export `completedRetentionWindowMs()`) and **throws at
+  construction** if `idempotencyWindowMs` is configured longer than it, instead of
+  silently degrading into duplicate deliveries days later. If you raise
+  `idempotencyWindowMs` past 7 days, raise the object's declared retention (or the
+  `lifecycle` settings override) to match — the error message names both numbers.
+
+  `class: 'transient'` is deliberate: `telemetry`/`event`/`audit` classes
+  relocate their table to the dedicated `telemetry` datasource wherever one is
+  registered (ADR-0057 §3.6), and moving a live work queue's storage would be a
+  migration, not a cleanup.
+
+- f104bab: feat(plugin-email,platform-objects): `sys_email` carries headers and small attachments, so those messages become durably deliverable (#5177)
+
+  Durable email delivery works from the **row**, not from the in-memory message:
+  `send()` publishes an `{ rowId }` job (#5160), the boot sweep re-reads rows
+  (#5161), and both end at `rowToNormalized`. So anything a `sys_email` row could
+  not carry, a row-based delivery would have dropped — and custom headers and
+  attachments were exactly that. The honest workaround was to refuse: a message
+  with either was pushed back onto inline delivery so that it would at least go
+  out whole, which closed the durable path to precisely the mail most worth
+  making durable (a signed receipt, a `List-Unsubscribe` header, an invoice PDF).
+
+  `sys_email` now has two columns, and those messages are queueable.
+
+  **`headers_json`** — the custom headers, as a JSON object. Written in both
+  delivery modes (it is audit evidence as much as delivery input) and rebuilt on
+  read. Headers are no longer a reason to fall back to inline delivery.
+
+  **`attachments_json`** — attachments as a JSON array of
+  `{ filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }`,
+  content base64 in `inline`. Written when the **combined raw size of one
+  message's attachments is within `SYS_EMAIL_ATTACHMENT_LIMIT_BYTES` (256 KiB,
+  exported from `@objectstack/plugin-email`)** — worst case ~350 KB of base64, so
+  a row stays bounded. Both arms of the declared `content: string | Buffer`
+  contract round-trip as the arm they were sent as: restoring a text attachment
+  as a Buffer would silently drop `charset=utf-8` from its MIME part and let the
+  recipient's client mis-decode a UTF-8 file, so `contentForm` records which one
+  it was. `cid` travels too — an inline `<img src="cid:…">` is unusable without
+  it.
+
+  **Over the limit, nothing changes.** The message is delivered inline exactly as
+  before, whole, and the row stores no attachment content; the reason is stated
+  at `info` (a bound, not a degradation — the worst outcome is today's
+  behaviour). Out-of-row storage for large attachments is #5172; `storageKey` is
+  declared now so that lands as a new _producer_ rather than a data migration.
+
+  Rows written before these columns exist read exactly as they did. A column that
+  is present but does not describe what it claims — malformed JSON, a size or
+  hash that disagrees with the content, a missing `contentForm` — is **rejected**,
+  and the row lands at `failed` carrying the reason, rather than being delivered
+  with a part quietly missing.
+
+  The `sys_email` schema change is additive (two optional textarea columns); no
+  migration is required and default inline delivery is unchanged.
+
+### Patch Changes
+
+- f1cc3a3: fix(spec): stop offering retired `app` keys in the metadata form, and make the reconciliation gate see tombstones (#5280)
+
+  The `app` authoring form rendered **eight** controls for keys `AppSchema` had
+  already retired to `retiredKey()` tombstones in 17.0.0 — `version`, `homePageId`,
+  `objects`, `apis`, `sharing`, `embed`, `mobileNavigation` and `aria`. A tombstone
+  is `z.never().optional()`, so filling one of those controls did not lose the
+  value quietly: it failed the **entire save** with the key's removal
+  prescription. The controls are gone, each with a comment in place naming where
+  the capability went (`manifest.version`; the first `navigation` item by `order`
+  plus `isDefault`; `defineStack({ objects })`; `defineStack({ apis })`;
+  `FormView.sharing` for both public access and embedding; the component that
+  renders the DOM node for `aria`).
+
+  Nothing about the contract changes — every one of these keys was already
+  rejected at parse. What changes is that an author is no longer shown a control
+  that can only produce a 422.
+
+  **The reconciliation gate now judges the right thing.** #3786's
+  `metadata-form-zod-reconciliation.test.ts` asked whether an offered key was
+  `∈ shape`. That was the same question as "may the author write this" until
+  `retiredKey()` existed: a tombstone **deliberately stays in the shape** so the
+  removal can carry its own upgrade prescription, so every one of those eight keys
+  read as "the Zod accepts it" and the gate stayed green over all of them. It now
+  asserts `∈ shape` **and not a tombstone**, in both directions — a retired key
+  may not be offered, and its absence needs no ledger entry to excuse it. The
+  detector reads the schema node (`z.never()` under the optional wrapper), never a
+  list of key names, mirroring `isRetired()` on the JSON-Schema side of
+  `build-schemas.ts`. The next `retiredKey()` retirement that forgets a form now
+  fails this test instead of reaching an author.
+
+  Retiring an authorable key already required pruning its form input; that step is
+  now enforced rather than remembered.
+
+- eda599e: fix(platform-objects): 超预算后台 seed 期间不再空库自证 —— 一次启动不再跑两套契约
+
+  #4769 已把 ADR-0104 的空库自证从 `kernel:ready` 挪到 `app:seeded`(本次启动自身数据的结算点),但保留 `kernel:ready` 作为「从不 seed 的内核」的兜底。剩下的窗口是这两个钩子**到达顺序可以颠倒**:`AppPlugin` 的 inline seed 超出软预算(`OS_INLINE_SEED_BUDGET_MS`,默认 8s)后转入后台,于是 `kernel:ready` 先到、兜底自证在 seed 仍在写的时候签发证书并把闸门翻到 strict——同一次 seed 运行的后半段撞上前半段从未见过的契约。showcase 冷启(`OS_INLINE_SEED_BUDGET_MS=1`)实测:自证发生在 +0.470s,seed 结算在 +3.617s,窗口 3.147s。
+
+  现在两个钩子都先问一句「本次启动自己的 seed 落定了吗」,任一处报告仍有未结算的 seed 源就不签发。`app:seeded` 同样受这道检查约束——多 config app 的 bundle 会每个 app 触发一次,第一次并不是本次启动的结算点。
+
+  新增 `seed-settlement` 契约(`@objectstack/spec/contracts`)承载这个信号,而不是让 platform-objects 去嗅 runtime 内部的 `seed-datasets` 服务:那个数组的存在只能说明「seed 源存在」,永远说明不了「已经落定」,而这两件事之间的差正是本 bug 的整个窗口。runtime 在选择分支之前先声明 seed 源,并在写入真正结束的同一刻结算它。
+
+  **multi-tenant 与 `skipSeedData` 的 ADR-0104 姿态(2026-08-06 裁定,#4795)**:这两种部署会注册 seed 数据但在启动时并不写入(前者按 org 在 `sys_organization` insert 时重放,后者是 `os migrate` 的只读规划启动,#3917),`app:seeded` 永不触发。它们的姿态是**启动时不自证,等 `os migrate … --apply` 在真实扫描的证据上落笔**——由同一个判据自然得出,不需要单独分支。这是答案而不是缺口:在启动那一刻断言一次尚未发生的 per-org 重放不含违规值,正是 #4769 的同一个错误、只是引信更长;而停在 warn-first 是可恢复的方向,随时可由 `os migrate value-shapes --apply` / `os migrate files-to-references --apply` 关闭。
+
+  `@objectstack/objectql` 侧只更新了 #4769 撤销机制的注释:「后台 seed 收尾晚于签发」不再是它要兜的场景(已在源头关闭),它对 `os dev` 热重载 seeder、运行期 marketplace 安装以及 lax 开关仍然有效。
+
+- 1b9a53b: plugin-email: large attachments (>256 KiB) now get durable queue delivery, with their content held out of the `sys_email` row
+
+  A message whose attachments exceeded the in-row budget was pushed back onto inline delivery — whole, but with none of the durability queue delivery exists to provide, which meant the platform was weakest about exactly the mail that matters most (a signed contract, an exported report). Its content now goes to the `file-storage` capability, the row records a `storageKey` plus the audit metadata, and the queue worker fetches the content back to rebuild the message.
+
+  - **Zero migration.** `attachments_json` declared `storageKey` from the start; this adds the producer and the reader. Attachments at or under `SYS_EMAIL_ATTACHMENT_LIMIT_BYTES` still go in the row exactly as before, and the boundary includes equality.
+  - **The row stays an audit log, not a blob store.** `filename` / `contentType` / `size` / `hash` stay on the row permanently; the content is a delivery artifact and is deleted a grace window (24h) after the row reaches a terminal state, at which point `storageKey` is replaced by `contentReclaimedAt`. Reclamation is a delayed `email.attachment.reclaim` queue job that carries the storage keys, so a row deleted in the meantime reclaims its content instead of orphaning it.
+  - **Nothing degrades silently.** No `file-storage` capability, or an upload that fails, keeps today's behaviour — inline delivery of the whole message — and says which of the two it was and how to fix it. On the way back, content that cannot be fetched (outage, missing object, no capability on the worker, truncated or substituted bytes) fails the row loudly; a message is never delivered without an attachment it declares.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [db0d53c]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [946a131]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

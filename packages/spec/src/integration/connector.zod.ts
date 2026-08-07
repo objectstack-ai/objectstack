@@ -561,6 +561,45 @@ export const ConnectorStatusSchema = lazySchema(() => z.enum([
 export type ConnectorStatus = z.infer<typeof ConnectorStatusSchema>;
 
 /**
+ * What one connector action does **upstream** (#4395).
+ *
+ *  - `'read'` — the action never mutates the external system (a lookup, a
+ *    search, a fetch). Its step reports a real `acted: 0`.
+ *  - `'write'` — it mutates (a create, an update, a delete, an enqueue). A
+ *    step whose dispatch SUCCEEDED reports `acted: 1`.
+ *
+ * Absent is the third answer and stays the default: the platform reports
+ * `ExecutionStepMetrics.unmeasuredEffect`, i.e. "this may have caused an effect
+ * I cannot count" — never `acted: 0`, which would claim it did nothing.
+ *
+ * ## Why the runtime needs this declared rather than inferred
+ *
+ * `connector_action` dispatches to a handler that reaches an external system;
+ * nothing on this side can see what happened there. #4354's per-run summary
+ * reports `selected` / `acted` and the broken-sweep alert is
+ * `selected > 0 AND acted = 0 AND unmeasured = 0`, so the two guesses are both
+ * wrong in a costly direction: a blanket `acted: 0` trips the alert on every
+ * healthy connector sweep until operators learn to ignore it, and a blanket
+ * `acted: 1` makes a read-only sweep look busy forever so the alert never
+ * fires. `http` gets to skip this question because the HTTP method answers it
+ * (`GET` reads, anything else mutates); a connector action's key does not.
+ *
+ * ## Why the vocabulary differs from `FlowFunctionEffectSchema`
+ *
+ * That one (`'pure' | 'writes'`, #4396) classifies a *local* compute step and
+ * deliberately has no `reads` member, because a `script` node's writes are
+ * downstream declarative nodes that count themselves. Here BOTH members are
+ * countable facts about a remote call, which is exactly what makes declaring
+ * `read` worth writing: it converts an uncountable step into a measured zero.
+ */
+export const ConnectorActionEffectSchema = lazySchema(() => z.enum([
+  'read',
+  'write',
+]).describe("What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero"));
+
+export type ConnectorActionEffect = z.infer<typeof ConnectorActionEffectSchema>;
+
+/**
  * Connector Action Definition
  */
 export const ConnectorActionSchema = lazySchema(() => z.object({
@@ -569,6 +608,20 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
   description: z.string().optional(),
   inputSchema: z.record(z.string(), z.unknown()).optional().describe('Input parameters schema (JSON Schema)'),
   outputSchema: z.record(z.string(), z.unknown()).optional().describe('Output schema (JSON Schema)'),
+  /**
+   * What this action does upstream (#4395) — see
+   * {@link ConnectorActionEffectSchema}. Optional on purpose: every connector
+   * written before this key keeps working and reports exactly what it reported
+   * before (`unmeasuredEffect`), so declaring it is a strict improvement rather
+   * than a migration.
+   *
+   * This is the ONLY producer of the effect. `AutomationEngine.registerConnector`
+   * stores `ConnectorSchema.parse(def)`, and the designer-facing
+   * `ConnectorActionDescriptor` is projected from that stored def — so both the
+   * hand-registered path and the ADR-0097 declarative materialization path read
+   * the declaration from right here.
+   */
+  effect: ConnectorActionEffectSchema.optional(),
 }));
 
 /**
