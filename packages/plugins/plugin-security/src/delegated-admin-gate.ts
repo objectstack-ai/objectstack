@@ -38,7 +38,7 @@
  */
 
 import { isGrantActive } from '@objectstack/core';
-import type { AdminScope, PermissionSet } from '@objectstack/spec/security';
+import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import { PermissionDeniedError } from './errors.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -121,7 +121,14 @@ export interface DelegableScopeReport {
 interface HeldScope {
   /** The set that carries the scope (for error messages). */
   setName: string;
-  scope: AdminScope & { assignablePermissionSets: string[] };
+  /**
+   * The scope as `resolveHeldScopes` NORMALISES it, not as it was authored:
+   * every flag there is forced to a boolean (`!== false` / `=== true`) and the
+   * allowlist to a string[]. So this names the PARSED shape (ADR-0122) — the
+   * authored one, which arrives as raw JSON and may state none of them, is
+   * `AdminScope` and appears at the two `parseMaybeJson` sites below.
+   */
+  scope: AdminScopeParsed & { assignablePermissionSets: string[] };
   /** Resolved BU ids covered (root + descendants when includeSubtree). Empty = misconfigured → approves nothing. */
   subtree: Set<string>;
 }
@@ -358,18 +365,13 @@ export class DelegatedAdminGate {
     }
 
     const held = await this.resolveHeldScopes(sets);
-    // The declared defaults are applied HERE because nothing parses these: the
-    // scope arrives as raw JSON off the row (`parseMaybeJson`), so since ADR-0122
-    // its type says what that actually is — every flag optional. The report
-    // promises booleans, so it states `AdminScopeSchema`'s own defaults rather
-    // than passing `undefined` through a field typed `boolean`.
     const scopes = held.map((h) => ({
       setName: h.setName,
       businessUnit: h.scope.businessUnit,
-      includeSubtree: h.scope.includeSubtree ?? true,
-      manageAssignments: h.scope.manageAssignments ?? false,
-      manageBindings: h.scope.manageBindings ?? false,
-      authorEnvironmentSets: h.scope.authorEnvironmentSets ?? false,
+      includeSubtree: h.scope.includeSubtree,
+      manageAssignments: h.scope.manageAssignments,
+      manageBindings: h.scope.manageBindings,
+      authorEnvironmentSets: h.scope.authorEnvironmentSets,
       assignablePermissionSets: [...h.scope.assignablePermissionSets],
       businessUnitIds: [...h.subtree],
     }));
