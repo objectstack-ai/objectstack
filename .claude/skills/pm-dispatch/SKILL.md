@@ -1879,6 +1879,17 @@ Stop the loop and report when any of these hits:
   挂队 —— 授权出处(维护者原话/指令记录)**必须引用在 PR 正文**;复核仍需
   另一个座位或维护者 walkthrough,⛔ 不得自审自合。授权是逐 PR(或逐项明示
   指令)的,不是常设豁免。
+- **版本发布必须人工(维护者 2026-08-07 拍板,#6170)。** 任何 AI 座位(PM / dev /
+  Routine / 队列管家)⛔ 不得执行或触发发布动作:跑 `changeset publish` /
+  `pnpm run release`、推版本 tag、`workflow_dispatch` 触发 Release/发布类
+  workflow、**合并 Version Packages(`chore: version packages`)PR** —— 发布只在
+  维护者亲手动作时发生。围绕发布的工作(发版板、pin bump、版本对账、发布状态
+  核验)照旧归座位;「发布」本身(把包推上 registry / 打版本 tag / 出 GitHub
+  Release / 推运行时镜像)不归任何座位。发现未经人工的发布痕迹(tag / npm 版本
+  凭空出现)按事故立案通知维护者,⛔ 不代跑任何「补救性发布」。先例:2026-08-07
+  rc.4 —— release.yml 的 on-push 自动通道在无人指令下完整发出了 rc.4
+  (#6169/#6170);机械通道的存在不构成授权 —— 读到这条的座位遇到那类通道,
+  当缺陷上报,不当工具使用。
 - Never force-push, never push `main`, never reassign an issue claimed by
   someone else, never dispatch a `needs-user-decision` issue.
 - Every dev agent works in its **own worktree per repo** (enforced by
