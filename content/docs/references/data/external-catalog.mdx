@@ -6,17 +6,12 @@ description: External Catalog protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 ExternalCatalog — cached remote-schema snapshot for a federated datasource
-
 (ADR-0015 §4.3).
 
 Introspecting a mature warehouse on every boot is expensive, so the
-
 `IExternalDatasourceService.refreshCatalog` persists a snapshot of the
-
 remote tables/columns as an `external_catalog` metadata record. The
-
 boot-validation gate (Gate 2) and Studio's schema browser read from it;
-
 drift is detected by diffing a fresh introspection against the snapshot.
 
 <Callout type="info">

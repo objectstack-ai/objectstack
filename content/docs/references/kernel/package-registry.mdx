@@ -10,35 +10,21 @@ description: Package Registry protocol schemas
 Defines the runtime state and lifecycle operations for installed packages.
 
 ## Key Distinction: App vs Package (ADR-0019)
-
 - **App (AppSchema)**: the one consumer-facing unit — what a tenant downloads,
-
-opens, and uninstalls. Only `type: app` packages are consumer-installable
-
-(see `isConsumerInstallable`), and a consumer package defines **at most one
-
-app** — there is no "suite contains apps" aggregator.
-
+  opens, and uninstalls. Only `type: app` packages are consumer-installable
+  (see `isConsumerInstallable`), and a consumer package defines **at most one
+  app** — there is no "suite contains apps" aggregator.
 - **Package (Manifest)**: the internal / control-plane artifact term (the
-
-"row" in the installed-packages table). Never surfaced to consumers as a
-
-separate noun.
-
+  "row" in the installed-packages table). Never surfaced to consumers as a
+  separate noun.
 - **Internal contributions** (plugin/driver/server/…): the "frameworks inside
-
-the .app bundle" — bundled within an App or operator-provisioned; a consumer
-
-never installs them directly.
+  the .app bundle" — bundled within an App or operator-provisioned; a consumer
+  never installs them directly.
 
 ## Architecture Alignment
-
 - **Salesforce**: Managed Packages with install/uninstall lifecycle
-
 - **VS Code**: Extension marketplace with enable/disable per-workspace
-
 - **Kubernetes**: Helm charts with release state tracking
-
 - **npm**: Package registry with install/uninstall/version management
 
 <Callout type="info">

@@ -8,15 +8,11 @@ description: Deploy Bundle protocol schemas
 Deploy Bundle Protocol
 
 Defines the schemas for metadata-driven deployment:
-
 Schema Push → Zod Validate → Diff → DDL Sync → Register
 
 This eliminates traditional CI/CD pipelines for schema changes.
-
 A "deploy" is a bundle of metadata (objects, views, flows, permissions)
-
 that is validated, diffed against the current state, and applied
-
 as DDL migrations directly to the tenant database.
 
 Target: 2-5 second deploys vs. 2-15 minute traditional Docker/CI/CD.

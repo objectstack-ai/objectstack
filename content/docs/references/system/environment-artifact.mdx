@@ -8,69 +8,44 @@ description: Environment Artifact protocol schemas
 # Environment Artifact Envelope
 
 THE single declaration of the environment artifact envelope (#4740,
-
 #4535 C10 — maintainer route A′). `@objectstack/spec/cloud` re-exports
-
 this file; both entry points resolve to these exact symbols, so the
-
 chosen entry point can never change the shape a consumer gets (the
-
 #4411 dual-source trap, closed for this name).
 
 Describes the response shape of
-
 `GET /api/v1/cloud/environments/:environmentId/artifact` — the assembled
-
 artifact ObjectOS pulls from the control plane, and the shape the runtime
-
 metadata loader parses at boot (`packages/metadata/src/plugin.ts`,
-
 `_parseAndRegisterArtifact` — the one runtime Zod parse of this envelope).
 
 Distinct from the marketplace `PackageArtifactSchema` (a .tgz file
-
 listing). This envelope wraps the compiled `ObjectStackDefinitionSchema`
-
 produced by `objectstack compile` together with control-plane assigned
-
 identity (`commitId`, `checksum`).
 
 ## Boundary
 
 - **Artifact (this schema):** compiled environment metadata plus
-
-provenance. Immutable, content-addressable via `commitId` and
-
-`checksum`.
-
+  provenance. Immutable, content-addressable via `commitId` and
+  `checksum`.
 - **Deployment Config (NOT in this schema):** business DB coordinates,
-
-credentials, environment identity, secrets. Injected at runtime.
+  credentials, environment identity, secrets. Injected at runtime.
 
 See `content/docs/concepts/north-star.mdx` §6.3 for the
-
 runtime-inputs boundary.
 
 ## History (#4740)
 
 This file previously documented a richer "v0" envelope — a
-
-`\{ algorithm, value \}` checksum object, a category-bag `metadata`, inlined
-
+`{ algorithm, value }` checksum object, a category-bag `metadata`, inlined
 `functions[]`, a required plugin/driver `manifest`, and a reserved
-
 `payloadRef` indirection — that NO producer or consumer ever implemented:
-
 `objectstack compile` ships function code as standalone runtime modules
-
 referenced from the compiled definition, and the control plane has always
-
 served the wire shape below (string SHA-256 checksum, `metadata` = the
-
 compiled definition). The declaration converged to the live wire shape;
-
 the never-implemented keys are tombstoned below (ADR-0049
-
 enforce-or-remove: declared = enforced, or absent).
 
 <Callout type="info">

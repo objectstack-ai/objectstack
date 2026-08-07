@@ -34,6 +34,11 @@ import {
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+// [#5918] The measure mint refuses a dotted member through the SAME constructor
+// the strategies' member-level refusals use — `INVALID_FIELD` / 400, naming the
+// member as the request spelled it (see `dataset-refusal.ts`'s header for why
+// that code and not `DATASET_INVALID`).
+import { invalidMemberError } from './dataset-refusal.js';
 
 /**
  * Analytics result augmented with drill-through metadata (ADR-0021 D2; see
@@ -1244,10 +1249,29 @@ export class AnalyticsService implements IAnalyticsService {
     // Cube exists — check for unknown measures referenced by the query and
     // augment the cube with suffix-inferred Metric definitions so callers
     // that pass `<field>_sum` / `<field>_avg` etc. get the right aggregation.
-    const stripPrefix = (m: string) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);
+    //
+    // [#5918] This is the SECOND measure mint, and it judges a dotted spelling
+    // exactly as the ad-hoc one does — `mintableMeasureKey` owns the rule. It
+    // has to: the ad-hoc path REGISTERS what it infers, so from the second
+    // request onwards a cube minted moments ago by `inferCubeFromQuery` is
+    // "registered" and arrives here. Measured on `origin/main` `01faeb13a`,
+    // one service, two queries:
+    //
+    //   ① measures: ['count']                        → SELECT COUNT(*) … (warms the registry)
+    //   ② measures: ['owner.region_count_distinct']   → SELECT COUNT(DISTINCT region) AS "owner.region_count_distinct"
+    //
+    // i.e. the silent wrong column #5918 reports, reached through this loop
+    // instead of that one. Refusing in only one of the two would have closed the
+    // cold request and left every warm one exactly as it was.
+    //
+    // A measure the cube DECLARES is never minted, so it never reaches the
+    // rule — including a declared DOTTED key, which `lookupMember` resolves by
+    // direct hit and which this loop must therefore check for verbatim FIRST or
+    // it would refuse a cube's own authored vocabulary.
     const extraMeasures: Record<string, any> = {};
     for (const m of query.measures || []) {
-      const key = stripPrefix(m);
+      if (cube.measures[m] || extraMeasures[m]) continue;
+      const key = mintableMeasureKey(m, name);
       if (cube.measures[key] || extraMeasures[key]) continue;
       extraMeasures[key] = inferMeasure(key);
     }
@@ -1311,6 +1335,13 @@ export class AnalyticsService implements IAnalyticsService {
    *   the data path's `resolveQueryFields`: they are engine-assigned rather than
    *   declared, and a gate stricter than the engine it guards would reject
    *   queries that used to work.
+   *
+   * [#5918] Its `stripPrefix` below is deliberately NOT narrowed the way the two
+   * MINTS were. This is a RESOLVER — it mirrors `lookupMember`'s tiers to answer
+   * "which Metric will the strategy read", and that tier order did not change.
+   * What changed is what can reach it: a dotted measure is now either a
+   * `<cube>.` qualifier or a key the cube itself declares, because every other
+   * dotted spelling is refused at the mint before this gate runs.
    */
   private assertMeasureFields(query: AnalyticsQuery, cube: Cube, declaredMeasures: string[]): void {
     const probe = this.getObjectFieldNames;
@@ -1684,9 +1715,11 @@ export class AnalyticsService implements IAnalyticsService {
     // the array `where` spelling has compiled all along, and the two spellings
     // converge instead of disagreeing. Maintainer ruling, 2026-08-06 (#5739).
     //
-    // Scope, measured rather than assumed: this governs the DIMENSION-shaped
-    // mints (`dimensions`, the `where`'s field keys, `timeDimensions`) and NOT
-    // `measures`, which keeps the old blanket strip below. See that loop.
+    // Scope: this governs the DIMENSION-shaped mints (`dimensions`, the
+    // `where`'s field keys, `timeDimensions`), which SERVE a traversal. The
+    // measure mint applies the same qualifier rule but ends the other way —
+    // `mintableMeasureKey` refuses a non-qualifier dot outright, because the
+    // measure side has no traversal to serve (#5918, and the loop below).
     const stripCubeQualifier = (m: string): string => {
       const dot = m.indexOf('.');
       if (dot < 0) return m;
@@ -1697,20 +1730,18 @@ export class AnalyticsService implements IAnalyticsService {
     measures.count = { name: 'count', label: 'Count', type: 'count', sql: '*' };
 
     for (const m of query.measures || []) {
-      // [#5739] MEASURES keep the blanket strip, deliberately and on measurement.
-      // `lookupMember`'s synthetic relation-traversal tier is DIMENSION-ONLY
-      // (`if (kind === 'dimension')`), so a dotted measure has no traversal
-      // answer to converge with — minting `measures['total.sum']` verbatim does
-      // not join anything, it only re-routes the member into ObjectQL's
-      // "cannot evaluate a cross-object measure" throw, which carries no
-      // `code`/`status`. Measured on this tree: `measures: ['total.sum']` (a
-      // `total_sum` typo, not a traversal) would go from #4437's
-      // `400 INVALID_FIELD` naming `sum` to that uncoded 5xx-class error. A
-      // worse envelope and a wrong diagnosis, for a spelling that is not what
-      // this issue is about — so the strip stays until a dotted MEASURE is ruled
-      // on in its own right. Its own residue (`owner.region_count_distinct`
-      // silently aggregating the BASE `region`, measured) is filed as #5918.
-      const key = m.includes('.') ? m.split('.').slice(1).join('.') : m;
+      // [#5918] MEASURES no longer take the blanket strip #5739 left them with.
+      // That strip cast `owner.region_count_distinct` onto the BASE `region`
+      // column — silently where the object had one, and as a #4437 400 naming
+      // the stripped tail where it did not. Neither is the caller's query.
+      //
+      // The ruling here is NOT #5739's (mint the traversal verbatim): measures
+      // have no traversal tier to converge on, so there is nothing correct to
+      // converge to. It is a loud refusal instead — see `mintableMeasureKey`,
+      // which owns the rule and the envelope, and which the augmentation mint in
+      // `ensureCube` shares so the same spelling gets the same answer on a warm
+      // registry. Maintainer ruling, 2026-08-07 (#5918).
+      const key = mintableMeasureKey(m, cubeName);
       if (measures[key]) continue;
       const inferred = inferMeasure(key);
       measures[key] = inferred;
@@ -1812,6 +1843,81 @@ export class AnalyticsService implements IAnalyticsService {
       'Ensure a compatible driver is configured or a fallback service is registered.',
     );
   }
+}
+
+/**
+ * [#5918] The `cube.measures` KEY a request's `measures` entry may be MINTED
+ * under — or a loud refusal when the entry is a dotted member.
+ *
+ * Two mint sites feed {@link inferMeasure}, and both go through here: the
+ * ad-hoc mint in {@link AnalyticsService.inferCubeFromQuery} (no cube
+ * registered) and the suffix-augmentation loop in
+ * {@link AnalyticsService.ensureCube} (a cube exists but does not declare the
+ * measure). They are the same act — inventing a Metric out of a request
+ * spelling — so they must judge the spelling the same way.
+ *
+ * ## What is refused, and why it is a refusal rather than a traversal
+ *
+ * A `<cube>.` QUALIFIER is stripped, exactly as `inferCubeFromQuery`'s
+ * `stripCubeQualifier` does for the dimension-shaped mints (#5739): `getMeta`
+ * hands members out cube-prefixed and
+ * callers echo them back, so that prefix is noise. **Every other dot is
+ * refused.** The predecessor dropped the first segment of ANY dotted member,
+ * which meant `owner.region_count_distinct` minted
+ * `measures.region_count_distinct = {type:'count_distinct', sql:'region'}` — the
+ * BASE table's own `region` column — and then:
+ *
+ * ```
+ * NativeSQL → SELECT COUNT(DISTINCT region) AS "owner.region_count_distinct" FROM "crm_account"
+ * ObjectQL  → aggregations: [{field:'region', method:'count_distinct', alias:'owner.region_count_distinct'}]
+ * ```
+ *
+ * No JOIN, no error, and a response column LABELLED with a relation attribute
+ * whose number came from the base table — a wrong answer the caller cannot see
+ * (measured on `origin/main` `01faeb13a`). Where the base object had no
+ * same-named column it degraded instead to #4437's `400 INVALID_FIELD` naming
+ * the STRIPPED tail (`Measure 'owner.score_sum' … aggregates field 'score'`) —
+ * honest about what reached SQL, but naming a string the caller never wrote.
+ *
+ * #5739 fixed the same punctuation on the three DIMENSION-shaped mints by
+ * minting the traversal verbatim, and that ruling deliberately does NOT carry
+ * over here: `lookupMember`'s synthetic relation-traversal tier is
+ * dimension-only (`if (kind === 'dimension')`), so a dotted measure has no
+ * correct traversal answer to converge on. Minting it verbatim would only
+ * re-route it into ObjectQL's `cannot evaluate a cross-object measure` — which
+ * would be the wrong diagnosis for a plain typo like `total.sum`. Maintainer
+ * ruling, 2026-08-07 (#5918, option 3): refuse the dotted measure LOUDLY, with
+ * the caller's own spelling in the envelope. A genuine traversal measure
+ * (`SUM("owner"."amount")` + LEFT JOIN) would be a capability with its own
+ * justification, not a side effect of a strip.
+ *
+ * The refusal deliberately reaches BOTH the typo (`total.sum`) and the genuine
+ * traversal intent (`owner.amount_sum`): the two are lexically indistinguishable
+ * on this path, and telling them apart would need field metadata the ad-hoc
+ * path does not have (`getObjectFieldNames` answers names, not types or
+ * relation targets). One honest 400 for both beats a metadata capability nobody
+ * has asked for.
+ *
+ * A measure the cube DECLARES under a dotted key is not this function's
+ * business — it was authored, not minted, and `lookupMember` resolves it by
+ * direct hit. Both call sites check that first.
+ */
+function mintableMeasureKey(member: string, cubeName: string): string {
+  const dot = member.indexOf('.');
+  if (dot < 0) return member;
+  if (member.slice(0, dot) === cubeName) return member.slice(dot + 1);
+
+  throw invalidMemberError(
+    `[Analytics] Measure '${member}' on cube '${cubeName}' is a DOTTED member, and ` +
+      `measures do not traverse relationships — only dimensions do — so there is no ` +
+      `related column for this to aggregate. Until #5918 the prefix was silently ` +
+      `dropped, so the aggregate ran against '${cubeName}' itself while the result ` +
+      `column kept the label '${member}'. Aggregate one of the object's OWN fields ` +
+      `instead ('<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct'), or ` +
+      `declare a Cube whose measure names the related column in its own 'sql'. The ` +
+      `only dot a measure may carry is the '${cubeName}.' qualifier.`,
+    { member, param: 'measures', cube: cubeName },
+  );
 }
 
 /**

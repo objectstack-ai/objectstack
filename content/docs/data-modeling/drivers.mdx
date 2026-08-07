@@ -54,8 +54,11 @@ Drivers can be selected in two ways:
 
 <Callout type="info">
 **Turso / libSQL needs one extra install.** `libsql://` and `*.turso.io` URLs *are*
-inferred, but `@objectstack/driver-turso` is an **optional peer dependency** of the
-CLI — it pulls in `@libsql/client`, so it is not part of a default install:
+inferred — by the CLI (`os serve` / `os start` / `os dev`) and by the standalone
+runtime stack the one-shot commands and embedders boot through (`os migrate`,
+`createStandaloneStack`) alike. But `@objectstack/driver-turso` is an **optional**
+install — it pulls in `@libsql/client` plus native bindings, so it is not part of a
+default install:
 
 ```bash
 npm install @objectstack/driver-turso
@@ -76,7 +79,7 @@ libSQL data stayed untouched. Pass the token with `--database-auth-token`
 | **SQLite** | `@objectstack/driver-sql` (peer: `better-sqlite3`) | `SqlDriver` | `sqlite` \| `sql` |
 | **SQLite (WASM)** | `@objectstack/driver-sqlite-wasm` | `SqliteWasmDriver` | `sqlite-wasm` \| `wasm-sqlite` \| `wasm` |
 | **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
-| **Turso / libSQL** | `@objectstack/driver-turso` (optional peer of the CLI) | `TursoDriver` | `turso` \| `libsql` |
+| **Turso / libSQL** | `@objectstack/driver-turso` (optional install — see the callout above) | `TursoDriver` | `turso` \| `libsql` |
 | **Memory** | `@objectstack/driver-memory` | `InMemoryDriver` | `memory` |
 
 > All SQL flavours (PostgreSQL / MySQL / SQLite) are served by a single

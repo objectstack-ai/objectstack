@@ -221,13 +221,9 @@ describe('renderFileDescription', () => {
     // Rendering is unchanged by #5059 — only the block SELECTION moved. These
     // two assertions exist so the extraction is provably behaviour-preserving.
     //
-    // The `{@link <path>}` (untitled) form is deliberately NOT asserted here:
-    // the untitled branch emits `[path](route)` and the bare-source-path
-    // rewriter two lines below then matches the path INSIDE the link text and
-    // wraps it again, so the published output is a link nested in a link. That
-    // is a pre-existing defect of the rendering chain, live on `main` in
-    // `automation/etl.mdx:54` and `integration/connector.mdx:102`; filed
-    // separately rather than pinned here, because pinning it would ratify it.
+    // #6136 has since fixed the untitled `{@link <path>}` form this case used
+    // to steer around; it is pinned on its own below rather than folded in
+    // here, so this case keeps testing exactly what it was written to test.
     const source = [
       '/**',
       ' * Header referencing {@link ../automation/sync.zod.ts | the sync protocol}',
@@ -240,6 +236,230 @@ describe('renderFileDescription', () => {
     const out = renderFileDescription(source, ctx);
     expect(out).toContain('[the sync protocol](/docs/references/automation/sync)');
     expect(out).toContain('\\{');
+  });
+});
+
+/**
+ * #5553 — the block is rendered as the markdown it was written as.
+ *
+ * The renderer used to drop blank lines and join what was left with `\n\n`,
+ * making every SOURCE LINE its own paragraph. Anything that legitimately wraps
+ * across lines was cut in half by a paragraph boundary, and an inline code span
+ * cannot cross one, so both backticks fell out as literal text on five
+ * published pages.
+ */
+describe('renderFileDescription — #5553: line layout is content, not decoration', () => {
+  const ctx = { sourcePathToDocsRoute: () => null };
+
+  it('keeps an inline code span that wraps across two source lines', () => {
+    // `automation/flow-function.zod.ts:13-15`, reduced — the example the issue
+    // opened with. Published as two paragraphs, one starting with a stray
+    // backtick and the next ending with one.
+    const source = [
+      '/**',
+      ' * A later node persists it (`update_record fields: {',
+      " *   ai_category: '{aiResult.ai_category}' }`). Done.",
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      "A later node persists it (`update_record fields: {\n  ai_category: '{aiResult.ai_category}' }`). Done.",
+    );
+  });
+
+  it('does not escape braces inside an inline code span, and still does outside one', () => {
+    // A code span renders its content literally, so a backslash there is not an
+    // escape character — it is a backslash the reader sees. `shared/expression`
+    // published `` `\{ dialect, source \}` `` for exactly this reason.
+    const source = [
+      '/**',
+      ' * The persisted form is `{ dialect, source }`, written {inline} in prose.',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      'The persisted form is `{ dialect, source }`, written \\{inline\\} in prose.',
+    );
+  });
+
+  it('leaves a fenced code block alone — no paragraph splitting, no escaping', () => {
+    const source = [
+      '/**',
+      ' * Example:',
+      ' *',
+      ' * ```ts',
+      ' * const a = { b: 1 };',
+      ' *',
+      ' * const c = 2;',
+      ' * ```',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      ['Example:', '', '```ts', 'const a = { b: 1 };', '', 'const c = 2;', '```'].join('\n'),
+    );
+  });
+
+  it('re-emits an indented (4-space) code block as a fenced one', () => {
+    // `data/date-macros.zod.ts` and `data/context-tokens.zod.ts` write their
+    // placeholder examples this way, and they are almost entirely braces.
+    //
+    // The fence is not cosmetic. MDX dropped CommonMark's indented code blocks
+    // so indentation could lay out JSX, so an indented block reaches MDX as
+    // ordinary prose — and unescaped braces in prose are an expression. Left
+    // indented, both pages fail to compile with "Could not parse expression
+    // with acorn"; escaped instead, the reader gets `\{` in what is meant to be
+    // code, which is the very defect #5553 is about.
+    const source = [
+      '/**',
+      ' * They use a placeholder grammar:',
+      ' *',
+      " *     { published_at: { $gte: '{last_quarter_start}' } }",
+      ' *',
+      ' * Expanded on both sides.',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      [
+        'They use a placeholder grammar:',
+        '',
+        '```',
+        "{ published_at: { $gte: '{last_quarter_start}' } }",
+        '```',
+        '',
+        'Expanded on both sides.',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps a list a list, and its nesting nested', () => {
+    // 85 of the 185 described sources write a list. Splitting per line made
+    // every item its own paragraph and `.trim()` flattened the nesting, so a
+    // literal space-join — the other reading of "merge the lines" — would have
+    // been just as wrong in the other direction.
+    const source = [
+      '/**',
+      ' * ## Layers',
+      ' *',
+      ' * 1. **Warehouse**',
+      ' *    - Extract from systems',
+      ' *    - Load into the warehouse',
+      ' * 2. **Integration**',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      [
+        '## Layers',
+        '',
+        '1. **Warehouse**',
+        '   - Extract from systems',
+        '   - Load into the warehouse',
+        '2. **Integration**',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps consecutive `@see` tags as separate blocks', () => {
+    // JSDoc block tags are block-level, and the sources write runs of them with
+    // no blank line between (`automation/etl` ends on three). Preserving the
+    // source layout alone would have merged them into one run-on paragraph —
+    // the one place the renderer must ADD a blank line rather than keep one.
+    const source = [
+      '/**',
+      ' * ETL pipelines.',
+      ' * @see https://airbyte.com/',
+      ' * @see https://nifi.apache.org/',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      ['ETL pipelines.', '', 'See also: https://airbyte.com/', '', 'See also: https://nifi.apache.org/'].join('\n'),
+    );
+  });
+});
+
+/**
+ * #6136 — a rewriter that runs over its own output nests a link in a link.
+ *
+ * The untitled `{@link <path>}` branch emits `[<path>](<route>)`, whose link
+ * TEXT is the path itself. The bare-source-path rewriter that runs next only
+ * excluded "preceded by `(`" and "followed by `)`", so it matched that text and
+ * wrapped it a second time. Lookaround cannot express "not nested inside a
+ * link"; the fix is to stop showing it the links at all.
+ */
+describe('renderFileDescription — #6136: the bare-path rewriter skips formed links', () => {
+  const ctx = {
+    sourcePathToDocsRoute: (t: string) =>
+      /integration\/connector\.zod\.ts$/.test(t) ? '/docs/references/integration/connector' : null,
+  };
+
+  it('renders an untitled `{@link <path>}` as ONE link', () => {
+    const source = [
+      '/**',
+      ' * See {@link ../integration/connector.zod.ts} for the connector layer.',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      'See [../integration/connector.zod.ts](/docs/references/integration/connector) for the connector layer.',
+    );
+  });
+
+  it('renders the published `@see {@link file://…}` shape as ONE link', () => {
+    // `automation/etl.zod.ts:42` verbatim — the exact input behind
+    // `content/docs/references/automation/etl.mdx:54`.
+    const source = [
+      '/**',
+      ' * @see {@link file://../integration/connector.zod.ts} for the Enterprise Connector layer',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      'See also: [../integration/connector.zod.ts](/docs/references/integration/connector) for the Enterprise Connector layer',
+    );
+  });
+
+  it('still linkifies a path left bare in prose', () => {
+    // The half that must NOT regress: skipping formed links is not the same as
+    // skipping paths, and a rewriter that stopped doing its job would pass the
+    // two cases above for the wrong reason.
+    //
+    // Spelled WITHOUT a `../` prefix on purpose. A bare path that carries one
+    // is mis-linked by a defect this PR does not touch — the rewriter's leading
+    // `\b` cannot match at the `.` of `../`, so the prefix is left outside the
+    // link (`../../[system/cache.zod.ts](route)`, live on `api/http-cache` and
+    // `system/cache`). That is a different input shape from #6136 (no `{@link}`
+    // is involved) and it is filed separately; asserting the broken spelling
+    // here would ratify it, so this case steers around it the way #5059's did.
+    const source = [
+      '/**',
+      ' * The connector lives in integration/connector.zod.ts today.',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      '',
+    ].join('\n');
+    expect(renderFileDescription(source, ctx)).toBe(
+      'The connector lives in [integration/connector.zod.ts](/docs/references/integration/connector) today.',
+    );
   });
 });
 
@@ -305,5 +525,139 @@ describe('corpus — no reference source donates a symbol comment to its page', 
     expect(openingOf('system/migration.zod.ts')).toBe('Migration protocol — the two kinds of migration, kept apart on purpose.');
     expect(openingOf('api/websocket.zod.ts')).toBe('WebSocket Event Protocol');
     expect(openingOf('ui/sharing.zod.ts')).toBe('@module ui/sharing');
+  });
+});
+
+/**
+ * The corpus half of #5553 / #6136: re-derive both verdicts from the real
+ * sources, so a future header cannot quietly re-acquire either defect.
+ *
+ * These assert on the RENDERED fragment rather than on the emitted `.mdx`, for
+ * the same reason the selection half does — running the whole generator and
+ * grepping its artifact is how both defects survived on `main` in the first
+ * place.
+ */
+describe('corpus — every rendered description is well-formed markdown', () => {
+  // `build-docs.ts` derives its category map from exactly this directory
+  // listing (`CATEGORIES`, build-docs.ts:129), so this is the real mapping and
+  // not a stand-in that could disagree with the generator.
+  const categories = new Set(
+    fs.readdirSync(SRC_DIR, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name),
+  );
+  const ctx = {
+    sourcePathToDocsRoute: (target: string) => {
+      const m = target.match(/(?:^|\/)([\w-]+)\/([\w.-]+)\.zod\.ts$/);
+      return m && categories.has(m[1]) ? `/docs/references/${m[1]}/${m[2]}` : null;
+    },
+  };
+
+  const zodFiles: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.zod.ts')) zodFiles.push(p);
+    }
+  };
+  walk(SRC_DIR);
+
+  const described = zodFiles
+    .map(file => ({ rel: path.relative(SRC_DIR, file), out: renderFileDescription(fs.readFileSync(file, 'utf-8'), ctx) }))
+    .filter(d => d.out !== '');
+
+  /** The description with fenced code blocks removed. */
+  const withoutFences = (out: string) => {
+    let fenced = false;
+    return out
+      .split('\n')
+      .map(line => {
+        if (/^\s*(?:`{3,}|~{3,})/.test(line)) { fenced = !fenced; return ''; }
+        return fenced ? '' : line;
+      })
+      .join('\n');
+  };
+
+  it('finds descriptions to check', () => {
+    expect(described.length).toBeGreaterThan(150);
+  });
+
+  it('never cuts an inline code span in half (#5553)', () => {
+    // A code span cannot cross a blank line, so within one PARAGRAPH the
+    // backticks have to pair. Counting per LINE — the scan the issue proposed —
+    // stopped being the right question once spans were allowed to wrap again:
+    // it now flags the four spans that correctly span lines.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      for (const para of withoutFences(out).split(/\n\s*\n/)) {
+        if ((para.match(/`/g) ?? []).length % 2 === 1) offenders.push(`${rel}: ${para.trim().slice(0, 60)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never prints a backslash escape inside code, where it is content (#5553)', () => {
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      let fenced = false;
+      for (const line of out.split('\n')) {
+        if (/^\s*(?:`{3,}|~{3,})/.test(line)) { fenced = !fenced; continue; }
+        const code = fenced || /^ {4,}\S/.test(line)
+          ? [line]
+          : line.match(/`[^`]*`/g) ?? [];
+        if (code.some(c => /\\[{}]/.test(c))) offenders.push(`${rel}: ${line.trim().slice(0, 60)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never leaves a brace where MDX would parse it as an expression', () => {
+    // The other half of "escape only in prose": every `{` that is NOT inside a
+    // code span or a fenced block has to arrive escaped, or the docs build dies
+    // with "Could not parse expression with acorn". This is the assertion that
+    // catches an indented code block left indented — MDX has no such construct,
+    // so its braces reach the compiler as prose.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      const bare = withoutFences(out)
+        .replace(/`[^`]*`/g, '') // inline code spans are literal in MDX
+        .replace(/\\[{}]/g, ''); // already escaped
+      if (/[{}]/.test(bare)) offenders.push(`${rel}: ${bare.match(/.{0,40}[{}].{0,20}/)?.[0].trim()}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never emits an indented code block — MDX has no such construct', () => {
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      let fenced = false;
+      let prevBlank = true;
+      for (const line of out.split('\n')) {
+        if (/^\s*(?:`{3,}|~{3,})/.test(line)) { fenced = !fenced; prevBlank = false; continue; }
+        if (!fenced && prevBlank && /^ {4,}\S/.test(line)) offenders.push(`${rel}: ${line.slice(0, 60)}`);
+        prevBlank = line.trim() === '';
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never nests a markdown link inside a markdown link (#6136)', () => {
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      // A link whose TEXT still contains link syntax — the published shape was
+      // `[../[path](route)](route)`.
+      if (/\[[^\]]*\]\([^)]*\)\]\(/.test(out) || /\[[^\][]*\[[^\]]*\]\(/.test(out)) {
+        offenders.push(rel);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps a description for every source that had one — #6134 selection is untouched', () => {
+    // The rendering fix must not remove a page's opening paragraph; that is
+    // #5059's acceptance criterion and it still binds. 185 sources carry a
+    // module header, and all 185 still render one.
+    expect(described.length).toBe(
+      zodFiles.filter(f => findModuleDocBlock(fs.readFileSync(f, 'utf-8')) !== null).length,
+    );
   });
 });

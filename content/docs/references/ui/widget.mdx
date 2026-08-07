@@ -8,7 +8,6 @@ description: Widget protocol schemas
 Widget Lifecycle Hooks Schema
 
 Defines lifecycle callbacks for custom widgets inspired by Web Components and React.
-
 These hooks allow widgets to perform initialization, cleanup, and respond to changes.
 
 See also: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
@@ -16,25 +15,15 @@ See also: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
 See also: https://react.dev/reference/react/Component#component-lifecycle
 
 @example
-
 ```typescript
-
-const widget = \{
-
-lifecycle: \{
-
-onMount: "console.log('Widget mounted')",
-
-onUpdate: "if (prevProps.value !== props.value) \{ updateUI() \}",
-
-onUnmount: "cleanup()",
-
-onValidate: "return value.length > 0 ? null : 'Required field'"
-
-\}
-
-\}
-
+const widget = {
+  lifecycle: {
+    onMount: "console.log('Widget mounted')",
+    onUpdate: "if (prevProps.value !== props.value) { updateUI() }",
+    onUnmount: "cleanup()",
+    onValidate: "return value.length > 0 ? null : 'Required field'"
+  }
+}
 ```
 
 <Callout type="info">

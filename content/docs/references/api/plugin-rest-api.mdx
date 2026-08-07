@@ -8,105 +8,59 @@ description: Plugin Rest Api protocol schemas
 REST API Plugin Protocol
 
 Defines the schema for REST API plugins that register Discovery, Metadata,
-
 Data CRUD, Batch, and Permission routes with the HTTP Dispatcher.
 
 This plugin type implements Phase 2 of the API Protocol implementation plan,
-
 providing standardized REST endpoints with:
-
 - Request validation middleware using Zod schemas
-
 - Response envelope wrapping with BaseResponseSchema
-
 - Error handling using ApiErrorSchema
-
 - OpenAPI documentation auto-generation
 
 Features:
-
 - Route registration for core API endpoints
-
 - Automatic schema-based validation
-
 - Standardized request/response envelopes
-
 - OpenAPI/Swagger documentation generation
 
 Architecture Alignment:
-
 - Salesforce: REST API with metadata and data CRUD
-
 - Microsoft Dynamics: Web API with entity operations
-
 - Strapi: Auto-generated REST endpoints from schemas
 
 @example Plugin Manifest
-
 ```typescript
-
-\{
-
-"name": "rest_api",
-
-"version": "1.0.0",
-
-"type": "server",
-
-"contributes": \{
-
-"routes": [
-
-\{
-
-"prefix": "/api/v1/discovery",
-
-"service": "metadata",
-
-"methods": ["getDiscovery"],
-
-"middleware": [
-
-\{ "name": "response_envelope", "type": "transformation", "enabled": true \}
-
-]
-
-\},
-
-\{
-
-"prefix": "/api/v1/meta",
-
-"service": "metadata",
-
-"methods": ["getMetaTypes", "getMetaItems", "getMetaItem", "saveMetaItem"],
-
-"middleware": [
-
-\{ "name": "auth", "type": "authentication", "enabled": true \},
-
-\{ "name": "request_validation", "type": "validation", "enabled": true \}
-
-]
-
-\},
-
-\{
-
-"prefix": "/api/v1/data",
-
-"service": "data",
-
-"methods": ["findData", "getData", "createData", "updateData", "deleteData"]
-
-\}
-
-]
-
-\}
-
-\}
-
+{
+  "name": "rest_api",
+  "version": "1.0.0",
+  "type": "server",
+  "contributes": {
+    "routes": [
+      {
+        "prefix": "/api/v1/discovery",
+        "service": "metadata",
+        "methods": ["getDiscovery"],
+        "middleware": [
+          { "name": "response_envelope", "type": "transformation", "enabled": true }
+        ]
+      },
+      {
+        "prefix": "/api/v1/meta",
+        "service": "metadata",
+        "methods": ["getMetaTypes", "getMetaItems", "getMetaItem", "saveMetaItem"],
+        "middleware": [
+          { "name": "auth", "type": "authentication", "enabled": true },
+          { "name": "request_validation", "type": "validation", "enabled": true }
+        ]
+      },
+      {
+        "prefix": "/api/v1/data",
+        "service": "data",
+        "methods": ["findData", "getData", "createData", "updateData", "deleteData"]
+      }
+    ]
+  }
+}
 ```
 
 <Callout type="info">

@@ -8,101 +8,63 @@ description: Odata protocol schemas
 OData v4 Protocol Support
 
 Open Data Protocol (OData) v4 is an industry-standard protocol for building
-
 and consuming RESTful APIs. It provides a uniform way to expose, structure,
-
 query, and manipulate data.
 
 ## Overview
 
 OData v4 provides standardized URL conventions for querying data including:
-
 - $select: Choose which fields to return
-
 - $filter: Filter results with complex expressions
-
 - $orderby: Sort results
-
 - $top/$skip: Pagination
-
 - $expand: Include related entities
-
 - $count: Get total count
 
 ## Use Cases
 
 1. **Enterprise Integration**
-
-- Integrate with Microsoft Dynamics 365
-
-- Connect to SharePoint Online
-
-- SAP OData services
+   - Integrate with Microsoft Dynamics 365
+   - Connect to SharePoint Online
+   - SAP OData services
 
 2. **API Standardization**
-
-- Provide consistent query interface
-
-- Standard pagination and filtering
-
-- Industry-recognized protocol
+   - Provide consistent query interface
+   - Standard pagination and filtering
+   - Industry-recognized protocol
 
 3. **External Data Sources**
-
-- Connect to OData-compliant systems
-
-- Federated queries
-
-- Data virtualization
+   - Connect to OData-compliant systems
+   - Federated queries
+   - Data virtualization
 
 See also: https://www.odata.org/documentation/
 
 See also: https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html
 
 @example OData Query
-
 ```
-
 GET /api/odata/customers?
-
-$select=name,email&
-
-$filter=country eq 'US' and revenue gt 100000&
-
-$orderby=revenue desc&
-
-$top=10&
-
-$skip=20&
-
-$expand=orders&
-
-$count=true
-
+  $select=name,email&
+  $filter=country eq 'US' and revenue gt 100000&
+  $orderby=revenue desc&
+  $top=10&
+  $skip=20&
+  $expand=orders&
+  $count=true
 ```
 
 @example Programmatic Use
-
 ```typescript
-
-const query: ODataQuery = \{
-
-select: ['name', 'email'],
-
-filter: "country eq 'US' and revenue gt 100000",
-
-orderby: 'revenue desc',
-
-top: 10,
-
-skip: 20,
-
-expand: ['orders'],
-
-count: true
-
-\}
-
+const query: ODataQuery = {
+  select: ['name', 'email'],
+  filter: "country eq 'US' and revenue gt 100000",
+  orderby: 'revenue desc',
+  top: 10,
+  skip: 20,
+  expand: ['orders'],
+  count: true
+}
 ```
 
 <Callout type="info">

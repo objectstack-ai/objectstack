@@ -15,6 +15,16 @@ export { celEngine, DEFAULT_LIMITS } from './cel-engine';
 // (approval `expression` approvers): lint and the runtime pre-check share this
 // one helper so what they accept can never drift.
 export { collectCelRootIdentifiers } from './cel-engine';
+// #6128 — the strict-environment "does this identifier resolve?" oracle, the
+// same one `validateExpression` gives its `record`-scoped bare-ref verdict from.
+// Published for the same reason as `collectCelRootIdentifiers` above: a lint
+// rule whose surface declares a DIFFERENT root set (`@objectstack/lint`'s
+// view/page visibility gate binds `current_user` / `page` on top of
+// SCOPE_ROOTS) needs this exact answer, and the alternative — rebuilding a
+// strict `Environment` in the consumer — is the private-front-end mistake
+// #4812 removed from that very package. One oracle, one answer to "what
+// resolves", whichever surface is asking.
+export { firstUndeclaredReference } from './cel-engine';
 // #4812 — the canonical parse-to-AST entry. Any consumer that needs the AST of
 // an authored CEL source takes it from here, so "what parses" has exactly ONE
 // answer across build, lint and runtime. Building a private `new Environment()`

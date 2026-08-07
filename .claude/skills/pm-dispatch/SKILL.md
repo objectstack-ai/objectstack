@@ -1306,18 +1306,35 @@ same environment — its own container and fresh clone, decoupled from the PM
 session's lifetime. Use it when devs need resources/lifetime beyond one
 container, or the maintainer asks for it. Requires the `Claude_Code_Remote`
 MCP tools (available in remote/web sessions; if absent, say so and fall back
-to `mode:subagent`). Per issue:
+to `mode:subagent`).
 
-1. `create_trigger` with `create_new_session_on_fire: true` and no schedule
-   (poke-only), name `pm-dispatch-issue-<n>`, prompt = the dispatch template
-   below **made fully standalone**: the fired session starts with zero
-   conversation context (it does get the repo clone, so it can be told to
-   follow `.claude/agents/os-dev.md`), and — since an independent session
-   cannot return a message to the PM — it must be told to **post the JSON
-   report as a comment on the issue** (prefixed `<!-- os-dev-report -->`)
-   instead of returning it, in addition to opening the draft PR.
-2. `fire_trigger` to launch it, then `delete_trigger` once the report has
-   been collected (step 6) so poke-only triggers don't accumulate.
+**一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire**(维护者
+2026-08-07 拍板;trigger 流只保留给**定时/重复**型 —— 座位 Routine 一节)。
+实测三课,#6083 首派一天踩齐,每一条都写进派发动作:
+
+1. **授权面随 source,不随环境。** trigger 拉起的会话**没有仓库授权** ——
+   clone(匿名只读)可用,push / 开 PR / 发评论全 403(`not in this
+   session's authorized repository set`),`permission_mode: auto` 下也没有
+   可弹的授权窗,dev 只能做只读勘察。`create_session` 带 `source_url` 的
+   会话**出生即持推送授权**。同时带 `outcome_branch`(= 认领分支,平台托管
+   推送)与显式 `model`(trigger 流不可指模型 —— sonnet 默认惊吓即此出处)、
+   `title`(客户端卡片名 —— **以车道名开头,⛔ 不叫 os-dev**,维护者
+   2026-08-07 拍板:多车道并行时卡片按车道可扫;形如
+   `⚡ spec #5599 view 身份前置(裁 B)`,即 `⚡ <车道> #<单号> <短语>`)。
+2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态 —— 回合结束
+   就停下等输入,不像 subagent 一口气跑完;不写这条,dev 会在中期汇报或提问
+   处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
+   开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
+   (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
+3. **交付通道写明降级路径。** 云会话通常没有 GitHub API 工具(连接器不随
+   create_session/trigger 传递),派发词写明:开 PR / 发评论失败 ⛔ 不视为
+   阻塞 —— 推送 outcome branch + 终报作最后一条会话消息,**PM 代开 draft
+   PR、代转录报告**到 issue(权限面不因此放大)。
+
+**监控与转向**:`get_session` 读实时状态(status / model / token 用量;
+IDLE + 分支未推送 = 停摆待 poke);投递消息用**绑定会话的 poke 触发器**
+(`create_trigger` 带 `persistent_session_id` + `fire_trigger` + 用后即
+`delete_trigger`)。收报:巡检主动读会话终报与分支推送,⛔ 不等推送通知。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 
@@ -1818,10 +1835,41 @@ dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/an
 第 3 条最容易被省掉,而省掉它就退化成最坏形态:前提不成立时 dev 自行改选,那正是**无人
 裁决**的状态,且没有任何读数会显示它发生过。
 
+**两条元判据 —— 一整族近似单默认不进决策箱(维护者 2026-08-07 决策箱第 2 轮拍板)。**
+上面的「不升级四类」说的是**单张单**自带裁决;这两条说的是**一族形状相同的单**不必逐张
+问 —— 族里第一张已经裁过,后来的默认继承那条裁决。重复立卡不是谨慎,是拿维护者的时间
+买同一个答案。
+
+- **静默丢弃的声明,默认并入既有拒收集。** 适用判据:一个**已声明的键**在组件的某一支上
+  被**静默忽略**,而更早的裁决已把同一个键在**兄弟支**上定成**响亮的编写期错误**。此时
+  新支**默认并入既有拒收集** —— 复用母单的裁决直接入队派发,⛔ 不为它另开决策箱槽位;
+  只有两支之间存在**真实语义差异**时才重开。出处:#5714 把 `pool`-on-sqlite 裁成编写期
+  错误之后,#5931(`memory` 支)仍占了一个槽位,而它只是那条裁决的一词之差的外延;同族
+  重复整周都在发生。⚠️ **边界必须与本条同段读,否则这条捷径会被用过头**:继承的是**裁决
+  连同它的理由**,不是「拒收」两个字 —— 母单的理由**被实测为分支特有**时本条不适用。
+  #5739(维度侧)的理由是「拒收会连带拒掉今天已经能跑的查询」,该理由在**度量面上被
+  证伪**,所以 #5918 另裁一次是对的。判法固定:把母单的理由拿到新支上复核一遍,理由不
+  成立就回正常升级路径,别让「同一个键」这个表面相似度替你做判断。
+- **一个操作两个实现,默认治理侧胜出。** 适用判据:同一个操作存在两处实现,且两处行为
+  不一致。**带治理的那一侧**(权限闸、用户同意、去重、审计留痕)是**默认幸存者**,另一侧
+  **改绑到它并删除** —— 不是两侧对齐,也不是保留双写。反向裁只在**产品语义明确要求**时
+  成立,且必须把那条语义写进裁决正文,而不是默认成立后再补理由。出处:cloud#896
+  (hostname)即此形定案;cloud#1147 的三个待答问题(重装 = UPSERT、卸载 = 软停用、外部
+  词表 = manifest id)按本条全部落在治理侧;objectstack#4636 的 B 选项是同一形状。留着
+  未治理的那一侧等于给权限闸留一条旁路,而「声明即强制」要堵的正是那条旁路。
+
 Whenever a dev returns `needs_decision` that passes the bar above, an issue
 is too vague to dispatch, or rework has failed twice:
 
-1. **Default: the decision lives ON the issue it belongs to — never a new
+1. **先刷新卡片的前提 —— 落卡与复升级都适用。** 决策卡写下的每条前提(某个在飞
+   PR 还没合、某能力还不存在、某文件还是那个形状)都是**有保质期的读数**:main
+   一天 ~18 合并,跨仓事实按小时变。落卡**之前**、以及把一张旧卡重新推到维护者
+   面前**之前**,逐条复核一遍,失效的就地改写或撤卡 —— **隔夜没动过的卡,默认按
+   「前提未经验证」处理,不是按「还在等答复」处理。** 出处是决策箱第 2 轮的实测:
+   cloud#1148 的 A/B 卡在**写下前 ~50 分钟**就已失效(它等的那个上游 PR 已经合了),
+   cloud#812 一张卡带三条过时前提。前提过期的卡比没有卡更贵 —— 维护者会照着一个
+   不存在的世界做裁决,而卡面上没有任何读数会显示这件事发生过。
+2. **Default: the decision lives ON the issue it belongs to — never a new
    issue.** Post the analysis as a comment on that issue, add the
    `needs-user-decision` label, drop it from the active queue. The label is
    the maintainer's inbox (filter `label:needs-user-decision` shows
@@ -1832,7 +1880,7 @@ is too vague to dispatch, or rework has failed twice:
    when the decision has no natural anchor — it spans several issues (file
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
-2. The analysis, wherever it lands (English, per the language policy):
+3. The analysis, wherever it lands (English, per the language policy):
    background / the concrete question / options / your recommendation /
    related issues, PRs, branches。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
@@ -1858,7 +1906,7 @@ is too vague to dispatch, or rework has failed twice:
      绝不让 AI 能声明一个运行时不兑现的能力。
    推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
-3. If the session is interactive, additionally raise it via `AskUserQuestion`;
+4. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer
    a product/architecture question on the maintainer's behalf.
 

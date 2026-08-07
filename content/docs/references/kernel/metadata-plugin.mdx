@@ -8,61 +8,37 @@ description: Metadata Plugin protocol schemas
 # Metadata Plugin Protocol
 
 Defines the specification for the **Metadata Plugin** — the central authority
-
 responsible for managing ALL metadata across the ObjectStack platform.
 
 ## Architecture
-
 The Metadata Plugin consolidates all scattered metadata operations into a single,
-
 cohesive plugin that "takes over" the entire platform's metadata management:
 
 ```
-
 ┌──────────────────────────────────────────────────────────────────┐
-
 │                     Metadata Plugin                             │
-
 │                                                                  │
-
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-
 │  │ Type Registry │  │  Loader      │  │ Customization Layer  │  │
-
 │  │ (all types)   │  │  (file/db/s3)│  │ (overlay / merge)    │  │
-
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-
 │                                                                  │
-
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-
 │  │ Persistence  │  │  Query       │  │ Lifecycle            │  │
-
 │  │ (db records) │  │  (search)    │  │ (validate/deploy)    │  │
-
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
-
 └──────────────────────────────────────────────────────────────────┘
-
 ```
 
 ## Alignment
-
 - **Salesforce**: Metadata API (deploy, retrieve, describe)
-
 - **ServiceNow**: System Dictionary + Metadata API
-
 - **Kubernetes**: API Server + CRD Registry
 
 ## References
-
 - [kernel/metadata-loader.zod.ts](/docs/references/kernel/metadata-loader) — MetadataManager wiring (datasource, cache, write gates)
-
 - [kernel/metadata-customization.zod.ts](/docs/references/kernel/metadata-customization) — Overlay/merge protocol
-
 - [system/metadata-persistence.zod.ts](/docs/references/system/metadata-persistence) — Database record format + loader/watch envelope types
-
 - contracts/metadata-service.ts — Service interface
 
 <Callout type="info">

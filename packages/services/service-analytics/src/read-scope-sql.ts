@@ -123,9 +123,26 @@ import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
  * remove; the route keys on the DECLARATION instead.
  *
  * The code is what a machine reads: `dispatcher-plugin.errorResponseBase`, the
- * sibling `/analytics/query` exit, puts a thrown `err.code` in
- * `error.details.code` (#3842), so `READ_SCOPE_COMPILE_FAILED` is legible there
- * without anyone parsing prose.
+ * sibling `/analytics/query` exit, puts a thrown `err.code` on the wire at
+ * `error.code` (#3842), so `READ_SCOPE_COMPILE_FAILED` is legible there without
+ * anyone parsing prose.
+ *
+ * ⚠️ At `error.code` — NOT `error.details.code`, which is where this note
+ * pointed until #6123 corrected it. `errorResponseBase` only STAGES the code in
+ * a `details` object; `buildApiError` then runs `splitSemanticCode`
+ * (`@objectstack/runtime`, `src/error-envelope.ts:117`), which PROMOTES it into
+ * the declared `ApiErrorSchema` field and returns the now-empty `details` as
+ * `undefined` — so the key is omitted from the body and `error.details.code` is
+ * never present to read. The measured 500 body is exactly:
+ *
+ * ```json
+ * {"success":false,"error":{"code":"READ_SCOPE_COMPILE_FAILED",
+ *  "message":"Internal server error","httpStatus":500}}
+ * ```
+ *
+ * Pinned end-to-end in `@objectstack/runtime`'s
+ * `analytics-query-read-scope-withhold.test.ts`, which asserts the code at
+ * `error.code` against a real `AnalyticsService` on a real mounted route.
  *
  * ⚠️ Deliberately NOT a 4xx of any flavour, including a 422. Option A on the
  * decision card was `READ_SCOPE_INVALID` / 422 ("not your fault, not a crash");

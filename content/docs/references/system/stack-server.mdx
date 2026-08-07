@@ -5,102 +5,63 @@ description: Stack Server protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-`defineStack(\{ server \})` — the authorable server-facing configuration.
+`defineStack({ server })` — the authorable server-facing configuration.
 
 ## Why this is NOT `HttpServerConfigSchema`
 
-`[system/http-server.zod.ts](/docs/references/system/http-server)` used to declare nine keys (`port`, `host`,
-
+`system/http-server.zod.ts` used to declare nine keys (`port`, `host`,
 `cors`, `requestTimeout`, `bodyLimit`, `compression`, `security`, `static`,
-
 `trustProxy`). #4938 measured them: **none had a runtime reader and none was
-
 reachable from any authoring surface** — `stack.zod.ts` had no `server:` key,
-
 so the whole shape was unwritable as well as unread. Mounting it wholesale
-
 here would have made eight dead keys authorable in one move, which is the
-
 declared-≠-enforced defect (Prime Directive #10) manufactured on purpose.
 
 So this schema is deliberately NARROW: it carries only keys an executor
-
 actually consumes, and it grows one key at a time, each arriving with its
-
 consumer. Today that is exactly two:
 
 | key | consumed by |
-
 |---|---|
-
 | `security.rateLimit` | `createDispatcherPlugin` → the inbound token bucket (`@objectstack/runtime` `security/inbound-rate-limit.ts`) — an over-budget caller gets `429` + `Retry-After` |
-
 | `trustProxy` | the same limiter's IP resolution — see below |
 
 The other seven `HttpServerConfigSchema` keys were RETIRED with the shape
-
 that carried them (#4938, ADR-0049 enforce-or-remove): unreachable *and*
-
 unread, they were the cleanest remove candidate in the ledger, and their
-
 prescriptions now live in the `guidance` maps below — the only place an
-
 author can write a server key is also the only place that has to answer for
-
 one. Adding one here without an executor re-opens the hole this narrowness
-
 exists to close.
 
 `cors` is the registered exception-in-waiting: the 2026-08-04 ruling named it
-
 the FIRST per-key admission candidate for this shape, because embedding
-
 (`example-embed-objectql`) is a real scenario with real pull. When that work
-
 is scheduled it arrives the #4910 way — key and executor in one change — not
-
 by un-retiring a declaration.
 
 ## What `server:` is NOT for
 
 **Deployment knobs stay on the CLI.** There is no `server.port` / `server.host`
-
 on purpose: the listening socket is a property of *where* a stack runs, not of
-
 the stack itself, and it is already owned by `objectstack serve -p <port>` /
-
 `PORT`. Two authorities for one number is how a config becomes advisory. If a
-
 future need does add `server.port`, the precedence is settled in advance and
-
 recorded here so it cannot be re-litigated per-caller: **the CLI flag wins over
-
 `server:`, and `server:` wins over the built-in default** — an operator
-
 overriding a port at the command line must not be silently overruled by a file
-
 baked into the artifact.
 
 Related: #4910 (this seam), #4937 (the limiter that documented an execution
-
 chain it never had), #4936 (the declarative `apis:` surface as it stood while
-
 nothing executed it: vocabulary kept, a non-empty array rejected outright) and
-
 #5040 — the executor that ended that state. From protocol 17 a declared
-
 endpoint is LIVE behind five per-endpoint publish gates, and its own
-
 `rateLimit` is enforced by the endpoint policy chain against a bucket keyed in
-
 a separate namespace, so an endpoint budget and the server-level budget
-
 declared here meter INDEPENDENTLY rather than sharing a counter. The upgrade
-
 checklist for that flip is the `declarative-apis-endpoints-live` entry of the
-
 protocol upgrade guide. ADR-0069 D2 (shared counters), ADR-0049 (enforce or
-
 remove).
 
 <Callout type="info">
