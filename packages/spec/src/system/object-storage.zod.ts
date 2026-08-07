@@ -39,7 +39,7 @@ export const StorageScopeSchema = lazySchema(() => z.enum([
   'public'      // Publicly accessible static assets
 ]).describe('Storage scope classification'));
 
-export type StorageScope = z.infer<typeof StorageScopeSchema>;
+export type StorageScope = z.input<typeof StorageScopeSchema>;
 
 /**
  * File Metadata Schema
@@ -60,7 +60,7 @@ export const FileMetadataSchema = lazySchema(() => z.object({
   fileId: z.string().optional().describe('Opaque sys_file id (ADR-0104 D3 file-as-reference)'),
 }));
 
-export type FileMetadata = z.infer<typeof FileMetadataSchema>;
+export type FileMetadata = z.input<typeof FileMetadataSchema>;
 
 // ============================================================================
 // Enums
@@ -83,7 +83,7 @@ export const StorageProviderSchema = lazySchema(() => z.enum([
   'local',        // Local filesystem (development only)
 ]).describe('Storage provider type'));
 
-export type StorageProvider = z.infer<typeof StorageProviderSchema>;
+export type StorageProvider = z.input<typeof StorageProviderSchema>;
 
 /**
  * Storage Access Control List (ACL)
@@ -99,7 +99,7 @@ export const StorageAclSchema = lazySchema(() => z.enum([
   'bucket_owner_full_control',  // Both object and bucket owner have full control
 ]).describe('Storage access control level'));
 
-export type StorageAcl = z.infer<typeof StorageAclSchema>;
+export type StorageAcl = z.input<typeof StorageAclSchema>;
 
 /**
  * Storage Class / Tier
@@ -115,7 +115,7 @@ export const StorageClassSchema = lazySchema(() => z.enum([
   'deep_archive',       // Deep archive (cheapest, slowest retrieval)
 ]).describe('Storage class/tier for cost optimization'));
 
-export type StorageClass = z.infer<typeof StorageClassSchema>;
+export type StorageClass = z.input<typeof StorageClassSchema>;
 
 /**
  * Lifecycle Transition Action
@@ -126,7 +126,7 @@ export const LifecycleActionSchema = lazySchema(() => z.enum([
   'abort',       // Abort incomplete multipart uploads
 ]).describe('Lifecycle policy action type'));
 
-export type LifecycleAction = z.infer<typeof LifecycleActionSchema>;
+export type LifecycleAction = z.input<typeof LifecycleActionSchema>;
 
 // ============================================================================
 // Configuration Schemas
@@ -167,7 +167,7 @@ export const ObjectMetadataSchema = lazySchema(() => z.object({
   custom: z.record(z.string(), z.string()).optional().describe('Custom user-defined metadata'),
 }));
 
-export type ObjectMetadata = z.infer<typeof ObjectMetadataSchema>;
+export type ObjectMetadata = z.input<typeof ObjectMetadataSchema>;
 
 /**
  * Presigned URL Configuration
@@ -201,7 +201,7 @@ export const PresignedUrlConfigSchema = lazySchema(() => z.object({
   responseContentDisposition: z.string().optional().describe('Override content-disposition for GET operations'),
 }));
 
-export type PresignedUrlConfig = z.infer<typeof PresignedUrlConfigSchema>;
+export type PresignedUrlConfig = z.input<typeof PresignedUrlConfigSchema>;
 
 /**
  * Multipart Upload Configuration
@@ -228,7 +228,7 @@ export const MultipartUploadConfigSchema = lazySchema(() => z.object({
   abortIncompleteAfterDays: z.number().min(1).optional().describe('Auto-abort incomplete uploads after N days'),
 }));
 
-export type MultipartUploadConfig = z.infer<typeof MultipartUploadConfigSchema>;
+export type MultipartUploadConfig = z.input<typeof MultipartUploadConfigSchema>;
 /** Post-parse shape of {@link MultipartUploadConfig} — defaults applied, transforms run (ADR-0122). */
 export type MultipartUploadConfigParsed = z.infer<typeof MultipartUploadConfigSchema>;
 
@@ -266,7 +266,7 @@ export const AccessControlConfigSchema = lazySchema(() => z.object({
   blockedIps: z.array(z.string()).optional().describe('Blocked IP addresses/CIDR blocks'),
 }));
 
-export type AccessControlConfig = z.infer<typeof AccessControlConfigSchema>;
+export type AccessControlConfig = z.input<typeof AccessControlConfigSchema>;
 /** Post-parse shape of {@link AccessControlConfig} — defaults applied, transforms run (ADR-0122). */
 export type AccessControlConfigParsed = z.infer<typeof AccessControlConfigSchema>;
 
@@ -313,7 +313,7 @@ export const LifecyclePolicyRuleSchema = lazySchema(() => z.object({
   message: 'targetStorageClass is required when action is "transition"',
 }));
 
-export type LifecyclePolicyRule = z.infer<typeof LifecyclePolicyRuleSchema>;
+export type LifecyclePolicyRule = z.input<typeof LifecyclePolicyRuleSchema>;
 /** Post-parse shape of {@link LifecyclePolicyRule} — defaults applied, transforms run (ADR-0122). */
 export type LifecyclePolicyRuleParsed = z.infer<typeof LifecyclePolicyRuleSchema>;
 
@@ -348,7 +348,7 @@ export const LifecyclePolicyConfigSchema = lazySchema(() => z.object({
   rules: z.array(LifecyclePolicyRuleSchema).default([]).describe('Lifecycle rules'),
 }));
 
-export type LifecyclePolicyConfig = z.infer<typeof LifecyclePolicyConfigSchema>;
+export type LifecyclePolicyConfig = z.input<typeof LifecyclePolicyConfigSchema>;
 /** Post-parse shape of {@link LifecyclePolicyConfig} — defaults applied, transforms run (ADR-0122). */
 export type LifecyclePolicyConfigParsed = z.infer<typeof LifecyclePolicyConfigSchema>;
 
@@ -401,7 +401,7 @@ export const BucketConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(true).describe('Enable this bucket'),
 }));
 
-export type BucketConfig = z.infer<typeof BucketConfigSchema>;
+export type BucketConfig = z.input<typeof BucketConfigSchema>;
 /** Post-parse shape of {@link BucketConfig} — defaults applied, transforms run (ADR-0122). */
 export type BucketConfigParsed = z.infer<typeof BucketConfigSchema>;
 
@@ -447,7 +447,7 @@ export const StorageConnectionSchema = lazySchema(() => z.object({
   timeout: z.number().min(0).optional().describe('Connection timeout in milliseconds'),
 }));
 
-export type StorageConnection = z.infer<typeof StorageConnectionSchema>;
+export type StorageConnection = z.input<typeof StorageConnectionSchema>;
 /** Post-parse shape of {@link StorageConnection} — defaults applied, transforms run (ADR-0122). */
 export type StorageConnectionParsed = z.infer<typeof StorageConnectionSchema>;
 
@@ -514,7 +514,7 @@ export const ObjectStorageConfigSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Configuration description'),
 }));
 
-export type ObjectStorageConfig = z.infer<typeof ObjectStorageConfigSchema>;
+export type ObjectStorageConfig = z.input<typeof ObjectStorageConfigSchema>;
 /** Post-parse shape of {@link ObjectStorageConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectStorageConfigParsed = z.infer<typeof ObjectStorageConfigSchema>;
 

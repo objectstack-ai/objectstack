@@ -1,6 +1,6 @@
 # ADR-0122: One naming family for schema type aliases — bare name is the author state, `XParsed` is the parsed state
 
-**Status**: Accepted (2026-08-06) — ruled by the maintainer on 2026-08-06 on the #5551 decision brief ("裁 C,分期倾向 C2"). **Phase 1 (additive `XParsed` + backflow gate) implemented in #5551.** Phase 2 (flipping the bare names, and deciding `XInput`'s fate) is deferred to the next `@objectstack/spec` major and is **not** authorized by this record beyond the direction it fixes.
+**Status**: Accepted (2026-08-06) — ruled by the maintainer on 2026-08-06 on the #5551 decision brief ("裁 C,分期倾向 C2"). **Phase 1 (additive `XParsed` + backflow gate) implemented in #5551 / PR #6072. Phase 2 (the flip, `XInput`'s retirement, the gate inversion) implemented in #6083, `@objectstack/spec` 17.0.0 — see the [Amendment](#amendment--phase-2-2026-08-07-6083) for what it decided and what it measured.** Both phases have landed; this record is now describing a completed change, and D8's "deferred to the next major" is history.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0089](./0089-unify-visibility-predicate-naming.md) (canonical name + alias + lint + phased major — the template this reuses, and the reason the phasing looks familiar), [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (the upgrade contract this change deliberately does *not* need, because phase 1 removes nothing), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the AI-authoring population whose default keystroke this decision is chosen to make correct)
 **Consumers**: `@objectstack/spec` (every `src/**/*.zod.ts`), every package and example app that annotates a value with a spec type, `@objectstack/qa`'s downstream-contract fixtures, and every AI author of `*.object.ts` / `*.view.ts` / connector and flow definitions
@@ -329,3 +329,104 @@ the same census that generated the change:
 
 Both are cases where the census and the gate disagreed and the gate was right, which is
 the property that makes it worth running.
+
+---
+
+## Amendment — phase 2 (2026-08-07, #6083)
+
+Phase 2 landed in `@objectstack/spec` 17.0.0. D8 left three things open — the flip
+itself, `XInput`'s fate, and what becomes of the gate — and reserved the last two for
+"its own record". This is that record. Everything above stands as written; nothing in
+it is retracted. The census figures in the appendices are the numbers that *chose* the
+criterion and stay as they were measured.
+
+**D9 — `XInput` is RETIRED where, and only where, the flip made it a literal synonym.**
+D8 offered two routes (retire, or keep one release as a deprecated alias). Retire, in
+the same major, because after D1 `export type XInput = z.input<typeof XSchema>` denotes
+character-for-character what `X` denotes, and D3 already forbids exactly that: a
+permanent synonym is a name an author can only pick wrongly. Deprecating it for a
+release would ship the coin flip D3 exists to prevent, in the release whose whole
+purpose is to remove it.
+
+"Where the flip made it a synonym" is a measured set, not the whole population. Of the
+**111** `export type *Input` declarations in `packages/spec/src/**/*.zod.ts`:
+
+| | count | what happens |
+|:---|---:|:---|
+| simple `z.input<typeof S>` where a bare alias of `S` exists | **102** | **retired** — the bare name now means this |
+| simple `z.input<typeof S>` where the bare alias of `S` *is* the `Input` name | 4 | kept — `ExpressionInput`, `CronExpressionInput`, `TemplateExpressionInput`, `PredicateInput` are the bare aliases of `…InputSchema`, not synonyms of anything |
+| composed types built *on* `z.input` | 5 | kept — `FormFieldInput`, `QueryInput`, `FieldInput`, `ObjectStackDefinitionInput`, `NavigationItemInput` denote recursive or `Partial`-shaped types no bare alias denotes |
+
+The dispatch brief said "108, all of them synonyms". It is 102, and the nine survivors
+are the reason the criterion had to be computed rather than pattern-matched on the name.
+
+The `@objectstack/qa` downstream-contract fixtures — the eleven domains D8 flagged as
+load-bearing, whose header says "DO NOT migrate these" — moved from `XInput` to the bare
+name and **that is the freeze holding, not an exception to it**. Those fixtures pin the
+AUTHOR state; phase 2 moved the author state onto the bare name. Every literal in them
+is byte-for-byte unchanged and is checked against the same type it always was. Only the
+spelling moved, and it moved because the name they used stopped existing.
+
+**D10 — the backflow gate is INVERTED, not extended.** `check:spec-parsed-alias` was
+written over the population "bare aliases that read `z.infer`". The flip empties that
+population, and a guard over an empty set is not a weaker guard — it is no guard.
+
+The concrete behaviour is worth recording, because it is stronger than "the gate goes
+quiet". Run the **phase-1 script unchanged against the phase-2 tree** and it reports:
+
+| arm | phase-1 gate on the phase-2 tree |
+|:---|:---|
+| missing-parsed-alias | **0 findings** — vacuously green over an empty population |
+| stale-pin ("does any bare `z.infer` alias still rely on this pin?") | **719 findings** — every pin in the file, all false |
+
+One arm silently stops working and the other misfires on the entire registry. Neither
+is a gate. So the population is re-pointed at the post-flip convention and the flip
+becomes the thing checked. Four arms now:
+
+1. a bare name may not read `z.infer` (**the flip, enforced** — revert one flipped alias
+   and this arm names it);
+2. a bare alias's schema must have its parsed state named or be pinned (phase 1's rule,
+   re-pointed at the flipped form);
+3. a pin nothing relies on is stale (unchanged);
+4. an `XInput` that is a literal synonym of a bare name is refused (**D9, enforced** —
+   this is what stops the 102 from returning one file at a time).
+
+**Inverting the gate widened it, and the widening found real work.** Phase 1's gate only
+ever looked at bare `z.infer` aliases, so the **86** aliases that already read `z.input`
+before the flip — the A family, plus `api/protocol.zod.ts`'s request shapes — had never
+been asked whether their parsed state was named. Asking produced **57** that were neither
+paired nor pinned. The same probe that chose phase 1's split (same type-level identity
+assertion, same deliberate control assertion so a vacuous pass could not be mistaken for
+isomorphism — the control failed, as required) split them **22 differ / 35 isomorphic**.
+The 22 received an `XParsed`; the 35 became pins, taking the registry 719 → 754. This is
+#5507's remaining scope, which the record above said phase 2 would absorb, and it is
+absorbed here.
+
+### What phase 2 actually changed
+
+| | count |
+|:---|---:|
+| bare aliases flipped `z.infer` → `z.input` | **1384** |
+| `*.zod.ts` files touched by the flip | 189 |
+| `XInput` declarations retired | **102** |
+| `XParsed` aliases added (the 22 above) | 22 |
+| isomorphic pins added (the 35 above) | 35 |
+| api-surface: export names removed / added | 106 / 24 |
+| `json-schema/`, `authorable-surface/` | **unchanged** — the generators read runtime `z.ZodType` exports, never type aliases |
+| final: bare `z.input` aliases / pinned / paired | **1470 / 754 / 716** |
+
+`defineX` factories are the one migration the compiler cannot force: a parse result is
+structurally assignable to the author state, so `function defineApp(...): App` kept
+compiling while quietly meaning something new. **24** factory return types therefore moved
+to `XParsed` by hand (`defineFlow` had already been written that way in phase 1); the six
+whose schema is pinned isomorphic keep the bare name, because there the two are one type.
+Every other consumer migration in this change was named by tsc.
+
+### The evidence the flip was the right direction
+
+`packages/spec/test-typecheck-debt.json` is a shrink-only ratchet whose own header
+describes its contents as "almost all of them fixture literals annotated with a schema
+OUTPUT type (`z.infer`) while holding an authored INPUT literal". Phase 2 took it from
+**79 files / 691 errors to 59 / 270** without editing a single fixture: 421 of those
+errors were the conflation this ADR exists to end, and the flip ended them. Nineteen test
+files graduated out of the ledger entirely.

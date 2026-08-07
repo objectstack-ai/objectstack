@@ -32,7 +32,7 @@ export const ExportFormat = z.enum([
   'xlsx',
   'parquet',
 ]);
-export type ExportFormat = z.infer<typeof ExportFormat>;
+export type ExportFormat = z.input<typeof ExportFormat>;
 
 /**
  * Export Job Status
@@ -45,7 +45,7 @@ export const ExportJobStatus = z.enum([
   'cancelled',
   'expired',
 ]);
-export type ExportJobStatus = z.infer<typeof ExportJobStatus>;
+export type ExportJobStatus = z.input<typeof ExportJobStatus>;
 
 // ==========================================
 // 2. Export Job Request / Response
@@ -78,7 +78,7 @@ export const CreateExportJobRequestSchema = lazySchema(() => z.object({
   templateId: z.string().optional()
     .describe('Export template ID for predefined field mappings'),
 }));
-export type CreateExportJobRequest = z.infer<typeof CreateExportJobRequestSchema>;
+export type CreateExportJobRequest = z.input<typeof CreateExportJobRequestSchema>;
 /** Post-parse shape of {@link CreateExportJobRequest} — defaults applied, transforms run (ADR-0122). */
 export type CreateExportJobRequestParsed = z.infer<typeof CreateExportJobRequestSchema>;
 
@@ -94,7 +94,7 @@ export const CreateExportJobResponseSchema = lazySchema(() => BaseResponseSchema
     createdAt: z.string().datetime().describe('Job creation timestamp'),
   }),
 }));
-export type CreateExportJobResponse = z.infer<typeof CreateExportJobResponseSchema>;
+export type CreateExportJobResponse = z.input<typeof CreateExportJobResponseSchema>;
 /** Post-parse shape of {@link CreateExportJobResponse} — defaults applied, transforms run (ADR-0122). */
 export type CreateExportJobResponseParsed = z.infer<typeof CreateExportJobResponseSchema>;
 
@@ -125,7 +125,7 @@ export const ExportJobProgressSchema = lazySchema(() => BaseResponseSchema.exten
     completedAt: z.string().datetime().optional().describe('Completion timestamp'),
   }),
 }));
-export type ExportJobProgress = z.infer<typeof ExportJobProgressSchema>;
+export type ExportJobProgress = z.input<typeof ExportJobProgressSchema>;
 /** Post-parse shape of {@link ExportJobProgress} — defaults applied, transforms run (ADR-0122). */
 export type ExportJobProgressParsed = z.infer<typeof ExportJobProgressSchema>;
 
@@ -141,7 +141,7 @@ export const ImportValidationMode = z.enum([
   'lenient',     // Skip invalid records, import valid ones
   'dry_run',     // Validate all records without persisting
 ]);
-export type ImportValidationMode = z.infer<typeof ImportValidationMode>;
+export type ImportValidationMode = z.input<typeof ImportValidationMode>;
 
 /**
  * Deduplication Strategy
@@ -153,7 +153,7 @@ export const DeduplicationStrategy = z.enum([
   'create_new',     // Create new record even if duplicate
   'fail',           // Fail the import if duplicates found
 ]);
-export type DeduplicationStrategy = z.infer<typeof DeduplicationStrategy>;
+export type DeduplicationStrategy = z.input<typeof DeduplicationStrategy>;
 
 /**
  * Import Validation Config Schema
@@ -185,7 +185,7 @@ export const ImportValidationConfigSchema = lazySchema(() => z.object({
   nullValues: z.array(z.string()).optional()
     .describe('Strings to treat as null (e.g., ["", "N/A", "null"])'),
 }));
-export type ImportValidationConfig = z.infer<typeof ImportValidationConfigSchema>;
+export type ImportValidationConfig = z.input<typeof ImportValidationConfigSchema>;
 /** Post-parse shape of {@link ImportValidationConfig} — defaults applied, transforms run (ADR-0122). */
 export type ImportValidationConfigParsed = z.infer<typeof ImportValidationConfigSchema>;
 
@@ -209,7 +209,7 @@ export const ImportValidationResultSchema = lazySchema(() => BaseResponseSchema.
       .describe('Preview of first N valid records (for dry_run mode)'),
   }),
 }));
-export type ImportValidationResult = z.infer<typeof ImportValidationResultSchema>;
+export type ImportValidationResult = z.input<typeof ImportValidationResultSchema>;
 /** Post-parse shape of {@link ImportValidationResult} — defaults applied, transforms run (ADR-0122). */
 export type ImportValidationResultParsed = z.infer<typeof ImportValidationResultSchema>;
 
@@ -233,7 +233,7 @@ export const FieldMappingEntrySchema = lazySchema(() => z.object({
   required: z.boolean().default(false)
     .describe('Whether this field is required (import validation)'),
 }));
-export type FieldMappingEntry = z.infer<typeof FieldMappingEntrySchema>;
+export type FieldMappingEntry = z.input<typeof FieldMappingEntrySchema>;
 /** Post-parse shape of {@link FieldMappingEntry} — defaults applied, transforms run (ADR-0122). */
 export type FieldMappingEntryParsed = z.infer<typeof FieldMappingEntrySchema>;
 
@@ -268,7 +268,7 @@ export const ExportImportTemplateSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().optional().describe('Last update timestamp'),
   createdBy: z.string().optional().describe('User who created the template'),
 }));
-export type ExportImportTemplate = z.infer<typeof ExportImportTemplateSchema>;
+export type ExportImportTemplate = z.input<typeof ExportImportTemplateSchema>;
 /** Post-parse shape of {@link ExportImportTemplate} — defaults applied, transforms run (ADR-0122). */
 export type ExportImportTemplateParsed = z.infer<typeof ExportImportTemplateSchema>;
 
@@ -285,7 +285,7 @@ export const ImportWriteMode = z.enum([
   'update',   // Update an existing record matched by matchFields; skip if none
   'upsert',   // Update when matched by matchFields, else create
 ]);
-export type ImportWriteMode = z.infer<typeof ImportWriteMode>;
+export type ImportWriteMode = z.input<typeof ImportWriteMode>;
 
 /**
  * Field Mapping (import)
@@ -296,7 +296,7 @@ export const ImportMappingSchema = lazySchema(() => z.union([
   z.record(z.string(), z.string()),
   z.array(FieldMappingEntrySchema),
 ]));
-export type ImportMapping = z.infer<typeof ImportMappingSchema>;
+export type ImportMapping = z.input<typeof ImportMappingSchema>;
 /** Post-parse shape of {@link ImportMapping} — defaults applied, transforms run (ADR-0122). */
 export type ImportMappingParsed = z.infer<typeof ImportMappingSchema>;
 
@@ -346,7 +346,7 @@ export const ImportRequestSchema = lazySchema(() => z.object({
   skipBlankMatchKey: z.boolean().default(false)
     .describe('Skip rows whose matchFields are blank (default: upsert creates them, update skips them)'),
 }));
-export type ImportRequest = z.infer<typeof ImportRequestSchema>;
+export type ImportRequest = z.input<typeof ImportRequestSchema>;
 /** Post-parse shape of {@link ImportRequest} — defaults applied, transforms run (ADR-0122). */
 export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;
 
@@ -365,7 +365,7 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   code: z.string().optional().describe('Error code (failed rows)'),
   error: z.string().optional().describe('Human-readable error message (failed rows)'),
 }));
-export type ImportRowResult = z.infer<typeof ImportRowResultSchema>;
+export type ImportRowResult = z.input<typeof ImportRowResultSchema>;
 
 /**
  * Import Response Schema
@@ -383,7 +383,7 @@ export const ImportResponseSchema = lazySchema(() => z.object({
   skipped: z.number().int().describe('Rows skipped (no match in update mode, etc.)'),
   results: z.array(ImportRowResultSchema).describe('Per-row outcomes'),
 }));
-export type ImportResponse = z.infer<typeof ImportResponseSchema>;
+export type ImportResponse = z.input<typeof ImportResponseSchema>;
 
 // ==========================================
 // 4b. Asynchronous Import Jobs
@@ -407,7 +407,7 @@ export const ImportJobStatus = z.enum([
   'failed',     // Aborted on a fatal error
   'cancelled',  // Cancelled by the caller before completion
 ]);
-export type ImportJobStatus = z.infer<typeof ImportJobStatus>;
+export type ImportJobStatus = z.input<typeof ImportJobStatus>;
 
 /**
  * Create Import Job Request — body for `POST /api/v1/data/:object/import/jobs`.
@@ -416,7 +416,7 @@ export type ImportJobStatus = z.infer<typeof ImportJobStatus>;
  * progress instead of blocking until done.
  */
 export const CreateImportJobRequestSchema = ImportRequestSchema;
-export type CreateImportJobRequest = z.infer<typeof CreateImportJobRequestSchema>;
+export type CreateImportJobRequest = z.input<typeof CreateImportJobRequestSchema>;
 /** Post-parse shape of {@link CreateImportJobRequest} — defaults applied, transforms run (ADR-0122). */
 export type CreateImportJobRequestParsed = z.infer<typeof CreateImportJobRequestSchema>;
 
@@ -430,7 +430,7 @@ export const CreateImportJobResponseSchema = lazySchema(() => z.object({
   total: z.number().int().describe('Rows accepted for processing'),
   createdAt: z.string().describe('Job creation timestamp (ISO 8601)'),
 }));
-export type CreateImportJobResponse = z.infer<typeof CreateImportJobResponseSchema>;
+export type CreateImportJobResponse = z.input<typeof CreateImportJobResponseSchema>;
 
 /**
  * Import Job Progress — the live counters a client polls while the job runs.
@@ -455,7 +455,7 @@ export const ImportJobProgressSchema = lazySchema(() => z.object({
   completedAt: z.string().optional().describe('Completion timestamp (ISO 8601)'),
   createdAt: z.string().describe('Job creation timestamp (ISO 8601)'),
 }));
-export type ImportJobProgress = z.infer<typeof ImportJobProgressSchema>;
+export type ImportJobProgress = z.input<typeof ImportJobProgressSchema>;
 
 /**
  * Import Job Results — the progress payload plus a capped sample of per-row
@@ -465,7 +465,7 @@ export const ImportJobResultsSchema = lazySchema(() => ImportJobProgressSchema.e
   results: z.array(ImportRowResultSchema).describe('Capped sample of per-row outcomes (failures first)'),
   resultsTruncated: z.boolean().describe('Whether `results` is a capped sample of a larger set'),
 }));
-export type ImportJobResults = z.infer<typeof ImportJobResultsSchema>;
+export type ImportJobResults = z.input<typeof ImportJobResultsSchema>;
 
 /**
  * List Import Jobs Request — query params for the history endpoint.
@@ -476,7 +476,7 @@ export const ListImportJobsRequestSchema = lazySchema(() => z.object({
   limit: z.number().int().min(1).max(200).default(50).describe('Max rows to return'),
   offset: z.number().int().min(0).default(0).describe('Pagination offset'),
 }));
-export type ListImportJobsRequest = z.infer<typeof ListImportJobsRequestSchema>;
+export type ListImportJobsRequest = z.input<typeof ListImportJobsRequestSchema>;
 /** Post-parse shape of {@link ListImportJobsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListImportJobsRequestParsed = z.infer<typeof ListImportJobsRequestSchema>;
 
@@ -496,13 +496,13 @@ export const ImportJobSummarySchema = lazySchema(() => z.object({
   undoable: z.boolean().describe('Whether this job can still be logically rolled back'),
   revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601)'),
 }));
-export type ImportJobSummary = z.infer<typeof ImportJobSummarySchema>;
+export type ImportJobSummary = z.input<typeof ImportJobSummarySchema>;
 
 /** List Import Jobs Response — newest first. */
 export const ListImportJobsResponseSchema = lazySchema(() => z.object({
   jobs: z.array(ImportJobSummarySchema).describe('Import jobs, newest first'),
 }));
-export type ListImportJobsResponse = z.infer<typeof ListImportJobsResponseSchema>;
+export type ListImportJobsResponse = z.input<typeof ListImportJobsResponseSchema>;
 
 /**
  * Undo Import Job Response — the outcome of a logical rollback: created records
@@ -516,7 +516,7 @@ export const UndoImportJobResponseSchema = lazySchema(() => z.object({
   restored: z.number().int().describe('Updated records restored to pre-import values'),
   failed: z.number().int().describe('Reversal operations that failed'),
 }));
-export type UndoImportJobResponse = z.infer<typeof UndoImportJobResponseSchema>;
+export type UndoImportJobResponse = z.input<typeof UndoImportJobResponseSchema>;
 
 // ==========================================
 // 5. Scheduled Export Jobs
@@ -564,7 +564,7 @@ export const ScheduledExportSchema = lazySchema(() => z.object({
   createdAt: z.string().datetime().optional().describe('Creation timestamp'),
   createdBy: z.string().optional().describe('User who created the schedule'),
 }));
-export type ScheduledExport = z.infer<typeof ScheduledExportSchema>;
+export type ScheduledExport = z.input<typeof ScheduledExportSchema>;
 /** Post-parse shape of {@link ScheduledExport} — defaults applied, transforms run (ADR-0122). */
 export type ScheduledExportParsed = z.infer<typeof ScheduledExportSchema>;
 
@@ -581,7 +581,7 @@ export type ScheduledExportParsed = z.infer<typeof ScheduledExportSchema>;
 export const GetExportJobDownloadRequestSchema = lazySchema(() => z.object({
   jobId: z.string().describe('Export job ID'),
 }));
-export type GetExportJobDownloadRequest = z.infer<typeof GetExportJobDownloadRequestSchema>;
+export type GetExportJobDownloadRequest = z.input<typeof GetExportJobDownloadRequestSchema>;
 
 /**
  * Get Export Job Download Response
@@ -598,7 +598,7 @@ export const GetExportJobDownloadResponseSchema = lazySchema(() => BaseResponseS
     checksum: z.string().optional().describe('File checksum (SHA-256)'),
   }),
 }));
-export type GetExportJobDownloadResponse = z.infer<typeof GetExportJobDownloadResponseSchema>;
+export type GetExportJobDownloadResponse = z.input<typeof GetExportJobDownloadResponseSchema>;
 /** Post-parse shape of {@link GetExportJobDownloadResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetExportJobDownloadResponseParsed = z.infer<typeof GetExportJobDownloadResponseSchema>;
 
@@ -620,7 +620,7 @@ export const ListExportJobsRequestSchema = lazySchema(() => z.object({
   cursor: z.string().optional()
     .describe('Pagination cursor from a previous response'),
 }));
-export type ListExportJobsRequest = z.infer<typeof ListExportJobsRequestSchema>;
+export type ListExportJobsRequest = z.input<typeof ListExportJobsRequestSchema>;
 /** Post-parse shape of {@link ListExportJobsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListExportJobsRequestParsed = z.infer<typeof ListExportJobsRequestSchema>;
 
@@ -639,7 +639,7 @@ export const ExportJobSummarySchema = lazySchema(() => z.object({
   completedAt: z.string().datetime().optional().describe('Completion timestamp'),
   createdBy: z.string().optional().describe('User who initiated the export'),
 }));
-export type ExportJobSummary = z.infer<typeof ExportJobSummarySchema>;
+export type ExportJobSummary = z.input<typeof ExportJobSummarySchema>;
 
 /**
  * List Export Jobs Response
@@ -652,7 +652,7 @@ export const ListExportJobsResponseSchema = lazySchema(() => BaseResponseSchema.
     hasMore: z.boolean().describe('Whether more jobs are available'),
   }),
 }));
-export type ListExportJobsResponse = z.infer<typeof ListExportJobsResponseSchema>;
+export type ListExportJobsResponse = z.input<typeof ListExportJobsResponseSchema>;
 /** Post-parse shape of {@link ListExportJobsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListExportJobsResponseParsed = z.infer<typeof ListExportJobsResponseSchema>;
 
@@ -689,7 +689,7 @@ export const ScheduleExportRequestSchema = lazySchema(() => z.object({
       .describe('Webhook URL (for webhook delivery)'),
   }).describe('Export delivery configuration'),
 }));
-export type ScheduleExportRequest = z.infer<typeof ScheduleExportRequestSchema>;
+export type ScheduleExportRequest = z.input<typeof ScheduleExportRequestSchema>;
 /** Post-parse shape of {@link ScheduleExportRequest} — defaults applied, transforms run (ADR-0122). */
 export type ScheduleExportRequestParsed = z.infer<typeof ScheduleExportRequestSchema>;
 
@@ -706,7 +706,7 @@ export const ScheduleExportResponseSchema = lazySchema(() => BaseResponseSchema.
     createdAt: z.string().datetime().describe('Creation timestamp'),
   }),
 }));
-export type ScheduleExportResponse = z.infer<typeof ScheduleExportResponseSchema>;
+export type ScheduleExportResponse = z.input<typeof ScheduleExportResponseSchema>;
 /** Post-parse shape of {@link ScheduleExportResponse} — defaults applied, transforms run (ADR-0122). */
 export type ScheduleExportResponseParsed = z.infer<typeof ScheduleExportResponseSchema>;
 

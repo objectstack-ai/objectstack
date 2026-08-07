@@ -157,7 +157,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'skill',       // AI skill definitions (SkillSchema)
 ]));
 
-export type MetadataType = z.infer<typeof MetadataTypeSchema>;
+export type MetadataType = z.input<typeof MetadataTypeSchema>;
 
 // ==========================================
 // Type Registry Entry
@@ -301,7 +301,7 @@ export const MetadataTypeRegistryEntrySchema = lazySchema(() =>
   })
 );
 
-export type MetadataTypeRegistryEntry = z.infer<typeof MetadataTypeRegistryEntrySchema>;
+export type MetadataTypeRegistryEntry = z.input<typeof MetadataTypeRegistryEntrySchema>;
 /** Post-parse shape of {@link MetadataTypeRegistryEntry} — defaults applied, transforms run (ADR-0122). */
 export type MetadataTypeRegistryEntryParsed = z.infer<typeof MetadataTypeRegistryEntrySchema>;
 
@@ -351,6 +351,8 @@ export const MetadataQuerySchema = lazySchema(() => z.object({
 }));
 
 export type MetadataQuery = z.input<typeof MetadataQuerySchema>;
+/** Post-parse shape of {@link MetadataQuery} — defaults applied, transforms run (ADR-0122). */
+export type MetadataQueryParsed = z.infer<typeof MetadataQuerySchema>;
 
 /**
  * Metadata Query Result
@@ -378,7 +380,7 @@ export const MetadataQueryResultSchema = lazySchema(() => z.object({
   pageSize: z.number().int().min(1).describe('Page size'),
 }));
 
-export type MetadataQueryResult = z.infer<typeof MetadataQueryResultSchema>;
+export type MetadataQueryResult = z.input<typeof MetadataQueryResultSchema>;
 
 // ==========================================
 // Metadata Lifecycle Events
@@ -420,7 +422,7 @@ export const MetadataValidationResultSchema = lazySchema(() => z.object({
   })).optional().describe('Validation warnings'),
 }));
 
-export type MetadataValidationResult = z.infer<typeof MetadataValidationResultSchema>;
+export type MetadataValidationResult = z.input<typeof MetadataValidationResultSchema>;
 
 // ==========================================
 // Metadata Plugin Configuration
@@ -515,6 +517,8 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataPluginConfig = z.input<typeof MetadataPluginConfigSchema>;
+/** Post-parse shape of {@link MetadataPluginConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetadataPluginConfigParsed = z.infer<typeof MetadataPluginConfigSchema>;
 
 // ==========================================
 // Metadata Plugin Manifest
@@ -579,6 +583,8 @@ export const MetadataPluginManifestSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataPluginManifest = z.input<typeof MetadataPluginManifestSchema>;
+/** Post-parse shape of {@link MetadataPluginManifest} — defaults applied, transforms run (ADR-0122). */
+export type MetadataPluginManifestParsed = z.infer<typeof MetadataPluginManifestSchema>;
 
 // ==========================================
 // Built-in Type Registry Defaults
@@ -590,7 +596,7 @@ export type MetadataPluginManifest = z.input<typeof MetadataPluginManifestSchema
  * The built-in metadata type registry with default configurations.
  * Plugins extend this via `contributes.kinds` in the manifest.
  */
-export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
+export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] = [
   // Data Protocol (load first)
   //
   // `object` and `field`: packaged items are LOCKED (`allowOrgOverride: false`).
@@ -869,7 +875,7 @@ export const MetadataBulkResultSchema = lazySchema(() => z.object({
   })).optional().describe('Per-item errors'),
 }));
 
-export type MetadataBulkResult = z.infer<typeof MetadataBulkResultSchema>;
+export type MetadataBulkResult = z.input<typeof MetadataBulkResultSchema>;
 
 // ==========================================
 // Metadata Dependency
@@ -899,4 +905,4 @@ export const MetadataDependencySchema = lazySchema(() => z.object({
     .describe('How the dependency is formed'),
 }));
 
-export type MetadataDependency = z.infer<typeof MetadataDependencySchema>;
+export type MetadataDependency = z.input<typeof MetadataDependencySchema>;

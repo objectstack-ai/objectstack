@@ -96,12 +96,12 @@ export const MCPToolBindingSchema = lazySchema(() => z.object({
   approval: MCPApprovalPolicySchema.default('never'),
 }));
 
-export type MCPTransport = z.infer<typeof MCPTransportSchema>;
-export type MCPServerRef = z.infer<typeof MCPServerRefSchema>;
+export type MCPTransport = z.input<typeof MCPTransportSchema>;
+export type MCPServerRef = z.input<typeof MCPServerRefSchema>;
 /** Post-parse shape of {@link MCPServerRef} — defaults applied, transforms run (ADR-0122). */
 export type MCPServerRefParsed = z.infer<typeof MCPServerRefSchema>;
-export type MCPApprovalPolicy = z.infer<typeof MCPApprovalPolicySchema>;
-export type MCPToolBinding = z.infer<typeof MCPToolBindingSchema>;
+export type MCPApprovalPolicy = z.input<typeof MCPApprovalPolicySchema>;
+export type MCPToolBinding = z.input<typeof MCPToolBindingSchema>;
 /** Post-parse shape of {@link MCPToolBinding} — defaults applied, transforms run (ADR-0122). */
 export type MCPToolBindingParsed = z.infer<typeof MCPToolBindingSchema>;
 

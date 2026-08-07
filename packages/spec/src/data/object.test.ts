@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 // Fixtures below are AUTHORED objects — what a developer writes before the
-// schema applies its defaults — so they are annotated with `ServiceObjectInput`
+// schema applies its defaults — so they are annotated with `ServiceObject`
 // (`z.input`), not `ServiceObject` (`z.infer`, defaults already materialised).
 // Under `z.infer` every fixture owes `isSystem`, `datasource`, `searchable`,
 // `activities`, … and the annotation stops being a contract check at all. This
 // only became visible when tsconfig.test.json put these files in front of tsc
 // (#5286).
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObjectInput } from './object.zod';
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -288,7 +288,7 @@ describe('IndexSchema retired keys (#5248 / #4943)', () => {
 describe('ObjectSchema', () => {
   describe('Basic Object Properties', () => {
     it('should accept minimal valid object', () => {
-      const validObject: ServiceObjectInput = {
+      const validObject: ServiceObject = {
         name: 'account',
         fields: {},
       };
@@ -323,7 +323,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Fields', () => {
     it('should accept object with multiple fields', () => {
-      const objectWithFields: ServiceObjectInput = {
+      const objectWithFields: ServiceObject = {
         name: 'contact',
         label: 'Contact',
         pluralLabel: 'Contacts',
@@ -481,7 +481,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Metadata', () => {
     it('should accept object with full metadata', () => {
-      const fullObject: ServiceObjectInput = {
+      const fullObject: ServiceObject = {
         name: 'opportunity',
         label: 'Opportunity',
         pluralLabel: 'Opportunities',
@@ -504,7 +504,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Indexes', () => {
     it('should accept object with indexes', () => {
-      const objectWithIndexes: ServiceObjectInput = {
+      const objectWithIndexes: ServiceObject = {
         name: 'user',
         fields: {
           email: {
@@ -539,7 +539,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Capabilities', () => {
     it('should accept object with custom capabilities', () => {
-      const objectWithCapabilities: ServiceObjectInput = {
+      const objectWithCapabilities: ServiceObject = {
         name: 'case',
         fields: {},
         enable: {
@@ -574,7 +574,7 @@ describe('ObjectSchema', () => {
 
   describe('Complete Real-World Examples', () => {
     it('should accept CRM Account object', () => {
-      const accountObject: ServiceObjectInput = {
+      const accountObject: ServiceObject = {
         name: 'account',
         label: 'Account',
         pluralLabel: 'Accounts',
@@ -639,7 +639,7 @@ describe('ObjectSchema', () => {
     });
 
     it('should accept Task object with parent relationship', () => {
-      const taskObject: ServiceObjectInput = {
+      const taskObject: ServiceObject = {
         name: 'task',
         label: 'Task',
         pluralLabel: 'Tasks',

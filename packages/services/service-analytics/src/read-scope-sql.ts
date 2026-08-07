@@ -180,6 +180,29 @@ import {
  * for this family: it does for all four positions, so the new refusal is
  * withheld from the response BY DECLARATION exactly like the other ten, and no
  * message-sniffing list learns a twelfth phrase.
+ *
+ * ## A non-boolean `$null` / `$exists` is refused too (#6387, applying #5347 / #5369)
+ *
+ * TWELVE refusing sites, and {@link nonBooleanFlagComparandError} is the
+ * twelfth's — ONE message for BOTH operators, because both failed the same way
+ * (see that function for the measured table and the #5240 argument). #5347 and
+ * #5369 refused a non-boolean comparand for these two operators on `driver-sql`;
+ * #6387 measured that neither ruling had been pushed down here, where the
+ * emitter still read them by plain TRUTHINESS. The consequence was sharper than
+ * on the driver face: `{ $exists: "false" }`, written to scope to rows with NO
+ * owner, compiled to `IS NOT NULL` — the rows that HAVE one. In a module whose
+ * contract is fail-closed, that is a WIDENING, which is why this cell was graded
+ * above #6125's silent-zero-rows one even though its reachability is narrower
+ * (measured: not reachable from stored metadata — the CEL lowering emits `$null`
+ * only with hard-coded booleans and `$exists` never; reachable only from an
+ * in-process `getReadScope` producer).
+ *
+ * The twelfth site is one gate over TWO triggers, exactly like `quoteIdent`'s
+ * alias-vs-field split, and the refusal-envelope inventory lists it as two rows
+ * over one site for that reason. The message was measured against
+ * `looksLikeInternalErrorLeak` too — FALSE, like the other eleven — so it is
+ * withheld from the response BY DECLARATION and teaches no sniffing list a new
+ * phrase.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -332,6 +355,13 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // why this one call site covers the whole tree.
   assertDefinedComparands(field, value);
 
+  // [#6387] …and the two comparands that are NOT positions but DOMAINS: `$null`
+  // and `$exists` take a declared boolean. Deliberately a second call rather
+  // than a widened first one — the two gates gate different things, and their
+  // domains are disjoint by construction (`assertDefinedComparands` skips these
+  // two operators by name), so neither can shadow the other's message.
+  assertBooleanFlagComparands(field, value);
+
   // Scalar / null → implicit equality.
   if (value === null) return `${col} IS NULL`;
   if (typeof value !== 'object' || value instanceof Date) {
@@ -472,7 +502,12 @@ function assertRenderableText(op: string, field: string, val: unknown): void {
  * ⛔ What deliberately does NOT move: `null`. `{ d: null }`, `{ $eq: null }`,
  * `{ $ne: null }`, `$null` and `$exists` keep their exact lowering — `null` IS a
  * declared comparand and IS the null predicate, and the whole point of this
- * refusal is the JS value that cannot be told apart from an ABSENT key. Pinned
+ * refusal is the JS value that cannot be told apart from an ABSENT key. ⚠️ Read
+ * `$null` / `$exists` there as "with their declared BOOLEAN comparand": #6387
+ * later refused every other comparand for those two, `{ $null: null }` included,
+ * on the separate domain grounds {@link assertBooleanFlagComparands} states. The
+ * `null` this paragraph promises not to move is `null` in a COMPARAND position,
+ * which is untouched by both changes and still pinned row for row. Pinned
  * as its own control group in `read-scope-undefined-comparand.test.ts`, because
  * refusing `null` along with `undefined` is the way this change could do harm.
  *
@@ -525,13 +560,16 @@ function undefinedComparandError(field: string, path: string): Error {
  *
  *   - `$null` / `$exists`. Their comparand is a declared BOOLEAN — a flag, not a
  *     value to compare against — so `undefined` there is not a comparand at all.
- *     `driver-sql`'s twin skips them for the same reason. ⚠️ Unlike that twin,
- *     THIS module has no boolean-domain gate to hand them to (#5347 / #5369 were
- *     never pushed down here): `{ $null: undefined }` still lowers by truthiness
- *     to `IS NOT NULL` and `{ $null: "false" }` — the STRING, which is truthy —
- *     lands on the side opposite the `false` it was written to mean. That is a
- *     different cell, measured and filed as #6387 rather than decided as a rider
- *     on this one.
+ *     `driver-sql`'s twin skips them for the same reason. ✅ [#6387] And it now
+ *     skips them the way that twin does: to a boolean-DOMAIN gate,
+ *     {@link assertBooleanFlagComparands}, which #6387 pushed down from #5347 /
+ *     #5369. When this note was written that gate did not exist here, so
+ *     `{ $null: undefined }` lowered by truthiness to `IS NOT NULL` and
+ *     `{ $null: "false" }` — the STRING, which is truthy — landed on the side
+ *     opposite the `false` it was written to mean. Both are refused today, and
+ *     `undefined` is refused there rather than here on purpose: outside the
+ *     declared domain is a truer diagnosis for a flag than "this comparand
+ *     position is undefined".
  *   - a bare ARRAY in direct comparand position (`{ d: [1, undefined] }`).
  *     {@link compileField} refuses the array as a whole ("use `{ $in: [...] }`"),
  *     and inspecting its members here would relabel a shape refused either way.
@@ -582,6 +620,137 @@ function assertDefinedComparands(field: string, spec: unknown): void {
   }
 }
 
+/**
+ * [#6387, applying #5347 / #5369] `$null` / `$exists` whose comparand is not a
+ * boolean.
+ *
+ * ## ONE wording for BOTH operators (#5240), and why that is right here
+ *
+ * `driver-sql` gives its twins two messages, because each names the direction
+ * ITS OWN emitter defaulted to and those directions differ. This module had one
+ * emitter rule covering both — plain TRUTHINESS — so both operators failed the
+ * same way, in the same sentence, and #5240's rule applies in the direction it
+ * usually does: one condition, one wording. Only the operator NAME and the
+ * `path` vary, and `read-scope-boolean-flag-comparand.test.ts` pins that "only
+ * those vary" so a later change cannot give one of them a bespoke phrasing.
+ *
+ * ## What it used to do — measured on `origin/main` (`5faa23ca3`), alias `t`
+ *
+ * The emitter read `val ? … : …`, so every non-boolean was sorted by JS
+ * truthiness into one of the two declared answers:
+ *
+ * | read scope | compiled to | |
+ * |---|---|---|
+ * | `{ owner_id: { $null: "false" } }`  | `"t"."owner_id" IS NULL`     | ⛔ the OPPOSITE of what was written |
+ * | `{ owner_id: { $null: "true" } }`   | `"t"."owner_id" IS NULL`     | |
+ * | `{ owner_id: { $null: 0 } }`        | `"t"."owner_id" IS NOT NULL` | |
+ * | `{ owner_id: { $null: null } }`     | `"t"."owner_id" IS NOT NULL` | |
+ * | `{ owner_id: { $null: undefined } }`| `"t"."owner_id" IS NOT NULL` | |
+ * | `{ owner_id: { $exists: "false" } }`| `"t"."owner_id" IS NOT NULL` | ⛔ the OPPOSITE of what was written |
+ * | `{ owner_id: { $exists: 0 } }`      | `"t"."owner_id" IS NULL`     | |
+ * | `{ owner_id: { $exists: "no" } }`   | `"t"."owner_id" IS NOT NULL` | |
+ *
+ * The string `"false"` is TRUTHY, so the two rows marked ⛔ are the ones that
+ * matter: a scope written to say "rows with NO owner" compiled to "rows that
+ * HAVE one". Unlike #6125's cell — which was fail-CLOSED, zero rows, merely
+ * silent — this direction ADMITS the rows the policy meant to exclude, in a
+ * module whose own contract is "a read-scope predicate must never be silently
+ * dropped". That is why the disposition needed no new judgement: #5347 (`$null`)
+ * and #5369 (`$exists`) already refused this shape on `driver-sql`, and their
+ * stated reason transfers word for word.
+ *
+ * ## ⚠️ Reachability, measured — and the half that came back NEGATIVE
+ *
+ * #6387 asked for a decisive answer to "can `{ $null: <non-boolean> }` travel
+ * from STORED metadata to this compiler". Measured on `5faa23ca3`, it cannot —
+ * three independent gates close that road, and this is recorded because the
+ * issue's severity argument rested on it:
+ *
+ *   1. `RowLevelSecurityPolicySchema` declares `using` / `check` as `z.string()`
+ *      — a CEL predicate, not a `FilterCondition`. A stored object is rejected
+ *      at write ("expected string, received object").
+ *   2. The CEL lowering never emits this shape. `@objectstack/formula`'s
+ *      `cel-to-filter.ts` emits `$null` at exactly two sites, both with a
+ *      HARD-CODED boolean (`== null` → `{ $null: true }`, `!= null` →
+ *      `{ $null: false }`), and emits `$exists` nowhere at all. An unresolved
+ *      `current_user.*` yields `unresolved-variable` → the policy drops → the
+ *      deny sentinel, never a stray comparand.
+ *   3. Even bypassing the schema, a raw object predicate throws inside
+ *      `sqlPredicateToCel` (`expression.replace is not a function`), and
+ *      `getReadFilter`'s catch turns that into `RLS_DENY_FILTER`. A JSON STRING
+ *      of a FilterCondition stores fine and then fails to parse as CEL → `null`
+ *      → deny. Both roads end fail-closed.
+ *
+ * The other read-scope producers cannot emit it either: the Layer 0 tenant
+ * filter, `plugin-sharing`'s `buildReadFilter` (`{owner: id}` / `$in` / `$or` /
+ * `{id:'__deny_all__'}`), the controlled-by-parent filter (`{fk: {$in: […]}}`)
+ * and `RLS_DENY_FILTER` contain no `$null` or `$exists` at all.
+ *
+ * ⚠️ What IS open, and why this gate is still worth having: `getReadScope` is a
+ * DOCUMENTED public option on `AnalyticsPluginOptions` (`plugin.ts`), so a host
+ * that supplies its own read scope — from JSON config, or from JS where the
+ * `FilterCondition` type is not checked — is a live producer with no gate
+ * between it and here. #6387 also confirmed the issue's other measurement:
+ * `plugin-security` performs no `FilterConditionSchema` / `safeParse` anywhere
+ * on this path. So the shape is not reachable from stored metadata TODAY, and
+ * nothing structural stops the next producer; refusing it at the compiler is
+ * what makes "declared boolean" mean enforced boolean regardless of who writes
+ * the scope. Graded on that measurement, not on the issue's opening wording.
+ */
+function nonBooleanFlagComparandError(op: string, field: string, path: string): Error {
+  return readScopeCompileError(
+    `[read-scope-sql] comparand for "${op}" at ${path} is not a boolean — refusing to build read scope ` +
+      `(fail-closed). @objectstack/spec FieldOperatorsSchema declares both $null and $exists as ` +
+      `z.boolean(), and this compiler used to read the comparand by TRUTHINESS instead — so a ` +
+      `non-boolean was silently sorted into one of the two declared answers rather than refused. The ` +
+      `string "false" is TRUTHY, which is the case that matters: it landed on the side OPPOSITE the ` +
+      `false it was written to mean, turning "rows with no ${field}" into "rows that have one" — a ` +
+      `read scope that ADMITS the rows the policy excludes. Write the boolean itself (true or false), ` +
+      `not a string, a number, null or undefined. The producer to fix is whoever BUILT this read ` +
+      `scope — an admin-authored sharing rule / permission set, its CEL lowering, or the in-process ` +
+      `code (a getReadScope option) that assembled the FilterCondition — never the caller of this ` +
+      `query, who cannot author it (#5347 / #5369, pushed down to this compiler by #6387).`,
+  );
+}
+
+/**
+ * [#6387] Refuse a non-boolean `$null` / `$exists` comparand on ONE field
+ * constraint.
+ *
+ * `hasOwnProperty` rather than `in`, so an inherited key can never trip the
+ * gate, and rather than `Object.hasOwn` to match `driver-sql`'s twin
+ * (`reduceFilterKey`) line for line. `{ $null: undefined }` DOES count: the key
+ * is own and enumerable, and `undefined` is one of the comparands #6387
+ * measured a flip on — it lowered to `IS NOT NULL`, which
+ * `read-scope-undefined-comparand.test.ts` pinned as "the cell #6125
+ * deliberately left alone". This is the ruling that picks it up. Refusing it
+ * here rather than in {@link assertDefinedComparands} keeps that gate's claim
+ * honest — `undefined` is refused as a value OUTSIDE the declared BOOLEAN
+ * DOMAIN, which is a truer diagnosis than "a comparand position is undefined"
+ * for a flag that was never a comparand position.
+ *
+ * ## Why this call site, and not the `$not` pre-pass
+ *
+ * Same reason {@link assertDefinedComparands} sits here: {@link compileField} is
+ * the one road every field constraint travels, because {@link compileNode}
+ * `.map()`s every child into its own buffer BEFORE any boolean identity is
+ * applied, so no sibling can absorb a malformed one. It runs AFTER
+ * {@link nullSafeNegationOperand} for a `$not` operand — harmless, and worth
+ * stating: that rewrite consults {@link nullValueSatisfiesOperator}, which now
+ * reads these two by identity, so a non-boolean is classified before it is
+ * refused. The classification is DISCARDED either way (the leaf still reaches
+ * `compileField` and still throws), and the rewrite's own synthesised leaves
+ * (`{ $null: false }`, `{ $null: true }`) are literal booleans by construction.
+ */
+function assertBooleanFlagComparands(field: string, spec: unknown): void {
+  if (!isFilterNode(spec)) return;
+  for (const op of ['$null', '$exists'] as const) {
+    if (!Object.prototype.hasOwnProperty.call(spec, op)) continue;
+    if (typeof spec[op] === 'boolean') continue;
+    throw nonBooleanFlagComparandError(op, field, `"${field}".${op}`);
+  }
+}
+
 function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
@@ -621,8 +790,15 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$notContains': assertRenderableText(op, field, val); return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
     case '$startsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
     case '$endsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
-    case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;
-    case '$exists': return val ? `${col} IS NOT NULL` : `${col} IS NULL`;
+    // [#6387] `val` is a boolean here — {@link assertBooleanFlagComparands}
+    // refused anything else at {@link compileField}, before this emitter runs.
+    // So `=== true` is an exhaustive TWO-WAY choice over the declared domain,
+    // not the "anything truthy is IS NULL" rule it used to be. That old rule is
+    // what put the STRING `"false"` on the side opposite the `false` it was
+    // written to mean; the identity spelling cannot, and it is the spelling
+    // {@link nullValueSatisfiesOperator} now mirrors (#5146 / #5298).
+    case '$null': return val === true ? `${col} IS NULL` : `${col} IS NOT NULL`;
+    case '$exists': return val === true ? `${col} IS NOT NULL` : `${col} IS NULL`;
     default:
       throw readScopeCompileError(`[read-scope-sql] unsupported operator "${op}" on "${field}" (fail-closed).`);
   }
@@ -648,16 +824,25 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  * !== 'won'` is simply `true` — and #5146 ruled that answer canonical.
  *
  * This is `sql-driver.ts`'s `nullValueSatisfiesOperator` table, entry for entry,
- * with two deliberate differences that come from THIS file's emitter rather than
+ * with ONE deliberate difference that comes from THIS file's emitter rather than
  * from a different reading of #5146:
  *
- *   - `$null` / `$exists` are read by TRUTHINESS here, because
- *     {@link compileOperator} writes them as `val ? … : …`. `driver-sql` reads
- *     them by identity against `false` because its emitter does. Each guard
- *     matches its own emitter — that is the invariant, not the literal test.
  *   - `$between` exists in this compiler and not in that table; it is a
  *     positive comparison, so it takes the default (a value that is not there
  *     does not lie between two bounds) exactly as the other comparisons do.
+ *
+ * ⚠️ [#6387] There used to be a SECOND difference, and its removal is half of
+ * that change rather than a tidy-up. `$null` / `$exists` were read here by
+ * TRUTHINESS — `Boolean(value)` / `!value` — because {@link compileOperator}
+ * wrote them as `val ? … : …`, while `driver-sql` read them by identity because
+ * its emitter did. That was correct under the invariant #5146 / #5298 state:
+ * each polarity table pins the spelling of ITS OWN emitter, not the other
+ * file's. So when the emitter stopped guessing at a non-boolean, these two arms
+ * had to move WITH it in the same change — leaving them truthy would have
+ * broken the invariant silently, at its own definition, with nothing red. The
+ * divergence is gone now because its cause is: both emitters read the declared
+ * boolean domain, so both tables spell it by identity, and the two files agree
+ * on every arm for the first time.
  *
  * The default is the large positive-comparison family (`$gt`/`$in`/`$contains`/
  * …), every member of which answers `false` for a value that is not there. An
@@ -670,9 +855,20 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
     case '$eq': return value === null;
     // Mirror image: `$ne: null` compiles to `IS NOT NULL`, which a NULL fails.
     case '$ne': return value !== null;
-    // Truthiness, matching this file's emitter (see the note above).
-    case '$null': return Boolean(value);
-    case '$exists': return !value;
+    // [#6387] Identity, matching this file's emitter (see the note above).
+    // `assertBooleanFlagComparands` refuses anything but `true` / `false` before
+    // this table is consulted, so each arm is an exhaustive TWO-WAY choice over
+    // the declared domain — and the strict spelling is chosen over the lenient
+    // one it replaces for the reason #5347 gave: `Boolean(value)` and
+    // `value === true` are equivalent only while the gate upstream holds, and
+    // the lenient spelling would quietly resume answering for shapes nobody
+    // ruled on if that gate were ever moved. A NULL column satisfies `$null`
+    // exactly when the author asked for null…
+    case '$null': return value === true;
+    // …and satisfies `$exists` exactly when the author asked for "no value".
+    // `$null: true` and `$exists: false` are the same question, so these two
+    // arms are correctly each other's MIRROR, not each other's copy (#5369).
+    case '$exists': return value === false;
     // Negative-polarity set / substring tests hold vacuously for an absent value.
     case '$nin': return true;
     // `$notContains` is the one operator where the two JS backends disagree for

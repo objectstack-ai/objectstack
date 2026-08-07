@@ -39,7 +39,7 @@ export const ErrorCategory = z.enum([
   'maintenance',     // Planned maintenance (503)
 ]);
 
-export type ErrorCategory = z.infer<typeof ErrorCategory>;
+export type ErrorCategory = z.input<typeof ErrorCategory>;
 
 // ==========================================
 // Standard Error Codes
@@ -124,7 +124,7 @@ export const StandardErrorCode = z.enum([
   'TRANSACTION_FAILED',         // Transaction rolled back
 ]);
 
-export type StandardErrorCode = z.infer<typeof StandardErrorCode>;
+export type StandardErrorCode = z.input<typeof StandardErrorCode>;
 
 // ==========================================
 // Enhanced Error Schema
@@ -207,7 +207,7 @@ export const RetryStrategy = z.enum([
   'retry_after',       // Retry after specified delay
 ]);
 
-export type RetryStrategy = z.infer<typeof RetryStrategy>;
+export type RetryStrategy = z.input<typeof RetryStrategy>;
 
 /**
  * Which constraint a single value violated (ADR-0114 D2).
@@ -265,7 +265,7 @@ export const FieldErrorCode = z.enum([
   'invalid_transition',         // state machine: not a legal move from here
 ]);
 
-export type FieldErrorCode = z.infer<typeof FieldErrorCode>;
+export type FieldErrorCode = z.input<typeof FieldErrorCode>;
 
 /**
  * Field Error Schema
@@ -306,7 +306,7 @@ export const FieldErrorSchema = lazySchema(() => z.object({
     .describe('The constraint that was violated, as discrete values (e.g. { maxLength: 512, actual: 3000 })'),
 }));
 
-export type FieldError = z.infer<typeof FieldErrorSchema>;
+export type FieldError = z.input<typeof FieldErrorSchema>;
 
 /**
  * Enhanced API Error Schema
@@ -397,7 +397,7 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   helpText: z.string().optional().describe('Suggested actions to resolve the error'),
 }));
 
-export type EnhancedApiError = z.infer<typeof EnhancedApiErrorSchema>;
+export type EnhancedApiError = z.input<typeof EnhancedApiErrorSchema>;
 /** Post-parse shape of {@link EnhancedApiError} — defaults applied, transforms run (ADR-0122). */
 export type EnhancedApiErrorParsed = z.infer<typeof EnhancedApiErrorSchema>;
 
@@ -431,6 +431,6 @@ export const ErrorResponseSchema = lazySchema(() => z.object({
   }).optional().describe('Response metadata'),
 }));
 
-export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+export type ErrorResponse = z.input<typeof ErrorResponseSchema>;
 /** Post-parse shape of {@link ErrorResponse} — defaults applied, transforms run (ADR-0122). */
 export type ErrorResponseParsed = z.infer<typeof ErrorResponseSchema>;

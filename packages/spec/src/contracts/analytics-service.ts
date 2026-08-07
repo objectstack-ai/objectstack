@@ -32,7 +32,7 @@ import type { Dataset } from '../ui/dataset.zod.js';
  * #1982/#2018) — so what a caller authors is exactly what an executor
  * receives.
  */
-export type { AnalyticsQuery, AnalyticsQueryInput } from '../data/analytics.zod.js';
+export type { AnalyticsQuery } from '../data/analytics.zod.js';
 
 /**
  * Analytics query result

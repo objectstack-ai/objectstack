@@ -45,7 +45,7 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
   options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map'),
 }).describe('Translation data for a single field'));
 
-export type FieldTranslation = z.infer<typeof FieldTranslationSchema>;
+export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
 
 /**
  * Action Result-Dialog Translation Schema
@@ -76,7 +76,7 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject
     .describe('Result field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
 }).describe('Translations for an action result dialog'));
 
-export type ActionResultDialogTranslation = z.infer<typeof ActionResultDialogTranslationSchema>;
+export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTranslationSchema>;
 
 /**
  * Action translations — one shape, used at two addresses: an object's
@@ -223,7 +223,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   })).optional().describe('Section translations keyed by section name'),
 }).describe('Translation data for a single object'));
 
-export type ObjectTranslationData = z.infer<typeof ObjectTranslationDataSchema>;
+export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // The retired object-first dialect
@@ -617,7 +617,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   extraKeys: ['locale'],
 }, translationDataShape()).describe('Translation data for objects, apps, and UI messages'));
 
-export type TranslationData = z.infer<typeof TranslationDataSchema>;
+export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Bundle (all locales)
@@ -625,9 +625,7 @@ export type TranslationData = z.infer<typeof TranslationDataSchema>;
 
 export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to translation data'));
 
-export type TranslationBundle = z.infer<typeof TranslationBundleSchema>;
-/** Authoring input for {@link TranslationBundle} — defaulted fields are optional. */
-export type TranslationBundleInput = z.input<typeof TranslationBundleSchema>;
+export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
 
 /**
  * Type-safe factory for an i18n translation bundle (locale code → translations map). Validates at authoring time via
@@ -690,7 +688,7 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   fallbackLocale: LocaleSchema.optional().describe('Fallback locale code'),
 }).describe('Internationalization configuration'));
 
-export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;
+export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Item (the runtime-authored `translation` metadata type)
@@ -769,7 +767,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
 }).describe('One locale of translations — the `translation` metadata type'));
 
 /** A single `translation` metadata item. */
-export type TranslationItem = z.infer<typeof TranslationItemSchema>;
+export type TranslationItem = z.input<typeof TranslationItemSchema>;
 
 /**
  * Type-safe factory for a single-locale `translation` item. Validates at
@@ -795,7 +793,7 @@ export const TranslationDiffStatusSchema = lazySchema(() => z.enum([
   'stale',
 ]).describe('Translation diff status: missing from bundle, redundant (no matching metadata), or stale (metadata changed)'));
 
-export type TranslationDiffStatus = z.infer<typeof TranslationDiffStatusSchema>;
+export type TranslationDiffStatus = z.input<typeof TranslationDiffStatusSchema>;
 
 /**
  * TranslationDiffItemSchema
@@ -836,7 +834,7 @@ export const TranslationDiffItemSchema = lazySchema(() => z.object({
   aiConfidence: z.number().min(0).max(1).optional().describe('AI suggestion confidence score (0–1)'),
 }).describe('A single translation diff item'));
 
-export type TranslationDiffItem = z.infer<typeof TranslationDiffItemSchema>;
+export type TranslationDiffItem = z.input<typeof TranslationDiffItemSchema>;
 
 /**
  * TranslationCoverageResultSchema
@@ -872,7 +870,7 @@ export const CoverageBreakdownEntrySchema = lazySchema(() => z.object({
   coveragePercent: z.number().min(0).max(100).describe('Coverage percentage for this group'),
 }).describe('Coverage breakdown for a single translation group'));
 
-export type CoverageBreakdownEntry = z.infer<typeof CoverageBreakdownEntrySchema>;
+export type CoverageBreakdownEntry = z.input<typeof CoverageBreakdownEntrySchema>;
 
 export const TranslationCoverageResultSchema = lazySchema(() => z.object({
   /** BCP-47 locale code */
@@ -902,4 +900,4 @@ export const TranslationCoverageResultSchema = lazySchema(() => z.object({
     .describe('Per-group coverage breakdown'),
 }).describe('Aggregated translation coverage result'));
 
-export type TranslationCoverageResult = z.infer<typeof TranslationCoverageResultSchema>;
+export type TranslationCoverageResult = z.input<typeof TranslationCoverageResultSchema>;

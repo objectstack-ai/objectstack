@@ -67,7 +67,7 @@ export const Sha256DigestSchema = z
   .regex(/^[a-f0-9]{64}$/, 'Must be a 64-character lowercase hex SHA-256 digest')
   .describe('SHA-256 digest (64 hex chars)');
 
-export type Sha256Digest = z.infer<typeof Sha256DigestSchema>;
+export type Sha256Digest = z.input<typeof Sha256DigestSchema>;
 
 // ==========================================
 // Envelope
@@ -145,7 +145,6 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type EnvironmentArtifact      = z.infer<typeof EnvironmentArtifactSchema>;
+export type EnvironmentArtifact      = z.input<typeof EnvironmentArtifactSchema>;
 /** Post-parse shape of {@link EnvironmentArtifact} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentArtifactParsed = z.infer<typeof EnvironmentArtifactSchema>;
-export type EnvironmentArtifactInput = z.input<typeof EnvironmentArtifactSchema>;

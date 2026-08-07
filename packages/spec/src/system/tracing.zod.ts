@@ -26,7 +26,7 @@ export const TraceStateSchema = lazySchema(() => z.object({
   entries: z.record(z.string(), z.string()).describe('Trace state entries'),
 }).describe('Trace state'));
 
-export type TraceState = z.infer<typeof TraceStateSchema>;
+export type TraceState = z.input<typeof TraceStateSchema>;
 
 /**
  * Trace Flags Enum
@@ -34,7 +34,7 @@ export type TraceState = z.infer<typeof TraceStateSchema>;
  */
 export const TraceFlagsSchema = lazySchema(() => z.number().int().min(0).max(255).describe('Trace flags bitmap'));
 
-export type TraceFlags = z.infer<typeof TraceFlagsSchema>;
+export type TraceFlags = z.input<typeof TraceFlagsSchema>;
 
 /**
  * Trace Context Schema
@@ -84,7 +84,7 @@ export const TraceContextSchema = lazySchema(() => z.object({
   remote: z.boolean().optional().default(false),
 }).describe('Trace context (W3C Trace Context)'));
 
-export type TraceContext = z.infer<typeof TraceContextSchema>;
+export type TraceContext = z.input<typeof TraceContextSchema>;
 /** Post-parse shape of {@link TraceContext} — defaults applied, transforms run (ADR-0122). */
 export type TraceContextParsed = z.infer<typeof TraceContextSchema>;
 
@@ -100,7 +100,7 @@ export const SpanKind = z.enum([
   'consumer',   // Message consumer
 ]).describe('Span kind');
 
-export type SpanKind = z.infer<typeof SpanKind>;
+export type SpanKind = z.input<typeof SpanKind>;
 
 /**
  * Span Status Enum
@@ -112,7 +112,7 @@ export const SpanStatus = z.enum([
   'error',      // Error occurred
 ]).describe('Span status');
 
-export type SpanStatus = z.infer<typeof SpanStatus>;
+export type SpanStatus = z.input<typeof SpanStatus>;
 
 /**
  * Span Attribute Value Schema
@@ -126,7 +126,7 @@ export const SpanAttributeValueSchema = lazySchema(() => z.union([
   z.array(z.boolean()),
 ]).describe('Span attribute value'));
 
-export type SpanAttributeValue = z.infer<typeof SpanAttributeValueSchema>;
+export type SpanAttributeValue = z.input<typeof SpanAttributeValueSchema>;
 
 /**
  * Span Attributes Schema
@@ -134,7 +134,7 @@ export type SpanAttributeValue = z.infer<typeof SpanAttributeValueSchema>;
  */
 export const SpanAttributesSchema = lazySchema(() => z.record(z.string(), SpanAttributeValueSchema).describe('Span attributes'));
 
-export type SpanAttributes = z.infer<typeof SpanAttributesSchema>;
+export type SpanAttributes = z.input<typeof SpanAttributesSchema>;
 
 /**
  * Span Event Schema
@@ -156,7 +156,7 @@ export const SpanEventSchema = lazySchema(() => z.object({
   attributes: SpanAttributesSchema.optional().describe('Event attributes'),
 }).describe('Span event'));
 
-export type SpanEvent = z.infer<typeof SpanEventSchema>;
+export type SpanEvent = z.input<typeof SpanEventSchema>;
 
 /**
  * Span Link Schema
@@ -174,7 +174,7 @@ export const SpanLinkSchema = lazySchema(() => z.object({
   attributes: SpanAttributesSchema.optional().describe('Link attributes'),
 }).describe('Span link'));
 
-export type SpanLink = z.infer<typeof SpanLinkSchema>;
+export type SpanLink = z.input<typeof SpanLinkSchema>;
 /** Post-parse shape of {@link SpanLink} — defaults applied, transforms run (ADR-0122). */
 export type SpanLinkParsed = z.infer<typeof SpanLinkSchema>;
 
@@ -250,7 +250,7 @@ export const SpanSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('OpenTelemetry span'));
 
-export type Span = z.infer<typeof SpanSchema>;
+export type Span = z.input<typeof SpanSchema>;
 /** Post-parse shape of {@link Span} — defaults applied, transforms run (ADR-0122). */
 export type SpanParsed = z.infer<typeof SpanSchema>;
 
@@ -263,7 +263,7 @@ export const SamplingDecision = z.enum([
   'record_and_sample', // Record and export
 ]).describe('Sampling decision');
 
-export type SamplingDecision = z.infer<typeof SamplingDecision>;
+export type SamplingDecision = z.input<typeof SamplingDecision>;
 
 /**
  * Sampling Strategy Type Enum
@@ -279,7 +279,7 @@ export const SamplingStrategyType = z.enum([
   'custom',             // Custom sampling logic
 ]).describe('Sampling strategy type');
 
-export type SamplingStrategyType = z.infer<typeof SamplingStrategyType>;
+export type SamplingStrategyType = z.input<typeof SamplingStrategyType>;
 
 /**
  * Trace Sampling Configuration Schema
@@ -383,7 +383,7 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
   customSamplerId: z.string().optional().describe('Custom sampler identifier'),
 }).describe('Trace sampling configuration'));
 
-export type TraceSamplingConfig = z.infer<typeof TraceSamplingConfigSchema>;
+export type TraceSamplingConfig = z.input<typeof TraceSamplingConfigSchema>;
 /** Post-parse shape of {@link TraceSamplingConfig} — defaults applied, transforms run (ADR-0122). */
 export type TraceSamplingConfigParsed = z.infer<typeof TraceSamplingConfigSchema>;
 
@@ -400,7 +400,7 @@ export const TracePropagationFormat = z.enum([
   'custom',         // Custom format
 ]).describe('Trace propagation format');
 
-export type TracePropagationFormat = z.infer<typeof TracePropagationFormat>;
+export type TracePropagationFormat = z.input<typeof TracePropagationFormat>;
 
 /**
  * Trace Context Propagation Schema
@@ -467,7 +467,7 @@ export const TraceContextPropagationSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Trace context propagation'));
 
-export type TraceContextPropagation = z.infer<typeof TraceContextPropagationSchema>;
+export type TraceContextPropagation = z.input<typeof TraceContextPropagationSchema>;
 /** Post-parse shape of {@link TraceContextPropagation} — defaults applied, transforms run (ADR-0122). */
 export type TraceContextPropagationParsed = z.infer<typeof TraceContextPropagationSchema>;
 
@@ -487,7 +487,7 @@ export const OtelExporterType = z.enum([
   'custom',         // Custom exporter
 ]).describe('OpenTelemetry exporter type');
 
-export type OtelExporterType = z.infer<typeof OtelExporterType>;
+export type OtelExporterType = z.input<typeof OtelExporterType>;
 
 /**
  * OpenTelemetry Compatibility Schema
@@ -619,7 +619,7 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
   semanticConventionsVersion: z.string().optional().describe('Semantic conventions version'),
 }).describe('OpenTelemetry compatibility configuration'));
 
-export type OpenTelemetryCompatibility = z.infer<typeof OpenTelemetryCompatibilitySchema>;
+export type OpenTelemetryCompatibility = z.input<typeof OpenTelemetryCompatibilitySchema>;
 /** Post-parse shape of {@link OpenTelemetryCompatibility} — defaults applied, transforms run (ADR-0122). */
 export type OpenTelemetryCompatibilityParsed = z.infer<typeof OpenTelemetryCompatibilitySchema>;
 
@@ -711,6 +711,6 @@ export const TracingConfigSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Tracing configuration'));
 
-export type TracingConfig = z.infer<typeof TracingConfigSchema>;
+export type TracingConfig = z.input<typeof TracingConfigSchema>;
 /** Post-parse shape of {@link TracingConfig} — defaults applied, transforms run (ADR-0122). */
 export type TracingConfigParsed = z.infer<typeof TracingConfigSchema>;

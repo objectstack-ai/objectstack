@@ -238,7 +238,15 @@ export class ObjectLogger implements Logger {
             redact: config.redact ?? ['password', 'token', 'secret', 'key'],
             sourceLocation: config.sourceLocation ?? false,
             file: config.file,
-            rotation: config.rotation ?? { maxSize: '10m', maxFiles: 5 },
+            // Per-key, because `LoggerConfig` is the AUTHOR state (ADR-0122): the
+            // schema defaults `maxSize`/`maxFiles` *inside* `rotation`, so a caller
+            // may legitimately write `{ rotation: { maxSize: '5m' } }` and this
+            // constructor — which does not parse — has to fill the other half the
+            // same way `LoggerConfigSchema.parse` would.
+            rotation: {
+                maxSize: config.rotation?.maxSize ?? '10m',
+                maxFiles: config.rotation?.maxFiles ?? 5,
+            },
         };
         this.bindings = bindings;
         this.redactPatterns = this.config.redact.map(tokenizeFieldName).filter((words) => words.length > 0);

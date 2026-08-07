@@ -109,6 +109,6 @@ export const EventNameSchema = lazySchema(() => z
 /**
  * Type Exports
  */
-export type SystemIdentifier = z.infer<typeof SystemIdentifierSchema>;
-export type SnakeCaseIdentifier = z.infer<typeof SnakeCaseIdentifierSchema>;
-export type EventName = z.infer<typeof EventNameSchema>;
+export type SystemIdentifier = z.input<typeof SystemIdentifierSchema>;
+export type SnakeCaseIdentifier = z.input<typeof SnakeCaseIdentifierSchema>;
+export type EventName = z.input<typeof EventNameSchema>;

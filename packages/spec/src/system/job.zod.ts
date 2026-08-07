@@ -44,14 +44,14 @@ export const ScheduleSchema = lazySchema(() => z.discriminatedUnion('type', [
   OnceScheduleSchema,
 ]));
 
-export type Schedule = z.infer<typeof ScheduleSchema>;
+export type Schedule = z.input<typeof ScheduleSchema>;
 /** Post-parse shape of {@link Schedule} — defaults applied, transforms run (ADR-0122). */
 export type ScheduleParsed = z.infer<typeof ScheduleSchema>;
-export type CronSchedule = z.infer<typeof CronScheduleSchema>;
+export type CronSchedule = z.input<typeof CronScheduleSchema>;
 /** Post-parse shape of {@link CronSchedule} — defaults applied, transforms run (ADR-0122). */
 export type CronScheduleParsed = z.infer<typeof CronScheduleSchema>;
-export type IntervalSchedule = z.infer<typeof IntervalScheduleSchema>;
-export type OnceSchedule = z.infer<typeof OnceScheduleSchema>;
+export type IntervalSchedule = z.input<typeof IntervalScheduleSchema>;
+export type OnceSchedule = z.input<typeof OnceScheduleSchema>;
 // NOTE [#4538]: the legacy `export type JobSchedule = Schedule` alias was
 // removed. It collided with the differently-shaped `JobSchedule` on
 // `@objectstack/spec/contracts` — the IJobService boundary type every runtime
@@ -151,11 +151,9 @@ export const JobSchema = lazySchema(() => strictObject({
   ...MetadataProtectionFields,
 }));
 
-export type Job = z.infer<typeof JobSchema>;
+export type Job = z.input<typeof JobSchema>;
 /** Post-parse shape of {@link Job} — defaults applied, transforms run (ADR-0122). */
 export type JobParsed = z.infer<typeof JobSchema>;
-/** Authoring input for {@link Job} — defaulted fields are optional. */
-export type JobInput = z.input<typeof JobSchema>;
 
 /**
  * Type-safe factory for declaring background jobs in metadata-as-code.
@@ -169,7 +167,7 @@ export type JobInput = z.input<typeof JobSchema>;
  * });
  * ```
  */
-export function defineJob(config: z.input<typeof JobSchema>): Job {
+export function defineJob(config: z.input<typeof JobSchema>): JobParsed {
   return JobSchema.parse(config);
 }
 
@@ -184,7 +182,7 @@ export const JobExecutionStatus = z.enum([
   'timeout',
 ]);
 
-export type JobExecutionStatus = z.infer<typeof JobExecutionStatus>;
+export type JobExecutionStatus = z.input<typeof JobExecutionStatus>;
 
 /**
  * Job Execution Schema
@@ -206,4 +204,4 @@ export const JobExecutionSchema = lazySchema(() => z.object({
   durationMs: z.number().int().optional().describe('Execution duration in milliseconds'),
 }));
 
-export type JobExecution = z.infer<typeof JobExecutionSchema>;
+export type JobExecution = z.input<typeof JobExecutionSchema>;

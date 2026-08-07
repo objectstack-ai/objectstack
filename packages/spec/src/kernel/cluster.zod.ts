@@ -42,7 +42,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const EventScopeSchema = z.enum(['local', 'cluster', 'tenant'])
   .describe('Where the event must be delivered: local process, whole cluster, or tenant-scoped.');
 
-export type EventScope = z.infer<typeof EventScopeSchema>;
+export type EventScope = z.input<typeof EventScopeSchema>;
 
 /**
  * Event Delivery Semantics.
@@ -68,7 +68,7 @@ export const EventDeliverySemanticsSchema = z.enum([
   'exactly-once',
 ]).describe('Delivery guarantee offered by the transport.');
 
-export type EventDeliverySemantics = z.infer<typeof EventDeliverySemanticsSchema>;
+export type EventDeliverySemantics = z.input<typeof EventDeliverySemanticsSchema>;
 
 /**
  * Per-emit cluster options attached to `EventMetadata.cluster`.
@@ -104,7 +104,7 @@ export const EventClusterOptionsSchema = lazySchema(() => z.object({
     .describe('Stable key that guarantees emit-order delivery for same-key events.'),
 }).describe('Per-emit cluster routing & ordering options.'));
 
-export type EventClusterOptions = z.infer<typeof EventClusterOptionsSchema>;
+export type EventClusterOptions = z.input<typeof EventClusterOptionsSchema>;
 /** Post-parse shape of {@link EventClusterOptions} — defaults applied, transforms run (ADR-0122). */
 export type EventClusterOptionsParsed = z.infer<typeof EventClusterOptionsSchema>;
 
@@ -129,7 +129,7 @@ export type EventClusterOptionsParsed = z.infer<typeof EventClusterOptionsSchema
 export const ServiceClusterScopeSchema = z.enum(['node', 'cluster'])
   .describe('Whether this service runs on every node or as a cluster singleton.');
 
-export type ServiceClusterScope = z.infer<typeof ServiceClusterScopeSchema>;
+export type ServiceClusterScope = z.input<typeof ServiceClusterScopeSchema>;
 
 /**
  * Strategy for maintaining the cluster-singleton invariant.
@@ -155,7 +155,7 @@ export const ServiceLeaderStrategySchema = z.enum([
   'idempotent-broadcast',
 ]).describe('How the cluster-singleton invariant is enforced at runtime.');
 
-export type ServiceLeaderStrategy = z.infer<typeof ServiceLeaderStrategySchema>;
+export type ServiceLeaderStrategy = z.input<typeof ServiceLeaderStrategySchema>;
 
 /**
  * Cluster annotations on a service registration.
@@ -190,7 +190,7 @@ export const ServiceClusterAnnotationsSchema = lazySchema(() => z.object({
     .describe('Logical cluster identity used for leader election (defaults to service name).'),
 }).describe('Service-registration annotations governing cluster behaviour.'));
 
-export type ServiceClusterAnnotations = z.infer<typeof ServiceClusterAnnotationsSchema>;
+export type ServiceClusterAnnotations = z.input<typeof ServiceClusterAnnotationsSchema>;
 /** Post-parse shape of {@link ServiceClusterAnnotations} — defaults applied, transforms run (ADR-0122). */
 export type ServiceClusterAnnotationsParsed = z.infer<typeof ServiceClusterAnnotationsSchema>;
 
@@ -215,7 +215,7 @@ export const ClusterDriverSchema = z.enum([
   'custom',    // Plugin-provided driver; runtime looks it up by name.
 ]).describe('Cluster transport driver.');
 
-export type ClusterDriver = z.infer<typeof ClusterDriverSchema>;
+export type ClusterDriver = z.input<typeof ClusterDriverSchema>;
 
 /**
  * Tenant isolation strategy on shared transports.
@@ -230,7 +230,7 @@ export type ClusterDriver = z.infer<typeof ClusterDriverSchema>;
 export const ClusterTenantIsolationSchema = z.enum(['channel-prefix', 'none'])
   .describe('How tenant traffic is separated on shared transports.');
 
-export type ClusterTenantIsolation = z.infer<typeof ClusterTenantIsolationSchema>;
+export type ClusterTenantIsolation = z.input<typeof ClusterTenantIsolationSchema>;
 
 /**
  * Cluster configuration block on `defineStack({ cluster })`.
@@ -316,10 +316,9 @@ export const ClusterCapabilityConfigSchema = lazySchema(() => z.object({
     .describe('Driver-specific opaque options.'),
 }).describe('Cluster capability configuration for the stack.'));
 
-export type ClusterCapabilityConfig = z.infer<typeof ClusterCapabilityConfigSchema>;
+export type ClusterCapabilityConfig = z.input<typeof ClusterCapabilityConfigSchema>;
 /** Post-parse shape of {@link ClusterCapabilityConfig} — defaults applied, transforms run (ADR-0122). */
 export type ClusterCapabilityConfigParsed = z.infer<typeof ClusterCapabilityConfigSchema>;
-export type ClusterCapabilityConfigInput = z.input<typeof ClusterCapabilityConfigSchema>;
 
 // ==========================================================================
 // Metadata Change Event Payload
@@ -335,7 +334,7 @@ export const MetadataChangeOperationSchema = z.enum([
   'publish',
 ]).describe('Persistence operation that triggered the change.');
 
-export type MetadataChangeOperation = z.infer<typeof MetadataChangeOperationSchema>;
+export type MetadataChangeOperation = z.input<typeof MetadataChangeOperationSchema>;
 
 /**
  * Canonical payload for the `metadata:changed` event.
@@ -389,4 +388,4 @@ export const MetadataChangedEventPayloadSchema = lazySchema(() => z.object({
     .describe('Trace correlation id of the originating request.'),
 }).describe('Canonical payload for the metadata:changed cluster event.'));
 
-export type MetadataChangedEventPayload = z.infer<typeof MetadataChangedEventPayloadSchema>;
+export type MetadataChangedEventPayload = z.input<typeof MetadataChangedEventPayloadSchema>;

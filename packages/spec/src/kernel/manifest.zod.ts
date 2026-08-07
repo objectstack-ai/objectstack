@@ -44,7 +44,7 @@ export const PluginPermissionsSchema = z
   .strict()
   .describe('Structured plugin permission grants (ADR-0025 §3.2)');
 
-export type PluginPermissions = z.infer<typeof PluginPermissionsSchema>;
+export type PluginPermissions = z.input<typeof PluginPermissionsSchema>;
 
 /**
  * Backward-compatible manifest `permissions` value: either the legacy flat
@@ -56,7 +56,7 @@ export const ManifestPermissionsSchema = z.union([
   PluginPermissionsSchema,
 ]);
 
-export type ManifestPermissions = z.infer<typeof ManifestPermissionsSchema>;
+export type ManifestPermissions = z.input<typeof ManifestPermissionsSchema>;
 
 /**
  * Compatibility ranges for a plugin (ADR-0025 §3.2, §3.10 #3).
@@ -73,7 +73,7 @@ export const PluginEnginesSchema = z
   })
   .describe('Plugin compatibility ranges (ADR-0025 §3.2)');
 
-export type PluginEngines = z.infer<typeof PluginEnginesSchema>;
+export type PluginEngines = z.input<typeof PluginEnginesSchema>;
 
 /**
  * Trust / isolation tier the plugin runs under (ADR-0025 §3.6):
@@ -85,7 +85,7 @@ export const PluginRuntimeSchema = z
   .enum(['node', 'sandbox', 'worker'])
   .describe('Plugin trust tier (ADR-0025 §3.6)');
 
-export type PluginRuntime = z.infer<typeof PluginRuntimeSchema>;
+export type PluginRuntime = z.input<typeof PluginRuntimeSchema>;
 
 /**
  * Dependency packaging strategy (ADR-0025 §3.3):
@@ -96,7 +96,7 @@ export const PluginPackagingSchema = z
   .enum(['bundled', 'manifest-deps'])
   .describe('Dependency packaging strategy (ADR-0025 §3.3)');
 
-export type PluginPackaging = z.infer<typeof PluginPackagingSchema>;
+export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
 
 /**
  * Per-file content digests of the packaged artifact (ADR-0025 §3.2),
@@ -108,7 +108,7 @@ export const PluginIntegritySchema = z
   .record(z.string(), z.string())
   .describe('Per-file content digests of the plugin artifact (ADR-0025 §3.2)');
 
-export type PluginIntegrity = z.infer<typeof PluginIntegritySchema>;
+export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
 
 /**
  * Schema for the ObjectStack Manifest.
@@ -560,8 +560,7 @@ export const ManifestSchema = z.object({
  * TypeScript type inferred from the ManifestSchema.
  * Use this type for type-safe manifest handling in TypeScript code.
  */
-export type ObjectStackManifest = z.infer<typeof ManifestSchema>;
+export type ObjectStackManifest = z.input<typeof ManifestSchema>;
 /** Post-parse shape of {@link ObjectStackManifest} — defaults applied, transforms run (ADR-0122). */
 export type ObjectStackManifestParsed = z.infer<typeof ManifestSchema>;
-export type ObjectStackManifestInput = z.input<typeof ManifestSchema>;
 

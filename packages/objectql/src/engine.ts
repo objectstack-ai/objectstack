@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { QueryAST, HookContext, ServiceObject } from '@objectstack/spec/data';
 import {
-  EngineQueryOptions,
+  EngineQueryOptionsParsed,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -28,7 +28,7 @@ import {
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
@@ -606,7 +606,7 @@ function planFormulaProjection(
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -662,7 +662,7 @@ function applyFormulaPlan(
 function hydrateWriteFormulas(
   schema: any,
   results: unknown[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -732,7 +732,7 @@ export interface OperationContext {
   ast?: QueryAST;
   data?: any;
   options?: any;
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
   result?: any;
 }
 
@@ -751,14 +751,14 @@ export interface OperationContext {
  * are given, `options.context` wins (it is the explicit channel).
  */
 export interface EngineReadOptions {
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
 function mergeReadContext(
-  fromQuery?: ExecutionContextInput,
-  fromOptions?: ExecutionContextInput,
-): ExecutionContextInput | undefined {
+  fromQuery?: ExecutionContext,
+  fromOptions?: ExecutionContext,
+): ExecutionContext | undefined {
   if (fromOptions == null) return fromQuery;
   if (fromQuery == null) return fromOptions;
   return { ...fromQuery, ...fromOptions };
@@ -772,7 +772,7 @@ function mergeReadContext(
  * for a "historical" import) turns it off. Both are server-set, never
  * client-supplied.
  */
-function shouldSkipStateMachine(ctx?: ExecutionContextInput): boolean {
+function shouldSkipStateMachine(ctx?: ExecutionContext): boolean {
   return ctx?.seedReplay === true || ctx?.skipStateMachine === true;
 }
 
@@ -908,7 +908,7 @@ function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
-function eventUserId(execCtx?: ExecutionContextInput): string | undefined {
+function eventUserId(execCtx?: ExecutionContext): string | undefined {
   const userId = execCtx?.userId;
   if (userId == null) return undefined;
   const asString = String(userId);
@@ -1648,7 +1648,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `positions` into the context, so an anonymous HTTP request still yields a
    * session and stays gated.
    */
-  private buildSession(execCtx?: ExecutionContextInput): HookContext['session'] {
+  private buildSession(execCtx?: ExecutionContext): HookContext['session'] {
     if (!execCtx) return undefined;
     const session = {
       userId: execCtx.userId,
@@ -1708,7 +1708,7 @@ export class ObjectQL implements IObjectQLEngine {
    * where every caller-gating hook would read them as the caller. Attribution
    * here, authorization in `session`/`isSystem`, never the two mixed.
    */
-  private buildProvenance(execCtx?: ExecutionContextInput): HookContext['provenance'] {
+  private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
     const attributedUserId = (execCtx as any)?.attributedUserId;
     if (!flowRunId && !attributedUserId) return undefined;
@@ -1725,7 +1725,7 @@ export class ObjectQL implements IObjectQLEngine {
    * system / unauthenticated writes, where membership predicates then fail-open.
    */
   private buildEvalUser(
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): { id: string; positions: string[]; organizationId: string | null } | undefined {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
@@ -1746,7 +1746,7 @@ export class ObjectQL implements IObjectQLEngine {
    * hooks that need an org regardless of a resolved user read
    * `ctx.session.organizationId`, which is populated whenever a session is.
    */
-  private buildUser(execCtx?: ExecutionContextInput): HookContext['user'] {
+  private buildUser(execCtx?: ExecutionContext): HookContext['user'] {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
       id: String(execCtx.userId),
@@ -1778,7 +1778,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `tenantId` themselves on the resulting object; this helper does not
    * mask the system path.
    */
-  private buildDriverOptions(object: string, execCtx?: ExecutionContextInput, base?: any): any {
+  private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
     // (ADR-0034). Explicit wins; ambient is the safety net.
@@ -1932,8 +1932,8 @@ export class ObjectQL implements IObjectQLEngine {
    * Falls back to a system-elevated empty context when no execCtx
    * is supplied (e.g. system-triggered hooks).
    */
-  private buildHookApi(execCtx?: ExecutionContextInput): ScopedContext {
-    const safeCtx: ExecutionContextInput = execCtx ?? ({ isSystem: true } as any);
+  private buildHookApi(execCtx?: ExecutionContext): ScopedContext {
+    const safeCtx: ExecutionContext = execCtx ?? ({ isSystem: true } as any);
     return new ScopedContext(safeCtx, this as unknown as IDataEngine);
   }
 
@@ -1963,7 +1963,7 @@ export class ObjectQL implements IObjectQLEngine {
   private applyFieldDefaults(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     nowSnapshot?: Date,
   ): Record<string, unknown> {
     const schema = this.getSchema(object);
@@ -2077,7 +2077,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async applyAutonumbers(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     driverOwnsAutonumber?: boolean,
   ): Promise<void> {
     if (driverOwnsAutonumber) return; // driver generates persistently in create()
@@ -2131,7 +2131,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     field: string,
     prefix: string,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<number> {
     try {
       // Canonical `fields`, not the wire spelling `select` — this call sat on
@@ -2717,7 +2717,7 @@ export class ObjectQL implements IObjectQLEngine {
       recordId: unknown;
       changes?: unknown;
       after?: unknown;
-      context?: ExecutionContextInput;
+      context?: ExecutionContext;
     },
   ): Promise<void> {
     if (!this.realtimeService) return;
@@ -2793,7 +2793,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
-    input: { matched: unknown; context?: ExecutionContextInput },
+    input: { matched: unknown; context?: ExecutionContext },
   ): Promise<void> {
     if (!this.realtimeService) return;
 
@@ -3223,7 +3223,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async encryptSecretFields(
     object: string,
     row: Record<string, unknown>,
-    context: ExecutionContextInput | undefined,
+    context: ExecutionContext | undefined,
     driverOptions: unknown,
   ): Promise<void> {
     if (!row || typeof row !== 'object') return;
@@ -3956,7 +3956,7 @@ export class ObjectQL implements IObjectQLEngine {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
         where: { id: migrationId },
         limit: 1,
-        context: { isSystem: true } as ExecutionContextInput,
+        context: { isSystem: true } as ExecutionContext,
       });
       const row: any = rows?.[0];
       if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
@@ -4094,7 +4094,7 @@ export class ObjectQL implements IObjectQLEngine {
         const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
           where: { id: migrationId },
           limit: 1,
-          context: { isSystem: true } as ExecutionContextInput,
+          context: { isSystem: true } as ExecutionContext,
         });
         const row: any = rows?.[0];
         if (!row || row.id !== migrationId) return; // nothing certified — nothing to revoke
@@ -4124,7 +4124,7 @@ export class ObjectQL implements IObjectQLEngine {
             }),
             updated_at: now,
           },
-          { context: { isSystem: true } as ExecutionContextInput },
+          { context: { isSystem: true } as ExecutionContext },
         );
         this.invalidateDataMigrationFlags();
         this.logger.warn(
@@ -4492,7 +4492,7 @@ export class ObjectQL implements IObjectQLEngine {
     childObject: string,
     records: any,
     previous: any,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
@@ -4549,7 +4549,7 @@ export class ObjectQL implements IObjectQLEngine {
     records: any[],
     expand: Record<string, QueryAST>,
     depth: number = 0,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     if (depth >= ObjectQL.MAX_EXPAND_DEPTH) return records;
@@ -4667,7 +4667,7 @@ export class ObjectQL implements IObjectQLEngine {
             where,
             ...(nestedAST.fields ? { fields: nestedAST.fields as any } : {}),
             ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy as any } : {}),
-            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput,
+            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext,
           },
         ) ?? [];
 
@@ -4739,7 +4739,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async resolveFileReferences(
     objectName: string,
     records: any[],
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     // A caller whose subject is the STORED form — the ADR-0104 backfill /
@@ -4788,7 +4788,7 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       fileRows = (await this.find(
         'sys_file',
-        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput },
+        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
       )) ?? [];
     } catch {
       return records; // sys_file unregistered / unreadable — leave ids as-is
@@ -4850,7 +4850,7 @@ export class ObjectQL implements IObjectQLEngine {
    * An unresolvable placeholder throws (see the resolver's module doc) — the one
    * outcome an author can act on.
    */
-  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContextInput): void {
+  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
     if (!ast || ast.where == null) return;
     ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
   }
@@ -4866,7 +4866,7 @@ export class ObjectQL implements IObjectQLEngine {
    * writing back would bake one request's user id into a filter object the
    * caller may reuse (view metadata and flow node config both get reused).
    */
-  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContextInput } | undefined>(
+  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
     options: T,
   ): T {
     if (!options || options.where == null) return options;
@@ -4974,7 +4974,7 @@ export class ObjectQL implements IObjectQLEngine {
     );
   }
 
-  async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  async find(object: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -4993,9 +4993,12 @@ export class ObjectQL implements IObjectQLEngine {
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
     // hook reading `ast.object` would have been lied to.
-    const ast: QueryAST = { ...query, object };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // `context` is dropped HERE rather than `delete`d from the built AST: since
+    // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
+    // optional) while `QueryAST` carries the parsed one, so spreading it in and
+    // removing it a line later would type the AST with a context it never holds.
+    const { context: _findContext, ...findQuery } = query ?? {};
+    const ast: QueryAST = { ...findQuery, object };
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -5121,7 +5124,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -5136,9 +5139,10 @@ export class ObjectQL implements IObjectQLEngine {
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
     // last — findOne is single-row by contract.
-    const ast: QueryAST = { ...query, object: objectName, limit: 1 };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // Same reason as find(): the caller's `context` is the author state and the
+    // AST carries the parsed one, so it leaves before the AST is typed.
+    const { context: _findOneContext, ...findOneQuery } = query ?? {};
+    const ast: QueryAST = { ...findOneQuery, object: objectName, limit: 1 };
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -6246,7 +6250,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async cascadeDeleteRelations(
     object: string,
     id: string | number,
-    context?: ExecutionContextInput,
+    context?: ExecutionContext,
     depth = 0,
   ): Promise<void> {
     if (id == null || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
@@ -6331,7 +6335,7 @@ export class ObjectQL implements IObjectQLEngine {
             // rides a server-DERIVED context (set here, never from client input
             // — same trust model as `__expandRead`), so it cannot be forged from
             // a request to bypass the guard on an ordinary write.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContextInput;
+            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
             await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
           }
         }
@@ -7409,7 +7413,7 @@ export class ObjectQL implements IObjectQLEngine {
 export class ObjectRepository implements IScopedObjectRepository {
   constructor(
     private objectName: string,
-    private context: ExecutionContextInput,
+    private context: ExecutionContext,
     private engine: IDataEngine & { executeAction?: (o: string, a: string, c: any) => Promise<any> }
   ) {}
 
@@ -7512,7 +7516,7 @@ export class ObjectRepository implements IScopedObjectRepository {
  */
 export class ScopedContext implements IScopedContext {
   constructor(
-    private executionContext: ExecutionContextInput,
+    private executionContext: ExecutionContext,
     private engine: IDataEngine
   ) {}
 

@@ -407,23 +407,17 @@ export const PluginInstallConfigSchema = lazySchema(() => z.object({
 }));
 
 // Export types
-export type PluginVendor = z.infer<typeof PluginVendorSchema>;
+export type PluginVendor = z.input<typeof PluginVendorSchema>;
 /** Post-parse shape of {@link PluginVendor} — defaults applied, transforms run (ADR-0122). */
 export type PluginVendorParsed = z.infer<typeof PluginVendorSchema>;
-export type PluginVendorInput = z.input<typeof PluginVendorSchema>;
-export type PluginQualityMetrics = z.infer<typeof PluginQualityMetricsSchema>;
+export type PluginQualityMetrics = z.input<typeof PluginQualityMetricsSchema>;
 /** Post-parse shape of {@link PluginQualityMetrics} — defaults applied, transforms run (ADR-0122). */
 export type PluginQualityMetricsParsed = z.infer<typeof PluginQualityMetricsSchema>;
-export type PluginQualityMetricsInput = z.input<typeof PluginQualityMetricsSchema>;
-export type PluginStatistics = z.infer<typeof PluginStatisticsSchema>;
+export type PluginStatistics = z.input<typeof PluginStatisticsSchema>;
 /** Post-parse shape of {@link PluginStatistics} — defaults applied, transforms run (ADR-0122). */
 export type PluginStatisticsParsed = z.infer<typeof PluginStatisticsSchema>;
-export type PluginStatisticsInput = z.input<typeof PluginStatisticsSchema>;
-export type PluginRegistryEntry = z.infer<typeof PluginRegistryEntrySchema>;
+export type PluginRegistryEntry = z.input<typeof PluginRegistryEntrySchema>;
 /** Post-parse shape of {@link PluginRegistryEntry} — defaults applied, transforms run (ADR-0122). */
 export type PluginRegistryEntryParsed = z.infer<typeof PluginRegistryEntrySchema>;
-export type PluginRegistryEntryInput = z.input<typeof PluginRegistryEntrySchema>;
-export type PluginSearchFilters = z.infer<typeof PluginSearchFiltersSchema>;
-export type PluginSearchFiltersInput = z.input<typeof PluginSearchFiltersSchema>;
-export type PluginInstallConfig = z.infer<typeof PluginInstallConfigSchema>;
-export type PluginInstallConfigInput = z.input<typeof PluginInstallConfigSchema>;
+export type PluginSearchFilters = z.input<typeof PluginSearchFiltersSchema>;
+export type PluginInstallConfig = z.input<typeof PluginInstallConfigSchema>;

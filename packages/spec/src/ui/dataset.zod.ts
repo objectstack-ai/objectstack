@@ -370,16 +370,12 @@ export const DatasetSchema = lazySchema(() => strictObject({
  * });
  * ```
  */
-export function defineDataset(dataset: DatasetInput): DatasetInput {
+export function defineDataset(dataset: Dataset): Dataset {
   return dataset;
 }
 
-export type DatasetDimension = z.infer<typeof DatasetDimensionSchema>;
-export type DatasetMeasure = z.infer<typeof DatasetMeasureSchema>;
-export type DerivedMeasureOpValue = z.infer<typeof DerivedMeasureOp>;
-export type Dataset = z.infer<typeof DatasetSchema>;
+export type DatasetDimension = z.input<typeof DatasetDimensionSchema>;
+export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
+export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
+export type Dataset = z.input<typeof DatasetSchema>;
 
-/** Input types for authoring (optional fields with defaults may be omitted). */
-export type DatasetDimensionInput = z.input<typeof DatasetDimensionSchema>;
-export type DatasetMeasureInput = z.input<typeof DatasetMeasureSchema>;
-export type DatasetInput = z.input<typeof DatasetSchema>;

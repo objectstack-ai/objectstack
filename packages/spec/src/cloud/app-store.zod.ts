@@ -381,33 +381,33 @@ export const ListInstalledAppsResponseSchema = lazySchema(() => z.object({
 // Export Types
 // ==========================================
 
-export type ReviewModerationStatus = z.infer<typeof ReviewModerationStatusSchema>;
-export type UserReview = z.infer<typeof UserReviewSchema>;
+export type ReviewModerationStatus = z.input<typeof ReviewModerationStatusSchema>;
+export type UserReview = z.input<typeof UserReviewSchema>;
 /** Post-parse shape of {@link UserReview} — defaults applied, transforms run (ADR-0122). */
 export type UserReviewParsed = z.infer<typeof UserReviewSchema>;
-export type SubmitReviewRequest = z.infer<typeof SubmitReviewRequestSchema>;
-export type ListReviewsRequest = z.infer<typeof ListReviewsRequestSchema>;
+export type SubmitReviewRequest = z.input<typeof SubmitReviewRequestSchema>;
+export type ListReviewsRequest = z.input<typeof ListReviewsRequestSchema>;
 /** Post-parse shape of {@link ListReviewsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListReviewsRequestParsed = z.infer<typeof ListReviewsRequestSchema>;
-export type ListReviewsResponse = z.infer<typeof ListReviewsResponseSchema>;
+export type ListReviewsResponse = z.input<typeof ListReviewsResponseSchema>;
 /** Post-parse shape of {@link ListReviewsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListReviewsResponseParsed = z.infer<typeof ListReviewsResponseSchema>;
-export type RecommendationReason = z.infer<typeof RecommendationReasonSchema>;
-export type RecommendedApp = z.infer<typeof RecommendedAppSchema>;
-export type AppDiscoveryRequest = z.infer<typeof AppDiscoveryRequestSchema>;
+export type RecommendationReason = z.input<typeof RecommendationReasonSchema>;
+export type RecommendedApp = z.input<typeof RecommendedAppSchema>;
+export type AppDiscoveryRequest = z.input<typeof AppDiscoveryRequestSchema>;
 /** Post-parse shape of {@link AppDiscoveryRequest} — defaults applied, transforms run (ADR-0122). */
 export type AppDiscoveryRequestParsed = z.infer<typeof AppDiscoveryRequestSchema>;
-export type AppDiscoveryResponse = z.infer<typeof AppDiscoveryResponseSchema>;
-export type SubscriptionStatus = z.infer<typeof SubscriptionStatusSchema>;
-export type AppSubscription = z.infer<typeof AppSubscriptionSchema>;
+export type AppDiscoveryResponse = z.input<typeof AppDiscoveryResponseSchema>;
+export type SubscriptionStatus = z.input<typeof SubscriptionStatusSchema>;
+export type AppSubscription = z.input<typeof AppSubscriptionSchema>;
 /** Post-parse shape of {@link AppSubscription} — defaults applied, transforms run (ADR-0122). */
 export type AppSubscriptionParsed = z.infer<typeof AppSubscriptionSchema>;
-export type InstalledAppSummary = z.infer<typeof InstalledAppSummarySchema>;
+export type InstalledAppSummary = z.input<typeof InstalledAppSummarySchema>;
 /** Post-parse shape of {@link InstalledAppSummary} — defaults applied, transforms run (ADR-0122). */
 export type InstalledAppSummaryParsed = z.infer<typeof InstalledAppSummarySchema>;
-export type ListInstalledAppsRequest = z.infer<typeof ListInstalledAppsRequestSchema>;
+export type ListInstalledAppsRequest = z.input<typeof ListInstalledAppsRequestSchema>;
 /** Post-parse shape of {@link ListInstalledAppsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListInstalledAppsRequestParsed = z.infer<typeof ListInstalledAppsRequestSchema>;
-export type ListInstalledAppsResponse = z.infer<typeof ListInstalledAppsResponseSchema>;
+export type ListInstalledAppsResponse = z.input<typeof ListInstalledAppsResponseSchema>;
 /** Post-parse shape of {@link ListInstalledAppsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListInstalledAppsResponseParsed = z.infer<typeof ListInstalledAppsResponseSchema>;

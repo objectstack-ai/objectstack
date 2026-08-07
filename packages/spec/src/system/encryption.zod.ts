@@ -17,7 +17,7 @@ export const EncryptionAlgorithmSchema = lazySchema(() => z.enum([
   'chacha20-poly1305',
 ]).describe('Supported encryption algorithm'));
 
-export type EncryptionAlgorithm = z.infer<typeof EncryptionAlgorithmSchema>;
+export type EncryptionAlgorithm = z.input<typeof EncryptionAlgorithmSchema>;
 
 export const KeyManagementProviderSchema = lazySchema(() => z.enum([
   'local',
@@ -27,7 +27,7 @@ export const KeyManagementProviderSchema = lazySchema(() => z.enum([
   'hashicorp-vault',
 ]).describe('Key management service provider'));
 
-export type KeyManagementProvider = z.infer<typeof KeyManagementProviderSchema>;
+export type KeyManagementProvider = z.input<typeof KeyManagementProviderSchema>;
 
 export const KeyRotationPolicySchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable automatic key rotation'),
@@ -36,10 +36,9 @@ export const KeyRotationPolicySchema = lazySchema(() => z.object({
   autoRotate: z.boolean().default(true).describe('Automatically rotate without manual approval'),
 }).describe('Policy for automatic encryption key rotation'));
 
-export type KeyRotationPolicy = z.infer<typeof KeyRotationPolicySchema>;
+export type KeyRotationPolicy = z.input<typeof KeyRotationPolicySchema>;
 /** Post-parse shape of {@link KeyRotationPolicy} — defaults applied, transforms run (ADR-0122). */
 export type KeyRotationPolicyParsed = z.infer<typeof KeyRotationPolicySchema>;
-export type KeyRotationPolicyInput = z.input<typeof KeyRotationPolicySchema>;
 
 export const EncryptionConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable field-level encryption'),
@@ -54,10 +53,9 @@ export const EncryptionConfigSchema = lazySchema(() => z.object({
   searchableEncryption: z.boolean().default(false).describe('Allows search on encrypted data'),
 }).describe('Field-level encryption configuration'));
 
-export type EncryptionConfig = z.infer<typeof EncryptionConfigSchema>;
+export type EncryptionConfig = z.input<typeof EncryptionConfigSchema>;
 /** Post-parse shape of {@link EncryptionConfig} — defaults applied, transforms run (ADR-0122). */
 export type EncryptionConfigParsed = z.infer<typeof EncryptionConfigSchema>;
-export type EncryptionConfigInput = z.input<typeof EncryptionConfigSchema>;
 
 export const FieldEncryptionSchema = lazySchema(() => z.object({
   fieldName: z.string().describe('Name of the field to encrypt'),
@@ -65,7 +63,6 @@ export const FieldEncryptionSchema = lazySchema(() => z.object({
   indexable: z.boolean().default(false).describe('Allow indexing on encrypted field'),
 }).describe('Per-field encryption assignment'));
 
-export type FieldEncryption = z.infer<typeof FieldEncryptionSchema>;
+export type FieldEncryption = z.input<typeof FieldEncryptionSchema>;
 /** Post-parse shape of {@link FieldEncryption} — defaults applied, transforms run (ADR-0122). */
 export type FieldEncryptionParsed = z.infer<typeof FieldEncryptionSchema>;
-export type FieldEncryptionInput = z.input<typeof FieldEncryptionSchema>;

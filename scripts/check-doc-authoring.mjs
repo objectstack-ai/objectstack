@@ -135,6 +135,11 @@ const DOMAINS = [
   'Mapping', 'Theme', 'TranslationBundle', 'Page', 'Action',
 ].join('|');
 const NS = '(?:UI\\.|Data\\.|System\\.|Security\\.|Identity\\.|Automation\\.|Integration\\.)?';
+// The optional `Input` suffix is a LEGACY spelling as of protocol 17: ADR-0122
+// phase 2 (#6083) moved the author state onto the bare name and retired every
+// `XInput` synonym of it. The arm stays anyway — this gate reads the corpus that
+// gets pasted into app code, where a sample carrying the retired spelling is
+// still the anti-pattern AND now names a type that no longer exists.
 const BARE = new RegExp(`^export const \\w+:\\s*${NS}(?:${DOMAINS})(?:Input)?\\s*=\\s*\\{`);
 const FENCE_OPEN = /^```(?:ts|typescript|tsx)\s*$/;
 const FENCE_CLOSE = /^```\s*$/;

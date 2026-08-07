@@ -6,7 +6,7 @@ import {
     MetadataClusterBridgePlugin,
     type ClusterServicePluginOptions,
 } from '@objectstack/service-cluster';
-import type { ClusterCapabilityConfigInput } from '@objectstack/spec/kernel';
+import type { ClusterCapabilityConfig } from '@objectstack/spec/kernel';
 
 export interface RuntimeConfig {
     /**
@@ -27,12 +27,12 @@ export interface RuntimeConfig {
      * - Omit (default): a single-node `memory` cluster is auto-registered.
      * - `false`: skip auto-registration entirely. Register your own
      *   `ClusterServicePlugin` if you need it later.
-     * - `ClusterCapabilityConfigInput`: forwarded to `defineCluster()`.
+     * - `ClusterCapabilityConfig`: forwarded to `defineCluster()`.
      * - `{ cluster: IClusterService }`: bring your own instance.
      *
      * See `content/docs/kernel/cluster.mdx` for driver options.
      */
-    cluster?: false | ClusterCapabilityConfigInput | ClusterServicePluginOptions;
+    cluster?: false | ClusterCapabilityConfig | ClusterServicePluginOptions;
 }
 
 /**
@@ -86,8 +86,8 @@ export class Runtime {
         ) {
             return raw as ClusterServicePluginOptions;
         }
-        // Otherwise treat as `ClusterCapabilityConfigInput`.
-        return { config: raw as ClusterCapabilityConfigInput };
+        // Otherwise treat as `ClusterCapabilityConfig`.
+        return { config: raw as ClusterCapabilityConfig };
     }
     
     /**

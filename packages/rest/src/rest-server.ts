@@ -2945,12 +2945,16 @@ export class RestServer {
                 responseFormat: api.responseFormat,
             },
             crud: {
-                operations: crud.operations ?? {
-                    create: true,
-                    read: true,
-                    update: true,
-                    delete: true,
-                    list: true,
+                // Per key, not per object: since ADR-0122 `crud.operations` is the
+                // AUTHOR state, so a caller may enable three of the five and leave the
+                // rest to the schema's own per-key `.default(true)`. `??` on the whole
+                // object would only have filled it when it was absent entirely.
+                operations: {
+                    create: crud.operations?.create ?? true,
+                    read: crud.operations?.read ?? true,
+                    update: crud.operations?.update ?? true,
+                    delete: crud.operations?.delete ?? true,
+                    list: crud.operations?.list ?? true,
                 },
                 patterns: crud.patterns,
                 dataPrefix: crud.dataPrefix ?? '/data',
@@ -2960,21 +2964,21 @@ export class RestServer {
                 prefix: metadata.prefix ?? '/meta',
                 enableCache: metadata.enableCache ?? true,
                 cacheTtl: metadata.cacheTtl ?? 3600,
-                endpoints: metadata.endpoints ?? {
-                    types: true,
-                    items: true,
-                    item: true,
-                    schema: true,
+                endpoints: {
+                    types: metadata.endpoints?.types ?? true,
+                    items: metadata.endpoints?.items ?? true,
+                    item: metadata.endpoints?.item ?? true,
+                    schema: metadata.endpoints?.schema ?? true,
                 },
             },
             batch: {
                 maxBatchSize: batch.maxBatchSize ?? 200,
                 enableBatchEndpoint: batch.enableBatchEndpoint ?? true,
-                operations: batch.operations ?? {
-                    createMany: true,
-                    updateMany: true,
-                    deleteMany: true,
-                    upsertMany: true,
+                operations: {
+                    createMany: batch.operations?.createMany ?? true,
+                    updateMany: batch.operations?.updateMany ?? true,
+                    deleteMany: batch.operations?.deleteMany ?? true,
+                    upsertMany: batch.operations?.upsertMany ?? true,
                 },
                 defaultAtomic: batch.defaultAtomic ?? true,
             },

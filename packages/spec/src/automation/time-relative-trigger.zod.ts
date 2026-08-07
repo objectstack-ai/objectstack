@@ -210,9 +210,7 @@ export const TimeRelativeTriggerSchema = lazySchema(() =>
   }),
 );
 
-export type TimeRelativeTrigger = z.infer<typeof TimeRelativeTriggerSchema>;
-/** Authoring input for {@link TimeRelativeTrigger} (defaulted fields optional). */
-export type TimeRelativeTriggerInput = z.input<typeof TimeRelativeTriggerSchema>;
+export type TimeRelativeTrigger = z.input<typeof TimeRelativeTriggerSchema>;
 
 /**
  * Default per-sweep record cap when a descriptor omits `maxRecords`. Keeps a

@@ -47,7 +47,7 @@ import { z } from 'zod';
  * dialect. Retired in #3278; see ADR-0058 addendum.
  */
 export const ExpressionDialect = z.enum(['cel', 'cron', 'template']);
-export type ExpressionDialect = z.infer<typeof ExpressionDialect>;
+export type ExpressionDialect = z.input<typeof ExpressionDialect>;
 
 /**
  * Authorship metadata for an expression. Optional but encouraged for AI-
@@ -59,7 +59,7 @@ export const ExpressionMetaSchema = z.object({
   /** Identifier of the agent / tool that produced this expression. */
   generatedBy: z.string().optional(),
 });
-export type ExpressionMeta = z.infer<typeof ExpressionMetaSchema>;
+export type ExpressionMeta = z.input<typeof ExpressionMetaSchema>;
 
 /**
  * Canonical Expression envelope.
@@ -87,7 +87,7 @@ export const ExpressionSchema = z.object({
 }).refine(e => e.source !== undefined || e.ast !== undefined, {
   message: 'Expression requires at least one of `source` or `ast`',
 });
-export type Expression = z.infer<typeof ExpressionSchema>;
+export type Expression = z.input<typeof ExpressionSchema>;
 
 /**
  * Author-time input shape: a bare string is shorthand for `{ dialect: 'cel',
@@ -130,7 +130,7 @@ export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSche
  * intent documentation and future runtime type-check wiring.
  */
 export const PredicateSchema = ExpressionSchema;
-export type Predicate = z.infer<typeof PredicateSchema>;
+export type Predicate = z.input<typeof PredicateSchema>;
 
 export const PredicateInputSchema = ExpressionInputSchema;
 export type PredicateInput = z.input<typeof PredicateInputSchema>;

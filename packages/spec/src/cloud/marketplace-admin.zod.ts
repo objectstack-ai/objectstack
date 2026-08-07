@@ -300,23 +300,23 @@ export const TrendingListingSchema = lazySchema(() => z.object({
 // Export Types
 // ==========================================
 
-export type ReviewCriterion = z.infer<typeof ReviewCriterionSchema>;
+export type ReviewCriterion = z.input<typeof ReviewCriterionSchema>;
 /** Post-parse shape of {@link ReviewCriterion} — defaults applied, transforms run (ADR-0122). */
 export type ReviewCriterionParsed = z.infer<typeof ReviewCriterionSchema>;
-export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
-export type RejectionReason = z.infer<typeof RejectionReasonSchema>;
-export type SubmissionReview = z.infer<typeof SubmissionReviewSchema>;
+export type ReviewDecision = z.input<typeof ReviewDecisionSchema>;
+export type RejectionReason = z.input<typeof RejectionReasonSchema>;
+export type SubmissionReview = z.input<typeof SubmissionReviewSchema>;
 /** Post-parse shape of {@link SubmissionReview} — defaults applied, transforms run (ADR-0122). */
 export type SubmissionReviewParsed = z.infer<typeof SubmissionReviewSchema>;
-export type FeaturedListing = z.infer<typeof FeaturedListingSchema>;
+export type FeaturedListing = z.input<typeof FeaturedListingSchema>;
 /** Post-parse shape of {@link FeaturedListing} — defaults applied, transforms run (ADR-0122). */
 export type FeaturedListingParsed = z.infer<typeof FeaturedListingSchema>;
-export type CuratedCollection = z.infer<typeof CuratedCollectionSchema>;
+export type CuratedCollection = z.input<typeof CuratedCollectionSchema>;
 /** Post-parse shape of {@link CuratedCollection} — defaults applied, transforms run (ADR-0122). */
 export type CuratedCollectionParsed = z.infer<typeof CuratedCollectionSchema>;
-export type PolicyViolationType = z.infer<typeof PolicyViolationTypeSchema>;
-export type PolicyAction = z.infer<typeof PolicyActionSchema>;
+export type PolicyViolationType = z.input<typeof PolicyViolationTypeSchema>;
+export type PolicyAction = z.input<typeof PolicyActionSchema>;
 /** Post-parse shape of {@link PolicyAction} — defaults applied, transforms run (ADR-0122). */
 export type PolicyActionParsed = z.infer<typeof PolicyActionSchema>;
-export type MarketplaceHealthMetrics = z.infer<typeof MarketplaceHealthMetricsSchema>;
-export type TrendingListing = z.infer<typeof TrendingListingSchema>;
+export type MarketplaceHealthMetrics = z.input<typeof MarketplaceHealthMetricsSchema>;
+export type TrendingListing = z.input<typeof TrendingListingSchema>;

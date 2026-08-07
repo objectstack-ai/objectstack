@@ -233,12 +233,10 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
  */
 export const SharingRuleSchema = CriteriaSharingRuleSchema;
 
-export type SharingRule = z.infer<typeof SharingRuleSchema>;
+export type SharingRule = z.input<typeof SharingRuleSchema>;
 /** Post-parse shape of {@link SharingRule} — defaults applied, transforms run (ADR-0122). */
 export type SharingRuleParsed = z.infer<typeof SharingRuleSchema>;
-/** Authoring input for {@link SharingRule} — defaulted fields are optional. */
-export type SharingRuleInput = z.input<typeof SharingRuleSchema>;
-export type CriteriaSharingRule = z.infer<typeof CriteriaSharingRuleSchema>;
+export type CriteriaSharingRule = z.input<typeof CriteriaSharingRuleSchema>;
 /** Post-parse shape of {@link CriteriaSharingRule} — defaults applied, transforms run (ADR-0122). */
 export type CriteriaSharingRuleParsed = z.infer<typeof CriteriaSharingRuleSchema>;
 
@@ -247,6 +245,6 @@ export type CriteriaSharingRuleParsed = z.infer<typeof CriteriaSharingRuleSchema
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: SharingRule` literal.
  */
-export function defineSharingRule(config: z.input<typeof SharingRuleSchema>): SharingRule {
+export function defineSharingRule(config: z.input<typeof SharingRuleSchema>): SharingRuleParsed {
   return SharingRuleSchema.parse(config);
 }
