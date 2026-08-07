@@ -93,6 +93,8 @@ This repo ships **backend only**. All Studio/Console UI work happens in `../obje
 
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⚠️ Never hand-edit `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
+**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the ratchet's trigger, and its only one. It is an **on-demand gate by decision** (#5960), never a CI job; `objectui:bump` and `objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md` → "After the pin moves".
+
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server — `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets `DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **published** console, not your `../objectui` src — only `:5180` reflects local UI edits. See `../objectui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 
 ---
@@ -555,9 +557,16 @@ unavailable` and **exited 0**, so no path existed on which this gate could go re
 **exits 1** when it has no usable manifest, because "could not run" is a failure, not a
 skip (Route & surface ownership §3, *Absence must be loud*). Run it the one way that
 works: `pnpm sdui:manifest` (or `OBJECTUI_ROOT=../objectui pnpm objectui:build` first),
-which dumps the manifest and runs the ratchet against it. Where the manifest *should* come
-from in CI is an open provenance question, tracked separately — do not "fix" the red by
-re-adding a skip.
+which dumps the manifest and runs the ratchet against it. Where the manifest comes from is
+**settled** (#5960, maintainer ruling 2026-08-07): **not from CI**. It is an on-demand
+gate whose trigger is the **objectui pin bump** — `.objectui-sha` is the only thing that
+moves the manifest, so `scripts/bump-objectui.sh` and `scripts/build-console.sh` print the
+`pnpm sdui:manifest` step and `docs/releases-maintenance.md` carries the procedure.
+Producing it here was rejected outright: the sole producer drives Playwright chromium over
+objectui's built console, so a CI-side dump means a full objectui build plus a browser
+download on every matching PR. So: do not "fix" the red by re-adding a skip, and do not
+"fix" it by wiring the gate into a workflow either — run it where it belongs, at the pin
+bump.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the

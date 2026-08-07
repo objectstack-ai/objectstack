@@ -7,6 +7,13 @@
 #   scripts/bump-objectui.sh --no-commit    # update files only, don't commit
 #   scripts/bump-objectui.sh --no-changeset # skip the @objectstack/console changeset
 #
+# After the bump — the second half of the pin-update procedure (#5960):
+#   pnpm sdui:manifest        # dump objectui's sdui.manifest.json and run the
+#                             # spec↔registry declaration-parity ratchet (ADR-0082 D4).
+#                             # The pin bump is that ratchet's ONLY trigger; it is an
+#                             # on-demand gate by decision, never a CI job. Needs
+#                             # Playwright chromium. This script prints the reminder.
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -56,7 +63,10 @@ for arg in "$@"; do
     --no-commit) NO_COMMIT=1 ;;
     --no-changeset) NO_CHANGESET=1 ;;
     -h|--help)
-      sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+      # NOTE: this line range is coupled to the header block above (usage → env →
+      # sibling layout, ending at "run from here"). Editing the header means moving
+      # it — #5960 added the pin-update step and had to.
+      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) EXPLICIT_SHA="$arg" ;;
@@ -157,8 +167,36 @@ EOF
   echo "→ wrote changeset $(basename "$CS_FILE") (@objectstack/console: ${BUMP})"
 fi
 
+# --- The other half of the pin-update procedure (#5960) ----------------------
+# ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's
+# `sdui.manifest.json`, and that file changes when — and only when — this pin
+# moves. So the pin bump is the ratchet's trigger, and it is the ONLY one:
+# measured on origin/main, no workflow runs `pnpm sdui:manifest`, no workflow
+# installs Playwright for it, `packages/console/dist/` is gitignored and the
+# published @objectstack/console tarball ships no manifest. Producing it in this
+# repo's CI was considered and REJECTED (#5960) — it would put a full objectui
+# build plus a chromium download on every matching PR.
+#
+# Deliberately a REMINDER, not a hard gate: a machine without Playwright must
+# still be able to move the pin, and hard-failing here would be the rejected
+# CI cost wearing a local disguise. The gate itself cannot go falsely green —
+# since #4690 a missing or unusable manifest exits 1 instead of skipping — so
+# the only failure mode left is "nobody ran it", which is what this prints to
+# prevent. Printed on BOTH exits below: --no-commit still moved the pin.
+print_sdui_next_step() {
+  echo
+  echo "→ NEXT STEP — run the declaration-parity ratchet (ADR-0082 D4):"
+  echo "      pnpm sdui:manifest"
+  echo "  It rebuilds objectui at the new pin, dumps packages/console/dist/sdui.manifest.json"
+  echo "  and ratchets spec↔registry declaration parity. A pin bump is its only trigger:"
+  echo "  it is an on-demand gate by decision (#5960), never a CI job."
+  echo "  Needs a Playwright browser — 'pnpm exec playwright install chromium-headless-shell'."
+  echo "  Procedure: docs/releases-maintenance.md → 'After the pin moves'."
+}
+
 if [[ "$NO_COMMIT" -eq 1 ]]; then
   echo "→ --no-commit: leaving files unstaged."
+  print_sdui_next_step
   exit 0
 fi
 
@@ -170,3 +208,4 @@ ${SUBJECT_LINE}
 
 objectui@${NEW_SHA}" -- .objectui-sha ${CS_FILE:+"$CS_FILE"}
 echo "✓ Committed. Push with: git push"
+print_sdui_next_step
