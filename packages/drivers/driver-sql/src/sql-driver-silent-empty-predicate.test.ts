@@ -41,19 +41,30 @@
  * describe do not apply.
  *
  * Measured by disabling each arm in turn and re-running this file together with
- * `sql-driver-out-of-contract-filter-input.test.ts`:
+ * `sql-driver-out-of-contract-filter-input.test.ts` (48 tests across the two,
+ * re-measured on `main` at d367f03 — i.e. after #6210's `DriverQuery` narrowing):
  *
- *   - LIKE arm disabled → **8 failed / 32 passed**. The eighth is in the other
+ *   - LIKE arm disabled → **8 failed / 40 passed**. The eighth is in the other
  *     file: the superseded `{ $startsWith: {} }` pin, which is the point of
  *     having replaced it rather than deleted it.
- *   - member arm disabled → **4 failed / 36 passed** — the `$in`, `$nin`,
+ *   - member arm disabled → **4 failed / 44 passed** — the `$in`, `$nin`,
  *     nested-array and `$between` cases. The `$field` member case is NOT among
  *     them, and that is the arm ordering being verified rather than a gap:
  *     #5041's cross-field refusal still answers first for that shape.
  *
  * The counts are here because a bare "reverting turns it red" claims nothing
  * checkable — if a later change makes one of these arms unreachable, the count
- * moves and the next reader can see that it did.
+ * moves and the next reader can see that it did. The FAILURE counts are the
+ * load-bearing half; the pass counts drift as neighbouring tests are added (they
+ * read 32 / 36 when this file was first written, against 40 tests).
+ *
+ * The analytics side answers the same way, measured the same way: reverting
+ * `read-scope-sql.ts` and `filter-normalizer.ts` to their pre-#5234 `main`
+ * versions turns `comparand-shape-refusal.test.ts` **17 failed / 41 passed**.
+ * `like-metacharacter-escape.test.ts` stays GREEN under that revert, and that is
+ * correct rather than a hole: it pins the two packages' PREDICATES against each
+ * other, while this refusal file pins that the doors actually call them. Both
+ * are needed — parity with nothing calling it is #4984's dead-rule shape.
  *
  * The row-set assertions are the other half, and they are what makes the
  * refusals meaningful rather than self-referential: `keeps` pins that every
@@ -124,8 +135,12 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
     for (const row of ROWS) await driver.create('probe', row);
   });
 
+  // No `object` key: #6210 narrowed the driver query parameter to `DriverQuery`,
+  // whose object is the first argument and nothing else. Kept in step here rather
+  // than cast away — a rejection test that builds its query off-contract stops
+  // exercising the shape a caller can actually send.
   const find = (where: unknown) =>
-    driver.find('probe', { object: 'probe', fields: ['id'], where: where as FilterCondition });
+    driver.find('probe', { fields: ['id'], where: where as FilterCondition });
 
   const ids = async (where: unknown): Promise<string[]> =>
     ((await find(where)) as Array<{ id: string }>).map((r) => r.id).sort();
