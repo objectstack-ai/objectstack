@@ -167,6 +167,7 @@
     "ui/BulkActionDef:operation",
     "ui/BulkActionDef:params",
     "ui/BulkActionDef:patch",
+    "ui/BulkActionDef:requiredPermissions",
     "ui/BulkActionDef:variant",
     "ui/BulkActionDef:visible",
     "ui/BulkActionParam:default",
