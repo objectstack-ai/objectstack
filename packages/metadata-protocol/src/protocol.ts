@@ -7354,12 +7354,61 @@ export class ObjectStackProtocolImplementation implements
      * AFTER `put()` resolves successfully, so a failed write — DB error,
      * optimistic-lock conflict, validation failure — never leaks a
      * stale schema into the registry.
+     *
+     * ── OWNERSHIP KEY (#4636, maintainer ruling 2026-08-07, option B) ──
+     *
+     * The contributor is keyed by the row's REAL `package_id`, not by the
+     * `'sys_metadata'` sentinel this used to hard-write. The sentinel
+     * survives for exactly one case — a package-less write, which has no
+     * real id to use.
+     *
+     * Why the key had to move (and not the other side): the ownership key
+     * IS the package-filter key. `SchemaRegistry.getAllObjects(packageId)`
+     * matches `contributor.packageId`, so an object created through
+     * Studio's package workspace was invisible to its own package's filter
+     * until something re-registered it. The written contract in
+     * `objectql/src/registry.ts` (the `isTenantAuthored` header) already
+     * said the real id is the key and the sentinel is a save-path-only
+     * artefact; this makes the save path say the same thing.
+     *
+     * ── `_provenance: 'org'` IS STAMPED HERE, SERVER-SIDE ──
+     *
+     * On a COPY of the body, unconditionally — the request's own
+     * `_provenance` is never consulted, and never wins.
+     *
+     * That is load-bearing, not defensive coding. `applyProtection` (spec)
+     * stamps `_provenance: 'package'` whenever it is handed a package id
+     * and the body has not already answered, and the registry's artifact
+     * lookup reads exactly that key: a row registered under `app.<slug>`
+     * with package provenance IS a code artifact as far as
+     * `getArtifactItem` is concerned, so `isArtifactBacked` turns true and
+     * `saveMetaItem`'s overlay gate refuses the NEXT write to it with
+     * `not_overridable` — `object` declares `allowOrgOverride: false`.
+     * Moving the key without the stamp therefore re-creates cloud#970 (an
+     * app the user just built becomes silently un-editable) on the write
+     * path, one save later instead of one restart later. Measured, not
+     * assumed: see the reverse-verification limb in
+     * `objectql/src/protocol-writepath-object-ownership.test.ts`.
+     *
+     * Client-supplied provenance cannot be trusted here:
+     * `metadata-read-decorations.ts` deliberately does NOT strip
+     * `_provenance`, so a Studio GET → PUT round-trip echoes whatever the
+     * served document carried. Every row this method sees came out of a
+     * `sys_metadata` write, which is tenant-authored by definition
+     * (ADR-0010 `_provenance: 'org'`) — so the server states that fact
+     * rather than reading it back from the caller. Same sentence the boot
+     * re-hydration already writes for the same rows.
      */
-    private applyObjectRegistryMutation(request: { type: string; name: string; item?: any }): void {
+    private applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
         if (request.type !== 'object' && request.type !== 'objects') return;
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
-            this.engine.registry.registerObject(request.item as any, 'sys_metadata');
+            this.engine.registry.registerObject(
+                { ...(request.item as Record<string, unknown>), _provenance: 'org' } as any,
+                // `||`, not `??`: an empty-string binding is "no package", the
+                // same normalisation the boot branch applies to `package_id`.
+                request.packageId || 'sys_metadata',
+            );
         } catch (err: any) {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
@@ -7524,6 +7573,43 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             console.warn(`[Protocol] table sync failed for object '${name}': ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * [#4636] The package binding of a persisted overlay row, read from the
+     * row itself.
+     *
+     * The write paths that HAVE a `packageId` parameter (`saveMetaItem`, the
+     * publish promotion) pass the caller's binding straight through — the same
+     * value `SysMetadataRepository.put` stamps on the row, so key and row agree
+     * by construction. `rollbackMetaItem` has no such parameter: it addresses a
+     * row that already exists, and the row's own `package_id` is the only
+     * authoritative answer to "who owns this".
+     *
+     * Mirrors the repository's own `whereFor(ref, 'active', undefined)`: no
+     * package predicate (match any package), scoped by org + type + name +
+     * state. Deliberately NOT a `findOne` on the repository — `MetadataItem`
+     * projects the body, not the binding, and widening that shared type to
+     * carry one field for one caller is a contract change PR1 does not need.
+     *
+     * Not caught: a metadata-store outage here means the ownership key would be
+     * a guess, and every caller reads this BEFORE its write, so failing is
+     * still failing closed.
+     */
+    private async resolveOverlayPackageBinding(
+        type: string,
+        name: string,
+        organizationId: string | null,
+    ): Promise<string | null> {
+        const row = await this.engine.findOne('sys_metadata', {
+            where: {
+                type,
+                name,
+                organization_id: organizationId,
+                state: 'active',
+            },
+        });
+        return (row as { package_id?: string | null } | null)?.package_id ?? null;
     }
 
     /**
@@ -10137,6 +10223,19 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: orgId ?? 'env',
         } as Parameters<typeof repo.restoreVersion>[0];
+        // [#4636] The ownership key the write-through below needs, read from
+        // the ROW rather than from the request — `rollbackMetaItem` has no
+        // `packageId` parameter, and inventing one would let a caller re-key
+        // an object it does not own. `restoreVersion` → `put` preserves an
+        // existing non-null `package_id` on update, so the binding read here
+        // is the binding the restored row still carries.
+        //
+        // Read BEFORE the restore, deliberately: the row exists at this point
+        // and a read failure can still fail the whole rollback cleanly. Reading
+        // it afterwards would put a fallible query downstream of a write that
+        // already succeeded — the shape that ends in a `catch {}` swallowing a
+        // real outage (#4867).
+        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
@@ -10148,10 +10247,17 @@ export class ObjectStackProtocolImplementation implements
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
             // after someone lists the type.
+            // #4636 — …under the SAME ownership key `saveMetaItem` used. Left
+            // unpassed, an object row bound to `app.<slug>` re-registered here
+            // under the `'sys_metadata'` sentinel and `registerObject` threw
+            // `already owned by package "app.<slug>"` into the best-effort
+            // `console.warn` — a rollback that reported success while the
+            // registry kept serving the body it was supposed to revert.
             this.applyRegistryWriteThrough({
                 type: singularType,
                 name: request.name,
                 item: result.item.body,
+                packageId: rollbackPackageId,
             });
             return {
                 success: true,
