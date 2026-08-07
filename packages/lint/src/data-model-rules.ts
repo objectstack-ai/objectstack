@@ -380,16 +380,46 @@ export function lintDataModel(objects: any[]): LintIssue[] {
     const fields = fieldEntries(obj.fields);
 
     // R9 — object should have a derivable display/primary field.
+    //
+    // `nameField` is ADR-0079's canonical primary-title pointer, so an object
+    // that declares one HAS a title face. `titleFormat` is deliberately NOT one:
+    // the same ADR retires it (it is a render-only template the server can
+    // neither return nor query), `validate-record-title.ts` reports every
+    // declaration of it as `title-format-retired` and steers the author to
+    // `nameField`, and the shared spec predicate `objectTitleCompleteness`
+    // (packages/spec/src/data/display-name.ts) never reads it either.
+    //
+    // Reading `titleFormat` while ignoring `nameField` made this rule
+    // contradict its own package (#6108): an author who followed the platform's
+    // own migration advice earned a "records will display as raw IDs"
+    // suggestion, while one who kept the retired key did not. `primaryField`
+    // and the name-like derivation are unchanged.
+    //
+    // `primaryField` is kept as-is, but do NOT read it as evidence that the key
+    // is authorable: measured on 17.0.0-rc.5, `ObjectSchema.safeParse` reports
+    // `unrecognized_keys: ['primaryField']` and `ObjectSchema.create()` rejects
+    // it outright, so this limb can never be true for an object the spec
+    // accepts. Filed as #6326 (it is declared nowhere in `packages/spec`, yet
+    // this rule, `validate-semantic-roles` and the objectstack-data skill doc
+    // all treat it as a title face) — removing the limb is that issue's call,
+    // not a rider here. The MESSAGE, however, must not advertise it: telling an
+    // author to reach for `primaryField` earns them a hard schema rejection, so
+    // the diagnostic names only the surfaces they can actually declare.
     const hasNameField =
+      !!obj.nameField ||
       !!obj.primaryField ||
-      !!obj.titleFormat ||
       fields.some((f) => NAME_LIKE_FIELDS.includes(f.name));
     if (fields.length > 0 && !hasNameField) {
       issues.push({
         severity: 'suggestion',
         rule: 'object/missing-name-field',
-        message: `Object "${obj.name}" has no name/title field or primaryField — records will display as raw IDs`,
+        message: `Object "${obj.name}" has no nameField and no name-like field — records will display as raw IDs`,
         path: `${objPath}.fields`,
+        fix:
+          `Set \`nameField: '<field>'\` — ADR-0079's canonical primary-title pointer — to a stored ` +
+          `text/autonumber field, or to a formula field with \`returnType: 'text'\` for a composite ` +
+          `title. A \`titleFormat\` template does NOT count: it is retired (ADR-0079) and render-only, ` +
+          `so the server can neither return nor query the title it renders.`,
       });
     }
 

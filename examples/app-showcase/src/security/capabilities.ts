@@ -61,9 +61,11 @@ export const ExportDataCapability = defineCapability({
  * the ADR-0066 three-way separation, and the one a demo usually leaves out.
  *
  * Its whole job is to be required and never held: `showcase_zoo_perm_missing`
- * (and the AND-gate specimen next to it, see ui/actions/predicate-matrix.action.ts)
- * lists it in `requiredPermissions`, so those buttons must be absent for every
- * caller on every one of the four action surfaces. Without a capability nobody
+ * (and the AND-gate specimen next to it, see ui/actions/predicate-matrix.action.ts),
+ * plus the INLINE data-plane bulk def `purge_restricted`
+ * (ui/views/project.view.ts, #6257), list it in `requiredPermissions`, so those
+ * buttons must be absent for every caller on every one of the four action
+ * surfaces. Without a capability nobody
  * holds there is nothing to notice when a surface stops applying the gate —
  * which is exactly how the selection bar shipped ignoring `requiredPermissions`
  * outright (objectui#3492) while three other surfaces honoured it.

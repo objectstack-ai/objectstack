@@ -1,38 +1,51 @@
 # Lychee Link Checker Configuration
-# This configuration enables checking of internal Fumadocs links by remapping
-# Next.js routes to actual file system paths
+#
+# Scope (#6028, maintainer ruling 2026-08-07): this gate checks REPO-INTERNAL
+# links only, deterministically, with zero external-network dependency.
+# `--offline`, `--root-dir` and `--fallback-extensions` are passed on the
+# invocation in .github/workflows/check-links.yml; that file also records why
+# `--offline` is asserted there rather than as a config key here.
+#
+# ⛔ Two keys in this file were HARD parse errors (exit 3 -- the gate dies
+# without checking anything) on the lychee the action pins, and stayed
+# undetected for the six months the gate was dormant. Do not reintroduce them:
+#   - `follow_redirects` is not a valid key at all;
+#   - `include_fragments` is an enum, not a boolean.
+# Whenever this file changes, run lychee against it locally before pushing --
+# a config typo here disables the gate rather than failing it loudly.
 
-# Maximum number of concurrent requests
+# Maximum number of concurrent requests.
+# ⚠️ Inert under `--offline` (no requests are made); kept for a future online lane.
 max_concurrency = 10
 
 # Accept status codes (2xx = success)
+# ⚠️ Inert under `--offline`.
 accept = [200, 204, 206, 301, 302, 307, 308, 429]
 
 # Timeout for requests (in seconds)
+# ⚠️ Inert under `--offline`.
 timeout = 30
 
 # Retry failed requests
+# ⚠️ Inert under `--offline`.
 max_retries = 2
 
-# Follow redirects
-follow_redirects = true
-
-# Check anchors/fragments in links
-include_fragments = false
+# Check anchors/fragments in links.
+# ⛔ Not a boolean on the pinned lychee (0.24.2) -- it takes one of
+# none | anchor-only | text-only | full, and a bare `false` is a HARD parse
+# error. "none" preserves the original `false` semantics: fragments unchecked.
+include_fragments = "none"
 
 # Verbose output
 # Accepts log level: "error", "warn", "info", "debug", "trace"
 verbose = "info"
 
-# Remap internal documentation links to actual file paths
-# Maps /docs/* routes to content/docs/*.mdx or content/docs/*.md files
-# Lychee remap uses simple "pattern" = "replacement" syntax
-remap = [
-    # Primary remapping for .mdx files
-    "^/docs/(.*)$ content/docs/$1.mdx",
-    # Fallback for .md files  
-    "^/docs/(.*)$ content/docs/$1.md"
-]
+# ⛔ No `remap` block. There used to be one claiming to map `/docs/*` routes onto
+# content/docs/*.mdx, and it never fired even once: a root-relative link fails
+# URI construction before remapping is reached. Route resolution is now done by
+# `--root-dir <workspace>/content` + `--fallback-extensions mdx,md`, which is
+# both the supported mechanism and one that demonstrably runs -- 1286 previously
+# unresolvable root-relative links are checked as a result.
 
 # Exclude file paths matching these regex patterns
 exclude_path = [
@@ -41,31 +54,31 @@ exclude_path = [
     "(^|.*/)meta\\.cn\\.json$"
 ]
 
-# Additional exclude patterns for internal paths
+# Additional exclude patterns.
+# ⚠️ Every entry below is inert under `--offline`, which already excludes all
+# non-file schemes; they are kept so a future online lane inherits the intent.
+#
+# ⛔ Do NOT add a `file://...content/docs...` entry here. The old one
+# ("Fumadocs relative links are handled by the framework at runtime") matched
+# nothing, which is the only reason the gate had any coverage left -- had it
+# matched as written it would have excluded the entire scan surface, i.e. the
+# exact links this gate exists to check.
 exclude = [
     # Local development
     "http://localhost*",
     "http://127.0.0.1*",
-    
+
     # Example/placeholder links
     "https://example.com*",
     "http://example.com*",
-    
+
     # Social media (prevents anti-bot false positives)
     "https://twitter.com*",
     "https://x.com*",
-    
+
     # Email links
-    "mailto:*",
-    
-    # Fumadocs relative links (handled by framework at runtime)
-    # These are links like ./agent that resolve to .mdx files
-    "file://**/content/docs/**"
+    "mailto:*"
 ]
 
 # Cache results to speed up subsequent runs
 cache = true
-
-# Specify schemes to check (include file:// for local files)
-# Leaving this unset allows all schemes including file://
-# scheme = ["https", "http", "file"]

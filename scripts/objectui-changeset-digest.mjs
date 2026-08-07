@@ -43,12 +43,71 @@
 // added over the range: package names say whether it releases, and the declared
 // level (major/minor/patch) IS the bump — nothing is inferred from a subject
 // line any more. Declaration over inference, per AGENTS.md Prime Directive #12.
+//
+// WHY "BREAKING" IS BROADER THAN THE DECLARED LEVEL (#6099)
+// --------------------------------------------------------
+// #4731 got breaking changes back INTO the list. #6099 is the other half: they
+// get in, but they could not be RECOGNISED. The criterion used to be `level ===
+// 'major'`, and objectui never declares `major` inside a launch window — the
+// same convention this repo's `check-changeset-no-major.mjs` enforces ships a
+// breaking change as `minor` plus a prose annotation the author writes. Measured
+// on the range `f5bc4c78be76..f995a452d2ca`: 64 releasing changesets, 14 `minor`
+// / 50 `patch` / **0 `major`**. So the count was structurally pinned at 0 and the
+// `⚠️` hint could never fire, while unmarked breaking migrations flowed into
+// `@objectstack/console`'s CHANGELOG input layer.
+//
+// The criterion is therefore "declared level `major` OR the AUTHOR annotated the
+// change as breaking in the changeset body" — see `hasBreakingAnnotation`. Note
+// what it still refuses to read: the commit SUBJECT. A conventional-commit `!`
+// is the tool's classification of a commit, not the author's statement about the
+// release, and re-admitting subject parsing is precisely the inference #4731
+// removed. Reading the body keeps this inside "declaration": it is the author's
+// own prose, in the same file that already declares the level. It also measures
+// strictly better than `!` would — over that same range `!` marks 2 commits,
+// while the authors' own annotations mark 4, including `app.homePageId` being
+// retired (a `feat(deps):` subject with no `!`).
+//
+// This criterion changes the ANNOTATION and the COUNT only. The collected set is
+// untouched: nothing is admitted or dropped because of it.
+//
+// WHY THE FALLBACK IS QUIET, AND WHY IT STILL SAYS SO (#6175)
+// ----------------------------------------------------------
+// `readAt` reads each changeset at `to` and falls back to the commit that ADDED
+// it, because a changeset consumed by a release INSIDE the range is gone at `to`
+// (the reason `collectAddedChangesets` walks the log instead of diffing the
+// endpoints). The fallback works, and the artifact it produces is complete.
+//
+// It used to ANNOUNCE ITSELF AS A FAILURE anyway. `execFileSync` sends the
+// child's stderr to ours unless `stdio` says otherwise, so the first `git show`
+// printed git's own `fatal: path … does not exist in …` before `catch` could run
+// — one line per changeset, then one line saying everything succeeded. Measured
+// on the real pin bump `f995a452d2ca..7dfbeb704e1e` (#6159 / PR #6173): 9
+// `fatal:` lines, 9 complete entries, exit 0.
+//
+// That is the MIRROR of the rule this file already enforces. #4731 wrote "a
+// degraded list and a complete one must never look alike"; here a COMPLETE list
+// looked like a failure. The two failure modes cost the same, because the next
+// reader's first instinct is "the digest is broken, write the changeset by hand
+// with `--no-changeset`" — and that hand-written path really does drop all 9
+// releasing entries. Noise that points at the wrong remedy is not merely noise.
+//
+// So the first attempt CAPTURES its stderr instead of inheriting it, and the
+// fallback is reported once, as a fact, beside the accounting line
+// (`absentAtTo`). Two things this deliberately does not do:
+//
+//   * It does not go silent. Silence would trade a misleading line for no line,
+//     and "this range crossed a release" is worth exactly one sentence — the
+//     same reason the cap and the degraded list announce themselves (#4731).
+//   * It does not mute FAILURE. When BOTH reads fail nothing was read and the
+//     entry would vanish, so both captured diagnostics are re-emitted, named by
+//     attempt, and the error still propagates. Quiet is earned by the fallback
+//     that worked; it is never extended to the one that did not.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -58,24 +117,38 @@ export const DEFAULT_MAX_ENTRIES = 100;
 
 const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
 
-/** @param {string} cwd @param {string[]} args */
-function git(cwd, args) {
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @param {{ captureStderr?: boolean }} [options] `captureStderr` routes the
+ *   child's stderr into the thrown error instead of ours. Leave it OFF by
+ *   default: an unset `stdio` inherits our stderr (`execFileSync`'s documented
+ *   behaviour), which is what a call whose failure is a real failure should do.
+ *   Turn it on only where a failure is EXPECTED and retried — `readAt` (#6175).
+ */
+function git(cwd, args, { captureStderr = false } = {}) {
   return execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    ...(captureStderr ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
   });
 }
 
 /**
- * Parse a changeset file: the frontmatter package→level map plus the first
- * paragraph of the summary.
+ * Parse a changeset file: the frontmatter package→level map, the first
+ * paragraph of the summary, and the FULL body after the frontmatter.
  *
  * An EMPTY frontmatter block (`---\n---`) is changesets' own "release-nothing"
  * marker — the file exists so the repo's own gate is satisfied, but it releases
  * no package. That is precisely the signal the old type filter could not see.
  *
+ * `summary` stays the first paragraph — that is what an entry line renders. But
+ * a breaking annotation is not reliably in the first paragraph (#6099: one of
+ * the two live specimens puts it in the last), so `body` carries the whole text
+ * for `hasBreakingAnnotation` to scan.
+ *
  * @param {string} text
- * @returns {{ packages: Record<string, string>, summary: string }}
+ * @returns {{ packages: Record<string, string>, summary: string, body: string }}
  */
 export function parseChangeset(text) {
   const lines = text.split(/\r?\n/);
@@ -93,13 +166,18 @@ export function parseChangeset(text) {
       if (m && LEVEL_RANK[m[2].toLowerCase()]) packages[m[1].trim()] = m[2].toLowerCase();
     }
   }
-  const body = [];
   while (i < lines.length && !lines[i].trim()) i++;
+  const body = lines.slice(i).join('\n');
+  const firstParagraph = [];
   for (; i < lines.length; i++) {
     if (!lines[i].trim()) break;
-    body.push(lines[i].trim());
+    firstParagraph.push(lines[i].trim());
   }
-  return { packages, summary: body.join(' ').replace(/\s+/g, ' ').trim() };
+  return {
+    packages,
+    summary: firstParagraph.join(' ').replace(/\s+/g, ' ').trim(),
+    body: body.trimEnd(),
+  };
 }
 
 /** Highest declared level in a package→level map, or null when release-nothing. */
@@ -115,6 +193,97 @@ export function highestLevel(packages) {
 export function clampSummary(summary, limit = 180) {
   if (summary.length <= limit) return summary;
   return `${summary.slice(0, limit - 1).trimEnd()}…`;
+}
+
+/**
+ * An emphasis run whose FIRST word is "breaking": `**BREAKING**`,
+ * `**BREAKING (v17)**`, `__Breaking change__`.
+ *
+ * Scanned anywhere in the body, because bolding a word is a deliberate act —
+ * nobody emphasises "breaking" by accident. Requiring it to OPEN the run is what
+ * keeps an emphasised ordinary sentence that happens to contain the word (real
+ * shape: `**Removed — … is technically breaking for anyone who wrote one**`)
+ * from matching, and the bounded, `*`/`_`-free tail keeps a run from swallowing
+ * a whole paragraph.
+ */
+const BREAKING_EMPHASIS_LABEL = /(\*\*|__)[ \t]*breaking\b[^*_\n]{0,48}\1/i;
+
+/** The same label, but required to OPEN the text — used to avoid restating it. */
+const OPENS_WITH_BREAKING_LABEL = /^[ \t]*(?:\*\*|__)[ \t]*breaking\b/i;
+
+/**
+ * A block (paragraph, heading or top-level bullet) that OPENS with the word
+ * "breaking" — `## Breaking note …`, `Breaking for anyone reading \`node.ui\` …`,
+ * `BREAKING CHANGE: …` (the conventional-commit footer needs no separate rule;
+ * it opens a block by construction).
+ */
+const BREAKING_BLOCK_OPENER = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*\*|__|\*|_)?[ \t]*breaking\b/i;
+
+/**
+ * Did the AUTHOR annotate this change as breaking, in the changeset body?
+ *
+ * THE PRECISION RULE IS POSITIONAL, NOT LEXICAL. "breaking" is an ordinary
+ * English word that appears in changeset prose all the time; what makes an
+ * occurrence a *declaration* is where the author put it — in an emphasis label,
+ * or at the head of a block. It is never enough that the word merely occurs.
+ *
+ * Measured over `f5bc4c78be76..f995a452d2ca` (65 changesets, 5 mention the word):
+ *
+ *   FLAGGED   `042e09d77` `**BREAKING (v17)** — field widgets receive …`  (label)
+ *   FLAGGED   `6e794a19e` `Breaking for anyone reading \`node.ui\` …`      (block, LAST paragraph)
+ *   FLAGGED   `8ec406728` `## Breaking note — read before tracking …`     (heading)
+ *   FLAGGED   `d22ae31ce` `Breaking semantics, in FROM → TO form:`        (block)
+ *   NOT       `9e9e9a92f` `… is technically breaking for anyone who wrote one, but only in
+ *                          the sense that TypeScript now reports what was already true`
+ *
+ * Two negatives fall out of the positional anchor with no lexical guard, which
+ * is why there is none: a hedged mid-sentence mention is not at a block head,
+ * and a negated form ("non-breaking", "not breaking", "no breaking changes" —
+ * `d22ae31ce` carries the second) does not START with the word, so the anchor
+ * rejects it. Same for words that merely CONTAIN it ("groundbreaking").
+ *
+ * Deliberately line-INSENSITIVE: block-initial, never line-initial. Changeset
+ * prose is hard-wrapped, so any sentence containing "breaking" can land it first
+ * on a line by accident — but only the author's own paragraphing puts it first
+ * in a block.
+ *
+ * @param {string} body full changeset text after the frontmatter
+ */
+export function hasBreakingAnnotation(body) {
+  if (!body) return false;
+  if (BREAKING_EMPHASIS_LABEL.test(body)) return true;
+  const lines = body.split(/\r?\n/);
+  let atBlockStart = true;
+  for (const line of lines) {
+    if (!line.trim()) {
+      atBlockStart = true;
+      continue;
+    }
+    // A heading opens a block whether or not a blank line precedes it.
+    if (atBlockStart || /^[ \t]*#{1,6}[ \t]+/.test(line)) {
+      if (BREAKING_BLOCK_OPENER.test(line)) return true;
+    }
+    atBlockStart = false;
+  }
+  return false;
+}
+
+/**
+ * The uniform marker the digest stamps on a breaking entry, so the compiled
+ * release record shows the class without a human having to rescue it by hand
+ * (#6110 did exactly that rescue, which is what #6099 records).
+ *
+ * Uniform, and deliberately WITHOUT a version tag: the digest cannot derive one,
+ * and inventing "(v17)" would be the script asserting something no input says.
+ * Where the author wrote their own richer label it survives verbatim instead —
+ * `markBreaking` never restates a summary that already opens with one.
+ */
+export const BREAKING_MARKER = '**BREAKING**';
+
+/** Prefix an entry's text with `BREAKING_MARKER` unless it already carries one. */
+export function markBreaking(text) {
+  if (OPENS_WITH_BREAKING_LABEL.test(text)) return text;
+  return `${BREAKING_MARKER} — ${text}`;
 }
 
 /**
@@ -182,12 +351,54 @@ export function collectAddedChangesets(objectuiRoot, from, to) {
   };
 }
 
-/** Read a changeset's content at `to`, falling back to the commit that added it. */
-function readAt(objectuiRoot, to, sha, path) {
+/** A failed `execFileSync` rendered as the child's own diagnostic, indented. */
+function gitDiagnostic(err) {
+  const captured = typeof err?.stderr === 'string' ? err.stderr : '';
+  const text = captured.trim() || err?.message || String(err);
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+/**
+ * Read a changeset's content at `to`, falling back to the commit that added it.
+ *
+ * `fellBack` is the caller's only handle on "this range crossed a release".
+ * git's own `fatal:` used to be that handle by accident — which made a complete
+ * result read as a failed one, the defect #6175 records; see the header note.
+ *
+ * Exported for the self-test: the both-reads-failed branch cannot be reached
+ * through `classifyRange`, whose `sha` always comes from `--diff-filter=A` and
+ * therefore always has the path. An error path no test can enter is an error
+ * path that quietly rots into silence, which is the one outcome #6175 forbids.
+ *
+ * @returns {{ text: string, fellBack: boolean }}
+ */
+export function readAt(objectuiRoot, to, sha, path) {
   try {
-    return git(objectuiRoot, ['show', `${to}:${path}`]);
-  } catch {
-    return git(objectuiRoot, ['show', `${sha}:${path}`]);
+    return {
+      text: git(objectuiRoot, ['show', `${to}:${path}`], { captureStderr: true }),
+      fellBack: false,
+    };
+  } catch (atTo) {
+    try {
+      return {
+        text: git(objectuiRoot, ['show', `${sha}:${path}`], { captureStderr: true }),
+        fellBack: true,
+      };
+    } catch (atSha) {
+      // BOTH reads failed: nothing was read, and this entry is about to be lost
+      // from the release record. Say so with everything git told us, twice over.
+      console.error(
+        `✗ objectui-changeset-digest: cannot read ${path} — neither at \`to\` nor at the commit that added it.`,
+      );
+      console.error(`  at \`to\` (${to}):`);
+      console.error(gitDiagnostic(atTo));
+      console.error(`  at the commit that added it (${sha}):`);
+      console.error(gitDiagnostic(atSha));
+      throw atSha;
+    }
   }
 }
 
@@ -196,10 +407,24 @@ function readAt(objectuiRoot, to, sha, path) {
  *
  * Mirrors `scripts/check-changeset-no-major.mjs`: outside an RC window a
  * `major` on any package promotes the WHOLE lockstep group, and that gate
- * rejects it. objectui marks its breaking symbol renames `major` routinely, so
- * a mechanical `major` here would make every ordinary pin refresh red. Inside
- * pre-mode a `major` only ever yields `X.0.0-<tag>.N`, which is what an RC
- * window is for — so the level passes through untouched.
+ * rejects it. Inside pre-mode a `major` only ever yields `X.0.0-<tag>.N`, which
+ * is what an RC window is for — so the level passes through untouched.
+ *
+ * WHAT OBJECTUI ACTUALLY DECLARES (corrected #6099). This comment used to assert
+ * that "objectui marks its breaking symbol renames `major` routinely", and the
+ * `downgradedMajor` path below was written as the ROUTINE case that assertion
+ * implies. Measured, the opposite holds: over `f5bc4c78be76..f995a452d2ca`,
+ * **0 of 64** releasing changesets declared `major` — including both commits
+ * whose subject carries a conventional-commit `!`. objectui observes the same
+ * launch-window convention this repo does, and ships a breaking change as
+ * `minor` plus an annotation the author writes in the changeset body.
+ *
+ * So `downgradedMajor` is a SAFETY NET for a level not observed in practice, not
+ * the common path — it stays because it is still the right answer if a `major`
+ * ever does arrive (an RC window closing upstream would do it), but nothing may
+ * be built on the premise that it fires. In particular the breaking COUNT must
+ * not be derived from it: that was the #6099 defect, and `hasBreakingAnnotation`
+ * is what actually carries the class now.
  */
 export function inPreMode(frameworkRoot) {
   try {
@@ -225,7 +450,11 @@ export function inPreMode(frameworkRoot) {
  * Nothing here reads a commit type. Grouping output BY type is presentation and
  * belongs to the caller; it must never become a filter again.
  *
- * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, totalCommits: number }}
+ * `absentAtTo` counts the changesets that were gone at `to` and had to be read
+ * from the commit that added them — the readable form of what used to arrive as
+ * a screenful of git `fatal:` lines (#6175).
+ *
+ * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number }}
  */
 export function classifyRange({ objectuiRoot, from, to }) {
   const { entries, commits, totalCommits, commitsWithChangesetShas } = collectAddedChangesets(
@@ -236,18 +465,27 @@ export function classifyRange({ objectuiRoot, from, to }) {
 
   const releasing = [];
   const releaseNothingEntries = [];
+  let absentAtTo = 0;
   for (const entry of entries) {
-    const { packages, summary } = parseChangeset(readAt(objectuiRoot, to, entry.sha, entry.path));
+    const read = readAt(objectuiRoot, to, entry.sha, entry.path);
+    if (read.fellBack) absentAtTo++;
+    const { packages, summary, body } = parseChangeset(read.text);
     const level = highestLevel(packages);
     if (!level) {
       releaseNothingEntries.push({ ...entry, summary: summary || entry.subject });
       continue;
     }
+    // The breaking verdict lives HERE, in the single shared implementation, for
+    // the same reason the releasing verdict does: two copies would drift, and
+    // the first thing they would drift on is this exact class (#4731 / #6099).
+    const annotated = hasBreakingAnnotation(body);
     releasing.push({
       ...entry,
       level,
       packages: Object.keys(packages),
       summary: summary || entry.subject,
+      breaking: level === 'major' || annotated,
+      breakingSource: level === 'major' ? 'declared-major' : annotated ? 'annotation' : null,
     });
   }
 
@@ -265,6 +503,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
     releaseNothing: releaseNothingEntries.length,
     noChangeset: noChangesetCommits.length,
     changesetsAdded: entries.length,
+    absentAtTo,
     totalCommits,
   };
 }
@@ -272,7 +511,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
 /**
  * Build the digest for a range.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, body: string }}
  */
 export function buildDigest({
   objectuiRoot,
@@ -282,11 +521,12 @@ export function buildDigest({
   max = DEFAULT_MAX_ENTRIES,
   bumpOverride = '',
 }) {
-  const { releasing, releaseNothing, noChangeset, changesetsAdded, totalCommits } = classifyRange({
-    objectuiRoot,
-    from,
-    to,
-  });
+  const { releasing, releaseNothing, noChangeset, changesetsAdded, absentAtTo, totalCommits } =
+    classifyRange({
+      objectuiRoot,
+      from,
+      to,
+    });
 
   const declaredLevel = releasing.length
     ? releasing.reduce(
@@ -294,7 +534,12 @@ export function buildDigest({
         'patch',
       )
     : null;
-  const breaking = releasing.filter((r) => r.level === 'major').length;
+  // #6099: declared `major` OR the author's own breaking annotation. Level alone
+  // pinned this at 0 for every launch-window range objectui has ever shipped.
+  const breakingEntries = releasing.filter((r) => r.breaking);
+  const breaking = breakingEntries.length;
+  const breakingByLevel = breakingEntries.filter((r) => r.breakingSource === 'declared-major').length;
+  const breakingByAnnotation = breaking - breakingByLevel;
 
   let bump = bumpOverride || declaredLevel || 'patch';
   let downgradedMajor = false;
@@ -308,9 +553,11 @@ export function buildDigest({
 
   const lines = [];
   for (const r of shown) {
-    lines.push(
-      `- **${r.level}** — ${clampSummary(r.summary)} (objectui \`${r.sha.slice(0, 9)}\`)`,
-    );
+    // Mark AFTER clamping, so the marker can never be the thing truncation eats
+    // — a breaking entry silently losing its marker is the #6099 failure again,
+    // one layer down. The clamp budget stays spent on the author's own text.
+    const text = r.breaking ? markBreaking(clampSummary(r.summary)) : clampSummary(r.summary);
+    lines.push(`- **${r.level}** — ${text} (objectui \`${r.sha.slice(0, 9)}\`)`);
   }
   if (hidden > 0) {
     // A cap that fires SAYS SO, with the real count. Silent truncation and no
@@ -343,11 +590,25 @@ export function buildDigest({
 
   const notes = [];
   if (breaking > 0) {
+    // The hint must NAME its source. Saying "declare a **major** bump" when the
+    // source is a body annotation would be false on every launch-window range,
+    // which is every range objectui has shipped so far (#6099).
+    const byLevel = `${breakingByLevel} by a declared \`major\` level`;
+    const byAnnotation = `${breakingByAnnotation} by the author's own breaking annotation in the changeset body`;
+    const source =
+      breakingByLevel && breakingByAnnotation
+        ? `${byLevel}, ${byAnnotation}`
+        : breakingByLevel
+          ? byLevel
+          : `${byAnnotation} — objectui declares no \`major\` inside a launch window ` +
+            `(\`scripts/check-changeset-no-major.mjs\`)`;
     notes.push(
-      `⚠️ ${breaking} of these declare a **major** (breaking) bump in objectui` +
+      `⚠️ ${breaking} of these ${breaking === 1 ? 'carries' : 'carry'} a breaking change: ${source}. ` +
+        `Each is marked ${BREAKING_MARKER} in the list above — read them before compiling the release record` +
         (downgradedMajor
-          ? `; recorded here as \`minor\` because the launch-window convention ships breaking as minor ` +
-            `(\`scripts/check-changeset-no-major.mjs\`) — the breaking entries are listed above, unabridged.`
+          ? `. The declared \`major\` is recorded here as \`minor\` because the launch-window convention ` +
+            `ships breaking as minor (\`scripts/check-changeset-no-major.mjs\`) — the breaking entries are ` +
+            `listed above, unabridged.`
           : '.'),
     );
   }
@@ -358,9 +619,13 @@ export function buildDigest({
     bump,
     declaredLevel,
     breaking,
+    breakingByLevel,
+    breakingByAnnotation,
     releasing,
     releaseNothing,
     noChangeset,
+    changesetsAdded,
+    absentAtTo,
     totalCommits,
     downgradedMajor,
     body,
@@ -433,10 +698,28 @@ function main(argv) {
     `objectui range: \`${rangeLabel}\`\n`;
 
   console.error(
-    `→ ${digest.releasing.length} releasing changeset(s), ${digest.breaking} breaking, ` +
+    `→ ${digest.releasing.length} releasing changeset(s), ` +
+      `${digest.breaking} breaking (${digest.breakingByLevel} declared major, ` +
+      `${digest.breakingByAnnotation} annotated), ` +
       `${digest.releaseNothing} release-nothing, ${digest.noChangeset} commit(s) without a changeset` +
       (digest.downgradedMajor ? ' — declared major recorded as minor (launch window)' : ''),
   );
+
+  // #6175: the one sentence that replaces the screenful of git `fatal:` lines.
+  // It lands HERE, beside the accounting line on stderr, and NOT in the
+  // changeset body: the body records what the range released, and how the tool
+  // had to read a file is not a fact about the release. The reader who needs it
+  // is the operator watching this run — the same reader the `fatal:` lines used
+  // to mislead. Printed only when it fires, so a range that crossed no release
+  // gains no new line (silence here means "nothing to explain", never "nothing
+  // happened" — the absence itself is not load-bearing).
+  if (digest.absentAtTo > 0) {
+    console.error(
+      `→ ${digest.absentAtTo} of ${digest.changesetsAdded} changeset(s) added in this range ` +
+        `no longer exist at ${short} — a release consumes the changesets it ships; ` +
+        `each was read from the commit that added it, so the account above is complete.`,
+    );
+  }
 
   if (out) {
     mkdirSync(dirname(out), { recursive: true });
@@ -563,7 +846,16 @@ function selfTest() {
     );
     check('the accounting states the omissions', digest.body.includes('omitted:'));
     check('the declared level drives the bump (major declared)', digest.declaredLevel === 'major');
-    check('breaking count is surfaced in the body', digest.body.includes('⚠️ 1 of these declare'));
+    check(
+      'breaking count is surfaced in the body, NAMING its source',
+      digest.body.includes('⚠️ 1 of these carries a breaking change: 1 by a declared `major` level'),
+      digest.body,
+    );
+    check(
+      'a declared-major entry is marked in the list too',
+      digest.body.includes('- **major** — **BREAKING** — Remove `PageNodeRenderer`'),
+      digest.body,
+    );
     check('in RC pre-mode a declared major stays major', digest.bump === 'major');
 
     const plain = buildDigest({
@@ -597,6 +889,213 @@ function selfTest() {
       'a cap that fires ANNOUNCES itself with the real count',
       capped.body.includes('…and 2 more releasing changesets'),
       capped.body,
+    );
+
+    // --- #6099: the `minor` + prose-annotation family ----------------------
+    // This is the form objectui ACTUALLY ships breaking changes in (0 of 64
+    // declared `major` over the live range), so it needs its own repo: the
+    // #4731 fixtures above pin exact counts and must not shift under it.
+    //
+    // Both recognised shapes are here, because the two live specimens differ in
+    // WHERE the author put the annotation — one leads with it, one buries it in
+    // the last paragraph — and a criterion that reads only the first paragraph
+    // (which is all `summary` is) catches the first and misses the second.
+    const ui2 = join(tmp, 'objectui-annotated');
+    mkdirSync(join(ui2, '.changeset'), { recursive: true });
+    const g2 = (...args) => git(ui2, args);
+    g2('init', '-q', '-b', 'main');
+    g2('config', 'user.email', 'selftest@objectstack.ai');
+    g2('config', 'user.name', 'self test');
+    g2('config', 'commit.gpgsign', 'false');
+    const commit2 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui2, path)), { recursive: true });
+        writeFileSync(join(ui2, path), content);
+      }
+      g2('add', '-A');
+      g2('commit', '-q', '-m', subject);
+      return g2('rev-parse', 'HEAD').trim();
+    };
+
+    const base2 = commit2('chore: base', { 'README.md': 'base\n' });
+
+    // (A) RECOGNISED — the annotation LEADS, as an emphasis label the author
+    //     spelled with their own version tag. Mirrors objectui `042e09d77`.
+    commit2('refactor(fields)!: converge the widget metadata carrier to `field` (#3233)', {
+      '.changeset/field-widget-single-metadata-carrier.md':
+        '---\n"@object-ui/fields": minor\n---\n\n' +
+        '**BREAKING (v17)** — field widgets receive their metadata on ONE key, `field`.\n' +
+        '`schema` is removed from the widget contract (objectui#3233).\n\n' +
+        '## What changed\n\n' +
+        '`schema` was a second carrier for what `field` already means.\n',
+      'src/fields.ts': 'a\n',
+    });
+    // (B) RECOGNISED — the annotation is in the LAST paragraph, opening a block
+    //     in plain prose. Mirrors objectui `6e794a19e`, the specimen whose entry
+    //     #6110 had to rescue by hand.
+    commit2('fix(app-shell)!: converge flow node geometry to spec `FlowNode.position` (#3172)', {
+      '.changeset/flow-node-geometry-is-spec-position.md':
+        '---\n"@object-ui/app-shell": minor\n---\n\n' +
+        "The flow designer writes node geometry as the spec's `FlowNode.position`, not\n" +
+        'its own `ui: { x, y }` (objectui#3172).\n\n' +
+        'FROM: dragging, adding-at-a-point and insert-on-edge each wrote `node.ui`.\n' +
+        'TO: all three write `position: { x, y }`.\n\n' +
+        'Breaking for anyone reading `node.ui` off a flow draft: after the first edit\n' +
+        'the key is gone and the coordinates live under `node.position`.\n',
+      'src/flow.ts': 'b\n',
+    });
+    // (C) RECOGNISED — the annotation is a HEADING. Mirrors objectui `8ec406728`,
+    //     which the conventional-commit `!` convention does NOT mark.
+    commit2('fix(app-shell): entitlement context reads `error.details.*` only (#3329)', {
+      '.changeset/entitlement-error-context-reads-details.md':
+        '---\n"@object-ui/app-shell": minor\n---\n\n' +
+        'The environment entitlement dialog now reads its context from\n' +
+        '`error.details.*` — the single declared location (objectui#3329).\n\n' +
+        '## Breaking note — read before tracking objectui `main` directly\n\n' +
+        'This is a wire-shape change with no consumer-side fallback.\n',
+      'src/entitlement.ts': 'c\n',
+    });
+    // (D) NOT RECOGNISED — the word appears MID-SENTENCE inside an emphasised
+    //     paragraph, hedged and then discounted. Mirrors objectui `9e9e9a92f`,
+    //     the real near-miss: an ordinary entry that merely discusses breakage.
+    commit2('fix(types): DrillDownConfig declares only keys a renderer reads (#3354)', {
+      '.changeset/drilldown-config-declared-equals-delivered.md':
+        '---\n"@object-ui/types": minor\n---\n\n' +
+        '`DrillDownConfig` now declares only keys a renderer reads (objectui#3354).\n\n' +
+        '**Removed — two keys no renderer has ever read.** Removing a declared key from\n' +
+        'a published interface is technically breaking for anyone who wrote one, but\n' +
+        'only in the sense that TypeScript now reports what was already true at\n' +
+        'runtime: the key did nothing.\n',
+      'src/types.ts': 'd\n',
+    });
+    // (E) NOT RECOGNISED — negated forms, and a word that merely CONTAINS it.
+    //     "Fixes that are not breaking…" is verbatim objectui `d22ae31ce`.
+    commit2('chore(deps): follow-up cleanups (#3287)', {
+      '.changeset/rc2-followup-cleanups.md':
+        '---\n"@object-ui/core": patch\n---\n\n' +
+        'Fixes that are not breaking, but were only found because rc.2 stopped being\n' +
+        'lenient — each had been passing vacuously.\n\n' +
+        'Non-breaking cleanup throughout; this groundbreaking refactor changes no\n' +
+        'contract.\n',
+      'src/core.ts': 'e\n',
+    });
+    // (F) NOT RECOGNISED — hard wrapping lands the word first on a LINE, still
+    //     mid-sentence. This is why the anchor is block-initial, not line-initial:
+    //     an author's paragraphing is a choice, a wrap column is not.
+    commit2('fix(fields): the record picker sends the authored option value (#3336)', {
+      '.changeset/record-picker-authored-option-value.md':
+        '---\n"@object-ui/fields": patch\n---\n\n' +
+        'The record picker sends the AUTHORED value of a picked `select` option.\n\n' +
+        'Radix `Select` speaks strings, so a numeric option value used to arrive as\n' +
+        'its stringified form. Nothing about the change is\n' +
+        'breaking for existing authors — the stored wire shape is unchanged.\n',
+      'src/picker.ts': 'f\n',
+    });
+    const head2 = g2('rev-parse', 'HEAD').trim();
+
+    const annotated = buildDigest({
+      objectuiRoot: ui2,
+      frameworkRoot: fwPlain,
+      from: base2,
+      to: head2,
+    });
+
+    check(
+      '#6099 the whole family is collected, breaking or not (6 releasing)',
+      annotated.releasing.length === 6,
+      `got ${annotated.releasing.length}`,
+    );
+    check(
+      '#6099 no `major` is declared anywhere — the form objectui actually ships',
+      annotated.declaredLevel === 'minor' && annotated.breakingByLevel === 0,
+      `declaredLevel=${annotated.declaredLevel} byLevel=${annotated.breakingByLevel}`,
+    );
+    check(
+      '#6099 a `minor` whose FIRST paragraph carries the annotation is recognised',
+      annotated.releasing.some(
+        (r) => r.path.includes('field-widget') && r.breaking && r.breakingSource === 'annotation',
+      ),
+    );
+    check(
+      '#6099 a `minor` whose LAST paragraph carries the annotation is recognised',
+      annotated.releasing.some(
+        (r) => r.path.includes('flow-node') && r.breaking && r.breakingSource === 'annotation',
+      ),
+    );
+    check(
+      '#6099 a `minor` annotated by a HEADING is recognised',
+      annotated.releasing.some((r) => r.path.includes('entitlement') && r.breaking),
+    );
+    check(
+      '#6099 a hedged MID-SENTENCE "technically breaking" is NOT flagged',
+      annotated.releasing.some((r) => r.path.includes('drilldown') && !r.breaking),
+    );
+    check(
+      '#6099 "not breaking" / "Non-breaking" / "groundbreaking" are NOT flagged',
+      annotated.releasing.some((r) => r.path.includes('rc2-followup') && !r.breaking),
+    );
+    check(
+      '#6099 a wrapped line STARTING with the word mid-sentence is NOT flagged',
+      annotated.releasing.some((r) => r.path.includes('record-picker') && !r.breaking),
+    );
+    check(
+      '#6099 exactly the three annotated entries are flagged, no more',
+      annotated.breaking === 3 && annotated.breakingByAnnotation === 3,
+      `breaking=${annotated.breaking} byAnnotation=${annotated.breakingByAnnotation}`,
+    );
+    check(
+      "#6099 the author's own label survives verbatim — never restated",
+      // The `r.breaking` clause is load-bearing: the `(v17)` label is the
+      // AUTHOR's text, so the two body clauses alone would pass whether or not
+      // this entry is flagged at all — green for an empty reason.
+      annotated.releasing.find((r) => r.path.includes('field-widget'))?.breaking === true &&
+        annotated.body.includes('- **minor** — **BREAKING (v17)** — field widgets receive') &&
+        !annotated.body.includes('**BREAKING** — **BREAKING'),
+      annotated.body,
+    );
+    check(
+      '#6099 markBreaking pins both directions directly (renderer, not criterion)',
+      markBreaking('**BREAKING (v17)** — x') === '**BREAKING (v17)** — x' &&
+        markBreaking('__Breaking change__ y') === '__Breaking change__ y' &&
+        markBreaking('An ordinary summary.') === '**BREAKING** — An ordinary summary.',
+    );
+    check(
+      '#6099 hasBreakingAnnotation pins both directions directly (criterion)',
+      hasBreakingAnnotation('## Breaking note\n\nx') &&
+        hasBreakingAnnotation('a\n\nBreaking for anyone reading `node.ui`.') &&
+        hasBreakingAnnotation('**BREAKING (v17)** — x') &&
+        !hasBreakingAnnotation('is technically breaking for anyone who wrote one') &&
+        !hasBreakingAnnotation('Non-breaking cleanup; a groundbreaking refactor.') &&
+        !hasBreakingAnnotation('wrapped so the word lands first on a line:\nbreaking for authors'),
+    );
+    check(
+      '#6099 an entry annotated further down GETS the marker on its line (#6110 by hand)',
+      annotated.body.includes(
+        '- **minor** — **BREAKING** — The flow designer writes node geometry',
+      ),
+      annotated.body,
+    );
+    check(
+      '#6099 an ordinary entry is NOT marked',
+      annotated.body.includes('- **minor** — `DrillDownConfig` now declares') &&
+        annotated.body.includes('- **patch** — The record picker sends'),
+      annotated.body,
+    );
+    check(
+      '#6099 the ⚠️ hint fires on a range with NO declared major — the whole point',
+      annotated.body.includes('⚠️ 3 of these carry a breaking change') &&
+        annotated.body.includes("by the author's own breaking annotation in the changeset body"),
+      annotated.body,
+    );
+    check(
+      '#6099 the hint no longer claims a **major** bump it cannot have',
+      !annotated.body.includes('declare a **major**'),
+      annotated.body,
+    );
+    check(
+      '#6099 nothing was downgraded — there was no major to downgrade',
+      annotated.bump === 'minor' && annotated.downgradedMajor === false,
+      `bump=${annotated.bump} downgraded=${annotated.downgradedMajor}`,
     );
 
     // --- end-to-end through the shell driver -------------------------------
@@ -648,6 +1147,140 @@ function selfTest() {
         degraded.includes('**Degraded list**') &&
         degraded.includes('NOT a\ncomplete account'),
       degraded,
+    );
+
+    // --- #6175: a range whose `to` endpoint is a RELEASE COMMIT -------------
+    // The shape that made a COMPLETE result look like a failure. A release
+    // consumes the changesets it ships, so every changeset added in the range
+    // is gone at `to` and every read falls back. Its own repo on purpose: the
+    // #4731 / #6099 fixtures above pin exact counts and must not shift under it.
+    const ui3 = join(tmp, 'objectui-released');
+    mkdirSync(join(ui3, '.changeset'), { recursive: true });
+    const g3 = (...args) => git(ui3, args);
+    g3('init', '-q', '-b', 'main');
+    g3('config', 'user.email', 'selftest@objectstack.ai');
+    g3('config', 'user.name', 'self test');
+    g3('config', 'commit.gpgsign', 'false');
+    const commit3 = (subject, files, removals = []) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui3, path)), { recursive: true });
+        writeFileSync(join(ui3, path), content);
+      }
+      for (const path of removals) rmSync(join(ui3, path), { force: true });
+      g3('add', '-A');
+      g3('commit', '-q', '-m', subject);
+      return g3('rev-parse', 'HEAD').trim();
+    };
+
+    const base3 = commit3('chore: base', { 'README.md': 'base\n' });
+    commit3('feat(grid): column pinning survives a layout reload (#3401)', {
+      '.changeset/grid-column-pinning-survives-reload.md':
+        '---\n"@object-ui/plugin-grid": minor\n---\n\nGrid column pinning survives a layout reload.\n',
+      'src/grid.ts': 'a\n',
+    });
+    commit3('fix(fields): the lookup picker keeps the authored value (#3402)', {
+      '.changeset/lookup-picker-keeps-authored-value.md':
+        '---\n"@object-ui/fields": patch\n---\n\nThe lookup picker keeps the authored value.\n',
+      'src/fields.ts': 'b\n',
+    });
+    const release3 = commit3(
+      'chore: release packages (#3403)',
+      { 'package.json': '{"version":"17.1.0"}\n' },
+      [
+        '.changeset/grid-column-pinning-survives-reload.md',
+        '.changeset/lookup-picker-keeps-authored-value.md',
+      ],
+    );
+
+    const released = buildDigest({
+      objectuiRoot: ui3,
+      frameworkRoot: fwPlain,
+      from: base3,
+      to: release3,
+    });
+    check(
+      '#6175 a range crossing a release still collects every changeset',
+      released.releasing.length === 2 && released.changesetsAdded === 2,
+      `releasing=${released.releasing.length} added=${released.changesetsAdded}`,
+    );
+    check(
+      '#6175 the fallback is COUNTED, not merely survived',
+      released.absentAtTo === 2,
+      `got ${released.absentAtTo}`,
+    );
+
+    // The CLI runs as a CHILD so its real stderr can be read: that stream is
+    // where git's `fatal:` used to land, and no in-process assertion can see it.
+    const selfPath = fileURLToPath(import.meta.url);
+    const runCli = (root, from, to, label) =>
+      spawnSync(
+        process.execPath,
+        [
+          selfPath,
+          '--objectui-root', root,
+          '--framework-root', fwPlain,
+          '--from', from,
+          '--to', to,
+          '--out', join(tmp, `cli-${label}.md`),
+        ],
+        { encoding: 'utf8' },
+      );
+
+    const fellBack = runCli(ui3, base3, release3, 'released');
+    check(
+      '#6175 the fallback no longer leaks git `fatal:` onto stderr',
+      fellBack.status === 0 && !fellBack.stderr.includes('fatal:'),
+      fellBack.stderr,
+    );
+    check(
+      '#6175 the fallback SAYS SO — once, with the real count',
+      /^→ 2 of 2 changeset\(s\) added in this range no longer exist at [0-9a-f]{12} —/m.test(
+        fellBack.stderr,
+      ) && fellBack.stderr.split('no longer exist at').length === 2,
+      fellBack.stderr,
+    );
+    const quietArtifact = readFileSync(join(tmp, 'cli-released.md'), 'utf8');
+    check(
+      '#6175 the artifact stays COMPLETE — the quiet read is the whole read',
+      quietArtifact.includes('Grid column pinning survives') &&
+        quietArtifact.includes('lookup picker keeps the authored value'),
+      quietArtifact,
+    );
+
+    const noFallback = runCli(ui, base, head, 'plain');
+    check(
+      '#6175 a range that crossed no release gains NO new line',
+      noFallback.status === 0 &&
+        !noFallback.stderr.includes('no longer exist at') &&
+        !noFallback.stderr.includes('fatal:'),
+      noFallback.stderr,
+    );
+
+    // Both reads failing is a REAL failure — nothing was read and the entry
+    // would vanish from the record. Quiet is earned by the fallback that
+    // worked; it is never extended to this. Driven through the exported
+    // `readAt` because `classifyRange` cannot reach the branch: its `sha`
+    // comes from `--diff-filter=A` and therefore always has the path.
+    const probe = join(tmp, 'probe-both-reads-fail.mjs');
+    writeFileSync(
+      probe,
+      `import { readAt } from ${JSON.stringify(pathToFileURL(selfPath).href)};\n` +
+        `readAt(${JSON.stringify(ui3)}, ${JSON.stringify(release3)}, ${JSON.stringify(base3)}, ` +
+        `'.changeset/never-existed.md');\n`,
+    );
+    const bothFail = spawnSync(process.execPath, [probe], { encoding: 'utf8' });
+    check(
+      '#6175 when BOTH reads fail the failure is LOUD, naming both attempts',
+      bothFail.status !== 0 &&
+        bothFail.stderr.includes('cannot read .changeset/never-existed.md') &&
+        bothFail.stderr.includes(release3) &&
+        bothFail.stderr.includes(base3),
+      bothFail.stderr,
+    );
+    check(
+      "#6175 both attempts' git diagnostics are re-emitted, not swallowed",
+      (bothFail.stderr.match(/fatal:/g) ?? []).length >= 2,
+      bothFail.stderr,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

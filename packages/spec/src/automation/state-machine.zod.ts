@@ -12,7 +12,7 @@
  *
  * The ledger carried these shapes as `authorable (p)` — provisional, because
  * nobody had checked. Checking matters here more than usual, because
- * [ADR-0020](../../../docs/adr/0020-state-machine-converge-and-enforce.md)
+ * [ADR-0020](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0020-state-machine-converge-and-enforce.md)
  * **retired this shape as a record-lifecycle declaration**: the top-level
  * `workflow` metadata type and `object.stateMachines` are both gone, and a
  * record's legal transitions are declared as a `state_machine` **validation

@@ -1410,8 +1410,20 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
   /**
    * Conditional-visibility predicate (CEL) — the field is shown only when TRUE
    * (ADR-0089, canonical `*When` name). Binding root depends on the surface:
-   * runtime record forms bind `record` + `current_user`; metadata-editing forms
+   * runtime record forms bind `record` (plus `previous`, the saved record, and
+   * `parent` for master-detail line items); metadata-editing forms
    * (`*.form.ts`) bind the row under edit as `data`.
+   *
+   * ⚠️ **No `current_user` here** (#6146). Field-level rules are evaluated by
+   * `evalFieldPredicate` / `resolveFieldRuleState` (`@object-ui/core`), which
+   * binds `record` + `previous` + an `extra` scope and nothing else — the
+   * autocomplete pins the same set (objectui#1582). A predicate referencing
+   * `current_user` is an UNBOUND identifier: the evaluation faults and falls
+   * back, and visibility's fallback is `true`, so the field a `current_user`
+   * test was meant to hide stays **permanently visible**. `current_user` IS
+   * bound for **per-option** `visibleWhen` (a different evaluator —
+   * `resolveCascadingOptions` against the host's predicate scope, ADR-0068 /
+   * objectui#2284); that is the only `*When` surface where it resolves.
    *
    * **Inside a repeater, `data` is the ROW, not the whole document** (#6254).
    * A sub-field of a `type: 'record'` / repeater field is rendered with its own
@@ -1420,10 +1432,12 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
    * means *this row's* `type`, which is what a per-entry rule wants. The root
    * is still spelled `data` at every depth: there is no implicit row scope, so
    * a BARE identifier (`type == 'formula'`) is unbound and the predicate faults
-   * open, showing the field for every row. Prefix every reference with `data.`
-   * whether the field sits at the top level or inside a repeater.
+   * open, showing the field for every row — the same fail-open direction the
+   * `current_user` note above describes, arriving from the other end. Prefix
+   * every reference with `data.` whether the field sits at the top level or
+   * inside a repeater.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open. e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
@@ -1514,10 +1528,12 @@ export const FormSectionSchema = lazySchema(() => z.object({
   /**
    * Conditional-visibility predicate (CEL) — the whole section is shown only
    * when TRUE (ADR-0089, canonical `*When` name). Same per-layer binding root as
-   * {@link FormFieldSchema.visibleWhen}: `record`+`current_user` in runtime
-   * forms, `data` in metadata-editing forms.
+   * {@link FormFieldSchema.visibleWhen}: `record` (+ `previous`, `parent`) in
+   * runtime forms, `data` in metadata-editing forms — and, as there, **no
+   * `current_user`**: it is unbound at this level, so such a predicate faults
+   * and falls back to visible (#6146).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms).'),
+  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([
@@ -2280,6 +2296,21 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // recursive-effective and what let `ViewFilterRuleSchema` / `ListView.sort`
 // close for authoring. Anyone closing a member here must re-run that trace,
 // not re-read this comment.
+//
+// [#5599] …and the cost of that opening, before the identity precondition
+// below existed: member 4 both `.strip()`s AND declares no required key
+// (`FormViewSchema.type` even carries a `'simple'` default), so it matched
+// ANY object. `{ nope: 1 }` did not merely pass — it passed as a *view*,
+// reduced to `{ type: 'simple' }`, and `saveMetaItem` (which persists the
+// ORIGINAL body, not the parse output) wrote `{"nope":1,"name":"…"}` into
+// `sys_metadata` as an ACTIVE view overlay. The read path then re-parsed the
+// same body through the same schema and badged it `_diagnostics.valid: true`
+// (#5598), so Studio agreed. `view` was the one common overlay type whose
+// declared write-path spec gate (ADR-0005 §Validation) could be bypassed by
+// an arbitrary body — Prime Directive #10's "declared ≠ enforced", one layer
+// above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
+// any single member. The fix is a precondition, NOT a strictness flip on the
+// members — see {@link viewIdentityVocabulary}.
 
 /**
  * Optional identity + structural-guard fields layered onto the two "flattened
@@ -2329,6 +2360,143 @@ function containerHasAView(v: unknown): boolean {
 }
 
 /**
+ * [#5599] The keys the WRITE PATH itself puts on a `view` body, which therefore
+ * cannot be evidence that the author sent a view.
+ *
+ * `saveMetaItem` normalizes before it validates. `normalizeViewMetadata`
+ * (`@objectstack/metadata-protocol`) stamps `name` onto **every** view body at
+ * the single write chokepoint — it exists precisely to guarantee one — and, when
+ * the overlay shadows a registry entry, `viewIdentityPatch` inherits `viewKind`,
+ * `object` and `label` from it (#2555). A key present on 100% of the bodies
+ * reaching the gate has zero discriminating power: counting `name` as evidence
+ * would leave this precondition unable to reject anything on the write path at
+ * all — which is the one path #5599 is about, since `{ nope: 1 }` arrives at the
+ * schema as `{ nope: 1, name: 'garbage_view' }`, exactly the body the issue
+ * reports as persisted.
+ *
+ * So the bar is *shape*, not identity — which is how the ruling worded it too.
+ * A body may be very lean, but it must say something about what the view IS; a
+ * body of these keys alone says only which view it is attached to.
+ *
+ * Exported so the producer side can be pinned against it: `normalizeViewMetadata`
+ * must never stamp a key that is not listed here, or that key silently becomes
+ * evidence again and re-opens this hole. That pin lives with the producer, in
+ * `metadata-protocol`'s `view-write-path-identity.test.ts`.
+ */
+export const VIEW_WRITE_PATH_IDENTITY_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'viewKind',
+  'object',
+  'label',
+]);
+
+/**
+ * [#5599] Every top-level key ANY member of {@link ViewMetadataSchema} declares,
+ * MINUS {@link VIEW_WRITE_PATH_IDENTITY_KEYS} — the vocabulary the identity
+ * precondition judges "is this a `view` at all?" against.
+ *
+ * **Derived from the members, never hand-listed.** A literal array here would be
+ * a second declaration of the union's own surface, and the two would drift on
+ * the first member that grows a key — the precondition would then reject a body
+ * the union accepts, which is a 422 on a shape the platform itself writes. So it
+ * walks the members' Zod defs instead: objects contribute their `shape` keys,
+ * unions recurse into their options (member 1 is a discriminated union of two
+ * arms), and wrappers (`.refine()`, `.strip()`, pipes) are unwrapped. Adding a
+ * key to any arm widens this set in the same edit, with no bookkeeping.
+ *
+ * Computed once, on first parse rather than at schema-construction time: the
+ * members are {@link lazySchema} proxies whose factories run on first `_zod`
+ * touch, and deriving eagerly would force every view schema in the file to
+ * materialise as a side effect of this module loading (ADR-0089 D3a).
+ */
+function collectDeclaredTopLevelKeys(schema: unknown, into: Set<string>, depth = 0): void {
+  const def = (schema as { _zod?: { def?: Record<string, unknown> } } | undefined)?._zod?.def;
+  if (!def || depth > 6) return;
+  if (def.type === 'object') {
+    for (const key of Object.keys((def.shape ?? {}) as object)) into.add(key);
+    return;
+  }
+  if (def.type === 'union') {
+    for (const option of (def.options ?? []) as unknown[]) collectDeclaredTopLevelKeys(option, into, depth + 1);
+    return;
+  }
+  // `.refine()` keeps the object def; these cover pipes / wrappers defensively.
+  for (const hop of ['innerType', 'in', 'out', 'schema'] as const) {
+    if (def[hop]) collectDeclaredTopLevelKeys(def[hop], into, depth + 1);
+  }
+}
+
+/**
+ * [#5599] The minimal identity precondition, run BEFORE the four-arm union.
+ *
+ * A `view` body must speak the `view` vocabulary — carry at least one key some
+ * member declares that the write path did not stamp itself
+ * ({@link VIEW_WRITE_PATH_IDENTITY_KEYS}). That is the whole bar, deliberately:
+ * it rejects bodies that are **not a view at all** (`{ nope: 1 }`, `{}`,
+ * `{ id: 'x' }`, and identity with no content) while making no judgement about
+ * whether the view is *complete* — which is what keeps it compatible with every
+ * lean shape the platform round-trips. A pin PUT (`{ isPinned: true }`), a hide
+ * PUT (`{ hidden: true }`), a reorder (`{ sortOrder: 3 }`) and a column-sort PUT
+ * all carry declared non-identity keys and are unaffected.
+ *
+ * "Complete" is deliberately NOT the bar, and the distinction is the whole
+ * reason this is safe: `{ isPinned: true }` is not a renderable view either, but
+ * it is unambiguously a *view operation*, and 422-ing the platform's own writes
+ * would be a worse defect than the one being fixed.
+ *
+ * **Why a precondition and not a required floor on member 4.** Giving the form
+ * arm a required key (the other candidate fix) would 422 the flattened overlays
+ * Studio writes, whose required-ness nobody has measured; the ruling on #5599
+ * took this route and deferred that one explicitly. This route also leaves every
+ * arm's `.strip()` untouched — the round-trip capability #5074 traced and
+ * documented is load-bearing and is not what was broken. What was broken is that
+ * an arm which strips AND requires nothing is a wildcard for the whole union, so
+ * the fix belongs one level up, at the union's door.
+ *
+ * **Why it lives in the existing `z.preprocess` stage.** `/api/v1/meta/types/view`
+ * serves `z.toJSONSchema()` of this schema to Studio's SchemaForm, and both pins
+ * (`view-metadata-schema.test.ts`, `view-authoring-wire-split.test.ts`) require a
+ * four-member `anyOf` in the OUTPUT *and* INPUT directions. Adding a stage to the
+ * pipe (`z.unknown().superRefine(…).pipe(union)`) satisfies the output direction
+ * and silently degrades the input one to `{}` — the form would render nothing.
+ * Reporting through the preprocess's own `ctx` changes no types, so the emitted
+ * `anyOf` is byte-identical. It also short-circuits: `z.NEVER` aborts the pipe,
+ * so a rejected body yields ONE named issue instead of that issue plus four
+ * `invalid_union` branches for arms that were never the point.
+ */
+function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set<string>): boolean {
+  // Non-objects and arrays are left to the union, which already rejects them —
+  // this precondition answers "which object is not a view", nothing else.
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return true;
+  const keys = Object.keys(body as Record<string, unknown>);
+  if (keys.some((key) => vocabulary.has(key))) return true;
+  // Report the two halves separately. Lumping them together would call `name`
+  // "unrecognized", which is false and would send an author to fix the wrong
+  // key: `name` is declared, it is just discounted as evidence.
+  const identity = keys.filter((key) => VIEW_WRITE_PATH_IDENTITY_KEYS.has(key));
+  const unknown = keys.filter((key) => !VIEW_WRITE_PATH_IDENTITY_KEYS.has(key));
+  const quote = (list: string[], cap = 5) =>
+    `${list.slice(0, cap).map((k) => `\`${k}\``).join(', ')}${list.length > cap ? ', …' : ''}`;
+  ctx.addIssue({
+    code: 'custom',
+    path: [],
+    message:
+      'Not a `view` body: no recognized `view` key. Expected at least one of a container slot ' +
+      '(`list` / `form` / `listViews` / `formViews`), a ViewItem record (`viewKind` + `config`), ' +
+      'or an inline view config (`type`, `columns`, `sections`, `filter`, …). ' +
+      (keys.length === 0 ? 'Received `{}`.' : 'Received ') +
+      (unknown.length > 0 ? `unrecognized ${unknown.length === 1 ? 'key' : 'keys'} ${quote(unknown)}` : '') +
+      (unknown.length > 0 && identity.length > 0 ? ', and ' : '') +
+      (identity.length > 0
+        ? `only identity fields (${quote(identity)}) — these say which view this attaches to, ` +
+          'not what the view is, and the write path stamps them itself'
+        : '') +
+      (keys.length === 0 ? '' : '.'),
+  });
+  return false;
+}
+
+/**
  * Canonical schema for ANY persisted `view` metadata body — the schema the
  * `view` type registers in `metadata-type-schemas.ts`. A union over the three
  * runtime shapes (see the block comment above), so save-time validation and
@@ -2346,9 +2514,14 @@ function containerHasAView(v: unknown): boolean {
  * {@link stripViewConsoleDecorations}. It runs once, ahead of every member, so
  * the openness this union needs reaches nested blocks that a member-level
  * `.strip()` can never reach.
+ *
+ * [#5599] That same stage now also carries the identity precondition — see
+ * {@link assertViewIdentity} for why the check has to live here rather than as
+ * an extra pipe stage, and why it is a precondition rather than a required floor
+ * on member 4.
  */
-export const ViewMetadataSchema = lazySchema(() =>
-  z.preprocess(stripViewConsoleDecorations, z.union([
+export const ViewMetadataSchema = lazySchema(() => {
+  const members = [
     // 1. Standalone ViewItem record — nested config validated genuinely, and
     //    the WIRE variant, so Studio's round-trip keys have a declared home.
     ViewItemWireSchema,
@@ -2371,8 +2544,28 @@ export const ViewMetadataSchema = lazySchema(() =>
     //    schema must strip back, or an upstream field addition becomes a crash.
     ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
     FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
-  ])),
-);
+  ] as const;
+
+  // [#5599] Derived once, on first parse — see `collectDeclaredTopLevelKeys`.
+  let vocabulary: Set<string> | undefined;
+  const viewVocabulary = (): Set<string> => {
+    if (!vocabulary) {
+      vocabulary = new Set<string>();
+      for (const member of members) collectDeclaredTopLevelKeys(member, vocabulary);
+      // Identity the write path supplies is not evidence of shape — see
+      // `VIEW_WRITE_PATH_IDENTITY_KEYS` for why this subtraction is the
+      // difference between closing #5599 and only appearing to.
+      for (const key of VIEW_WRITE_PATH_IDENTITY_KEYS) vocabulary.delete(key);
+    }
+    return vocabulary;
+  };
+
+  return z.preprocess(
+    (body, ctx) =>
+      assertViewIdentity(body, ctx, viewVocabulary()) ? stripViewConsoleDecorations(body) : z.NEVER,
+    z.union(members as unknown as readonly [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]),
+  );
+});
 
 // ───────────────────────────────────────────────────────────────────────────
 // defineView container → ViewItem expansion (shared by every loader)

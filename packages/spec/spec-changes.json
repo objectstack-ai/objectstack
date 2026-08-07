@@ -337,6 +337,24 @@
         "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
         "conversionId": "object-index-type-partial-removed",
         "toMajor": 17
+      },
+      {
+        "surface": "page.component.element:record_picker.displayField",
+        "to": "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+        "conversionId": "record-picker-display-field-to-label-field",
+        "toMajor": 17
+      },
+      {
+        "surface": "page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple",
+        "to": "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+        "conversionId": "record-picker-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "page.component.page:card.body",
+        "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+        "conversionId": "page-card-body-to-children",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1077,6 +1095,24 @@
           "surface": "object.indexes[].type / object.indexes[].partial",
           "to": "object index keys 'indexes[].type'/'indexes[].partial' removed (#5248, #4943 — no driver ever read either: the index method is the dialect's choice and a partial index is built by a database-layer migration, not declared)",
           "conversionId": "object-index-type-partial-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.element:record_picker.displayField",
+          "to": "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+          "conversionId": "record-picker-display-field-to-label-field",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple",
+          "to": "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+          "conversionId": "record-picker-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.page:card.body",
+          "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+          "conversionId": "page-card-body-to-children",
           "toMajor": 17
         }
       ],

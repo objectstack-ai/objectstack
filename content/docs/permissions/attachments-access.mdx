@@ -103,7 +103,7 @@ an auth service is wired, and stamp `owner_id` on the new `sys_file`.
 
 Deleting attachments does not immediately delete the underlying bytes (a file
 can be shared across records). Reclamation is handled by the platform LifecycleService via declarative
-[reap guards](/adr/0057-system-data-lifecycle-and-retention):
+[reap guards](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0057-system-data-lifecycle-and-retention.md):
 
 - **`sys_file`** — when the last `sys_attachment` referencing an
   attachments-scope file is deleted, the file is tombstoned; a reap guard

@@ -79,6 +79,25 @@
  * {@link escapeLikePattern} against `applyLike`'s expression character for
  * character. A third hand-copy of this logic anywhere is the thing to refuse —
  * import from here, or add a consumer to that test.
+ *
+ * ## `String(value)` is safe here because nothing unrenderable reaches it (#5234)
+ *
+ * The `String()` below used to be the whole defect on the other side: `String({})`
+ * is the literal `'[object Object]'`, so an object comparand built a parameterised
+ * `LIKE '%[object Object]%'` — valid SQL, a pattern nobody wrote, and one that
+ * MATCHED a row whose text really was `[object Object]`. This function is NOT the
+ * place that was fixed. Both of this package's doors refuse an object comparand
+ * before a pattern is built — `filter-normalizer.ts`'s `fieldLeaves` for the
+ * analytics `where` path and `read-scope-sql.ts`'s `compileOperator` for the RLS
+ * lowering — using the one rule in `comparand-shape.ts`, and `driver-sql`'s
+ * `assertCompilableComparand` does the same for `applyLike`.
+ *
+ * So `escapeLikePattern` keeps its `unknown` parameter and its unconditional
+ * `String()` on purpose: what arrives is a string, number, bigint, boolean,
+ * `null`, `undefined` or `Date`, each of which `String()` renders faithfully, and
+ * a number comparand (`{$contains: 5}` → `%5%`) is deliberately still accepted —
+ * it agrees across every face and #5526 kept it. Do NOT add a tolerant reading of
+ * an object here; add it to neither door either.
  */
 
 /**

@@ -26,6 +26,7 @@ import path from 'path';
 // a confident page from a tree nobody rebuilt (#4675, #4723).
 import { schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
 
+import { resolveCategoryTitles } from './lib/category-title';
 import {
   evaluateBaseline,
   loadEntrySurfaces,
@@ -119,19 +120,28 @@ const { emit, manageDir, wasEmitted, flush } = createSink({
   repoRoot: REPO_ROOT,
 });
 
-// Dynamically discover categories from src directory
-const getCategoryTitle = (dir: string) => {
-  const upper = dir.toUpperCase();
-  if (['UI', 'AI', 'API'].includes(upper)) return `${upper} Protocol`;
-  return `${dir.charAt(0).toUpperCase() + dir.slice(1)} Protocol`;
-};
+// Categories are discovered from the src directory; their TITLES are declared,
+// not derived from the directory name (#5853 — see lib/category-title.ts for
+// why a derived title is wrong in a way no gate can see). A directory with no
+// declared title stops the build here rather than publishing a guess.
+const CATEGORY_DIRS = fs.readdirSync(SRC_DIR)
+  .filter(file => fs.statSync(path.join(SRC_DIR, file)).isDirectory());
 
-const CATEGORIES = fs.readdirSync(SRC_DIR)
-  .filter(file => fs.statSync(path.join(SRC_DIR, file)).isDirectory())
-  .reduce((acc, dir) => {
-    acc[dir] = getCategoryTitle(dir);
-    return acc;
-  }, {} as Record<string, string>);
+// `resolveCategoryTitles` is the ONLY way this map gets built, and it is total:
+// it throws on a directory with no title and on a title with no directory. The
+// check lives inside the constructor rather than beside it so a future caller
+// cannot obtain a CATEGORIES map without it — what this replaces was exactly a
+// fallback nobody had to opt out of.
+function loadCategoryTitles(): Record<string, string> {
+  try {
+    return resolveCategoryTitles(CATEGORY_DIRS);
+  } catch (err) {
+    console.error(`\n✗ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
+const CATEGORIES = loadCategoryTitles();
 
 // Track all zod files per category
 const categoryZodFiles = new Map<string, Set<string>>();
