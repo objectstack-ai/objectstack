@@ -249,8 +249,11 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       );
       expect((await compile({ $and: [] })).sql).toBe(BARE_SCAN);
       expect((await compile({ $or: [] })).sql).toBe(`${BARE_SCAN} WHERE 1 = 0`);
+      // [#5903] The `$not` operand carries the #5146 NULL guard on this face
+      // now. What #1075 pins is that a well-formed top-level `where` still
+      // COMPILES rather than being refused by the node gate — which it does.
       expect((await compile({ $not: { stage: 'won' } })).sql).toBe(
-        `${BARE_SCAN} WHERE NOT ("stage" = ?)`,
+        `${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`,
       );
       expect((await compile({ closed_at: null })).sql).toBe(`${BARE_SCAN} WHERE "closed_at" IS NULL`);
     });

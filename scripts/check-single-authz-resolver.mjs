@@ -27,12 +27,12 @@
 // workspace. The scan cannot tell you it never ran; only its (unprinted) file
 // count could, and nobody reads a count that is not printed.
 //
-// Today a whole-`packages/` rename happens to be caught downstream, because both
+// A whole-`packages/` rename also happens to be caught downstream, because both
 // DELEGATORS live under that same root and check (2) reports them missing. That
 // is luck, not coverage, and it misdirects the diagnosis: the operator is told
 // two files are missing when the actual event is that the duplicate-resolver
 // scan read nothing at all. Move either delegator out of `packages/`, or add a
-// second scan root, and the vacuous scan goes fully silent — the #4916 shape,
+// second scan root, and that downstream crutch goes silent — the #4916 shape,
 // one refactor away. So the roots are resolved up front and a dead one fails the
 // gate BY NAME, before any conclusion is drawn from the scan.
 //
@@ -43,6 +43,28 @@
 // instead of fixing the rename — the empty `catch {}` again, spelled politely.
 // Should a root ever become legitimately absent, that is a decision to record
 // with its condition and a test, not a check to relax.
+//
+// ## An empty scan is a hard error too (#5916)
+//
+// Resolving the roots is only half of it, and the half above cannot see the other:
+// a root that resolves, is readable, and simply yields NO file leaves the check
+// iterating an empty corpus and reporting zero errors — "no duplicate resolver
+// exists", concluded from nothing. `assertRootsResolvable` is satisfied the whole
+// time; the directory is right there. The corpus is what left: a subtree migrated
+// out of `packages/`, sources renamed to an extension `walk` does not collect, or
+// the walk filter narrowed. Nothing in the output distinguishes that from clean.
+//
+// So each declared root must also YIELD at least one file. The floor is computed
+// by this very walk — "every root in SCAN_ROOTS > 0 files" — deliberately NOT a
+// recorded high-water mark: a ratchet would need maintaining on every legitimate
+// move, and the failure it buys (a corpus that shrank but is not empty) is not the
+// one that turns this gate vacuous. Same shape as `check-doc-authoring.mjs`, which
+// closed this exact gap for the docs corpus (#4932); #4690 is where "an extraction
+// that finds nothing must be red" was first written down.
+//
+// The floor is per-root and never a total: with more than one root, a single
+// populated one would otherwise cover for every evaporated sibling — which is the
+// silent narrowing this assertion exists to stop.
 
 import {
   mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
@@ -124,17 +146,49 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** The corpus check (1) reasons over. Throws {@link DeadRootError} if a root is dead. */
+/**
+ * A declared scan root that resolved to a directory and yielded no file to scan.
+ * Carries the names, and the total the run would otherwise have reasoned over.
+ */
+class EmptyRootError extends Error {
+  constructor(empty, total) {
+    super(`scan root(s) contributed no scannable .ts file: ${empty.join(', ')} (total scanned: ${total})`);
+    this.name = 'EmptyRootError';
+    /** @type {string[]} the roots that yielded nothing. */
+    this.roots = empty;
+    /** @type {number} files found across all roots — 0 when the whole scan evaporated. */
+    this.total = total;
+  }
+}
+
+/**
+ * The corpus check (1) reasons over.
+ *
+ * Each declared root must resolve AND yield at least one file: a root that resolves
+ * but holds nothing is the same evaporation as one that does not resolve, minus the
+ * ENOENT that made the first kind detectable (#5916). See the header for why the
+ * floor is computed here rather than recorded as a high-water mark.
+ *
+ * @throws {DeadRootError} a declared root is not a directory.
+ * @throws {EmptyRootError} a declared root resolved but contributed no file.
+ */
 function collectScanFiles(root = ROOT, roots = SCAN_ROOTS) {
   assertRootsResolvable(root, roots);
   const out = [];
-  for (const rel of roots) walk(join(root, rel), out);
+  const empty = [];
+  for (const rel of roots) {
+    const before = out.length;
+    walk(join(root, rel), out);
+    if (out.length === before) empty.push(rel);
+  }
+  if (empty.length) throw new EmptyRootError(empty, out.length);
   return out;
 }
 
 /**
- * Both invariants over `root`. Throws {@link DeadRootError} rather than returning a
- * verdict when the scan could not read what it claims to have read.
+ * Both invariants over `root`. Throws {@link DeadRootError} / {@link EmptyRootError}
+ * rather than returning a verdict when the scan could not read what it claims to
+ * have read.
  */
 function audit(root = ROOT) {
   const errors = [];
@@ -184,11 +238,27 @@ function reportDeadRoots(err) {
   );
 }
 
+function reportEmptyRoots(err) {
+  console.error('\n✗ check:authz-resolver: declared scan root(s) resolved but contributed no file, so the\n' +
+    '  duplicate-resolver scan would have concluded "none found" from a corpus it never read:\n');
+  for (const r of err.roots) console.error(`  ${r} — 0 files`);
+  console.error(
+    `\n${err.total} file(s) were found in total across all of SCAN_ROOTS.` +
+    `\n\nEvery entry in SCAN_ROOTS (scripts/check-single-authz-resolver.mjs) must yield at least one` +
+    `\nscannable .ts file. The root still being a directory is not enough — that is all #4930's` +
+    `\ncheck can see. If the sources moved to a new directory, point SCAN_ROOTS at it; if the walk` +
+    `\nfilter no longer matches them (a new extension, a widened SKIP_DIRS), fix the filter. Do NOT` +
+    `\nlower this to a total count: one populated root would then cover for every evaporated one,` +
+    `\nwhich is the silent narrowing this assertion exists to stop (#5916).\n`,
+  );
+}
+
 // ── Self-test ───────────────────────────────────────────────────────────────
 //
 // A guard that cannot fail is not a guard. Both invariants are driven over a real
-// temporary tree with the real walker, and the dead-root failure is proved in both
-// directions — red when a root is renamed away, green when it is restored.
+// temporary tree with the real walker, and both corpus failures are proved in both
+// directions — red when a root is renamed away, red when a root that still resolves
+// yields nothing, green when each is restored.
 
 function selfTest() {
   const failures = [];
@@ -274,6 +344,59 @@ function selfTest() {
     // ...and restoring the tree restores the green, so the reds above were caused
     // by the broken root and nothing else.
     expect('restoring the root makes the audit green again', audit(dir).length, 0);
+
+    // --- Reverse proof for the empty-scan hard error (#5916), same discipline. ---
+    // The direction was decided before it was run: a root that resolves and yields
+    // nothing must be RED, and the red must name that root only. This is the case
+    // #4930's assertion cannot reach — nothing is renamed, nothing is unreadable,
+    // the directory is right there; the corpus is simply not in it any more.
+    const baseline = collectScanFiles(dir).length;
+    expect('the compliant tree yields a corpus to reason over', baseline > 0, true);
+
+    // SCAN_ROOTS holds a single entry today, so "only that root is named" has to be
+    // driven over an injected two-root list — the parameter `collectScanFiles` already
+    // takes. Adding a second REAL scan root to prove a self-test point would be a
+    // change to what the gate scans, which is not this assertion's business.
+    const twoRoots = ['packages', 'tools'];
+    mkdirSync(join(dir, 'tools'), { recursive: true });
+    writeFileSync(join(dir, 'tools', 'notes.md'), 'sources moved to tools/src-new/\n');
+    let oneEmptyErr = null;
+    try { collectScanFiles(dir, twoRoots); } catch (err) { oneEmptyErr = err; }
+    expect('a root that resolves but yields nothing is red', oneEmptyErr instanceof EmptyRootError, true);
+    expect('the failure names the empty root', oneEmptyErr?.roots?.join(',') ?? '<none>', 'tools');
+    expect('the failure does not blame the populated root',
+      /packages/.test(oneEmptyErr?.roots?.join(',') ?? ''), false);
+    // The populated root was still walked, so the total proves the run was not simply
+    // aborted — and that a per-root floor is not a total floor.
+    expect('the failure reports what the run did find', oneEmptyErr?.total ?? -1, baseline);
+
+    write('tools/helper.ts', 'export const noop = () => {};\n');
+    expect('one file under the empty root restores the green',
+      collectScanFiles(dir, twoRoots).length, baseline + 1);
+    rmSync(join(dir, 'tools'), { recursive: true, force: true });
+
+    // ...and the extreme the issue named: every declared root resolves, the whole
+    // scan finds nothing, and check (1) drew "no duplicate resolver" from zero files.
+    // `audit` must surface THAT, not the downstream "Delegator missing" pair it used
+    // to report — the misdiagnosis the header calls luck rather than coverage.
+    const bare = mkdtempSync(join(tmpdir(), 'check-authz-resolver-selftest-empty-'));
+    let allEmptyErr = null;
+    let bareErrors = null;
+    try {
+      for (const rel of SCAN_ROOTS) mkdirSync(join(bare, rel), { recursive: true });
+      try { bareErrors = audit(bare); } catch (err) { allEmptyErr = err; }
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+    expect('a scan that finds nothing at all is red, not a vacuous "no duplicates"',
+      allEmptyErr instanceof EmptyRootError, true);
+    expect('every empty root is named', allEmptyErr?.roots?.join(',') ?? '<none>', SCAN_ROOTS.join(','));
+    expect('the zero total is reported', allEmptyErr?.total ?? -1, 0);
+    expect('the empty scan is reported instead of a misleading delegator verdict', bareErrors, null);
+
+    // Restoring the tree restores the green one last time, so every red above was
+    // caused by the missing corpus and nothing else.
+    expect('the untouched tree is still green', audit(dir).length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -283,8 +406,10 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    '✓ check-single-authz-resolver self-test: duplicate detection, delegation, and the dead-root ' +
-    'hard error (red when the scan root is renamed, green when restored) all hold.',
+    '✓ check-single-authz-resolver self-test: duplicate detection, delegation, the dead-root ' +
+    'hard error (red when the scan root is renamed, green when restored) and the empty-scan ' +
+    'hard error (red when one declared root yields nothing and when the whole scan does, green ' +
+    'when restored) all hold.',
   );
 }
 
@@ -295,10 +420,17 @@ function main() {
   try {
     errors = audit();
   } catch (err) {
-    if (!(err instanceof DeadRootError)) throw err;
-    reportDeadRoots(err);
-    process.exit(1);
-    return;
+    if (err instanceof DeadRootError) {
+      reportDeadRoots(err);
+      process.exit(1);
+      return;
+    }
+    if (err instanceof EmptyRootError) {
+      reportEmptyRoots(err);
+      process.exit(1);
+      return;
+    }
+    throw err;
   }
 
   if (errors.length) {

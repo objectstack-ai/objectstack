@@ -54,6 +54,7 @@
     "check:objectui-changeset": "node scripts/objectui-changeset-digest.mjs --self-test && node scripts/objectui-range.mjs --self-test",
     "check:objectui-pin-fresh": "node scripts/check-objectui-pin-fresh.mjs --self-test && node scripts/check-objectui-pin-fresh.mjs",
     "check:prerelease-pins": "node scripts/check-prerelease-pin-watch.mjs --self-test && node scripts/check-prerelease-pin-watch.mjs",
+    "check:empty-changeset": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-empty-changeset.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:release-body": "node scripts/release-github-releases.mjs --self-test",
     "check:node-version": "node scripts/check-node-version.mjs",

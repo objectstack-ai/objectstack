@@ -3163,6 +3163,88 @@ export class ObjectStackProtocolImplementation implements
         throw metadataStoreUnavailableError(error);
     }
 
+    /**
+     * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
+     * D3 verdict instead of flattening it into `undefined`.
+     *
+     * The `sys_metadata` overlay reads in this file already refuse to answer an
+     * outage as an absence (#5532 / #5707) — they see a throw and rethrow it as
+     * a 503. The MetadataService reads could not do the same, and not because
+     * anyone decided they should not: `MetadataManager.get()` swallows a loader
+     * failure internally, so an unreachable metadata database arrived here as
+     * the very same `undefined` a name that was never declared produces. The
+     * verdict existed one layer down (`loadDiagnosed`) and was discarded two
+     * hops before this call site. `getDiagnosed` (#5840) hands it over.
+     *
+     * Deliberately does NOT throw: the two callers want the same fact and
+     * dispose of it differently — see each call site. A service that predates
+     * `getDiagnosed` reports nothing degraded, which is exactly what it could
+     * express before, so its behaviour is unchanged.
+     *
+     * The singular/plural retry is folded in because both callers do it, and
+     * `degraded` must be the verdict of the WHOLE lookup: a first read that
+     * failed is not made trustworthy by an alternate spelling that cleanly
+     * missed.
+     */
+    private async readItemFromMetadataService(
+        type: string,
+        name: string,
+        packageId?: string,
+    ): Promise<{ data: unknown; degraded: boolean; errors: string[] }> {
+        const services = this.getServicesRegistry?.();
+        const metadataService: any = services?.get('metadata');
+        if (!metadataService || typeof metadataService.get !== 'function') {
+            return { data: undefined, degraded: false, errors: [] };
+        }
+        // ADR-0048 — thread the caller's package id so a single-item fetch is
+        // package-scoped. Passed positionally to BOTH reads, so whatever the
+        // occupant of the `metadata` slot makes of a third argument today is
+        // unchanged by which of the two methods answers.
+        const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
+            if (typeof metadataService.getDiagnosed === 'function') {
+                const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
+                return {
+                    data: diagnosed?.data,
+                    degraded: diagnosed?.degraded === true,
+                    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+                };
+            }
+            return { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
+        };
+
+        const primary = await read(type);
+        if (primary.data !== undefined && primary.data !== null) return primary;
+        const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
+        if (!alt) return { data: undefined, degraded: primary.degraded, errors: primary.errors };
+        const secondary = await read(alt);
+        if (secondary.data !== undefined && secondary.data !== null) return secondary;
+        return {
+            data: undefined,
+            degraded: primary.degraded || secondary.degraded,
+            errors: [...primary.errors, ...secondary.errors],
+        };
+    }
+
+    /**
+     * [#5840] The MetadataService counterpart of
+     * {@link rethrowUnlessMetadataStoreUnprovisioned}: turn a degraded read
+     * into the same 503 the overlay half of these methods already throws.
+     *
+     * There is no driver error to carry here — `MetadataManager` warn-logs and
+     * skips each failing loader — so `cause` is built from the messages it
+     * collected, which is what reaches the operator through
+     * `handleRouteError` / `logWithheldServerFault`.
+     */
+    private throwMetadataServiceUnavailable(errors: string[]): never {
+        throw metadataStoreUnavailableError(
+            new Error(
+                `The metadata service could not read every loader: ${
+                    errors.length > 0 ? errors.join('; ') : 'no loader detail reported'
+                }`,
+            ),
+        );
+    }
+
     async getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
         // is load-bearing twice over: the SchemaRegistry indexes code-authored
@@ -3625,26 +3707,24 @@ export class ObjectStackProtocolImplementation implements
         //    running server). Without this ordering, edits to `*.view.ts`
         //    source files appear to take effect (MetadataManager learns the
         //    new value) but reads continue to return the stale registry copy.
+        // [#5840] `serviceDegraded` survives past the registry step below on
+        // purpose — see the branch that reads it after step 3 for why the
+        // verdict cannot be acted on here.
+        let serviceDegraded: { degraded: boolean; errors: string[] } | undefined;
         if (item === undefined) {
             try {
-                const services = this.getServicesRegistry?.();
-                const metadataService = services?.get('metadata');
-                if (metadataService && typeof metadataService.get === 'function') {
-                    // Thread the caller's package id (ADR-0048) so a single-item
-                    // fetch is package-scoped: when two installed packages ship the
-                    // same type/name, the facade prefers the requester's own item.
-                    const fromService = await metadataService.get(request.type, request.name, request.packageId);
-                    if (fromService !== undefined && fromService !== null) {
-                        item = fromService;
-                    } else {
-                        const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                        if (alt) {
-                            const altFromService = await metadataService.get(alt, request.name, request.packageId);
-                            if (altFromService !== undefined && altFromService !== null) {
-                                item = altFromService;
-                            }
-                        }
-                    }
+                // Threads the caller's package id (ADR-0048) so a single-item
+                // fetch is package-scoped: when two installed packages ship the
+                // same type/name, the facade prefers the requester's own item.
+                const fromService = await this.readItemFromMetadataService(
+                    request.type,
+                    request.name,
+                    request.packageId,
+                );
+                if (fromService.data !== undefined && fromService.data !== null) {
+                    item = fromService.data;
+                } else if (fromService.degraded) {
+                    serviceDegraded = fromService;
                 }
             } catch {
                 // MetadataService not available — fall through
@@ -3669,6 +3749,26 @@ export class ObjectStackProtocolImplementation implements
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
             }
+        }
+
+        // [#5840] The MetadataService half of the #5532 rule, and the last
+        // moment it can be applied. The cached-read wrapper below this method
+        // documents its 404 as "reaching here now means a real miss —
+        // `getMetaItem` throws 503 rather than answering `undefined` when the
+        // store could not be read". That was true of the overlay read only: a
+        // metadata database the LOADERS could not reach was warn-logged inside
+        // `MetadataManager` and arrived at step 2 as a plain `undefined`, so
+        // the outage was served as `404 RESOURCE_NOT_FOUND` — a claim about
+        // what the author declared, made from a read that never happened.
+        //
+        // Deliberately narrow, and deliberately after step 3: a registry hit is
+        // a real declaration, so the answer contains no false claim and is
+        // served exactly as before (possibly staler than the service copy — the
+        // pre-existing ordering trade-off, not this issue's). Only when the
+        // WHOLE chain resolved nothing does the degraded read change anything,
+        // because only then would this method answer "no such item".
+        if (item === undefined && serviceDegraded?.degraded) {
+            this.throwMetadataServiceUnavailable(serviceDegraded.errors);
         }
 
         // Merge registered navigation contributions into a served app
@@ -3768,11 +3868,21 @@ export class ObjectStackProtocolImplementation implements
      * that would have to stand in for it already means "not customised". So
      * an overlay read that failed is reported as a failure, never as a layer.
      *
+     * [#5840] That rule now holds on BOTH halves. It could not before: the
+     * code layer's failure is a loader `MetadataManager` warn-logs and skips,
+     * so it reached this method as an ordinary `undefined` and became
+     * `code: null` — the same unfounded assertion, one column to the left, and
+     * the one the lock/affordance flags are derived from.
+     *
      * @throws {@link metadataStoreUnavailableError} — 503 /
-     *         `SERVICE_UNAVAILABLE`, driver error on `cause`, when the
-     *         `sys_metadata` overlay read fails for any reason other than the
-     *         table not being provisioned yet (which genuinely means "no
-     *         overlay row" and still returns normally).
+     *         `SERVICE_UNAVAILABLE` when a read that would decide a layer did
+     *         not happen: the `sys_metadata` overlay read failing for any
+     *         reason other than the table not being provisioned yet (which
+     *         genuinely means "no overlay row" and still returns normally),
+     *         carrying the driver error on `cause`; or (#5840) the code
+     *         layer's MetadataService read reporting `degraded` with nothing
+     *         in the registry to answer instead, carrying the failing loaders'
+     *         messages on `cause`.
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -3815,18 +3925,21 @@ export class ObjectStackProtocolImplementation implements
         request = canonicalizeMetaRequestType(request);
         // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
         let code: unknown | null = null;
+        let codeDegraded: { degraded: boolean; errors: string[] } | undefined;
         try {
-            const services = this.getServicesRegistry?.();
-            const metadataService = services?.get('metadata');
-            if (metadataService && typeof metadataService.get === 'function') {
-                // ADR-0048 — package-scope the code layer so a same-name
-                // collision resolves to the requested package's artifact.
-                let fromService = await metadataService.get(request.type, request.name, request.packageId);
-                if (fromService === undefined || fromService === null) {
-                    const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                    if (alt) fromService = await metadataService.get(alt, request.name, request.packageId);
-                }
-                if (fromService !== undefined && fromService !== null) code = fromService;
+            // ADR-0048 — package-scope the code layer so a same-name
+            // collision resolves to the requested package's artifact.
+            const fromService = await this.readItemFromMetadataService(
+                request.type,
+                request.name,
+                request.packageId,
+            );
+            if (fromService.data !== undefined && fromService.data !== null) {
+                code = fromService.data;
+            } else if (fromService.degraded) {
+                // [#5840] Kept, not swallowed — acted on after the registry
+                // fallback below, which may still produce a real code layer.
+                codeDegraded = fromService;
             }
         } catch {
             // ignore
@@ -3842,6 +3955,26 @@ export class ObjectStackProtocolImplementation implements
                 if (alt) regItem = this.engine.registry.getItem(alt, request.name, request.packageId);
             }
             if (regItem !== undefined) code = regItem;
+        }
+
+        // [#5840] The code half of the rule #5707 wrote for the overlay half,
+        // eleven lines below. `code: null` is not a shrug — this method states
+        // it positively ("no packaged/code-layer definition exists"), and the
+        // response then DERIVES from it: `lockSource = code ?? overlay ?? {}`
+        // feeds `resolveLockState`, so an item whose code layer declares
+        // `_lock: 'full'` is rendered `editable: true, deletable: true` when
+        // the read that would have found that lock simply failed. An
+        // availability failure widening an affordance is precisely what
+        // ADR-0110 D3 forbids, and the overlay half of this very method
+        // already refuses to do it — the two halves were asymmetric only
+        // because the loader failure was invisible on this side.
+        //
+        // Same narrow shape as the overlay half: the benign "nothing there"
+        // still returns `code: null` normally (a clean miss is not degraded),
+        // and a registry hit above is a real code layer, so this fires only
+        // when the null would otherwise be an unfounded authorship claim.
+        if (code === null && codeDegraded?.degraded) {
+            this.throwMetadataServiceUnavailable(codeDegraded.errors);
         }
 
         // ── overlay layer: sys_metadata row (org-scoped wins, then env-wide) ──
@@ -5910,6 +6043,15 @@ export class ObjectStackProtocolImplementation implements
                 // not be read (see
                 // {@link rethrowUnlessMetadataStoreUnprovisioned}) — so the
                 // 404 is a claim this layer is finally entitled to make.
+                //
+                // [#5840] That entitlement was only three-quarters earned when
+                // it was written: it held for the `sys_metadata` overlay read,
+                // whose failure arrives as a throw, and NOT for the
+                // MetadataService read, whose failure `MetadataManager`
+                // warn-logs and skips — so a loader outage still reached this
+                // line as a plain missing `item` and was answered 404. Both
+                // halves now refuse to guess (see
+                // {@link readItemFromMetadataService}).
                 throw metadataItemNotFoundError(request.type, request.name);
             }
 
@@ -7346,6 +7488,15 @@ export class ObjectStackProtocolImplementation implements
             const services = this.getServicesRegistry?.();
             const metadataService = services?.get('metadata');
             if (metadataService && typeof metadataService.get === 'function') {
+                // [#5840] Measured and deliberately left on plain `get`. This
+                // read decides nothing and asserts nothing: it returns void,
+                // its `undefined` produces no answer to any caller, and the
+                // method's own contract above is "best-effort, the next full
+                // reload fixes the registry anyway". Routing it through
+                // `getDiagnosed` could only add a log line to a path that is
+                // already documented as silent — over-applying the rule, which
+                // is how `error`/`warn` become unreadable (AGENTS.md
+                // "Degradation log levels", the do-not-over-apply half).
                 const artifactItem = await metadataService.get(type, name);
                 if (artifactItem !== undefined) {
                     this.engine.registry.registerItem(type, artifactItem, 'name');
