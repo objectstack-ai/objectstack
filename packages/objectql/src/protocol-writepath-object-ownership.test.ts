@@ -356,8 +356,7 @@ describe('#4636 — rollback re-registers under the row\'s own package binding',
      * PREDICATE (`package_id IS NULL`) rather than "any package". So the
      * lookup misses the package-bound row it is restoring, reads its parent
      * hash as null, and every rollback of a package-bound row answers 409
-     * before any registry write-through runs. Filed separately — see the
-     * `out_of_scope_findings` link in this PR.
+     * before any registry write-through runs. Filed as #6215.
      *
      * When that is fixed this test FAILS, which is the point: whoever fixes it
      * must then assert what the write-through does with the key, and the
