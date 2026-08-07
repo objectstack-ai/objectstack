@@ -254,6 +254,10 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
       // which is what a user with more unread than the page size was told
       // forever. The parse was green either way; only this assertion can tell.
       expect(windowed.unreadCount).toBe(all.unreadCount);
+      // Stated as the property rather than only as an equality, so the pin
+      // cannot go quietly vacuous if a future fixture change flattens both
+      // sides: the count MUST be able to exceed the window it came back in.
+      expect(windowed.unreadCount).toBeGreaterThan(windowed.notifications.length);
       expect(ListNotificationsResponseSchema.safeParse(windowed).success).toBe(true);
     });
 
