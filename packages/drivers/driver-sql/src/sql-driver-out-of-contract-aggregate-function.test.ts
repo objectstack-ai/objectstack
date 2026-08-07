@@ -61,11 +61,41 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from './index.js';
 import { AggregationFunction } from '@objectstack/spec/data';
+import type { AggregationNode, QueryAST } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
   status?: number;
 }
+
+/**
+ * [#4918] The two classes this file separates are ALSO two different type
+ * situations, and the query values are built to say so rather than erased to
+ * `any`:
+ *
+ * - {@link declaredAst} is on-contract. `function` is typed
+ *   `AggregationNode['function']`, so `tsc` proves the class-2 fixtures
+ *   (`count_distinct` / `array_agg` / `string_agg`) really are members of the
+ *   declared enum — which is the exact claim class 2 makes at runtime. A typo
+ *   there would fail the build instead of silently testing a class-1 input.
+ * - {@link undeclaredAst} is DELIBERATELY off-contract: `function: 'median'`
+ *   cannot be a `QueryAST`, because that is the whole point of the test. It is
+ *   spelled `as unknown as QueryAST` rather than `as any` — naming the contract
+ *   being bypassed, keeping every other key checked, and greppable as an
+ *   intentional act.
+ */
+const declaredAst = (
+  fn: AggregationNode['function'],
+  field: string | null = 'stage',
+): QueryAST => ({
+  object: 'deal',
+  aggregations: [{ function: fn, ...(field ? { field } : {}), alias: 'n' }],
+});
+
+const undeclaredAst = (fn: string): QueryAST => ({
+  object: 'deal',
+  aggregations: [{ function: fn, field: 'stage', alias: 'n' }],
+}) as unknown as QueryAST;
 
 /**
  * The first sentences, spelled out here rather than imported: this is the
@@ -103,20 +133,21 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
     await driver.create('deal', { id: '2', stage: 'lost', score: 20 });
   });
 
-  const aggregate = (fn: string, field: string | undefined = 'stage') =>
-    driver.aggregate('deal', {
-      object: 'deal',
-      aggregations: [{ function: fn, ...(field ? { field } : {}), alias: 'n' }],
-    } as any);
-
-  const refusalOf = async (fn: string): Promise<WireBearingError> => {
+  const refusalOfAst = async (fn: string, ast: QueryAST): Promise<WireBearingError> => {
     try {
-      await aggregate(fn);
+      await driver.aggregate('deal', ast);
     } catch (e) {
       return e as WireBearingError;
     }
     throw new Error(`expected the driver to refuse "${fn}", but it resolved`);
   };
+
+  /** Class 1's inputs: off-contract by construction — see {@link undeclaredAst}. */
+  const refusalOfUndeclared = (fn: string) => refusalOfAst(fn, undeclaredAst(fn));
+
+  /** Class 2's inputs: declared names, so the fixture is a real `QueryAST`. */
+  const refusalOfDeclared = (fn: AggregationNode['function']) =>
+    refusalOfAst(fn, declaredAst(fn));
 
   // ── Class 1: the Query Protocol does not declare this name ─────────────────
 
@@ -127,7 +158,7 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
 
     for (const fn of UNDECLARED) {
       it(`refuses "${fn}" with INVALID_QUERY / 400`, async () => {
-        const err = await refusalOf(fn);
+        const err = await refusalOfUndeclared(fn);
         expect(err.code).toBe('INVALID_QUERY');
         expect(err.status).toBe(400);
         expect(err.message.startsWith(UNDECLARED_SENTENCE(fn))).toBe(true);
@@ -151,7 +182,7 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
     const MISCASED = ['COUNT_DISTINCT', 'Median', 'COUNT'];
     for (const fn of MISCASED) {
       it(`refuses the miscased "${fn}" as UNDECLARED (400), not as a capability gap`, async () => {
-        const err = await refusalOf(fn);
+        const err = await refusalOfUndeclared(fn);
         expect(err.code).toBe('INVALID_QUERY');
         expect(err.status).toBe(400);
         expect(err.message.startsWith(UNDECLARED_SENTENCE(fn))).toBe(true);
@@ -165,7 +196,15 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
 
   describe('a DECLARED function this backend cannot compile', () => {
     // Exactly the three `AggregationFunction` declares with no SQL lowering.
-    const UNCOMPILABLE = ['count_distinct', 'array_agg', 'string_agg'];
+    // The TYPE is load-bearing (#4918): `AggregationNode['function']` is the
+    // declared enum, so a typo in this fixture — or a name that leaves the enum
+    // when #6188 is decided — fails `tsc` instead of quietly becoming a class-1
+    // input that still passes a class-2 assertion for the wrong reason.
+    const UNCOMPILABLE: Array<AggregationNode['function']> = [
+      'count_distinct',
+      'array_agg',
+      'string_agg',
+    ];
 
     // Guard: the fixture is the real declared-minus-compiled set, derived rather
     // than trusted. If the spec drops one (that decision is #6188) or this driver
@@ -179,7 +218,7 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
 
     for (const fn of UNCOMPILABLE) {
       it(`refuses "${fn}" with NOT_IMPLEMENTED / 501`, async () => {
-        const err = await refusalOf(fn);
+        const err = await refusalOfDeclared(fn);
         expect(err.code).toBe('NOT_IMPLEMENTED');
         expect(err.status).toBe(501);
         expect(err.message.startsWith(UNCOMPILABLE_SENTENCE(fn))).toBe(true);
@@ -199,23 +238,24 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
 
   describe('the compiled vocabulary is untouched', () => {
     it('every function this driver lowers still computes its value', async () => {
-      expect(await aggregate('count', 'id')).toEqual([{ n: 2 }]);
-      expect(await aggregate('sum', 'score')).toEqual([{ n: 30 }]);
-      expect(await aggregate('avg', 'score')).toEqual([{ n: 15 }]);
-      expect(await aggregate('min', 'score')).toEqual([{ n: 10 }]);
-      expect(await aggregate('max', 'score')).toEqual([{ n: 20 }]);
+      expect(await driver.aggregate('deal', declaredAst('count', 'id'))).toEqual([{ n: 2 }]);
+      expect(await driver.aggregate('deal', declaredAst('sum', 'score'))).toEqual([{ n: 30 }]);
+      expect(await driver.aggregate('deal', declaredAst('avg', 'score'))).toEqual([{ n: 15 }]);
+      expect(await driver.aggregate('deal', declaredAst('min', 'score'))).toEqual([{ n: 10 }]);
+      expect(await driver.aggregate('deal', declaredAst('max', 'score'))).toEqual([{ n: 20 }]);
     });
 
     it('COUNT(*) — the `field`-less spelling the spec allows — still answers', async () => {
-      expect(await aggregate('count', undefined)).toEqual([{ n: 2 }]);
+      expect(await driver.aggregate('deal', declaredAst('count', null))).toEqual([{ n: 2 }]);
     });
 
     it('grouped aggregation still answers', async () => {
-      const rows = await driver.aggregate('deal', {
+      const ast: QueryAST = {
         object: 'deal',
         groupBy: ['stage'],
         aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
-      } as any);
+      };
+      const rows = await driver.aggregate('deal', ast);
       expect((rows as any[]).map((r) => `${r.stage}:${r.n}`).sort()).toEqual(['lost:1', 'won:1']);
     });
   });
