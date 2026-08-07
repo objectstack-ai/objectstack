@@ -390,6 +390,12 @@ against the report's own claims**:
   present.
 - Test evidence in the report shows the **actual commands and passing output**,
   not a bare "tests pass".
+- Rejection-class tests in the diff — those whose point is that bad input is
+  **refused** — assert the error's identity (its `code` and `status`, or
+  whatever fields the project's error envelope declares), not merely that
+  something was thrown. A throw-only assertion is green on any producer that
+  already throws a bare error, which is what an unfixed producer usually does,
+  so it reads as coverage while being unable to fail on the defect it names.
 - The diff plausibly satisfies the issue's acceptance criteria.
 
 Verdict per issue:
@@ -585,6 +591,20 @@ Definition of done, in order:
 - A DRAFT PR to the default branch, body starting "Fixes {backlog_repo}#<n>",
   written in the language the repository's PRs use.
 - Tear down anything you started (dev servers, temporary processes) by PID.
+
+Rejection-class tests assert the envelope, not the throw. For any test whose
+point is that bad input is REFUSED, the minimum assertion set is the error's
+identity — its `code` and its `status`, or whatever fields your project's error
+envelope declares. "It threw" alone (`expect(...).toThrow()`,
+`rejects.toThrow()`) is not a rejection test, and it goes blind in two opposite
+directions. An unfixed producer usually throws ALREADY — a bare error carrying
+neither field — so the assertion stays GREEN on the very defect the test names.
+And a producer that answers instead of throwing fails it with "nothing was
+thrown", naming the absence of a throw rather than the absence of an envelope,
+so it cannot separate "refused with the wrong envelope" from "did not refuse at
+all". Assert the message's wording on top of the envelope fields only where the
+wording is itself contract — never instead of them. A rejection test that
+cannot go red on a missing envelope reads as coverage and is not.
 
 When to STOP instead of coding. If the issue underspecifies a decision that
 shapes a public contract — a schema, API shape, naming, metadata semantics —

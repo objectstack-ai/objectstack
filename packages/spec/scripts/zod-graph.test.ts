@@ -25,16 +25,24 @@
  * the pre-#5317 code, and the live-graph cases fail the moment a NEW preprocess
  * registration appears that the walker cannot resolve.
  *
- * ── What is deliberately NOT asserted ─────────────────────────────────────
- * "Every preprocess root resolves to a real shape" is the pin the issue asked
- * for, and it is not true of `view` — the one preprocess ROOT in the registry —
- * because its OUT is a `z.union`, and `zodShapeOf` has no union branch. Fixing
- * the pipe direction is necessary but not sufficient there. Asserting the
- * literal sentence would mean either a failing test or a union branch smuggled
- * in unmeasured, so what is pinned instead is the fact that actually holds and
- * that actually catches recurrence #5: no pipe in the registry ever resolves its
- * authorable side to a TRANSFORM. `view` passes that (its side is the union);
- * a regressed walker does not.
+ * ── The unwrap surface, completed at #6098 ────────────────────────────────
+ * #5317 fixed the pipe DIRECTION and stopped there, leaving `zodShapeOf` two
+ * spellings narrower than its three sibling walkers: no `union` arm, and no
+ * `prefault` wrapper. Both are now here, measured together (#6098), and the
+ * `view` case below is the one this file used to pin the other way round — it
+ * documented that a corrected direction still derived no shape, and it now pins
+ * the merged shape that direction actually leads to.
+ *
+ * What the measurement found, recorded because it is the part a future edit can
+ * silently undo: widening this walker cannot widen the consumer's derived-clone
+ * BRIDGE, because every object a resolved shape comes from is itself in the BFS
+ * closure (`zodChildSchemas` walks union options, wrapper `innerType`s and both
+ * pipe sides), so it has already contributed the same (name, instance) pairs.
+ * The single new bridge entry the run produced came from a `z.lazy` getter that
+ * mints fresh instances per call (`ui/NavigationItem`) and matches nothing, in
+ * either direction. What DID move is the query side: 18 defs that answered the
+ * `!shape` fail-closed default now answer from their real shape (17 of them
+ * `null`, one — `ui/ViewItem` — `derived-clone`).
  */
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -92,6 +100,79 @@ describe('zodShapeOf — pipe direction (#4488, #5074, #5317)', () => {
   });
 });
 
+describe('zodShapeOf — union members (#3095, #6098)', () => {
+  it('merges every member’s keys', () => {
+    const schema = z.union([
+      z.object({ shared: z.string(), onlyA: z.string() }),
+      z.object({ shared: z.string(), onlyB: z.number() }),
+    ]);
+
+    // Pre-#6098 this was null: no union arm, so the walker fell through.
+    expect(Object.keys(zodShapeOf(schema) ?? {})).toEqual(['shared', 'onlyA', 'onlyB']);
+  });
+
+  it('keeps the FIRST member’s instance when two members declare one name', () => {
+    // The documented narrowing: the consumer's bridge is keyed by (name,
+    // INSTANCE) and this record holds one instance per name. Pinned so the rule
+    // is a decision someone can find, not an accident of `Object.assign` order.
+    const first = z.string();
+    const second = z.string();
+    const shape = zodShapeOf(
+      z.union([z.object({ dup: first }), z.object({ dup: second })]),
+    );
+
+    expect(shape?.dup).toBe(first);
+    expect(shape?.dup).not.toBe(second);
+  });
+
+  it('descends a union nested inside a union', () => {
+    const schema = z.union([
+      z.union([z.object({ deep: z.string() })]),
+      z.object({ top: z.string() }),
+    ]);
+
+    // `view`'s live shape depends on this: its OUT union's first member is
+    // itself a union, and two of the 89 merged keys come only from there.
+    expect(Object.keys(zodShapeOf(schema) ?? {})).toEqual(['deep', 'top']);
+  });
+
+  it('still returns null for a union with no object member', () => {
+    // Widening the walker must not turn "no keys to contribute" into a shape:
+    // an empty shape would bridge on nothing and read as a resolved answer.
+    expect(zodShapeOf(z.union([z.string(), z.number()]))).toBeNull();
+  });
+
+  it('resolves a discriminated union through the same arm', () => {
+    const schema = z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('a'), a: z.string() }),
+      z.object({ kind: z.literal('b'), b: z.string() }),
+    ]);
+
+    // In Zod 4.4.3 a discriminated union IS a `union` def, which is why this
+    // walker carries no `discriminated_union` arm — one would match nothing.
+    // If a Zod upgrade ever splits them, this fails rather than going quiet.
+    expect(zodDefOf(schema)?.type).toBe('union');
+    expect(Object.keys(zodShapeOf(schema) ?? {})).toEqual(['kind', 'a', 'b']);
+  });
+});
+
+describe('zodShapeOf — `prefault` wrapper (#6098)', () => {
+  it('peels a `prefault` the way every sibling walker already does', () => {
+    const schema = z.object({ alpha: z.string() }).prefault({ alpha: 'x' });
+
+    expect(Object.keys(zodShapeOf(schema) ?? {})).toEqual(['alpha']);
+  });
+
+  it('sees a preprocess transform parked behind a `prefault`', () => {
+    // `SHAPE_WRAPPER_TYPES` is read by `pipeInIsTransform` too, so this is the
+    // second half of the same entry: IN unwraps to a transform, so the
+    // authorable side is OUT. Reading IN here would hand back the prefault.
+    const schema = z.transform((raw: unknown) => raw).prefault('x').pipe(z.object({ beta: z.string() }));
+
+    expect(Object.keys(zodShapeOf(schema as unknown as z.ZodType) ?? {})).toEqual(['beta']);
+  });
+});
+
 describe('pipeAuthorableSide — the registered metadata-type roots (#5317)', () => {
   /** Every registered root that compiles to a `pipe`, with its resolved side. */
   const pipeRoots = listMetadataTypeSchemaTypes().flatMap((type) => {
@@ -134,15 +215,33 @@ describe('pipeAuthorableSide — the registered metadata-type roots (#5317)', ()
     expect(Object.keys(zodShapeOf(schema!) ?? {}).length).toBeGreaterThan(10);
   });
 
-  it('documents that `view`s preprocess OUT is a union, so it still derives no shape', () => {
-    // Honest pin of the measured state rather than the issue's expectation: the
-    // direction is now right (the side is the union, not the transform), but
-    // `zodShapeOf` has no union branch, so `view` still yields null. Whoever adds
-    // that branch will land here — and should re-measure the derived-clone bridge
-    // before doing so (#5056: a new bridge can mark a dead shape reachable).
+  it('resolves `view`s preprocess OUT union to the MERGE of its members', () => {
+    // ── This case is the converted #5317 pin, not a new one ──────────────
+    // It used to assert `zodShapeOf(view)` was null and to say why: the
+    // direction was right, the union arm was missing, so the one preprocess
+    // ROOT in the registry still derived nothing. #6098 added that arm after the
+    // measurement it was waiting on, so the same case now pins the shape the
+    // corrected direction actually leads to. The direction assertion is kept
+    // verbatim — it is the #4488 recurrence guard and is independent of the
+    // union arm.
     const schema = getMetadataTypeSchema('view');
     expect(schema).toBeDefined();
     expect(defTypeOf(pipeAuthorableSide(zodDefOf(schema!)!))).toBe('union');
-    expect(zodShapeOf(schema!)).toBeNull();
+
+    const shape = zodShapeOf(schema!);
+    expect(shape).not.toBeNull();
+
+    // Not a key count (89 today, and every view feature moves it) — one key that
+    // ONLY a given member declares, so the assertion fails if the merge ever
+    // silently collapses to a single member. All four members are represented,
+    // the first of them a nested union:
+    expect(Object.keys(shape ?? {})).toEqual(
+      expect.arrayContaining([
+        'isPinned', // member 0 only — and member 0 is itself a union
+        'list', //     the defineView container member
+        'pagination', // the flattened list-view member
+        'sections', //  the flattened form-view member
+      ]),
+    );
   });
 });
