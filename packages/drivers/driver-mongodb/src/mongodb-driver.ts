@@ -8,7 +8,7 @@
  * ObjectStack's query protocol, aggregations, transactions, and streaming.
  */
 
-import type { QueryAST, DriverOptions } from '@objectstack/spec/data';
+import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import {
   MongoClient,
@@ -465,7 +465,7 @@ export class MongoDBDriver implements IDataDriver {
   // Aggregation
   // ===========================================================================
 
-  async aggregate(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 

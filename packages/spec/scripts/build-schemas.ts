@@ -39,6 +39,19 @@ import {
   writeShards,
   type GitRun,
 } from './lib/sharded-artifacts';
+// The #4666 default-value ratchet: what an author gets when they OMIT a key.
+// Its own module because the fingerprint's normalisation rules — and the
+// direction-B boundary that keeps constraints out of them — are assertable
+// without running the whole generator (scripts/authorable-defaults.test.ts).
+import {
+  AUTHORABLE_DEFAULTS_DIR_NAME,
+  authorableDefaultsShardTexts,
+  authoriseDefaultChanges,
+  collectAuthorableDefaults,
+  diffAuthorableDefaults,
+  parseDefaultEntries,
+} from './lib/authorable-defaults';
+import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
 import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
@@ -1702,8 +1715,18 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
   process.exit(1);
 }
 
+/**
+ * The baseline this run resolved, kept for the default-value ratchet further
+ * down (#4666), which needs the same two facts check (c) needs: which upstream
+ * rev the comparison is anchored on, and which keys were AUTHORABLE there. It
+ * is one resolution, shared — a second `resolveSurfaceBase()` call would ask git
+ * the same question twice and could answer it differently.
+ */
+let resolvedSurfaceBase: { rev: string; doc: AuthorableSurface } | null = null;
+
 {
   const base = resolveSurfaceBase();
+  resolvedSurfaceBase = base;
   // Whole defs first: check (c) below waives every baseline line under a def this
   // build stopped emitting, on the grounds that this gate adjudicates it. Running
   // it first is what makes that deferral true rather than circular.
@@ -2016,6 +2039,254 @@ if (surfaceChanged && !CHECK) {
       // The locality claim, printed: a PR that touched one category names one
       // shard here, which is the same fact as "two such PRs do not conflict in
       // the merge queue" (#5837).
+      (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
+      (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
+  );
+}
+
+// ─── The default-value ratchet (#4666) ───────────────────────────────
+//
+// The three ratchets above all measure the SHAPE of the contract: which schemas
+// are published, which keys they carry, whether a key is live or tombstoned.
+// None of them can see what a key MEANS WHEN THE AUTHOR OMITS IT — and that is
+// the one change in this file's whole subject matter that alters the behaviour
+// of already-deployed metadata with no error, no warning and no diff on the
+// author's side.
+//
+// Measured, not theorised: on #4661's branch, moving `retryPolicyShape()`'s
+// `maxRetries` default from 0 to 3 — one character — left this entire script
+// green ("✅ Successfully generated 1703 schemas."). The only thing that caught
+// it was a runtime pin an author had remembered to hand-write. Every recording
+// channel missed it for a different reason: the authorable-surface comparison
+// reads key NAMES, `retiredKey()` tombstones fire on live → retired, and
+// spec-changes.json is a projection of the ADR-0087 registries, which a default
+// change need not touch at all.
+//
+// Why defaults specifically, and why now: omitting optional keys is the normal
+// mode of AI-authored metadata (ADR-0033), so a default covers far more live
+// behaviour than it did in the hand-written era. `maxRetries`, `enabled`,
+// `required`, any `allow*` — flipping one of those is a reliability or security
+// event, and a silent one.
+//
+// ⛔ CONSTRAINTS ARE DELIBERATELY NOT RECORDED HERE (maintainer ruling on #4666,
+// direction B). The asymmetry that decided it: tightening `.max()` REJECTS an
+// existing document — loud, diagnosable, discovered from CI — while a default
+// flip rejects nothing and is discovered from a customer incident. Recording
+// both (direction A) covers more but makes this ratchet markedly noisier, and
+// #4535 §1 is already complaining that the authorable surface over-collects.
+// The exclusion is structural rather than a matter of discipline: the
+// fingerprint reads exactly one field of the emitted schema, `default`, so a
+// bound or a `.describe()` cannot move it even by accident.
+const AUTHORABLE_DEFAULTS_DIR = path.resolve(__dirname, `../${AUTHORABLE_DEFAULTS_DIR_NAME}`);
+const DEFAULTS_DIR_LABEL = `${AUTHORABLE_DEFAULTS_DIR_NAME}/`;
+
+const currentDefaults = collectAuthorableDefaults(generatedSchemas);
+
+let defaultsTexts: Map<string, string> | null = null;
+let committedDefaults: Map<string, string> | null = null;
+try {
+  const read = aggregateCategoryShards(AUTHORABLE_DEFAULTS_DIR, 'defaults');
+  if (read) {
+    defaultsTexts = new Map(read.shards.map((s) => [s.name, s.raw]));
+    committedDefaults = parseDefaultEntries(read.entries);
+  }
+} catch (error) {
+  console.error(`\n❌ Failed to read ${DEFAULTS_DIR_LABEL}: ${error instanceof Error ? error.message : error}`);
+  process.exit(1);
+}
+
+// The baseline, in strict preference order. Both halves of a baseline — the
+// recorded defaults AND the authorable keys they belong to — always come from
+// the SAME anchor, or "this key is new" would be decided against one commit
+// while its default was read from another.
+//
+//   `upstream` — authorable-defaults/ at the merge base with origin/main, the
+//      commit under test cannot rewrite it. This is the anchor that matters, and
+//      it is the one every run gets once this ratchet exists upstream.
+//   `in-tree`  — the committed authorable-defaults/ in THIS tree. Weaker: the
+//      commit under test owns these bytes. Used only where the upstream read has
+//      nothing to return — a merge base that predates this ratchet (every branch
+//      in flight when it lands), and the offline builds #5235 describes, which
+//      are immutable already-merged trees with no "what did this PR change
+//      relative to main" question to ask. It is strictly additive: it can only
+//      ADD findings, never remove one the upstream anchor would have made.
+//
+// With NEITHER available the comparison is skipped — and that skip is not the
+// #4690 hole, because it is not reachable by deleting anything: the artifact's
+// staleness check below runs unconditionally, so a tree with no
+// authorable-defaults/ fails there in `--check` mode whatever this block
+// decided. Which anchor was used is PRINTED, every run.
+let defaultsBaseline: { defaults: Map<string, string>; keys: Map<string, boolean>; label: string } | null =
+  null;
+if (resolvedSurfaceBase) {
+  const upstream = readSurfaceKeysAtRev(
+    gitInPackage,
+    resolvedSurfaceBase.rev,
+    AUTHORABLE_DEFAULTS_DIR_NAME,
+    'defaults',
+    `authorable-defaults change check (#4666)`,
+  );
+  if (upstream) {
+    const keys = new Map<string, boolean>();
+    for (const entry of resolvedSurfaceBase.doc.keys ?? []) {
+      keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
+    }
+    defaultsBaseline = {
+      defaults: parseDefaultEntries(upstream.entries),
+      keys,
+      label: `upstream ${resolvedSurfaceBase.rev.slice(0, 12)}`,
+    };
+  }
+}
+if (!defaultsBaseline && committedDefaults && surfaceDoc) {
+  const keys = new Map<string, boolean>();
+  for (const entry of surfaceDoc.keys) {
+    keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
+  }
+  defaultsBaseline = {
+    defaults: committedDefaults,
+    keys,
+    label: 'in-tree (this commit owns these bytes — no upstream baseline was reachable)',
+  };
+}
+
+if (!defaultsBaseline) {
+  console.log(
+    `\nℹ️  ${DEFAULTS_DIR_LABEL} has no baseline to compare against — neither the merge base nor\n` +
+      `   this tree carries one, so this run RECORDS the defaults rather than adjudicating them\n` +
+      `   (#4666). The artifact check below still runs: a tree missing ${DEFAULTS_DIR_LABEL} fails\n` +
+      `   \`check:authorable-surface\` regardless of what this block decided.`,
+  );
+} else {
+  const changes = diffAuthorableDefaults({
+    baseline: defaultsBaseline.defaults,
+    current: currentDefaults,
+    baselineKeys: defaultsBaseline.keys,
+    currentKeys,
+  });
+  const { authorised, unauthorised, stale } = authoriseDefaultChanges(
+    changes,
+    DEFAULT_CHANGES_BY_MAJOR,
+    CURRENT_MAJOR,
+    currentDefaults,
+    currentKeys,
+  );
+
+  // A stale declaration is judged whether or not anything changed today: it is
+  // the property that stops this table decaying into an allowlist. Reported
+  // FIRST, because a chain that no longer describes reality also explains why a
+  // change below looks unauthorised.
+  if (stale.length > 0) {
+    console.error(
+      `\n❌ ${stale.length} DEFAULT_CHANGES_BY_MAJOR declaration(s) at major ${CURRENT_MAJOR} no longer describe reality:`,
+    );
+    for (const s of stale) {
+      console.error(
+        s.why === 'chain-tip-mismatch'
+          ? `     - ${s.key}: declared to end at ${s.claims}, but this build emits ${s.emits}`
+          : `     - ${s.key}: declared hops do not meet (${s.claims})`,
+      );
+    }
+    console.error(
+      `\n   A declared default change is a claim about a value this build EMITS, re-checked on\n` +
+        `   every run — that is what keeps it from becoming an allowlist nobody re-reads. The\n` +
+        `   default moved again (or was reverted) and the declaration was left behind, so it now\n` +
+        `   pre-approves a value nobody wrote down.\n\n` +
+        `   Append the new hop to the key's chain in scripts/lib/default-changes.ts (the chain\n` +
+        `   must be contiguous: each hop's \`from\` is the previous hop's \`to\`), or — if the\n` +
+        `   default should not have moved at all — restore it in the schema.`,
+    );
+    process.exit(1);
+  }
+
+  if (authorised.length > 0) {
+    // Printed in full, every run. An acknowledged flip that passes in silence is
+    // the failure #4690 names; this is the exit announcing itself.
+    console.log(`\n📌 ${authorised.length} declared default change(s) accepted (#4666):`);
+    for (const { change, declared } of authorised) {
+      console.log(`     - ${change.key}: ${change.from} → ${change.to}`);
+      for (const hop of declared) console.log(`       ${hop.reason}`);
+    }
+  }
+
+  if (unauthorised.length > 0) {
+    console.error(
+      `\n❌ ${unauthorised.length} authorable key(s) changed the DEFAULT they apply when the author omits them:`,
+    );
+    for (const c of unauthorised) console.error(`     - ${c.key}: ${c.from} → ${c.to}  (${c.kind})`);
+    console.error(
+      `\n   Baseline: ${defaultsBaseline.label}\n\n` +
+        `   A default decides what already-deployed metadata does when it does NOT write the key,\n` +
+        `   and omitting optional keys is the normal mode of AI-authored metadata (ADR-0033). So\n` +
+        `   this change reaches every document that stayed silent about ${unauthorised.length === 1 ? 'this key' : 'these keys'} — with no\n` +
+        `   parse error, no warning, and nothing in the author's diff. Unlike a tightened\n` +
+        `   constraint, which rejects the document loudly, there is no moment where anyone finds\n` +
+        `   out (#4666, measured on #4661).\n\n` +
+        `   If the change is intended, declare it — exactly, by \`\${defKey}:\${name}\` — in\n` +
+        `   DEFAULT_CHANGES_BY_MAJOR (scripts/lib/default-changes.ts), under \`${CURRENT_MAJOR}: [ … ]\`:\n\n` +
+        unauthorised
+          .map(
+            (c) =>
+              `        {\n` +
+              `          key: '${c.key}',\n` +
+              `          from: '${c.from}',\n` +
+              `          to: '${c.to}',\n` +
+              `          reason: '…what changes for a consumer who relied on ${c.from}, and what they should write to keep it…',\n` +
+              `        },\n`,
+          )
+          .join('') +
+        `\n   \`reason\` is printed by every build that accepts the change, so write it for the\n` +
+        `   consumer who is about to be surprised. Both endpoints are re-checked on every run\n` +
+        `   against sources you do not control — \`from\` against the baseline, \`to\` against what\n` +
+        `   the build emits — so the declaration dies the moment it stops being true.\n\n` +
+        `   If the default was NOT meant to move, restore it in the schema. And if the value\n` +
+        `   genuinely has to change for existing documents too, add a \`semantic\` entry to this\n` +
+        `   major's step in src/migrations/registry.ts so it reaches spec-changes.json, the\n` +
+        `   upgrade guide and \`os migrate meta\`.`,
+    );
+    process.exit(1);
+  }
+
+  if (changes.length === 0) {
+    console.log(
+      `\n🔒 ${DEFAULTS_DIR_LABEL} verified against ${defaultsBaseline.label} — ` +
+        `${currentDefaults.size} default(s) unchanged (#4666).`,
+    );
+  }
+}
+
+// The artifact itself, on the same byte-for-byte terms as its two siblings: a
+// generated file whose every difference must come from the generator (#4662).
+// Reached only after the adjudication above, so `gen:schema` can never absorb an
+// undeclared change into the record it is supposed to be evidence for.
+const canonicalDefaultsTexts = authorableDefaultsShardTexts(currentDefaults);
+const staleDefaultsShards = [...canonicalDefaultsTexts]
+  .filter(([name, text]) => defaultsTexts?.get(name) !== text)
+  .map(([name]) => name);
+const orphanDefaultsShards = [...(defaultsTexts?.keys() ?? [])].filter(
+  (name) => !canonicalDefaultsTexts.has(name),
+);
+const defaultsChanged =
+  defaultsTexts === null || staleDefaultsShards.length > 0 || orphanDefaultsShards.length > 0;
+if (defaultsChanged && CHECK) {
+  console.error(`\n❌ ${DEFAULTS_DIR_LABEL} is out of date or hand-edited (#4666).`);
+  for (const name of staleDefaultsShards) {
+    console.error(`     ~ ${AUTHORABLE_DEFAULTS_DIR_NAME}/${name}.json  (stale)`);
+  }
+  for (const name of orphanDefaultsShards) {
+    console.error(`     - ${AUTHORABLE_DEFAULTS_DIR_NAME}/${name}.json  (no default in this category)`);
+  }
+  console.error(
+    `\n   Any CHANGE to an existing key's default already exited above, so reaching here means\n` +
+      `   the record is behind on a NEW key's default, or its bytes are not what the generator\n` +
+      `   writes. Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result.`,
+  );
+  process.exit(1);
+}
+if (defaultsChanged && !CHECK) {
+  const { written, removed } = writeShards(AUTHORABLE_DEFAULTS_DIR, canonicalDefaultsTexts);
+  console.log(
+    `\n🎚️  ${DEFAULTS_DIR_LABEL} ${defaultsTexts ? 'updated' : 'created'} (${currentDefaults.size} defaults) — commit it.` +
       (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
       (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
   );

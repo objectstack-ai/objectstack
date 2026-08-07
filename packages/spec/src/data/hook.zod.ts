@@ -422,13 +422,25 @@ export const HookContextSchema = lazySchema(() => z.object({
      * `buildSession()` (`packages/objectql/src/engine.ts`).
      *
      * ⚠️ **Descriptive, NOT an authorization input.** A hook may READ this to
-     * describe the caller — forwarding it as the sharing service's evaluation
-     * context (`services.sharing.canEdit(..., { positions })`, the shape both
-     * `content/docs/kernel/runtime-services/` pages teach), tailoring a
-     * message, logging — and nothing more. It grants nothing on its own, no
-     * security middleware keys on it here, and a hook must never make the
-     * access decision itself by testing it
+     * describe the caller — tailoring a message, branching a *business* rule
+     * through its own channel (`ctx.api`), logging — and nothing more. It
+     * grants nothing on its own, no security middleware keys on it here, and a
+     * hook must never make the access decision itself by testing it
      * (`session.positions.includes('sales_manager')` is the anti-pattern).
+     *
+     * The example that used to stand here — forwarding this array as the
+     * sharing service's evaluation context,
+     * `services.sharing.canEdit(..., { positions })` — was itself unreachable
+     * and is gone (#6001). A hook context is assembled key by key by the engine
+     * (`buildSession()` / `buildSandboxContext()` in
+     * `packages/runtime/src/sandbox/body-runner.ts`) and carries **no
+     * `services` key**, so that call is `undefined()` at run time and the
+     * customary `if (!ok) throw` around it rejects every write (#5720). It was
+     * a defect shape wearing a good-practice label. The sharing gates run
+     * inside the engine and have already thrown `FORBIDDEN` before any hook is
+     * reached, so there is nothing for a hook to forward: see
+     * `content/docs/kernel/runtime-services/sharing-service.mdx`,
+     * "Enforcement is automatic — do not re-check it in a hook".
      * PRIVILEGE is judged by the security service on the ExecutionContext:
      * capability grants (`permissions`), placements (`positions`) and the
      * derived posture (ADR-0095 D3). A hook that re-decides access from this
@@ -447,10 +459,13 @@ export const HookContextSchema = lazySchema(() => z.object({
      */
     positions: z.array(z.string()).optional().describe(
       'Position names held by the caller (ADR-0090 D3; formerly `roles`), copied from '
-      + 'ExecutionContext.positions. For hook READS only — e.g. forwarding to the sharing '
-      + 'service as evaluation context. Authorization is decided by the security service on '
-      + 'the ExecutionContext (permissions / positions / derived posture); this is NOT an '
-      + 'authorization input and a hook must not gate a write by testing it.',
+      + 'ExecutionContext.positions. For hook READS only — e.g. tailoring a message, or '
+      + 'branching a business rule the hook runs through its own `ctx.api` channel. '
+      + 'Authorization is decided by the security service on the ExecutionContext '
+      + '(permissions / positions / derived posture); this is NOT an authorization input '
+      + 'and a hook must not gate a write by testing it. A hook context carries no '
+      + '`services` key, so the sharing service cannot be called from one either — the '
+      + 'sharing gates already ran inside the engine before the hook chain.',
     ),
     /**
      * Historical-import audit-preservation flag (#3493). Set by

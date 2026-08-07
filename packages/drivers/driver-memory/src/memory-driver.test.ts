@@ -308,7 +308,6 @@ describe('InMemoryDriver', () => {
       await driver.create(testTable, { id: '3', role: 'user', active: true });
 
       const roles = await driver.distinct(testTable, 'role', {
-        object: testTable,
         where: { active: true },
       });
       expect(roles).toHaveLength(2);
@@ -742,7 +741,7 @@ describe('InMemoryDriver', () => {
       const rows = await driver.aggregate(tbl, {
         groupBy: ['category'],
         aggregations: [{ function: 'sum', field: 'amount', alias: 'amount' }],
-      } as any);
+      });
       const byCat = Object.fromEntries(rows.map((r: any) => [r.category, r.amount]));
       expect(byCat).toEqual({ travel: 150, meals: 30 });
     });
@@ -751,7 +750,7 @@ describe('InMemoryDriver', () => {
       const rows = await driver.aggregate(tbl, {
         where: { category: 'travel' },
         aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }, { function: 'count', field: '*', alias: 'count' }],
-      } as any);
+      });
       expect(rows).toEqual([{ total: 150, count: 2 }]);
     });
 

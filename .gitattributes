@@ -46,6 +46,7 @@
 packages/spec/spec-changes.json                              merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
+packages/spec/authorable-defaults/**                         merge=os-regen
 packages/spec/json-schema.manifest/**                        merge=os-regen
 packages/spec/api-surface/**                                 merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen

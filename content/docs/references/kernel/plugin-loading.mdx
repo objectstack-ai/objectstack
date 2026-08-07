@@ -179,12 +179,29 @@ Plugin loading lifecycle event
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'load-started' \| 'load-completed' \| 'load-failed' \| 'init-started' \| 'init-completed' \| 'init-failed' \| 'preload-started' \| 'preload-completed' \| 'cache-hit' \| 'cache-miss' \| 'hot-reload' \| 'dynamic-load' \| 'dynamic-unload' \| 'dynamic-discover'>` | ✅ |  |
+| **type** | `Enum<'load-started' \| 'load-completed' \| 'load-failed' \| 'init-started' \| 'init-completed' \| 'init-failed' \| 'preload-started' \| 'preload-completed' \| 'cache-hit' \| … +5 more>` | ✅ |  |
 | **pluginId** | `string` | ✅ |  |
 | **timestamp** | `integer` | ✅ |  |
 | **durationMs** | `integer` | optional |  |
 | **metadata** | `Record<string, any>` | optional |  |
 | **error** | `{ message: string; code?: string; stack?: string }` | optional |  |
+
+### Allowed Values: `PluginLoadingEvent.type`
+
+* `load-started`
+* `load-completed`
+* `load-failed`
+* `init-started`
+* `init-completed`
+* `init-failed`
+* `preload-started`
+* `preload-completed`
+* `cache-hit`
+* `cache-miss`
+* `hot-reload`
+* `dynamic-load`
+* `dynamic-unload`
+* `dynamic-discover`
 
 
 ---

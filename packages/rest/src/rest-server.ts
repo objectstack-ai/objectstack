@@ -2240,6 +2240,15 @@ export class RestServer {
      * back to a caller who does not hold the set, and an `org` book came back to
      * an anonymous reader on a publicly-served deployment. Same route, gate
      * enforced on one spelling of it.
+     *
+     * Calling this at each gate is NOT the durable form — #6241 proved it.
+     * Eight days after #3984, the single-item read's cache-branch condition
+     * still excluded `doc`/`book` by literal comparison, so the plural read
+     * skipped the branch that holds the gate and the same authorization hole
+     * came back on the same route. The handlers therefore normalize ONCE at
+     * the top (`const metaType = RestServer.metaTypeSingular(req.params.type)`)
+     * and every gate reads that local: a gate added later has no raw param in
+     * scope to compare against.
      */
     private static metaTypeSingular(type: unknown): string {
         const t = typeof type === 'string' ? type : '';
@@ -4208,6 +4217,33 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
+                        // [#3984 / #6241] Normalize the `:type` segment ONCE,
+                        // here at the top, and let every gate below read THIS
+                        // value. The route serves both spellings and Prime
+                        // Directive #3 makes the plural one canonical
+                        // (`/meta/books/:name`), so any gate comparing the raw
+                        // param is a gate the canonical spelling walks past.
+                        //
+                        // #3984 ruled this shape for exactly that reason ("每个
+                        // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
+                        // #6241 is why the ruling is written into the code
+                        // rather than trusted to memory: eight days after
+                        // #3984 landed, the cache-branch condition below still
+                        // excluded `doc`/`book` by LITERAL comparison, so
+                        // `GET /meta/books/:name` took the cached branch and
+                        // the §6.7 audience gate — which lives in the uncached
+                        // branch — never ran at all. Measured on the real
+                        // server, one `{ permissionSet }`-gated book, one
+                        // signed-in caller holding no set:
+                        //
+                        //     singular "book"  :: cachedCalls=0 status=[403]
+                        //     plural   "books" :: cachedCalls=1 status=[]  ← full body served
+                        //
+                        // A new per-type gate added below inherits the
+                        // normalization by default now; there is no raw param
+                        // in scope for it to compare against by accident.
+                        const metaType = RestServer.metaTypeSingular(req.params.type);
+
                         // Phase 3a-layered-get: opt-in 3-state view when client
                         // asks for `?layers=true` (or any non-empty value).
                         // Skips the cache path entirely — layered view is a
@@ -4249,7 +4285,7 @@ export class RestServer {
                         // viewers of the same app schema. Drafts also
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
-                        const isAppType = RestServer.metaTypeSingular(req.params.type) === 'app';
+                        const isAppType = metaType === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
@@ -4272,6 +4308,21 @@ export class RestServer {
                         // `doc` and `book` bypass the shared cache: their §6.7
                         // audience gate is per-caller, and a shared ETag would
                         // leak gated content across viewers.
+                        //
+                        // [#6241] That sentence was already here while the
+                        // exclusion beneath it compared the RAW param against
+                        // the literals `'doc'` / `'book'`, so the canonical
+                        // plural spelling took the cached branch and shipped
+                        // the gated body. The exclusion is not incidental
+                        // tidying — it is the stated security invariant above,
+                        // and it now reads the normalized `metaType`.
+                        //
+                        // The predicate is ONE named value shared with the §6.7
+                        // gate in the uncached branch (`isAudienceGatedType`),
+                        // so "which types bypass the cache" and "which types
+                        // are audience-gated" can no longer drift apart: the
+                        // bypass exists only to make that gate reachable, and a
+                        // future third gated type joins both sites at once.
                         //
                         // [#5881] `dashboard` bypasses it too, and the reason is
                         // NOT the one above — worth writing down, because the
@@ -4305,15 +4356,19 @@ export class RestServer {
                         // so the server does identical work either way and only
                         // the 304's saved body bytes are given up.
                         //
-                        // Compared on the NORMALIZED type, like `isAppType` and
-                        // unlike the two literals at the end of this condition
-                        // (`/meta/dashboards/x` is the canonical plural spelling
-                        // under Prime Directive #3, and an exclusion it could be
-                        // spelled around would not be an exclusion). The `doc` /
-                        // `book` literals have exactly that hole — measured and
-                        // filed as #6241, deliberately not fixed here.
-                        const isDashboardType = RestServer.metaTypeSingular(req.params.type) === 'dashboard';
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book') {
+                        // Compared on the NORMALIZED type, like every other
+                        // exclusion in this condition (`/meta/dashboards/x` is
+                        // the canonical plural spelling under Prime Directive
+                        // #3, and an exclusion it could be spelled around would
+                        // not be an exclusion). The `doc` / `book` literals
+                        // that stood at the end of this condition had exactly
+                        // that hole; #6241 closed it.
+                        const isDashboardType = metaType === 'dashboard';
+                        // ADR-0046 §6.7 — the two audience-gated types. Read by
+                        // the cache exclusion here AND by the gate itself in
+                        // the uncached branch below; one predicate, two sites.
+                        const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             const cacheRequest = {
                                 ifNoneMatch: req.headers['if-none-match'] as string,
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
@@ -4383,7 +4438,7 @@ export class RestServer {
                             // and never consulted the lock resolver; a caller that
                             // needs the ADR-0008 OCC carriers reads the uncached path.
                             const cachedEnvelope = {
-                                type: RestServer.metaTypeSingular(req.params.type),
+                                type: metaType,
                                 name: req.params.name,
                             };
                             res.json(await this.translateMetaEnvelope(
@@ -4458,8 +4513,7 @@ export class RestServer {
                             // it, unclaimed → org). 401 for anonymous, 403 for an
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
-                            const audienceGatedType = RestServer.metaTypeSingular(req.params.type);
-                            if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
+                            if (isAudienceGatedType && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
                                 // The document under audience test. [#5563] This
@@ -4472,7 +4526,7 @@ export class RestServer {
                                 const target = visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
-                                if (audienceGatedType === 'book') {
+                                if (metaType === 'book') {
                                     caller = await this.resolveAudienceCaller(environmentId, req, {
                                         needPermissionSets: RestServer.anyPermissionSetAudience([target]),
                                     });
@@ -4514,7 +4568,7 @@ export class RestServer {
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
                             // `translations` map so consumers get one body.
-                            if (audienceGatedType === 'doc' && visible) {
+                            if (metaType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = resolveDocLocale(visible as any, locale);

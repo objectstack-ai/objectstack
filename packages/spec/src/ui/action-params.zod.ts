@@ -78,11 +78,76 @@ export interface ActionParamIssue {
  * record id in this key so the handler can produce a single aggregate
  * artifact (zip of QR codes, merged PDF…). Server handlers read it from
  * `ctx.params._selectedIds`; it is never authored as a declared param.
+ *
+ * Rejecting a caller's near-miss spelling of one of these (`selectedIds` for
+ * `_selectedIds`) names the built-in in the rejection message — see
+ * {@link BUILTIN_PARAM_ORIGINS}.
  */
 export const ACTION_PARAM_BUILTIN_KEYS: readonly string[] = ['recordId', 'objectName', '_selectedIds'];
 
+/**
+ * Where each built-in key actually comes from, one true sentence each — the
+ * tail of the near-miss hint below, NOT a second contract. Message copy only:
+ * nothing reads it to decide anything.
+ *
+ * Per-key rather than one generic sentence because the three built-ins have
+ * three different producers, and a hint that explains the wrong one is worse
+ * than no hint: `recordId` / `objectName` are merged in server-side by the
+ * dispatcher (`params: { ...reqParams, recordId, objectName }` —
+ * `runtime/src/domains/actions.ts` and `action-execution.ts`'s
+ * `invokeBusinessAction`), while `_selectedIds` arrives from the CLIENT, in
+ * the request's own `params`, put there by the renderer's aggregate bulk
+ * dispatch. Telling a caller to "send `params.recordId`" would be actively
+ * wrong — the dispatcher's spread overwrites whatever the bag carried under
+ * that key, with `undefined` when the route and body carry no record id.
+ *
+ * A key reached through a custom `builtinKeys` override has no entry and gets
+ * {@link GENERIC_BUILTIN_ORIGIN}, which is true of every member of that set by
+ * the option's own definition (keys the dispatcher merges in, never authored).
+ */
+const BUILTIN_PARAM_ORIGINS: ReadonlyMap<string, string> = new Map([
+  ['recordId', 'the dispatcher merges it in from the record-scoped route (or the request body\'s top-level `recordId`), and a handler reads `ctx.params.recordId`.'],
+  ['objectName', 'the dispatcher merges in the name of the object the action dispatched on, and a handler reads `ctx.params.objectName`.'],
+  ['_selectedIds', 'an aggregate bulk dispatch (`execution: \'aggregate\'`) injects every selected record id under it, and a handler reads `ctx.params._selectedIds`.'],
+]);
+
+/** Fallback origin sentence for a built-in supplied via `opts.builtinKeys`. */
+const GENERIC_BUILTIN_ORIGIN = 'the dispatcher supplies it.';
+
 function isPresent(v: unknown): boolean {
   return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
+}
+
+/**
+ * The tail appended to an `unknown_field` message when the rejected key is one
+ * leading underscore away from a built-in — `''` when it is not (an ordinary
+ * typo keeps today's message, byte for byte).
+ *
+ * The rejection VERDICT is unchanged in both directions: the key is refused
+ * before and after, and the accepted set does not move. What changes is that
+ * "not declared on this action" no longer sends the reader down the one road
+ * that cannot work — declaring the built-in as a param, which the platform
+ * refuses by construction. #5568's reporter spent that road's full length on
+ * `params.selectedIds` and concluded from the silence that REST had no legal
+ * shape carrying a selection, when `params._selectedIds` was live the whole
+ * time.
+ *
+ * Bidirectional, and exactly one byte wide: `selectedIds` → `_selectedIds`
+ * and `_recordId` → `recordId`. Anything further away gets no hint, because a
+ * guess that is merely nearby ("did you mean X?" for an unrelated key) trains
+ * readers to ignore the line. Candidate order is fixed, so one rejected key
+ * always yields one message (#5240).
+ *
+ * The `key.replace(...)` candidate collapses to `key` itself for a key with no
+ * leading underscore. That can never produce a hint: the caller has already
+ * skipped every key `allow` holds, so `allow.has(key)` is false here by the
+ * loop's own guard — no identity check needed to exclude it.
+ */
+function builtinNearMissHint(key: string, allow: ReadonlySet<string>): string {
+  const near = [`_${key}`, key.replace(/^_/, '')].find((candidate) => allow.has(candidate));
+  if (!near) return '';
+  const origin = BUILTIN_PARAM_ORIGINS.get(near) ?? GENERIC_BUILTIN_ORIGIN;
+  return `. Did you mean the built-in "${near}"? Built-in params are never declared on an action — ${origin}`;
 }
 
 /**
@@ -96,6 +161,11 @@ function isPresent(v: unknown): boolean {
  * `valueSchemaFor`, so option membership / `multiple` arrays / reference-id
  * shape all ride the one contract), and unknown keys (not declared, not a
  * built-in). A param with no resolvable `type` leaves its value shape open.
+ *
+ * An unknown key one leading underscore away from a built-in is rejected
+ * exactly as before and additionally NAMED with it — see
+ * {@link builtinNearMissHint}. Message copy only; the accepted set is the
+ * declared params plus `allow`, unchanged.
  */
 export function validateActionParams(
   resolved: ResolvedActionParam[],
@@ -134,7 +204,7 @@ export function validateActionParams(
     issues.push({
       param: key,
       code: 'unknown_field',
-      message: `Unknown action param "${key}" — not declared on this action`,
+      message: `Unknown action param "${key}" — not declared on this action${builtinNearMissHint(key, allow)}`,
     });
   }
 
