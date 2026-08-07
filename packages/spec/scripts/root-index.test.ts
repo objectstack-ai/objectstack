@@ -23,6 +23,7 @@
  *    is the exact failure `lib/generated-output.ts` was written against.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { SCHEMA_MANIFEST_DIR_NAME, aggregateCategoryShards } from './lib/sharded-artifacts';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -218,10 +219,14 @@ describe('content/docs/references/index.mdx (the committed page)', () => {
     // never runs spec's own `gen:schema`. A test that needed generated input
     // would degrade to "nothing to compare", which is the silent-green shape
     // this whole page is a case study in.
-    const published = new Set<string>(
-      (JSON.parse(readFileSync(resolve(packageRoot, 'json-schema.manifest.json'), 'utf8')) as { schemas: string[] })
-        .schemas,
-    );
+    //
+    // The manifest is sharded by category since #5837, and this reads the whole
+    // DIRECTORY — the same aggregation the ratchet itself does. Reading one
+    // shard, or only the shards this test expects, would reintroduce exactly the
+    // "nothing to compare" degradation the paragraph above is about.
+    const aggregated = aggregateCategoryShards(resolve(packageRoot, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
+    expect(aggregated, `${SCHEMA_MANIFEST_DIR_NAME}/ is missing — it is a committed artifact (#2978, #5837)`).not.toBeNull();
+    const published = new Set<string>(aggregated!.entries);
     const indexed = new Set(fileRows().flatMap(r => r.schemas.map(name => `${r.category}/${name}`)));
 
     // `SyncSchema` / `ETLSchema` / `TriggerRegistrySchema` were never exports —

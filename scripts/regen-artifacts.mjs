@@ -20,9 +20,17 @@
  * so a renamed script fails loudly here instead of silently disarming a path.
  */
 export const REGEN_ARTIFACTS = Object.freeze([
+  // Deliberately NOT sharded (#5837): keyed by version, so two PRs append under
+  // different majors — a low-conflict shape the split would not improve.
   { path: 'packages/spec/spec-changes.json', gen: 'gen:spec-changes', check: 'check:spec-changes' },
   { path: 'docs/protocol-upgrade-guide.md', gen: 'gen:upgrade-guide', check: 'check:upgrade-guide' },
-  { path: 'packages/spec/authorable-surface.json', gen: 'gen:schema', check: 'check:authorable-surface' },
+  // Sharded by category (#5837): one file per namespace, so two PRs touching
+  // different categories never share a file. The reason it had to be sharded and
+  // not merely driver-managed is that the driver is LOCAL — the GitHub merge
+  // queue rebuilds server-side and runs no custom merge driver, so a textual
+  // conflict there evicted the second PR and the spec lane could land one at a
+  // time. The driver still owns the residue: two PRs in the SAME category.
+  { path: 'packages/spec/authorable-surface/**', gen: 'gen:schema', check: 'check:authorable-surface' },
   // The deletion gate's in-tree anchor (#5235). Same sorted-array shape, same
   // conflict — two branches that each re-anchored it differ on the `baseRev`
   // header and on whatever main added in between, and a text merge of that is
@@ -43,8 +51,12 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // is exactly #5370, where `merge-base(HEAD, origin/main)` still resolves to the
   // branch's OLD fork point and the anchor moves BACKWARDS — authentically, so no
   // gate objects. Re-anchor after the merge is committed, or not at all.
+  // Stays a SINGLE file while its subject is sharded (#5837): nothing but an
+  // explicit `--update-base` writes it, so it was never on the churn path that
+  // made the other three the queue's serialization point — and its `baseRev` is
+  // one commit for the whole surface, which a per-shard copy would let drift.
   { path: 'packages/spec/authorable-surface.base.json', gen: 'gen:schema', check: 'check:authorable-surface' },
-  { path: 'packages/spec/json-schema.manifest.json', gen: 'gen:schema', check: 'check:authorable-surface' },
+  { path: 'packages/spec/json-schema.manifest/**', gen: 'gen:schema', check: 'check:authorable-surface' },
   // `gen:api-surface` reads the BUILT `dist/*.d.ts`, never the source. On a
   // stale dist it does not fail — it emits a *plausible* surface missing every
   // export added since the last build, and `gen:docs` will ratchet a baseline
@@ -52,7 +64,9 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // caught only by diffing the generated files against `main`. Hence
   // `readsDist`: every path that would regenerate these refuses unless the
   // build is newer than the sources it claims to describe.
-  { path: 'packages/spec/api-surface.json', gen: 'gen:api-surface', check: 'check:api-surface', readsDist: true },
+  { path: 'packages/spec/api-surface/**', gen: 'gen:api-surface', check: 'check:api-surface', readsDist: true },
+  // Deliberately NOT sharded (#5837): 1.3KB, one line per `defineX` factory —
+  // never the conflict surface its neighbour was.
   {
     path: 'packages/spec/api-surface-signatures.json',
     gen: 'gen:api-surface',

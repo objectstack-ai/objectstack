@@ -6,8 +6,10 @@ export * from '@objectstack/core';
 import {
     IHttpServer,
     RouteHandler,
-    Middleware
+    Middleware,
+    createLogger,
 } from '@objectstack/core';
+import type { Logger } from '@objectstack/spec/contracts';
 import type { Context } from 'hono';
 import { currentPerfTiming } from '@objectstack/observability';
 import { Hono } from 'hono';
@@ -100,6 +102,57 @@ function readRemoteAddress(c: any): string | undefined {
 }
 
 /**
+ * Any thrown value, as a real `Error` whose `message` and `stack` survive
+ * structured logging.
+ *
+ * ## The trap this exists for
+ *
+ * `Error.prototype.message` and `.stack` are **non-enumerable**. A rejection
+ * handed straight to a structured logger's *meta* slot — `{ err }`,
+ * `{ ...err }`, `JSON.stringify(err)` — therefore serializes to `{}`: the
+ * record is emitted, the reader sees a log line, and the one thing they needed
+ * is not in it. That is strictly worse than no log at all, because it reports
+ * success. (cloud's `objectos-runtime/src/safe-log.ts` header documents the
+ * same hazard from the other side of the wire.)
+ *
+ * The `Logger` contract's `error(message, error?: Error, meta?)` has a
+ * dedicated `Error` slot precisely so implementations can lift those two
+ * fields out by name, and all three in-repo implementations do
+ * (`ObjectLogger`, `ConsoleLogger`, `JsonLogger`). So the adapter's job is
+ * only to make sure what reaches that slot really is an `Error`:
+ *
+ *  - a genuine `Error` passes through untouched — original stack preserved;
+ *  - an **error-like** object that fails `instanceof` (a cross-realm `Error`
+ *    from a `vm` context or a worker, the shape a bare spread would flatten to
+ *    `{}`) is rebuilt, carrying its own `name`/`message`/`stack` across;
+ *  - anything else (`throw 'boom'`, `throw { code: 1 }`, `throw undefined`) is
+ *    described in the message rather than dropped, and labelled as a non-Error
+ *    throw so the synthesized stack is not mistaken for the thrower's.
+ */
+function toLoggableError(thrown: unknown): Error {
+    if (thrown instanceof Error) return thrown;
+
+    if (thrown !== null && typeof thrown === 'object') {
+        const like = thrown as { name?: unknown; message?: unknown; stack?: unknown };
+        if (typeof like.message === 'string') {
+            const rebuilt = new Error(like.message);
+            if (typeof like.name === 'string') rebuilt.name = like.name;
+            if (typeof like.stack === 'string') rebuilt.stack = like.stack;
+            return rebuilt;
+        }
+    }
+
+    let described: string;
+    try {
+        described = typeof thrown === 'string' ? thrown : JSON.stringify(thrown) ?? String(thrown);
+    } catch {
+        // Circular / throwing `toJSON` — `String()` still yields something.
+        described = String(thrown);
+    }
+    return new Error(`Non-Error value thrown: ${described}`);
+}
+
+/**
  * The matched route's path parameters, or `{}` when there is no matched route.
  *
  * `c.req.param()` reads the router's match result, and in the `notFound` hook
@@ -144,6 +197,11 @@ export class HonoHttpServer implements IHttpServer {
     private fallbackHandler: RouteHandler | undefined;
     /** Whether the Hono `notFound` hook that runs {@link unmatchedResponse} is mounted. */
     private notFoundSeamInstalled = false;
+    /**
+     * Where {@link reportHandlerFailure} writes. See {@link setLogger} for why
+     * the default is a REAL logger and not a no-op.
+     */
+    private logger: Logger = createLogger({ name: 'hono' });
 
     constructor(
         private port: number = 3000,
@@ -362,9 +420,15 @@ export class HonoHttpServer implements IHttpServer {
                     closeStream();
                     resolve({ response: null, failed: false });
                 }
-            }).catch((_err) => {
+            }).catch((err) => {
                 _endHandler?.();
                 closeStream();
+                // The ONE place an escaping throw is reported (#5848). Both
+                // callers turn `failed: true` into a 500 that says nothing
+                // about the cause — `wrap`'s `No response from handler` and
+                // the `notFound` seam's `Fallback handler failed` — so if the
+                // diagnosis is not emitted here it does not exist anywhere.
+                this.reportHandlerFailure(c, err);
                 resolve({ response: null, failed: true });
             });
         });
@@ -374,6 +438,67 @@ export class HonoHttpServer implements IHttpServer {
             response: outcome.response ?? capturedResponse ?? null,
             failed: outcome.failed,
         };
+    }
+
+    /**
+     * Point this adapter's diagnostics at the host's logger. Called by
+     * `HonoServerPlugin.init()` with `ctx.logger`; a host that embeds
+     * `HonoHttpServer` directly (cloud's serverless entrypoints, tests) may
+     * call it itself, at any time.
+     *
+     * ## Why the default is a real logger, not a no-op (#5848)
+     *
+     * The failure this reports is one nobody can see any other way: a throw
+     * that escapes a route handler produces a 500 carrying no cause, so a
+     * silent default reproduces exactly the bug — bare 5xx, zero log — for
+     * every host that forgets to wire this. That is not hypothetical: the
+     * production report behind #5848 came from a control plane built on the
+     * BARE adapter, i.e. the path that never sees `ctx.logger`, and its only
+     * remedy was to re-wrap every route in its own try/catch (cloud#1144) —
+     * paying off this seam's debt one route at a time, which is the tax
+     * #4264 already described and did not remove.
+     *
+     * So the default is `createLogger()`: level `info` (an `error` always
+     * passes), secrets redacted by field name, and `message`/`stack` lifted
+     * out of the `Error` slot by name. Wiring a host logger REPLACES it;
+     * silencing is a deliberate act (pass a `NoopLogger`), never the default.
+     */
+    setLogger(logger: Logger): void {
+        this.logger = logger;
+    }
+
+    /**
+     * Report a throw that escaped a {@link RouteHandler} — the diagnostic exit
+     * that did not exist before #5848.
+     *
+     * Deliberately at `error`, not `warn`: per AGENTS.md "Degradation log
+     * levels", the third legal answer — "the failure was handed to the CALLER"
+     * — does NOT apply here. What the caller gets is a bare 500 whose body
+     * names no cause, no code and no message; they were told that something
+     * broke, not what, and nothing downstream can reconstruct it. Nor is this
+     * a validation path that could fire once per malformed keystroke: an
+     * unhandled throw out of a handler is a server-side defect, and one
+     * `error` per occurrence is the correct volume.
+     *
+     * Method and path only. The request body is NOT logged — it is the most
+     * likely place for credentials and PII to sit, and `message` + `stack`
+     * already locate the failure in the code.
+     */
+    private reportHandlerFailure(c: any, thrown: unknown): void {
+        try {
+            const method = typeof c?.req?.method === 'string' ? c.req.method : undefined;
+            const path = typeof c?.req?.path === 'string' ? c.req.path : undefined;
+            this.logger.error(
+                '[hono] route handler threw — request answered 500 with no cause in the body',
+                toLoggableError(thrown),
+                { method, path },
+            );
+        } catch {
+            // Reporting the failure must never become a second failure: a
+            // host logger that throws (or a partial one missing `error`)
+            // would otherwise reject `runHandler`'s own promise and turn a
+            // clean 500 into Hono's opaque error page.
+        }
     }
 
     get(path: string, handler: RouteHandler) {

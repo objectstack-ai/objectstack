@@ -4,6 +4,8 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs for the authorable surface), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove)
 **Consumers**: `@objectstack/spec` (the public API surface + `api-surface.json` snapshot), `@objectstack/downstream-contract` (the frozen fixture), the TypeScript Type Check + Test Core CI gates, the Release workflow, spec authors, platform contributors, and every third party consuming a published release.
+**Amended 2026-08-06 (#5837), paths only — no decision changes**: the breadth snapshot this ADR calls `packages/spec/api-surface.json` is now the directory `packages/spec/api-surface/`, one shard per published entry point (`root.json` for `.`), and the authorable-key ratchet §5 defers to is `packages/spec/authorable-surface/`. `check:api-surface` reads the whole directory as one set, so every gate, verdict and breaking-change rule below is unchanged; only the file layout moved, to stop two PRs colliding in the GitHub merge queue.
+
 **Surfaced by**: [#2035](https://github.com/objectstack-ai/objectstack/issues/2035) — 16 writable domains had no `defineX` factory, so third parties authored them as bare output-type literals; and [#2023](https://github.com/objectstack-ai/objectstack/issues/2023), where a root-import resolved to `any` and silently swallowed ~30 real type errors in the examples.
 
 ---

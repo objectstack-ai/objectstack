@@ -2348,6 +2348,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

@@ -12,9 +12,15 @@
  *      engine middleware AND-s into every read query. Callers must
  *      treat `null` as "object is public, do not filter".
  *
- *   2. **Per-record gating** — `canEdit()` answers the access question
- *      for `update` / `delete` operations. Returns `true` when the
- *      caller may modify the record, `false` otherwise.
+ *   2. **Per-record gating** — two SEPARATE gates, one per write verb.
+ *      `canEdit()` answers the access question for `update`: ownership
+ *      (widened by write DEPTH), a write-level (`edit`) share, or the
+ *      `modifyAllRecords` super-user bypass. `canDelete()` answers it
+ *      for `delete` and is deliberately NARROWER (ADR-0111 D3) — a
+ *      share widens which ROWS a principal reaches, never which VERBS
+ *      they may use, so an `edit` share does NOT confer delete:
+ *      ownership or the bypass only. Each returns `true` when the
+ *      caller may perform that operation, `false` otherwise.
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to

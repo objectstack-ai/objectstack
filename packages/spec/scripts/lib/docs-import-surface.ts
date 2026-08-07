@@ -2,7 +2,7 @@
 
 /**
  * Import-example names for the generated reference pages, resolved against the
- * package's REAL export surface (`api-surface.json`).
+ * package's REAL export surface (`api-surface/`).
  *
  * Every `content/docs/references/<category>/<page>.mdx` opens with a
  * "TypeScript Usage" block:
@@ -21,7 +21,7 @@
  *
  * ## How a name is resolved
  *
- * `api-surface.json` records `name (kind)` for every public entry point, so it
+ * `api-surface/` records `name (kind)` for every public entry point, so it
  * answers both questions directly. Two asymmetries drive the rules below:
  *
  *  - **Type side is decidable.** `build-api-surface.ts`'s `kindOf` tests
@@ -47,13 +47,13 @@
 /** Kinds that guarantee `import type { N }` resolves. */
 const TYPE_KINDS: ReadonlySet<string> = new Set(['type', 'interface', 'class', 'enum']);
 
-/** `name (kind)` for one entry point, as recorded in `api-surface.json`. */
+/** `name (kind)` for one entry point, as recorded in `api-surface/<entry>.json`. */
 export type CategorySurface = ReadonlyMap<string, ReadonlySet<string>>;
 
 const SURFACE_LINE = /^(\S+) \((\w+)\)$/;
 
 /**
- * Parse `api-surface.json` into `category -> name -> kinds`, keyed by the
+ * Parse the aggregated api-surface record into `category -> name -> kinds`, keyed by the
  * category segment of each subpath entry (`./data` -> `data`). The root entry
  * (`.`) is skipped: reference pages import from the subpath, never the root
  * (`export * as Namespace` was removed from the root index for tree-shaking).
@@ -67,7 +67,7 @@ export function loadEntrySurfaces(apiSurface: Record<string, string[]>): Map<str
       const m = SURFACE_LINE.exec(line);
       // A format change here would silently empty the surface and strip every
       // import example — fail instead of degrading into a confident lie.
-      if (!m) throw new Error(`api-surface.json: cannot parse entry "${line}" under "${subpath}" (expected "Name (kind)")`);
+      if (!m) throw new Error(`api-surface/: cannot parse entry "${line}" under "${subpath}" (expected "Name (kind)")`);
       let kinds = names.get(m[1]);
       if (!kinds) names.set(m[1], (kinds = new Set()));
       kinds.add(m[2]);

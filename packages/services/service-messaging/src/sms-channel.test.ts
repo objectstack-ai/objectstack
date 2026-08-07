@@ -153,4 +153,37 @@ describe('sms channel', () => {
         expect(r.error).toContain('gateway timeout');
         expect(ch.classifyError?.(new Error('x'))).toBe('retryable');
     });
+
+    describe('daily SMS quota exhaustion is rate_limited, not retryable (#2814)', () => {
+        /** Exactly what `SmsService.send` returns once the day's budget is spent. */
+        const QUOTA_REFUSAL = { id: 'sms-1', status: 'failed', error: 'TOO_MANY_REQUESTS: daily SMS quota exhausted' };
+
+        it('reports ok:false so the delivery lands in the outbox rather than being dropped', async () => {
+            const data = fakeData();
+            const ch = createSmsChannel({
+                getSms: () => ({ async send() { return QUOTA_REFUSAL; } }),
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            const r = await ch.send(silentCtx(), delivery());
+            expect(r.ok).toBe(false);
+            expect(r.error).toContain('TOO_MANY_REQUESTS');
+            // The dispatcher hands `SendResult.error` — a string — to classifyError.
+            expect(ch.classifyError?.(r.error)).toBe('rate_limited');
+        });
+
+        it('classifies a thrown quota error the same way', () => {
+            const data = fakeData();
+            const ch = createSmsChannel({
+                getSms: () => ({ async send() { return QUOTA_REFUSAL; } }),
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.classifyError?.(new Error('sms send failed: TOO_MANY_REQUESTS: daily SMS quota exhausted')))
+                .toBe('rate_limited');
+            // Everything else stays retryable — a transport hiccup is not a wall.
+            expect(ch.classifyError?.('sms send failed: gateway timeout')).toBe('retryable');
+            expect(ch.classifyError?.(undefined)).toBe('retryable');
+        });
+    });
 });
