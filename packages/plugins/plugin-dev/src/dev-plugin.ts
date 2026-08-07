@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
+import { resolveAllowDegradedTenancy, resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 /**
@@ -439,6 +439,13 @@ export class DevPlugin implements Plugin {
       }
     }
 
+    // [#5301] The enterprise organizations plugin, once constructed — held so
+    // the child-`init()` loop below can tell ITS refusal apart from every other
+    // child plugin's. That loop is best-effort by design (a dev stack survives
+    // an absent service), but "the organization wall failed to come up" is the
+    // one failure in it that ADR-0093 D5 forbids booting through.
+    let organizationsPlugin: Plugin | undefined;
+
     // 5. Security Plugin (RBAC, RLS, field-level masking)
     // OrganizationsPlugin (when multi-org; ENTERPRISE `@objectstack/organizations`,
     // ADR-0081 D2) MUST register BEFORE SecurityPlugin because
@@ -462,16 +469,89 @@ export class DevPlugin implements Plugin {
       const tenancyPosture = resolveTenancyPosture();
       const multiTenant = postureEnforcesWall(tenancyPosture);
       if (multiTenant) {
+        // [#5301] ADR-0093 D5 is enforced HERE, not merely reported. This
+        // branch used to `logger.warn` and boot on, so a dev stack that asked
+        // for the organization wall and could not get it served traffic with
+        // no wall and nobody having agreed to that — while `objectstack serve`
+        // refused to boot on the very same fact. D5 is a property of the
+        // DEPLOYMENT ("a stack that requested isolation must not serve traffic
+        // without it"), not of one entrypoint, so the dev assembly path owes
+        // the same answer.
+        //
+        // `throw`, not `process.exit(1)`. serve.ts needs the exit because its
+        // guard sits inside a broad AuthPlugin `try` that swallows throws;
+        // DevPlugin is a LIBRARY-shaped assembly plugin with no claim on the
+        // host process, and its boot chain does not swallow — `kernel.use()`
+        // only registers, `initPluginWithTimeout` does not catch, `bootstrap()`
+        // rethrows. So a throw genuinely aborts boot here, exactly as this
+        // file's own `assertNotProduction()` already relies on. Killing the
+        // host process from a library would additionally take down embedders
+        // (tests, scripts, a parent app) that are entitled to catch this.
+        //
+        // #4818 — TWO STAGES, TWO FAILURES, TWO DIAGNOSES, mirroring serve.ts.
+        // `import` and `new OrganizationsPlugin()` shared one `try`, so a
+        // plugin that CONSTRUCTED and refused was reported as an absent
+        // package. Those are different facts with different remedies (install
+        // it vs. address what the plugin reported), and the escape hatch only
+        // ever meant "the capability is ABSENT and I accept the degradation".
+        // The classifier is WHICH STAGE THREW — deliberately not the error's
+        // shape: the framework must not encode any of the plugin's private
+        // refusal semantics.
+        const organizationsPkg = '@objectstack/organizations';
+        let orgMod: any;
+        // ── Stage 1: import. Failure here = the package is ABSENT. ──
         try {
-          const organizationsPkg = '@objectstack/organizations';
-          const mod: any = await import(/* webpackIgnore: true */ organizationsPkg);
-          this.childPlugins.push(new mod.OrganizationsPlugin());
-          ctx.logger.info(`  ✔ Organizations plugin enabled (posture '${tenancyPosture}': organization_id auto-stamp, per-org seed)`);
-        } catch {
+          orgMod = await import(/* webpackIgnore: true */ organizationsPkg);
+        } catch (orgErr: any) {
+          const cause = orgErr instanceof Error ? orgErr.message : String(orgErr);
+          if (!resolveAllowDegradedTenancy()) {
+            throw new Error(
+              `tenancy posture '${tenancyPosture}' was requested but @objectstack/organizations `
+              + '(the enterprise multi-org runtime) could not be loaded, so the organization wall is '
+              + 'INACTIVE. Refusing to initialize — a stack that requested multi-organization '
+              + 'isolation must not serve traffic without it (ADR-0093 D5). Fix one of: '
+              + 'install @objectstack/organizations; or set OS_TENANCY_POSTURE=single (and unset '
+              + 'OS_MULTI_ORG_ENABLED) to run single-org; or set OS_ALLOW_DEGRADED_TENANCY=1 to boot '
+              + `in an explicitly degraded single-org state. cause: ${cause}`,
+            );
+          }
+          // Explicitly opted into degraded operation — boot, but brand it.
           // Names the posture that was actually requested, not one knob's
           // spelling of it: the old text asserted `OS_MULTI_ORG_ENABLED=true`
           // at an operator who may well have set only `OS_TENANCY_POSTURE`.
-          ctx.logger.warn(`  ✘ tenancy posture '${tenancyPosture}' requested but @objectstack/organizations (enterprise) not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);
+          ctx.logger.warn(`  ✘ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): tenancy posture '${tenancyPosture}' requested but @objectstack/organizations (enterprise) not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);
+          // Degraded boot: `orgMod` stays undefined, so stage 2 is skipped.
+          // Nothing was loaded, so nothing can be constructed.
+        }
+
+        // ── Stage 2: construct + register. Failure here = the package IS
+        // present and the plugin itself declined. Report what it said,
+        // verbatim, and refuse unconditionally: OS_ALLOW_DEGRADED_TENANCY does
+        // NOT cover this (#4818). Honouring it here would move whatever gate
+        // the plugin is enforcing onto an env var. ──
+        if (orgMod) {
+          try {
+            organizationsPlugin = new orgMod.OrganizationsPlugin();
+            this.childPlugins.push(organizationsPlugin!);
+          } catch (mountErr: any) {
+            // The framework does NOT interpret this error — it does not know
+            // why the plugin refused and must not guess a cause. Surface the
+            // plugin's own words and let them be the authority.
+            const mountMessage = mountErr instanceof Error ? mountErr.message : String(mountErr);
+            const mountCode = (mountErr as any)?.code;
+            throw new Error(
+              `tenancy posture '${tenancyPosture}' was requested and @objectstack/organizations WAS `
+              + 'found and loaded, but its OrganizationsPlugin refused to be constructed, so the '
+              + 'organization wall is INACTIVE. Refusing to initialize (ADR-0093 D5). This is NOT a '
+              + 'missing-package problem: the runtime is installed and resolvable here. The plugin '
+              + 'reported (verbatim — the framework does not interpret it): '
+              + (mountCode !== undefined ? `code: ${String(mountCode)} — ` : '')
+              + `${mountMessage}. OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will `
+              + 'not get past it: it covers an ABSENT multi-org runtime the operator accepts doing '
+              + 'without, not a present one that declined. (#4818)',
+            );
+          }
+          ctx.logger.info(`  ✔ Organizations plugin enabled (posture '${tenancyPosture}': organization_id auto-stamp, per-org seed)`);
         }
       }
       try {
@@ -544,6 +624,28 @@ export class DevPlugin implements Plugin {
       try {
         await plugin.init(ctx);
       } catch (err: any) {
+        // [#5301] One child's init failure is NOT best-effort: the enterprise
+        // organizations plugin declining here means the organization wall a
+        // walled posture asked for is INACTIVE, and ADR-0093 D5 forbids serving
+        // traffic in that state. This is stage 2's other half — under
+        // `objectstack serve` the same refusal reaches the kernel, whose Phase-1
+        // loop rethrows, so serve needs no equivalent line; DevPlugin's own loop
+        // would otherwise swallow it into a log entry and boot on unwalled,
+        // re-opening on `init()` exactly the hole the construct stage closes.
+        // A PRESENT plugin that refused is never covered by
+        // OS_ALLOW_DEGRADED_TENANCY (#4818) — the hatch means "the runtime is
+        // absent and I accept that", so it is deliberately not consulted here.
+        if (organizationsPlugin !== undefined && plugin === organizationsPlugin) {
+          throw new Error(
+            'the enterprise @objectstack/organizations runtime was loaded but its OrganizationsPlugin '
+            + `failed to initialize, so the organization wall requested by tenancy posture `
+            + `'${resolveTenancyPosture()}' is INACTIVE. Refusing to initialize — a stack that `
+            + 'requested multi-organization isolation must not serve traffic without it (ADR-0093 D5). '
+            + 'The plugin reported (verbatim — the framework does not interpret it): '
+            + `${err?.message ?? String(err)}. OS_ALLOW_DEGRADED_TENANCY does NOT apply: it covers an `
+            + 'ABSENT multi-org runtime, not a present one that declined. (#4818)',
+          );
+        }
         ctx.logger.error(`Failed to init child plugin ${plugin.name}: ${err.message}`);
       }
     }

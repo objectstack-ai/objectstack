@@ -78,8 +78,40 @@ function hasTopLevelUnionOrIntersection(rendered: string): boolean {
   return false;
 }
 
+/**
+ * Is this node the JSON Schema encoding of `z.never()` — i.e. a `retiredKey()`
+ * tombstone (`packages/spec/src/shared/retired-key.ts`)?
+ *
+ * `z.toJSONSchema` renders `z.never()` as `{ "not": {} }` — the negation of the
+ * always-true empty schema, so nothing validates against it. That node carries
+ * no `type`, no `$ref` and no `enum`, so before #5606 it fell all the way
+ * through `formatType` to the `prop.type || 'any'` tail and printed as **`any`**
+ * — the one rendering that reads as "free-form slot, nothing validates it",
+ * which is the exact inverse of what a tombstone means. A key retired from
+ * `heading?: string` to a tombstone came out of the generator as
+ * `heading?: any`, i.e. *more* inviting to write than before it was removed.
+ *
+ * A **non-empty** `not` (`{ not: { type: 'string' } }`) is an ordinary negation
+ * constraint, not `never`, and is deliberately not matched here.
+ */
+function isNeverNode(prop: any): boolean {
+  return (
+    !!prop &&
+    typeof prop.not === 'object' &&
+    prop.not !== null &&
+    Object.keys(prop.not).length === 0
+  );
+}
+
 export function formatType(prop: any, ctx?: TypeContext): string {
   if (!prop) return 'any';
+
+  // A `retiredKey()` tombstone. `never` is both the accurate TypeScript (the
+  // key's `z.input` type IS `never`) and the only rendering that survives the
+  // inline shape summary below, where there is no description column to carry
+  // the `[REMOVED]` prescription. Checked FIRST: `{ not: {} }` accepts nothing
+  // whatever else the node says, so no later branch can be more specific.
+  if (isNeverNode(prop)) return 'never';
 
   if (prop.$ref) {
     // Self-reference: link to the current section rather than a bare `#`.
@@ -137,7 +169,21 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       : null;
 
     // Inline object: show its shape one level deep instead of an opaque `Object`.
-    const keys = prop.properties ? Object.keys(prop.properties) : [];
+    //
+    // Tombstoned keys are dropped BEFORE `INLINE_KEY_LIMIT` is applied, not
+    // rendered as `never` and counted. They are not authorable surface any
+    // more, so spending one of the four slots on one — and pushing a key the
+    // author MUST write behind the `…` to afford it — sells a removed key in
+    // place of a live one. The elision cannot be worked around by ordering,
+    // either: #5248 retired `IndexSchema.type`/`.partial` down to three live
+    // keys, so with a limit of four the first tombstone is *mathematically*
+    // guaranteed into the summary however low in the shape it sits (#5606).
+    // Their own table row still carries the `[REMOVED]` prescription wherever
+    // the shape is a named schema; a summary cell has no description column to
+    // carry it at all.
+    const keys = prop.properties
+      ? Object.keys(prop.properties).filter(k => !isNeverNode(prop.properties[k]))
+      : [];
 
     if (keys.length > 0) {
       const shown = keys.slice(0, INLINE_KEY_LIMIT).map(k => {
@@ -149,8 +195,11 @@ export function formatType(prop: any, ctx?: TypeContext): string {
           : formatType(child, ctx);
         return `${k}${optional}: ${childType}`;
       });
-      // `…` elides further DECLARED keys; `& Record<…>` states that UNDECLARED
-      // ones are accepted. Different facts — a cell may need both.
+      // `…` elides further LIVE declared keys; `& Record<…>` states that
+      // UNDECLARED ones are accepted. Different facts — a cell may need both.
+      // Tombstones are in neither set: they are declared and rejected, so a
+      // summary that ends without `…` now means "these are all the keys you may
+      // write", which is a stronger and truer claim than it used to be.
       if (keys.length > shown.length) shown.push('…');
       const shape = `{ ${shown.join('; ')} }`;
       // Declared shape first: the reader needs the keys they MUST write before
@@ -158,9 +207,11 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       return open ? `${shape} & ${open}` : shape;
     }
 
-    // Nothing declared. An empty `properties: {}` is not a shape — intersecting
-    // it would print `{  } & Record<…>`, so fall through to the record/opaque
-    // renderings exactly as before.
+    // No LIVE key declared — either `properties: {}` outright, or a shape whose
+    // every declared key is now a tombstone. Both state the same authorable
+    // fact, and neither is a shape: intersecting one would print
+    // `{  } & Record<…>`, so fall through to the record/opaque renderings
+    // exactly as before.
     if (open) return open;
     if (!prop.properties) return 'object';
     return '{  }';

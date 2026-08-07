@@ -47,7 +47,7 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable batch operations |
 | **maxRecordsPerBatch** | `integer` | ✅ | Maximum records per batch |
-| **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Default batch options |
+| **defaultOptions** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Default batch options |
 
 
 ---
@@ -89,7 +89,7 @@ const result = BatchConfigSchema.parse(data);
 | **atomic** | `boolean` | ✅ | Opt-in all-or-nothing. When explicitly true the whole batch runs inside ONE engine transaction: the first failure rolls back every prior write, and the response reports zero successes — each row carries `errors[0].code` ROLLED_BACK (written, then undone), the causal row its own error, and rows never reached NOT_ATTEMPTED. A runtime that cannot roll back REFUSES the request (501 NOT_IMPLEMENTED) rather than silently degrading to best-effort — probe `capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. Default false: sequential best-effort. |
 | **returnRecords** | `boolean` | ✅ | If true, return full record data in response |
 | **continueOnError** | `boolean` | ✅ | If true (and atomic=false), continue processing remaining records after errors |
-| **validateOnly** | `any` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
+| **validateOnly** | `never` | optional | [REMOVED] `options.validateOnly` was removed from BatchOptions in @objectstack/spec (#4052). It was never implemented: the batch surfaces persisted regardless, so a "dry-run" would have silently executed. There is no dry-run today — drop the key. If you need to preview a batch without writing, open an issue so it can be designed (no-commit cascade / constraint semantics) and reintroduced as a flag that actually holds. |
 
 
 ---
@@ -115,7 +115,7 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | ✅ | Type of batch operation |
 | **records** | `{ id?: string; data?: Record<string, any>; externalId?: string }[]` | ✅ | Array of records to process (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Batch operation options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Batch operation options |
 
 
 ---
@@ -199,7 +199,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Delete options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
 
 
 ---
@@ -223,7 +223,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Update options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
 
 
 ---

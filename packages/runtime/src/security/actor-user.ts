@@ -92,10 +92,23 @@ export interface ActorUser extends EvalUser {
     name: string;
     /** Alias of {@link name} — the spelling AI route handlers already read. */
     displayName: string;
-    /** ADR-0090 position names held by the caller (canonical; `EvalUser.positions`). */
+    /**
+     * ADR-0090 position names held by the caller (canonical; `EvalUser.positions`).
+     *
+     * The pre-ADR-0090 `roles` alias of this key was REMOVED in v17 (#6011).
+     * It carried `positions` verbatim under a word ADR-0090 D3 reserves and
+     * bans, and no consumer read it — the "kept for the REST/AI shapes" claim
+     * its comment made was checked and disproven at removal time (the REST/AI
+     * shapes are BUILT here, but nothing downstream read `.roles` off them).
+     * A body that used to read `ctx.user.roles` reads `ctx.user.positions`.
+     *
+     * ⚠️ Do not restore it as a `??` fallback in a consumer: `positions` is the
+     * one spelling this surface publishes, and a second de-facto spelling is
+     * exactly the state #5613's ruling called a defect rather than an endpoint.
+     * (`ctx.session` is a DIFFERENT face and keeps its own deprecation window —
+     * see `buildActionSession` in `action-execution.ts`.)
+     */
     positions: string[];
-    /** Legacy alias of {@link positions} (pre-ADR-0090 spelling, kept for the REST/AI shapes). */
-    roles: string[];
     /** Permission-SET names (`admin_full_access`, `ai_seat`, …). */
     permissions: string[];
     /** CAPABILITIES (`manage_metadata`, `studio.access`, …) — a separate channel (#4705). */
@@ -205,7 +218,6 @@ export function buildActorUser(input?: {
         userId: id,
         displayName: name,
         positions: core.positions,
-        roles: core.positions,
         permissions: anonymous ? [] : strings(input?.permissions),
         systemPermissions: anonymous ? [] : strings(input?.systemPermissions),
     };
