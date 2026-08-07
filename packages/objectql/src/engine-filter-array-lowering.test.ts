@@ -26,7 +26,31 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type {
+  EngineAggregateOptions,
+  EngineCountOptions,
+  EngineQueryOptions,
+} from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
+
+/**
+ * [#4918] `FilterArray` on `where` is off-contract BY DECLARATION, and these
+ * tests exist to drive it: `EngineQueryOptions.where` is a `FilterCondition` /
+ * `Record< string, unknown >`, which an array is not assignable to, because
+ * `FilterArray` is INPUT-ONLY authoring sugar the spec deliberately excludes
+ * (#5285). So a test that hands the engine one has to say so, and
+ * `as unknown as EngineQueryOptions` is how: it names the contract being
+ * bypassed, keeps the rest of the call type-checked, and greps as an
+ * intentional act — none of which a bare `as any` does.
+ *
+ * Deliberately NOT used for the malformed-COMPARAND cases below
+ * (`{ stage: { $nin: 'won' } }`). Those are ordinary objects that `tsc`
+ * accepts, because `where` is declared loosely on purpose — which is the whole
+ * reason the runtime gate this file pins has to exist. Erasing them would hide
+ * that they are type-legal, which is the point.
+ */
+const asFilterArrayQuery = (where: unknown): EngineQueryOptions =>
+  ({ where }) as unknown as EngineQueryOptions;
 
 const deal = {
   name: 'deal',
@@ -320,7 +344,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     ['notin', [['stage', 'notin', 'won']]],
     ['in', [['stage', 'in', 'won']]],
   ])('refuses a scalar comparand on the collection operator %s', async (_op, where) => {
-    await expect(engine.find('deal', { where } as any))
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     // Nothing ran: a refused filter must not reach the driver at all, or the
     // 400 would be describing a query that already returned rows.
@@ -328,7 +352,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   });
 
   it('the refusal NAMES the operator, the field and the expected shape (#5346/#5348 wording)', async () => {
-    const err = await engine.find('deal', { where: [['stage', 'not_in', 'won']] } as any)
+    const err = await engine.find('deal', asFilterArrayQuery([['stage', 'not_in', 'won']]))
       .then(() => null, (e: any) => e);
 
     expect(err).not.toBeNull();
@@ -367,7 +391,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
       [['stage', 'in', 'won']],
       [['amount', 'between', 5]],
     ]) {
-      const err = await engine.find('deal', { where } as any)
+      const err = await engine.find('deal', asFilterArrayQuery(where))
         .then(() => null, (e: any) => e);
       expect(err.message.length, JSON.stringify(where)).toBeLessThan(CLIENT_MESSAGE_MAX);
       expect(err.message, JSON.stringify(where)).toMatch(/UNFILTERED result set/);
@@ -378,9 +402,12 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     // The protocol/HTTP face runs its own `isFilterAST` → `parseFilterAST` and
     // hands the engine an already-lowered FilterCondition, so the array branch
     // above never sees a wire query. This is that shape, arriving as an object.
-    await expect(engine.find('deal', { where: { stage: { $nin: 'won' } } } as any))
+    // NOT erased: `where` is declared `Record< string, unknown >`, so `tsc`
+    // accepts a malformed comparand. That it type-checks and still has to be
+    // refused at runtime is exactly why this gate exists.
+    await expect(engine.find('deal', { where: { stage: { $nin: 'won' } } }))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
-    await expect(engine.find('deal', { where: { stage: { $in: 'won' } } } as any))
+    await expect(engine.find('deal', { where: { stage: { $in: 'won' } } }))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
   });
 
@@ -389,28 +416,31 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     ['a number', { amount: { $in: 10 } }],
     ['an object', { stage: { $in: { a: 1 } } }],
   ])('refuses a comparand that is %s — every non-list, not just strings', async (_l, where) => {
-    await expect(engine.find('deal', { where } as any))
+    await expect(engine.find('deal', { where }))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
   });
 
   it('walks into $and / $or / $not — a nested scalar is refused with its own path', async () => {
-    const err = await engine.find('deal', {
-      where: ['and', ['amount', '>', 5], ['stage', 'not_in', 'won']],
-    } as any).then(() => null, (e: any) => e);
+    const err = await engine.find(
+      'deal',
+      asFilterArrayQuery(['and', ['amount', '>', 5], ['stage', 'not_in', 'won']]),
+    ).then(() => null, (e: any) => e);
     expect(err?.status).toBe(400);
     expect(err.message).toMatch(/where\.\$and\[1\]\.stage\.\$nin/);
 
-    await expect(engine.find('deal', { where: { $not: { stage: { $in: 'won' } } } } as any))
+    await expect(engine.find('deal', { where: { $not: { stage: { $in: 'won' } } } }))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
   });
 
   it('every engine entry point refuses it, not just find()', async () => {
     const where = [['stage', 'not_in', 'won']];
-    await expect(engine.findOne('deal', { where } as any)).rejects.toMatchObject({ status: 400 });
-    await expect(engine.count('deal', { where } as any)).rejects.toMatchObject({ status: 400 });
+    await expect(engine.findOne('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
+      .rejects.toMatchObject({ status: 400 });
     await expect(engine.aggregate('deal', {
       where, groupBy: ['stage'], aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
-    } as any)).rejects.toMatchObject({ status: 400 });
+    } as unknown as EngineAggregateOptions)).rejects.toMatchObject({ status: 400 });
     await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
       .rejects.toMatchObject({ status: 400 });
     await expect(engine.delete('deal', { where, multi: true } as any))
@@ -430,12 +460,12 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     ['a 1-tuple', [['amount', 'between', [1]]]],
     ['a 3-tuple', [['amount', 'between', [1, 2, 3]]]],
   ])('refuses a $between comparand that is %s', async (_l, where) => {
-    await expect(engine.find('deal', { where } as any))
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
   });
 
   it('the $between refusal keeps the platform-wide wording and names the field', async () => {
-    const err = await engine.find('deal', { where: [['amount', 'between', 5]] } as any)
+    const err = await engine.find('deal', asFilterArrayQuery([['amount', 'between', 5]]))
       .then(() => null, (e: any) => e);
     // Verbatim leading sentence from driver-sql / driver-memory: one condition,
     // one wording, wherever the caller meets it.
@@ -448,22 +478,22 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   // ── what must KEEP working: the declared list shapes ───────────────────
 
   it('a proper list comparand still reaches the driver untouched', async () => {
-    await engine.find('deal', { where: [['stage', 'in', ['won', 'lost']]] } as any);
+    await engine.find('deal', asFilterArrayQuery([['stage', 'in', ['won', 'lost']]]));
     expect(lastWhere()).toEqual({ stage: { $in: ['won', 'lost'] } });
 
-    await engine.find('deal', { where: [['stage', 'not_in', ['lost']]] } as any);
+    await engine.find('deal', asFilterArrayQuery([['stage', 'not_in', ['lost']]]));
     expect(lastWhere()).toEqual({ stage: { $nin: ['lost'] } });
 
-    await engine.find('deal', { where: [['amount', 'between', [5, 25]]] } as any);
+    await engine.find('deal', asFilterArrayQuery([['amount', 'between', [5, 25]]]));
     expect(lastWhere()).toEqual({ amount: { $between: [5, 25] } });
   });
 
   it('an EMPTY list is a declared predicate, not a malformed one', async () => {
     // `$in: []` matches nothing and `$nin: []` matches everything — both
     // drivers say so in as many words. Arity is not this gate's business.
-    await engine.find('deal', { where: { stage: { $in: [] } } } as any);
+    await engine.find('deal', { where: { stage: { $in: [] } } });
     expect(lastWhere()).toEqual({ stage: { $in: [] } });
-    await engine.find('deal', { where: { stage: { $nin: [] } } } as any);
+    await engine.find('deal', { where: { stage: { $nin: [] } } });
     expect(lastWhere()).toEqual({ stage: { $nin: [] } });
   });
 
@@ -471,7 +501,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     // A `$field` reference and a plain object are both legitimate members here;
     // this gate asks only whether the comparand is a list at all.
     const where = { stage: { $in: [{ $field: 'other' }, 'won'] } };
-    await engine.find('deal', { where } as any);
+    await engine.find('deal', { where });
     expect(lastWhere()).toEqual(where);
   });
 
@@ -480,18 +510,18 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     // stored document whose own key happens to be `$in` — a stricter contract
     // than any backend applies.
     const where = { stage: { $eq: { $in: 'not-an-operator-here' } } };
-    await engine.find('deal', { where } as any);
+    await engine.find('deal', { where });
     expect(lastWhere()).toEqual(where);
   });
 
   it('a scalar on a NON-collection operator is untouched', async () => {
-    await engine.find('deal', { where: [['stage', '!=', 'won']] } as any);
+    await engine.find('deal', asFilterArrayQuery([['stage', '!=', 'won']]));
     expect(lastWhere()).toEqual({ stage: { $ne: 'won' } });
     // String bounds on a range comparison stay legal — `FieldOperatorsSchema`
     // declares `$gt` as number|Date|FieldReference, but ISO strings are what the
     // showcase apps send and every backend accepts. This gate enforces the
     // three list declarations, not the whole schema.
-    await engine.find('deal', { where: [['stage', '>', '2026-01-01']] } as any);
+    await engine.find('deal', asFilterArrayQuery([['stage', '>', '2026-01-01']]));
     expect(lastWhere()).toEqual({ stage: { $gt: '2026-01-01' } });
   });
 
