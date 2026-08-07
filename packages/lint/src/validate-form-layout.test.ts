@@ -6,7 +6,7 @@ import {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
   FORM_COLSPAN_ABSOLUTE,
-} from './validate-form-layout';
+} from './validate-form-layout.js';
 
 type AnyRec = Record<string, unknown>;
 
