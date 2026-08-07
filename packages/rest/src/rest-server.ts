@@ -1036,7 +1036,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // `CLIENT_MESSAGE_MAX` was returned word for word, past `isSqlLeak`,
         // past `looksLikeInternalErrorLeak`, past `Internal data error`.
         //
-        // That is not dormant code. `metadata-protocol` interpolates the raw
+        // That is not dormant code. `metadata-protocol` interpolated the raw
         // driver error into two client-facing 500s — `Failed to persist
         // customization overlay to sys_metadata: ${dbError.message}` and
         // `Failed to delete customization overlay: ${err.message}` — and a real
@@ -1045,6 +1045,16 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // columns) is nowhere near 500 characters, so it arrived intact. Length
         // was never a proxy for leakage; on this side of the bound it failed
         // OPEN.
+        //
+        // [#5264 / #5783] ONE of those two is now gone: `saveMetaItem`'s legacy
+        // raw-engine branch was deleted, taking its `OVERLAY_PERSISTENCE_FAILED`
+        // catch — the persist half — with it, and the code has been unregistered
+        // from the ADR-0112 ledger since nothing could emit it. The DELETE half
+        // is untouched and still live (`deleteMetaItem`'s catch: a 500 assigned
+        // to an already-constructed error, no `code`), which is what
+        // `rest-5xx-message-sanitization.test.ts` §1 walks in process. Read the
+        // paragraph above as the history that produced this branch, not as a
+        // present-tense census of its producers.
         //
         // The cure is structural rather than another predicate: in the 5xx band
         // the message is dropped unconditionally, so there is no phrasing a
@@ -1056,11 +1066,12 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // Sanitising HERE rather than by falling through to `mapDataError` is
         // the point: `mapDataError` derives a status from the message TEXT, so
         // handing it a declared 5xx re-labels the fault as something else
-        // entirely — the two overlay 500s come back as `404 OBJECT_NOT_FOUND`
+        // entirely — the overlay-delete 500 comes back as `404 OBJECT_NOT_FOUND`
         // ("no such table" trips the unknown-object heuristic) and the atomic
         // batch's `501 NOT_IMPLEMENTED` as `404 Object '<name>' is not
-        // registered`, both of which then read as *expected* statuses and stop
-        // being logged at all. Worse, a 5xx whose text matches no heuristic
+        // registered` (its text carries the quoted object name and "cannot"),
+        // both of which then read as *expected* statuses and stop being logged
+        // at all. Worse, a 5xx whose text matches no heuristic
         // falls out of `mapDataError`'s terminal `{ status: 400, error: raw }`
         // — still verbatim, now wearing a client-error status. So: keep the
         // status the producer declared, keep the machine-readable `code` (a
@@ -1068,9 +1079,9 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // on), drop the prose.
         //
         // Accepted cost, recorded so it is not rediscovered as a bug: a
-        // self-authored 500 body — `OVERLAY_PERSISTENCE_FAILED`'s "In-memory
-        // registry was updated but will be lost on restart", the atomic
-        // batch's "retry without options.atomic" — reaches the client as the
+        // self-authored 5xx body — the atomic batch's "retry without
+        // options.atomic, or probe capabilities.transactionalBatch on
+        // /discovery first" (`501 NOT_IMPLEMENTED`) — reaches the client as the
         // generic sentence plus its `code`. The full text still reaches the
         // server log (see `logWithheldServerFault`), which is the side of the
         // boundary that sentence was written for. Producers that owe a caller

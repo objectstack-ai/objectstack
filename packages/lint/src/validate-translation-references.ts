@@ -65,6 +65,7 @@
  *   4. unresolved, unprefixed              → warn on the object key only
  */
 
+import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
@@ -219,6 +220,13 @@ function emptyFacts(): ObjectFacts {
  *     the canonical shape, which silently drops the whole record — a rule that
  *     then reports every view key the app ships.
  *
+ * The default `list` is the ONE place where "read the author's `name`" was
+ * wrong, and #5164 is why: the runtime does not key that view by its `name`,
+ * it keys it by the identity the composer assigns. Its key therefore comes
+ * from {@link defaultListViewKey} — asked of the composer, never re-derived
+ * here. See that function for the three facts that live in the composer and
+ * nowhere else.
+ *
  * A third thing was learned later, from the showcase (#5415): the container's
  * DEFAULT form (`form`) is a section anchor too. It is not one of the
  * `formViews.*` entries and it is not the record's own `sections` either, so
@@ -257,7 +265,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   };
 
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
-  if (isRec(view.list)) addView(listBinding, strName(view.list.name));
+  if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
   addView(recordObject ?? listBinding, strName(view.name));
 
   for (const key of ['listViews', 'formViews'] as const) {
@@ -276,11 +284,63 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // and `ObjectForm` renders when no named form view is asked for. Bound the
   // way the CLI i18n walker's `viewObjectName` resolves `view.form.data.object`
   // (#5415), so the two agree on which object the headings belong to.
-  // Deliberately sections only: the default form has no map key, and whether it
-  // contributes a `_views` name is the neighbouring question #5164 owns.
+  //
+  // Deliberately sections only, and #5164 is now settled enough to say WHY
+  // rather than defer: the composer does give the default form a runtime
+  // identity (`<object>.form`), but `_views.*` is a LIST-view convention —
+  // `viewLabel` / `viewDescription` resolve view tabs, and the i18n walker
+  // emits no `_views` entry for any form view (`i18n-extract.ts`: "form views
+  // have no counterpart in the `viewLabel` / `_views.*` resolver convention").
+  // A `_views` name registered here for the default form would make a key
+  // legal that no consumer ever reads. Its SECTIONS are a different matter —
+  // `ObjectForm` resolves those, which is exactly what #5415 established.
   if (isRec(view.form)) addSections(view.form, bindingOf(view.form) ?? listBinding);
 
   addSections(view, recordObject ?? listBinding);
+}
+
+/**
+ * The bare `_views` key the RUNTIME assigns to a container's default `list` —
+ * the only key a bundle can legally spell for that view.
+ *
+ * Asked of the composer (`expandViewContainer`, `spec/src/ui/view.zod.ts`)
+ * rather than re-derived here. This rule used to read `view.list.name` and
+ * register nothing when the author wrote none, while the composer named that
+ * very same view `<object>.default` — so a container declaring only a default
+ * `list` produced a registry entry keyed `default` and a lint fact set that
+ * knew no such view. The CLI i18n walker demanded `_views.default.label`
+ * (#6124, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
+ * six instances on the showcase, and no author action could make both green.
+ * Ruled 2026-08-06 (#5164): canonical = the runtime identity's bare key.
+ * Leg 1's `defaultListViewKey` in `packages/cli/src/utils/i18n-extract.ts` is
+ * this function's twin — deliberately, both are thin readers of the composer
+ * rather than a third and fourth derivation of the key.
+ *
+ * Three facts live in the composer and nowhere else, all load-bearing here:
+ *
+ *  1. a nameless default list is keyed **`default`** (never `list`), and a
+ *     named one keeps the author's `list.name`;
+ *  2. a default list whose STRUCTURE merely restates a `listViews` entry is
+ *     **collapsed into that entry** and has no key of its own — the
+ *     `examples/app-crm` shape. The surviving `listViews` key is returned (the
+ *     `listViews` loop registers it anyway, so the set is unchanged), and the
+ *     collapsed-away `list.name` correctly stops being a legal key: nothing
+ *     resolves it;
+ *  3. a key renamed by a collision (`default` → `default_2`, when another view
+ *     already claimed `default`) is returned as renamed, because the rename is
+ *     the registry key too.
+ *
+ * Returns `undefined` when the record declares no default `list`, or when no
+ * object binding resolved — the caller cannot file a fact without one.
+ */
+function defaultListViewKey(object: string | undefined, container: AnyRec): string | undefined {
+  if (!object || !isRec(container.list)) return undefined;
+  const item = expandViewContainer(object, container).find(
+    (i) => i.viewKind === 'list' && i.isDefault,
+  );
+  if (!item) return undefined;
+  const prefix = `${object}.`;
+  return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
 }
 
 /** The object a view (or one of its containers) binds to, across the shapes it is authored in. */

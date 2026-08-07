@@ -140,10 +140,22 @@ jobs:
     # re-run green. It is permanently red by construction: three PRs in one day
     # (#5467 -- this gate's own fix PR -- plus #5501 and #5577) each left a stale
     # red that a human or agent had to stop and explain away.
-    # The authority is the live re-read in the first step below. This expression
-    # only short-circuits the case where the payload ALREADY shows the label, so
-    # the common path still costs no runner at all. The branch/author half needs
-    # no such treatment: head_ref and the PR author cannot change under a rerun.
+    # The authority is the live label read below. This expression only
+    # short-circuits the case where the payload ALREADY shows the label, so the
+    # common path still costs no runner at all. The branch/author half needs no
+    # such treatment: head_ref and the PR author cannot change under a rerun.
+    #
+    # #6378: ONE live re-read was not enough, and the reason is measured rather
+    # than reasoned. On PR #6426's `opened` run (31204438874) the re-read step
+    # ran at 17:54:07Z for a PR created at 17:53:57Z -- it reads the label list
+    # TEN SECONDS after the PR exists. The `skip-changeset` label cannot be
+    # applied before the PR exists (GitHub offers no create-with-labels path to
+    # this flow), and measured label latency is 10-45s after creation (#6310
+    # ~+15s, #6358 ~+35-45s). So the read is inside the race window by
+    # construction, and the route-2 first run was red 22 times in one day.
+    # The second, SETTLING read further down is what closes it; see the note on
+    # that step for why the wait it costs is charged to nobody who was going to
+    # pass anyway.
     #
     # Keeping the fast path leaves ONE stale cell, in the opposite direction: a
     # label REMOVED after the event fired still short-circuits this run, which is
@@ -165,6 +177,13 @@ jobs:
       # on purpose: when the label is there, every step below is skipped and the
       # whole job costs one API call, so converging on the live state is cheaper
       # than the stale red it replaces.
+      #
+      # This is the FAST PATH read, and #6378 measured that it is only a fast
+      # path: at +10s from PR creation it is too early to be the last word for a
+      # label that lands at +10..45s. It stays exactly as it is -- every run of an
+      # ALREADY-labelled PR (`synchronize`, `labeled`, every rerun, every later
+      # push) still exits here for one API call and no runner. What it must not
+      # do is pronounce a PR guilty; that verdict moved to the settling read.
       #
       # The direction of the tolerance is deliberate: an unreadable label list
       # (API error, no PR number) resolves to `skip=false`, i.e. ENFORCE. A gate
@@ -301,13 +320,20 @@ jobs:
         if: steps.labels.outputs.skip != 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Check for a changeset added by this PR
+      # COUNTING ONLY -- the verdict is two steps down (#6378). The split is not
+      # cosmetic: it is what lets the label window be settled for exactly the PRs
+      # that would otherwise be failed, and for nobody else. A PR that added a
+      # changeset needs no label and waits for nothing; this step establishes
+      # that fact before any waiting is considered.
+      - name: Count the changesets this PR adds
+        id: changeset_count
         if: steps.labels.outputs.skip != 'true'
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
           if [ ! -d ".changeset" ]; then
             echo "::warning::.changeset directory not found. Skipping changeset check."
+            echo 'added=n/a' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Count changesets THIS PR adds (diff against the base commit), NOT
@@ -341,6 +367,117 @@ jobs:
           # ("the changeset you added declares nothing").
           ADDED=$(git diff --name-only --diff-filter=A "$MERGE_BASE" HEAD -- '.changeset/*.md' \
                   | grep -v '/README\.md$' | wc -l | tr -d '[:space:]')
+          echo "This PR adds $ADDED changeset(s) (diffed from $MERGE_BASE)."
+          echo "added=$ADDED" >> "$GITHUB_OUTPUT"
+
+      # ── The settling read (#6378) ────────────────────────────────────────────
+      #
+      # The one step in this job that is allowed to WAIT, and its `if:` is the
+      # whole design. It runs only when both of these hold:
+      #
+      #   * the fast-path read saw no label, AND
+      #   * this PR added no changeset -- i.e. it is headed for RED.
+      #
+      # So the wait is charged exclusively to PRs that were about to be failed.
+      # A PR that wrote a changeset skips this step entirely and costs neither a
+      # second of wall time nor an API call; that is the answer to the standing
+      # objection against "just poll for a while" (issue #6378, direction 1),
+      # which would have taxed every run instead. It has to be answered rather
+      # than waved away, because the numbers are small: measured on run
+      # 31204438874, the whole job is 43s and only ~45s has elapsed since PR
+      # creation by the time the counting step above finishes. There is no
+      # convenient slow step to hide a wait behind in this job -- so the wait is
+      # not hidden, it is CONDITIONED.
+      #
+      # Polarity, stated because it is the entire hard constraint of #6378: this
+      # step can only ever turn a red into a green by OBSERVING A LABEL THAT IS
+      # REALLY THERE. Every other exit -- no PR number, an unreadable label list,
+      # a closed window, the attempt cap -- writes `skip=false`, i.e. ENFORCE, the
+      # same #4690 direction the fast-path read already takes. A PR that genuinely
+      # forgot its changeset and carries no label is therefore still failed,
+      # having merely been given the same grace period the labelling agent needs.
+      # Delaying a red by at most a window costs nothing anyone values; letting a
+      # red through would cost the gate its meaning.
+      #
+      # The window is measured from PR CREATION, not from this step, and that is
+      # what keeps it self-cancelling: on a `synchronize`, a `labeled` run, or any
+      # `rerun_failed_jobs` replay, `created_at` is long past, the deadline is
+      # already behind us, and the loop does exactly one read and no sleeping.
+      # Only a genuinely fresh PR can wait at all. 120s is ~3x the worst label
+      # latency measured on this repo (~40s, #6358).
+      - name: Settle the skip-changeset window (only when this PR would otherwise fail)
+        id: labels_settled
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.changeset_count.outputs.added == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
+          WINDOW_SECONDS: '120'
+          POLL_SECONDS: '10'
+        run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::warning::No PR number on this event, so the label window cannot be settled. Enforcing the changeset check."
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # An absent or unparseable created_at collapses the deadline to "now":
+          # one read, no wait. That is the enforcing direction and it matches
+          # every other unreadable input in this job (#4690).
+          DEADLINE=0
+          if [ -n "$PR_CREATED_AT" ] && CREATED=$(date -u -d "$PR_CREATED_AT" +%s 2>/dev/null); then
+            DEADLINE=$((CREATED + WINDOW_SECONDS))
+          else
+            echo "::warning::This event carries no readable pull_request.created_at, so the label window is treated as already closed: one read, no wait."
+          fi
+          ATTEMPT=0
+          while :; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if ! LABELS=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name'); then
+              echo "::warning::Could not read the labels of PR #$PR_NUMBER (attempt $ATTEMPT), so this run cannot see a 'skip-changeset' applied after the event fired. Enforcing the changeset check."
+              echo 'skip=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Whole-line fixed match, fed by a here-string -- deliberately the
+            # SAME matcher as the fast-path read above, for the same two reasons
+            # (an array-element match, not a substring, so `skip-changeset-audit`
+            # is not newly exempted; and `grep -q` kept out of a pipeline so no
+            # writer can take SIGPIPE under `set -o pipefail`). A divergence
+            # between the two reads would be a gate that exempts on one path and
+            # enforces on the other, so check-empty-changeset.mjs pins them equal.
+            if grep -qxF 'skip-changeset' <<<"$LABELS"; then
+              echo "::notice::'skip-changeset' is on PR #$PR_NUMBER (read live on attempt $ATTEMPT), so this PR declares no release of its own and the changeset check is exempt."
+              echo 'skip=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            NOW=$(date -u +%s)
+            # The attempt cap is belt-and-braces next to the deadline: a clock
+            # that disagrees with GitHub's must not be able to make this loop
+            # unbounded.
+            if [ "$NOW" -ge "$DEADLINE" ] || [ "$ATTEMPT" -ge 20 ]; then
+              break
+            fi
+            echo "No 'skip-changeset' on PR #$PR_NUMBER yet (attempt $ATTEMPT); it is still $((DEADLINE - NOW))s inside the label window. Re-reading in ${POLL_SECONDS}s."
+            sleep "$POLL_SECONDS"
+          done
+          echo "Label window closed after $ATTEMPT read(s). Labels on PR #$PR_NUMBER right now: ${LABELS:-(none)}"
+          echo 'skip=false' >> "$GITHUB_OUTPUT"
+
+      # The VERDICT. Everything it needs was decided above; this step only
+      # announces it, which is what makes the failure message a single block of
+      # prose rather than something interleaved with counting and polling.
+      - name: Require a changeset (or the skip-changeset label)
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.labels_settled.outputs.skip != 'true'
+        env:
+          ADDED: ${{ steps.changeset_count.outputs.added }}
+        run: |
+          if [ "$ADDED" = 'n/a' ]; then
+            echo "There is no .changeset directory to count; the counting step above said so and this gate stands aside."
+            exit 0
+          fi
           if [ "$ADDED" -eq 0 ]; then
             # The full comparison goes to the job log — that is what an author
             # reading `gh run view --log-failed`, or expanding this step in the
@@ -362,6 +499,13 @@ jobs:
                The label is a gate-level exemption. It produces NO input for
                changesets/action, so it cannot affect a release.
 
+               You do not have to race this run to apply it: the step above waits
+               out a window measured from PR creation before this verdict is
+               reached (#6378), so a label applied promptly after 'gh pr create'
+               is seen by THIS run. If you were slower than that, applying it now
+               still fires a 'labeled' event and that run goes green -- but the
+               red left here does not clear itself.
+
                'skills/**' is on that list, and it is spelled out because the git
                log says otherwise (#5947). Changes to PUBLISHED skills have
                repeatedly shipped with an empty changeset instead -- #4607, #5130,
@@ -373,8 +517,9 @@ jobs:
                EITHER, and pays #4898 for the privilege. Take the label.
 
             3. (CLOSED) An empty-frontmatter changeset. Still present in the
-               repository's history and still counted by this step, but the step
-               below now REJECTS any that a PR newly adds (#5471). It was never worth
+               repository's history and still counted by the counting step above,
+               but the step below now REJECTS any that a PR newly adds (#5471). It
+               was never worth
                taking: it names no package, so its body reaches no CHANGELOG, and it
                buys nothing the label does not. What it uniquely buys is risk --
                unlike the label it is a REAL INPUT to changesets/action, and when
@@ -392,7 +537,7 @@ jobs:
             echo "::error::This PR adds no changeset. If it releases nothing (including any 'skills/**' change -- see #5947), apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
             exit 1
           fi
-          echo "This PR adds $ADDED changeset(s)."
+          echo "This PR adds $ADDED changeset(s), so it declares a release of its own."
 
       # #5471: an empty-frontmatter changeset is rejected when this PR is the one
       # introducing it. Ruled 2026-08-06 after the #5292 / PR #5467 prose route
@@ -422,9 +567,10 @@ jobs:
       # place the red and green directions are pinned. It builds real temp git
       # repositories and costs well under a second.
       #
-      # Label handling: this step carries the same `steps.labels.outputs.skip`
-      # guard as every step above it, so it honours the LIVE label re-read
-      # (#5580 / #5625) and a rerun after labelling converges. That leaves one
+      # Label handling: this step carries the same live-label guard as the verdict
+      # step above it -- BOTH reads, the fast path and the settling one (#5580 /
+      # #5625 / #6378) -- so a label that lands inside the window exempts this
+      # step on the same run, and a rerun after labelling converges. That leaves one
       # cell open and it is recorded rather than implied: a PR carrying BOTH the
       # `skip-changeset` label AND a new empty changeset is not caught, because
       # the whole job is exempt. Closing it would mean running this step outside
@@ -440,7 +586,9 @@ jobs:
       # and reports it against an author who never touched the file. Same defect,
       # opposite direction (a false RED here, a false GREEN up there), one base.
       - name: Reject an empty-frontmatter changeset added by this PR
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.labels_settled.outputs.skip != 'true'
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
@@ -478,7 +626,9 @@ jobs:
       # pinned, and each of them was verified to flip green when the corresponding
       # check is ablated. Real temp git repositories, well under a second.
       - name: Require an ADR-0087 disposition on a declared-breaking changeset
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.labels_settled.outputs.skip != 'true'
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
@@ -491,9 +641,12 @@ jobs:
         # version. During the launch window we ship breaking changes as `minor`.
         # Add the `allow-major` PR label when a whole-stack major is intended.
         #
-        # The first clause keeps this step exempt exactly when the changeset check
-        # above is: before #5580 the `skip-changeset` label skipped the whole job,
-        # this step included, and a live-read label must not quietly re-arm it.
+        # The first two clauses keep this step exempt exactly when the changeset
+        # check above is: before #5580 the `skip-changeset` label skipped the whole
+        # job, this step included, and a live-read label must not quietly re-arm
+        # it. Both reads are named for the same reason -- after #6378 the exemption
+        # can be established by either one, and a step that honoured only the fast
+        # path would re-arm itself on precisely the PRs the settling read rescued.
         #
         # The second clause still reads the frozen payload, and so still carries
         # the #5580 race in its own right: an `allow-major` applied after the event
@@ -506,5 +659,6 @@ jobs:
         # cover of another issue is how exemptions grow unnoticed.
         if: >-
           steps.labels.outputs.skip != 'true'
+          && steps.labels_settled.outputs.skip != 'true'
           && !contains(github.event.pull_request.labels.*.name, 'allow-major')
         run: node scripts/check-changeset-no-major.mjs

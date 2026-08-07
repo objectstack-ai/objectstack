@@ -216,36 +216,48 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Declared, not delivered — recorded, NOT endorsed
+  // The gaps the double assertion cannot see — one now closed, one still open
   // ═══════════════════════════════════════════════════════════════════════════
   //
-  // The two assertions above are 3/3 green for this family. These two facts are
-  // real inconsistencies that BOTH assertions are structurally blind to, and
-  // that is the point worth writing down for #3877's Stage D ratchet:
+  // The two assertions above are 3/3 green for this family. These two facts
+  // were real inconsistencies that BOTH assertions are structurally blind to,
+  // and that is the point worth writing down for #3877's Stage D ratchet:
   //
   //   * `unreadCount` is a `number` whether it counts the total or the window,
   //     so a VALUE assertion cannot see a wrong semantic;
   //   * `cursor` is `optional`, so "no producer ever emits it" is a legal
   //     parse and the KEY assertion (⊆, not =) cannot see it either.
   //
-  // Pinned as the measured behaviour of `origin/main`, with the issues that own
-  // the judgement call. Whichever way #6361 / #6363 are ruled, these two
-  // assertions are the ones that must flip — which is why they are here rather
-  // than left for the next reader to rediscover.
+  // Both were pinned here as the measured behaviour of `origin/main`, on the
+  // note that whichever way #6361 / #6363 were ruled, these assertions are the
+  // ones that must flip. #6363 has been ruled (2026-08-07, Option A: make the
+  // declaration true) and its assertion has flipped — it now pins the fix, over
+  // the wire, which is the only place the whole stack is in play. The `cursor`
+  // half is unchanged: it is one capability's two halves and is being retired
+  // with #6361, so it stays pinned as measured until that lands.
+  //
+  // The Stage D input stands either way, and is if anything sharper now: the
+  // ratchet still cannot see EITHER fact. Both had to be written by hand, and
+  // the fix below would have been just as invisible to it as the defect was.
   describe('[#6361 / #6363] the gaps the double assertion cannot see', () => {
-    it('[#6363] `unreadCount` counts the RETURNED WINDOW, not the total the schema describes', async () => {
+    it('[#6363] `unreadCount` is the TOTAL the schema describes, and survives a smaller window', async () => {
       const all = await getJson(GAP_USER, '/api/v1/notifications');
       expect(all.unreadCount, 'fixture must leave more than one unread for this to mean anything')
         .toBeGreaterThan(1);
 
       const windowed = await getJson(GAP_USER, '/api/v1/notifications?limit=1');
 
+      // The LIST is still windowed — that half never changed.
       expect(windowed.notifications).toHaveLength(1);
-      // Declared: 'Total number of unread notifications'. Delivered: the unread
-      // count within the fetched window. See #6363.
-      expect(windowed.unreadCount).toBe(1);
-      expect(windowed.unreadCount).not.toBe(all.unreadCount);
-      // …and it still parses, which is exactly the blind spot.
+      // The BADGE is not: declared 'Total number of unread notifications', and
+      // now delivered as one. Before #6363 this read `1` — the window's size,
+      // which is what a user with more unread than the page size was told
+      // forever. The parse was green either way; only this assertion can tell.
+      expect(windowed.unreadCount).toBe(all.unreadCount);
+      // Stated as the property rather than only as an equality, so the pin
+      // cannot go quietly vacuous if a future fixture change flattens both
+      // sides: the count MUST be able to exceed the window it came back in.
+      expect(windowed.unreadCount).toBeGreaterThan(windowed.notifications.length);
       expect(ListNotificationsResponseSchema.safeParse(windowed).success).toBe(true);
     });
 

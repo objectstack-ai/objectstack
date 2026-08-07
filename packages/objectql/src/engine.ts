@@ -5963,6 +5963,57 @@ export class ObjectQL implements IObjectQLEngine {
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
+               // [#6262] A bulk SET clause must not carry `id`. Reaching this
+               // branch AT ALL means `resolveEngineUpdateDispatch` returned
+               // `multi`, i.e. it found no scalar truthy id in EITHER source —
+               // so whatever sits in `data.id` here (an operator object, an
+               // array, `null`, a falsy scalar) is a value the engine has
+               // already RULED is not a primary key. Leaving it in the payload
+               // then asks the driver to write that ruled-not-an-id value into
+               // the primary-key column of every matched row: the measured
+               // probe was `updateMany({object}, { id: { $in: ['a','b'] },
+               // title: 'x' })`, i.e. a serialized operator object as the new
+               // primary key of N rows. Five backends would each answer that
+               // differently (#5240 / #4434), and on the ones that accept it
+               // the matched rows lose their identity irreversibly.
+               //
+               // This is the SAME answer to the SAME question, applied one
+               // layer on — not a second opinion. #5748 / PR #5919 ruled that a
+               // non-scalar `data.id` is not an id and therefore stops
+               // shadowing the dispatch ladder; the declared bulk intent is
+               // honoured (`ENGINE_UPDATE_DISPATCH_CASES` says `'multi'`, and
+               // this change leaves every verdict in that set untouched). The
+               // strip is that ruling's other half: a value that is not the
+               // primary key does not get to sit in the primary-key column
+               // either. Rejecting the call instead (#6262's route B) would
+               // reverse a verdict the case-set states today, which is a fresh
+               // maintainer decision rather than this fix.
+               //
+               // No reachable shape loses a legitimate write: a truthy scalar
+               // `data.id` outranks both `where` and `multi` and never gets
+               // here, and N rows cannot share one primary key anyway.
+               //
+               // Deliberately NOT reported through `reportDroppedFields`:
+               // `DroppedFieldsEvent.reason` is a closed enum over the two
+               // READ-ONLY strips (`readonly` / `readonly_when`, #3407/#3042),
+               // and this drop is neither. Widening that vocabulary is a
+               // `packages/spec` change with its own consumers (batch + REST
+               // protocol responses), not a rider on an engine fix. The `warn`
+               // is the #4632 duty in the meantime: name the consequence and
+               // the remedy, since the caller is told the write succeeded.
+               const preIdMulti = hookContext.input.data as Record<string, unknown> | null | undefined;
+               if (preIdMulti && typeof preIdMulti === 'object' && Object.prototype.hasOwnProperty.call(preIdMulti, 'id')) {
+                   const { id: notAnId, ...withoutId } = preIdMulti;
+                   hookContext.input.data = withoutId as any;
+                   this.logger.warn(
+                     `Bulk update on '${object}': dropped 'id' from the write payload. A multi:true update ` +
+                       `targets rows through its predicate, and the engine has already ruled this value is not a ` +
+                       `primary key (${JSON.stringify(notAnId) ?? String(notAnId)}) — writing it would have ` +
+                       `overwritten the primary-key column of every matched row. To update ONE row by id, pass a ` +
+                       `scalar id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`) instead of ` +
+                       `options.multi; to SELECT rows by an id set, put it in \`where\` (\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
+                   );
+               }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });

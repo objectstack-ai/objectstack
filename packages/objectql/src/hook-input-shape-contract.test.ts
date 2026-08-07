@@ -54,6 +54,38 @@
  * `input.ast`, so "no `ast` on the write paths" is a measurement, not an
  * assertion that would pass against an engine that had stopped setting `ast`
  * anywhere at all.
+ *
+ * ## [#5997] The other half — what a `before*` handler CAN reach
+ *
+ * Section 5 below is the POSITIVE twin of section 1, and it exists because the
+ * table's two `before` rows had the complementary defect: they typed
+ * `input.options` as `DriverOptions`, a type that declares neither `where` nor
+ * `multi`. The engine does not build that there — it hands `before*` the
+ * CALLER's own engine options bag (`EngineUpdateOptions` /
+ * `EngineDeleteOptions`), predicate included, and only merges the driver-facing
+ * keys onto it after the handlers return. Two shipped break-glass guards in
+ * `packages/plugins/plugin-auth` (the #5892 ban half and the #5941 delete half)
+ * resolve their target rows from exactly that slot, and objectql's own
+ * `isPredicateBulkWrite` (`hook-wrappers.ts`) reads `options.multi` off it — so
+ * the property was load-bearing while being prose only: nothing here asserted
+ * it, and `'ast' in input === false` above reads, on its own, as "a handler can
+ * see no predicate at all" — the false inference #5997 reported.
+ *
+ * Measured (the deletion test these assertions have to survive): rebuilding the
+ * `before*` slot into a STRIPPED `DriverOptions` — the shape the old table row
+ * described — turns exactly the four cases below red and leaves all eleven
+ * pre-existing cases in this file GREEN, including §2's
+ * `expect(seen[0].options).toBeDefined()`. That gap is why the pin is worth
+ * having: the suite as it stood could not tell the two shapes apart.
+ *
+ * The two statements are both true and must stay distinguishable:
+ *
+ *   - the COMPOSED `ast` — the *effective* predicate, onto which the filters
+ *     middleware may layer RLS / sharing narrowing — is NOT reachable (§1);
+ *   - the CALLER's RAW `options.where` (and `options.multi`) IS (§5).
+ *
+ * Middleware only ever narrows, so the caller's predicate over-approximates
+ * the row set — the safe direction for a fail-closed guard.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -256,6 +288,116 @@ describe('[#5273] a metadata-declared hook reads the same shape', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * 5. [#5997] `input.options` during `before*` IS the caller's bag — `where`
+ *    and `multi` included. The positive twin of section 1.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe("[#5997] `before*` reads the CALLER's options bag, predicate included", () => {
+  /**
+   * Every case asserts the same three things, and each one fails on a
+   * different way of getting this wrong:
+   *
+   *   1. `toBe(callerOptions)` — REFERENCE identity. The engine passes the
+   *      caller's very object through; substituting a freshly built
+   *      `DriverOptions` for it (which is what the old table row described)
+   *      fails here even if the substitute happened to copy `where` across.
+   *   2. `options.where` deep-equals the predicate the caller passed. This is
+   *      the read both plugin-auth guards actually perform, and it is what
+   *      goes red if the slot is ever rebuilt into a stripped bag before the
+   *      handlers run.
+   *   3. `'ast' in input === false` — restated per case so the pair reads
+   *      together: the COMPOSED predicate stays unreachable while the RAW one
+   *      is right there. Neither assertion is safe to read without the other.
+   */
+  const assertCallerBag = (
+    input: Record<string, unknown>,
+    callerOptions: Record<string, unknown>,
+    where: unknown,
+  ): void => {
+    expect(input.options).toBe(callerOptions);
+    expect((input.options as Record<string, unknown>).where).toEqual(where);
+    // §1's claim, restated here so neither half can be read alone.
+    expect('ast' in input).toBe(false);
+  };
+
+  it('`beforeUpdate` (single id) carries the caller `where`', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { engine } = await boot();
+    engine.registerHook('beforeUpdate', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
+
+    const [row] = await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+    const callerOptions = { where: { id: row.id } };
+    await engine.update('task', { status: 'done' }, callerOptions as any);
+
+    expect(seen).toHaveLength(1);
+    assertCallerBag(seen[0]!, callerOptions, { id: row.id });
+    // A by-id write is not a batch: nothing sets `multi`.
+    expect((seen[0]!.options as any).multi).toBeUndefined();
+  });
+
+  it('`beforeUpdate` (bulk) carries the caller `where` AND `multi`', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { engine } = await boot();
+    engine.registerHook('beforeUpdate', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
+
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+    const callerOptions = { multi: true, where: { status: 'todo' } };
+    await engine.update('task', { status: 'done' }, callerOptions as any);
+
+    expect(seen).toHaveLength(1);
+    assertCallerBag(seen[0]!, callerOptions, { status: 'todo' });
+    // `multi` survives too — the guards branch on it to tell a batch from a
+    // by-id write when `input.id` is undefined for either reason.
+    expect((seen[0]!.options as any).multi).toBe(true);
+    // And the batch shape from §2 still holds on the same context.
+    expect(seen[0]!.id).toBeUndefined();
+  });
+
+  it('`beforeDelete` (single id) carries the caller `where`', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { engine } = await boot();
+    engine.registerHook('beforeDelete', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
+
+    const [row] = await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+    const callerOptions = { where: { id: row.id } };
+    await engine.delete('task', callerOptions as any);
+
+    expect(seen).toHaveLength(1);
+    assertCallerBag(seen[0]!, callerOptions, { id: row.id });
+    expect((seen[0]!.options as any).multi).toBeUndefined();
+  });
+
+  it('`beforeDelete` (bulk) carries an operator predicate verbatim, `multi` included', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { engine } = await boot();
+    engine.registerHook('beforeDelete', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
+
+    const rows = await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+      { title: 'c', status: 'keep' },
+    ]);
+    // The `$in` shape #5941's guard is written against — a predicate that can
+    // sweep several administrators in one call. It must arrive UNPARSED, since
+    // the guard resolves it itself.
+    const doomed = [rows[0]!.id, rows[1]!.id];
+    const callerOptions = { multi: true, where: { id: { $in: doomed } } };
+    await engine.delete('task', callerOptions as any);
+
+    expect(seen).toHaveLength(1);
+    assertCallerBag(seen[0]!, callerOptions, { id: { $in: doomed } });
+    expect((seen[0]!.options as any).multi).toBe(true);
+    expect(seen[0]!.id).toBeUndefined();
+    // The write really did run as a batch through that predicate — so the
+    // assertions above describe a live path, not an inert options bag.
+    // No `as any` on this one: `count(object, query?)` infers the empty query,
+    // and erasing it would add a site to the #4918 ratchet for nothing (the
+    // positive control at the top of this file carries the same note).
+    expect(await engine.count('task', {})).toBe(1);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Harness — a stub driver just wide enough for the dispatch paths above.
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -276,6 +418,13 @@ function makeStubDriver(): any {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
       if (k.startsWith('$')) continue;
+      // `$in` (#5997): the batch shape the delete guard is written against, so
+      // its case exercises a predicate that really matches several rows rather
+      // than an options bag nothing consumes.
+      if (v && typeof v === 'object' && '$in' in (v as any)) {
+        if (!(v as any).$in.includes(row[k])) return false;
+        continue;
+      }
       const expected = v && typeof v === 'object' && '$eq' in (v as any) ? (v as any).$eq : v;
       if ((row[k] ?? null) !== (expected ?? null)) return false;
     }

@@ -47,6 +47,7 @@ import {
   IndexSchema,
   defineObjectExtension,
 } from './object.zod';
+import { resolveInjectedSystemColumns } from './injected-system-columns';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 /** Reject `value` through `schema` and return its issues as a searchable string. */
@@ -268,6 +269,54 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('ownership');
       // The claim: `ownership` is the real, enforced lever, one level up.
       accept(ObjectSchema, { ...OBJ, ownership: 'none' });
+    });
+
+    // #6365 — the wrong-key rescue used to hand out a SECOND wrong answer. It
+    // said `'user'`/`'org'` "choose the principal", so an author who wanted an
+    // org-owned record was sent to `ownership: 'org'` — which injects no
+    // `owner_id` at all, and nothing rejects it, so every owner-keyed feature
+    // (owner-scoped RLS, "My" views, owner reports, the first-admin bootstrap
+    // handoff) quietly does nothing. The assertions below are anchored to the
+    // injection authority rather than to the sentence, so the prescription can
+    // only stay green while it still describes what really happens.
+    it("`systemFields.owner`'s prescription matches the injection authority — `'org'` SKIPS `owner_id`, it does not pick a different principal (#6365)", () => {
+      // The authority `applySystemFields` consumes (`resolveInjectedSystemColumns`).
+      // `'org'` sits with `'none'` on the withheld side, not opposite it.
+      expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'org' }).owner).toBe(false);
+      expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'none' }).owner).toBe(false);
+      expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'user' }).owner).toBe(true);
+      expect(resolveInjectedSystemColumns(OBJ).owner, 'omitted behaves as `user`').toBe(true);
+
+      const msg = rejectOnObject({ systemFields: { tenant: true, owner: false } });
+      // …and the message says exactly that: the two skipping values are named
+      // TOGETHER, and the absence is stated as an absence.
+      expect(msg).toContain("`'org'` and `'none'` BOTH skip it");
+      expect(msg).toContain('no `owner_id` is injected at all');
+      // The retired claim, pinned by name so it cannot come back by paraphrase
+      // of the same idea — `'org'` as a second *principal*.
+      expect(msg).not.toContain('choose the principal');
+      expect(msg).not.toContain('principal');
+      // …while `'org'` and `'none'` stay visibly DISTINCT in intent, which is
+      // the reason the enum carries both (the `ownership` JSDoc's own split:
+      // Dataverse-style catalog vs junction table).
+      expect(msg).toContain('org-wide catalog');
+      expect(msg).toContain('junction/link');
+    });
+
+    it('`systemFields.ownership` names BOTH ownership anchors — since #5677 the property governs `owning_business_unit_id` too (#6365)', () => {
+      const msg = rejectOnObject({ systemFields: { tenant: true, ownership: 'none' } });
+      expect(msg).toContain('TOP-LEVEL');
+      expect(msg).toContain('owner_id');
+      expect(msg).toContain('owning_business_unit_id');
+
+      // The claim, against the authority: across the whole AUTHORABLE enum the
+      // two anchors move together — injected under `'user'`/omitted, withheld
+      // under `'org'`/`'none'`. (ADR-0117 D1's fourth tier is the one case that
+      // splits them, and it is deliberately unauthorable today — #5678.)
+      for (const ownership of [undefined, 'user', 'org', 'none'] as const) {
+        const plan = resolveInjectedSystemColumns({ ...OBJ, ownership });
+        expect(plan.owningBusinessUnit, `ownership: ${String(ownership)}`).toBe(plan.owner);
+      }
     });
 
     it('`external.allowWrites` names the DOUBLE opt-in — the datasource half and the object half', () => {

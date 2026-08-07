@@ -711,6 +711,77 @@ function selfTest() {
         pinnedDiffs.length === 0,
         `consumer: no \`git diff\` in the workflow may use the frozen base.sha as an endpoint (found ${pinnedDiffs.length})`,
       );
+
+      // ── The label race, and the half of #6378 that also lives in YAML ──────
+      //
+      // Same argument as the block above, one defect along: the fix for #6378 is
+      // shell and `if:` expressions in pr-automation.yml, so nothing that drives
+      // scan() can see it being undone. Two live label reads (a fast path at
+      // ~+10s from PR creation, and a settling one that waits out the window)
+      // are what turn the route-2 first run green; a later edit that deletes the
+      // second, or that lets the FIRST one pronounce a verdict, restores a gate
+      // that was red-by-construction 22 times in one day.
+      //
+      // What is pinned here is deliberately the SHAPE OF THE EXEMPTION, never
+      // its permissiveness: read the assertions below as one sentence -- the
+      // exemption may be established only by a label really observed, the wait
+      // may be charged only to a PR that would otherwise fail, every step that
+      // can fail a PR over the changeset rule must honour both reads, and the
+      // failure must stay a failure.
+      const settle = /steps\.changeset_count\.outputs\.added == '0'/.test(yaml);
+      assert(
+        settle,
+        'consumer: the settling label read must be conditioned on `steps.changeset_count.outputs.added == \'0\'` -- the wait #6378 introduces is charged ONLY to a PR headed for red, and un-conditioning it taxes every run instead',
+      );
+
+      // Both reads, one matcher. A divergence (say a substring `grep -q` on one
+      // path) would be a gate that exempts on one read and enforces on the
+      // other, and `skip-changeset-audit` would newly buy an exemption on
+      // whichever path drifted.
+      const matchers = [...yaml.matchAll(/grep -qxF 'skip-changeset'/g)];
+      assert(
+        matchers.length === 2,
+        `consumer: exactly two live \`grep -qxF 'skip-changeset'\` reads are expected (the fast path and the settling read); found ${matchers.length}`,
+      );
+
+      // Every step that can FAIL a PR over the changeset rule must honour both
+      // reads. Scoped to those steps by what they run, not by name: a step that
+      // shells out to a `check-*.mjs` gate, or that emits the "no changeset"
+      // error. `Resolve the diff base` is deliberately outside this set -- it
+      // exits 1 over an unusable git base, which is not a changeset verdict and
+      // was never label-exempt (recorded, not implied).
+      const jobText = yaml.slice(yaml.indexOf('\n  changeset-check:'));
+      const chunks = jobText
+        .split(/\n(?=      - name: )/)
+        .map((c) => c.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'))
+        .filter((c) => /node scripts\/check-\S+\.mjs/.test(c) || /::error::This PR adds no changeset/.test(c));
+      assert(
+        chunks.length === 4,
+        `consumer: expected 4 changeset-verdict steps in the Check Changeset job, found ${chunks.length} -- a new one that this rule cannot see is a new way to red an exempt PR`,
+      );
+      const unguarded = chunks.filter((c) => !/steps\.labels_settled\.outputs\.skip != 'true'/.test(c));
+      assert(
+        unguarded.length === 0,
+        `consumer: every changeset-verdict step must honour the settling read as well as the fast path (${unguarded.length} do not) -- a step guarded only by the fast path re-arms itself on exactly the PRs #6378 rescued`,
+      );
+      const halfGuarded = chunks.filter((c) => !/steps\.labels\.outputs\.skip != 'true'/.test(c));
+      assert(
+        halfGuarded.length === 0,
+        `consumer: every changeset-verdict step must honour the fast-path read too (${halfGuarded.length} do not) -- dropping it makes an already-labelled PR pay a whole job (#5580)`,
+      );
+
+      // The hard constraint of #6378, stated as structure: none of this may have
+      // made the gate softer. A PR with no changeset and no label still has to
+      // hit a real non-zero exit, and no step of this job may be excused from
+      // its own failure.
+      assert(
+        /::error::This PR adds no changeset[\s\S]{0,900}?\n\s+exit 1\n/.test(yaml),
+        'consumer: the "no changeset" verdict must still exit 1 -- #6378 removes a structural FALSE red, it does not relax the gate',
+      );
+      assert(
+        !/continue-on-error/.test(yaml),
+        'consumer: no step in pr-automation.yml may carry `continue-on-error` -- that would turn this gate into a warning, which is the one outcome #6378 rules out',
+      );
     }
 
     // ── Parser unit rows ─────────────────────────────────────────────────────

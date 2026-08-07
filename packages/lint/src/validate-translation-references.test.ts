@@ -411,6 +411,13 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
   // Reading `view.name` / `view.data.object` at the record root resolves
   // nothing here, drops the record, and reports every view key the app ships —
   // ~40 correct keys on the real corpus.
+  //
+  // The default list carries a `label` (#6038): without one it is
+  // signature-identical to `listViews.my_leads` (`{type,label,columns}` all
+  // equal), the composer collapses the two, and `all_leads` is not a runtime
+  // view name at all — so the fixture would be asserting that a key nothing
+  // resolves is legal. The label makes it the distinct default list this test
+  // says it is. The collapse itself is pinned separately below.
   const leadViews = {
     objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
     views: [
@@ -418,6 +425,7 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
         list: {
           type: 'grid',
           name: 'all_leads',
+          label: 'All Leads',
           data: { provider: 'object', object: 'crm_lead' },
         },
         listViews: {
@@ -470,6 +478,159 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.hot_leads');
     expect(findings[0].hint).toContain('all_leads');
+  });
+
+  // ── #6038 / #5164 leg 2: the default list's key is the RUNTIME's ─────────
+  //
+  // The composer (`expandViewContainer`) is the single producer of a view's
+  // runtime identity, and these pin that this rule reads the key from it
+  // instead of re-deriving one. Every fixture below is driven through the real
+  // `validateTranslationReferences`, and every "legal" assertion is paired with
+  // a planted bad key on the SAME fixture — a `toEqual([])` that passes because
+  // the rule produced nothing at all would prove nothing.
+  describe('the default list is keyed by the runtime identity, single spelling', () => {
+    /** The showcase shape: a container declaring ONLY a nameless default list. */
+    const namelessDefaultList = {
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      views: [
+        {
+          list: { type: 'grid', label: 'All Leads', data: { provider: 'object', object: 'crm_lead' } },
+        },
+      ],
+    };
+
+    const bundle = (views: Record<string, unknown>) => ({
+      translations: [{ en: { objects: { crm_lead: { label: 'Lead', _views: views } } } }],
+    });
+
+    it('accepts `default` for a nameless default list — the key the registry holds', () => {
+      const findings = validateTranslationReferences({
+        ...namelessDefaultList,
+        ...bundle({ default: { label: '全部线索' } }),
+      });
+      expect(findings).toEqual([]);
+    });
+
+    it('the same fixture still reports a key nothing declares (the green above is not an empty run)', () => {
+      const findings = validateTranslationReferences({
+        ...namelessDefaultList,
+        ...bundle({ default: { label: '全部线索' }, hot_leads: { label: 'Hot' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.hot_leads');
+    });
+
+    it('rejects the old `list` spelling — one key per view, and it is the runtime one', () => {
+      const findings = validateTranslationReferences({
+        ...namelessDefaultList,
+        ...bundle({ list: { label: '全部线索' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.list');
+      expect(findings[0].hint).toContain('default');
+    });
+
+    it('a named default list keeps the author\'s `name`', () => {
+      const stack = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            list: {
+              type: 'grid',
+              name: 'all_leads',
+              label: 'All Leads',
+              data: { provider: 'object', object: 'crm_lead' },
+            },
+            listViews: { my_leads: { type: 'grid', data: { provider: 'object', object: 'crm_lead' } } },
+          },
+        ],
+      };
+      expect(
+        validateTranslationReferences({ ...stack, ...bundle({ all_leads: { label: 'A' }, my_leads: { label: 'M' } }) }),
+      ).toEqual([]);
+      // …and `default` is NOT legal here: the author named the view, so the
+      // composer never falls back to `default`.
+      const planted = validateTranslationReferences({ ...stack, ...bundle({ default: { label: 'D' } }) });
+      expect(planted).toHaveLength(1);
+      expect(planted[0].path).toBe('translations[0].en.objects.crm_lead._views.default');
+    });
+
+    it('a default list collapsed into a `listViews` entry contributes that entry\'s key, not its own `name`', () => {
+      // Composer fact 2 — the `examples/app-crm` shape: `list` is
+      // signature-identical to `listViews.all` (`{type,label,columns}` equal),
+      // so the two are ONE registry entry named `all`. `list.name` resolves to
+      // nothing and must not be a legal bundle key.
+      const collapsed = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            list: { type: 'grid', name: 'all_leads', data: { provider: 'object', object: 'crm_lead' } },
+            listViews: { all: { type: 'grid', data: { provider: 'object', object: 'crm_lead' } } },
+          },
+        ],
+      };
+      expect(validateTranslationReferences({ ...collapsed, ...bundle({ all: { label: '全部' } }) })).toEqual([]);
+      const findings = validateTranslationReferences({ ...collapsed, ...bundle({ all_leads: { label: '全部' } }) });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.all_leads');
+    });
+
+    it('a collision-renamed default list is legal under the renamed key', () => {
+      // Composer fact 3: `listViews.default` claims `crm_lead.default` first,
+      // so the nameless default list is renamed `crm_lead.default_2` — and the
+      // rename IS the registry key, so it is what a bundle must spell.
+      const collided = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            list: { type: 'grid', data: { provider: 'object', object: 'crm_lead' } },
+            listViews: { default: { type: 'kanban', data: { provider: 'object', object: 'crm_lead' } } },
+          },
+        ],
+      };
+      expect(
+        validateTranslationReferences({ ...collided, ...bundle({ default: { label: 'D' }, default_2: { label: 'D2' } }) }),
+      ).toEqual([]);
+      const findings = validateTranslationReferences({ ...collided, ...bundle({ default_3: { label: 'D3' } }) });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.default_3');
+    });
+
+    it('the default FORM contributes sections but no `_views` name — `_views.*` is a list convention', () => {
+      // The composer does name the default form `crm_lead.form`, but the i18n
+      // walker emits no `_views` entry for any form view, so a `_views.form`
+      // key would be one nothing reads. Its `_sections` still resolve (#5415).
+      const withForm = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            list: { type: 'grid', label: 'All', data: { provider: 'object', object: 'crm_lead' } },
+            form: {
+              type: 'simple',
+              data: { provider: 'object', object: 'crm_lead' },
+              sections: [{ name: 'contact_info', label: 'Contact Info' }],
+            },
+          },
+        ],
+      };
+      expect(
+        validateTranslationReferences({
+          ...withForm,
+          translations: [
+            {
+              en: {
+                objects: {
+                  crm_lead: { label: 'Lead', _views: { default: { label: 'All' } }, _sections: { contact_info: { label: '联系方式' } } },
+                },
+              },
+            },
+          ],
+        }),
+      ).toEqual([]);
+      const findings = validateTranslationReferences({ ...withForm, ...bundle({ form: { label: 'Form' } }) });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.form');
+    });
   });
 
   it('resolves views embedded on the object itself', () => {
@@ -644,6 +805,33 @@ describe('validateTranslationReferences — the showcase contact surface (#5415)
       ),
     );
     expect(findings).toEqual([]);
+  }, 60_000);
+
+  it('accepts `_views.default` — the key this very surface ships, and the one it was told to ship (#6038)', () => {
+    // The specimen behind #5164/#6038, on the real metadata rather than a
+    // reduction: `ContactViews` declares a nameless default `list`, the CLI
+    // i18n walker demands `objects.showcase_contact._views.default.label`
+    // (#6124), and `examples/app-showcase` ships exactly that key. Before this
+    // rule read the key from the composer it answered "no view of object
+    // showcase_contact declares `default`" — one `os lint` run, two rules, no
+    // author action that satisfied both. The control below keeps this honest:
+    // `list`, the spelling the walker used to demand, is NOT legal.
+    expect(
+      validateTranslationReferences(
+        showcaseContactStack([
+          { 'zh-CN': { objects: { showcase_contact: { _views: { default: { label: '联系人' } } } } } },
+        ]),
+      ),
+    ).toEqual([]);
+
+    const stale = validateTranslationReferences(
+      showcaseContactStack([
+        { 'zh-CN': { objects: { showcase_contact: { _views: { list: { label: '联系人' } } } } } },
+      ]),
+    );
+    expect(stale).toHaveLength(1);
+    expect(stale[0].path).toBe('translations[0]["zh-CN"].objects.showcase_contact._views.list');
+    expect(stale[0].hint).toContain('default');
   }, 60_000);
 
   it('still reports a section name nothing declares, and names the real ones', () => {

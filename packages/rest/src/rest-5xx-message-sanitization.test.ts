@@ -65,6 +65,8 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { RestServer } from './rest-server';
 
 const META_ITEM = '/api/v1/meta/:type/:name';
+const OBJ_BATCH = '/api/v1/data/:object/batch';
+const BATCH_OBJECT = 'showcase_account';
 
 /** The driver line a missing `sys_metadata` produces on each dialect. */
 const SQLITE_NO_TABLE = 'SQLITE_ERROR: no such table: sys_metadata';
@@ -162,14 +164,28 @@ function loggedText(needle: string): boolean {
 // issue flagged exactly that shape as un-enumerated ("动态赋值的路径没清点"). A
 // `status:` grep does not find it; this test does.
 //
-// Its sibling `saveMetaItem` producer (`OVERLAY_PERSISTENCE_FAILED`) is covered
-// by message shape in the next section rather than live: reaching its legacy
-// raw-engine branch requires a metadata type that is neither overlay-allowed
-// nor runtime-creatable AND an artifact-backed item of that type, and a
-// runtime-created one is refused earlier with `403 NOT_CREATABLE`. Both
-// producers hand `resolveErrorResponse` the same thing — a declared 5xx whose
-// message embeds `err.message` — so the live half proves the boundary and the
-// shaped half proves the wording.
+// It is now the ONLY `sys_metadata` producer on this boundary. The sibling
+// `saveMetaItem` one (`OVERLAY_PERSISTENCE_FAILED`) that this section used to
+// name is gone, and the note that stood here was already wrong before it went:
+// it argued the legacy raw-engine branch was merely hard to reach — "requires a
+// metadata type that is neither overlay-allowed nor runtime-creatable AND an
+// artifact-backed item of that type, and a runtime-created one is refused
+// earlier with `403 NOT_CREATABLE`" — but the artifact-backed half is refused
+// just as early, with `403 NOT_OVERRIDABLE` (#5086; `saveMetaItem`'s code-only
+// gate throws `codeOnlyOverrideError` for exactly that stack, pinned by
+// `protocol.code-only-types.test.ts`'s "refuses overlaying an artifact-backed
+// <type> with not_overridable"). Both halves were refused, so the branch was
+// unreachable rather than rare; #5264 deleted it, and #5783 unregistered the
+// code. A reachability argument written into a comment is what rots here —
+// this one was CORRECT the day it was written and outlived by one week the
+// gate tightening that falsified it.
+//
+// What replaced it in the next section is the atomic-batch refusal
+// (`501 NOT_IMPLEMENTED`), a producer that still exists: `metadata-protocol`'s
+// `batchData` throws it when the runtime cannot open a transaction. It hands
+// `resolveErrorResponse` the same thing this live half does — a DECLARED 5xx —
+// so the live half proves the boundary and the shaped half proves that a
+// declared `code` survives the sanitizing.
 
 function failingDriver(dbError: string) {
     const boom = () => { throw new Error(dbError); };
@@ -247,17 +263,31 @@ describe('[#5437] a real sys_metadata failure, walked in process', () => {
 // 2. The envelope a declared 5xx now produces
 // ---------------------------------------------------------------------------
 //
-// Built the way `metadata-protocol` builds it at the two producer sites, so the
-// assertions read against the exact shape that ships.
+// Built the way `metadata-protocol` builds it at the two producer sites that
+// survive, so the assertions read against the exact shape that ships. The two
+// are deliberately opposite in the one dimension this branch keys on: the batch
+// refusal DECLARES a `code`, the overlay delete declares only a `status`.
 
-/** `protocol.ts` — `saveMetaItem`'s persistence catch. Status set at build. */
-function overlayPersistenceError(dbError: string) {
+/**
+ * `protocol.ts` — `batchData`'s atomic refusal, the code-carrying declared 5xx
+ * on this boundary. Copied from the producer verbatim, `status` and `code` set
+ * on the error before it is thrown.
+ *
+ * It is here because #5264 removed the one this section used to build
+ * (`saveMetaItem`'s `OVERLAY_PERSISTENCE_FAILED` catch, unregistered from the
+ * ledger by #5783). Same job, and a strictly better specimen for it: its
+ * message is the "accepted cost" sentence `resolveErrorResponse`'s own docblock
+ * names — written FOR the caller, and withheld from them anyway — so the case
+ * below asserts a real loss rather than the withholding of a driver dump that
+ * nobody wanted delivered.
+ */
+function atomicBatchUnsupportedError(object: string) {
     const err = new Error(
-        `Failed to persist customization overlay to sys_metadata: ${dbError}. `
-        + `In-memory registry was updated but will be lost on restart.`,
+        `Atomic batch on '${object}' requires engine transaction support; this runtime cannot roll back. `
+        + `Retry without options.atomic, or probe capabilities.transactionalBatch on /discovery first.`,
     );
-    (err as any).code = 'OVERLAY_PERSISTENCE_FAILED';
-    (err as any).status = 500;
+    (err as any).code = 'NOT_IMPLEMENTED';
+    (err as any).status = 501;
     return err;
 }
 
@@ -275,25 +305,29 @@ function deleteOverlayError(dbError: string) {
 }
 
 describe('[#5437] the 5xx envelope: status and code survive, the prose does not', () => {
-    it('OVERLAY_PERSISTENCE_FAILED keeps its 500 and its code, loses its text', async () => {
+    it('NOT_IMPLEMENTED keeps its 501 and its code, loses its text', async () => {
         const rest = setup({
-            saveMetaItem: vi.fn().mockRejectedValue(overlayPersistenceError(SQLITE_NO_TABLE)),
+            getMetaItems: vi.fn().mockResolvedValue([{ name: BATCH_OBJECT }]),
+            batchData: vi.fn().mockRejectedValue(atomicBatchUnsupportedError(BATCH_OBJECT)),
         });
 
-        const res = await callRoute(rest, 'PUT', META_ITEM, {
-            params: { type: 'object', name: 'showcase_account' },
-            body: { name: 'showcase_account' },
+        const res = await callRoute(rest, 'POST', OBJ_BATCH, {
+            params: { object: BATCH_OBJECT },
+            body: { operation: 'update', records: [{ id: 'r1', data: { name: 'r1' } }] },
         });
 
         // The producer's own declaration is honoured — this is what routing the
-        // error through `mapDataError` would have destroyed (it answers 404
-        // OBJECT_NOT_FOUND, because "no such table" trips its unknown-object
-        // heuristic).
-        expect(res.statusCode).toBe(500);
-        expect(res.body.code).toBe('OVERLAY_PERSISTENCE_FAILED');
-        // A machine-readable code is not a leak; the prose is.
+        // error through `mapDataError` would have destroyed: its text carries
+        // the quoted object name and the word "cannot", so the unknown-object
+        // heuristic's last limb answers `404 Object '<name>' is not registered`
+        // (asserted directly in `rest-unknown-object-heuristic.test.ts` §4).
+        expect(res.statusCode).toBe(501);
+        expect(res.body.code).toBe('NOT_IMPLEMENTED');
+        // A machine-readable code is not a leak; the prose is — even here,
+        // where the prose was addressed to the caller and is the remedy.
         expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
-        expect(res.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'OVERLAY_PERSISTENCE_FAILED' });
+        expect(res.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'NOT_IMPLEMENTED' });
+        expect(JSON.stringify(res.body)).not.toContain('options.atomic');
     }, 60_000);
 
     it('a dynamically-assigned status is treated identically (no code declared)', async () => {
@@ -314,16 +348,19 @@ describe('[#5437] the 5xx envelope: status and code survive, the prose does not'
     }, 60_000);
 
     it('a SHORT 5xx is withheld too — length was never the criterion', async () => {
-        // The whole defect in one case: 46 characters, well under the bound
-        // that used to be the only thing standing here, and every word of it a
-        // driver internal.
-        const short = overlayPersistenceError('UNIQUE constraint failed: sys_metadata.name');
+        // The whole defect in one case: well under the bound that used to be
+        // the only thing standing here, and every word of it a driver
+        // internal. Built on the delete producer (#5783: the persist one this
+        // used to call was deleted with its branch in #5264), which is the
+        // surviving `sys_metadata` 500 and interpolates the driver line the
+        // same way.
+        const short = deleteOverlayError('UNIQUE constraint failed: sys_metadata.name');
         expect(short.message.length).toBeLessThan(500);
+        expect(short.message).toContain('sys_metadata');
 
-        const rest = setup({ saveMetaItem: vi.fn().mockRejectedValue(short) });
-        const res = await callRoute(rest, 'PUT', META_ITEM, {
+        const rest = setup({ deleteMetaItem: vi.fn().mockRejectedValue(short) });
+        const res = await callRoute(rest, 'DELETE', META_ITEM, {
             params: { type: 'object', name: 'showcase_account' },
-            body: { name: 'showcase_account' },
         });
 
         expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
@@ -409,11 +446,10 @@ describe('[#5437] the whole 5xx band, not just 500', () => {
         // `handleRouteError` already prints the whole error object for a fault
         // this size; the withheld-message line must not double it.
         const rest = setup({
-            saveMetaItem: vi.fn().mockRejectedValue(overlayPersistenceError(SQLITE_NO_TABLE)),
+            deleteMetaItem: vi.fn().mockRejectedValue(deleteOverlayError(SQLITE_NO_TABLE)),
         });
-        await callRoute(rest, 'PUT', META_ITEM, {
+        await callRoute(rest, 'DELETE', META_ITEM, {
             params: { type: 'object', name: 'showcase_account' },
-            body: { name: 'showcase_account' },
         });
 
         expect(logged).toHaveLength(1);
