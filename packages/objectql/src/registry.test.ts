@@ -970,9 +970,11 @@ describe('reconcileManagedApiMethods', () => {
         const writable: any = {
             name: 'sys_user_position',
             // #3355: was `managedBy: 'system'` + a `userActions` re-open block.
-            // The rename made full CRUD the bucket default, so the reconciliation
-            // must reach the same "strip nothing" answer with no `userActions` at
-            // all — that equivalence is the whole claim of the rename.
+            // The rename made create/edit/delete/exportCsv the bucket default, so
+            // the reconciliation must reach the same "strip nothing" answer with no
+            // `userActions` at all — that equivalence is the whole claim of the
+            // rename. (CSV `import` is opt-in on this bucket since #4671, and is
+            // not an `apiMethods` verb, so it does not enter this reconciliation.)
             managedBy: 'system-data',
             enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update', 'delete'] },
         };
