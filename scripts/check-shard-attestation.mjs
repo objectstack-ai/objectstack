@@ -246,8 +246,8 @@ export function judge({ gate, legs, filterResult, present, runId, downloadOutcom
   if (errors.length === 0) {
     log.push(
       counted > 0
-        ? `${gate} gate satisfied: all ${counted} declared shard(s) published a positive attestation.`
-        : `${gate} gate satisfied: no shard was expected to run, and none claimed to.`,
+        ? `${gate}: satisfied — all ${counted} declared shard(s) published a positive attestation.`
+        : `${gate}: satisfied — no shard was expected to run, and none claimed to.`,
     );
   }
   return { ok: errors.length === 0, log, errors };
