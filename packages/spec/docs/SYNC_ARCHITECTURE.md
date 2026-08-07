@@ -195,7 +195,8 @@ Complete, production-grade integration with external systems. Includes authentic
 - ✅ **Authentication**: OAuth2, JWT, SAML, API Key, Basic Auth
 - ✅ **Webhooks**: Bidirectional event notifications
 - ✅ **Retry Policies**: Exponential backoff, circuit breaker
-- ✅ **Field Mapping**: With transformations and data type conversion
+- ✅ **Field Mapping**: `dataType` target type and `syncMode` per-field direction —
+  **no value transformation**; see below
 - ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
 - ✅ **Security**: Signature verification, encryption
 - ✅ **Monitoring**: Health checks, metrics, logging
@@ -214,6 +215,25 @@ Complete, production-grade integration with external systems. Includes authentic
 > connector provider or upstream gateway.** What L3 does declare for a
 > rate-limited upstream is `retryConfig` — whose `retryableStatusCodes` default
 > `[408, 429, 500, 502, 503, 504]` includes `429` — and `health.circuitBreaker`.
+
+> **Field mapping does not transform values.** The ticked line above used to read
+> "With transformations and data type conversion". Only the second half was ever
+> true: `ConnectorFieldMappingSchema` (`integration/connector.zod.ts`) extends the
+> base mapping with exactly three keys — `dataType`, `required` and `syncMode`.
+> `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and
+> `externalLookup.fieldMappings[].transform` — was removed in `@objectstack/spec`
+> 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with
+> it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no runtime ever
+> executed any of the five**, and the `javascript` member advertised
+> `dialect: "js"`, a dialect retired in #3278. An L3 connector mapping moves a
+> value from `source` to `target`; it does not compute one. **Value conversion
+> belongs on a surface that runs it:** the L2 import mapping's own `transform`
+> (`mapping.fieldMapping[].transform` in `data/mapping.zod.ts` — a string enum,
+> `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
+> applied row by row by the REST import path, which rejects its own `javascript`
+> value with a 400 rather than pretending to run it — or an ETL transformation
+> step (L2 above). Already authored the retired key? `os migrate meta --from 16`
+> rewrites it.
 
 ### Use Cases
 
@@ -284,7 +304,8 @@ const sapConnector: ConnectorInput = {
     deleteMode: 'soft_delete'
   },
 
-  // Field Mappings with Transformations.
+  // Field Mappings — `dataType` target type and `syncMode` direction. There is
+  // no value transformation here; see the tombstone on the second entry.
   // The keys are `source` / `target` — the canonical spelling of the base
   // protocol in `shared/mapping.zod.ts`, which every mapping surface extends.
   fieldMappings: [
@@ -384,7 +405,7 @@ const sapConnector: ConnectorInput = {
 
 | Question | Answer → Level |
 |----------|----------------|
-| Do you need complex transformations (joins, aggregations)? | **Yes** → L2 (ETL) |
+| Do you need to transform values at all — joins and aggregations, or just a per-field convert? | **Yes** → L2 (ETL) for joins/aggregations, or the import mapping's `fieldMapping[].transform` for per-field conversion. **Not** L3: a connector's `fieldMappings` declares `dataType` and `syncMode` and performs no value transformation (#5552) |
 | Do you need multi-source aggregation? | **Yes** → L2 (ETL) |
 | Do you need real-time webhooks? | **Yes** → L3 (Connector) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
@@ -427,7 +448,8 @@ Combine levels for complex scenarios.
 
 ### From L3 (`syncConfig`) to L2
 
-When a connector's declarative sync needs complex transformations:
+When a connector's declarative sync needs to transform values — joins and
+aggregations, or a per-field convert that `fieldMappings` cannot do (#5552):
 
 **Before (L3 `syncConfig`):**
 ```typescript
