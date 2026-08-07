@@ -215,12 +215,17 @@
  *
  * Scope in the other direction: this guard watches writes to the four tables
  * the administrator population is derived from, and stops there. It has no
- * opinion on what a permission set CONTAINS — emptying `admin_full_access`'s
- * `system_permissions` would leave administrators who administer nothing, but
- * that is a capability question (ADR-0086), and answering it here would make
- * every permission-set edit in Setup a break-glass decision. "Who is an
- * administrator" is resolved by NAME in this codebase (`resolveAuthzContext`,
- * ADR-0068 D2), so the guard reads exactly the name.
+ * opinion on what a permission set CONTAINS, and that is not a gap being left
+ * open — it was measured. `resolveAuthzContext` sets `hasPlatformAdminGrant`
+ * from `ps.name === 'admin_full_access'` alone and `derivePosture` returns
+ * `PLATFORM_ADMIN` off that boolean, so emptying the set's
+ * `system_permissions` does NOT un-make a platform admin: the posture rung and
+ * the superuser bypass ride on the NAME (ADR-0068 D2 / ADR-0095 D3). Such an
+ * edit costs the holder `setup.access` / `studio.access` — Setup and Studio go
+ * invisible — while the data plane still answers, so it is recoverable from
+ * inside the product and is a capability question (ADR-0086), not a break-glass
+ * one. The name is the whole of what makes an administrator here, so the name
+ * is the whole of what this guard reads.
  *
  * ## Relationship to the ADR-0092 identity write guard
  *
@@ -544,9 +549,10 @@ const GRANT_STANDING_KEYS = [
  * because the platform-admin half of the enumeration reads exactly one column
  * of that table: the `name` it looks the set up by. Everything else a
  * permission-set write touches (`label`, `description`, the four permission
- * JSON blobs, `active`, provenance) is invisible to "who is an administrator",
- * so those writes — which is every projection pass and every Setup edit — cost
- * this guard no reads at all.
+ * JSON blobs, `active`, provenance) is invisible to "who is an administrator" —
+ * `resolveAuthzContext` derives `platform_admin` from the NAME, not from the
+ * capabilities the set carries — so those writes, which is every projection
+ * pass and every Setup edit, cost this guard no reads at all.
  *
  * `id` is deliberately NOT here even though the enumeration reads it. On this
  * engine `data.id` on an update ADDRESSES the row (it is what
