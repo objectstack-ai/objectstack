@@ -172,13 +172,27 @@ describe('SqliteWasmDriver date bucket (dateGranularity)', () => {
   });
 
   describe('unsupported granularity', () => {
-    it('throws a loud error for week on SQLite (so engine routes to in-memory)', async () => {
-      await expect(
-        driver.aggregate('events', {
+    /**
+     * [#6212] The twin of `driver-sql`'s case, moved for the same reason and
+     * kept here rather than dropped: this driver inherits `SqlDriver.aggregate`
+     * but reports a DIFFERENT dialect name in the refusal's tail, which is the
+     * one part of the message a shared implementation cannot prove.
+     */
+    it('refuses week on SQLite with NOT_IMPLEMENTED / 501 (so engine routes to in-memory)', async () => {
+      const err = await driver
+        .aggregate('events', {
           groupBy: [{ field: 'ts', dateGranularity: 'week' }],
           aggregations: [{ function: 'count', alias: 'n' }],
-        }),
-      ).rejects.toThrow(/dateGranularity 'week' not supported/);
+        })
+        .then(
+          () => { throw new Error('expected the driver to refuse week on SQLite'); },
+          (e) => e as Error & { code?: string; status?: number },
+        );
+
+      expect(err.code).toBe('NOT_IMPLEMENTED');
+      expect(err.status).toBe(501);
+      expect(err.message.startsWith("Date bucketing by 'week' is not supported by this backend.")).toBe(true);
+      expect(err.message).toContain('Bucketed here: day, month, quarter, year');
     });
   });
 
