@@ -68,6 +68,11 @@ export const FieldZooViews = defineView({
      *   • `showcase_zoo_relation_gate` — offered (Full's two lookups resolve
      *     to the same account id), and offered identically in the row `⋮` menu
      *     and the record header. Three surfaces, one verdict.
+     *   • `showcase_zoo_owner_gate` — offered to whoever seeded the workspace
+     *     (both specimens are theirs). `owner_id` is a platform-INJECTED column
+     *     that object metadata never publishes, so it is also what proves a
+     *     `$select` harvest knows the platform columns and does not drop it as
+     *     a typo (objectui#3501).
      *   • `showcase_zoo_user_gate` — absent until you assign `f_user` to
      *     yourself on a record; `sys_user` rows cannot be seeded.
      *   • `showcase_zoo_visible_*` — the three authoring forms of one
@@ -83,6 +88,7 @@ export const FieldZooViews = defineView({
      */
     bulkActions: [
       'showcase_zoo_relation_gate',
+      'showcase_zoo_owner_gate',
       'showcase_zoo_user_gate',
       'showcase_zoo_visible_string',
       'showcase_zoo_visible_tagged',
@@ -118,6 +124,7 @@ export const FieldZooViews = defineView({
       ],
       bulkActions: [
         'showcase_zoo_relation_gate',
+        'showcase_zoo_owner_gate',
         'showcase_zoo_user_gate',
         'showcase_zoo_visible_string',
         'showcase_zoo_visible_tagged',

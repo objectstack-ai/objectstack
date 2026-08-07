@@ -137,18 +137,41 @@ export const ZooRelationGateAction = defineAction({
 });
 
 /**
- * The identity spelling over a declared `user` relation. `f_user` is unseeded
- * by design — `sys_user` rows come from sign-up, not seeds (see the note on
+ * **The ownership gate every app writes first**, over the platform-injected
+ * `owner_id` column. Both specimens are owned by the seeding user, so the
+ * honest reading is: this appears on all four surfaces for whoever seeded the
+ * workspace, and on none of them for anyone else.
+ *
+ * `owner_id` is injected by `applySystemFields` and is NOT among the object's
+ * declared fields, which is what makes it worth a specimen of its own on two
+ * counts. Author-time: it was rejected as `unknown field owner_id` until #5378
+ * taught the linter to derive the injected set (`packages/spec/src/data/
+ * injected-system-columns.ts`) — this predicate is the live proof that landed.
+ * Run time: a list's `$select` is built from the object's declared fields, so
+ * a consumer harvesting the fields a predicate reads has to know the platform
+ * columns too, or drop this one as a typo and leave the predicate faulting on
+ * an absent key (objectui#3501's `PLATFORM_RECORD_COLUMNS`).
+ */
+export const ZooOwnerGateAction = defineAction({
+  name: 'showcase_zoo_owner_gate',
+  label: 'Mine (owner_id)',
+  icon: 'user-check',
+  objectName: zoo,
+  type: 'script',
+  body: echo,
+  successMessage: 'You own this specimen.',
+  visible: 'record.owner_id == os.user.id',
+  locations: [...RECORD_SURFACES],
+  refreshAfter: false,
+});
+
+/**
+ * The same idea over a DECLARED `user` relation. `f_user` is unseeded by design
+ * — `sys_user` rows come from sign-up, not seeds (see the note on
  * field-zoo.object.ts) — so this is HIDDEN on both specimens out of the box and
  * becomes visible on whichever record you assign to yourself in the UI. That
- * makes it the manual half of the matrix, and the one that most resembles what
- * an app actually writes.
- *
- * Note what it is NOT written against: `record.owner_id`, the platform-injected
- * ownership column. That is the predicate every app reaches for first, and the
- * author-time validator rejects it — `unknown field owner_id` — because
- * injected columns are absent from published object metadata. Filed upstream
- * rather than worked around here.
+ * makes it the manual half of the matrix, and the pair with `owner_id` above is
+ * the point: an injected column and a declared field must gate identically.
  */
 export const ZooUserIdentityGateAction = defineAction({
   name: 'showcase_zoo_user_gate',
@@ -389,6 +412,7 @@ export const ZooTypeGates = [
   zooTypeGate('tree', 'tree — unset', 'record.f_tree == null'),
   zooTypeGate('user', 'user — unset', 'record.f_user == null'),
   zooTypeGate('user_identity', 'user — is me', 'record.f_user == os.user.id'),
+  zooTypeGate('owner', 'owner_id (injected) — mine', 'record.owner_id == os.user.id'),
 
   // ── Text family: contains() / matches(), never startsWith() ──────────────
   zooTypeGate('text', 'text — name non-empty', 'record.name != null && record.name.size() > 0'),
@@ -443,6 +467,7 @@ export const ZooTypeGates = [
 
 export const allPredicateMatrixActions = [
   ZooRelationGateAction,
+  ZooOwnerGateAction,
   ZooUserIdentityGateAction,
   ZooDialectSplitAction,
   ZooToolbarGateAction,
