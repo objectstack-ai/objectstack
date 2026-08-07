@@ -8,170 +8,1046 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_account — writable standard object (sharingModel public_read_write), required name + status, format validations tax_id_format / billing_email_format (examples/app-showcase/src/data/objects/account.object.ts)"
+        ]
+      },
       "steps": [
-        "on a seeded showcase object, create a record through the New form",
-        "open its detail page; edit a field; save",
-        "delete it from the row/detail actions",
-        "after each mutation, re-read the row over the data API"
+        "sign in as seeded admin; open Accounts via its nav entry (/_console/apps/com.example.showcase/showcase_account)",
+        "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; Save",
+        "capture the create request/response (expect POST /api/v1/data/showcase_account)",
+        "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
+        "open the record detail; edit exactly one field (annual_revenue); Save; capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
+        "open the record's History tab (screenshot first, then read entries)",
+        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET",
+        "reload the list view and confirm final state"
       ],
       "acceptance": [
         {
-          "clause": "each UI mutation is reflected in the server row (the API read is the oracle, not the grid repaint)",
+          "clause": "create returns success with an id and the API re-read shows every submitted value verbatim (no silent coercion/loss on any field)",
           "oracle": "api",
-          "verify": "GET /api/v1/data/<object> after each step shows the created values, the edit, and finally the row gone",
-          "evidence": "the three API reads"
+          "verify": "field-by-field diff of the POST payload vs the filtered GET re-read; the empty optional (website) stays empty, not defaulted",
+          "evidence": "create payload + re-read JSON"
         },
         {
-          "clause": "the list view reflects the changes after refresh without stale rows",
+          "clause": "the update persists ONLY the edited field — untouched fields byte-identical across before/after full-row reads",
+          "oracle": "api",
+          "verify": "diff of GET /api/v1/data/showcase_account/<id> before and after the single-field annual_revenue edit",
+          "evidence": "the two full-row reads"
+        },
+        {
+          "clause": "delete removes the row authoritatively — the filtered API re-read returns 0 rows and the reloaded list no longer shows it",
+          "oracle": "api",
+          "verify": "GET ...?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] returns total 0 post-delete",
+          "evidence": "the empty read + post-reload screenshot"
+        },
+        {
+          "clause": "the list reflects each mutation after a full reload with correct display values (grid repaint is NOT the oracle — the reload is)",
           "oracle": "screenshot",
-          "verify": "post-delete screenshot of the list shows the row absent",
-          "evidence": "screenshot"
+          "verify": "post-reload screenshots of the list at create and at delete",
+          "evidence": "screenshots"
+        },
+        {
+          "clause": "record History reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase Project",
+          "evidence": "screenshot + entries"
+        },
+        {
+          "clause": "unicode round-trips: a create with a CJK name (e.g. os-qa-<runid>-华宁) reads back byte-identical and is findable via list quick-search",
+          "oracle": "api",
+          "verify": "filtered GET returns the CJK name unmangled; $search finds it (the seed's 华宁科技 proves the pattern — ADR-0061)",
+          "evidence": "re-read JSON + search response"
         }
       ],
+      "negative": [
+        "save with required status empty → the form blocks with a named field error AND no row is created (filtered API count stays 0) — a silent success is a FAIL",
+        "a direct API POST missing required status → 400 VALIDATION_FAILED with fields[] carrying code 'required' (server enforces, not just the form — packages/objectql/src/validation/record-validator.ts)",
+        "a create with tax_id violating the tax_id_format rule → named validation error, never a silently-stored bad value"
+      ],
       "traps": ["hydration-race", "automation-input"],
-      "source": ["dogfood-verification skill §3"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke", "ref": "#3358" }]
+      "source": [
+        "dogfood-verification skill §3",
+        "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
+        "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
+        "objectui: e2e/live/record-history-display.spec.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.field-type-matrix",
+      "title": "Field-type matrix: every FieldTypeSchema member renders its widget, accepts a valid value, round-trips over HTTP, and rejects invalid input",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_field_zoo — one field of (almost) every FieldType (examples/app-showcase/src/data/objects/field-zoo.object.ts); seeded rows 'Specimen — Full' and 'Specimen — Minimal'"
+        ],
+        "knownGaps": [
+          "summary is NOT on the zoo (a roll-up needs a child object and the zoo is a leaf) — verify it on its real carriers showcase_invoice.total and showcase_expense_report.total_amount/approved_amount instead",
+          "f_user / f_users / f_owner cannot be seeded or written on a fresh boot with no signed-up users (sys_user rows come from sign-up, not seeds) — assign after creating a user, or record blocked(fixture)",
+          "f_secret writes fail closed unless an ICryptoProvider is registered (ADR-0100) — the seed deliberately omits it; on a stock boot verify the masked-read contract via the dogfood pin, not a raw UI write"
+        ]
+      },
+      "variants": [
+        "text", "textarea", "email", "url", "phone", "password", "secret",
+        "markdown", "html", "richtext",
+        "number", "currency", "percent",
+        "date", "datetime", "time",
+        "boolean", "toggle",
+        "select", "multiselect", "radio", "checkboxes",
+        "lookup", "master_detail", "tree", "user",
+        "image", "file", "avatar", "video", "audio",
+        "formula", "summary", "autonumber",
+        "composite", "repeater", "record",
+        "location", "address", "code", "json", "color", "rating", "slider",
+        "signature", "qrcode", "progress", "tags",
+        "vector"
+      ],
+      "steps": [
+        "run the pinned HTTP round-trip matrix: pnpm --filter @objectstack/dogfood exec vitest run test/field-zoo-roundtrip.dogfood.test.ts (write vectors + expected read shapes live in test/field-zoo.matrix.ts)",
+        "boot showcase isolated; open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo) and open 'Specimen — Full' in edit mode; screenshot the form before reading DOM",
+        "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext→editor, select/multiselect→pickers, image/file→upload, code→code editor, location/address→structured inputs, rating/slider/progress→their own controls, autonumber/formula→read-only)",
+        "through the form, change one representative value per family (a select, an array type, a temporal, a structured JSON), Save, and capture the PATCH",
+        "re-read the record via GET /api/v1/data/showcase_field_zoo/<id> and diff against the submitted values (arrays compared as sets)",
+        "POST an out-of-set select value (f_select: 'not-a-value') directly to /api/v1/data/showcase_field_zoo and capture the refusal",
+        "POST f_lookup with a fabricated account id and capture the refusal (#4441 dangling-reference gate)",
+        "verify f_formula and f_autonumber materialized server-side on a created row (formula = f_number × f_percent / 100)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every authorable field type in the matrix survives a real HTTP POST → GET round-trip with its declared value shape (arrays as sets; JSON object types as objects, not stringified)",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/dogfood exec vitest run test/field-zoo-roundtrip.dogfood.test.ts — green, with any it.fails (xfail) rows reported as the known type-fidelity gaps they are",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "PER-VARIANT: each of the 49 FieldTypeSchema members renders its real widget on the Specimen — Full form (not a generic text input), with per-variant evidence recorded in the variant→widget table",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms render, match each f_* control against its declared type; every variant row in the table carries its own observed control + screenshot crop",
+          "evidence": "form screenshot + the 49-row variant→widget table"
+        },
+        {
+          "clause": "constrained types reject invalid input server-side with a named error: out-of-set select → VALIDATION_FAILED with fields[].code 'invalid_option'; missing required name → code 'required'",
+          "oracle": "api",
+          "verify": "direct POSTs with the bad payloads return 400-class VALIDATION_FAILED envelopes naming the field; the row count does not grow",
+          "evidence": "refusal responses + before/after counts"
+        },
+        {
+          "clause": "credential types mask on read: f_secret and f_password never echo plaintext — reads return the SECRET_MASK sentinel",
+          "oracle": "api",
+          "verify": "the dogfood matrix 'masked' checks (kind: 'masked' in test/field-zoo.matrix.ts) pass; any GET of the record shows the mask, not the written value",
+          "evidence": "test output + a raw GET excerpt"
+        },
+        {
+          "clause": "computed/system types materialize without being written: f_autonumber is server-assigned and non-null; f_formula reads f_number × f_percent / 100 (matrix vector: 42 × 75 / 100 = 31.5)",
+          "oracle": "api",
+          "verify": "create via the matrix suite or by hand and read both fields back; the formula value matches the arithmetic",
+          "evidence": "the read JSON"
+        },
+        {
+          "clause": "relational types (lookup / master_detail / tree) store a real reference id verbatim and refuse a dangling one",
+          "oracle": "api",
+          "verify": "matrix REFERENCE_TARGETS rows (showcase_account / showcase_project / showcase_category) round-trip their created ids; a fabricated id is rejected (#4441)",
+          "evidence": "test output + the dangling-id refusal"
+        },
+        {
+          "clause": "summary is verified on its real carriers: showcase_invoice.total sums its lines server-side; showcase_expense_report shows the summaryOperations.filter variant (approved_amount ≠ total_amount on seeded EXP-2001)",
+          "oracle": "api",
+          "verify": "GET the seeded invoices/expense reports and check the roll-up columns against the seeded line arithmetic (EXP-2001: total 1500.50, approved 960 — seed comments carry the expected values)",
+          "evidence": "the reads + the seed-derived expected table"
+        }
+      ],
+      "negative": [
+        "an out-of-set select value accepted with 200 is a FAIL (the server, not the picker, is the boundary)",
+        "a lookup/master_detail/tree write pointing at a nonexistent row accepted with 200 is a FAIL (#4441 closed exactly this hole)",
+        "any GET returning f_secret/f_password plaintext is a FAIL regardless of what the form shows"
+      ],
+      "traps": ["hydration-race", "automation-input", "stale-console-bundle"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts vectors, field-zoo-value-shape.test.ts contract)" },
+      "source": [
+        "packages/spec/src/data/field.zod.ts (FieldType enum — 49 members, listed exhaustively in variants)",
+        "examples/app-showcase/src/data/objects/field-zoo.object.ts",
+        "examples/app-showcase/src/data/seed/index.ts (Specimen rows; expense/invoice roll-up expectations)",
+        "packages/qa/dogfood/test/field-zoo.matrix.ts",
+        "objectui: e2e/live/summary-rollup.spec.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test variant matrix over FieldTypeSchema, pinned to the dogfood HTTP round-trip suite", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.list-view-capabilities",
+      "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with string sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
+          "showcase_field_zoo views for conditional formatting + bulk-action gating (examples/app-showcase/src/ui/views/field-zoo.view.ts)",
+          "CJK seeds for search recall (account 华宁科技, contact 张伟)"
+        ]
+      },
+      "variants": [
+        "saved-view-filter",
+        "quick-search",
+        "sort",
+        "server-pagination",
+        "saved-view-switcher",
+        "inline-edit",
+        "export",
+        "visualization-switcher",
+        "bulk-actions",
+        "row-actions",
+        "conditional-formatting"
+      ],
+      "steps": [
+        "open /_console/apps/com.example.showcase/showcase_task and screenshot the default All Tasks grid",
+        "switch to the in_progress saved view; capture the data request — expect $filter carrying the stored rule as an ObjectQL AST ([[\"status\",\"equals\",\"in_progress\"]]) and a 200; the count bar must read 2",
+        "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the $search request and the hits (pinyin + CJK recall, ADR-0061)",
+        "open the tabular saved view (string-form sort 'estimate_hours desc' — the objectui#2601 fixture); confirm it renders and the request carries the sort",
+        "page a list past page 1; capture $top/$skip on every data request; confirm no unpaged full fetch",
+        "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
+        "on in_progress, export each declared format (csv, xlsx, json); capture the requests and files",
+        "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
+        "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch carrying params._selectedIds); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
+      ],
+      "acceptance": [
+        {
+          "clause": "PER-VARIANT: every listed capability variant is exercised and carries its own captured evidence (request trace or screenshot) — no variant ticked by association",
+          "oracle": "network",
+          "verify": "one evidence artifact per variant in the run record, keyed by variant name",
+          "evidence": "per-variant trace/screenshot set"
+        },
+        {
+          "clause": "a saved view's stored filter reaches $filter as an ObjectQL AST, the server answers 200, and the filtered count is server-computed (2 of 10 for in_progress)",
+          "oracle": "network",
+          "verify": "captured GET /api/v1/data/showcase_task?...$filter=[[\"status\",\"equals\",\"in_progress\"]] → 200; count bar matches the response total",
+          "evidence": "request/response trace + screenshot"
+        },
+        {
+          "clause": "quick-search issues a server-side $search (not client filtering) and finds the CJK account via pinyin ('huaning' → 华宁科技)",
+          "oracle": "api",
+          "verify": "the captured request carries $search; the response contains the CJK row; the same query direct against GET /api/v1/data/showcase_account reproduces it",
+          "evidence": "request trace + response JSON"
+        },
+        {
+          "clause": "paging issues $top/$skip requests; the full set is never fetched; a walked page sequence visits every row exactly once (deterministic paging)",
+          "oracle": "network",
+          "verify": "page 1 = $top=N; page 2 = $top=N&$skip=N; union of pages has no duplicate and no missing id",
+          "evidence": "the request URLs + the id-union check"
+        },
+        {
+          "clause": "string-form sort ('estimate_hours desc') renders without error and the rows come back server-ordered (the objectui#2601 crash fixture stays green)",
+          "oracle": "network",
+          "verify": "the tabular view request succeeds; response row order is by estimate_hours descending",
+          "evidence": "trace + first-page rows"
+        },
+        {
+          "clause": "inline edit persists through the API — the PATCH carries only the edited cell and a post-reload re-read shows it, with untouched fields unchanged",
+          "oracle": "api",
+          "verify": "diff full-row reads before/after the cell edit (same contract objectui e2e/live/inline-edit-polish-2572.spec.ts pins on Project)",
+          "evidence": "the two reads + the PATCH body"
+        },
+        {
+          "clause": "export offers exactly the declared formats (csv, xlsx, json on in_progress) and the exported rows equal the FILTERED set, not the whole table",
+          "oracle": "network",
+          "verify": "the export menu lists the three exportOptions; each downloaded file contains the 2 in_progress rows",
+          "evidence": "menu screenshot + the three files"
+        },
+        {
+          "clause": "the visualization switcher offers exactly the whitelisted six (grid, kanban, gallery, calendar, timeline, gantt — appearance.allowedVisualizations) and each re-renders the SAME task records",
+          "oracle": "dom",
+          "verify": "after screenshot, enumerate the dropdown entries; switch to each and confirm records render (map/chart are named views, correctly NOT in the switcher)",
+          "evidence": "dropdown screenshot + one screenshot per visualization"
+        },
+        {
+          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate') issues ONE request carrying every selected id in params._selectedIds",
+          "oracle": "network",
+          "verify": "count the captured POSTs against the selection size for each mode",
+          "evidence": "network trace of both runs"
+        },
+        {
+          "clause": "legacy string rowActions resolve against the object's declared actions — showcase_recalc_estimate is a live entry (not a dead menu item) and showcase_quick_view appears exactly once (no dead duplicate)",
+          "oracle": "dom",
+          "verify": "after screenshot, open a row menu on the legacy_row_actions view; click each entry and confirm it dispatches (objectui#2960 contract)",
+          "evidence": "menu screenshot + dispatch traces"
+        }
+      ],
+      "negative": [
+        "a saved view whose filter is refused (400 INVALID_FILTER) while the grid silently shows ALL rows unfiltered is a FAIL — the objectui#3431 regression shape; zero rows with a captured refusal is the honest symptom, unfiltered rows is the lie",
+        "userFilters leaking onto an OBJECT list view is a FAIL — ADR-0053 suppresses them there by design (filter elements belong to interface pages; objectui warns since #2220)",
+        "an export that returns the unfiltered table for a filtered view is a FAIL even though a file downloaded"
+      ],
+      "traps": ["hydration-race", "automation-input", "stale-console-bundle"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/saved-view-filter.spec.ts, e2e/live/user-filters.spec.ts, e2e/live/inline-edit-polish-2572.spec.ts; packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
+      "source": [
+        "examples/app-showcase/src/ui/views/task.view.ts (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
+        "examples/app-showcase/src/ui/views/field-zoo.view.ts (conditionalFormatting, gated bulk actions)",
+        "packages/spec/src/ui/view.zod.ts (UserActionsConfigSchema, AppearanceConfigSchema/VisualizationTypeSchema)",
+        "packages/spec/src/data/pagination-conformance.ts (deterministic paging property)",
+        "examples/app-showcase/src/data/seed/index.ts (10 tasks / 2 in_progress; CJK rows)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test capability matrix for list surfaces, pinned to the objectui live specs where they exist", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.view-type-gallery",
+      "title": "View-type gallery: every ListViewSchema visualization renders seeded records",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task views covering 8 types (examples/app-showcase/src/ui/views/task.view.ts: grid, board/kanban, cards/gallery, calendar, timeline, gantt, map, chart)",
+          "showcase_business_unit 'Organization Chart' for the 9th type, tree (examples/app-showcase/src/ui/views/business-unit.view.ts)",
+          "seeds sized to feed every view: 10 tasks across all 5 kanban columns with due/start/end/created dates and locations (src/data/seed/index.ts)"
+        ],
+        "knownGaps": [
+          "task 'cover' (gallery coverField) is declared but deliberately unseeded (#4891 / ADR-0104 — a managed sys_file cannot honestly be seeded); the gallery renders coverless cards by design — do not fail the gallery variant on missing covers, upload one to prove the cover path"
+        ]
+      },
+      "variants": ["grid", "kanban", "gallery", "calendar", "timeline", "gantt", "map", "chart", "tree"],
+      "steps": [
+        "open /_console/apps/com.example.showcase/showcase_task and walk its named views: Grid, Board (Kanban), Cards (Gallery), Calendar, Activity Timeline, Schedule (Gantt), Work Locations (Map), Hours by Status (Chart)",
+        "on each: wait for render, screenshot FIRST, then read the DOM for the visualization's own structure (kanban columns, calendar cells, gantt bars, map markers, chart SVG)",
+        "on the kanban board, verify the groupByField columns match the 5 task statuses and every column is populated; check the summarizeField (estimate_hours) totals against an API aggregate",
+        "on calendar/timeline/gantt, spot-check 2 records' placement against their seeded due_date / created_at / start_date+end_date via API reads",
+        "on the chart view, confirm a real SVG is drawn from dataset showcase_task_metrics (not an empty canvas or a single bar from thin data)",
+        "open /_console/apps/com.example.showcase/showcase_business_unit and its Organization Chart view; verify the tree renders the seeded parent hierarchy",
+        "capture one screenshot per variant for the per-variant evidence set"
+      ],
+      "acceptance": [
+        {
+          "clause": "PER-VARIANT: each of the 9 ListViewSchema types renders its REAL visualization (not a grid fallback) with seeded records, with its own screenshot in the evidence set",
+          "oracle": "screenshot",
+          "verify": "one screenshot per variant showing the visualization's characteristic structure; a variant that silently fell back to grid is a FAIL for that variant",
+          "evidence": "9 screenshots keyed by variant"
+        },
+        {
+          "clause": "kanban groups by status with every seeded column populated, and the summarizeField per-column totals agree with a direct API aggregate of estimate_hours",
+          "oracle": "api",
+          "verify": "compare column headers/totals against GET /api/v1/data/showcase_task grouped client-side from the raw rows",
+          "evidence": "board screenshot + the aggregate check"
+        },
+        {
+          "clause": "temporal views place records by their true date fields: calendar by due_date, timeline by created_at, gantt bars spanning start_date→end_date with progressField rendered",
+          "oracle": "api",
+          "verify": "for 2 sampled tasks, the placement matches the API-read dates",
+          "evidence": "screenshots + the two API reads"
+        },
+        {
+          "clause": "map renders a marker per task with a location value; chart draws a non-empty SVG bound to the showcase_task_metrics dataset",
+          "oracle": "dom",
+          "verify": "after screenshots confirm render, count markers vs rows with location; assert svg element with plotted marks exists",
+          "evidence": "screenshots + DOM excerpts"
+        },
+        {
+          "clause": "tree renders the seeded business-unit hierarchy (parent references as nesting), expandable without error",
+          "oracle": "dom",
+          "verify": "after screenshot, the rendered nesting matches parent fields read via GET /api/v1/data/showcase_business_unit",
+          "evidence": "screenshot + API read"
+        },
+        {
+          "clause": "no variant throws a pageerror or renders an empty <main> (the automated smoke covers the page-level render for these surfaces)",
+          "oracle": "test",
+          "verify": "pnpm -C examples/app-showcase test:smoke — the All Views / Task Board / Calendar / Gallery / Schedule / Timeline / Work Map SURFACES stay green",
+          "evidence": "test run output"
+        }
+      ],
+      "negative": [
+        "a visualization that renders as a plain grid (fallback) while its type claims kanban/calendar/gantt/etc. is a FAIL for that variant — 'it rendered something' is not the oracle",
+        "a chart that renders from a single datapoint proves little — note the weakness in evidence rather than ticking silently (single-datapoint trap)"
+      ],
+      "traps": ["hydration-race", "single-datapoint", "wrong-panel"],
+      "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts (page-level render for the view surfaces)" },
+      "source": [
+        "packages/spec/src/ui/view.zod.ts (ListViewSchema type enum: grid|kanban|gallery|calendar|timeline|gantt|map|chart|tree)",
+        "examples/app-showcase/src/coverage.ts (LIST_VIEW_TYPES — the 8 the task object demonstrates)",
+        "examples/app-showcase/src/ui/views/task.view.ts",
+        "examples/app-showcase/src/ui/views/business-unit.view.ts (tree)",
+        "examples/app-showcase/src/data/seed/index.ts (view-feeding seed shape)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test view-type gallery derived from the spec's own enum, 8 types on task + tree on business-unit", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.form-view-gallery",
+      "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task formViews: edit (simple), tabbed, wizard, split, quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts"
+        ],
+        "knownGaps": [
+          "the spec's 6th form type, 'modal', is not authored anywhere in the showcase (coverage.ts FORM_VIEW_TYPES deliberately lists 5) — record the modal variant blocked(fixture) rather than ticking or silently skipping it"
+        ]
+      },
+      "variants": ["simple", "tabbed", "wizard", "split", "drawer", "modal"],
+      "steps": [
+        "open a task record and its 'edit' (simple) form view; screenshot; verify the single 2-column section with the declared field order",
+        "open the tabbed form view; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
+        "open the wizard form view; walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end",
+        "open the split form view; verify primary/secondary panes render their assigned sections side-by-side",
+        "trigger the quick (drawer) form; verify it renders as a side panel over the list with the 3 declared fields",
+        "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
+        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>"
+      ],
+      "acceptance": [
+        {
+          "clause": "PER-VARIANT: each authored form type renders its own layout mechanics (sections / tabs / steps / panes / side panel), with a screenshot per variant; the unauthored 'modal' variant is recorded blocked(fixture), never ticked",
+          "oracle": "screenshot",
+          "verify": "one screenshot per variant showing the characteristic layout; wizard shows step chrome, split shows two panes, drawer overlays the list",
+          "evidence": "per-variant screenshots"
+        },
+        {
+          "clause": "the wizard enforces step order and issues exactly ONE save at the end (no per-step writes)",
+          "oracle": "network",
+          "verify": "network trace across the walk shows a single POST/PATCH at final submit",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "view-level visibleWhen works live: notes renders only while priority == 'urgent', full-width via span 'full'",
+          "oracle": "dom",
+          "verify": "after screenshot, toggle priority and assert notes mounts/unmounts (same family as objectui e2e/live/field-conditional-rules.spec.ts)",
+          "evidence": "before/after screenshots"
+        },
+        {
+          "clause": "every save through every variant persists — API re-read shows the edited value and untouched fields unchanged",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_task/<id> after each variant's save; diff against pre-save read",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "tab/step navigation never loses entered-but-unsaved values (switching tabs or going back a wizard step preserves the draft)",
+          "oracle": "dom",
+          "verify": "enter a distinctive value, navigate away and back within the form, read the control value",
+          "evidence": "screenshots at each hop"
+        }
+      ],
+      "negative": [
+        "a wizard that lets Next past a required title with no named field error — or that silently writes per step — is a FAIL",
+        "counting the modal variant as passed because the other five rendered is a FAIL: it must be recorded blocked(fixture) with this item cited"
+      ],
+      "traps": ["hydration-race", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/view.zod.ts (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
+        "examples/app-showcase/src/coverage.ts (FORM_VIEW_TYPES — the 5 authored)",
+        "examples/app-showcase/src/ui/views/task.view.ts (formViews incl. visibleWhen on notes)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test form-view gallery derived from the spec enum; modal recorded as a standing fixture gap", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.conditional-rules-header",
+      "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice conditional fields (examples/app-showcase/src/data/objects/invoice.object.ts): issued_on requiredWhen status in ['sent','paid']; tax_rate readonlyWhen status=='paid'; paid_on visibleWhen+requiredWhen status=='paid'; userActions edit disabledWhen / delete visibleWhen on paid",
+          "seeded invoices: INV-1002 (draft), INV-1001 (sent), INV-1003 (paid)"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/com.example.showcase/showcase_invoice; open INV-1002 (draft) in its form",
+        "flip status draft → sent; observe issued_on gain a required marker; attempt save with issued_on empty; capture the block",
+        "set issued_on; save; re-read via GET /api/v1/data/showcase_invoice/<id>",
+        "direct API negative: POST /api/v1/data/showcase_invoice with status 'sent' and no issued_on; capture the refusal",
+        "open INV-1003 (paid): verify paid_on is visible and required, tax_rate renders read-only",
+        "direct API: PATCH /api/v1/data/showcase_invoice/<INV-1003 id> with tax_rate: 99; then GET the row and compare tax_rate to its pre-PATCH value",
+        "on the invoice LIST, inspect INV-1003's row actions: Edit visible but disabled, Delete absent; compare a draft row's untouched menu",
+        "on INV-1002 (draft), verify paid_on is NOT rendered at all"
+      ],
+      "acceptance": [
+        {
+          "clause": "requiredWhen reacts live in the form: leaving Draft marks issued_on required and blocks submit with a named field error while empty",
+          "oracle": "dom",
+          "verify": "after screenshot, assert the required marker + the field-level error on blocked submit (pinned by objectui e2e/live/field-conditional-rules.spec.ts and required-when-submit.spec.ts)",
+          "evidence": "screenshots + the blocked submit"
+        },
+        {
+          "clause": "requiredWhen is enforced server-side: a direct POST with status 'sent' and no issued_on → VALIDATION_FAILED naming issued_on with code 'required' — the form is not the boundary",
+          "oracle": "api",
+          "verify": "the direct POST returns the 400-class envelope; invoice count for the test name stays 0",
+          "evidence": "refusal response + count check"
+        },
+        {
+          "clause": "readonlyWhen locks the client AND the server drops the change: tax_rate on a paid invoice renders read-only, and a direct PATCH to it is silently DISCARDED — the persisted value must be unchanged on re-read (stripReadonlyWhenFields semantics: keep, not reject)",
+          "oracle": "api",
+          "verify": "GET before, PATCH tax_rate 99, GET after — before == after; note: a 200 on the PATCH is expected, the ORACLE is the unchanged re-read",
+          "evidence": "the two reads + the PATCH"
+        },
+        {
+          "clause": "visibleWhen is honored: paid_on is absent from the draft form and present (and required) on the paid form",
+          "oracle": "dom",
+          "verify": "after screenshots of both forms, assert paid_on mounted only on paid",
+          "evidence": "both screenshots"
+        },
+        {
+          "clause": "per-record row-action gating follows the same CEL truth: on paid rows Edit is visible-but-disabled (disabledWhen) and Delete is hidden (visibleWhen); draft rows keep the full menu",
+          "oracle": "dom",
+          "verify": "after screenshot, read both rows' action menus (objectui#2614; pinned by objectui e2e/live/list-row-action-cel.spec.ts)",
+          "evidence": "both row-menu screenshots"
+        },
+        {
+          "clause": "the client and server evaluate ONE rule, not two: the same predicate that blocked the form blocks the API, and the field the client locked is the field the server strips",
+          "oracle": "api",
+          "verify": "cross-check clauses 1↔2 and 3: no case where the form blocks but the API accepts (or vice versa)",
+          "evidence": "the paired form + API results"
+        }
+      ],
+      "negative": [
+        "a direct API POST of a 'sent' invoice without issued_on that succeeds is a FAIL (client-only enforcement)",
+        "a PATCH to tax_rate on a paid invoice whose new value PERSISTS is a FAIL — silent acceptance of a locked field is the defect this rule exists to stop",
+        "a Delete affordance on a paid invoice row is a FAIL even if clicking it would error later"
+      ],
+      "traps": ["hydration-race", "automation-input", "stale-console-bundle"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/field-conditional-rules.spec.ts, e2e/live/required-when-submit.spec.ts, e2e/live/list-row-action-cel.spec.ts" },
+      "source": [
+        "examples/app-showcase/src/data/objects/invoice.object.ts (the B2 rules + userActions gating, with server-semantics comments)",
+        "packages/spec/src/data/field.zod.ts (requiredWhen/readonlyWhen/visibleWhen authoring surface)",
+        "packages/objectql/src/validation/rule-validator.ts (enforcement site)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test both-ends contract for header-level conditional rules on the seeded invoices", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.conditional-rules-grid",
+      "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice_line rules (examples/app-showcase/src/data/objects/invoice.object.ts): description requiredWhen record.quantity >= 100 (ROW-scoped); product/quantity/unit_price readonlyWhen parent.status == 'paid' (PARENT-scoped); receipt Field.file upload cell (objectui#2360)",
+          "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003)"
+        ]
+      },
+      "steps": [
+        "open INV-1002 (draft) — the inline Line Items grid renders via inlineEdit: 'grid'",
+        "on one line, raise quantity to 120 with description empty; observe the description cell flag required ON THAT ROW; screenshot",
+        "confirm a second line with quantity 1 stays unflagged and editable (per-row evaluation)",
+        "attempt to save the batch with the flagged description still empty; capture the block; then fill it and save; capture the batch request",
+        "server-side negative: submit the same shape directly to the API (line with quantity 120, no description) and capture the refusal",
+        "flip the header status to paid and save; observe product/quantity/unit_price cells lock; flip back to sent/draft and observe them unlock (live parent-scope re-evaluation)",
+        "on a draft line, upload a file into the receipt cell; save the batch; re-read the line via API and confirm the stored managed-file reference"
+      ],
+      "acceptance": [
+        {
+          "clause": "row-scoped requiredWhen flags the cell per row: only the row crossing quantity >= 100 is marked, and the batch save is blocked with a named cell error while its description is empty",
+          "oracle": "dom",
+          "verify": "after screenshot, assert the required flag on row 1 and its absence on row 2; blocked save shows the error (pinned by objectui e2e/live/grid-conditional-rules.spec.ts)",
+          "evidence": "screenshots + blocked save"
+        },
+        {
+          "clause": "the same rule is enforced on the server write path: a direct batch write with the violating line → VALIDATION_FAILED naming description; no partial rows land",
+          "oracle": "api",
+          "verify": "the direct submit returns the refusal envelope; line count for the invoice is unchanged",
+          "evidence": "refusal + before/after line reads"
+        },
+        {
+          "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting status to paid locks the three cells, reverting unlocks them — without a page reload",
+          "oracle": "dom",
+          "verify": "after screenshots at each state, assert cell editability (pinned by objectui e2e/live/grid-parent-rules.spec.ts)",
+          "evidence": "lock/unlock screenshots"
+        },
+        {
+          "clause": "the receipt upload cell stores a real managed file: the API re-read of the line carries the sys_file reference and the file is retrievable",
+          "oracle": "api",
+          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form; pinned by objectui e2e/live/grid-file-upload.spec.ts)",
+          "evidence": "line read + fetched file"
+        },
+        {
+          "clause": "the saved batch persists: reloading the invoice shows the edited lines with their values, and untouched sibling lines byte-identical",
+          "oracle": "api",
+          "verify": "diff all lines before/after the save; only the edited line changed",
+          "evidence": "the before/after reads"
+        }
+      ],
+      "negative": [
+        "a batch save that succeeds with quantity 120 and empty description is a FAIL on both the client clause and the server clause",
+        "cells still editable on a paid invoice (or still locked after reverting) is a FAIL — the parent scope must re-evaluate live"
+      ],
+      "traps": ["hydration-race", "automation-input"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts, e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts" },
+      "source": [
+        "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
+        "objectui: e2e/live/grid-conditional-rules.spec.ts, grid-parent-rules.spec.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test grid conditional rules split from the header item (different scopes, different pins)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "records-forms.cascading-options",
+      "title": "Cascading and gated select options: dependsOn + per-option visibleWhen, client narrows / server rejects",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)", "non-admin user (sign one up — sys_user rows cannot be seeded)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_cascade (examples/app-showcase/src/data/objects/cascading-select.object.ts): province dependsOn ['country'] with per-option visibleWhen (cn → zj/gd, us → ca/tx); tier option 'restricted' gated on 'admin' in current_user.positions; sharingModel public_read_write",
+          "showcase_invoice.contact dependsOn ['account'] — the dependent LOOKUP twin (contact picker scoped to the chosen account's people; seed gives Northwind 26 contacts, Contoso 2, Fabrikam 1)"
+        ]
+      },
+      "steps": [
+        "open a New Cascading Select form (/_console/apps/com.example.showcase/showcase_cascade or its nav entry)",
+        "verify province is gated (empty/disabled) until a country is chosen",
+        "pick country=cn; enumerate province options (expect exactly Zhejiang, Guangdong); switch to us; re-enumerate (California, Texas) and verify a previously chosen cn province CLEARED",
+        "as admin, enumerate tier options (Standard + Restricted); save a record with tier=restricted",
+        "direct API negative: POST /api/v1/data/showcase_cascade with country 'cn' and province 'ca'; capture the refusal; then POST province 'zj' and capture the success",
+        "as the non-admin user: enumerate tier options in the form (Restricted absent), then POST tier='restricted' directly and capture the refusal",
+        "on a New Invoice, verify the contact picker is empty-scoped before an account is chosen; pick Northwind and capture the picker's data request (scoped to Northwind's contacts); switch to Contoso and verify the candidate set changes"
+      ],
+      "acceptance": [
+        {
+          "clause": "dependsOn gates the dependent field until its driver has a value, and changing the driver re-filters the offered set live, clearing a now-invalid selection",
+          "oracle": "dom",
+          "verify": "after screenshots, enumerate the offered options at each country state (pinned by objectui e2e/live/cascading-options.spec.ts: 'province options re-filter live as country changes, and the stale value clears')",
+          "evidence": "option enumerations + screenshots"
+        },
+        {
+          "clause": "the server rejects an out-of-set submitted option with VALIDATION_FAILED and fields[] carrying {field: 'province', code: 'invalid_option'} — and accepts the in-set one",
+          "oracle": "api",
+          "verify": "the two direct POSTs from the steps; refusal envelope must name the field and code (pinned by the same spec's API half; server site: objectql evaluateOptionVisibility, objectui#2284)",
+          "evidence": "both responses"
+        },
+        {
+          "clause": "BOTH sides of the role gate: admin sees and can persist tier='restricted'; the non-admin neither sees it NOR can submit it — the direct non-admin POST is refused server-side",
+          "oracle": "api",
+          "verify": "admin create re-reads with tier='restricted'; non-admin POST returns the invalid_option refusal (current_user bound from the request on authenticated writes)",
+          "evidence": "admin re-read + non-admin refusal + both option enumerations"
+        },
+        {
+          "clause": "the dependent LOOKUP twin works: the invoice contact picker issues account-scoped candidate requests, and switching accounts changes the candidate set (26 for Northwind vs 2 for Contoso)",
+          "oracle": "network",
+          "verify": "captured picker requests carry the account scope; candidate counts match the seeded spread",
+          "evidence": "picker request traces + counts"
+        },
+        {
+          "clause": "a legal cascade selection persists: create with country=cn, province=zj re-reads verbatim over the API after reload",
+          "oracle": "api",
+          "verify": "GET the created row; both values present",
+          "evidence": "the re-read"
+        }
+      ],
+      "negative": [
+        "an out-of-set province accepted with 200 is a FAIL — client hiding is UX, the objectql rule-validator is the boundary",
+        "a non-admin's direct tier='restricted' POST accepted is a FAIL even though their picker hid the option (UI absence alone is a client courtesy — RUNNER rule 4)"
+      ],
+      "traps": ["hydration-race", "automation-input", "wrong-persona"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/cascading-options.spec.ts" },
+      "source": [
+        "examples/app-showcase/src/data/objects/cascading-select.object.ts (the B3 / #1583 fixture, with both-sides contract in its header comment)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (contact dependsOn account)",
+        "examples/app-showcase/src/data/seed/index.ts (contact spread per account)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — deep-test dynamic options: cascade, role gate, dependent lookup, server-side rejection", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "records-forms.master-detail-atomic-save",
-      "title": "Master + line items save as one atomic batch",
+      "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["admin"],
-      "fixtures": { "app": "showcase", "requires": ["a master-detail pair with an inline child grid (e.g. expense report + lines)"] },
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice + showcase_invoice_line with inlineEdit: 'grid' on the master_detail field (examples/app-showcase/src/data/objects/invoice.object.ts) — every New/Edit Invoice form renders the editable Line Items grid",
+          "seeded products for the catalog lookup (SKUs incl. SERVICE-HR, WIDGET-A; picking one auto-fills description + unit_price)"
+        ]
+      },
       "steps": [
-        "edit the master and several child lines in one form session, save once",
-        "repeat with one child line made deliberately invalid, save"
+        "open New Invoice (/_console/apps/com.example.showcase/showcase_invoice → New); fill name os-qa-<runid>, account=Northwind, status=draft",
+        "add two lines in the inline grid: pick a product on each (observe description/unit_price auto-fill), set quantities; watch amount recompute read-only as qty × unit_price",
+        "Save ONCE; capture the network trace of the save",
+        "re-read master + lines via GET /api/v1/data/showcase_invoice?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] and the lines by the returned invoice id; check invoice.total against the sum of line amounts",
+        "add a third line via the edit form and save; re-read invoice.total; delete that line; re-read total again",
+        "repeat the create with one child made deliberately invalid (product empty on a line); attempt save; capture the failure",
+        "verify no partial writes: filtered GET for the failed invoice name returns 0 rows and no orphan lines exist"
       ],
       "acceptance": [
         {
-          "clause": "the happy-path save lands master + children in one batch request",
+          "clause": "the happy-path save lands master + children in ONE atomic batch request (not N sequential writes), with the child ops referencing the parent",
           "oracle": "network",
-          "verify": "the save issues a single batch call (not N sequential writes); all rows readable afterwards",
-          "evidence": "network trace of the save"
+          "verify": "the save issues a single batch call whose payload contains the parent and both line ops (pinned by objectui e2e/live/master-detail.spec.ts: 'Create submits the populated parent in one atomic batch' / 'includes the child op referencing the parent')",
+          "evidence": "the batch request payload"
         },
         {
-          "clause": "a failing child aborts the WHOLE save — no partial writes",
+          "clause": "all rows are readable afterwards and correct: master + 2 lines re-read via API with the entered values; product pick auto-filled description/unit_price persisted",
           "oracle": "api",
-          "verify": "after the failed save, API reads show master and siblings unchanged",
-          "evidence": "API reads proving no row moved"
+          "verify": "field-by-field diff of the re-read against what was entered/auto-filled",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "invoice.total is a SERVER-side roll-up: computed on the atomic create, recomputed when a line is added and again when it is deleted",
+          "oracle": "api",
+          "verify": "total == sum(line.amount) after each mutation (pinned by objectui e2e/live/summary-rollup.spec.ts: computed on atomic create; recomputes on child add/delete)",
+          "evidence": "the three total reads"
+        },
+        {
+          "clause": "a failing child aborts the WHOLE save — master not created, sibling lines not written, and the form surfaces a named error",
+          "oracle": "api",
+          "verify": "after the failed save, the filtered GET returns 0 invoices and no line rows reference a phantom parent",
+          "evidence": "the empty reads + the error screenshot"
+        },
+        {
+          "clause": "the relationship-derived subform/grid renders on the standard New form with NO hand-built page (derived from the master_detail declaration)",
+          "oracle": "dom",
+          "verify": "after screenshot, the Line Items grid is present on the stock New Invoice form (pinned by objectui e2e/live/form-view-subforms.spec.ts)",
+          "evidence": "form screenshot"
+        },
+        {
+          "clause": "the amount expression recomputes live client-side (read-only cell) and the computed value persists as the stored column the roll-up reads",
+          "oracle": "api",
+          "verify": "change qty, watch amount update without save; after save the API row carries qty × unit_price",
+          "evidence": "screenshot + line read"
         }
       ],
-      "negative": ["the invalid-child case above IS the negative side — it must not partially commit"],
-      "traps": ["automation-input"],
-      "source": ["#3358 §4"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+      "negative": [
+        "the invalid-child case must not partially commit: ANY surviving master or sibling row after the failed save is a FAIL — check by API read, not by the grid",
+        "a save that issues one write per row (N requests) is a FAIL of the atomicity clause even when all rows land"
+      ],
+      "traps": ["automation-input", "hydration-race"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/summary-rollup.spec.ts, e2e/live/form-view-subforms.spec.ts" },
+      "source": [
+        "#3358 §4",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (inlineEdit grid, amount expression, total summary)",
+        "examples/app-showcase/src/data/seed/index.ts (product catalog rows)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "records-forms.related-list-server-pagination",
-      "title": "Related lists page on the server, never fetch every child row",
+      "title": "Related lists derive from the relationship and page on the server — never fetch every child row",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["admin"],
-      "fixtures": { "app": "showcase", "requires": ["a parent record with more children than one page (e.g. Northwind account with 26 contacts)"] },
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "Northwind account with 26 seeded contacts (2 named + 24 'Prospect NN' rows authored precisely so the related list exceeds a page — examples/app-showcase/src/data/seed/index.ts, objectui#2711)",
+          "showcase_invoice.account declares relatedList: 'primary' with relatedListTitle 'Invoices' and relatedListColumns [name, status, total, issued_on] (examples/app-showcase/src/data/objects/invoice.object.ts)"
+        ]
+      },
       "steps": [
-        "open the parent detail page's related list",
-        "click next-page; capture the data requests"
+        "open the Northwind account detail page (/_console/apps/com.example.showcase/showcase_account → Northwind)",
+        "screenshot; enumerate the related-list tabs (expect relationship-derived lists incl. Contacts and the declared Invoices tab)",
+        "open the Contacts related list; capture the page-1 data request",
+        "click next-page; capture the page-2 request; note the pager text",
+        "diff page-1 and page-2 row ids for overlap",
+        "open the Invoices related tab; verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
+        "capture every data request issued by the detail page and check each child query for a $top bound"
       ],
       "acceptance": [
         {
           "clause": "paging issues server-side $top/$skip requests scoped by the parent filter; the full child set is never fetched",
           "oracle": "network",
-          "verify": "page 1 = top=N&filter=[parent]; next page = top=N&skip=N; no request without top",
-          "evidence": "the captured request URLs + the pager reading 'page 2 of M'"
+          "verify": "page 1 = $top=N + parent filter; page 2 = $top=N&$skip=N; NO child-list request without $top anywhere on the page",
+          "evidence": "the captured request URLs"
+        },
+        {
+          "clause": "the pager reflects the server total (26 Northwind contacts), and pages partition the set — no row repeated or skipped across pages",
+          "oracle": "network",
+          "verify": "pager reads 'page 2 of M' consistent with total 26; id sets of page 1 and 2 are disjoint",
+          "evidence": "pager screenshot + the id diff"
+        },
+        {
+          "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
+          "oracle": "dom",
+          "verify": "after screenshot, the related tabs exist on the stock detail page (pinned by objectui e2e/live/detail-related-list.spec.ts)",
+          "evidence": "detail screenshot"
+        },
+        {
+          "clause": "the declared relatedList config is honored: the Invoices tab carries the authored title and exactly the authored columns",
+          "oracle": "dom",
+          "verify": "after screenshot, read the tab label and column headers; compare to relatedListTitle/relatedListColumns on the lookup field",
+          "evidence": "tab screenshot + declaration excerpt"
+        },
+        {
+          "clause": "row navigation works from the related list: clicking a child row opens its record, and the child re-reads via its own API id",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_contact/<clicked id> matches the row navigated to",
+          "evidence": "navigation screenshot + the read"
         }
       ],
+      "negative": [
+        "any child-list request WITHOUT a $top bound is a FAIL even when the rendered page looks right — the unpaged fetch is the defect",
+        "a pager total that disagrees with a direct filtered API count (GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]]) is a FAIL"
+      ],
       "traps": ["hydration-race"],
-      "automated": null,
-      "source": ["#3358 §4 (evidence run captured exactly this trace)"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run", "ref": "#3358" }]
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/detail-related-list.spec.ts" },
+      "source": [
+        "#3358 §4 (evidence run captured exactly this trace)",
+        "examples/app-showcase/src/data/seed/index.ts (the 26-contact Northwind fixture, authored for objectui#2711)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (relatedList declaration)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "records-forms.action-param-widgets",
-      "title": "Action params render their real widgets, not text inputs",
+      "title": "Action params render their real widgets, and the param contract is enforced at dispatch",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
-      "surface": "browser",
-      "personas": ["admin"],
-      "fixtures": { "app": "showcase", "requires": ["the Action Param Gallery action on the Field Zoo row menu"] },
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_action_param_gallery on showcase_field_zoo (examples/app-showcase/src/ui/actions/index.ts): p_text (text, required), p_richtext, p_priority (select), p_date, p_account (lookup→showcase_account), p_assignee (lookup→sys_user), p_color, p_reference (autonumber), p_cover (image, accept image/*, maxSize 5MB), p_attachments (file, multiple, accept pdf+image, maxSize 10MB)"
+        ]
+      },
+      "variants": [
+        "p_text (text)",
+        "p_richtext (richtext)",
+        "p_priority (select)",
+        "p_date (date)",
+        "p_account (lookup → showcase_account)",
+        "p_assignee (lookup → sys_user)",
+        "p_color (color)",
+        "p_reference (autonumber)",
+        "p_cover (image)",
+        "p_attachments (file, multiple)"
+      ],
       "steps": [
-        "run the gallery action; wait for the dialog to render (screenshot first)",
-        "read each param's rendered control from the dialog DOM"
+        "open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo); run the gallery action from the Specimen — Full row menu",
+        "wait for the dialog; screenshot FIRST",
+        "enumerate each param's rendered control from the dialog DOM and build the variant→control table",
+        "read accept/multiple off the two upload inputs as real DOM attributes",
+        "fill a conformant bag (p_text set, valid p_priority) and confirm; capture the dispatch POST /api/v1/actions/showcase_field_zoo/showcase_action_param_gallery",
+        "re-open and confirm with p_text EMPTY; capture the outcome",
+        "direct API negative: POST the dispatch route with a malformed bag (e.g. p_priority out-of-set) and capture the refusal"
       ],
       "acceptance": [
         {
-          "clause": "each param type maps to its real widget: date→input[type=date], color→input[type=color], richtext→editor, select→picker, file/image→input[type=file] with accept/multiple as declared, autonumber→read-only server-assigned",
+          "clause": "PER-VARIANT: each declared param renders its real widget (date→date input, color→color input, richtext→editor, select→picker, lookup→record picker, file/image→input[type=file], autonumber→read-only server-assigned) — recorded per variant in the table",
           "oracle": "dom",
-          "verify": "after screenshot confirms render, enumerate controls and match the declared param types; accept/multiple must be real DOM attributes",
-          "evidence": "screenshot + the param→control table"
+          "verify": "after the screenshot confirms render, match each control against the declared param type; every variant row carries its own observed control",
+          "evidence": "screenshot + the 10-row param→control table"
+        },
+        {
+          "clause": "accept and multiple are REAL DOM attributes on the upload inputs, matching the declaration (p_cover: image/*; p_attachments: multiple + application/pdf,image/*)",
+          "oracle": "dom",
+          "verify": "read the attributes off both inputs post-render",
+          "evidence": "DOM excerpt"
+        },
+        {
+          "clause": "the declared param contract is enforced at dispatch BEFORE the body runs (strict since 17.0, #3438): a malformed bag is rejected 400-class; the conformant bag passes and the body echoes the received keys",
+          "oracle": "api",
+          "verify": "the two direct POSTs against /api/v1/actions/showcase_field_zoo/showcase_action_param_gallery (pinned by packages/qa/dogfood/test/action-params-contract.dogfood.test.ts, ADR-0104 D2)",
+          "evidence": "both responses"
+        },
+        {
+          "clause": "required p_text is enforced on both ends: the dialog blocks confirm (or errors) with it empty, and a direct dispatch without it is refused server-side",
+          "oracle": "api",
+          "verify": "UI attempt + direct POST both refuse with a named error; no action execution recorded",
+          "evidence": "UI screenshot + API refusal"
         }
       ],
-      "negative": ["maxSize is enforced in JS, not as a DOM attribute — do NOT claim it from attribute absence; it needs an oversized-upload attempt to verify"],
-      "traps": ["hydration-race"],
-      "source": ["#3358 §4 (evidence table)", "#3393"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, keeping its maxSize caveat as a negative-side note", "ref": "#3358" }]
+      "negative": [
+        "maxSize is enforced in JS, not as a DOM attribute — do NOT claim it from attribute absence; it needs an oversized-upload attempt (covered by records-forms.upload-guard-blocks-confirm)",
+        "a malformed param bag that reaches the action body (echo shows the bad key accepted) is a FAIL — the dispatch gate, not the widget, is the boundary"
+      ],
+      "traps": ["hydration-race", "automation-input"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/action-params-contract.dogfood.test.ts; objectui: e2e/live/action-modal.spec.ts" },
+      "source": [
+        "#3358 §4 (evidence table)",
+        "#3393",
+        "examples/app-showcase/src/ui/actions/index.ts (the gallery action's declared params)",
+        "ADR-0059 (param-dialog widgets)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, keeping its maxSize caveat as a negative-side note", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "records-forms.upload-guard-blocks-confirm",
-      "title": "Confirm stays disabled while a file param is still uploading",
+      "title": "Confirm stays disabled while a file param is still uploading; maxSize is enforced by a real oversized attempt",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_action_param_gallery's p_attachments (maxSize 10MB) and p_cover (maxSize 5MB) — the ADR-0059 upload-guard fixtures (examples/app-showcase/src/ui/actions/index.ts)"
+        ]
+      },
       "steps": [
-        "open an action dialog with a file param; start a real upload large/slow enough to catch mid-flight",
-        "attempt to confirm while the upload is in progress"
+        "open the gallery action dialog from the Field Zoo row menu (screenshot first)",
+        "prepare a real file large enough to catch mid-flight (~8MB, under the 10MB p_attachments limit); start the upload into p_attachments",
+        "while the upload is in flight, attempt to click Confirm; capture the network trace across the attempt",
+        "wait for upload completion; confirm; capture the dispatch request",
+        "re-open the dialog; attempt an OVERSIZED file (>10MB) into p_attachments and (>5MB) into p_cover; capture the client's response",
+        "verify no upload request was issued for the oversized attempts"
       ],
       "acceptance": [
         {
           "clause": "the Confirm control is actually disabled mid-upload and enables on completion — proven by catching a real upload in flight, not by reading the helper label",
           "oracle": "dom",
-          "verify": "during the in-flight window the button carries disabled state and clicking issues no request; after completion the confirm succeeds",
+          "verify": "during the in-flight window the button carries disabled state AND clicking issues no dispatch request; after completion the confirm succeeds",
           "evidence": "mid-flight screenshot + network trace showing no premature submit"
+        },
+        {
+          "clause": "the completed dispatch carries the uploaded file reference and the action executes",
+          "oracle": "network",
+          "verify": "the POST /api/v1/actions/showcase_field_zoo/showcase_action_param_gallery after completion returns success with the file param populated",
+          "evidence": "the dispatch trace"
+        },
+        {
+          "clause": "maxSize is enforced by attempt: an oversized file is rejected with a named client error BEFORE any upload request is issued (both the 10MB and the 5MB limits)",
+          "oracle": "network",
+          "verify": "the oversized attempts produce a visible error and zero upload requests in the trace",
+          "evidence": "error screenshots + the empty trace window"
+        },
+        {
+          "clause": "a rejected oversized file leaves the dialog usable: a subsequent valid file uploads and confirms normally",
+          "oracle": "dom",
+          "verify": "after the rejection, repeat a valid upload and confirm",
+          "evidence": "final success screenshot"
         }
       ],
-      "traps": ["automation-input"],
-      "source": ["#3358 §4 ('leaving it unticked on the strength of a label')", "ADR-0059"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — codifies the #3358 refusal to tick from a label into the oracle itself", "ref": "#3358" }]
+      "negative": [
+        "a confirm click mid-upload that ISSUES the dispatch is a FAIL even if the server would cope",
+        "an oversized file that starts uploading (any upload request observed) is a FAIL — the guard must reject before the wire"
+      ],
+      "traps": ["automation-input", "hydration-race"],
+      "source": [
+        "#3358 §4 ('leaving it unticked on the strength of a label')",
+        "ADR-0059",
+        "examples/app-showcase/src/ui/actions/index.ts (maxSize declarations)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — codifies the #3358 refusal to tick from a label into the oracle itself", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "records-forms.import-wizard-encoding-and-hints",
       "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an importable showcase object (e.g. showcase_contact) and a GBK-encoded CSV fixture; the pinned unit suites carry their own byte fixtures"
+        ]
+      },
       "steps": [
-        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice)",
-        "optionally spot-check the wizard visually past the native file picker"
+        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts src/__tests__/importMissingRequiredHint.test.tsx src/__tests__/importLegacyReferenceGuard.test.tsx",
+        "capture the suite output as the primary evidence (the native file-picker hand-off is deliberately not browser-automated)",
+        "optionally spot-check visually: open the import wizard on showcase_contact, load a GBK CSV past the native picker, and screenshot the decoded preview",
+        "in the spot-check, map columns while leaving a required field (name) unmapped; observe the Next control and its hint",
+        "verify the wizard's outcome server-side after a completed import: filtered GET /api/v1/data/showcase_contact for an imported marker row"
       ],
       "acceptance": [
         {
-          "clause": "all three clauses are pinned by targeted tests in objectui",
+          "clause": "GBK bytes decode to the exact expected strings (no mojibake) — pinned",
           "oracle": "test",
-          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts src/__tests__/importMissingRequiredHint.test.tsx src/__tests__/importLegacyReferenceGuard.test.tsx",
+          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts",
           "evidence": "test run output"
+        },
+        {
+          "clause": "an unmapped required field disables Next AND shows the named required-field hint — pinned",
+          "oracle": "test",
+          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/__tests__/importMissingRequiredHint.test.tsx",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "the legacy-reference fallback path shows a visible degrade notice instead of silently degrading — pinned",
+          "oracle": "test",
+          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/__tests__/importLegacyReferenceGuard.test.tsx",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "a completed import lands rows the API can read back (the wizard's end state is server rows, not a success toast)",
+          "oracle": "api",
+          "verify": "filtered GET for an imported marker row returns it with decoded values intact",
+          "evidence": "the read"
         }
       ],
+      "negative": [
+        "a GBK file whose preview renders mojibake while the tests pass means the WIRED wizard regressed against the pinned parser — a FAIL, file against the wizard wiring",
+        "an import that reports success while the filtered API read finds no rows is a FAIL (silent drop)"
+      ],
       "automated": { "kind": "unit", "ref": "objectui: packages/plugin-grid/src/importParsers.test.ts (+ importMissingRequiredHint, importLegacyReferenceGuard)" },
-      "traps": ["automation-input"],
+      "traps": ["automation-input", "stale-console-bundle"],
       "source": ["#3358 §4 (ticked on test evidence — the native file picker hand-off is deliberately not automated)"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358's test-evidence resolution", "ref": "#3358" }]
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358's test-evidence resolution", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     }
   ]
 }
