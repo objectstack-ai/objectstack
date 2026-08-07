@@ -32,7 +32,8 @@ describe('LocalStorageAdapter', () => {
     expect(typeof storage.exists).toBe('function');
     expect(typeof storage.getInfo).toBe('function');
     // `list` is deliberately absent: IStorageService no longer declares it
-    // (#5540). The adapter's own `list` implementation goes in #5541.
+    // (#5540) and the adapter no longer implements it (#5541). The absence is
+    // pinned in `storage-adapter-list-retirement.test.ts`.
   });
 
   it('should upload and download a file', async () => {
@@ -74,21 +75,12 @@ describe('LocalStorageAdapter', () => {
     expect(info.lastModified).toBeInstanceOf(Date);
   });
 
-  it('should list files in a directory', async () => {
-    await createTempDir();
-    await adapter.upload('docs/a.txt', Buffer.from('a'));
-    await adapter.upload('docs/b.txt', Buffer.from('bb'));
-    const files = await adapter.list('docs');
-    expect(files).toHaveLength(2);
-    const keys = files.map(f => f.key).sort();
-    expect(keys).toEqual(['docs/a.txt', 'docs/b.txt']);
-  });
-
-  it('should return empty array when listing non-existent directory', async () => {
-    await createTempDir();
-    const files = await adapter.list('nonexistent');
-    expect(files).toEqual([]);
-  });
+  // The `should list files in a directory` and `should return empty array when
+  // listing non-existent directory` cases were deleted with the method they
+  // exercised (#5541). They pinned exactly the single-level, directories-as-files
+  // behaviour the retirement removed — `docs/a.txt` + `docs/b.txt` are both one
+  // level down, which is the only depth that implementation could see — so
+  // keeping them green would have meant keeping the method.
 
   it('should reject path traversal', async () => {
     await createTempDir();

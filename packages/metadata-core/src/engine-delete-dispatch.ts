@@ -65,21 +65,45 @@
  * call identify a single row by primary key?*
  *
  *  - `options.where.id` is a **scalar** (`string` / `number` / `bigint`, not
- *    `null`) → `by-id`: routes to `driver.delete`, runs cascade-delete and the
- *    by-id RLS pre-image check.
+ *    `null`) **and truthy** → `by-id`: routes to `driver.delete`, runs
+ *    cascade-delete and the by-id RLS pre-image check.
  *  - otherwise, `options.multi` is truthy → `multi`: routes to
  *    `driver.deleteMany` with the middleware-composed AST.
  *  - otherwise → **`reject`**. The call names neither one row nor a bulk
  *    intent, and the engine throws rather than guessing.
  *
- * The scalar test is load-bearing and is the half a hand-written double most
- * often drops: `where: { id: { $in: [...] } }` is a *multi-row predicate*, not
- * an id. Treating it as an id would bind the operator object literally into
- * `driver.delete(object, {$in: […]})` **and** skip both the row-scoping AST
- * seeding (#2982) and the by-id pre-image check. So it is `reject` unless the
- * caller also said `multi`.
+ * Two halves of that first line are load-bearing, and a hand-written double
+ * drops one or the other — which is the whole argument for importing this
+ * instead of copying it:
+ *
+ * 1. **The scalar test.** `where: { id: { $in: [...] } }` is a *multi-row
+ *    predicate*, not an id. Treating it as an id would bind the operator
+ *    object literally into `driver.delete(object, {$in: […]})` **and** skip
+ *    both the row-scoping AST seeding (#2982) and the by-id pre-image check.
+ *    So it is `reject` unless the caller also said `multi`.
+ * 2. **Truthiness, not `!== undefined`.** The engine branches on
+ *    `if (hookContext.input.id)`, so a falsy scalar id — `where: { id: 0 }`,
+ *    `where: { id: '' }` — does **not** take the by-id route; it falls through
+ *    to `multi`/`reject` like any other non-identifying call. Byte-for-byte
+ *    the rule the twin states as its own point 3, and until objectstack#5747
+ *    this module read `!== undefined` and answered `by-id` for both — the one
+ *    input on which a double pinned to `assertEngineDeleteDispatch` was still
+ *    *looser than the producer* (it accepted `delete(o, { where: { id: '' } })`
+ *    while a running server answers `ENGINE_DELETE_REJECT_MESSAGE`), which is
+ *    the #4434 shape this module exists to remove. `where: { id: '' }` is a
+ *    reachable spelling, not a curiosity: an empty path segment or an unfilled
+ *    form field passed straight through to `where.id` produces it.
+ *
+ *    Note this **changed the predicate, never the engine**. `resolveEngine…`
+ *    is a description of `ObjectQL.delete`, and it was the description that
+ *    was wrong; `delete(o, { where: { id: 0 } })` threw before this change and
+ *    throws after it. Realigning the engine to the old description instead —
+ *    making `{ id: 0 }` a real by-id delete — would have been a change to the
+ *    producer's behaviour, and was rejected as such (objectstack#5747 option
+ *    B, deliberately not taken).
  *
  * @see ObjectQL.delete in `packages/objectql/src/engine.ts` — the only production caller.
+ * @see engine-update-dispatch.ts — the twin; its point 3 is this module's point 2.
  * @see packages/objectql/src/engine-delete-dispatch.ts — the re-export shim that keeps
  *      objectql's original import path (and its public API) working.
  * @see packages/objectql/src/engine-delete-dispatch.test.ts — the test that drives the
@@ -93,7 +117,7 @@ export const ENGINE_DELETE_REJECT_MESSAGE = 'Delete requires an ID or options.mu
 
 /** What `ObjectQLEngine.delete` will do with a given options bag. */
 export type EngineDeleteDispatch =
-  /** A scalar `where.id` — `driver.delete`, cascade + by-id RLS pre-image. */
+  /** A TRUTHY scalar `where.id` — `driver.delete`, cascade + by-id RLS pre-image. */
   | { readonly kind: 'by-id'; readonly id: string | number | bigint }
   /** No single id but `options.multi` — `driver.deleteMany` with the composed AST. */
   | { readonly kind: 'multi' }
@@ -108,12 +132,21 @@ export interface EngineDeleteDispatchInput {
 }
 
 /**
- * Extract the SCALAR `where.id`, or `undefined` when the call does not name one
- * row by primary key.
+ * Extract the SCALAR `where.id`, or `undefined` when `where` carries no scalar
+ * there at all.
  *
  * `null`, `undefined`, arrays, and operator objects (`{ $in: [...] }`,
  * `{ $ne: … }`) all yield `undefined` — they are predicates over many rows, not
  * a primary key.
+ *
+ * This answers only "is that VALUE a scalar?", which is **not** the whole
+ * by-id question: the engine additionally requires the id to be TRUTHY, so
+ * `scalarDeleteId({ where: { id: 0 } })` is `0` while the call itself
+ * dispatches `multi`/`reject` (objectstack#5747). Kept value-faithful on
+ * purpose — narrowing it to "truthy scalar" would make the extractor and its
+ * name disagree, and a caller asking what the `where` holds would have to
+ * reach for a second spelling. Use {@link resolveEngineDeleteDispatch} for the
+ * verdict about a CALL; its twin `scalarUpdateId` splits the same way.
  */
 export function scalarDeleteId(
   options?: EngineDeleteDispatchInput | null,
@@ -140,7 +173,11 @@ export function resolveEngineDeleteDispatch(
   options?: EngineDeleteDispatchInput | null,
 ): EngineDeleteDispatch {
   const id = scalarDeleteId(options);
-  if (id !== undefined) return { kind: 'by-id', id };
+  // The engine branches on `if (hookContext.input.id)` — truthiness, not
+  // `!== undefined`, so a falsy scalar id (`0`, `''`) is not an identifying
+  // call and falls down the same ladder as a non-scalar one. See header
+  // point 2, and the twin's point 3 (objectstack#5747 / objectstack#5748).
+  if (id) return { kind: 'by-id', id };
   if (options?.multi) return { kind: 'multi' };
   return { kind: 'reject', message: ENGINE_DELETE_REJECT_MESSAGE };
 }
@@ -192,12 +229,27 @@ export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] =
   { what: 'multi with a predicate', options: { where: { rule_id: 'r1' }, multi: true }, expect: 'multi' },
   { what: 'multi with no predicate at all', options: { multi: true }, expect: 'multi' },
   { what: 'multi alongside an $in id set', options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'multi' },
+  // ── The FALSY scalars (objectstack#5747). `0` and `''` are scalars, so
+  //    `scalarDeleteId` returns them — but the engine's `if (input.id)` is a
+  //    truthiness test, so neither identifies a row. With a declared bulk
+  //    intent they are honoured as `multi` (the caller's `where` still rides
+  //    onto the AST, so the predicate is `id = 0` / `id = ''`, not "every
+  //    row"); without one they are `reject`, below. Same pair the twin pins
+  //    on the update side.
+  { what: 'falsy scalar where.id (0) with multi:true', options: { where: { id: 0 }, multi: true }, expect: 'multi' },
+  { what: "falsy scalar where.id ('') with multi:true", options: { where: { id: '' }, multi: true }, expect: 'multi' },
   // ── The rejects. Everything below is what #4434 shipped against a fake that
   //    accepted it, and what a running server answers 500 to.
   { what: 'predicate on a non-id column, no multi', options: { where: { rule_id: 'r1' } }, expect: 'reject' },
   { what: '$in over ids, no multi (an operator object is NOT an id)', options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
   { what: 'array id, no multi', options: { where: { id: ['a', 'b'] } }, expect: 'reject' },
   { what: 'null id, no multi', options: { where: { id: null } }, expect: 'reject' },
+  // The two shapes objectstack#5747 was filed for: a fake pinned to
+  // `assertEngineDeleteDispatch` ACCEPTED both until this case-set could
+  // reach them (#4868 family — a per-case parity run cannot contradict an
+  // input nobody listed).
+  { what: 'falsy scalar where.id (0), no multi', options: { where: { id: 0 } }, expect: 'reject' },
+  { what: "falsy scalar where.id (''), no multi — the empty path segment / unfilled form field", options: { where: { id: '' } }, expect: 'reject' },
   { what: 'empty where, no multi', options: { where: {} }, expect: 'reject' },
   { what: 'no options at all', options: undefined, expect: 'reject' },
   { what: 'multi explicitly false with a predicate', options: { where: { rule_id: 'r1' }, multi: false }, expect: 'reject' },
