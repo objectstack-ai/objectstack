@@ -30,6 +30,7 @@ import {
   evaluateBaseline,
   loadEntrySurfaces,
   resolveImports,
+  serializeImportBaseline,
   type CategorySurface,
 } from './lib/docs-import-surface';
 import { escapeMdxDescription } from './lib/escape-mdx';
@@ -50,6 +51,7 @@ import {
   type ZodFileInput,
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
 const SRC_DIR = path.resolve(__dirname, '../src');
@@ -57,7 +59,7 @@ const SRC_DIR = path.resolve(__dirname, '../src');
 // ⚠️  Everything inside category sub-folders is auto-generated and disposable.
 const DOCS_ROOT = path.resolve(__dirname, '../../../content/docs/references');
 const REPO_ROOT = path.resolve(__dirname, '../../..');
-const API_SURFACE_PATH = path.resolve(__dirname, '../api-surface.json');
+const API_SURFACE_DIR = path.resolve(__dirname, `../${API_SURFACE_DIR_NAME}`);
 const IMPORT_BASELINE_PATH = path.resolve(__dirname, '../docs-import-surface.baseline.json');
 
 const CHECK = process.argv.includes('--check');
@@ -72,7 +74,7 @@ const UPDATE_IMPORT_BASELINE = process.argv.includes('--update-import-baseline')
 // Until #4723 the question could not come up: `check:docs` was
 // `pnpm gen:schema && tsx scripts/build-docs.ts --check`, so the tree was rebuilt
 // on every run. That first step is what made a script called `check:` WRITE two
-// TRACKED files — `json-schema.manifest.json` and `authorable-surface.json` are
+// TRACKED files — `json-schema.manifest/` and `authorable-surface/` are
 // projections `gen:schema` repairs whenever they are behind — so running the gate
 // silently edited the tree of whoever ran it and left the staleness unreported.
 // #4711 removed exactly that from `--check`; this was the same defect at a
@@ -235,30 +237,18 @@ function sourcePathFor(category: string, zodFile: string): string | undefined {
 const schemaIndex = scanCategories();
 
 // ── Import examples: the package's real export surface ───────────────────────
-// `api-surface.json` is the committed record of every `name (kind)` per public
+// `api-surface/` is the committed record of every `name (kind)` per public
 // entry point, kept honest by `check:api-surface`. Import examples are spelled
 // from it rather than from the schema file name, so a page can only advertise
 // an import that actually exists (#4570). Names it cannot account for are
 // collected here and ratcheted against the committed baseline after flush().
 
 const ENTRY_SURFACES: ReadonlyMap<string, CategorySurface> = loadEntrySurfaces(
-  JSON.parse(fs.readFileSync(API_SURFACE_PATH, 'utf-8')),
+  readApiSurfaceFrom(API_SURFACE_DIR),
 );
 
 /** Every unresolvable import name this run met, one stable line each. */
 const importGaps = new Set<string>();
-
-const IMPORT_BASELINE_COMMENT =
-  'Accepted gaps between the reference docs\' import examples and the real export surface of ' +
-  '@objectstack/spec (#4570): a documented JSON Schema whose entry point exports no matching type ' +
-  'alias ("no type export") or no matching schema const ("no schema const export"). The name is ' +
-  'omitted from the generated import line — the docs never advertise an import that cannot compile ' +
-  '— and listed here so the omission is countable instead of silent. Shrink-only ratchet: a NEW gap ' +
-  'fails check:docs (fix it by adding `export type X = z.infer<typeof XSchema>;` next to the schema ' +
-  'and regenerating api-surface.json, or by retiring the schema together with its alias), and a ' +
-  'stale entry fails until its line is deleted. Growing this list is a maintainer decision that ' +
-  'shows up as this file in the diff. Regenerate with: ' +
-  'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
 
 /**
  * Resolve a schema name to its page, AS SEEN FROM the category being rendered.
@@ -923,7 +913,7 @@ emit(path.join(DOCS_ROOT, 'meta.json'), JSON.stringify(meta, null, 2));
 //
 // Diffing generated output against committed docs proves the two agree; it
 // cannot prove either is TRUE. Now that import examples are spelled from
-// `api-surface.json`, a schema whose type alias is missing quietly loses its
+// `api-surface/`, a schema whose type alias is missing quietly loses its
 // name from the `import type` line — correct output, silent regression. The
 // baseline turns that silence into a red gate: a NEW gap fails (that is #4539
 // exactly — deleting a zero-consumer type alias while its schema keeps its
@@ -942,10 +932,11 @@ if (managedCount > 0) {
   const gaps = [...importGaps].sort();
 
   if (UPDATE_IMPORT_BASELINE) {
-    fs.writeFileSync(
-      IMPORT_BASELINE_PATH,
-      JSON.stringify({ _comment: IMPORT_BASELINE_COMMENT, entries: gaps }, null, 2) + '\n',
-    );
+    // Serialized through the lib, never inline: the same function is what the
+    // round-trip pin in `docs-import-surface.test.ts` re-serializes the
+    // committed file with, so this writer and that file cannot drift into two
+    // encodings again (#5990).
+    fs.writeFileSync(IMPORT_BASELINE_PATH, serializeImportBaseline(gaps));
     console.log(`Wrote ${gaps.length} import-surface gap(s) to ${path.relative(REPO_ROOT, IMPORT_BASELINE_PATH)} — review the diff before committing.`);
   } else {
     const baseline: { entries?: string[] } = fs.existsSync(IMPORT_BASELINE_PATH)
@@ -982,7 +973,7 @@ if (managedCount > 0) {
     }
 
     if (!importSurfaceFailed) {
-      console.log(`✅ import examples resolve against api-surface.json (${gaps.length} accepted gap(s) in the baseline)`);
+      console.log(`✅ import examples resolve against ${API_SURFACE_DIR_NAME}/ (${gaps.length} accepted gap(s) in the baseline)`);
     }
   }
 }

@@ -399,6 +399,33 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
+      # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
+      # registries, the api-surface baselines) from text-merging into a
+      # plausible-looking wrong file: the driver defers the path and records it,
+      # and `.githooks/pre-commit` refuses the commit until the regeneration has
+      # actually happened. Both halves are CONFIG — `.gitattributes` routing on
+      # one side, the table in scripts/regen-artifacts.mjs on the other — and
+      # they drift apart in either direction with nothing failing: a path
+      # declared in the table but unmapped still text-merges, and a path mapped
+      # but undeclared leaves the merge CONFLICTED with no explanation. The
+      # self-test reconciles them both ways, checks the gen:/check: names the
+      # driver advises still resolve, that the hook is executable IN THE INDEX
+      # (git ignores a non-executable hook and says only `advice.ignoredHook`),
+      # that the driver registered in THIS clone resolves here (#4868: it
+      # pointed at a deleted worktree for weeks while every other check stayed
+      # green), and proves the behaviour end to end against real git. The
+      # second half pins the staleness rules' dangerous direction — "says fresh
+      # when stale".
+      # It ran nowhere until now: `pre-commit` runs check-regen-pending's MAIN
+      # path (which exits immediately with no pending marker), never
+      # `--self-test`, and no workflow named the command — so the reconciliation
+      # was verified only when someone happened to run the root script by hand
+      # (#4690's family: a gate archived as "runs elsewhere" that ran nowhere).
+      # Pure git + fs, no build, seconds — so it belongs in this job.
+      - name: Merge-driver wiring gate
+        run: pnpm check:merge-driver
+
       # ADR-0122 type-alias convention gate (#5551). `packages/spec` spelled the
       # same idea two ways for its whole life — 1384 bare aliases meaning the
       # PARSED state, 86 meaning the AUTHOR state — and three first-hand sources
@@ -566,7 +593,7 @@ jobs:
       # generated page and the filter kept watching the old path, so hand-edits
       # went unchecked for months; #3855 listed specific spec paths but no schema
       # dirs, so `check:authorable-surface` went dormant on exactly the PRs that
-      # remove an authorable key; and `json-schema.manifest.json` — the #2978
+      # remove an authorable key; and the json-schema manifest — the #2978
       # ratchet that is the ONLY durable record of every emitted schema, since
       # json-schema/ is gitignored — was never watched at all, so a PR retiring a
       # key from it skipped its own verifier. Six gates had already escaped to
@@ -597,7 +624,7 @@ jobs:
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
       # The authorable KEY surface — what a metadata author may write, which for
-      # this platform is the third-party API. `api-surface.json` records exported
+      # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript
       # PRINTS them (a reference, never structurally expanded), so neither sees a
       # key added to or removed from a schema. #3883 removed three authorable keys
@@ -730,7 +757,7 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
-      # Same surface, the other axis: api-surface.json records that an export
+      # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers
       # to replace a local declaration with the spec import, which for those four
@@ -743,7 +770,7 @@ jobs:
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
 
-      # Third axis on the same surface: api-surface.json shows a name on two
+      # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
       # or TWO declarations sharing a name — the #4411 trap, where which type a
       # consumer gets depends on nothing but the import path and the copy that

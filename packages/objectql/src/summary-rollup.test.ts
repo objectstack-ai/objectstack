@@ -282,3 +282,169 @@ describe('roll-up summary index — a roll-up registered at RUNTIME still comput
     expect(parent.completed_task_count).toBe(1);
   });
 });
+
+describe('roll-up summary seeding on the PARENT insert (#5749)', () => {
+  // The bug: `recomputeSummaries` only ever visits parents named by a CHILD
+  // write (`recs`/`prevs` → `desc.fkField`), so a parent that has never had a
+  // child is never visited and its summary column keeps insert's `null`. Delete
+  // the last child and the parent IS visited (via `previous`) and lands on 0 —
+  // so "never had a child" and "had one, deleted it" are the same logical state
+  // read back as two different values, and a `= 0` filter silently drops the
+  // first kind. Seeding at parent-insert time is the producer-side fix: `count`
+  // and `sum` start at the empty-collection value they will always have.
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'project',
+      fields: {
+        name: { type: 'text' },
+        task_count: { type: 'summary', summaryOperations: { object: 'task', field: 'id', function: 'count' } },
+        total_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'sum' } },
+        // No empty-set value — these must stay `null`, same list the recompute
+        // fallback uses.
+        avg_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'avg' } },
+        max_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'max' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'task',
+      fields: {
+        title: { type: 'text' },
+        estimate: { type: 'number' },
+        project: { type: 'master_detail', reference: 'project' },
+      },
+    } as any);
+  });
+
+  const row = (id: string) => storeFor('project').get(id);
+
+  it('reads the SAME value for "never had a child" (A) and "had one, deleted it" (C)', async () => {
+    // A — created, never had a child. The issue measured `null` here.
+    const a = await engine.insert('project', { name: 'Legacy Sunset' });
+    expect(a.task_count).toBe(0);          // the record handed back to the caller
+    expect(row(a.id).task_count).toBe(0);  // and what was actually stored
+    expect(row(a.id).total_estimate).toBe(0);
+
+    // B — one child.
+    const b = await engine.insert('project', { name: 'Apollo' });
+    const t = await engine.insert('task', { title: 't1', estimate: 8, project: b.id });
+    expect(row(b.id).task_count).toBe(1);
+    expect(row(b.id).total_estimate).toBe(8);
+
+    // C — that child deleted again.
+    await engine.delete('task', { where: { id: t.id } });
+    expect(row(b.id).task_count).toBe(0);
+    expect(row(b.id).total_estimate).toBe(0);
+
+    // The point of the whole change: A and C are one logical state, one value.
+    expect(row(a.id).task_count).toBe(row(b.id).task_count);
+    expect(row(a.id).total_estimate).toBe(row(b.id).total_estimate);
+  });
+
+  it('`= 0` and `< 1` filters no longer drop the parent that never had a child', async () => {
+    // Exactly the showcase repro: `Legacy Sunset` (never had a task) used to be
+    // missing from both result sets while `ROLLUP PROBE` (had one, deleted it)
+    // was returned — the same query, two answers for one state, and the miss is
+    // a silently absent ROW, not an error.
+    const never = await engine.insert('project', { name: 'Legacy Sunset' });
+    const probe = await engine.insert('project', { name: 'ROLLUP PROBE' });
+    const seeded = await engine.insert('task', { title: 'seed', estimate: 3, project: probe.id });
+    await engine.delete('task', { where: { id: seeded.id } });
+    const busy = await engine.insert('project', { name: 'Apollo' });
+    await engine.insert('task', { title: 'live', estimate: 5, project: busy.id });
+
+    const eqZero = await engine.find('project', { where: [['task_count', '=', 0]] });
+    expect(eqZero.map((r: any) => r.name).sort()).toEqual(['Legacy Sunset', 'ROLLUP PROBE']);
+    expect(eqZero.map((r: any) => r.id)).toContain(never.id);
+
+    const ltOne = await engine.find('project', { where: [['task_count', '<', 1]] });
+    expect(ltOne.map((r: any) => r.name).sort()).toEqual(['Legacy Sunset', 'ROLLUP PROBE']);
+
+    // And the parent that DOES have a task is still excluded by both.
+    expect(eqZero.map((r: any) => r.id)).not.toContain(busy.id);
+    expect(ltOne.map((r: any) => r.id)).not.toContain(busy.id);
+  });
+
+  it('leaves avg/max null — undefined on an empty set, before AND after children', async () => {
+    const p = await engine.insert('project', { name: 'No tasks yet' });
+    expect(row(p.id).avg_estimate ?? null).toBeNull();
+    expect(row(p.id).max_estimate ?? null).toBeNull();
+
+    const t = await engine.insert('task', { title: 't', estimate: 6, project: p.id });
+    expect(row(p.id).avg_estimate).toBe(6);
+    expect(row(p.id).max_estimate).toBe(6);
+
+    // Back to the empty collection: the recompute fallback puts them back to
+    // null. Seeding reads the same list, so A and C agree here too.
+    await engine.delete('task', { where: { id: t.id } });
+    expect(row(p.id).avg_estimate ?? null).toBeNull();
+    expect(row(p.id).max_estimate ?? null).toBeNull();
+  });
+
+  it('never overwrites a value the author supplied on insert', async () => {
+    const p = await engine.insert('project', { name: 'Imported', task_count: 7, total_estimate: 42 });
+    expect(row(p.id).task_count).toBe(7);
+    expect(row(p.id).total_estimate).toBe(42);
+  });
+
+  it('seeds every row of a batch insert, and only the unsupplied ones', async () => {
+    const written = await engine.insert('project', [{ name: 'P1' }, { name: 'P2', task_count: 3 }]);
+    expect(row(written[0].id).task_count).toBe(0);
+    expect(row(written[0].id).total_estimate).toBe(0);
+    expect(row(written[1].id).task_count).toBe(3);
+  });
+
+  it('lets a beforeInsert hook still have the final say', async () => {
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      ctx.input.data.task_count = 99;
+    }, { object: 'project' });
+    const p = await engine.insert('project', { name: 'Hooked' });
+    expect(row(p.id).task_count).toBe(99);
+  });
+
+  it('does NOT seed a roll-up whose relationship cannot be resolved', async () => {
+    // Seeded ⇔ maintained: `buildSummaryIndex` skips a descriptor whose child→
+    // parent FK it cannot resolve, so the recompute would never maintain this
+    // field. A 0 nothing ever updates would be a worse lie than the null.
+    engine.registry.registerObject({
+      name: 'orphan_parent',
+      fields: {
+        name: { type: 'text' },
+        ghost_count: { type: 'summary', summaryOperations: { object: 'ghost', field: 'id', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({ name: 'ghost', fields: { label: { type: 'text' } } } as any);
+
+    const p = await engine.insert('orphan_parent', { name: 'x' });
+    expect(storeFor('orphan_parent').get(p.id).ghost_count ?? null).toBeNull();
+  });
+
+  it('seeds a parent published AFTER the summary index was already warmed', async () => {
+    // The parent-side index must share the child-side staleness rule (cloud#970):
+    // a runtime publish registers straight into the registry, so an index warmed
+    // by an earlier write must still see the new roll-up.
+    await engine.insert('project', { name: 'warms the index' });
+
+    engine.registry.registerObject({
+      name: 'sprint',
+      fields: {
+        name: { type: 'text' },
+        story_count: { type: 'summary', summaryOperations: { object: 'story', field: 'id', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'story',
+      fields: { title: { type: 'text' }, sprint: { type: 'master_detail', reference: 'sprint' } },
+    } as any);
+
+    const s = await engine.insert('sprint', { name: 'S1' });
+    expect(storeFor('sprint').get(s.id).story_count).toBe(0);
+  });
+});

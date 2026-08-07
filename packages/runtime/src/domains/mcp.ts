@@ -310,6 +310,9 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata service. Keeps the MCP tool layer free of any direct
  * engine access.
+ *
+ * Also carries the action seam (`listActions` / `runAction`) and the skill seam
+ * (`listSkills`, #3905) the MCP runtime wires by capability.
  */
 export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolContext): any {
     const ec = context.executionContext;
@@ -381,6 +384,24 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             );
             return res?.rows ?? [];
         },
+
+        // ── Skill metadata → MCP prompts (#3905) ──────────────────
+        // ADR-0063 §2 names skills the only third-party extension primitive,
+        // and the open distribution is MCP-only (BYO-AI): without this read the
+        // type is authorable, lint-validated and consumed by nothing here. The
+        // MCP runtime projects each skill's `instructions` onto the `prompts`
+        // primitive; the tool-binding half stays cloud-runtime-only.
+        //
+        // Resolved through THIS request's per-environment metadata service —
+        // the same seam `listObjects` / `describeObject` use — so a
+        // multi-tenant host serves each environment its own skills. Metadata,
+        // not row data: no ExecutionContext filtering, exactly like
+        // `describeObject` (the MCP route itself is authenticated).
+        listSkills: async () => {
+            const meta: any = await getMeta();
+            return (await meta?.list?.('skill')) ?? [];
+        },
+
         create: async (object: string, data: any) =>
             await callData('create', { object, data }, driver, envId, ec),
         update: async (object: string, id: string, data: any) =>

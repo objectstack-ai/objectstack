@@ -1,0 +1,183 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// Self-test for the liveness gate's EVIDENCE guard (#5623).
+//
+// WHY IT RUNS THE REAL SCRIPT. Everything this file asserts is a property of the
+// gate as CI invokes it: which finding classes reach `process.exit(1)`, and what
+// the summary line claims. Those two live in `check-liveness.mts` itself, not in
+// a helper, and re-implementing the decision in a test would pin the copy rather
+// than the gate — which is the exact failure #5623 reports one layer down. The
+// bug was never that the check could not SEE the rot: it named all five rotted
+// pointers, correctly, and exited 0 anyway. A test of `checkEvidence` (there is
+// one, in evidence.test.ts) was therefore green throughout.
+//
+// So each case spawns `check-liveness.mts` the way `pnpm check:liveness` does and
+// reads its exit code. `--ledger-root=<dir>` lets a case point the walk at a COPY
+// of packages/spec/liveness with one pointer broken, so the run has exactly one
+// cause for its verdict and no repo file is ever mutated — a crashed test leaves
+// the worktree clean. Precedent for spawning a gate in its own test:
+// scripts/check-generated-ledger.test.ts.
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SPEC = path.resolve(HERE, '../..');
+const GATE = path.join(HERE, 'check-liveness.mts');
+const LEDGERS = path.join(SPEC, 'liveness');
+
+// A repo-rooted path shaped exactly like a real pointer (so `evidence.mts`
+// extracts it) that this repo has never contained.
+const ROTTED = 'packages/plugins/driver-sql/src/sql-driver.ts';
+
+function runGate(ledgerRoot?: string): { status: number | null; output: string } {
+  const require = createRequire(import.meta.url);
+  const tsx = require.resolve('tsx/cli');
+  const argv = [tsx, GATE, ...(ledgerRoot ? [`--ledger-root=${ledgerRoot}`] : [])];
+  const r = spawnSync(process.execPath, argv, { cwd: SPEC, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  if (r.error) throw r.error;
+  return { status: r.status, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+/** Rewrite one property's `evidence` in a copied ledger. */
+function setEvidence(root: string, type: string, prop: string, evidence: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  ledger.props[prop].evidence = evidence;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+function summaryLine(output: string): string {
+  return output.split('\n').find((l) => l.startsWith('evidence paths:')) ?? '';
+}
+
+describe('check:liveness — evidence pointers (#5623)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-'));
+    cpSync(LEDGERS, path.join(tmp, 'liveness'), { recursive: true });
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  // The control. Without it, every "exit 1" below would also be satisfied by the
+  // copy simply not being readable.
+  it('is green against a verbatim copy of the shipped ledgers', () => {
+    const { status, output } = runGate(path.join(tmp, 'liveness'));
+    expect(status, output).toBe(0);
+    expect(output).toContain('✓ every governed-type property');
+  });
+
+  it('FAILS when a `live` entry cites a repo-local file that is gone', () => {
+    const root = path.join(tmp, 'broken-local');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'query', 'limit', `${ROTTED}:1345`);
+
+    const { status, output } = runGate(root);
+    // The regression this pins: before #5623 this run printed the finding and
+    // exited 0, so a directory move could rot an ADR-0087 evidence chain with
+    // nothing in CI to notice.
+    expect(status, output).toBe(1);
+    expect(output).toContain("'live' entr(ies) cite a file that is missing from THIS repo");
+    expect(output).toContain(`query/limit → ${ROTTED}`);
+    // ✗, not ⚠ — the grading is the fix, and the two are one character apart.
+    expect(output).toMatch(/✗ 1 'live' entr\(ies\) cite a file/);
+    expect(output).not.toMatch(/⚠ \d+ 'live' entr\(ies\)/);
+  });
+
+  it('names EVERY rotted pointer, not just the first', () => {
+    const root = path.join(tmp, 'broken-many');
+    cpSync(LEDGERS, root, { recursive: true });
+    for (const prop of ['fields', 'where', 'orderBy', 'limit', 'offset']) {
+      setEvidence(root, 'query', prop, `${ROTTED} (rotted by the self-test)`);
+    }
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toMatch(/✗ 5 'live' entr\(ies\) cite a file/);
+    for (const prop of ['fields', 'where', 'orderBy', 'limit', 'offset']) {
+      expect(output).toContain(`query/${prop} → ${ROTTED}`);
+    }
+  });
+
+  // THE BOUNDARY. Tightening the local case must not drag the ~101 cross-repo
+  // attributions in with it: those files are legitimately absent from this
+  // checkout, and failing on them would make the gate unsatisfiable for every
+  // property whose consumer is the renderer or the closed cloud runtime.
+  it('stays green when the missing path is attributed to ANOTHER repo', () => {
+    const root = path.join(tmp, 'foreign');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'query', 'limit', 'objectui: packages/app-shell/src/no-such-file.tsx:12');
+    setEvidence(root, 'query', 'offset', 'cloud: packages/ee-runtime/src/also-not-here.ts:9');
+    // The closed cloud runtime is repo-ROOTED and still foreign — the shape that
+    // would break first if the boundary were drawn on the path text alone.
+    setEvidence(root, 'query', 'orderBy', 'packages/services/service-ai/src/nope.ts:1');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).not.toContain('cite a file that is missing');
+  });
+
+  it('still fails a local path that shares a string with a foreign clause', () => {
+    // A realm marker's scope ends at the clause boundary. If it did not, one
+    // `objectui:` anywhere in an entry would silence the whole entry — a
+    // one-token opt-out of the gate.
+    const root = path.join(tmp, 'mixed');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'query', 'limit', `objectui: packages/app-shell/src/x.tsx; ${ROTTED}:1345`);
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain(`query/limit → ${ROTTED}`);
+  });
+});
+
+describe('check:liveness — the evidence summary line (#5623)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-sum-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it('prints declared and resolved as separate numbers, equal on a green run', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    const line = summaryLine(output);
+    const m = line.match(/^evidence paths: (\d+) repo-local path\(s\) declared by 'live' entries, (\d+) resolved/);
+    expect(m, line).not.toBeNull();
+    expect(m![1]).toBe(m![2]);
+    // Guards the same degradation evidence.test.ts guards: a parser that extracts
+    // nothing would make "declared === resolved" vacuously true.
+    expect(Number(m![1])).toBeGreaterThan(100);
+    expect(line).not.toContain('MISSING');
+  });
+
+  it('MOVES the resolved count when a pointer rots — the mis-labelled count of #5623', () => {
+    const root = path.join(tmp, 'liveness');
+    cpSync(LEDGERS, root, { recursive: true });
+    const green = summaryLine(runGate(root).output);
+    const declared = Number(green.match(/: (\d+) repo-local/)![1]);
+
+    setEvidence(root, 'query', 'limit', `${ROTTED}:1345`);
+    const red = summaryLine(runGate(root).output);
+
+    // `declared` is unchanged — the pointer is still DECLARED, it just does not
+    // resolve. That is precisely why the old line, which printed this number
+    // under the word "resolved", read 330 both before and after five pointers
+    // were broken.
+    expect(red).toContain(`${declared} repo-local path(s) declared`);
+    expect(red).toContain(`${declared - 1} resolved against this checkout`);
+    expect(red).toContain('1 MISSING');
+  });
+
+  it('reports foreign attributions separately and never as missing', () => {
+    const { output } = runGate();
+    const line = summaryLine(output);
+    expect(line).toMatch(/; \d+ attributed to another repo \(objectui \/ cloud — not resolvable here\)\./);
+  });
+});

@@ -56,7 +56,14 @@ export const ApiMappingSchema = lazySchema(() => z.object({
 export const ApiEndpointSchema = z.object({
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique endpoint ID'),
-  path: z.string().regex(/^\//).describe('URL Path (e.g. /api/v1/customers)'),
+  path: z.string().regex(/^\//).describe(
+    'URL Path — must be inside this stack\'s endpoint carve-out: '
+    + '`/api/v1/apps/<manifest.namespace>/<subpath>` with a non-empty subpath (ADR-0121 D1), '
+    + 'e.g. `/api/v1/apps/crm/leads` for a stack whose `manifest.namespace` is `crm`. '
+    + 'Only the subpath is yours to name; the namespace segment is derived from '
+    + '`manifest.namespace` (ADR-0121 D2), never authored here. A path outside the carve-out '
+    + 'is rejected at publish and would match NOTHING at runtime.',
+  ),
   method: HttpMethod.describe('HTTP Method'),
 
   /** Documentation */

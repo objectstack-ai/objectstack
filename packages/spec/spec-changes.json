@@ -315,6 +315,12 @@
         "toMajor": 17
       },
       {
+        "surface": "connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform",
+        "to": "field-mapping key 'transform' removed (#5552 — the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", retired in #3278. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
+        "conversionId": "field-mapping-transform-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "theme.typography.fontSize / theme.typography.fontWeight / theme.typography.lineHeight / theme.typography.letterSpacing / theme.typography.fontFamily.heading / theme.typography.fontFamily.mono / theme.animation / theme.zIndex",
         "to": "theme keys 'typography.fontSize'/'fontWeight'/'lineHeight'/'letterSpacing', 'typography.fontFamily.heading'/'mono', 'animation' and 'zIndex' removed (#5021, ADR-0049 — the engine emitted --font-size-*, --font-weight-*, --line-height-*, --letter-spacing-*, --duration-*, --timing-*, --z-*, --font-heading and --font-mono faithfully, and no first-party component or stylesheet has ever read one. Re-declare any variable you actually consume under customVars, which emits it verbatim)",
         "conversionId": "theme-inert-token-scales-removed",
@@ -1040,6 +1046,12 @@
           "surface": "connector.rateLimitConfig",
           "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
           "conversionId": "connector-rate-limit-config-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform",
+          "to": "field-mapping key 'transform' removed (#5552 — the whole five-member FieldMappingTransform union went with it: no runtime ever executed constant/cast/lookup/javascript/map, and the javascript member advertised dialect=\"js\", retired in #3278. The enforced transform pipeline is the import mapping's string-enum `mapping.fieldMapping[].transform`, which is unaffected)",
+          "conversionId": "field-mapping-transform-removed",
           "toMajor": 17
         },
         {

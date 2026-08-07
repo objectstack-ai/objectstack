@@ -234,6 +234,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **credential** | `{ id: string; environmentId: string; secretCiphertext: string; encryptionKeyId: string; … }` | ✅ | Freshly-minted credential for the environment DB |
 | **durationMs** | `number` | ✅ | Total provisioning duration in milliseconds |
 | **warnings** | `string[]` | optional | Non-fatal warnings emitted during provisioning |
+| **hostnameAssignment** | `{ requestedHostname: string; assignedHostname: string }` | optional | Populated ONLY when the control plane auto-renamed the requested hostname to avoid a collision. Absent means the requested hostname was assigned unchanged — never read absence as "unknown". |
 
 
 ---
@@ -261,7 +262,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **defaultEnvironment** | `{ environment: object; credential: object; durationMs: number; warnings?: string[] }` | ✅ | Default environment that was created |
+| **defaultEnvironment** | `{ environment: object; credential: object; durationMs: number; warnings?: string[]; … }` | ✅ | Default environment that was created |
 | **durationMs** | `number` | ✅ | Total bootstrap duration in milliseconds |
 | **warnings** | `string[]` | optional | Non-fatal warnings |
 

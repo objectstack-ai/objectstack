@@ -71,6 +71,11 @@ const manifest = {
     { type: 'text', key: 'twilio_messaging_service_sid', label: 'Messaging Service SID', required: false,
       visible: "${data.provider === 'twilio'}" },
 
+    { type: 'group', id: 'limits', label: 'Spend limits', required: false,
+      description: 'Caps the deployment’s outbound SMS volume. SMS is a paid channel and every send costs real money.' },
+    { type: 'number', key: 'daily_quota', label: 'Daily send limit', required: false, default: 0, min: 0,
+      description: 'Maximum SMS this deployment may send per UTC day, across OTP sign-in, invitations and notifications. 0 means no limit. Sends beyond the limit are refused until 00:00 UTC.' },
+
     { type: 'action_button', id: 'test', label: 'Send test SMS', required: false, icon: 'Send',
       handler: { kind: 'http', method: 'POST', url: '/api/settings/sms/test' } },
   ],

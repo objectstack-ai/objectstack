@@ -1,0 +1,28 @@
+{
+  "description": "Ratchet of every AUTHORABLE key in one category of the spec — what a metadata author may write, which for this platform IS the third-party API. Sharded by category (#5837) so two PRs touching different categories never share a file; the gate reads the whole authorable-surface/ directory as ONE set, so deleting a shard deletes its keys exactly as deleting lines did. Auto-updated on additions (commit the change). A key that disappears without a tombstone fails gen:schema, because these schemas are not .strict() and Zod would silently strip it. \"[RETIRED]\" marks a tombstoned key that still rejects with an upgrade prescription. See #3855, ADR-0059 §5.",
+  "category": "qa",
+  "keys": [
+    "qa/TestAction:payload",
+    "qa/TestAction:target",
+    "qa/TestAction:type",
+    "qa/TestAction:user",
+    "qa/TestAssertion:expectedValue",
+    "qa/TestAssertion:field",
+    "qa/TestAssertion:operator",
+    "qa/TestScenario:description",
+    "qa/TestScenario:id",
+    "qa/TestScenario:name",
+    "qa/TestScenario:requires",
+    "qa/TestScenario:setup",
+    "qa/TestScenario:steps",
+    "qa/TestScenario:tags",
+    "qa/TestScenario:teardown",
+    "qa/TestStep:action",
+    "qa/TestStep:assertions",
+    "qa/TestStep:capture",
+    "qa/TestStep:description",
+    "qa/TestStep:name",
+    "qa/TestSuite:name",
+    "qa/TestSuite:scenarios"
+  ]
+}

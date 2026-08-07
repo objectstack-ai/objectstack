@@ -87,7 +87,7 @@ export class LocalStorageAdapter implements IStorageService {
    * Wrap a storage operation with metrics instrumentation. Never swallows
    * the underlying error; instrumentation failures are silently ignored.
    */
-  private async track<T>(op: 'put' | 'get' | 'delete' | 'head' | 'list', fn: () => Promise<T>): Promise<T> {
+  private async track<T>(op: 'put' | 'get' | 'delete' | 'head', fn: () => Promise<T>): Promise<T> {
     const started = Date.now();
     const baseLabels = { adapter: 'local', op } as const;
     try {
@@ -189,29 +189,17 @@ export class LocalStorageAdapter implements IStorageService {
     });
   }
 
-  async list(prefix: string): Promise<StorageFileInfo[]> {
-    return this.track('list', async () => {
-      const dirPath = this.resolvePath(prefix);
-      try {
-        const entries = await fs.readdir(dirPath);
-        const results: StorageFileInfo[] = [];
-        for (const entry of entries) {
-          if (entry.startsWith('.')) continue;
-          const fullKey = prefix ? `${prefix}/${entry}` : entry;
-          try {
-            // Inline stat to avoid double-counting `head` operations.
-            const stat = await fs.stat(this.resolvePath(fullKey));
-            results.push({ key: fullKey, size: stat.size, lastModified: stat.mtime });
-          } catch {
-            /* skip */
-          }
-        }
-        return results;
-      } catch {
-        return [];
-      }
-    });
-  }
+  // `list(prefix)` is gone (#5541), following its removal from IStorageService
+  // (#5540, ADR-0049 enforce-or-remove; analysis #5266). This implementation was
+  // a single-level `readdir` that reported subdirectories as files, so it and the
+  // S3 adapter's recursive-but-truncated one answered the same call differently
+  // and neither said so. Nothing in the repo called either. Enumerate the records
+  // you wrote (`sys_file` / file references, paginated through ObjectQL) instead
+  // of the bucket; if a first-party caller ever needs real bucket enumeration it
+  // returns cursor-shaped — `list(prefix, { cursor, limit })` — with
+  // adapter-conformance cases proving both backends agree before it ships.
+  // Absence is pinned in `storage-adapter-list-retirement.test.ts`: an excess
+  // method on a class is not a type error, so tsc cannot hold this line.
 
   // ---------------------------------------------------------------------------
   // Presigned URL helpers

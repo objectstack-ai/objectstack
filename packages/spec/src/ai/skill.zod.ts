@@ -44,6 +44,25 @@ export type SkillTriggerCondition = z.infer<typeof SkillTriggerConditionSchema>;
  * Aligned with Salesforce Agentforce Topics, Microsoft Copilot Studio Topics,
  * and ServiceNow Skill metadata patterns.
  *
+ * ## Where each half of a skill runs (#3905)
+ *
+ * ADR-0063 §2 makes skills the only third-party extension primitive, and the
+ * open distribution is deliberately BYO-AI (cloud ADR-0025): it ships MCP, not
+ * an in-product agent runtime. The two halves of a skill therefore reach very
+ * different runtimes, and the schema says which is which rather than implying
+ * both work everywhere:
+ *
+ * - **`instructions`** — served **everywhere**. `@objectstack/mcp` projects it
+ *   onto the MCP `prompts` primitive, so any connected MCP client can
+ *   `prompts/list` / `prompts/get` a skill authored in the open framework.
+ * - **`tools` / `surface` / `triggerConditions`** — **cloud-runtime-only**.
+ *   Tool binding and skill↔agent affinity are read by the in-product `ask` /
+ *   `build` agent runtime, which ships in the cloud / Enterprise distribution.
+ *   In the open framework there is no agent loop to bind tools to (the client's
+ *   own model drives a flat MCP tool list), so these keys are authored for
+ *   cloud and inert here. They are still validated — a skill naming a tool that
+ *   does not exist is an authoring error in both distributions.
+ *
  * NOTE — there is deliberately NO per-skill `permissions` field. Access to AI
  * capability is gated at the AGENT level (`agent.access` / `agent.permissions`,
  * both enforced at the chat route), and each tool enforces its own authz when
@@ -117,19 +136,30 @@ export const SkillSchema = lazySchema(() => strictObject({
    * matches either); the runtime enforces this at load time. An agent's
    * tool set is the union of its surface-compatible skills' tools — there
    * is no global fall-through (ADR-0064). Defaults to `'ask'`, the
-   * data-console surface. (Both the `ask` and `build` in-product agent
-   * runtimes ship in the cloud / Enterprise distribution per ADR-0025;
-   * the surface value here is authoring metadata, not an edition gate.)
+   * data-console surface.
+   *
+   * **CLOUD-RUNTIME-ONLY.** Both the `ask` and `build` in-product agent
+   * runtimes ship in the cloud / Enterprise distribution (ADR-0025), and this
+   * key is read only there — it is authoring metadata, not an edition gate.
+   * The open framework has no agent to bind to; what it serves from a skill is
+   * `instructions`, as an MCP prompt (#3905).
    */
   surface: z.enum(['ask', 'build', 'both']).default('ask').describe(
-    "Agent surface this skill binds to ('ask' | 'build' | 'both') — ADR-0063 §3",
+    "Agent surface this skill binds to ('ask' | 'build' | 'both') — ADR-0063 §3; read by the cloud agent runtime only",
   ),
 
   /**
    * Instructions injected into the system prompt when this skill is active.
    * Guides the LLM on how and when to use the skill's tools.
+   *
+   * The half of a skill that runs in **every** distribution (#3905). On the
+   * cloud agent runtime it is injected into the active agent's system prompt;
+   * in the open framework `@objectstack/mcp` projects it onto the MCP `prompts`
+   * primitive, so a connected client can list this skill by name and fetch this
+   * text. A skill with no `instructions` has nothing to project and is not
+   * listed as a prompt at all.
    */
-  instructions: z.string().optional().describe('LLM instructions when skill is active'),
+  instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt (#3905)'),
 
   /**
    * References to tool names that belong to this skill.
@@ -142,8 +172,16 @@ export const SkillSchema = lazySchema(() => strictObject({
    *
    * Tools should also be registered as first-class metadata
    * (type: 'tool') unless they are dynamically materialised at runtime.
+   *
+   * **CLOUD-RUNTIME-ONLY** (#3905). Tool binding is consumed by the in-product
+   * agent runtime, which composes an agent's tool set from its
+   * surface-compatible skills. Over MCP the model lives client-side and the
+   * server exposes one flat tool list, so there is nothing here to bind: an
+   * AI-exposed Action is already reachable as `action_<name>` through
+   * `list_actions` / `run_action`. The references are still checked at
+   * authoring time in both distributions (`ai-skill-tool-unresolved`).
    */
-  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`)'),
+  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime only'),
 
   /**
    * Natural language phrases that trigger skill activation.
@@ -165,10 +203,18 @@ export const SkillSchema = lazySchema(() => strictObject({
   /**
    * Programmatic conditions for skill activation.
    * Evaluated against the runtime context (object name, user role, etc.).
+   *
+   * **CLOUD-RUNTIME-ONLY** (#3905) — activation is a property of an agent loop.
+   * MCP has no server-side activation step: a client lists every projected
+   * prompt and decides for itself which to fetch.
    */
-  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions'),
+  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions — evaluated by the cloud agent runtime only'),
 
-  /** Whether the skill is enabled */
+  /**
+   * Whether the skill is enabled. Honoured in both distributions: an inactive
+   * skill is dropped by the cloud skill registry and is not projected as an
+   * MCP prompt (#3905).
+   */
   active: z.boolean().default(true).describe('Whether the skill is enabled'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

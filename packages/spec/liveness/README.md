@@ -74,7 +74,18 @@ checkout. Prose around the paths is fine and encouraged — `packages/spec/src/s
 (mergeActionsIntoObjects stable-sorts each group)` resolves the path and ignores
 the parenthetical.
 
-**A path in another repo must say so**, or the gate will report it as rot:
+**A repo-local path that does not resolve FAILS CI** (`✗`, exit 1 — since #5623;
+it was a non-failing `⚠` before, calibrated for the parser bug described in the
+note below rather than for the parser we have). A `live` verdict *is* its
+evidence pointer, so a pointer into thin air is a claim nothing can falsify — and
+a directory move or a rename is the whole cost of getting there. Repair it, or,
+if the consumer is genuinely gone, re-classify the property under ADR-0049
+enforce-or-remove instead of repointing at a plausible survivor.
+
+**A path in another repo must say so**, or the gate will report it as rot —
+attributed paths are counted and never resolved, so they cannot fail this check
+(that boundary is deliberate: ~101 entries cite the renderer repo or the closed
+cloud runtime, whose files are legitimately absent here):
 
 ```jsonc
 "evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx:573"

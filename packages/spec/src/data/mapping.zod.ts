@@ -105,9 +105,13 @@ export const TransformType = z.enum([
  * test:
  *
  * 1. `transform` is a plain {@link TransformType} enum defaulting to `'none'`,
- *    steering a flat `params` bag. `shared`/`integration` use the discriminated
- *    union `FieldMappingTransformSchema` (`{ type: 'cast', targetType }` …).
- *    Same key name, mutually unparseable values.
+ *    steering a flat `params` bag — and it is the only one of the three that is
+ *    ENFORCED: `packages/rest/src/import-mapping.ts` applies it row by row, and
+ *    rejects its `javascript` value with a 400 because no server sandbox
+ *    exists. `shared`/`integration` used to declare the same key as a
+ *    discriminated union (`FieldMappingTransformSchema`), which nothing ever
+ *    executed; #5552 retired it there under ADR-0049, so the key is now live
+ *    here and tombstoned on the other two. Same name, opposite dispositions.
  * 2. `source` / `target` accept `string | string[]` here — one target field may
  *    be composed from several columns (`split` / `join`). The other two take a
  *    single `string`.
