@@ -201,10 +201,8 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
 /**
  * Which tier of the stack a rule reads.
  *
- * - `normalized` — the `normalizeStackInput` output, BEFORE the Zod parse. The
- *   rules that need it check keys the parse strips (a flat list view in
- *   `views: []`, `userFilters` on an object list view, a `visibleOn` alias): by
- *   the time `result.data` exists the evidence is gone.
+ * - `normalized` — the `normalizeStackInput` output, run before this package's
+ *   caller had a chance to Zod-parse.
  * - `parsed` — the post-parse stack, where defaults are filled and shapes are
  *   settled.
  *
@@ -212,6 +210,49 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  * `os validate`'s verdict to give), so it runs BOTH tiers on the normalized
  * stack. Every rule here is written to tolerate that — it is what `os lint`
  * already did for the reference-integrity suite and the security linter.
+ *
+ * ## What `normalized` does NOT buy, measured (#6073)
+ *
+ * This tier used to be justified as "the rules that need it check keys the
+ * parse strips — a flat list view in `views: []`, `userFilters` on an object
+ * list view, a `visibleOn` alias — by the time `result.data` exists the
+ * evidence is gone". **All three of those examples were measured false**, each
+ * for its own reason, and the pins live in `authoring-rule-input-tier.test.ts`:
+ *
+ *  1. `defineStack` — the documented and universal way a TS config declares a
+ *     stack — PARSES at definition time, so for such a config the value every
+ *     command hands this registry is already `result.data`: parse-time defaults
+ *     filled (`flow.runAs === 'user'`), unknown keys resolved. Re-normalizing it
+ *     cannot resurrect anything. That half was measured in #5693 and re-measured
+ *     here.
+ *  2. But nothing is lost, because since #4001 the two cited view schemas do not
+ *     STRIP — they REFUSE. `ViewSchema` and `ObjectListViewSchema` are strict, so
+ *     `defineStack` throws on the flat list view and on `quickFilters` /
+ *     `userFilters: { element: 'tabs' }`, naming the same sites the rules name,
+ *     one layer earlier and with the schema's own fix hint. Measured end to end:
+ *     `os lint` and `os validate` on an example app carrying the flat view both
+ *     refuse the config at LOAD, before any rule runs.
+ *  3. The `visibleOn` alias never reaches this tier on ANY input shape: the
+ *     ADR-0087 D2 conversion (`view-visibleOn-to-visibleWhen`,
+ *     `page-component-visibility-to-visibleWhen`) folds it into `visibleWhen`
+ *     INSIDE `normalizeStackInput` — one layer before the tier, not during the
+ *     parse. See #6318.
+ *
+ * ## What it does buy, and why the tier stays
+ *
+ * The surviving reason is the one `validate-functional-completeness.ts` states
+ * and the measurement confirms: a `normalized`-tier finding reaches the author
+ * even when an unrelated schema error elsewhere would stop the parse. On the
+ * raw (non-`defineStack`) path that is not theoretical — `os validate` stops at
+ * the schema step and reports zero rule findings, while `os lint`, which never
+ * parses, still names `view-container-shape` and
+ * `list-view-filters-in-views-mode`. Plus the plain fact that `os lint` has no
+ * parsed stack to give.
+ *
+ * So: read `normalized` as "does not REQUIRE a parsed stack", never as "is
+ * guaranteed to see pre-parse evidence". A new rule whose only evidence is a key
+ * a strict schema rejects is a rule that will never fire — put the diagnostic in
+ * the schema instead, where #4001 already puts it.
  */
 export type AuthoringRuleInputTier = 'normalized' | 'parsed';
 
@@ -349,8 +390,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       })),
   },
   // ADR-0053 — `userFilters`/`quickFilters` on an object list view ("views"
-  // mode) are silently dropped: `ObjectListViewSchema` omits them, so this must
-  // read the pre-parse tier or the evidence is already gone.
+  // mode). NOT "silently dropped" any more: since #4001 `ObjectListViewSchema`
+  // is strict and refuses `quickFilters` by name, and `ObjectUserFiltersSchema`
+  // refuses `element: 'tabs'` by enum — measured under #6073, `defineStack`
+  // THROWS on both. `normalized` here therefore means "needs no parsed stack"
+  // (so `os lint`, which never parses, can run it), not "sees evidence the
+  // parse would have eaten".
   {
     name: 'validateListViewMode',
     tier: 'gating',
@@ -381,9 +426,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateFunctionalCompleteness(stack),
   },
-  // A flat list-view object in `views: []` parses to an EMPTY container
-  // (ViewSchema strips unknown keys): the schema step passes, zero views
-  // register, and the Console renders nothing. Pre-parse for the same reason.
+  // A view container in `views: []` that registers zero views: nothing appears
+  // in the Console, and the schema step cannot tell it from an intentionally
+  // empty one. The FLAT-list-view arm no longer needs this tier — `ViewSchema`
+  // went strict at #4001, so `defineStack` now REFUSES `{ name, type, columns,
+  // data }` by name with the wrap-it hint (measured under #6073); the arm that
+  // still needs a rule is the all-slots-empty container, whose keys are all
+  // declared and which survives the parse untouched.
   {
     name: 'validateViewContainers',
     tier: 'gating',
@@ -698,9 +747,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateSeedStateMachine(stack),
   },
   // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root,
-  // plus (#6128) the bare-identifier gate. Pre-parse: the schema folds
-  // `visibleOn`/`visibility` into `visibleWhen` during parse, so the alias the
-  // author wrote is gone from `result.data`.
+  // plus (#6128) the bare-identifier gate. This entry used to read "pre-parse:
+  // the schema folds `visibleOn`/`visibility` into `visibleWhen` during parse,
+  // so the alias the author wrote is gone from `result.data`". Measured false
+  // at #6073: the ADR-0087 D2 conversions do that fold INSIDE
+  // `normalizeStackInput`, one layer BEFORE this tier, so on every spec-valid
+  // alias site `visibility-alias-deprecated` reports zero here too — see #6318,
+  // which carries the per-site table and the retire-or-rewire question. The two
+  // predicate-VALUE rules (`visibility-bare-identifier`,
+  // `visibility-root-mislayered`) are unaffected: the value moves into
+  // `visibleWhen` intact and both still report on this tier.
   //
   // `gating` since #6128: `visibility-bare-identifier` emits `error`. The two
   // ADR-0089 rules stay advisory findings within it — the tier is a property of

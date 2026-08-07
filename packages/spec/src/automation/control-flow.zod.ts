@@ -139,9 +139,9 @@ export const FlowRegionSchema = lazySchema(() => strictObject(
   },
   {
     /** Body nodes (must not include `start`/`end` trigger sentinels). */
-    nodes: z.array(FlowNodeSchema).min(1).describe('Region body nodes (single-entry/single-exit sub-graph)'),
+    nodes: z.array(z.lazy(() => FlowNodeSchema)).min(1).describe('Region body nodes (single-entry/single-exit sub-graph)'),
     /** Body edges connecting the region nodes. */
-    edges: z.array(FlowEdgeSchema).default([]).describe('Region body edges'),
+    edges: z.array(z.lazy(() => FlowEdgeSchema)).default([]).describe('Region body edges'),
   },
 ));
 
@@ -239,8 +239,8 @@ export const ParallelBranchSchema = lazySchema(() => strictObject(
   {
     /** Optional human label for the branch (designer + logs). */
     name: z.string().optional().describe('Branch label'),
-    nodes: z.array(FlowNodeSchema).min(1).describe('Branch body nodes'),
-    edges: z.array(FlowEdgeSchema).default([]).describe('Branch body edges'),
+    nodes: z.array(z.lazy(() => FlowNodeSchema)).min(1).describe('Branch body nodes'),
+    edges: z.array(z.lazy(() => FlowEdgeSchema)).default([]).describe('Branch body edges'),
   },
 ));
 
@@ -451,8 +451,8 @@ interface RegionSlot {
  * the value it holds, the Zod schema that value parses as, and a diagnostic
  * label.
  *
- * The three passes in this module read it ({@link validateControlFlow},
- * {@link normalizeControlFlowRegions}, {@link collectFlowGraphs}). WHERE the
+ * The three readers in this module use it ({@link validateControlFlow},
+ * {@link parseFlowNodeRegions}, {@link collectFlowGraphs}). WHERE the
  * slots are is no longer stated here — that moved to `region-slots.ts` so the
  * conversion walk and the lint walk read the same list. What stays here is the
  * schema half, which is this module's business.
@@ -554,81 +554,70 @@ export function validateControlFlow(flow: { nodes: FlowNodeParsed[] }): void {
 }
 
 
-// ─── Region normalization ────────────────────────────────────────────
+// ─── Region parsing (the FlowNodeSchema transform) ───────────────────
 
 /**
- * Parse ONE region value through its own schema, then recurse into the
- * containers its nodes carry.
+ * Re-entrancy depth of {@link parseFlowNodeRegions}.
  *
- * A value that does not parse is returned untouched: rejecting a malformed
- * region is {@link validateControlFlow}'s job (and, at run time, the container
- * executor's `parseNodeConfig`). A normalization pass that also threw would
- * change *which* flows register, which is not what it is for.
+ * A module-level counter rather than a parameter, because the recursion is no
+ * longer ours to thread: `FlowRegionSchema.nodes` is `z.array(FlowNodeSchema)`,
+ * so the descent happens *inside Zod*, which has nowhere to carry a depth. Safe
+ * as shared state because Zod parsing is synchronous — the whole tree unwinds on
+ * one stack, and the `finally` below restores the counter on the error path too.
+ *
+ * Without it a flow assembled as hand-built objects (not parsed JSON) could hold
+ * a self-reference and recurse until the stack blows, at the load seam. The
+ * post-parse pass this replaced guarded the same hazard with an explicit `depth`
+ * argument; the ceiling is unchanged.
  */
-function normalizeRegion(slot: RegionSlot, depth: number): unknown {
-  if (!isRegionDict(slot.raw)) return slot.raw;
-  const parsed = slot.schema.safeParse(slot.raw);
-  if (!parsed.success) return slot.raw;
-  const region = parsed.data as { nodes?: FlowNodeParsed[] };
-  if (!Array.isArray(region.nodes)) return region;
-  return { ...region, nodes: region.nodes.map(n => normalizeNodeRegions(n, depth + 1)) };
-}
+let regionParseDepth = 0;
 
-/** Normalize every region one node carries — recursively, since regions nest. */
-function normalizeNodeRegions(node: FlowNodeParsed, depth: number): FlowNodeParsed {
-  if (depth >= MAX_REGION_DEPTH) return node;
+/**
+ * Parse every ADR-0031 region a node's `config` holds — the body of
+ * {@link FlowNodeSchema}'s `.transform()` (#4415).
+ *
+ * `FlowNodeSchema.config` is a deliberately open `z.record` (ADR-0018), so
+ * nothing about a container's nested sub-graph is described by the node's own
+ * shape. This resolves each declared slot against {@link FLOW_REGION_SLOTS_BY_TYPE}
+ * and runs its value through the schema that slot's value IS — `FlowRegionSchema`
+ * for `loop.config.body` / `try_catch.config.try` / `.catch`,
+ * `ParallelBranchSchema` for each `parallel.config.branches[]`.
+ *
+ * Nesting needs no recursion here: those schemas hold `z.array(FlowNodeSchema)`,
+ * so a region's own nodes come back through this transform on the way down. That
+ * is the whole reason this reads shorter than the pass it replaced.
+ *
+ * **A value that does not parse is returned untouched.** Rejecting a malformed
+ * region is {@link validateControlFlow}'s job (and, at run time, the container
+ * executor's `parseNodeConfig`): a transform that threw here would change *which*
+ * flows parse at all, moving a structural diagnostic out of the validator that
+ * owns its message and into a Zod issue on `config`. Copy-on-write — a node with
+ * no region comes back by identity.
+ */
+export function parseFlowNodeRegions<T extends { type: string; config?: unknown }>(node: T): T {
   const cfg = node.config as Record<string, unknown> | undefined;
   if (!cfg) return node;
+  if (regionParseDepth >= MAX_REGION_DEPTH) return node;
 
-  let next = cfg;
-  for (const slot of regionSlotsOf(node)) {
-    const normalized = normalizeRegion(slot, depth);
-    if (normalized === slot.raw) continue;
-    if (slot.index === undefined) {
-      next = { ...next, [slot.key]: normalized };
-    } else {
-      const branches = [...(next[slot.key] as unknown[])];
-      branches[slot.index] = normalized;
-      next = { ...next, [slot.key]: branches };
+  regionParseDepth++;
+  try {
+    let next = cfg;
+    for (const slot of regionSlotsOf(node as unknown as FlowNodeParsed)) {
+      if (!isRegionDict(slot.raw)) continue;
+      const parsed = slot.schema.safeParse(slot.raw);
+      if (!parsed.success) continue;
+      if (slot.index === undefined) {
+        next = { ...next, [slot.key]: parsed.data };
+      } else {
+        const branches = [...(next[slot.key] as unknown[])];
+        branches[slot.index] = parsed.data;
+        next = { ...next, [slot.key]: branches };
+      }
     }
+    return next === cfg ? node : { ...node, config: next };
+  } finally {
+    regionParseDepth--;
   }
-
-  return next === cfg ? node : { ...node, config: next };
-}
-
-/**
- * Canonicalize the metadata **inside** every structured region of a flow (#4347).
- *
- * `FlowSchema.parse` normalizes a flow's own `nodes[]` / `edges[]` — most
- * visibly, `FlowEdgeSchema.condition` is `ExpressionInputSchema`, so a
- * bare-string predicate becomes the canonical `{ dialect: 'cel', source }`
- * envelope. It does not reach a region, because a region lives inside
- * `FlowNodeSchema.config`, which is deliberately `z.record(z.unknown())` — open,
- * per node type. So the *same predicate* was stored enveloped on a top-level edge
- * and left a bare string on a loop-body edge: a representation that depended on
- * where in the graph it sat, which no flow author can be expected to predict.
- *
- * This pass closes that. Each region is run through its own schema — recursively,
- * because regions nest — producing a flow whose nested edges and nodes carry the
- * same canonical shapes as its top-level ones. Copy-on-write: a flow with no
- * structured container comes back untouched.
- *
- * Call it at the load seam, after `FlowSchema.parse` and `validateControlFlow`.
- * The container executors parse their own config at run time (`parseNodeConfig`,
- * #4277), so this is not what makes a nested predicate *evaluate* correctly — it
- * is what makes the stored flow SAY so, for every reader that is not the
- * executor: the Studio designer, `getFlow`, the version history, and any
- * consumer that reads a region without re-parsing it.
- */
-export function normalizeControlFlowRegions<T extends { nodes: FlowNodeParsed[] }>(flow: T): T {
-  if (!Array.isArray(flow.nodes)) return flow;
-  let changed = false;
-  const nodes = flow.nodes.map(node => {
-    const next = normalizeNodeRegions(node, 0);
-    if (next !== node) changed = true;
-    return next;
-  });
-  return changed ? { ...flow, nodes } : flow;
 }
 
 // ─── Whole-flow graph traversal ──────────────────────────────────────

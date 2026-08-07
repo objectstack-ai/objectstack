@@ -265,9 +265,9 @@
     "getSchemalessNodeConfigJsonSchemas (function)",
     "importBpmnToConstructs (function)",
     "isFlowFunctionEffect (function)",
-    "normalizeControlFlowRegions (function)",
     "normalizeDecisionOutputs (function)",
     "normalizeFlowFunctionEntry (function)",
+    "parseFlowNodeRegions (function)",
     "resolveFlowNodeExpressions (function)",
     "validateControlFlow (function)"
   ]

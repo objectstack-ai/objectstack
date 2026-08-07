@@ -40,6 +40,8 @@ export const ProjectViews = defineView({
     //   • reassign_account → single-select on a `lookup` param (searchable
     //                     reference picker, not a bare dropdown)
     //   • reschedule    → the new `date` control + a single-select together
+    // The last two defs are the CAPABILITY-GATED pair (ADR-0066 D4, #6257) —
+    // see their own comment below.
     bulkActionDefs: [
       {
         name: 'set_labels',
@@ -116,6 +118,35 @@ export const ProjectViews = defineView({
             ],
           },
         ],
+      },
+      // ── Capability-gated INLINE defs (ADR-0066 D4, #6257) ────────────────
+      // The cell the #6157 action-gating matrix could not pin: an inline
+      // DATA-PLANE def dispatches no action, so it has nothing to inherit a
+      // gate from — before #6257 there was no legal spelling of
+      // `requiredPermissions` here at all. Same specimen pair as the zoo's
+      // `showcase_zoo_perm_held` / `showcase_zoo_perm_missing` (see
+      // security/capabilities.ts): one capability Operations HOLDS, one that
+      // is granted to NOBODY. The selection bar must therefore show
+      // `relabel_ops` exactly to Ops-position callers, show `purge_restricted`
+      // to no one (platform admin included — the gate reads GRANTS, not the
+      // admin bit), and keep the four ungated defs above visible to everyone
+      // who can open the list. The gate governs visibility only: the write
+      // itself is still authorized by the data API's object permissions.
+      {
+        name: 'relabel_ops',
+        label: 'Relabel (Ops)',
+        operation: 'update',
+        patch: { labels: ['qa'] },
+        requiredPermissions: ['showcase.export_data'],
+        confirmText: 'Reset the labels of every selected project to QA?',
+      },
+      {
+        name: 'purge_restricted',
+        label: 'Purge (Restricted)',
+        operation: 'delete',
+        variant: 'danger',
+        requiredPermissions: ['showcase.restricted_ops'],
+        confirmText: 'Permanently delete every selected project?',
       },
     ],
   },

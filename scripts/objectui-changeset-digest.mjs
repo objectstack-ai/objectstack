@@ -69,12 +69,45 @@
 //
 // This criterion changes the ANNOTATION and the COUNT only. The collected set is
 // untouched: nothing is admitted or dropped because of it.
+//
+// WHY THE FALLBACK IS QUIET, AND WHY IT STILL SAYS SO (#6175)
+// ----------------------------------------------------------
+// `readAt` reads each changeset at `to` and falls back to the commit that ADDED
+// it, because a changeset consumed by a release INSIDE the range is gone at `to`
+// (the reason `collectAddedChangesets` walks the log instead of diffing the
+// endpoints). The fallback works, and the artifact it produces is complete.
+//
+// It used to ANNOUNCE ITSELF AS A FAILURE anyway. `execFileSync` sends the
+// child's stderr to ours unless `stdio` says otherwise, so the first `git show`
+// printed git's own `fatal: path … does not exist in …` before `catch` could run
+// — one line per changeset, then one line saying everything succeeded. Measured
+// on the real pin bump `f995a452d2ca..7dfbeb704e1e` (#6159 / PR #6173): 9
+// `fatal:` lines, 9 complete entries, exit 0.
+//
+// That is the MIRROR of the rule this file already enforces. #4731 wrote "a
+// degraded list and a complete one must never look alike"; here a COMPLETE list
+// looked like a failure. The two failure modes cost the same, because the next
+// reader's first instinct is "the digest is broken, write the changeset by hand
+// with `--no-changeset`" — and that hand-written path really does drop all 9
+// releasing entries. Noise that points at the wrong remedy is not merely noise.
+//
+// So the first attempt CAPTURES its stderr instead of inheriting it, and the
+// fallback is reported once, as a fact, beside the accounting line
+// (`absentAtTo`). Two things this deliberately does not do:
+//
+//   * It does not go silent. Silence would trade a misleading line for no line,
+//     and "this range crossed a release" is worth exactly one sentence — the
+//     same reason the cap and the degraded list announce themselves (#4731).
+//   * It does not mute FAILURE. When BOTH reads fail nothing was read and the
+//     entry would vanish, so both captured diagnostics are re-emitted, named by
+//     attempt, and the error still propagates. Quiet is earned by the fallback
+//     that worked; it is never extended to the one that did not.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -84,11 +117,20 @@ export const DEFAULT_MAX_ENTRIES = 100;
 
 const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
 
-/** @param {string} cwd @param {string[]} args */
-function git(cwd, args) {
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @param {{ captureStderr?: boolean }} [options] `captureStderr` routes the
+ *   child's stderr into the thrown error instead of ours. Leave it OFF by
+ *   default: an unset `stdio` inherits our stderr (`execFileSync`'s documented
+ *   behaviour), which is what a call whose failure is a real failure should do.
+ *   Turn it on only where a failure is EXPECTED and retried — `readAt` (#6175).
+ */
+function git(cwd, args, { captureStderr = false } = {}) {
   return execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    ...(captureStderr ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
   });
 }
 
@@ -309,12 +351,54 @@ export function collectAddedChangesets(objectuiRoot, from, to) {
   };
 }
 
-/** Read a changeset's content at `to`, falling back to the commit that added it. */
-function readAt(objectuiRoot, to, sha, path) {
+/** A failed `execFileSync` rendered as the child's own diagnostic, indented. */
+function gitDiagnostic(err) {
+  const captured = typeof err?.stderr === 'string' ? err.stderr : '';
+  const text = captured.trim() || err?.message || String(err);
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+/**
+ * Read a changeset's content at `to`, falling back to the commit that added it.
+ *
+ * `fellBack` is the caller's only handle on "this range crossed a release".
+ * git's own `fatal:` used to be that handle by accident — which made a complete
+ * result read as a failed one, the defect #6175 records; see the header note.
+ *
+ * Exported for the self-test: the both-reads-failed branch cannot be reached
+ * through `classifyRange`, whose `sha` always comes from `--diff-filter=A` and
+ * therefore always has the path. An error path no test can enter is an error
+ * path that quietly rots into silence, which is the one outcome #6175 forbids.
+ *
+ * @returns {{ text: string, fellBack: boolean }}
+ */
+export function readAt(objectuiRoot, to, sha, path) {
   try {
-    return git(objectuiRoot, ['show', `${to}:${path}`]);
-  } catch {
-    return git(objectuiRoot, ['show', `${sha}:${path}`]);
+    return {
+      text: git(objectuiRoot, ['show', `${to}:${path}`], { captureStderr: true }),
+      fellBack: false,
+    };
+  } catch (atTo) {
+    try {
+      return {
+        text: git(objectuiRoot, ['show', `${sha}:${path}`], { captureStderr: true }),
+        fellBack: true,
+      };
+    } catch (atSha) {
+      // BOTH reads failed: nothing was read, and this entry is about to be lost
+      // from the release record. Say so with everything git told us, twice over.
+      console.error(
+        `✗ objectui-changeset-digest: cannot read ${path} — neither at \`to\` nor at the commit that added it.`,
+      );
+      console.error(`  at \`to\` (${to}):`);
+      console.error(gitDiagnostic(atTo));
+      console.error(`  at the commit that added it (${sha}):`);
+      console.error(gitDiagnostic(atSha));
+      throw atSha;
+    }
   }
 }
 
@@ -366,7 +450,11 @@ export function inPreMode(frameworkRoot) {
  * Nothing here reads a commit type. Grouping output BY type is presentation and
  * belongs to the caller; it must never become a filter again.
  *
- * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, totalCommits: number }}
+ * `absentAtTo` counts the changesets that were gone at `to` and had to be read
+ * from the commit that added them — the readable form of what used to arrive as
+ * a screenful of git `fatal:` lines (#6175).
+ *
+ * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number }}
  */
 export function classifyRange({ objectuiRoot, from, to }) {
   const { entries, commits, totalCommits, commitsWithChangesetShas } = collectAddedChangesets(
@@ -377,10 +465,11 @@ export function classifyRange({ objectuiRoot, from, to }) {
 
   const releasing = [];
   const releaseNothingEntries = [];
+  let absentAtTo = 0;
   for (const entry of entries) {
-    const { packages, summary, body } = parseChangeset(
-      readAt(objectuiRoot, to, entry.sha, entry.path),
-    );
+    const read = readAt(objectuiRoot, to, entry.sha, entry.path);
+    if (read.fellBack) absentAtTo++;
+    const { packages, summary, body } = parseChangeset(read.text);
     const level = highestLevel(packages);
     if (!level) {
       releaseNothingEntries.push({ ...entry, summary: summary || entry.subject });
@@ -414,6 +503,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
     releaseNothing: releaseNothingEntries.length,
     noChangeset: noChangesetCommits.length,
     changesetsAdded: entries.length,
+    absentAtTo,
     totalCommits,
   };
 }
@@ -421,7 +511,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
 /**
  * Build the digest for a range.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, body: string }}
  */
 export function buildDigest({
   objectuiRoot,
@@ -431,11 +521,12 @@ export function buildDigest({
   max = DEFAULT_MAX_ENTRIES,
   bumpOverride = '',
 }) {
-  const { releasing, releaseNothing, noChangeset, changesetsAdded, totalCommits } = classifyRange({
-    objectuiRoot,
-    from,
-    to,
-  });
+  const { releasing, releaseNothing, noChangeset, changesetsAdded, absentAtTo, totalCommits } =
+    classifyRange({
+      objectuiRoot,
+      from,
+      to,
+    });
 
   const declaredLevel = releasing.length
     ? releasing.reduce(
@@ -533,6 +624,8 @@ export function buildDigest({
     releasing,
     releaseNothing,
     noChangeset,
+    changesetsAdded,
+    absentAtTo,
     totalCommits,
     downgradedMajor,
     body,
@@ -611,6 +704,22 @@ function main(argv) {
       `${digest.releaseNothing} release-nothing, ${digest.noChangeset} commit(s) without a changeset` +
       (digest.downgradedMajor ? ' — declared major recorded as minor (launch window)' : ''),
   );
+
+  // #6175: the one sentence that replaces the screenful of git `fatal:` lines.
+  // It lands HERE, beside the accounting line on stderr, and NOT in the
+  // changeset body: the body records what the range released, and how the tool
+  // had to read a file is not a fact about the release. The reader who needs it
+  // is the operator watching this run — the same reader the `fatal:` lines used
+  // to mislead. Printed only when it fires, so a range that crossed no release
+  // gains no new line (silence here means "nothing to explain", never "nothing
+  // happened" — the absence itself is not load-bearing).
+  if (digest.absentAtTo > 0) {
+    console.error(
+      `→ ${digest.absentAtTo} of ${digest.changesetsAdded} changeset(s) added in this range ` +
+        `no longer exist at ${short} — a release consumes the changesets it ships; ` +
+        `each was read from the commit that added it, so the account above is complete.`,
+    );
+  }
 
   if (out) {
     mkdirSync(dirname(out), { recursive: true });
@@ -1038,6 +1147,140 @@ function selfTest() {
         degraded.includes('**Degraded list**') &&
         degraded.includes('NOT a\ncomplete account'),
       degraded,
+    );
+
+    // --- #6175: a range whose `to` endpoint is a RELEASE COMMIT -------------
+    // The shape that made a COMPLETE result look like a failure. A release
+    // consumes the changesets it ships, so every changeset added in the range
+    // is gone at `to` and every read falls back. Its own repo on purpose: the
+    // #4731 / #6099 fixtures above pin exact counts and must not shift under it.
+    const ui3 = join(tmp, 'objectui-released');
+    mkdirSync(join(ui3, '.changeset'), { recursive: true });
+    const g3 = (...args) => git(ui3, args);
+    g3('init', '-q', '-b', 'main');
+    g3('config', 'user.email', 'selftest@objectstack.ai');
+    g3('config', 'user.name', 'self test');
+    g3('config', 'commit.gpgsign', 'false');
+    const commit3 = (subject, files, removals = []) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui3, path)), { recursive: true });
+        writeFileSync(join(ui3, path), content);
+      }
+      for (const path of removals) rmSync(join(ui3, path), { force: true });
+      g3('add', '-A');
+      g3('commit', '-q', '-m', subject);
+      return g3('rev-parse', 'HEAD').trim();
+    };
+
+    const base3 = commit3('chore: base', { 'README.md': 'base\n' });
+    commit3('feat(grid): column pinning survives a layout reload (#3401)', {
+      '.changeset/grid-column-pinning-survives-reload.md':
+        '---\n"@object-ui/plugin-grid": minor\n---\n\nGrid column pinning survives a layout reload.\n',
+      'src/grid.ts': 'a\n',
+    });
+    commit3('fix(fields): the lookup picker keeps the authored value (#3402)', {
+      '.changeset/lookup-picker-keeps-authored-value.md':
+        '---\n"@object-ui/fields": patch\n---\n\nThe lookup picker keeps the authored value.\n',
+      'src/fields.ts': 'b\n',
+    });
+    const release3 = commit3(
+      'chore: release packages (#3403)',
+      { 'package.json': '{"version":"17.1.0"}\n' },
+      [
+        '.changeset/grid-column-pinning-survives-reload.md',
+        '.changeset/lookup-picker-keeps-authored-value.md',
+      ],
+    );
+
+    const released = buildDigest({
+      objectuiRoot: ui3,
+      frameworkRoot: fwPlain,
+      from: base3,
+      to: release3,
+    });
+    check(
+      '#6175 a range crossing a release still collects every changeset',
+      released.releasing.length === 2 && released.changesetsAdded === 2,
+      `releasing=${released.releasing.length} added=${released.changesetsAdded}`,
+    );
+    check(
+      '#6175 the fallback is COUNTED, not merely survived',
+      released.absentAtTo === 2,
+      `got ${released.absentAtTo}`,
+    );
+
+    // The CLI runs as a CHILD so its real stderr can be read: that stream is
+    // where git's `fatal:` used to land, and no in-process assertion can see it.
+    const selfPath = fileURLToPath(import.meta.url);
+    const runCli = (root, from, to, label) =>
+      spawnSync(
+        process.execPath,
+        [
+          selfPath,
+          '--objectui-root', root,
+          '--framework-root', fwPlain,
+          '--from', from,
+          '--to', to,
+          '--out', join(tmp, `cli-${label}.md`),
+        ],
+        { encoding: 'utf8' },
+      );
+
+    const fellBack = runCli(ui3, base3, release3, 'released');
+    check(
+      '#6175 the fallback no longer leaks git `fatal:` onto stderr',
+      fellBack.status === 0 && !fellBack.stderr.includes('fatal:'),
+      fellBack.stderr,
+    );
+    check(
+      '#6175 the fallback SAYS SO — once, with the real count',
+      /^→ 2 of 2 changeset\(s\) added in this range no longer exist at [0-9a-f]{12} —/m.test(
+        fellBack.stderr,
+      ) && fellBack.stderr.split('no longer exist at').length === 2,
+      fellBack.stderr,
+    );
+    const quietArtifact = readFileSync(join(tmp, 'cli-released.md'), 'utf8');
+    check(
+      '#6175 the artifact stays COMPLETE — the quiet read is the whole read',
+      quietArtifact.includes('Grid column pinning survives') &&
+        quietArtifact.includes('lookup picker keeps the authored value'),
+      quietArtifact,
+    );
+
+    const noFallback = runCli(ui, base, head, 'plain');
+    check(
+      '#6175 a range that crossed no release gains NO new line',
+      noFallback.status === 0 &&
+        !noFallback.stderr.includes('no longer exist at') &&
+        !noFallback.stderr.includes('fatal:'),
+      noFallback.stderr,
+    );
+
+    // Both reads failing is a REAL failure — nothing was read and the entry
+    // would vanish from the record. Quiet is earned by the fallback that
+    // worked; it is never extended to this. Driven through the exported
+    // `readAt` because `classifyRange` cannot reach the branch: its `sha`
+    // comes from `--diff-filter=A` and therefore always has the path.
+    const probe = join(tmp, 'probe-both-reads-fail.mjs');
+    writeFileSync(
+      probe,
+      `import { readAt } from ${JSON.stringify(pathToFileURL(selfPath).href)};\n` +
+        `readAt(${JSON.stringify(ui3)}, ${JSON.stringify(release3)}, ${JSON.stringify(base3)}, ` +
+        `'.changeset/never-existed.md');\n`,
+    );
+    const bothFail = spawnSync(process.execPath, [probe], { encoding: 'utf8' });
+    check(
+      '#6175 when BOTH reads fail the failure is LOUD, naming both attempts',
+      bothFail.status !== 0 &&
+        bothFail.stderr.includes('cannot read .changeset/never-existed.md') &&
+        bothFail.stderr.includes(release3) &&
+        bothFail.stderr.includes(base3),
+      bothFail.stderr,
+    );
+    check(
+      "#6175 both attempts' git diagnostics are re-emitted, not swallowed",
+      (bothFail.stderr.match(/fatal:/g) ?? []).length >= 2,
+      bothFail.stderr,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

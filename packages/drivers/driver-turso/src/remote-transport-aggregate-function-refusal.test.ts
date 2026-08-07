@@ -57,6 +57,30 @@
  * "the transport is silent" — it is "the two faces answer one query
  * differently", so the case that must go red is the SINGLE-face change, which is
  * exactly what a future PR touching only one package would produce.
+ *
+ * ---
+ *
+ * # [#6203] The other half of the same fork: which names COMPILE
+ *
+ * #5907 made the two faces agree on how a refusal is SPELLED. It deliberately
+ * did not touch which names each face compiles, and recorded the residue here as
+ * a `[filed, not fixed]` control: this transport lowercased the function name
+ * before its lookup and the local driver did not, so `COUNT` compiled here and
+ * was refused there. Measured on `origin/main` @ `d367f03d6`:
+ *
+ * ```
+ * COUNT   REMOTE -> RESOLVED "SELECT count(\"stage\") AS \"n\" FROM \"deal\""
+ *         LOCAL  -> THREW INVALID_QUERY/400 "…\"COUNT\" is not a declared aggregate function"
+ * Count   REMOTE -> RESOLVED (same)          LOCAL -> THREW INVALID_QUERY/400
+ * ```
+ *
+ * #6203 closes it by DELETING the `toLowerCase()` — the contract-first
+ * direction of the two available. `AggregationFunction` is a case-sensitive
+ * `z.enum`, so `COUNT` is a spelling the Query Protocol never declared and what
+ * this transport accepted was a private dialect; teaching the local driver the
+ * same dialect instead would have fossilised it into a second de-facto contract
+ * (PD#12). The control is flipped into the `[#6203]` block at the bottom, whose
+ * own docblock carries the per-case reverse-verification prediction.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -95,10 +119,13 @@ const undeclaredAst = (fn: string): QueryAST => ({
 }) as unknown as QueryAST;
 
 /**
- * The one control that is off-contract on TWO axes at once — a miscased name
- * and no `alias` (which `AggregationNodeSchema` requires) — because what it pins
- * is precisely how this transport names a result column when the caller gave it
- * nothing to work with. Same `as unknown as QueryAST` discipline.
+ * The control fixture for the default alias: off-contract on the one axis it
+ * needs (no `alias`, which `AggregationNodeSchema` requires), because what it
+ * pins is precisely how this transport names a result column when the caller
+ * gave it nothing to work with. Same `as unknown as QueryAST` discipline.
+ *
+ * [#6203] It used to be off-contract on a SECOND axis — the name was miscased —
+ * which stopped being expressible the moment a miscased name became a refusal.
  */
 const aliaslessAst = (fn: string): QueryAST => ({
   object: 'deal',
@@ -139,6 +166,28 @@ const refusalOfUndeclared = (fn: string) => refusalOfAst(fn, undeclaredAst(fn));
 /** Class 2's inputs: declared names, so the fixture is a real `QueryAST`. */
 const refusalOfDeclared = (fn: AggregationNode['function']) => refusalOfAst(fn, declaredAst(fn));
 
+/**
+ * The same query put to the OTHER face of `TursoDriver` — the local/replica one,
+ * which inherits `SqlDriver`. Module-scoped because two blocks below need it:
+ * #5240's wording parity and #6203's case parity.
+ */
+async function localRefusalOf(fn: string, ast: QueryAST): Promise<WireBearingError> {
+  const d = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+  await d.initObjects([
+    { name: 'deal', fields: { id: { type: 'text', name: 'id' }, stage: { type: 'text', name: 'stage' } } } as any,
+  ]);
+  try {
+    await d.aggregate('deal', ast);
+  } catch (e) {
+    return e as WireBearingError;
+  }
+  throw new Error(`expected the local driver to refuse "${fn}", but it resolved`);
+}
+
 describe('[#5907] RemoteTransport refuses an aggregate function it cannot compile', () => {
   describe('a function name the Query Protocol never declared', () => {
     const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat'];
@@ -160,11 +209,15 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
       });
     }
 
-    it('quotes the spelling the CALLER wrote, not the normalised one', async () => {
-      // This transport lowercases before its own lookup; the refusal is judged
-      // and worded on the caller's own bytes, so `COUNT_DISTINCT` is undeclared
-      // here exactly as it is on the local driver — the two faces agree on the
-      // class instead of splitting 400/501 over a normalisation difference.
+    it('quotes the spelling the CALLER wrote, not a normalised one', async () => {
+      // The refusal is judged and worded on the caller's own bytes, so
+      // `COUNT_DISTINCT` is undeclared here exactly as it is on the local driver
+      // — the two faces agree on the class instead of splitting 400/501 over a
+      // normalisation difference. #5907 established this while this transport
+      // still lowercased for its LOOKUP; #6203 removed that lookup
+      // normalisation, so the guard is now double-locked rather than moot: it
+      // still fails on a `toLowerCase()` reintroduced anywhere between the
+      // caller's value and the message.
       const err = await refusalOfUndeclared('COUNT_DISTINCT');
       expect(err.code).toBe('INVALID_QUERY');
       expect(err.status).toBe(400);
@@ -204,23 +257,6 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
   // ── The cross-package half: one condition, one wording ─────────────────────
 
   describe('local/remote parity (#5240 — one condition, one wording)', () => {
-    const localRefusalOf = async (fn: string, ast: QueryAST): Promise<WireBearingError> => {
-      const d = new SqlDriver({
-        client: 'better-sqlite3',
-        connection: { filename: ':memory:' },
-        useNullAsDefault: true,
-      });
-      await d.initObjects([
-        { name: 'deal', fields: { id: { type: 'text', name: 'id' }, stage: { type: 'text', name: 'stage' } } } as any,
-      ]);
-      try {
-        await d.aggregate('deal', ast);
-      } catch (e) {
-        return e as WireBearingError;
-      }
-      throw new Error(`expected the local driver to refuse "${fn}", but it resolved`);
-    };
-
     // Compared as RUNTIME messages from the two packages, not as two copies of a
     // literal — a shared constant would agree with itself no matter how far the
     // two faces drifted. This is what makes "首句逐字一致" checkable.
@@ -259,33 +295,111 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
       }
     });
 
-    it('the default alias still spells itself with the NORMALISED name', async () => {
+    /**
+     * [#6203] Was `aliaslessAst('COUNT')` — off-contract on two axes at once, a
+     * miscased name AND no `alias`. The miscased half is now refused, so the
+     * fixture drops to the one axis it was actually pinning: how this transport
+     * NAMES a result column when the caller gave it nothing to work with. The
+     * expected SQL is unchanged, and that is the point of the case — the default
+     * alias used to be built from the lowercased name and is now built from the
+     * caller's own, which is the same string for every input that still
+     * compiles, because every key in the lowering table is lowercase.
+     */
+    it('the default alias still spells itself from the function name', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await t.aggregate('deal', aliaslessAst('COUNT'));
+      await t.aggregate('deal', aliaslessAst('count'));
       expect(calls[0].sql).toBe('SELECT count("stage") AS "count_stage" FROM "deal"');
     });
+  });
 
-    /**
-     * Pinned as it IS, not as it should be. This transport lowercases the
-     * function name before its lookup and the local driver does not, so `COUNT`
-     * compiles here and is refused there — measured on `origin/main` @
-     * `80f7dc6a3`, before this change and unchanged by it:
-     *
-     * ```
-     * COUNT  REMOTE -> RESOLVED "SELECT count(...)"   LOCAL -> THREW
-     * ```
-     *
-     * That fork is a normalisation question, not an envelope one: no in-repo
-     * caller emits a miscased name and `AggregationNodeSchema.function` cannot
-     * express one, so it is filed as **#6203** rather than fixed under this
-     * issue's envelope scope. This case exists so the next reader finds it
-     * recorded instead of rediscovering it, and so a change to the normalisation
-     * is a deliberate one that has to come here and say so.
-     */
-    it('[filed, not fixed] `COUNT` still compiles HERE while the local driver refuses it', async () => {
+  // ── #6203: one spelling, both faces ───────────────────────────────────────
+
+  /**
+   * [#6203] A miscased function name is refused by BOTH faces, with one wire
+   * identity — the half of the local/remote fork #5907 left open.
+   *
+   * This block replaces the `[filed, not fixed]` control that #5907's PR left
+   * here recording `COUNT` compiling on this transport. That case pinned exactly
+   * the limb this issue deletes, so re-spelling it was not an option: it is
+   * flipped, not adjusted.
+   *
+   * # Reverse verification — direction predicted BEFORE it was run
+   *
+   * Restore `REMOTE_AGGREGATE_FUNCTIONS.get(func.toLowerCase())` and the four
+   * cases below do NOT move together. Predicted, per case:
+   *
+   * - `COUNT`, `Count` — RED, and not on a comparison: the transport RESOLVES,
+   *   so `refusalOfAst` throws its own "but it compiled to […]" error. These two
+   *   are the cases this issue exists for; a name that differs from a compiled
+   *   one only by case is the entire population the `toLowerCase()` moved.
+   * - `COUNT_DISTINCT`, `Median` — GREEN, unchanged. Lowercasing them still
+   *   misses the lowering table (`count_distinct`/`median` are not in it), and
+   *   #5907 already classifies on the CALLER's spelling, so both faces answered
+   *   `INVALID_QUERY`/400 with identical text before this change too.
+   *
+   * Measured after writing the above: exactly that — 2 of 4 red on the revert.
+   * They are kept as one family regardless, because what the family asserts is
+   * "no miscased spelling gets a different answer from the two faces", and the
+   * two insensitive members are the standing guard on #5907's half of it: they
+   * go red the day a `toLowerCase()` reappears in the CLASSIFICATION rather than
+   * in the lookup, which the sensitive pair cannot see.
+   */
+  describe('[#6203] a miscased name gets ONE answer, not one per connection string', () => {
+    // Every spelling here is off-contract by construction: `AggregationFunction`
+    // is a case-sensitive `z.enum` (`AggregationFunction.parse('COUNT')` throws,
+    // pinned in `packages/spec/src/data/query.test.ts`), so none of these can be
+    // a `QueryAST` — hence `undeclaredAst`'s `as unknown as QueryAST`.
+    const MISCASED = [
+      'COUNT',           // differs from a COMPILED name only by case
+      'Count',           // …and in mixed case
+      'COUNT_DISTINCT',  // differs from a DECLARED-but-uncompiled name only by case
+      'Median',          // differs from an undeclared name only by case
+    ];
+
+    for (const fn of MISCASED) {
+      it(`"${fn}" is refused by both faces with the same code, status and wording`, async () => {
+        const remote = await refusalOfUndeclared(fn);
+        const local = await localRefusalOf(fn, undeclaredAst(fn));
+
+        // #6144: `code` AND `status`, never "it threw" — the local face already
+        // threw for all four before this change, so a bare `rejects.toThrow()`
+        // would have been green throughout and blind to the whole defect.
+        expect(remote.code).toBe('INVALID_QUERY');
+        expect(remote.status).toBe(400);
+        expect(local.code).toBe(remote.code);
+        expect(local.status).toBe(remote.status);
+
+        // Class 1, on both faces: a spelling the protocol never declared is a
+        // query no backend can run, not a gap in this one — so never the 501.
+        expect(remote.message.startsWith(UNDECLARED_SENTENCE(fn))).toBe(true);
+        expect(remote.message.split('. ')[0]).toBe(local.message.split('. ')[0]);
+        expect(remote.message).toBe(local.message);
+        expect(remote.message).not.toContain('capability gap');
+
+        // The refusal quotes the caller's own bytes — nothing normalised one of
+        // them into a name the caller never wrote.
+        expect(remote.message).toContain(`"${fn}"`);
+        expect(remote.message).not.toContain(`"${fn.toLowerCase()}"`);
+      });
+    }
+
+    it('the lowercase spelling the protocol DOES declare still compiles on both faces', async () => {
+      // The control that keeps the above from being satisfiable by refusing
+      // everything: the fork is closed by narrowing what this transport accepts,
+      // not by breaking the vocabulary both faces share.
       const { t, calls } = transportWithCapturingClient();
-      await t.aggregate('deal', undeclaredAst('COUNT'));
+      await t.aggregate('deal', declaredAst('count'));
       expect(calls.map((c) => c.sql)).toEqual(['SELECT count("stage") AS "n" FROM "deal"']);
+
+      const d = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      });
+      await d.initObjects([
+        { name: 'deal', fields: { id: { type: 'text', name: 'id' }, stage: { type: 'text', name: 'stage' } } } as any,
+      ]);
+      await expect(d.aggregate('deal', declaredAst('count'))).resolves.toEqual([{ n: 0 }]);
     });
   });
 });

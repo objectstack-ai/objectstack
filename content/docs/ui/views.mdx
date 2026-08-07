@@ -198,6 +198,16 @@ Aggregate is the def form, which is where `execution` lives. A def that says
 time: the renderer has no action attached to such a def, so it used to render a
 button that reported success for every selected record and did nothing.
 
+**Gating a def by capability.** An inline def takes
+`requiredPermissions: string[]` with `action.requiredPermissions` semantics —
+absent/empty always passes, several entries AND, unknown caller capabilities
+fail open (the server stays the authority). A def promoted from
+`bulkActions: ['<name>']` (or an aggregate def naming a declared action)
+inherits the action's own declaration instead, so this key matters chiefly for
+the `update`/`delete` data-plane forms, which dispatch no action and have
+nothing to inherit from. On those defs the gate governs **visibility only** —
+the mass write itself is still authorized by the data API's object permissions.
+
 A url or api action rendered on the list **toolbar** can also read the current
 selection through target interpolation — `${ctx.selection.ids}` (comma-joined)
 and `${ctx.selection.count}` — without any bulk wiring.
