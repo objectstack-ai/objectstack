@@ -165,25 +165,62 @@ export type FlowFunctionDeclarationParsed = z.infer<typeof FlowFunctionDeclarati
 export type FlowFunctionDeclarationInput = z.input<typeof FlowFunctionDeclarationSchema>;
 
 /**
- * One entry of the `functions` map: the handler alone (pure), a
- * {@link FlowFunctionDeclarationSchema} that states its effect, or the
- * **lowered handler ref** a built artifact carries.
+ * The **lowered** form of {@link FlowFunctionDeclarationSchema}: the same
+ * declaration, with its callable replaced by the string ref `objectstack build`
+ * emits (`{ handler: 'syncBilling', effect: 'writes' }`).
  *
- * The first two are what an author writes. The third is what `objectstack
- * build` produces and was, until #4343, the reason `defineStack({ functions })`
- * could not survive a build at all: the CLI lowers every inline callable to a
- * serialisable string ref BEFORE the stack is parsed (it must — `z.function()`
- * wraps callables and would break the ref mapping), so the manifest reaching
- * this schema holds `{ myFn: 'myFn' }`, which neither of the other two members
- * accepts. The build failed on a mechanism its own docs call first-class.
+ * Derived from the authored declaration rather than re-typed beside it, which
+ * is the whole point: the two shapes differ in exactly one field, so a key
+ * added to the declaration is carried by the artifact form automatically, and
+ * the strictness travels with it — a misspelled `effect` in a hand-edited
+ * `objectstack.json` still gets the same named surface, the same alias table
+ * and the same `` `efect` → `effect` `` prescription the authoring door gives.
  *
- * A string entry carries no callable, and that is correct rather than lossy:
- * the real functions ride in the sibling ESM module esbuild emits, and
- * {@link collectBundleFunctionEntries} merges both sources by name. The string
- * is the artifact's record that the NAME exists — which is why
- * {@link normalizeFlowFunctionEntry} deliberately drops it (see there).
+ * `effect` stays optional-with-a-default here for the same reason it is
+ * optional on the authored form. It is normally already present — the callable
+ * that gets lowered has been through `defineStack`'s parse, which materialises
+ * the `'pure'` default — but `defineStack({…}, { strict: false })` skips that
+ * parse, and requiring `effect` would hand that path the identical
+ * `invalid_union` this member exists to end.
+ */
+const FlowFunctionLoweredDeclarationSchema = lazySchema(() => FlowFunctionDeclarationSchema.extend({
+  handler: z.string().min(1)
+    .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
+}).describe('A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref (#4976)'));
+
+/**
+ * One entry of the `functions` map, in the four shapes it legitimately takes:
+ * the handler alone (pure), a {@link FlowFunctionDeclarationSchema} that states
+ * its effect, and each of those two **lowered** — a bare handler ref, or a
+ * declaration whose handler is a ref.
  *
- * Authoring a string by hand therefore registers nothing. It fails loudly, not
+ * The first two are what an author writes; the last two are what `objectstack
+ * build` produces. The CLI lowers every inline callable to a serialisable
+ * string ref BEFORE the stack is parsed (it must — `z.function()` wraps
+ * callables and would break the ref mapping), so the manifest reaching this
+ * schema holds `{ myFn: 'myFn' }` for a bare entry and
+ * `{ myFn: { handler: 'myFn', effect: 'writes' } }` for a declared one.
+ *
+ * Both lowered shapes have been the reason `defineStack({ functions })` could
+ * not survive a build, one after the other, and for the same reason each time —
+ * a lowering step taught a new shape while this union was not. #4343 added the
+ * bare ref. #4396 taught `lowerCallables` to keep what a declared entry
+ * declared, and the artifact it started emitting was rejected here until #4976:
+ * `invalid_union: Invalid input`, no path past `functions`, on the honest
+ * spelling of a writer. The practical outcome of that error was worse than a
+ * failed build — an author who cannot see which key is wrong deletes the
+ * declaration and ships an UNDECLARED writer, which is precisely the state
+ * `effect` exists to prevent (#4354).
+ *
+ * A lowered entry carries no callable in either shape, and that is correct
+ * rather than lossy: the real functions ride in the sibling ESM module esbuild
+ * emits, `mergeRuntimeModule` re-attaches each one to the declaration the JSON
+ * carried, and {@link collectBundleFunctionEntries} reads the result. The
+ * lowered entry is the artifact's record of what the function is NAMED and what
+ * it DECLARED — which is why {@link normalizeFlowFunctionEntry} deliberately
+ * drops both lowered shapes (see there).
+ *
+ * Authoring either by hand therefore registers nothing. It fails loudly, not
  * silently: a `script` node naming it refuses at execute with "no function
  * named '…' is registered" (#1870).
  */
@@ -191,7 +228,8 @@ export const FlowFunctionEntrySchema = lazySchema(() => z.union([
   z.function(),
   FlowFunctionDeclarationSchema,
   z.string().min(1).describe('A lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
-]).describe('A named handler function, a declaration record stating its effect, or a lowered handler ref'));
+  FlowFunctionLoweredDeclarationSchema,
+]).describe('A named handler function or a declaration record stating its effect — either as authored, or lowered to a handler ref by `objectstack build`'));
 
 export type FlowFunctionEntry = z.infer<typeof FlowFunctionEntrySchema>;
 /** Post-parse shape of {@link FlowFunctionEntry} — defaults applied, transforms run (ADR-0122). */
@@ -229,11 +267,19 @@ export function isFlowFunctionEffect(value: unknown): value is FlowFunctionEffec
  * the entry holds a live function, and the collectors that call this run on the
  * boot path where re-parsing every handler buys nothing.
  *
- * A lowered string ref (the third member of that schema) returns `undefined`
- * here BY DESIGN — it names a function without carrying one. The callable for
- * that name comes from the built sidecar module, which the same collector
- * merges in; treating the string as an entry would register a name bound to
- * nothing.
+ * BOTH lowered shapes return `undefined` here BY DESIGN — the bare ref
+ * (`'syncBilling'`) and the lowered declaration
+ * (`{ handler: 'syncBilling', effect: 'writes' }`) alike. Each names a function
+ * without carrying one, and registering a name bound to nothing is worse than
+ * registering nothing.
+ *
+ * That is not where `effect` goes to die on the built path, and the ordering is
+ * what makes it safe: `mergeRuntimeModule` runs FIRST and rebuilds the entry as
+ * `{ ...declared, handler: <the module's callable> }`, so by the time
+ * {@link collectBundleFunctionEntries} reaches this function the handler is a
+ * real callable and the declaration is intact — the string form is simply never
+ * the value a boot normalizes. `packages/runtime`'s
+ * `artifact-function-declarations.test.ts` pins that seam from the other side.
  */
 export function normalizeFlowFunctionEntry(entry: unknown): NormalizedFlowFunction | undefined {
   if (typeof entry === 'function') {

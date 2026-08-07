@@ -52,6 +52,17 @@
  * green; measured exactly that set** — plus, in the same run, the three flipped
  * cases in `infer-cube-where-spelling-parity.test.ts` and the one in
  * `where-source-field-gate.test.ts`, for 14 red across the package.
+ *
+ * ## [#5918] One case in block 5 changed hands
+ *
+ * The dotted MEASURE this file pinned as "#4437 refuses it, naming the strip"
+ * is now refused at the MINT, naming the caller's own spelling — the fourth
+ * mint site #5739 measured and deliberately left alone, ruled on 2026-08-07 in
+ * its own right (measures have no traversal tier to converge on, so a refusal,
+ * not a verbatim mint). Block 5's floor is untouched: the query is refused,
+ * with `INVALID_FIELD` / 400, and never becomes SQL. Both directions of the
+ * reverse verification above are unaffected — restoring the blanket
+ * DIMENSION strip leaves that case green, as this block promises.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -429,12 +440,20 @@ describe('[#5739] the source-field gates keep every rejection they already made'
     expect(error?.message).toMatch(/constrains field 'bogus_col'/);
   });
 
-  it('still refuses a dotted MEASURE through #4437, naming what it stripped to', async () => {
-    // Measures deliberately keep the blanket strip — `lookupMember`'s synthetic
-    // traversal tier is dimension-only, so a dotted measure has no traversal to
-    // converge with, and minting it verbatim would trade this `400 INVALID_FIELD`
-    // for ObjectQL's uncoded "cross-object measure" throw. See the mint loop, and
-    // #5918 for the residue that leaves on the `measures` key.
+  it('[#5918] still refuses a dotted MEASURE — now naming the caller\'s spelling, not the strip', async () => {
+    // Rewritten by #5918, which is the one case in this file whose ANSWERING
+    // LAYER moved. When #5739 landed, measures kept the blanket strip (their
+    // traversal tier is dimension-only, so there was no correct answer to
+    // converge on) and this case pinned #4437's verdict on the stripped tail:
+    // `field: 'score'`. The residue #5739 filed as #5918 was the sibling
+    // spelling whose tail DOES exist — `owner.region_count_distinct` silently
+    // aggregating the base `region`. The 2026-08-07 ruling refuses the dotted
+    // measure at the mint instead, so both spellings now answer identically and
+    // name what the caller wrote.
+    //
+    // The floor this block is about is unchanged and is what stays asserted: a
+    // dotted measure is REFUSED, with `INVALID_FIELD` / 400, and never becomes
+    // SQL. Only the diagnostic moved — from `field` (this gate's) to `member`.
     const { error, sqls } = await run(
       { cube: 'crm_account', measures: ['owner.score_sum'] },
       { native: true },
@@ -442,7 +461,11 @@ describe('[#5739] the source-field gates keep every rejection they already made'
 
     expect(error?.code).toBe('INVALID_FIELD');
     expect(error?.status).toBe(400);
-    expect(error?.field).toBe('score');
+    expect((error as { member?: string } | undefined)?.member).toBe('owner.score_sum');
+    expect(error?.message).toMatch(/Measure 'owner\.score_sum'/);
+    // Not the source-field gate's verdict any more — it names a base column in
+    // `field`, and `score` is not a column the caller asked about.
+    expect(error?.field).toBeUndefined();
     expect(sqls).toEqual([]);
   });
 

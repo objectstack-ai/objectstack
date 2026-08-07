@@ -304,13 +304,42 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
       expect(crossField.message).toContain('Cross-field comparison');
     });
 
-    it('the regex family keeps its non-string comparands (explicitly out of scope)', async () => {
-      // #5347 measured this family as AGREEING across backends and fail-closed,
-      // and #5041 left it out of the comparand guard on the same evidence. It
-      // is not tightened here, and this pins that it was not tightened by
-      // accident.
+    it('the LIKE family keeps its non-string PRIMITIVE comparands', async () => {
+      // This assertion used to read "the regex family keeps its non-string
+      // comparands (explicitly out of scope)", carrying:
+      //
+      //   > #5347 measured this family as AGREEING across backends and
+      //   > fail-closed, and #5041 left it out of the comparand guard on the
+      //   > same evidence. It is not tightened here, and this pins that it was
+      //   > not tightened by accident.
+      //
+      // **#5234 supersedes the OBJECT half of that** (Prime Directive #13 — the
+      // reversal is quoted rather than deleted so the next reader can find it
+      // from the sentence they remember). Both premises held only for
+      // primitives:
+      //
+      //   - "agreeing across backends" — `{$startsWith: {}}` did agree, on the
+      //     WRONG answer. `String({})` is `'[object Object]'`, and against a row
+      //     storing that literal text the pattern MATCHED. This fixture has no
+      //     such row, so the old `toEqual([])` passed because nothing was there
+      //     to match, not because the compiled predicate was right.
+      //   - "fail-closed" — `$notContains` and `$nin` invert it: the exclusion
+      //     the caller wrote silently did not happen.
+      //
+      // The primitive half is UNCHANGED and still pinned here, deliberately:
+      // `{$contains: 1}` → `%1%` is what this driver, `driver-memory` and both
+      // `service-analytics` faces all give, and #5526 kept it on purpose.
       expect(await ids({ stage: { $contains: 1 } })).toEqual([]);
-      expect(await ids({ stage: { $startsWith: {} } })).toEqual([]);
+      expect(await ids({ stage: { $contains: null } })).toEqual([]);
+      expect(await ids({ stage: { $startsWith: true } })).toEqual([]);
+
+      // The object half now refuses, in this driver's own envelope. Replaced
+      // rather than re-spelled: an assertion that keeps passing because nothing
+      // is produced pins nothing at all.
+      const err = await refusalOf({ stage: { $startsWith: {} } });
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$startsWith');
     });
   });
 });

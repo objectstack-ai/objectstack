@@ -77,7 +77,12 @@ function collectUserIds(ctx: any): string[] {
   const add = (v: unknown) => { if (v != null && v !== '') ids.add(String(v)); };
   add(ctx?.result?.user_id);
   add(ctx?.previous?.user_id);
-  add((ctx?.input?.data ?? ctx?.input?.doc)?.user_id);
+  // `input.data` is the ONE key a write hook's payload arrives under — measured
+  // and pinned by objectql's `hook-input-shape-contract.test.ts` ("insert carries
+  // `data` — never `doc`", #5273). An `input.doc` alias limb sat below this read
+  // for a producer that never existed; removed in #5906 (same family as #5671)
+  // rather than left as a second de-facto contract (PD #12).
+  add(ctx?.input?.data?.user_id);
   add(ctx?.[STASH_KEY]);
   return [...ids];
 }

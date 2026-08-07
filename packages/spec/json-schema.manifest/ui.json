@@ -98,6 +98,7 @@
     "ui/PageCardProps",
     "ui/PageComponent",
     "ui/PageComponentType",
+    "ui/PageContainerProps",
     "ui/PageHeaderProps",
     "ui/PageNavItem",
     "ui/PageRegion",

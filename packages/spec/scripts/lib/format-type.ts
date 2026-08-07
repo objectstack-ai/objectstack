@@ -50,6 +50,21 @@ export interface TypeContext {
   schemaHref?: (name: string) => string | null;
 }
 
+/**
+ * A property whose type is a vocabulary too wide to spell inside its table
+ * cell: the cell prints a sample plus a count, and these members are printed in
+ * full under the table (#6225).
+ */
+export interface RenderedProperty {
+  /** The type string for the table cell. */
+  cell: string;
+  /**
+   * The members the cell no longer spells, for the caller to print in full —
+   * or `null` when the cell is complete and nothing needs relocating.
+   */
+  allowedValues: string[] | null;
+}
+
 export const refName = (ref: string): string => ref.split('/').pop() || ref;
 export const isAnonymousRef = (name: string) => /^__schema\d+$/.test(name);
 
@@ -97,6 +112,84 @@ const INLINE_KEY_LIMIT = 4;
  * characters, perfectly readable) while still leaving 134 cells over 200.
  */
 const INLINE_ENUM_WIDTH_LIMIT = 80;
+
+/**
+ * Character budget for a vocabulary printed in ITS OWN table cell — the one
+ * position `INLINE_ENUM_WIDTH_LIMIT` deliberately never touches (#6225).
+ *
+ * Over it the cell prints a sample plus a count AND `formatPropertyType` hands
+ * the members back so `build-docs.ts` can print them in full underneath. The
+ * two are one decision: this budget may only be spent where the relocation
+ * happens, which is why it is read from `formatPropertyType` and never from
+ * `formatType` itself.
+ *
+ * WHY 160, and why it is NOT the 80 that governs the in-shape copy. The two
+ * positions have opposite costs. Eliding a copy inside a summary is nearly
+ * free — the full list is elsewhere, or the JSON Schema is the authority — so
+ * #5340 could put that budget right at the population's density collapse.
+ * Relocating a vocabulary out of its OWN row costs a whole `### Allowed Values`
+ * section on the page, so the budget wants to be as LOOSE as the width goal
+ * allows, not as tight as the population suggests.
+ *
+ * Measured across the 216 generated pages (8541 type cells, 893 of them a
+ * top-level `Enum<…>`), regenerating at each candidate and re-measuring the
+ * emitted `.mdx`:
+ *
+ *   budget   |  40 |  80 | 120 | 160 | 176 | 184 | 200 | 240 | 320
+ *   relocated| 227 |  72 |  41 |  25 |  24 |  24 |  17 |  14 |   9
+ *   cells>200| 121 | 121 | 121 | 121 | 121 | 125 | 144 | 145 | 145
+ *   cells>400|  18 |  18 |  18 |  18 |  18 |  18 |  18 |  18 |  18
+ *   p99      | 227 | 227 | 227 | 227 | 227 | 227 | 227 | 247 | 247
+ *
+ * Every budget from 40 to 176 produces the IDENTICAL width profile — cells over
+ * 200 at 121, over 400 at 18, over 900 at 1, p99 227, max 1538. Inside that
+ * band the choice is therefore not about width at all; it is only about how
+ * many vocabularies get moved, and that falls from 227 sections to 24. Above
+ * 176 the profile degrades (184 gives back 4 cells over 200, 200 gives back 23).
+ *
+ * 160 sits near the top of the flat band: it buys the best achievable width at
+ * 25 relocations instead of 227, and keeps a member or two of margin below the
+ * 184 cliff rather than overfitting to today's exact knee. That it lands at
+ * exactly twice `INLINE_ENUM_WIDTH_LIMIT` is the asymmetry stated plainly — a
+ * vocabulary's own row is worth twice the width of a sampled second copy.
+ */
+const TOP_LEVEL_ENUM_WIDTH_LIMIT = 160;
+
+/**
+ * How many `anyOf` variants one cell spells before printing the count of the
+ * rest (#6226).
+ *
+ * A union's width is variant COUNT times variant WIDTH, so neither enum budget
+ * above can reach it: `ui/app.mdx`'s `App.navigation` prints
+ * `{ id: string; label: string; icon?: string; order?: number; … }` nine times,
+ * seven of them character-identical, for 582 characters of correct-but-repeated
+ * type. The maintainer's ruling on #6226 chose a cap on the count that prints
+ * how many variants it hid, over a whole-cell character budget degrading to
+ * `object` and over restoring `$ref` links: those lose more information, and a
+ * SECOND elision style in the same table is worse than the width it would fix.
+ *
+ * WHY 4. The corpus renders 353 unions, and their arity is as lopsided as the
+ * enum widths were:
+ *
+ *   variants | 2   | 3  | 4  | 5  | 6 | 7 | 9
+ *   unions   | 256 | 53 | 18 | 12 | 8 | 2 | 4
+ *   cumulative 72.5% 87.5% 92.6% 96.0% 98.3% 98.9% 100%
+ *
+ * A cap of 4 leaves 92.6% of every union in the corpus spelled out in full and
+ * touches only the 26 in the tail. Measured on the emitted pages at each
+ * candidate (enum budget held at 160): cap 2 → 8 cells over 400, cap 3 → 8,
+ * cap 4 → 9, cap 5 → 11, cap 6 → 18, i.e. no better than no cap at all. So 4 is
+ * the loosest cap that still does essentially all of the available work: going
+ * to 3 recovers ONE more wide cell while eliding 44 unions instead of 26.
+ *
+ * It is also the cap the reader already meets one line up. `INLINE_KEY_LIMIT`
+ * is 4, so a cell shows at most four declared KEYS of an object; showing at
+ * most four VARIANTS of a union is the same reading budget on the other axis,
+ * and #6226's own issue body proposed the cap that way. Two different "how many
+ * before `…`" numbers inside one cell would reintroduce, between the two
+ * elisions, exactly the inconsistency the ruling picked this option to avoid.
+ */
+const VARIANT_LIMIT = 4;
 
 /**
  * Does this rendered type carry a top-level `&` or `|`, i.e. would suffixing
@@ -202,8 +295,8 @@ function formatLiteral(value: unknown): string {
 }
 
 /**
- * An `enum` node's members, joined — and, inside a shape summary only, cut to
- * `INLINE_ENUM_WIDTH_LIMIT` with an explicit count of what was cut.
+ * An `enum` node's members, joined — and, when a budget is given, cut to it with
+ * an explicit count of what was cut.
  *
  * The elided spelling is `Enum<'text' | 'textarea' | … +42 more>`-shaped:
  * `…` is the same "there is more" token the key elision above already uses, and
@@ -213,26 +306,29 @@ function formatLiteral(value: unknown): string {
  * lies by omission is worse than a wide one. With the count, the cell states
  * exactly what it is: a sample of a 49-term vocabulary.
  *
- * Where the rest stays readable, in order of what a reader hits first:
- *   1. The vocabulary's OWN row is never elided — `ctx.inShapeSummary` is only
- *      set below a summary's `{ … }`. For 457 of the 805 in-shape occurrences
- *      the identical list is printed in full elsewhere on the SAME page (the
- *      named schema's own `type` row, or its `### Allowed Values` bullets):
- *      `BulkActionDef.params` is one — `BulkActionParam.type` two sections down
- *      carries all 49 — and so is every `api/*.mdx` `error` shape, whose codes
- *      are spelled out on `ErrorResponse.code`.
- *   2. For the remaining 348 the elided cell is the only place on that page, so
- *      the count is doing the work by itself, and the JSON Schema under
- *      `json-schema/` remains the authority it always was.
- * The marker cannot be an anchor to (1): Zod inlines enums, so the node reaching
- * this function is a bare `{ type: 'string', enum: [...] }` with no `$ref` and
- * no name to link — inventing one would be guessing at which page-local heading
- * happens to carry the same members.
+ * TWO budgets reach this function, and which one applies decides where the rest
+ * of the vocabulary stays readable:
+ *   1. `INLINE_ENUM_WIDTH_LIMIT`, below an inline summary's `{ … }` (#5340).
+ *      That cell holds a SECOND copy. For 457 of the 805 in-shape occurrences
+ *      the identical list is printed in full elsewhere on the same page
+ *      (`BulkActionDef.params` is one — `BulkActionParam.type` two sections down
+ *      carries all 49). For the remaining 348 the JSON Schema under
+ *      `json-schema/` is the authority, as it always was.
+ *   2. `TOP_LEVEL_ENUM_WIDTH_LIMIT`, on a property whose own type IS the
+ *      vocabulary (#6225), reached only through `formatPropertyType`. That cell
+ *      is often the page's ONLY copy, so nothing is cut unless the caller prints
+ *      the members underneath the table — which is why that budget is spent in
+ *      the one place that hands them back, and never from `formatType`.
+ * The marker is a count and not an anchor in both cases: Zod inlines enums, so
+ * the node reaching this function is a bare `{ type: 'string', enum: [...] }`
+ * with no `$ref` and no name to link — inventing one would be guessing at which
+ * page-local heading happens to carry the same members. Case 2 does not need one:
+ * its list is immediately below, under a heading naming that exact property.
  */
-function formatEnum(values: unknown[], inShapeSummary: boolean): string {
+function elideEnum(values: unknown[], budget: number | null): { body: string; hidden: number } {
   const members = values.map((v: unknown) => formatLiteral(v));
   const full = members.join(' | ');
-  if (!inShapeSummary || full.length <= INLINE_ENUM_WIDTH_LIMIT) return `Enum<${full}>`;
+  if (budget === null || full.length <= budget) return { body: full, hidden: 0 };
 
   // Fill greedily, never below one member: a sample of zero states nothing, and
   // the member widths are the schema's, not ours to bound.
@@ -240,7 +336,7 @@ function formatEnum(values: unknown[], inShapeSummary: boolean): string {
   let width = 0;
   for (const member of members) {
     const cost = shown.length === 0 ? member.length : member.length + ' | '.length;
-    if (shown.length > 0 && width + cost > INLINE_ENUM_WIDTH_LIMIT) break;
+    if (shown.length > 0 && width + cost > budget) break;
     shown.push(member);
     width += cost;
   }
@@ -248,20 +344,86 @@ function formatEnum(values: unknown[], inShapeSummary: boolean): string {
   const hidden = members.length - shown.length;
   // One member wider than the whole budget: it was forced in, nothing is
   // hidden, and `+0 more` would be a marker pointing at nothing.
-  if (hidden === 0) return `Enum<${full}>`;
+  if (hidden === 0) return { body: full, hidden: 0 };
 
+  const elided = elideWithMarker(shown, hidden, full.length);
+  return elided === null ? { body: full, hidden: 0 } : { body: elided, hidden };
+}
+
+/**
+ * Join a sample with the `… +N more` marker — or refuse, returning `null`.
+ *
+ * THE MARKER MUST EARN ITS OWN FOOTPRINT. A body only a member or two over its
+ * budget gives back less than the marker costs to print, so eliding it trades a
+ * real spelling for a count and a rewritten page, and buys nothing. Measured on
+ * the corpus when #5340 introduced the guard: without it, 29 of 189 enum
+ * elisions saved fewer characters than the marker occupied (14 of them hid a
+ * single member and saved 2-3 characters). With it, every elision that survives
+ * saves at least its own cost, and a limit stops being a cliff at exactly one
+ * character over.
+ *
+ * Shared by all three elisions (#6225/#6226 reuse what #5340 measured): the
+ * enum-body budget, the top-level vocabulary relocation, and the `anyOf`
+ * variant cap. They differ in what they count, never in whether a marker is
+ * worth printing.
+ *
+ * Re-measured on the corpus with both new limits in place, by regenerating with
+ * this guard forced to return `elided` unconditionally: it refuses **54** of the
+ * 248 candidate elisions, and those 54 would together have saved **328
+ * characters** — about 6 each, against a marker that costs 12-15 to print. 7 of
+ * the refusals are `TOP_LEVEL_ENUM_WIDTH_LIMIT` candidates, i.e. seven whole
+ * `### Allowed Values` sections that would have been added to a page to shave
+ * single digits off one cell. The guard matters MORE for the relocation than it
+ * did for #5340's in-shape elision, because a refusal there saved only a marker
+ * while a refusal here saves a page section too.
+ */
+function elideWithMarker(shown: string[], hidden: number, fullLength: number): string | null {
+  if (hidden <= 0) return null;
   const marker = `… +${hidden} more`;
   const elided = [...shown, marker].join(' | ');
-  // THE MARKER MUST EARN ITS OWN FOOTPRINT. A body only a member or two over
-  // the budget gives back less than the marker costs to print, so eliding it
-  // trades a real spelling for a count and a rewritten page, and buys nothing.
-  // Measured on the corpus: without this guard 29 of 189 elisions save fewer
-  // characters than the marker occupies (14 of them hide a single member and
-  // save 2-3 characters). With it, every elision that survives saves at least
-  // its own cost, and the limit stops being a cliff at exactly 81 characters.
-  const markerFootprint = marker.length + ' | '.length;
-  const worthIt = full.length - elided.length >= markerFootprint;
-  return `Enum<${worthIt ? elided : full}>`;
+  return fullLength - elided.length >= marker.length + ' | '.length ? elided : null;
+}
+
+function formatEnum(values: unknown[], budget: number | null): string {
+  return `Enum<${elideEnum(values, budget).body}>`;
+}
+
+/**
+ * One property's table cell — and, when its type IS a vocabulary too wide to
+ * spell there, the members to print in full underneath it (#6225).
+ *
+ * `build-docs.ts` has always had a rendering built for a long vocabulary — a
+ * `### Allowed Values` heading and one bullet per member — but it fired only
+ * when the WHOLE SCHEMA was `type: 'string'` + `enum`. A schema Zod hoisted into
+ * its own name (`data/FieldType`) got the bullets; the identical 49 members
+ * inlined onto a PROPERTY (`Field.type`) got a 561-character table cell, and the
+ * 261-member error vocabulary on `ApiError.code` got 6092. Which rendering a
+ * vocabulary received depended on whether it had been hoisted — a fact about
+ * Zod, not about how a reader needs to read it.
+ *
+ * This is the mirror of that branch, matched to it CONDITION FOR CONDITION
+ * (`type === 'string'` and an `enum` array): the property's own type node is
+ * itself the vocabulary. That exactness is what makes the relocation safe. The
+ * elision is applied to the SAME node whose members are handed back, so the
+ * cell can never be cut without the full list being printed — the two verdicts
+ * come from one `elideEnum` call and cannot drift apart.
+ *
+ * Deliberately NOT matched, though each renders an `Enum<…>` somewhere in its
+ * cell: `Enum<…>[]`, `Record<string, Enum<…>>`, and a union variant
+ * (`Enum<…> | string`, `ui/page.mdx`'s `PageComponent.type`). For those, "the
+ * allowed values of this property" is not the whole truth — the members are the
+ * element/value/one-variant vocabulary — so a bullet list under the table would
+ * state something the schema does not. They keep their full spelling, exactly
+ * as #5340 left them.
+ */
+export function formatPropertyType(prop: any, ctx?: TypeContext): RenderedProperty {
+  if (prop && prop.type === 'string' && Array.isArray(prop.enum)) {
+    const { body, hidden } = elideEnum(prop.enum, TOP_LEVEL_ENUM_WIDTH_LIMIT);
+    if (hidden > 0) {
+      return { cell: `Enum<${body}>`, allowedValues: prop.enum.map((v: unknown) => String(v)) };
+    }
+  }
+  return { cell: formatType(prop, ctx), allowedValues: null };
 }
 
 export function formatType(prop: any, ctx?: TypeContext): string {
@@ -306,7 +468,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
   }
 
   if (prop.enum) {
-    return formatEnum(prop.enum, ctx?.inShapeSummary === true);
+    return formatEnum(prop.enum, ctx?.inShapeSummary === true ? INLINE_ENUM_WIDTH_LIMIT : null);
   }
 
   if (prop.const !== undefined) {
@@ -315,7 +477,15 @@ export function formatType(prop: any, ctx?: TypeContext): string {
 
   if (prop.anyOf || prop.oneOf) {
     const variants = prop.anyOf || prop.oneOf;
-    return variants.map((v: any) => formatType(v, ctx)).join(' | ');
+    const rendered = variants.map((v: any) => formatType(v, ctx));
+    const full = rendered.join(' | ');
+    if (rendered.length <= VARIANT_LIMIT) return full;
+    // The variants a reader does not see are counted, never silently dropped —
+    // the principle #5340 established for enum members, applied to the other
+    // axis a cell grows along (#6226). `elideWithMarker` keeps the count from
+    // costing more than the spellings it replaces.
+    const elided = elideWithMarker(rendered.slice(0, VARIANT_LIMIT), rendered.length - VARIANT_LIMIT, full.length);
+    return elided ?? full;
   }
 
   if (prop.type === 'object') {

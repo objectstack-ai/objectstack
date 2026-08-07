@@ -1,21 +1,33 @@
 name: Check Links
 
+# Repo-internal link gate (#6028).
+#
+# `pull_request` was commented out in a59dc59e (2026-01-28) as a rider on an
+# unrelated commit, with no rationale recorded; the gate then sat dormant for
+# six months while `lychee.toml` and `fail: true` kept it looking alive.
+# Maintainer ruling 2026-08-07: restore the trigger, check REPO-INTERNAL links
+# only, and land it advisory-first (NOT in the required set) until it has shown
+# a stable green streak.
+#
+# ⛔ No `merge_group` trigger on purpose: this is an advisory lane, and an
+# advisory gate does not get to consume merge-queue capacity. If it is ever
+# promoted into the required set, `merge_group` MUST be added in the same
+# change or the queue stalls on a required check that never reports (#6121).
 on:
   workflow_dispatch:
-  # push:
-  #   branches:
-  #     - main
-  # pull_request:
-  #   branches:
-  #     - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   link-checker:
     name: Check Documentation Links
     runs-on: ubuntu-latest
+    # Least privilege: the job only reads the tree and runs lychee offline.
+    # There is no issue-filing step, and `--offline` makes zero network
+    # requests, so neither `issues: write` nor a GITHUB_TOKEN is needed.
     permissions:
       contents: read
-      issues: write
 
     steps:
       - name: Checkout repository
@@ -24,14 +36,32 @@ jobs:
       - name: Check links with lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          # Use configuration file for path remapping and settings
+          # `--offline` is the internal-only mechanism, and it lives HERE rather
+          # than in lychee.toml on purpose: the equivalent `offline = true`
+          # config key is silently ignored by older lychee (measured: ignored on
+          # 0.19.1, honoured on the 0.24.2 this action pins). A determinism
+          # guarantee must not depend on which lychee the action happens to
+          # install, so it is asserted at the invocation site.
+          #
+          # Offline means only `file://` targets are resolved -- every http(s)
+          # link is reported EXCLUDED, never requested. That is what makes this
+          # gate deterministic and free of external-network flake.
+          #
+          # --root-dir is what makes ROOT-RELATIVE links checkable. Most internal
+          # links in content/** are site routes (`/docs/permissions`), and lychee
+          # hard-errors on those unless it is told which directory `/` means.
+          # The Fumadocs content root is `content/`, so `/docs/x` resolves to
+          # content/docs/x -- and --fallback-extensions supplies the .mdx/.md
+          # suffix that a site route omits. Without this pair the gate cannot go
+          # green at all: 1286 root-relative links fail as "Cannot resolve
+          # root-relative link ... provide a root dir".
           args: >-
+            --offline
+            --root-dir ${{ github.workspace }}/content
+            --fallback-extensions mdx,md
             --config lychee.toml
             'content/**/*.md'
             'content/**/*.mdx'
             'README.md'
           # Fail the job if broken links are found
           fail: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

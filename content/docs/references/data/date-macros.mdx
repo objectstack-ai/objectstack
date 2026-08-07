@@ -6,114 +6,75 @@ description: Date Macros protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Date Macro Tokens — the declarative placeholders the UI substitutes
-
 into filter values before sending a query to the data engine.
 
 # Why this lives in `spec`
 
 Filter values in dashboards, views, reports and pages travel as JSON.
-
 Because JSON cannot evaluate code, callers cannot write `daysAgo(30)`
-
 inline; they use a tiny placeholder grammar instead:
 
-\{ published_at: \{ $gte: '\{last_quarter_start\}' \} \}
-
-\{ signal_at:    \{ $gte: '\{30_days_ago\}' \} \}
+```
+{ published_at: { $gte: '{last_quarter_start}' } }
+{ signal_at:    { $gte: '{30_days_ago}' } }
+```
 
 The placeholders are expanded on **both** sides of the wire, so a
-
 filter behaves the same wherever it is executed (framework#3582):
 
 - **Client** — `resolveDateMacros()` in `@object-ui/core`, just
-
-before the filter is handed to the data source.
-
+  before the filter is handed to the data source.
 - **Server** — `resolveFilterTokens()` in `@objectstack/core`, wired
-
-into the ObjectQL read AND write paths (`find`/`findOne`/`count`/
-
-`aggregate`/`update`/`delete`) and the analytics dataset executor.
-
-Filters that reach the database WITHOUT passing through a renderer —
-
-dashboard widgets, dataset definitions, REST query params, flow node
-
-filters — need this: before it, the token compared as a literal
-
-string and matched nothing. The write verbs are covered for the same
-
-reason (#3810): one filter must select one row set regardless of
-
-which verb consumes it, or a flow's `find` preview and its
-
-`update` act on different rows.
+  into the ObjectQL read AND write paths (`find`/`findOne`/`count`/
+  `aggregate`/`update`/`delete`) and the analytics dataset executor.
+  Filters that reach the database WITHOUT passing through a renderer —
+  dashboard widgets, dataset definitions, REST query params, flow node
+  filters — need this: before it, the token compared as a literal
+  string and matched nothing. The write verbs are covered for the same
+  reason (#3810): one filter must select one row set regardless of
+  which verb consumes it, or a flow's `find` preview and its
+  `update` act on different rows.
 
 Either way the DRIVER only ever sees ISO date / timestamp strings,
-
-never `\{tokens\}`. Translating an ISO comparand into a column's on-disk
-
+never `{tokens}`. Translating an ISO comparand into a column's on-disk
 form — canonical UTC text on SQLite, a native `timestamptz` on
-
 Postgres, a `DATETIME(3)` literal on MySQL, and `YYYY-MM-DD` text for
-
 a calendar day on every dialect — is the driver's job; see
-
 `SqlDriver.temporalFilterValue`.
 
 A token OUTSIDE this vocabulary is rejected rather than passed
-
 through: `@objectstack/lint`'s `validate-filter-tokens` fails the
-
 build, and the runtime resolver throws. Silently matching nothing is
-
 the failure mode the vocabulary exists to prevent.
 
 AI agents and template authors author these placeholders directly,
-
 so the **set of recognised tokens is part of the platform contract**
-
 and must live here next to the rest of the JSON-DSL schemas, not
-
 inside any single UI implementation.
 
 # Two flavours of token
 
-1. **Fixed tokens** — small, finite list (`\{today\}`,
+1. **Fixed tokens** — small, finite list (`{today}`,
+   `{current_quarter_start}`, `{last_year_end}`, …). Enumerated by
+   `DATE_MACRO_TOKENS` below.
 
-`\{current_quarter_start\}`, `\{last_year_end\}`, …). Enumerated by
-
-`DATE_MACRO_TOKENS` below.
-
-2. **Parameterised tokens** — `\{N_days_ago\}`, `\{N_weeks_from_now\}`,
-
-etc., where `N` is any non-negative integer. Matched by
-
-`DATE_MACRO_PARAM_RE`. Units: `minute(s)`, `hour(s)`, `day(s)`,
-
-`week(s)`, `month(s)`, `year(s)`. Directions: `ago`, `from_now`.
+2. **Parameterised tokens** — `{N_days_ago}`, `{N_weeks_from_now}`,
+   etc., where `N` is any non-negative integer. Matched by
+   `DATE_MACRO_PARAM_RE`. Units: `minute(s)`, `hour(s)`, `day(s)`,
+   `week(s)`, `month(s)`, `year(s)`. Directions: `ago`, `from_now`.
 
 # Out of scope
 
 - CEL expressions (`cel\`daysAgo(30)\``) run **server-side** in the
-
-formula engine. They are unrelated to these placeholders; see
-
-`@objectstack/formula`.
-
+  formula engine. They are unrelated to these placeholders; see
+  `@objectstack/formula`.
 - Token resolution semantics (week-start day, timezone, fiscal
-
-calendars) are defined by the resolver implementation; spec only
-
-freezes the **vocabulary**. One property is worth stating here
-
-because it is authored against: a `*_end` token is the period's
-
-last calendar DAY (`\{current_year_end\}` → `2026-12-31`), so on a
-
-`datetime` column `<= \{current_year_end\}` stops at midnight on the
-
-31st. Filter a timestamp with the half-open `< \{next_year_start\}`.
+  calendars) are defined by the resolver implementation; spec only
+  freezes the **vocabulary**. One property is worth stating here
+  because it is authored against: a `*_end` token is the period's
+  last calendar DAY (`{current_year_end}` → `2026-12-31`), so on a
+  `datetime` column `<= {current_year_end}` stops at midnight on the
+  31st. Filter a timestamp with the half-open `< {next_year_start}`.
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/date-macros.zod.ts`

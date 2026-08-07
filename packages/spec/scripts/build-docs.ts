@@ -26,6 +26,7 @@ import path from 'path';
 // a confident page from a tree nobody rebuilt (#4675, #4723).
 import { schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
 
+import { resolveCategoryTitles } from './lib/category-title';
 import {
   evaluateBaseline,
   loadEntrySurfaces,
@@ -35,7 +36,7 @@ import {
 } from './lib/docs-import-surface';
 import { escapeMdxDescription } from './lib/escape-mdx';
 import { renderFileDescription } from './lib/file-description';
-import { anchorFor, formatType, type TypeContext } from './lib/format-type';
+import { anchorFor, formatPropertyType, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import {
   blurbCoverage,
@@ -119,19 +120,28 @@ const { emit, manageDir, wasEmitted, flush } = createSink({
   repoRoot: REPO_ROOT,
 });
 
-// Dynamically discover categories from src directory
-const getCategoryTitle = (dir: string) => {
-  const upper = dir.toUpperCase();
-  if (['UI', 'AI', 'API'].includes(upper)) return `${upper} Protocol`;
-  return `${dir.charAt(0).toUpperCase() + dir.slice(1)} Protocol`;
-};
+// Categories are discovered from the src directory; their TITLES are declared,
+// not derived from the directory name (#5853 — see lib/category-title.ts for
+// why a derived title is wrong in a way no gate can see). A directory with no
+// declared title stops the build here rather than publishing a guess.
+const CATEGORY_DIRS = fs.readdirSync(SRC_DIR)
+  .filter(file => fs.statSync(path.join(SRC_DIR, file)).isDirectory());
 
-const CATEGORIES = fs.readdirSync(SRC_DIR)
-  .filter(file => fs.statSync(path.join(SRC_DIR, file)).isDirectory())
-  .reduce((acc, dir) => {
-    acc[dir] = getCategoryTitle(dir);
-    return acc;
-  }, {} as Record<string, string>);
+// `resolveCategoryTitles` is the ONLY way this map gets built, and it is total:
+// it throws on a directory with no title and on a title with no directory. The
+// check lives inside the constructor rather than beside it so a future caller
+// cannot obtain a CATEGORIES map without it — what this replaces was exactly a
+// fallback nobody had to opt out of.
+function loadCategoryTitles(): Record<string, string> {
+  try {
+    return resolveCategoryTitles(CATEGORY_DIRS);
+  } catch (err) {
+    console.error(`\n✗ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
+const CATEGORIES = loadCategoryTitles();
 
 // Track all zod files per category
 const categoryZodFiles = new Map<string, Set<string>>();
@@ -323,14 +333,22 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
   const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref: schemaHrefFrom(category) };
 
   const renderProperties = (props: any, required: Set<string> = new Set()) => {
+      // Vocabularies too wide for their own table cell. Collected while the
+      // table is built and printed as `### Allowed Values` bullets right after
+      // it, so the complete list never leaves the page the cell sits on
+      // (#6225) — the same rendering a hoisted `type: 'string'` + `enum` schema
+      // has always got, now reachable from a property position too.
+      const relocated: Array<{ key: string; members: string[] }> = [];
       let t = `### Properties\n\n`;
       t += `| Property | Type | Required | Description |\n`;
       t += `| :--- | :--- | :--- | :--- |\n`;
       for (const [key, prop] of Object.entries(props) as [string, any][]) {
+          const { cell, allowedValues } = formatPropertyType(prop, typeCtx);
+          if (allowedValues) relocated.push({ key, members: allowedValues });
           // Backslashes first, then pipes — same order as `desc` below, and for
           // the same reason: escaping pipes first lets a literal backslash in
           // the input pair with the escape and free the pipe again.
-          const typeStr = formatType(prop, typeCtx)
+          const typeStr = cell
             .replace(/\\/g, '\\\\')
             .replace(/\|/g, '\\|');
           const isReq = required.has(key) ? '✅' : 'optional';
@@ -343,7 +361,16 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
             .replace(/\|/g, '\\|');
           t += `| **${key}** | \`${typeStr}\` | ${isReq} | ${desc} |\n`;
       }
-      return t + '\n';
+      t += '\n';
+      // Qualified by schema AND property: `api/errors.mdx` carries a wide
+      // `code` on both `EnhancedApiError` and `FieldError`, so a heading naming
+      // only the property would give one page two identical anchors.
+      for (const { key, members } of relocated) {
+          t += `### Allowed Values: \`${schemaName}.${key}\`\n\n`;
+          t += members.map(m => `* \`${m}\``).join('\n');
+          t += `\n\n`;
+      }
+      return t;
   };
 
   if (mainDef.type === 'object' && mainDef.properties) {

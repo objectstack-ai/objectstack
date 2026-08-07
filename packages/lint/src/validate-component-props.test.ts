@@ -183,7 +183,7 @@ describe('validateComponentProps — value verdicts', () => {
           type: 'element:record_picker',
           id: 'picker',
           dataSource: { object: 'project', limit: 50 },
-          properties: { displayField: 'name' },
+          properties: { labelField: 'name' },
         },
       ]),
     );
@@ -192,11 +192,81 @@ describe('validateComponentProps — value verdicts', () => {
     // …and still reports it when nothing supplies it (or the suppression above
     // would be indistinguishable from the rule never looking).
     const without = validateComponentProps(
-      stackWith([{ type: 'element:record_picker', properties: { displayField: 'name' } }]),
+      stackWith([{ type: 'element:record_picker', properties: { labelField: 'name' } }]),
     );
     expect(invalid(without).map((f) => f.path)).toEqual([
       'pages[0].regions[0].components[0].properties.object',
     ]);
+  });
+
+  /**
+   * #5775 — the retirement's author-facing channel. `displayField` was the
+   * picker's REQUIRED prop and no renderer ever read it, so the tombstone's
+   * prescription has to reach whoever is still writing it. It arrives through
+   * the `safeParse` half of this rule (a `never` type is a value verdict, not
+   * an unknown key), carrying the rename verbatim.
+   */
+  it('surfaces the retired `displayField` prescription (#5775)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          properties: { object: 'project', displayField: 'name' },
+        },
+      ]),
+    );
+    const retired = invalid(findings).filter((f) => f.path.endsWith('.displayField'));
+    expect(retired).toHaveLength(1);
+    expect(retired[0].severity).toBe('warning');
+    expect(retired[0].message).toMatch(/removed in @objectstack\/spec 17\.0\.0[\s\S]*`labelField`/);
+  });
+
+  /**
+   * The showcase page that made #5775 necessary: it authors the shape the
+   * renderer serves, and the gate used to report it twice over — an undeclared
+   * `labelField`/`label` and a missing required `displayField`. It is clean now.
+   */
+  it('reports nothing on the showcase picker (page-variables.page.ts:59)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          id: 'project_picker',
+          dataSource: { object: 'showcase_project', limit: 50 },
+          properties: { label: 'Project', labelField: 'name', placeholder: 'Choose a project…' },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * The container half of #5775. `page:card` `children` and the three thin
+   * containers' `children` were all reported as unknown keys while the
+   * renderers rendered exactly them; `record:path` `stages[].terminal` and the
+   * tab items' `value`/`count` are the same shape one level down.
+   */
+  it('reports nothing on the container/child keys the renderers honour (#5775)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        { type: 'page:card', properties: { title: 'Shortcuts', children: [{ type: 'element:text' }] } },
+        { type: 'page:section', properties: { children: [{ type: 'element:text' }] } },
+        { type: 'page:footer', properties: { children: [{ type: 'element:text' }] } },
+        { type: 'page:sidebar', properties: { children: [{ type: 'element:text' }] } },
+        {
+          type: 'page:tabs',
+          properties: { items: [{ label: 'Tasks', value: 'related:task', count: 3, children: [] }] },
+        },
+        {
+          type: 'record:path',
+          properties: {
+            statusField: 'status',
+            stages: [{ value: 'done', label: 'Done', terminal: 'won' }],
+          },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
   });
 
   /**

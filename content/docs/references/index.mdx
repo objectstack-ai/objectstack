@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1600 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1601 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -27,13 +27,13 @@ counts are sums of the rows they head. Regenerate with
 | [Identity Protocol](/docs/references/identity) | 5 | 28 | Users and accounts, organizations, positions, API keys, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 27 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 31 | 187 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
-| [Qa Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
+| [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 145 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1600** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 146 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **200** | **1601** | 14 protocol modules |
 
 ---
 
@@ -255,7 +255,7 @@ Plugin lifecycle and manifests, capabilities and security, metadata loading, ser
 
 ---
 
-## Qa Protocol
+## QA Protocol
 
 **Source:** `packages/spec/src/qa/` · **Import:** `@objectstack/spec/qa` · **1 page, 8 schemas**
 
@@ -366,7 +366,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 145 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 146 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -377,7 +377,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
-| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `PageAccordionProps`, `PageCardProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
+| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
 | [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel` |

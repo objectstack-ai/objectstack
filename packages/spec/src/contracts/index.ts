@@ -10,6 +10,8 @@
 export * from './logger.js';
 export * from './data-engine.js';
 export * from './objectql-engine.js';
+// The hook-facing slice of the engine: what `HookContext.api` is (#5945).
+export * from './scoped-context.js';
 export * from './data-driver.js';
 export * from './http-server.js';
 export * from './service-registry.js';

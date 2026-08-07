@@ -8,6 +8,11 @@ export type { RestProtocol } from './rest-server.js';
 // Route Management
 export { RouteManager, RouteGroupBuilder } from './route-manager.js';
 export type { RouteEntry } from './route-manager.js';
+// What `RestServer.getRoutes()` answers with (#5822): every route mounted for
+// this boot, RouteManager's and the direct-mount registrars' alike, each
+// carrying the `source` that says which.
+export type { MountedRoute } from './rest-server.js';
+export type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 
 // REST API Plugin
 export { createRestApiPlugin } from './rest-api-plugin.js';

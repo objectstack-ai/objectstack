@@ -240,6 +240,12 @@ import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
 import type * as M166 from './ui/theme.zod.js';
 import type * as M167 from './ui/view.zod.js';
+// Appended out of alphabetical order deliberately: the M-indices are positional
+// identifiers the pin lines below reference by number, so a new module takes the
+// next free index rather than renumbering 169 imports and every pin that names
+// one. #5775 is the first entry from this file — `component.zod.ts` had no bare
+// `X = z.infer` alias until `PageContainerProps` arrived.
+import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
 // 717 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -1309,6 +1315,14 @@ export type Iso713 = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.i
 export type Iso714 = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
 export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 
+// ui/component.zod.ts
+// #5775 — the shared `children` contract for `page:section`/`page:footer`/
+// `page:sidebar`. A lone optional array with no default, transform, catch or
+// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
+// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
+// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
+export type Iso719 = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
+
 // ---------------------------------------------------------------------------
 // Representative spot-checks on the phase-1 ADDITIONS.
 //
@@ -1364,7 +1378,7 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 719 isomorphic pins', () => {
+  it('still declares all 720 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1384,16 +1398,22 @@ describe('ADR-0122 type-alias convention', () => {
     //
     // And it drops by MORE than one when schemas are RETIRED, which is the third
     // way and the one to read carefully, because from the count alone it looks
-    // exactly like the edit this case exists to stop: 719 -> 715 is #5055
-    // removing `I18nObjectSchema`, `PluralRuleSchema`, `DateFormatSchema` and
-    // `WidgetLifecycleSchema` under ADR-0049. What separates it from a bare
-    // deletion is that the SCHEMAS went with the pins — `check:spec-parsed-alias`
-    // has nothing left to exempt, and `ui/widget-i18n-retirement.test.ts` asserts
-    // their absence on every public entry. A pin deleted while its schema still
-    // exports is still the failure this counts.
+    // exactly like the edit this case exists to stop: #5055 removed
+    // `I18nObjectSchema`, `PluralRuleSchema`, `DateFormatSchema` and
+    // `WidgetLifecycleSchema` under ADR-0049, i.e. -4. What separates it from a
+    // bare deletion is that the SCHEMAS went with the pins —
+    // `check:spec-parsed-alias` has nothing left to exempt, and
+    // `ui/widget-i18n-retirement.test.ts` asserts their absence on every public
+    // entry. A pin deleted while its schema still exports is still the failure
+    // this counts.
+    //
+    // 720 -> 716 is that retirement landing on top of #5775's addition
+    // (`PageContainerProps`, the +1 that had taken the count to 720). Both moves
+    // are in this number at once, which is exactly why it is recomputed from the
+    // source rather than reasoned about: -4 retired, +0 of my own.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(715);
+    expect(pins).toHaveLength(716);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

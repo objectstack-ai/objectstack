@@ -40,15 +40,33 @@
  */
 
 import { applyInMemoryAggregation } from '@objectstack/objectql';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 
-/** The minimal driver surface this check drives. */
+/**
+ * The minimal driver surface this check drives.
+ *
+ * `aggregate` names {@link DriverQuery} rather than `unknown` (#6212). A
+ * structural double declaring `unknown` is not "minimal", it is unchecked: it
+ * tells an out-of-tree driver author — this file is a PUBLISHED reference, and
+ * cloud's `driver-turso` implements it — nothing about the AST the check will
+ * send, and it left the two literals below free to drift from the shape the
+ * real drivers parse. `DriverQuery` is also what says the query does NOT repeat
+ * the object name that argument one already carries (#5181): the redundancy
+ * those literals used to spell is now spelled once.
+ *
+ * This deliberately does NOT presume what the drivers' own `aggregate`
+ * parameter type becomes when it is narrowed in its own right (#6212 batch B,
+ * behind #6203): method parameters compare bivariantly, so a driver declaring
+ * `any`, `QueryAST` or a narrowed type all satisfy this double either way.
+ * `find` stays `unknown` — this check never calls it with a query.
+ */
 export interface BucketableDriver {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
   syncSchema(object: string, schema: unknown, options?: unknown): Promise<void>;
   create(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
   find(object: string, query: unknown, options?: unknown): Promise<any[]>;
-  aggregate(object: string, query: unknown, options?: unknown): Promise<any[]>;
+  aggregate(object: string, query: DriverQuery, options?: unknown): Promise<any[]>;
   supports?: { queryDateGranularity?: Record<string, boolean> };
 }
 
@@ -197,8 +215,12 @@ export async function checkDateBucketParity(
       for (const granularity of GRANULARITIES) {
         if (caps[granularity] !== true) continue; // engine routes this in-memory
 
-        const ast = {
-          object,
+        // Annotated, not inferred: the annotation is what makes `'count'` keep
+        // its literal type and be checked against the declared aggregate
+        // vocabulary. Inferred, it widened to `string` — which is precisely why
+        // handing it to `applyInMemoryAggregation` needed an `as never` below,
+        // an erasure that would have swallowed a genuinely wrong AST here too.
+        const ast: DriverQuery = {
           groupBy: [{ field, dateGranularity: granularity }],
           aggregations: [{ function: 'count', alias: 'n' }],
         };
@@ -214,7 +236,7 @@ export async function checkDateBucketParity(
         }
 
         const sql = labelCounts(pushedDown, field);
-        const inMemory = labelCounts(applyInMemoryAggregation(rows, ast as never), field);
+        const inMemory = labelCounts(applyInMemoryAggregation(rows, ast), field);
 
         if (canonical(sql) !== canonical(inMemory)) {
           problems.push(
@@ -231,7 +253,6 @@ export async function checkDateBucketParity(
       if (caps[granularity] !== true) continue;
       const mk = (field: 'at' | 'on') =>
         driver.aggregate(object, {
-          object,
           groupBy: [{ field, dateGranularity: granularity }],
           aggregations: [{ function: 'count', alias: 'n' }],
         });

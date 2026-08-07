@@ -1334,6 +1334,28 @@ const ObjectSchemaBase = z.object({
    *     business objects (auto-stamped to the creating user on insert;
    *     reassignable). Governed by the object-level `ownership` property
    *     (`'user' | 'org' | 'none'`), NOT by `owner` below.
+   *   - `owning_business_unit_id` — `lookup → sys_business_unit`, the
+   *     record-level ORG-UNIT ownership tier between `owner_id` (a person) and
+   *     `organization_id` (the tenant wall). [ADR-0117 D1, landed in #5677]
+   *     Governed by the same `ownership` property, on the same objects
+   *     `owner_id` is: injected under `'user'` and when `ownership` is omitted,
+   *     withheld under `'org' | 'none'`. Shaped after `organization_id`
+   *     (`readonly` + `hidden` + `system`), not after `owner_id` — it is a
+   *     server-stamped scope anchor. Provisioned but **inert**: the stamping
+   *     middleware (ADR-0117 D2/D4) has not landed, so nothing writes a value
+   *     yet.
+   *
+   *     ⚠️ D1 also defines a fourth tier, `ownership: 'business_unit'` (owning
+   *     unit, no owning person), which `applySystemFields` already implements —
+   *     but the `ownership` enum below is still `'user' | 'org' | 'none'`, so
+   *     that value is still deliberately REJECTED by this schema (the enum
+   *     member is #5678). The column being injected does NOT mean the tier is
+   *     authorable.
+   *
+   * The authority on which of these an object actually carries is
+   * `resolveInjectedSystemColumns` (`@objectstack/spec/data`): `applySystemFields`
+   * consumes it, and author-time lint reads the same derivation rather than
+   * re-deriving the conditions from this prose.
    *
    * Author-declared fields with the same name always win over injection
    * (no overwrite). Objects with `managedBy` set (and the `sys_*` namespace)

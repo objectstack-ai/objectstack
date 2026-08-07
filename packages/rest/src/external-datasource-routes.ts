@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import type { IExternalDatasourceService, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
+import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 
 /**
  * External Datasource Federation REST routes (ADR-0015 §6.2).
@@ -23,6 +24,10 @@ import { sendOk, sendError } from '@objectstack/types';
  * list / test / create / update / remove, ADR-0015 Addendum) were extracted
  * into the private `@objectstack/datasource-admin` package, which registers
  * them via its own `registerDatasourceAdminRoutes`.
+ *
+ * Returns the routes it mounted so the caller can record them on the
+ * `RestServer` that owns the surface (#5822): the returned array IS the array
+ * that was iterated to mount. See `direct-mount.ts`.
  *
  * Every body is built by the shared `sendOk` / `sendError`, in the envelope
  * `BaseResponseSchema` declares (#3843, consolidated in #3973). Before #3843
@@ -59,7 +64,7 @@ export function registerExternalDatasourceRoutes(
   server: IHttpServer,
   ctx: PluginContext,
   basePath = '/api/v1',
-): void {
+): readonly DirectMountedRoute[] {
   const ext = `${basePath}/datasources/:name/external`;
 
   /**
@@ -91,81 +96,123 @@ export function registerExternalDatasourceRoutes(
   const refused = (res: any, err: unknown) =>
     sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', err instanceof Error ? err.message : String(err));
 
-  // List remote tables (optionally filtered by ?schema=).
-  server.get(`${ext}/tables`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.listRemoteTables) return unavailable(res);
-    try {
-      const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
-      const tables = await svc.listRemoteTables(req.params.name, { schema });
-      sendOk(res, { tables });
-    } catch (err) {
-      refused(res, err);
-    }
-  });
+  /**
+   * ONE declaration of this registrar's surface (#5822): the array below is
+   * what gets mounted on the host server AND what is handed back as the
+   * description of what was mounted — no second table to keep in sync. See
+   * `direct-mount.ts`.
+   *
+   * Note what this list does NOT claim: it says these five routes are MOUNTED,
+   * which they unconditionally are (the plugin registers them whether or not
+   * federation is wired in), never that the `external-datasource` service is
+   * present. That verdict stays per-request, inside each handler, where it can
+   * still answer 503 — the boot must not record it (AGENTS.md, "never record a
+   * verdict the boot can still contradict").
+   */
+  const routes: readonly DirectMountedRoute[] = [
+    // List remote tables (optionally filtered by ?schema=).
+    {
+      method: 'GET',
+      path: `${ext}/tables`,
+      metadata: { summary: 'List remote tables on an external datasource', tags: ['datasources'] },
+      handler: async (req: any, res: any) => {
+        const svc = externalService();
+        if (!svc?.listRemoteTables) return unavailable(res);
+        try {
+          const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
+          const tables = await svc.listRemoteTables(req.params.name, { schema });
+          sendOk(res, { tables });
+        } catch (err) {
+          refused(res, err);
+        }
+      },
+    },
 
-  // Generate an Object draft (structured + *.object.ts source) from a table.
-  server.post(`${ext}/tables/:remote/draft`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.generateObjectDraft) return unavailable(res);
-    try {
-      const draft = await svc.generateObjectDraft(
-        req.params.name,
-        req.params.remote,
-        (req.body as Record<string, unknown>) ?? {},
-      );
-      sendOk(res, { draft });
-    } catch (err) {
-      refused(res, err);
-    }
-  });
+    // Generate an Object draft (structured + *.object.ts source) from a table.
+    {
+      method: 'POST',
+      path: `${ext}/tables/:remote/draft`,
+      metadata: { summary: 'Generate an Object draft from a remote table', tags: ['datasources'] },
+      handler: async (req: any, res: any) => {
+        const svc = externalService();
+        if (!svc?.generateObjectDraft) return unavailable(res);
+        try {
+          const draft = await svc.generateObjectDraft(
+            req.params.name,
+            req.params.remote,
+            (req.body as Record<string, unknown>) ?? {},
+          );
+          sendOk(res, { draft });
+        } catch (err) {
+          refused(res, err);
+        }
+      },
+    },
 
-  // Import a remote table as a live (runtime-origin) federated object so it's
-  // immediately queryable — the "Import as Object" action (ADR-0015 Addendum).
-  // 503 when the service is absent; 400 when import is refused (e.g. read-only
-  // metadata store) or the remote table is missing.
-  server.post(`${ext}/tables/:remote/import`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.importObject) return unavailable(res);
-    try {
-      const result = await svc.importObject(
-        req.params.name,
-        req.params.remote,
-        (req.body as Record<string, unknown>) ?? {},
-      );
-      sendOk(res, { object: result }, 201);
-    } catch (err) {
-      sendError(
-        res,
-        400,
-        'EXTERNAL_IMPORT_ERROR',
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  });
+    // Import a remote table as a live (runtime-origin) federated object so it's
+    // immediately queryable — the "Import as Object" action (ADR-0015 Addendum).
+    // 503 when the service is absent; 400 when import is refused (e.g. read-only
+    // metadata store) or the remote table is missing.
+    {
+      method: 'POST',
+      path: `${ext}/tables/:remote/import`,
+      metadata: { summary: 'Import a remote table as a federated object', tags: ['datasources'] },
+      handler: async (req: any, res: any) => {
+        const svc = externalService();
+        if (!svc?.importObject) return unavailable(res);
+        try {
+          const result = await svc.importObject(
+            req.params.name,
+            req.params.remote,
+            (req.body as Record<string, unknown>) ?? {},
+          );
+          sendOk(res, { object: result }, 201);
+        } catch (err) {
+          sendError(
+            res,
+            400,
+            'EXTERNAL_IMPORT_ERROR',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      },
+    },
 
-  // Refresh and return the cached catalog snapshot.
-  server.post(`${ext}/refresh-catalog`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.refreshCatalog) return unavailable(res);
-    try {
-      const catalog = await svc.refreshCatalog(req.params.name);
-      sendOk(res, { catalog });
-    } catch (err) {
-      refused(res, err);
-    }
-  });
+    // Refresh and return the cached catalog snapshot.
+    {
+      method: 'POST',
+      path: `${ext}/refresh-catalog`,
+      metadata: { summary: 'Refresh the external datasource catalog snapshot', tags: ['datasources'] },
+      handler: async (req: any, res: any) => {
+        const svc = externalService();
+        if (!svc?.refreshCatalog) return unavailable(res);
+        try {
+          const catalog = await svc.refreshCatalog(req.params.name);
+          sendOk(res, { catalog });
+        } catch (err) {
+          refused(res, err);
+        }
+      },
+    },
 
-  // Validate the federated objects on this datasource.
-  server.post(`${ext}/validate`, async (req: any, res: any) => {
-    const svc = externalService();
-    if (!svc?.validateAll) return unavailable(res);
-    try {
-      const report = await svc.validateAll();
-      const results = (report.results ?? []).filter((r) => r.datasource === req.params.name);
-      sendOk(res, { ok: results.every((r) => r.ok), results });
-    } catch (err) {
-      refused(res, err);
-    }
-  });
+    // Validate the federated objects on this datasource.
+    {
+      method: 'POST',
+      path: `${ext}/validate`,
+      metadata: { summary: 'Validate the federated objects on a datasource', tags: ['datasources'] },
+      handler: async (req: any, res: any) => {
+        const svc = externalService();
+        if (!svc?.validateAll) return unavailable(res);
+        try {
+          const report = await svc.validateAll();
+          const results = (report.results ?? []).filter((r) => r.datasource === req.params.name);
+          sendOk(res, { ok: results.every((r) => r.ok), results });
+        } catch (err) {
+          refused(res, err);
+        }
+      },
+    },
+  ];
+
+  return mountDirectRoutes(server, routes);
 }

@@ -12,47 +12,30 @@ Defines inputs required before executing an action.
 Two declaration modes:
 
 1. **Field-backed** (preferred) — reference an existing object field; the
+   runtime resolves the field's label (i18n), type, validation rules,
+   options, placeholder, help text, and widget mapping from object
+   metadata. Cross-object references use `objectOverride`.
 
-runtime resolves the field's label (i18n), type, validation rules,
-
-options, placeholder, help text, and widget mapping from object
-
-metadata. Cross-object references use `objectOverride`.
-
-```ts
-
-params: [
-
-\{ field: 'email' \},                                 // same object
-
-\{ field: 'role', objectOverride: 'sys_member' \},    // different object
-
-]
-
-```
+   ```ts
+   params: [
+     { field: 'email' },                                 // same object
+     { field: 'role', objectOverride: 'sys_member' },    // different object
+   ]
+   ```
 
 2. **Inline** (legacy / bespoke) — declare `name`, `label`, `type` etc.
+   inline when no matching object field exists. Inline values may also be
+   used alongside `field` to override individual properties. A `lookup` /
+   `master_detail` param declared this way MUST name its target object via
+   `reference` — there is no field to inherit it from:
 
-inline when no matching object field exists. Inline values may also be
-
-used alongside `field` to override individual properties. A `lookup` /
-
-`master_detail` param declared this way MUST name its target object via
-
-`reference` — there is no field to inherit it from:
-
-```ts
-
-params: [
-
-\{ name: 'inspector', label: 'Inspector', type: 'lookup', reference: 'sys_user' \},
-
-]
-
-```
+   ```ts
+   params: [
+     { name: 'inspector', label: 'Inspector', type: 'lookup', reference: 'sys_user' },
+   ]
+   ```
 
 `name` is required unless `field` is provided (in which case it defaults
-
 to the field name and is used as the request-body key).
 
 <Callout type="info">
@@ -98,7 +81,7 @@ const result = ActionSchema.parse(data);
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). |
-| **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| … +3 more>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Boolean or predicate (CEL) — action is disabled when TRUE. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there. |
 | **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. |
@@ -120,6 +103,22 @@ const result = ActionSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Allowed Values: `Action.requiresFeature`
+
+* `twoFactor`
+* `passkeys`
+* `magicLink`
+* `organization`
+* `multiOrgEnabled`
+* `degradedTenancy`
+* `oidcProvider`
+* `sso`
+* `ssoEnforced`
+* `deviceAuthorization`
+* `admin`
+* `phoneNumber`
+* `phoneNumberOtp`
 
 
 ---
@@ -165,9 +164,9 @@ const result = ActionSchema.parse(data);
 | **field** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
-| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | optional |  |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
 | **required** | `boolean` | optional |  |
-| **options** | `{ label: string; value: string }[]` | optional |  |
+| **options** | `{ label: string; value: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |
@@ -177,7 +176,75 @@ const result = ActionSchema.parse(data);
 | **reference** | `string` | optional | Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference. |
 | **defaultFromRow** | `boolean` | optional |  |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Param visibility predicate (CEL); omits the param when false. |
-| **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| 'admin' \| 'phoneNumber' \| 'phoneNumberOtp'>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
+| **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| … +3 more>` | optional | Public auth feature flag gating this param; lowered into `visible` at parse time. |
+
+### Allowed Values: `ActionParam.type`
+
+* `text`
+* `textarea`
+* `email`
+* `url`
+* `phone`
+* `password`
+* `secret`
+* `markdown`
+* `html`
+* `richtext`
+* `number`
+* `currency`
+* `percent`
+* `date`
+* `datetime`
+* `time`
+* `boolean`
+* `toggle`
+* `select`
+* `multiselect`
+* `radio`
+* `checkboxes`
+* `lookup`
+* `master_detail`
+* `tree`
+* `user`
+* `image`
+* `file`
+* `avatar`
+* `video`
+* `audio`
+* `formula`
+* `summary`
+* `autonumber`
+* `composite`
+* `repeater`
+* `record`
+* `location`
+* `address`
+* `code`
+* `json`
+* `color`
+* `rating`
+* `slider`
+* `signature`
+* `qrcode`
+* `progress`
+* `tags`
+* `vector`
+
+### Allowed Values: `ActionParam.requiresFeature`
+
+* `twoFactor`
+* `passkeys`
+* `magicLink`
+* `organization`
+* `multiOrgEnabled`
+* `degradedTenancy`
+* `oidcProvider`
+* `sso`
+* `ssoEnforced`
+* `deviceAuthorization`
+* `admin`
+* `phoneNumber`
+* `phoneNumberOtp`
 
 
 ---

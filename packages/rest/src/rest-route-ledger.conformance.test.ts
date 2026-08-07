@@ -12,10 +12,20 @@
  *  2. A ledger entry for a route the server no longer mounts — the ledger
  *     went stale.
  *
- * Enumeration is real on BOTH sources: `route-manager` rows against
- * `RestServer.getRoutes()` (the introspection seam RouteManager already
- * provides), and `direct-mount` rows against the registration calls the two
- * bypass registrars make on a mock `IHttpServer` — no pinned-by-hand list.
+ * Enumeration is real, and since #5822 there is exactly ONE of it:
+ * `RestServer.getRoutes()`, asked of a server booted the way production boots
+ * it — its own `registerRoutes()` plus `mountAndRecordDirectRoutes`, the same
+ * composition step `rest-api-plugin.ts` calls. Each row carries the `source`
+ * that says how it was mounted, so both ledger sources are still audited
+ * separately, from one table.
+ *
+ * That replaced a second enumeration: `direct-mount` rows used to be captured
+ * by re-invoking the two bypass registrars against a mock `IHttpServer` here,
+ * because the server held no record of them. Two consequences of the merge are
+ * worth knowing — the guard now fails if a direct-mount route is mounted but
+ * NOT recorded (previously invisible), and a third bypass registrar added to
+ * the composition step is enumerated here automatically instead of needing this
+ * file to be taught about it.
  *
  * The third direction — "every `sdk` row names a client method that exists" —
  * lives in `packages/client/src/rest-route-ledger-coverage.test.ts`, next to
@@ -25,11 +35,13 @@
  * dependency closure).
  */
 
+// `.js` on the relative imports: without it `moduleResolution: nodenext` does
+// not resolve them, every imported symbol degrades to `any`, and the callbacks
+// below turn into a TS7006 pile in this package's TEST_DEBT entry.
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
-import { registerPackageRoutes } from './package-routes';
-import { registerExternalDatasourceRoutes } from './external-datasource-routes';
-import { REST_ROUTE_LEDGER } from './rest-route-ledger';
+import { RestServer } from './rest-server.js';
+import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
+import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
 /** Minimal IHttpServer mock that records registrations. */
 function createMockServer() {
@@ -67,25 +79,49 @@ function createCapableProtocol() {
   };
 }
 
-/** `VERB /path` keys for every route RouteManager holds at default config. */
-function enumerateRouteManagerRoutes(): Set<string> {
-  const rest = new RestServer(createMockServer() as any, createCapableProtocol() as any, {} as any);
-  rest.registerRoutes();
-  return new Set(rest.getRoutes().map((r) => `${r.method.toUpperCase()} ${r.path}`));
+/**
+ * A plugin context with the services the direct-mount composition gates on.
+ *
+ * `package` is present, so the package registrar runs — this guard audits the
+ * ledger's whole direct-mount surface, and a boot without the service mounts a
+ * strict subset of it (that direction is pinned in
+ * `direct-mount-introspection.test.ts`, not here).
+ */
+function createDirectMountCtx() {
+  return {
+    getService: (name: string) => {
+      if (name === 'package') return { list: vi.fn(), get: vi.fn(), publish: vi.fn(), delete: vi.fn() };
+      return undefined;
+    },
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  };
 }
 
-/** `VERB /path` keys captured from the two RouteManager-bypassing registrars. */
-function enumerateDirectMountRoutes(): Set<string> {
+/**
+ * A server booted the way production boots it: its own routes, then the
+ * direct-mount composition — the SAME function `rest-api-plugin.ts` calls.
+ */
+function bootRestServer(): RestServer {
   const server = createMockServer();
-  registerPackageRoutes(server as any, {} as any);
-  registerExternalDatasourceRoutes(server as any, { getService: () => undefined } as any);
-  const keys = new Set<string>();
-  for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {
-    for (const call of (server[verb] as any).mock.calls) {
-      keys.add(`${verb.toUpperCase()} ${call[0]}`);
-    }
-  }
-  return keys;
+  const rest = new RestServer(server as any, createCapableProtocol() as any, {} as any);
+  rest.registerRoutes();
+  mountAndRecordDirectRoutes({
+    server: server as any,
+    recorder: rest,
+    ctx: createDirectMountCtx() as any,
+    versionedBase: '/api/v1',
+  });
+  return rest;
+}
+
+/** `VERB /path` keys for every route the booted server reports for one source. */
+function enumerateMountedRoutes(source: 'route-manager' | 'direct-mount'): Set<string> {
+  return new Set(
+    bootRestServer()
+      .getRoutes()
+      .filter((r) => r.source === source)
+      .map((r) => `${r.method.toUpperCase()} ${r.path}`),
+  );
 }
 
 function ledgerKeys(source: 'route-manager' | 'direct-mount'): Set<string> {
@@ -95,7 +131,7 @@ function ledgerKeys(source: 'route-manager' | 'direct-mount'): Set<string> {
 describe('REST route ledger ↔ RouteManager enumeration', () => {
   it('every RouteManager-registered route has a ledger entry', () => {
     const ledger = ledgerKeys('route-manager');
-    const missing = [...enumerateRouteManagerRoutes()].filter((k) => !ledger.has(k));
+    const missing = [...enumerateMountedRoutes('route-manager')].filter((k) => !ledger.has(k));
     expect(
       missing,
       `REST routes with no rest-route-ledger entry: ${missing.join(', ')}. ` +
@@ -104,7 +140,7 @@ describe('REST route ledger ↔ RouteManager enumeration', () => {
   });
 
   it('every route-manager ledger entry is a live RouteManager route', () => {
-    const live = enumerateRouteManagerRoutes();
+    const live = enumerateMountedRoutes('route-manager');
     const stale = [...ledgerKeys('route-manager')].filter((k) => !live.has(k));
     expect(
       stale,
@@ -117,7 +153,7 @@ describe('REST route ledger ↔ RouteManager enumeration', () => {
 describe('REST route ledger ↔ direct-mount registrars', () => {
   it('every directly-mounted route has a ledger entry', () => {
     const ledger = ledgerKeys('direct-mount');
-    const missing = [...enumerateDirectMountRoutes()].filter((k) => !ledger.has(k));
+    const missing = [...enumerateMountedRoutes('direct-mount')].filter((k) => !ledger.has(k));
     expect(
       missing,
       `Directly-mounted routes with no rest-route-ledger entry: ${missing.join(', ')}.`,
@@ -125,12 +161,24 @@ describe('REST route ledger ↔ direct-mount registrars', () => {
   });
 
   it('every direct-mount ledger entry is really registered by its registrar', () => {
-    const live = enumerateDirectMountRoutes();
+    const live = enumerateMountedRoutes('direct-mount');
     const stale = [...ledgerKeys('direct-mount')].filter((k) => !live.has(k));
     expect(
       stale,
       `direct-mount rest-route-ledger entries no registrar mounts: ${stale.join(', ')}.`,
     ).toEqual([]);
+  });
+
+  it('reports them through the server, not through a parallel enumeration', () => {
+    // The #5822 convergence, asserted rather than described: what the ledger is
+    // compared against is the SERVER's own answer. Before, this suite ran a
+    // second enumeration (mock-server registration capture) precisely because
+    // `getRoutes()` could not see these nine — so a regression that stopped
+    // recording them would have kept this file green while emptying the
+    // OpenAPI document.
+    const directMounted = bootRestServer().getRoutes().filter((r) => r.source === 'direct-mount');
+    expect(directMounted.length).toBe(ledgerKeys('direct-mount').size);
+    expect(directMounted.every((r) => typeof r.handler === 'function')).toBe(true);
   });
 });
 

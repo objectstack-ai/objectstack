@@ -8,39 +8,24 @@ description: Metadata protocol schemas
 Metadata Service Protocol
 
 Defines the standard API contracts for the **@objectstack/metadata** package.
-
 This is the single authority for ALL metadata-related services and APIs across
-
 the entire platform, including Hono, Next.js, and NestJS adapters.
 
 ## Architecture
-
 ```
-
 ┌──────────────────────────────────────────────────────────────────┐
-
 │              @objectstack/metadata — API Contracts              │
-
 │                                                                  │
-
 │  CRUD        │ Query/Search │ Bulk Ops  │ Overlay   │ Watch     │
-
 │  Import/Export│ Validation   │ Type Reg  │ Deps      │           │
-
 ├──────────────────────────────────────────────────────────────────┤
-
 │  Hono Adapter │ Next.js Adapter │ NestJS Adapter │ CLI         │
-
 └──────────────────────────────────────────────────────────────────┘
-
 ```
 
 ## Alignment
-
 - **Salesforce**: Metadata API (deploy, retrieve, describe)
-
 - **ServiceNow**: System Dictionary + Metadata API
-
 - **Kubernetes**: API Server + CRD Registry
 
 <Callout type="info">
@@ -376,10 +361,39 @@ Metadata query with filtering, sorting, and pagination
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>` | ✅ | Metadata type |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| … +11 more>` | ✅ | Metadata type |
 | **name** | `string` | ✅ | Item name (snake_case) |
 | **data** | `Record<string, any>` | ✅ | Metadata payload |
 | **namespace** | `string` | optional | Optional namespace |
+
+### Allowed Values: `MetadataRegisterRequest.type`
+
+* `object`
+* `field`
+* `hook`
+* `seed`
+* `mapping`
+* `view`
+* `page`
+* `dashboard`
+* `app`
+* `action`
+* `report`
+* `dataset`
+* `flow`
+* `job`
+* `datasource`
+* `external_catalog`
+* `translation`
+* `api`
+* `email_template`
+* `doc`
+* `book`
+* `permission`
+* `position`
+* `agent`
+* `tool`
+* `skill`
 
 
 ---

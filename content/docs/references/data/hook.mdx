@@ -6,7 +6,6 @@ description: Hook protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Hook Lifecycle Events
-
 Defines the interception points in the ObjectQL execution pipeline.
 
 <Callout type="info">
@@ -41,7 +40,7 @@ const result = HookContextSchema.parse(data);
 | **provenance** | `{ flowRunId?: string; attributedUserId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
-| **api** | `any` | optional | Cross-object data access (ScopedContext) |
+| **api** | `any` | optional | Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`) |
 | **user** | `{ id?: string; name?: string; email?: string; organizationId?: string }` | optional | Current user info shortcut |
 
 

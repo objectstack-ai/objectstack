@@ -171,7 +171,14 @@ export function installAttachmentLifecycleHooks(
     'afterInsert',
     async (ctx: any) => {
       try {
-        const row: any = ctx?.result ?? ctx?.input?.doc ?? ctx?.input?.data;
+        // An after-insert context carries the stored row on `ctx.result`, and the
+        // written payload under `input.data` — `data` is the ONLY spelling any
+        // engine path produces, measured and pinned by objectql's
+        // `hook-input-shape-contract.test.ts` ("insert carries `data` — never
+        // `doc`", #5273). An `input.doc` alias limb used to sit between these two
+        // for a producer that never existed; removed in #5906 (same family as
+        // #5671) rather than left as a second de-facto contract (PD #12).
+        const row: any = ctx?.result ?? ctx?.input?.data;
         const fileId = row?.file_id;
         if (!fileId) return;
         const file = await engine.findOne('sys_file', { where: { id: String(fileId) }, context: { ...SYSTEM_CTX } });

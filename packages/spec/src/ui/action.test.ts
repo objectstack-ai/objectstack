@@ -1407,3 +1407,166 @@ describe('#3896 close-out — retired shortcut/bulkEnabled', () => {
     expect(message).toMatch(/#3896/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #5016 — per-option `visibleWhen` on an action param's option list
+// ---------------------------------------------------------------------------
+
+/**
+ * #4001 批 14 closed this option entry at `{ label, value }` and filed the
+ * capability question as #5016. #5016 answered it PER KEY, on measurement of
+ * what an action param's option list can actually reach in objectui:
+ *
+ *  - `visibleWhen` has a reader on this exact path, so it is declared.
+ *  - `color` / `default` / `icon` / `disabled` do not, so they stay rejected —
+ *    with the guidance that says where each vocabulary IS real.
+ *
+ * Every assertion below goes through a REAL door — `getMetadataTypeSchema('action')`
+ * (what `MetadataManager.validate` / `GET /api/v1/meta` / the Studio form use)
+ * or `ObjectSchema.actions[]` — rather than through `ActionParamSchema`
+ * directly, because the defect #5016 records was not "the sub-schema strips it"
+ * but "the key never survives the door an author's metadata actually crosses".
+ */
+describe('#5016 — action param option vocabulary', () => {
+  const gatedAction = {
+    name: 'escalate',
+    label: 'Escalate',
+    type: 'script' as const,
+    target: 'escalate_handler',
+    params: [{
+      name: 'severity',
+      label: 'Severity',
+      type: 'select' as const,
+      options: [
+        { label: 'Normal', value: 'normal' },
+        { label: 'Overload', value: 'overload', visibleWhen: "record.status == 'open'" },
+      ],
+    }],
+  };
+
+  it('SURVIVES the metadata door — declared AND delivered, not declared-then-stripped', () => {
+    const schema = getMetadataTypeSchema('action');
+    expect(schema, "the 'action' metadata type must resolve to a schema").toBeDefined();
+    const result = schema!.safeParse(gatedAction);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+
+    // The load-bearing half. Batch 14 measured this same payload coming back as
+    // `{"label":"Overload","value":"overload"}` — parsed clean, key gone before
+    // any renderer saw it. Asserting only `success` would still pass in that
+    // world, which is exactly the ADR-0078 shape this change exists to end.
+    const options = (result.data as any).params[0].options;
+    expect(options[1]).toMatchObject({
+      label: 'Overload',
+      value: 'overload',
+      // `ExpressionInputSchema` normalises the authored string into the wire
+      // envelope objectui's `evalFieldPredicate` accepts (`FieldRulePredicate =
+      // string | { dialect?, source }`).
+      visibleWhen: { dialect: 'cel', source: "record.status == 'open'" },
+    });
+    // An option that declares no predicate stays predicate-free — `visibleWhen`
+    // is optional, not defaulted to an always-true expression.
+    expect(options[0].visibleWhen).toBeUndefined();
+  });
+
+  it('survives the other real door too — nested in `object.actions[]`', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'crm_case',
+      label: 'Case',
+      fields: { status: { label: 'Status', type: 'text' } },
+      actions: [gatedAction],
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect((result.data as any).actions[0].params[0].options[1].visibleWhen)
+      .toEqual({ dialect: 'cel', source: "record.status == 'open'" });
+  });
+
+  it('accepts the canonical `{ dialect, source }` envelope as authored', () => {
+    const result = getMetadataTypeSchema('action')!.safeParse({
+      ...gatedAction,
+      params: [{
+        name: 'severity',
+        type: 'select' as const,
+        options: [{
+          label: 'Overload',
+          value: 'overload',
+          visibleWhen: { dialect: 'cel', source: "'admin' in current_user.positions" },
+        }],
+      }],
+    });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it('does NOT open the keys whose readers this surface cannot reach', () => {
+    // `color` / `default` are declared one layer down on `SelectOptionSchema`;
+    // `icon` / `disabled` are declared nowhere in the spec. Neither group has a
+    // consumer an action param's option list reaches — the dialog builds an
+    // INPUT from the list and discards it — so both stay rejected. Opening them
+    // for vocabulary symmetry would be the parses-clean-changes-nothing key.
+    for (const key of ['color', 'default', 'icon', 'disabled']) {
+      const result = getMetadataTypeSchema('action')!.safeParse({
+        ...gatedAction,
+        params: [{
+          name: 'severity',
+          type: 'select' as const,
+          options: [{ label: 'Overload', value: 'overload', [key]: key === 'disabled' || key === 'default' ? true : 'x' }],
+        }],
+      });
+      expect(result.success, `\`${key}\` must stay rejected on an action param option`).toBe(false);
+    }
+  });
+
+  it('keeps each rejection pointing at where that vocabulary IS real', () => {
+    const messageFor = (option: Record<string, unknown>): string => {
+      const r = getMetadataTypeSchema('action')!.safeParse({
+        ...gatedAction,
+        params: [{ name: 'severity', type: 'select' as const, options: [option] }],
+      });
+      return JSON.stringify(r.error?.issues ?? []);
+    };
+
+    // `color`: real one layer down, on the STORED-value display path. The
+    // sentence must no longer defer to #5016 as an open question — it is
+    // decided — and must not promise the field-backed inheritance route, which
+    // `normaliseOptions` still drops (ledger finding 18).
+    const color = messageFor({ label: 'A', value: 'a', color: 'red' });
+    expect(color).toContain('SelectOptionSchema');
+    expect(color).not.toContain('do not rely on it today');
+
+    // `default`: a wrong-LAYER key, not a missing capability. The prescription
+    // is the param's own `defaultValue`, one level up.
+    expect(messageFor({ label: 'A', value: 'a', default: true })).toContain('defaultValue');
+
+    // `icon`: declared nowhere — claiming it lives on `SelectOptionSchema`
+    // would be the false-prescription class.
+    const icon = messageFor({ label: 'A', value: 'a', icon: 'x' });
+    expect(icon).toContain('no option shape in the spec declares');
+    expect(icon).not.toContain('is a per-option key of a FIELD');
+  });
+
+  it('points the two rival spellings at the newly declared key', () => {
+    for (const alias of ['visible', 'showWhen']) {
+      const r = getMetadataTypeSchema('action')!.safeParse({
+        ...gatedAction,
+        params: [{
+          name: 'severity',
+          type: 'select' as const,
+          options: [{ label: 'A', value: 'a', [alias]: "record.status == 'open'" }],
+        }],
+      });
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain(`\`${alias}\` → \`visibleWhen\``);
+    }
+  });
+
+  it('leaves the PARAM-level canonical spelling alone — `visibleWhen` there still means `visible`', () => {
+    // The two surfaces have opposite canonical spellings on purpose (a param
+    // gates itself with `visible`; an option gates itself with `visibleWhen`),
+    // so opening the option key must not blur the one level up.
+    const r = getMetadataTypeSchema('action')!.safeParse({
+      ...gatedAction,
+      params: [{ name: 'severity', type: 'text' as const, visibleWhen: 'features.x == true' }],
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain('`visibleWhen` → `visible`');
+  });
+});
