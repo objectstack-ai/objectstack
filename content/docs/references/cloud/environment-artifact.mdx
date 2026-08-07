@@ -8,21 +8,14 @@ description: Environment Artifact protocol schemas
 # Environment Artifact Envelope — re-export (#4740, #4535 C10)
 
 The envelope has exactly ONE declaration:
-
 `../system/environment-artifact.zod` (maintainer route A′ on #4740 —
-
 `./system` holds the live wire shape, `./cloud` re-exports it). Importing
-
 from `@objectstack/spec/cloud` and `@objectstack/spec/system` yields the
-
 SAME symbols, so the import path can never change the shape a consumer
-
 gets (the #4411 dual-source trap, closed for this name).
 
 Do NOT re-declare the envelope here. A second declaration under this name
-
 is exactly what `check:dual-source-exports` and the symbol-identity pin in
-
 `../system/environment-artifact.test.ts` exist to reject.
 
 <Callout type="info">

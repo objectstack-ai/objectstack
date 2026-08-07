@@ -576,12 +576,14 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine-core` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
+| `domain:engine-core` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
+| `domain:metadata` | `packages/metadata*`(metadata service / registry / directory:加载、注册、持久化、缓存、目录)、`packages/platform-objects`(内置平台对象定义)—— 见下「`engine-core` 再拆 `metadata`」 |
 | `domain:drivers` | `packages/drivers/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
-| `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
+| `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役的行为半边、strictness 台账 —— 判据是**接受面变化**,见下「`spec` 一分为二」 |
+| `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑迁移散文/错误 guidance 与 alias 表 —— 校验不变量卡,changeset 恒 patch,见下「`spec` 一分为二」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
@@ -595,7 +597,7 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 
 - `packages/apps/*` 今天只是 app manifest + plugin 壳,内容仍从
   `@objectstack/platform-objects/apps` 再导出,落点可能在 platform-objects
-  (`engine-core`)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要
+  (`metadata`)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要
   落地站点在分诊时判定。
 - `packages/console` 是 `../objectui` 构建产物的落盘位:仓内只跟踪
   `package.json` / `README` / `CHANGELOG`,`dist/` 由 `scripts/build-console.sh`
@@ -619,6 +621,56 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 - **座位贴同批新立**:`domain:engine` 那一个座位一分为二,各自的范围段
   照抄上表(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入
   冻结指令锚在 `drivers` 那一行,`formula` / `driver-sql` 不受影响)。
+
+**`spec` 一分为二(维护者 2026-08-07 批准,座位贴 #6298)。** 旧 `domain:spec`
+同时覆盖「改接受面」与「改契约自述文本」两类节律完全不同的活:前者量小、
+风险高、要吃版本窗口裁决;后者量大、机械、天然适合 sweep 打包 —— 混在一席,
+文本债持续积压(truth-sweep 审计开采一天可灌 5-10 张)。切分纪律:
+
+- **判据是接受面,不是包、不是 diff 大小。** 这是 anchoring rule 在
+  `packages/spec` 内的**显式例外**:一包两席,按「合法元数据集合变没变」分派 ——
+  改动前能过校验的输入,改动后逐字节仍然同判 ⇒ `spec-surface`;否则 `spec`。
+  该判据与包归属同样机械(分诊读 diff 落点:语义行 vs 纯文本行)。反向红线:
+  **任何改变接受/拒绝行为的卡,不论多小,归 `domain:spec`**(#6245 size S,
+  但把零校验放行改成 422 ⇒ 协议卡;#6235 只开一个 `visibleWhen` 键 ⇒ 协议卡)。
+- **与 `domain:spec-tooling`(#5163 程序卡,座位贴 #6018)的分界**:surface 改
+  「契约自己说的话」(`packages/spec` 源内文本行),tooling 改「围着契约转的
+  机器」(门禁/生成器/lint 与 docs 手写页;其席位范围 ⛔ 不碰
+  `packages/spec/src/**/*.zod.ts`,与 surface 天然无交集)。同一缺陷两半分治的
+  先例:#6146(文档教了一个求值面从未绑定的根 —— surface)与 #6290(lint 一边
+  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。
+- **产物随源走**:describe/JSDoc 改动会重生成 `content/docs/references/**` 与
+  manifest 的 description 字段 —— 产物变更归触发它的**源 PR**(`check:generated`
+  重生成提交,⛔ 手改);同一生成树在飞重生成 >1 张时按 #4675 四步序串行
+  (#6224 扣压处置即此形,记录在 #6018)。
+- **卡点自报**(座位职责,不等积压被感觉到):① 水位 —— 本车道 `pm:queue`
+  连续 3 天 >15 张或平均滞留 >48h ⇒ 提频/加 batch/按本条款继续拆;② 同一
+  references 树在飞重生成 PR >2 ⇒ 打包成一列发,不加席位;③ 分诊脉冲 ——
+  单次审计灌入 20+ ⇒ 一次性 sweep 专项吃掉,不改常设结构。
+- **迁移**:存量带 `domain:spec` 的文本面 open issue 由**分诊座位**按上述判据
+  一次性重标;拆分时已在飞的打包卡(sweep/工头)由原认领者跟完,不迁移。
+- **运行模式**:surface 席 sweep-first —— 一认领、一 PR、多单 `Fixes`,逐单
+  清单复审、零 rider,把认领/PR/CI/验收的固定开销摊薄到 1/N(试点 #6243)。
+
+**`engine-core` 再拆 `metadata`(维护者 2026-08-07 拍板,座位贴 #6367)。**
+首拆后的 engine-core 仍是全仓最大、增长最快的车道:编译/查询核心与元数据
+机制(service / registry / directory + 内置平台对象)的落地节律不同 —— 前者
+深、串行、常挂 ★,后者以机制修缮与观测型 finding 为主,天然可并行。二次
+切分仍按包边界(anchoring rule 无例外,与 spec 拆分不同):**`engine-core` =
+编译/查询核心**(objectql / core / formula / plugin-pinyin-search),
+**`metadata` = 元数据机制与内置对象**(`packages/metadata*`、
+`packages/platform-objects`)。配套纪律:
+
+- **红线**:改变元数据**格式/接受面**的卡照旧归 `domain:spec`(协议席,判据
+  「合法集合变没变」,#6245/#6235 先例);`/meta` HTTP 路由本体在
+  `packages/rest`,归 `domain:cli` —— `metadata` 席只吃 engine 侧机制。跨半边
+  的卡按主要落点判,拿不准 FLAG 回分诊。
+- **迁移**:存量带 `domain:engine-core` 的 open issue 由**分诊座位**按落点
+  逐条改标(只读分类审计留证,逐卡迁移评论);已在飞(`pm:dispatched`)的
+  **改标不改辖** —— 标签随分类走,收尾与复核仍归原认领会话(先例 #6298
+  说明段)。
+- **座位贴新立**:#6367,范围段照抄上表;母席 #6019 范围随表收缩,由其在任
+  PM 自行更新正文(单写手规则),分诊座位只留知会评论。
 
 **Label discipline —— 单一生产者。** `domain:*` 只由**分诊座位**在 backlog
 sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:分诊座位
@@ -787,6 +839,24 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   范围 —— 已排队父单的 sub-issue 会自动成为派发候选(step 1),把仅有依赖
   关系的发现挂进去等于让未分诊的东西静默入池;那种情况独立立单 +
   `Blocked-by:`(cloud#1045/#1046 之于 cloud#1050 即此形)。
+- **sweep 打包晋级**(试点 #6243 / PR #6288 一轮跑顺后定稿,维护者
+  2026-08-07 批准):晋级一批**同类**发现时,可以打包成**一张 sweep 卡**
+  代替逐张入队 —— 一次认领、一个 PR、N 条 `Fixes`、逐项清单评审,把每单的
+  认领/PR/CI/验收固定开销摊薄到 1/N。这是「顺手修」的制度化替身:省同一笔
+  固定开销,但评审完整性不打折。打包判据与纪律,五条都是试点实测过的:
+  1. **同类才打包**:全部命中同一判据(试点即「description 面在说谎或漂移」,
+     全部校验不变量卡);不同性质的卡打包=一张 PR 里混多个评审面,禁止;
+  2. **逐项清单是 PR 正文的必备件**:每项一行 落点 | before | after,评审
+     按行核,不按 diff 顺序读;
+  3. **N 项之外零改动**,且 PR 自证(`git diff --stat` 文件数与清单一一
+     对应)—— 这是 sweep 与 rider 的分界线;
+  4. **范围外发现照旧单开**(PD #10 不因打包而豁免;#6287 之于 #6288 即
+     此形);
+  5. **卡片本身是认领对象**:sweep 卡入队、被认领,成员单保持 `pm:queue`
+     标签但**不再是可派发候选**(选择期按 sweep 卡的成员清单排除,防双派;
+     PR 合并时 N 条 `Fixes` 齐关)。
+  适用面注记:`domain:spec-surface` 车道的默认运行模式即 sweep-first
+  (见「`spec` 一分为二」);其它车道按发现批次的同类度自行判断。
 
 #### 发版板(`target:<major>` —— 发版视角的常设轴,维护者 2026-08-06 拍板)
 
@@ -1195,6 +1265,28 @@ prompt:
 实现面逐层收口」这类工作上,没有第二个实现面的活(纯 UI、文档、单面脚本)这条无处可
 绑,该省掉而不是改写它。
 
+**拒收类用例的最低断言集是 `code` + `status`,不是「它抛了」—— 派发令的标准条款。**
+适用判据:本单会**新增或改写拒收 / 错误类用例**(验收点里出现「应当被拒收」的活)。
+满足时派发令带这一句(原话):
+
+> 拒收类用例最低断言**错误的 `code` 与 `status`**(ADR-0112 信封)。
+> `expect(...).toThrow()` / `rejects.toThrow()` 单独使用**不构成**拒收测试;措辞本身
+> 是契约时(#5240「一个条件一种措辞」),首句断言**加在** `code`+`status` **之上**,
+> 而不是代替它。本条约束你**新写或改写**的用例 —— 顺手回填存量套件不在本单范围内。
+
+出处是 #6142(#6050)的反向验证实测。两种失明机制方向相反,同一个洞:
+
+- **裸 `Error` ⇒ 恒绿。** 删掉拒收闸后 `driver-sql` 28 例红 22,**多数红在抛出 knex 的
+  裸 `Undefined binding(s)`** —— 一个 `code` / `status` 均为 `undefined` 的 Error。未修的
+  驱动本来就抛,缺的只是信封:只断言「它抛了」的用例,**在本单所针对的那个驱动上保持
+  绿色**。
+- **从不抛的 transport ⇒ 红,但红得不指向缺陷。** 同一次删闸,`driver-turso` remote
+  29 例红 20,**20 个全部**红在「本该拒收却编译出了 SQL」—— 该 transport 从不抛。只断言
+  抛出的用例在这里报的是「promise 没有 reject」,说的是**没抛**而不是**没信封**,分不开
+  「拒收了但信封错」与「根本没拒收」—— 而这正是这一族的两个缺陷。
+
+一句话:**一个在缺信封的实现上无法转红的拒收用例,读起来是覆盖,实际不是。**
+
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
 is the PM's sample; the dev's verification is the real thing, so the prompt
@@ -1284,18 +1376,51 @@ same environment — its own container and fresh clone, decoupled from the PM
 session's lifetime. Use it when devs need resources/lifetime beyond one
 container, or the maintainer asks for it. Requires the `Claude_Code_Remote`
 MCP tools (available in remote/web sessions; if absent, say so and fall back
-to `mode:subagent`). Per issue:
+to `mode:subagent`).
 
-1. `create_trigger` with `create_new_session_on_fire: true` and no schedule
-   (poke-only), name `pm-dispatch-issue-<n>`, prompt = the dispatch template
-   below **made fully standalone**: the fired session starts with zero
-   conversation context (it does get the repo clone, so it can be told to
-   follow `.claude/agents/os-dev.md`), and — since an independent session
-   cannot return a message to the PM — it must be told to **post the JSON
-   report as a comment on the issue** (prefixed `<!-- os-dev-report -->`)
-   instead of returning it, in addition to opening the draft PR.
-2. `fire_trigger` to launch it, then `delete_trigger` once the report has
-   been collected (step 6) so poke-only triggers don't accumulate.
+**一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire**(维护者
+2026-08-07 拍板;trigger 流只保留给**定时/重复**型 —— 座位 Routine 一节)。
+实测三课,#6083 首派一天踩齐,每一条都写进派发动作:
+
+1. **授权面随 source,不随环境。** trigger 拉起的会话**没有仓库授权** ——
+   clone(匿名只读)可用,push / 开 PR / 发评论全 403(`not in this
+   session's authorized repository set`),`permission_mode: auto` 下也没有
+   可弹的授权窗,dev 只能做只读勘察。`create_session` 带 `source_url` 的
+   会话**出生即持推送授权**。同时带 `outcome_branch`(= 认领分支,平台托管
+   推送)与显式 `model`(trigger 流不可指模型 —— sonnet 默认惊吓即此出处)、
+   `title`(客户端卡片名 —— **以车道名开头,⛔ 不叫 os-dev**,维护者
+   2026-08-07 拍板:多车道并行时卡片按车道可扫;形如
+   `⚡ spec #5599 view 身份前置(裁 B)`,即 `⚡ <车道> #<单号> <短语>`)。
+2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态 —— 回合结束
+   就停下等输入,不像 subagent 一口气跑完;不写这条,dev 会在中期汇报或提问
+   处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
+   开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
+   (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
+3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流。**
+   初版条款以为云会话一律没有 GitHub API 工具 —— 对 `create_session` 卡是
+   **过度保守的误判**(2026-08-07 下午三例实测推翻:#5599 会话自发 issue
+   评论、#5775 会话自立两张 issue、#6243 会话自开 PR #6288),没有工具的只是
+   **trigger 拉起**的会话(与第 1 课的 403 同源)。据此分流:
+   - **create_session 卡(常态)**:派发词要求 dev **自开 draft PR**
+     (`Fixes #<n>`,正文含验证记录)并把终报以 **issue 评论**
+     (`<!-- os-dev-report -->`)交付;PM 在派发后立即对该 PR(或预期分支的
+     PR)挂 `subscribe_pr_activity` —— dev 的完成动作即 webhook,通知延迟从
+     「≤巡检间隔」降到秒级。**例外仍归 PM 代办**:会话未 attach 的姊妹仓
+     (源仓之外)依旧够不着 —— 跨仓跟进卡由 PM 代立(#5775 的 objectui
+     跟进卡即此形)。
+   - **trigger 拉起的会话(定时/重复型)**:维持降级通道 —— 推送 outcome
+     branch + 终报走报告 ref(空提交信息)或最后一条会话消息,PM 代开
+     draft PR、代转录(权限面不因此放大)。附一条实测:报告 ref 用完后
+     PM 侧 `push --delete` 会被 git 代理 403(推送授权不含删 ref),清理
+     要走有权限的通道或留给维护者。
+
+**监控与转向**:事件面交给 PR 订阅(上条),`get_session` 读实时状态
+(status / model / `post_turn_summary`;IDLE + 分支未推送 = 停摆待 poke);
+投递消息用**绑定会话的 poke 触发器**(`create_trigger` 带
+`persistent_session_id` + `fire_trigger` + 用后即 `delete_trigger`)。巡检
+从主通知通道退为**兜底心跳**:webhook 不保证送达(CI success/新推送/踢队
+可能缺席),定时器仍要挂,但频率可放宽,且每轮先核订阅已覆盖哪些面、只补
+盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 
@@ -1478,6 +1603,12 @@ against the report's own claims:
   genuinely invalid shapes are still there (step 5's two lines). #5365 slipped
   through exactly this review layer and was caught by CI instead: CI does catch
   it, at the price of one extra lap.
+- **拒收类用例的绿,是不是「它抛了」的绿?** 判据:本单验收点含「应当被拒收」。抽查
+  diff 里的拒收用例有没有断言 `code` 与 `status`(ADR-0112 信封)—— 只写 `toThrow()` /
+  `rejects.toThrow()` 的用例,在**未修实现本来就抛裸 Error** 的那一族上恒绿(#6142
+  实测:`driver-sql` 删闸后 22 红中多数是裸 knex Error,`code` / `status` 均
+  `undefined`),于是「28 例全绿」这种报告读起来是覆盖、实际证不了拒收。缺断言判
+  REWORK 补齐,而不是接受绿色输出。本条是 step 5 那条标准条款在复核侧的对账。
 - **Did the dev verify the issue's premise?** The report's
   `premise_still_valid` field makes the answer explicit — a `false` there
   reopens triage rather than failing review. A report that falsifies the
@@ -1790,10 +1921,41 @@ dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/an
 第 3 条最容易被省掉,而省掉它就退化成最坏形态:前提不成立时 dev 自行改选,那正是**无人
 裁决**的状态,且没有任何读数会显示它发生过。
 
+**两条元判据 —— 一整族近似单默认不进决策箱(维护者 2026-08-07 决策箱第 2 轮拍板)。**
+上面的「不升级四类」说的是**单张单**自带裁决;这两条说的是**一族形状相同的单**不必逐张
+问 —— 族里第一张已经裁过,后来的默认继承那条裁决。重复立卡不是谨慎,是拿维护者的时间
+买同一个答案。
+
+- **静默丢弃的声明,默认并入既有拒收集。** 适用判据:一个**已声明的键**在组件的某一支上
+  被**静默忽略**,而更早的裁决已把同一个键在**兄弟支**上定成**响亮的编写期错误**。此时
+  新支**默认并入既有拒收集** —— 复用母单的裁决直接入队派发,⛔ 不为它另开决策箱槽位;
+  只有两支之间存在**真实语义差异**时才重开。出处:#5714 把 `pool`-on-sqlite 裁成编写期
+  错误之后,#5931(`memory` 支)仍占了一个槽位,而它只是那条裁决的一词之差的外延;同族
+  重复整周都在发生。⚠️ **边界必须与本条同段读,否则这条捷径会被用过头**:继承的是**裁决
+  连同它的理由**,不是「拒收」两个字 —— 母单的理由**被实测为分支特有**时本条不适用。
+  #5739(维度侧)的理由是「拒收会连带拒掉今天已经能跑的查询」,该理由在**度量面上被
+  证伪**,所以 #5918 另裁一次是对的。判法固定:把母单的理由拿到新支上复核一遍,理由不
+  成立就回正常升级路径,别让「同一个键」这个表面相似度替你做判断。
+- **一个操作两个实现,默认治理侧胜出。** 适用判据:同一个操作存在两处实现,且两处行为
+  不一致。**带治理的那一侧**(权限闸、用户同意、去重、审计留痕)是**默认幸存者**,另一侧
+  **改绑到它并删除** —— 不是两侧对齐,也不是保留双写。反向裁只在**产品语义明确要求**时
+  成立,且必须把那条语义写进裁决正文,而不是默认成立后再补理由。出处:cloud#896
+  (hostname)即此形定案;cloud#1147 的三个待答问题(重装 = UPSERT、卸载 = 软停用、外部
+  词表 = manifest id)按本条全部落在治理侧;objectstack#4636 的 B 选项是同一形状。留着
+  未治理的那一侧等于给权限闸留一条旁路,而「声明即强制」要堵的正是那条旁路。
+
 Whenever a dev returns `needs_decision` that passes the bar above, an issue
 is too vague to dispatch, or rework has failed twice:
 
-1. **Default: the decision lives ON the issue it belongs to — never a new
+1. **先刷新卡片的前提 —— 落卡与复升级都适用。** 决策卡写下的每条前提(某个在飞
+   PR 还没合、某能力还不存在、某文件还是那个形状)都是**有保质期的读数**:main
+   一天 ~18 合并,跨仓事实按小时变。落卡**之前**、以及把一张旧卡重新推到维护者
+   面前**之前**,逐条复核一遍,失效的就地改写或撤卡 —— **隔夜没动过的卡,默认按
+   「前提未经验证」处理,不是按「还在等答复」处理。** 出处是决策箱第 2 轮的实测:
+   cloud#1148 的 A/B 卡在**写下前 ~50 分钟**就已失效(它等的那个上游 PR 已经合了),
+   cloud#812 一张卡带三条过时前提。前提过期的卡比没有卡更贵 —— 维护者会照着一个
+   不存在的世界做裁决,而卡面上没有任何读数会显示这件事发生过。
+2. **Default: the decision lives ON the issue it belongs to — never a new
    issue.** Post the analysis as a comment on that issue, add the
    `needs-user-decision` label, drop it from the active queue. The label is
    the maintainer's inbox (filter `label:needs-user-decision` shows
@@ -1804,7 +1966,7 @@ is too vague to dispatch, or rework has failed twice:
    when the decision has no natural anchor — it spans several issues (file
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
-2. The analysis, wherever it lands (English, per the language policy):
+3. The analysis, wherever it lands (English, per the language policy):
    background / the concrete question / options / your recommendation /
    related issues, PRs, branches。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
@@ -1830,7 +1992,7 @@ is too vague to dispatch, or rework has failed twice:
      绝不让 AI 能声明一个运行时不兑现的能力。
    推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
-3. If the session is interactive, additionally raise it via `AskUserQuestion`;
+4. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer
    a product/architecture question on the maintainer's behalf.
 

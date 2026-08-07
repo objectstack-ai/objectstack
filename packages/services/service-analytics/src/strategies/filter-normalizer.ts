@@ -251,6 +251,13 @@
 
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import {
+  isBindableComparand,
+  isRenderableTextComparand,
+  TEXT_PATTERN_OPERATORS,
+  unbindableListMemberMessage,
+  unrenderableTextComparandMessage,
+} from '../comparand-shape.js';
 
 export interface NormalizedAnalyticsFilter {
   member: string;
@@ -416,6 +423,48 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
 }
 
 /**
+ * [#5234] The comparand-SHAPE gate for the analytics `where` door.
+ *
+ * This runs before a leaf exists, which is the whole reason it is here rather
+ * than at the three emitters. {@link fieldLeaves} is the ONLY producer of leaf
+ * nodes in this package, so one refusal here covers all three consumers of the
+ * tree at once — `NativeSQLStrategy.buildFilterClause` (the statement that
+ * executes), `ObjectQLStrategy.buildFilterClauseSql` (the `/analytics/sql` echo)
+ * and `ObjectQLStrategy.convertFilter` (the engine path). Guarding the emitters
+ * instead would have been three guards, three envelopes, and one of them —
+ * `convertFilter`'s `String(v0)` — would still have LAUNDERED the object into
+ * `'[object Object]'` before any driver could refuse it, so a strict driver
+ * downstream could never see the shape it was strict about.
+ *
+ * Prime Directive #12, applied literally: refuse at the door, do not tolerate at
+ * the consumer. `read-scope-sql.ts` is this package's OTHER door — it compiles a
+ * `FilterCondition` that never passes through here — and carries the same two
+ * checks in its own fail-closed envelope.
+ *
+ * Only the two shapes #5234 measured are refused; `$eq` and friends keep binding
+ * an object as JSON (`toSqlBindValue`), which is a separate account.
+ */
+function assertCompilableComparand(opKey: string, field: string, value: unknown): void {
+  if (TEXT_PATTERN_OPERATORS.has(opKey)) {
+    // An array reaches this door as `values[0]` — i.e. every member after the
+    // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
+    // stringify the whole array. That split is why an array is refused and not
+    // merely stringified consistently.
+    if (!isRenderableTextComparand(value)) {
+      throw invalidFilterError(`[analytics] ${unrenderableTextComparandMessage(opKey, field, value)}`);
+    }
+    return;
+  }
+  if ((opKey === '$in' || opKey === '$nin') && Array.isArray(value)) {
+    value.forEach((member, index) => {
+      if (!isBindableComparand(member)) {
+        throw invalidFilterError(`[analytics] ${unbindableListMemberMessage(opKey, field, member, index)}`);
+      }
+    });
+  }
+}
+
+/**
  * Compile one `field: value | { $op: … }` entry into its leaves.
  *
  * Multiple operators on one field AND together — the rule
@@ -558,6 +607,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           );
         }
         const v = wrapper[opKey];
+        // [#5234] The comparand SHAPE gate runs before anything reads `v` — see
+        // {@link assertCompilableComparand} for why this door and not the three
+        // emitters downstream of it.
+        assertCompilableComparand(opKey, key, v);
         const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
         // [#5298] The operators that carry their own negation are NULL-safe,
         // here as everywhere else — see the module header's section on it.

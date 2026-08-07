@@ -18,9 +18,10 @@ offending key, and — when the key is a recognisable spelling of a declared one
 the canonical key to use instead:
 
 ```
-Unrecognized key(s) on this action param: `reference_to`. Until #3405 these were
-dropped silently — the param still parsed, so a mis-spelled config shipped as a
-control that quietly ignored it. Did you mean `reference_to` → `reference`?
+Unrecognized key(s) on this action param: `reference_to`. Did you mean
+`reference_to` → `reference`? Until #3405 these were dropped silently — the param
+still parsed, so a mis-spelled config shipped as a control that quietly ignored
+it.
 ```
 
 **Migration.** A param that previously carried an extra key now fails to parse.

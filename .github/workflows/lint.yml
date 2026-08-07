@@ -139,6 +139,21 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
+      # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
+      # about the table under it. The page is hand-written (build-docs.ts writes
+      # only content/docs/references/), so the two drift one edit at a time —
+      # #6319 found Kernel claiming 17 over a 15-row table because two kernel
+      # rows had migrated into the Cloud section and only Cloud's heading was
+      # updated. Nothing breaks at runtime; the cost is that content/docs/ is the
+      # corpus humans and AIs copy from, so a miscounted index is read as a fact
+      # about the schema catalog. Declared = enforced.
+      # It lives in this job with the other docs guards: the change that breaks
+      # the count is a docs edit, so a packages/** paths filter would blind it to
+      # its own failure mode.
+      - name: Quick-reference section counts match their tables
+        run: pnpm check:quick-reference-counts
+
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —
@@ -210,6 +225,20 @@ jobs:
       # --self-test first.
       - name: Wildcard fall-through guard
         run: pnpm check:wildcard-fallthrough
+
+      # Raw `:type` route-param comparison guard (#6241). The `/meta/:type`
+      # routes serve BOTH spellings and Prime Directive #3 makes the PLURAL one
+      # canonical, so a gate comparing the raw param is a gate the canonical
+      # spelling skips. That is one authorization bypass fixed three times in
+      # one file: #3984 (every per-type gate), #5881 (the dashboard exclusion),
+      # #6241 (the doc/book cache exclusion, still literal eight days after
+      # #3984's structural fix). Each was found by hand; per-defect tests pin
+      # the gates that exist today and nothing refused the NEXT raw comparison.
+      # AST-based on purpose — the file documents the bad pattern in prose, and
+      # a textual scan would flag its own post-mortems. Zero exemptions today.
+      # Runs its own --self-test first.
+      - name: Normalized metadata-type guard
+        run: pnpm check:meta-type-normalized
 
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
@@ -716,6 +745,27 @@ jobs:
       # script header on layering.
       - name: Check the decision frame is in sync across its four copies
         run: pnpm check:skill-frame-sync
+
+      # The third gate over SKILL.md, covering the one line the other two cannot see
+      # (#5331). check:skill-docs / check:skill-refs compare generated artifacts and
+      # check:skill-examples typechecks `os:check` blocks; none of them reads the
+      # `compatibility:` frontmatter line. That blind spot is measured, not theoretical:
+      # nine of ten skills declared `@objectstack/spec 16.x` for an entire major cycle
+      # while teaching 17's capabilities, with all three gates green throughout (#5245).
+      # #5245 corrected the values by hand; this reconciles them against
+      # packages/spec/package.json on every run so they cannot drift again.
+      #
+      # Note the contract is the wording that actually LANDED for #5245 — an exact
+      # `<major>.x` pin. If the wording is ever changed to an unpinned range, this gate
+      # goes RED rather than quietly matching nothing (#4690): a gate that cannot find
+      # its input must fail, never skip.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required, so it
+      # cannot go dormant on exactly the PR that breaks it — and a `skills/**` filter in
+      # particular would blind it to the other half of its input, packages/*/package.json,
+      # where a major bump is what makes the declarations stale in the first place.
+      - name: Check SKILL.md compatibility declarations match the workspace majors
+        run: pnpm check:skill-compatibility
 
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks

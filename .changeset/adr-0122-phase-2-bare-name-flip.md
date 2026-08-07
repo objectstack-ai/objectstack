@@ -135,8 +135,11 @@ and so on for every factory whose schema has two shapes.
   flipped form.
 - **57 previously ungoverned aliases were audited.** Inverting the gate widened it to the
   86 aliases that already read `z.input`, which phase 1 never examined. 22 gained an
-  `XParsed`; 35 were proved isomorphic and pinned, taking the pin registry 719 → 754. This
-  closes #5507's remaining scope.
+  `XParsed`; 35 were proved isomorphic and pinned, adding 35 to the pin registry (716 → 751
+  on the merged tree, after #5055's four retirements and #5775's one addition). This closes
+  #5507's remaining scope.
 - **`@objectstack/spec` public surface: 106 export names removed, 24 added.** The removals
   are the 102 `XInput` aliases (plus re-exports); the additions are the 22 new `XParsed`
   names (plus re-exports). All type-only — no runtime code, no bundle-size change.
+
+<!-- adr-0087: registered spec-type-alias-input-suffix-retired -->

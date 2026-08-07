@@ -8,23 +8,15 @@ description: Email Template protocol schemas
 Email Template Metadata Protocol
 
 Declarative template definition consumed by `IEmailService.sendTemplate()`
-
 to render outbound mail. Persisted as rows of `sys_email_template` so
-
 administrators can author/edit/translate templates in Studio without
-
 shipping code, and tenants can override the built-in defaults
-
 (`allowOrgOverride: true` in the metadata registry).
 
 Aligned with Salesforce `EmailTemplate` and ServiceNow
-
 `sysevent_email_action` conventions: a single named template is
-
 resolved by `(name, locale)`; subject/body strings carry simple
-
-`\{\{path.to.value\}\}` placeholders rendered against a per-send
-
+`{{path.to.value}}` placeholders rendered against a per-send
 `data` payload.
 
 <Callout type="info">

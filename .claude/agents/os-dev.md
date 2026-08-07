@@ -206,6 +206,32 @@ all real:
   forcing the template; #4984 is the family origin — fixtures spelling
   rejected aliases kept the tests green while the rule was dead).
 
+**Rejection-class cases assert the envelope, not the throw.** For any case whose
+point is that bad input is *refused*, the minimum assertion set is the error's
+**`code` AND `status`** (the ADR-0112 envelope). `expect(...).toThrow()` /
+`rejects.toThrow()` on its own is not a rejection test: it carries one bit where
+the defect has two, and PR #6142 (#6050) measured both ways it goes blind —
+opposite directions, same hole:
+
+- **A bare `Error` ⇒ permanently green.** Deleting the new refusal gate turned
+  22 of `driver-sql`'s 28 cases red, and *most* of those reds were the driver
+  throwing knex's bare `Undefined binding(s)` — an `Error` whose `code` and
+  `status` are both `undefined`. The unfixed driver already throws; only the
+  envelope is missing. A throw-only assertion therefore stays **green on the
+  very driver the issue targets**.
+- **A transport that never throws ⇒ red, but pointing away from the defect.**
+  The same deletion turned 20 of `driver-turso`'s 29 remote cases red, and all
+  20 failed by *answering* — that transport never throws. A throw-only
+  assertion reports "the promise resolved", which names the absence of a throw
+  and never the absence of an envelope, so it cannot separate "refused with the
+  wrong envelope" from "did not refuse at all" — and those are exactly the two
+  defects.
+
+Where the wording is itself contract (#5240, one condition ⇒ one wording),
+assert the message's first sentence **on top of** `code`+`status`, never instead
+of them. A rejection test that cannot go red on a missing envelope reads as
+coverage and is not.
+
 **Key-vs-value reachability criterion.** Match a fixture guard's assertion to
 what the rule guards. Guarding that a **key** is a real authoring surface →
 assert the schema reports no `unrecognized_keys` on the fixture. Guarding a

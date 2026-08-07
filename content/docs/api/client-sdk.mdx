@@ -264,7 +264,7 @@ for the underlying endpoint contract.
 // Semantic analytics query (cube-style)
 const result = await client.analytics.query({
   cube: 'account',
-  measures: ['revenue.sum', 'count'],
+  measures: ['revenue_sum', 'count'],
   dimensions: ['industry'],
   where: { status: 'active' },
   limit: 100,
@@ -276,7 +276,7 @@ const meta = await client.analytics.meta('account');
 // Dry-run a query to its generated SQL (POST /analytics/sql)
 const explained = await client.analytics.explain({
   cube: 'account',
-  measures: ['revenue.sum'],
+  measures: ['revenue_sum'],
 });
 ```
 

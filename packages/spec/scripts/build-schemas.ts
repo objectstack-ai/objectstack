@@ -27,9 +27,7 @@ import {
   clearOwnedOutputs,
 } from './lib/json-schema-out-dir';
 import {
-  AUTHORABLE_SURFACE_DESCRIPTION,
   AUTHORABLE_SURFACE_DIR_NAME,
-  SCHEMA_MANIFEST_DESCRIPTION,
   SCHEMA_MANIFEST_DIR_NAME,
   aggregateCategoryShards,
   authorableSurfaceShardTexts,
@@ -38,13 +36,22 @@ import {
   serializeShard,
   writeShards,
   type GitRun,
+  type ShardArrayField,
 } from './lib/sharded-artifacts';
-import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
+// The #4666 default-value ratchet: what an author gets when they OMIT a key.
+// Its own module because the fingerprint's normalisation rules — and the
+// direction-B boundary that keeps constraints out of them — are assertable
+// without running the whole generator (scripts/authorable-defaults.test.ts).
 import {
-  MIGRATIONS_BY_MAJOR,
-  RETIRED_DEFS_BY_MAJOR,
-  RETIRED_KEYS_BY_MAJOR,
-} from '../src/migrations/registry';
+  AUTHORABLE_DEFAULTS_DIR_NAME,
+  authorableDefaultsShardTexts,
+  authoriseDefaultChanges,
+  collectAuthorableDefaults,
+  diffAuthorableDefaults,
+  parseDefaultEntries,
+} from './lib/authorable-defaults';
+import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
+import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
@@ -475,15 +482,11 @@ if (defKeyCollisions.length > 0) {
 // run means a code change unpublished a schema — fail loudly instead of
 // letting gen:docs quietly delete its reference docs (#2978). Deliberate
 // removals must delete the key from the manifest in the same PR.
-/**
- * The manifest's description — the procedure a reader who opens a shard to
- * delete a line follows. Until #4725 it ended "remove a key ONLY for a
- * deliberate retirement", which was the entire requirement and was checked by
- * nothing; it now names the gate and the table that answer for a removal. It
- * lives in scripts/lib/sharded-artifacts.ts with the writer that stamps it into
- * every shard (#5837).
- */
-const MANIFEST_DESCRIPTION = SCHEMA_MANIFEST_DESCRIPTION;
+// The manifest's and the authorable surface's shard descriptions used to be
+// re-exported through here. #5837 moved both to scripts/lib/sharded-artifacts.ts,
+// beside the writer that stamps them into every shard, and nothing in this file
+// has read them since — the import and the `MANIFEST_DESCRIPTION` alias were
+// residue no checker could see (#5475).
 
 /**
  * Every def key recorded across `json-schema.manifest/`, or null when the whole
@@ -887,10 +890,15 @@ if (surfaceDoc) {
 // A deletion is legitimate on exactly one of three proofs, each computed
 // inside this gate — never argued in a PR description:
 //
-//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its surface
-//      is registered in CONVERSIONS_BY_MAJOR / MIGRATIONS_BY_MAJOR at a major
+//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its EXACT
+//      `${defKey}:${name}` is declared in RETIRED_KEYS_BY_MAJOR at a major
 //      ≥ TOMBSTONE_AGE_MAJORS behind the current one (the "~two majors" this
-//      file's description has always promised, now enforced);
+//      file's description has always promised, now enforced). Since #5898 this
+//      reads the same exact-key table check (b) reads, not a leaf-name match
+//      against the conversion registry — see TOMBSTONE_AGE_MAJORS below for the
+//      two false positives that matching produced and why the 97 pre-existing
+//      tombstones are left undeclared (and therefore undeletable) rather than
+//      backfilled from a source that cannot date them;
 //   2. the def is not reachable from the metadata-type roots (2026-08-02
 //      ruling on #4650): no metadata document is ever parsed by it, so its
 //      entry was over-collection and there is no author to tombstone for.
@@ -909,37 +917,40 @@ if (surfaceDoc) {
 /** A tombstone may be deleted once its registration is this many majors old. */
 const TOMBSTONE_AGE_MAJORS = 2;
 
-/**
- * Every ' / '-separated surface clause registered across the ADR-0087
- * registries, mapped to the EARLIEST major that registered it — the moment the
- * retirement became visible to consumers, which is when its aging clock
- * started.
- *
- * This is now the LAST leaf-name matcher in this file: check (b) above moved to
- * exact `${defKey}:${name}` membership in RETIRED_KEYS_BY_MAJOR (#4659). Check
- * (c) cannot follow it there, because it adjudicates tombstones that predate
- * that table and were deliberately not backfilled into it — so the aging proof
- * still reads the conversion clauses, leaf and all, and inherits the same
- * coincidence (an unrelated cluster's `.type` can date a tombstone's clock).
- * Narrowing it needs the historical mapping #4659 would have had to invent —
- * all 97 current tombstones predate that table — so it is tracked in #5898.
- */
-function registeredClauseMajors(): Map<string, number> {
-  const out = new Map<string, number>();
-  const add = (clause: string, major: number): void => {
-    const prev = out.get(clause);
-    if (prev === undefined || major < prev) out.set(clause, major);
-  };
-  for (const [major, list] of Object.entries(CONVERSIONS_BY_MAJOR)) {
-    for (const c of list) for (const clause of c.surface.split(' / ')) add(clause, Number(major));
-  }
-  for (const [major, step] of Object.entries(MIGRATIONS_BY_MAJOR)) {
-    for (const sem of step.semantic ?? []) {
-      for (const clause of sem.surface.split(' / ')) add(clause, Number(major));
-    }
-  }
-  return out;
-}
+// The aging clock reads RETIRED_KEYS_BY_MAJOR — `registeredRetiredKeys()` above,
+// the same exact-key map check (b) reads. There is no leaf-name matching left in
+// this file (#5898).
+//
+// Until #5898 check (c) dated a tombstone by matching the key's LEAF against
+// every ' / ' clause of every major in CONVERSIONS_BY_MAJOR / MIGRATIONS_BY_MAJOR
+// and taking `Math.min` — structurally the matcher #4659 had just removed from
+// check (b), and permissive in both of its halves: an unrelated clause ending in
+// the same leaf proved "this was registered at all", and `Math.min` then started
+// the clock at the EARLIEST such coincidence. Both of the two rows it let through
+// on the real baseline were false positives, by two different mechanisms:
+//
+//   - `data/Index:type` (#5898's specimen) matched protocol 11's
+//     `flow.node.type` — a flow node's type, nothing to do with index types — so
+//     its clock started at 11 while its own honest clause `object.indexes[].type`
+//     is major 17. At major 17 the row was deletable one major after its
+//     retirement became visible.
+//   - `api/RestApiConfig:requireAuth` matched protocol 12's `api.requireAuth`,
+//     which is `rest-requireauth-default-flip`: a secure-DEFAULT flip whose own
+//     step says "No metadata shape changed". Its retirement is the protocol 17
+//     conversion `stack.api.requireAuth` (#3963). The clock was started from a
+//     different KIND of change to the same surface.
+//
+// Why the historical mapping is not backfilled, and what happens instead: a
+// tombstone with no entry in RETIRED_KEYS_BY_MAJOR cannot prove its age, so its
+// baseline line stays. That is fail-closed by construction rather than by
+// estimate — see the table's "Historical tombstones" section for why neither
+// available source could date the 97 pre-existing rows honestly (leaf-matching
+// the conversion registry is the very inference #4659 removed; this file's own
+// git history begins at 17.0.0-rc.0, so it dates every one of them at major 17
+// — an artifact of the baseline's birth, not archaeology). Deleting one of those
+// lines is therefore a deliberate, reviewable act: declare its exact key under
+// its true major in the table, and check (b2) verifies the entry still names a
+// key this build tombstones.
 
 interface SurfaceReachability {
   /** The metadata-type roots the BFS started from. */
@@ -1078,7 +1089,13 @@ function readSurfaceKeysAtRev(
   git: GitRun,
   rev: string,
   dirName: string,
-  field: 'keys' | 'schemas',
+  // `ShardArrayField`, not a re-spelled copy of it. This parameter used to read
+  // `'keys' | 'schemas'` — a hand-written narrowing of the exported union that
+  // `readShardedKeysAtRev` below actually takes. When #4666 added `'defaults'`
+  // to `ShardArrayField` and a call site passing it, the copy here was left
+  // behind and no type checker existed to say so (#5475). Harmless at runtime,
+  // since the value is only forwarded, but it is the drift this program is for.
+  field: ShardArrayField,
   context: string,
 ): { entries: string[] } | null {
   const read = readShardedKeysAtRev(git, rev, dirName, field);
@@ -1275,6 +1292,100 @@ function compareAnchorKeys(
 }
 
 /**
+ * `merge-base --is-ancestor`, read as the THREE answers it gives (#5370).
+ *
+ * Extracted so the two places that need this direction — the re-anchor guard
+ * below and the drift notice further down (#5847) — decide it ONCE, with one
+ * reading of the exit codes. Two independent determinations of one direction is
+ * how the two answers drift apart later, and this file already paid for the
+ * drift: the notice used to infer direction from a key subtraction and printed
+ * the opposite of what the guard said about the very same pair of revs.
+ *
+ * 0 is "ancestor", 1 is "not an ancestor", and anything else (128 with a
+ * `fatal:`, or `null` from the timeout) is git declining to answer. Folded into
+ * a `&&`/`||` chain the third collapses into the second and an ERROR becomes a
+ * verdict — the trap cloud#1116 paid for.
+ *
+ * Shallow history makes a FOURTH reading necessary, and it is asymmetric. A
+ * truncated walk can only ever LOSE reachability, never invent it, so exit 0 is
+ * proof wherever it appears — while exit 1 in a shallow checkout means nothing at
+ * all (#5358's own first CI run was failed by exactly that answer, about a commit
+ * that plainly was an ancestor; the same false 1 is reproducible today in any
+ * agent container, where the anchor's `baseRev` sits in `.git/shallow` as its own
+ * grafted root). So shallowness is consulted only to decide whether a NEGATIVE
+ * counts — never to discard a positive, which would refuse re-anchors that are
+ * demonstrably fine.
+ *
+ * What each caller DOES with `unknown` is the caller's own disposition, and the
+ * two differ on purpose: the guard fails closed (refuses the write), the notice
+ * simply declines to name a direction. Neither may turn it into a verdict.
+ */
+type Ancestry =
+  | { answer: 'yes' }
+  | { answer: 'no' }
+  | { answer: 'unknown'; reason: 'git-declined'; status: number | null; stderr: string }
+  | { answer: 'unknown'; reason: 'shallow' };
+
+function probeAncestry(git: GitRun, ancestor: string, descendant: string): Ancestry {
+  const probe = git('merge-base', '--is-ancestor', ancestor, descendant);
+  // Reachability was demonstrated. Truncation cannot fake that, so this is the
+  // one answer that stands in every checkout, shallow included.
+  if (probe.status === 0) return { answer: 'yes' };
+  if (probe.status !== 1) {
+    return {
+      answer: 'unknown',
+      reason: 'git-declined',
+      status: probe.status,
+      stderr: (probe.stderr || '').trim().split('\n')[0] || '(no output)',
+    };
+  }
+  // A negative, on the other hand, is only meaningful where history is WALKABLE —
+  // the same truncation `verifyCommittedSurfaceBase` accounts for. There it SKIPS
+  // a verification, which is safe; for the guard below it would BLESS a write,
+  // which is not, and for the notice it would print a direction backwards.
+  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+    return { answer: 'unknown', reason: 'shallow' };
+  }
+  return { answer: 'no' };
+}
+
+/**
+ * Where the committed anchor sits relative to the baseline THIS build resolved
+ * (#5847) — the question the drift notice has to answer before it can word
+ * itself, decided on `probeAncestry` above rather than on a key subtraction.
+ *
+ * `unordered` is not a failure and not a fallback: it is the honest answer in a
+ * shallow checkout (CI's own typecheck job is one), when git declines, and in
+ * the genuinely unordered case where two authentic origin/main ancestors sit on
+ * different branches of a merge. Naming a direction there would be exactly the
+ * defect this exists to remove, one state over.
+ */
+type AnchorRelation = { kind: 'behind' } | { kind: 'ahead' } | { kind: 'unordered'; why: string };
+
+function relateAnchorToBaseline(git: GitRun, committedRev: string, resolvedRev: string): AnchorRelation {
+  const forward = probeAncestry(git, committedRev, resolvedRev);
+  if (forward.answer === 'yes') return { kind: 'behind' };
+  const backward = probeAncestry(git, resolvedRev, committedRev);
+  if (backward.answer === 'yes') return { kind: 'ahead' };
+  // Only a definitive negative BOTH ways is a real fork; anything else is an
+  // answer nobody has, and the two are told apart because their remedies differ.
+  const unusable = forward.answer === 'unknown' ? forward : backward.answer === 'unknown' ? backward : null;
+  if (!unusable) {
+    return {
+      kind: 'unordered',
+      why: 'neither commit is an ancestor of the other — they sit on different branches of a merge',
+    };
+  }
+  return {
+    kind: 'unordered',
+    why:
+      unusable.reason === 'shallow'
+        ? 'shallow checkout — a "not an ancestor" answer is not usable about a truncated history'
+        : `\`git merge-base --is-ancestor\` did not answer (exit ${unusable.status}): ${unusable.stderr}`,
+  };
+}
+
+/**
  * The anchor moves FORWARD, or it does not move (#5370).
  *
  * Called immediately before the only write, so a re-anchor may replace `baseRev`
@@ -1288,22 +1399,11 @@ function compareAnchorKeys(
  * comes back, the deletion gate stops seeing it, and the offline consumers of
  * #5235 get a baseline older than the published one.
  *
- * Three exit codes from `merge-base --is-ancestor`, and they must be read as
- * three answers, not two: 0 is "ancestor", 1 is "not an ancestor", and anything
- * else (128 with a `fatal:`, or `null` from the timeout) is git declining to
- * answer. Folded into a `&&`/`||` chain the third collapses into the second and
- * an ERROR becomes a verdict — the trap cloud#1116 paid for. Here it fails
- * CLOSED: an ancestry nobody could establish refuses the write.
- *
- * Shallow history makes a FOURTH reading necessary, and it is asymmetric. A
- * truncated walk can only ever LOSE reachability, never invent it, so exit 0 is
- * proof wherever it appears — while exit 1 in a shallow checkout means nothing at
- * all (#5358's own first CI run was failed by exactly that answer, about a commit
- * that plainly was an ancestor; the same false 1 is reproducible today in any
- * agent container, where the anchor's `baseRev` sits in `.git/shallow` as its own
- * grafted root). So shallowness is consulted only to decide whether a NEGATIVE
- * counts — never to discard a positive, which would refuse re-anchors that are
- * demonstrably fine.
+ * The three-plus-one readings of `merge-base --is-ancestor` live in
+ * `probeAncestry` above, shared with the drift notice (#5847). What is decided
+ * HERE is the disposition on `unknown`, and it is to fail CLOSED: an ancestry
+ * nobody could establish refuses the write rather than defaulting to one of the
+ * two answers.
  */
 function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev: string): void {
   if (committedRev === resolvedRev) return;
@@ -1323,24 +1423,16 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
     process.exit(1);
   };
 
-  const probe = git('merge-base', '--is-ancestor', committedRev, resolvedRev);
-  // Reachability was demonstrated. Truncation cannot fake that, so this is the
-  // one answer that stands in every checkout, shallow included.
-  if (probe.status === 0) return;
-  if (probe.status !== 1) {
+  const probe = probeAncestry(git, committedRev, resolvedRev);
+  if (probe.answer === 'yes') return;
+  if (probe.answer === 'unknown') {
     return refuseIndeterminate(
-      `\`git merge-base --is-ancestor ${from} ${to}\` did not answer (exit ${probe.status}):\n` +
-        `   ${(probe.stderr || '').trim().split('\n')[0] || '(no output)'}`,
-    );
-  }
-  // A negative, on the other hand, is only meaningful where history is WALKABLE —
-  // the same truncation `verifyCommittedSurfaceBase` accounts for. There it SKIPS
-  // a verification, which is safe; here it would BLESS a write, which is not.
-  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
-    return refuseIndeterminate(
-      'This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n' +
-        `   "not an ancestor" about commits that plainly are one — ${from} is very likely one of\n` +
-        '   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).',
+      probe.reason === 'git-declined'
+        ? `\`git merge-base --is-ancestor ${from} ${to}\` did not answer (exit ${probe.status}):\n` +
+            `   ${probe.stderr}`
+        : 'This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n' +
+            `   "not an ancestor" about commits that plainly are one — ${from} is very likely one of\n` +
+            '   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).',
     );
   }
   console.error(
@@ -1362,12 +1454,33 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
 }
 
 /**
- * Set when THIS run resolved the baseline from git. It is the ONLY input
- * `--update-base` may write the in-tree anchor from: an offline build must never
- * be able to advance the anchor to its own state (#5235). The second half of that
- * discipline is #5358 — no build writes it at all, only the explicit mode.
+ * What `resolveSurfaceBase()` resolved: the baseline itself, plus — only when
+ * the GIT path produced it — the anchor that path is allowed to write.
+ *
+ * `gitAnchor` is a returned field rather than the module-level assignment it
+ * used to be, and that is a type-checking fix, not a style one (#5475). The old
+ * shape declared `let gitResolvedAnchor: {...} | null = null` here and assigned
+ * it from INSIDE this function. TypeScript's control-flow analysis does not
+ * follow an assignment made in a function body, so at every top-level read below
+ * the variable was still narrowed to `null` — which made `if (gitResolvedAnchor)`
+ * a block whose body is typed `never`, i.e. the entire in-tree anchor writer
+ * (#5235/#5358/#5370/#5847, ~100 lines) was invisible to tsc while reading as
+ * ordinary checked code. Returning the value puts the assignment in the caller's
+ * own flow, where CFA can see it. Runtime behaviour is unchanged: the git path
+ * sets it, the in-tree path leaves it null, exactly as before.
  */
-let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
+type SurfaceBaseResolution = {
+  rev: string;
+  doc: AuthorableSurface;
+  /**
+   * Set when THIS run resolved the baseline from git. It is the ONLY input
+   * `--update-base` may write the in-tree anchor from: an offline build must
+   * never be able to advance the anchor to its own state (#5235). The second
+   * half of that discipline is #5358 — no build writes it at all, only the
+   * explicit mode.
+   */
+  gitAnchor: { rev: string; keys: string[] } | null;
+};
 
 /**
  * The committed authorable surface this PR started from: its content at
@@ -1392,7 +1505,7 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
  * What is NOT offered is an env-var skip: that is precisely the bypass #4650
  * closes. With no anchor of either kind this still exits 1.
  */
-function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
+function resolveSurfaceBase(): SurfaceBaseResolution | null {
   const git = gitInPackage;
   const committed = readCommittedSurfaceBase();
 
@@ -1429,10 +1542,10 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
       return null;
     }
     const doc: AuthorableSurface = { keys: baseline.entries };
-    gitResolvedAnchor = { rev, keys: doc.keys };
+    const gitAnchor = { rev, keys: doc.keys };
     // The environment that CAN police the in-tree anchor is the one that must.
-    if (committed) verifyCommittedSurfaceBase(git, tip, gitResolvedAnchor, committed.doc);
-    return { rev, doc };
+    if (committed) verifyCommittedSurfaceBase(git, tip, gitAnchor, committed.doc);
+    return { rev, doc, gitAnchor };
   }
 
   if (committed) {
@@ -1444,6 +1557,9 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     return {
       rev: committed.doc.baseRev,
       doc: { keys: committed.doc.keys },
+      // Offline: this run did not resolve an anchor from git, so it has nothing
+      // it is entitled to write one from (#5235).
+      gitAnchor: null,
     };
   }
 
@@ -1624,8 +1740,27 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
   process.exit(1);
 }
 
+/**
+ * The baseline this run resolved, kept for the default-value ratchet further
+ * down (#4666), which needs the same two facts check (c) needs: which upstream
+ * rev the comparison is anchored on, and which keys were AUTHORABLE there. It
+ * is one resolution, shared — a second `resolveSurfaceBase()` call would ask git
+ * the same question twice and could answer it differently.
+ */
+let resolvedSurfaceBase: SurfaceBaseResolution | null = null;
+
+/**
+ * The git-resolved anchor of this run, hoisted out of the block below because
+ * the in-tree anchor writer further down is a separate top-level block.
+ * Assigned HERE, in the module's own control flow, which is what keeps it typed
+ * as the union it is declared as — see `SurfaceBaseResolution.gitAnchor`.
+ */
+let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
+
 {
   const base = resolveSurfaceBase();
+  resolvedSurfaceBase = base;
+  gitResolvedAnchor = base?.gitAnchor ?? null;
   // Whole defs first: check (c) below waives every baseline line under a def this
   // build stopped emitting, on the grounds that this gate adjudicates it. Running
   // it first is what makes that deferral true rather than circular.
@@ -1641,15 +1776,16 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
     const deletedKeys = [...baseSnapshot.keys()].filter((k) => !currentKeys.has(k));
     if (deletedKeys.length > 0) {
       const baseRev = base.rev.slice(0, 12);
-      const clauseMajors = registeredClauseMajors();
+      const declaredRetired = registeredRetiredKeys();
       const reachability = computeSurfaceReachability();
       const allowed: string[] = [];
       const violations: string[] = [];
       const goneDefs = new Map<string, number>(); // def no longer emitted -> deleted key count
       for (const key of deletedKeys) {
-        const sep = key.indexOf(':');
-        const defKey = key.slice(0, sep);
-        const prop = key.slice(sep + 1);
+        // Only the def half is read now. The leaf half fed the leaf-NAME match
+        // #5898 removed from route 3 (see the RETIRED_KEYS_BY_MAJOR message
+        // below); slicing it out survived the rewrite as a dead local (#5475).
+        const defKey = key.slice(0, key.indexOf(':'));
         if (!generatedSchemas.has(defKey)) {
           goneDefs.set(defKey, (goneDefs.get(defKey) ?? 0) + 1);
           continue;
@@ -1674,16 +1810,17 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
           violations.push(`${key} — def ${how}; the entry at ${baseRev} was LIVE (never tombstoned).`);
           continue;
         }
-        const matches = [...clauseMajors.entries()].filter(([clause]) => clause.endsWith('.' + prop));
-        if (matches.length === 0) {
+        const registeredAt = declaredRetired.get(key);
+        if (registeredAt === undefined) {
           violations.push(
-            `${key} — def ${how}; tombstoned, but no conversion/migration clause matching '.${prop}'\n` +
-              `       is registered in the ADR-0087 registries, so the retirement never reached\n` +
-              `       spec-changes.json or \`os migrate meta\`.`,
+            `${key} — def ${how}; tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR names this\n` +
+              `       EXACT key, so there is nothing that dates the retirement and its aging clock\n` +
+              `       has no start. Until #5898 a leaf-name match against unrelated ADR-0087\n` +
+              `       clauses supplied one by coincidence (a flow node's '.type' dated an index\n` +
+              `       type's tombstone) — always erring early, since it took the Math.min.`,
           );
           continue;
         }
-        const registeredAt = Math.min(...matches.map(([, major]) => major));
         if (CURRENT_MAJOR - registeredAt < TOMBSTONE_AGE_MAJORS) {
           violations.push(
             `${key} — def ${how}; tombstone registered at major ${registeredAt}, current major is\n` +
@@ -1718,9 +1855,15 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
             `   compared against the baseline at merge base ${baseRev} with origin/main,\n` +
             `   which this commit cannot rewrite.\n\n` +
             `   A line may only leave this file when:\n` +
-            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") with a D2 conversion\n` +
-            `        (src/conversions/registry.ts) or migration step registered for its surface,\n` +
-            `        AND that registration is ≥ ${TOMBSTONE_AGE_MAJORS} majors old (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}); or\n` +
+            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") AND that key is\n` +
+            `        declared — EXACTLY, as '\${defKey}:\${name}' — in RETIRED_KEYS_BY_MAJOR\n` +
+            `        (src/migrations/registry.ts) under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one\n` +
+            `        (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}). Tombstones that predate that table are deliberately\n` +
+            `        undeclared: nothing could date them honestly, so they are NOT deletable\n` +
+            `        until someone establishes the true major and writes it down (#5898). The\n` +
+            `        D2 conversion (src/conversions/registry.ts) naming the surface stays\n` +
+            `        required — it is the prescription consumers follow — but it is no longer\n` +
+            `        what dates the clock; or\n` +
             `     2. its def is not reachable from the metadata-type roots — this gate computes\n` +
             `        that itself (it would have said so above); or\n` +
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
@@ -1808,14 +1951,67 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
     } else if (drifted) {
       // Reported, never fatal, and never repaired here: see the notes above on
       // `main`'s own merge base and on #5358.
+      //
+      // The DIRECTION is asked, not assumed (#5847). This used to print one fixed
+      // sentence — "trails the baseline at <rev> by <n> key(s)" — with `n` counted
+      // as `resolved keys ∖ anchor keys`. In the state where the committed anchor
+      // is NEWER than the baseline this build resolved, the resolved keys are a
+      // subset of the anchor's, so that count is 0 and the line degrades to
+      // "trails the baseline at <rev> by 0 key(s)": the direction backwards, and
+      // the one number that could have contradicted it zeroed out. That state is
+      // ordinary, not a corner — a build during an uncommitted merge, or a branch
+      // that forked before the anchor advanced and then took a newer anchor
+      // (#5370 catalogues both) — and since #5370 `--update-base` REFUSES there
+      // and explains the direction correctly, so the two were describing one
+      // situation in contradictory language.
+      //
+      // Both key deltas are reported now, because either can be the empty one and
+      // the pair is what makes the sentence say something. Only the wording and
+      // the counts change here: this arm still writes nothing, exits nothing, and
+      // decides nothing.
       const recorded = new Set(committed.doc.keys);
-      const behind = anchor.keys.filter((k) => !recorded.has(k)).length;
-      console.log(
-        `ℹ️  ${SURFACE_BASE_FILE_NAME} trails the baseline at ${anchor.rev.slice(0, 12)} by ${behind} key(s)\n` +
-          `   — expected, and not an error: the anchor is a snapshot of an upstream commit, proved\n` +
-          `   AUTHENTIC rather than current. Re-anchoring is a deliberate act with its own reviewed\n` +
-          `   diff — \`${REANCHOR_COMMAND}\` — never a side effect of this build (#5358).`,
-      );
+      const resolvedKeys = new Set(anchor.keys);
+      const onlyBaseline = anchor.keys.filter((k) => !recorded.has(k)).length;
+      const onlyAnchor = committed.doc.keys.filter((k) => !resolvedKeys.has(k)).length;
+      const anchorShort = committed.doc.baseRev.slice(0, 12);
+      const baseShort = anchor.rev.slice(0, 12);
+      const delta =
+        onlyBaseline > 0 && onlyAnchor > 0
+          ? `${onlyBaseline} key(s) only that baseline has, ${onlyAnchor} only the anchor has`
+          : onlyBaseline > 0
+            ? `${onlyBaseline} key(s) only that baseline has`
+            : onlyAnchor > 0
+              ? `${onlyAnchor} key(s) only the anchor has`
+              : 'the same keys in a different order';
+      const reanchor =
+        `   Re-anchoring is a deliberate act with its own reviewed diff — \`${REANCHOR_COMMAND}\`\n` +
+        `   — never a side effect of this build (#5358).`;
+      const relation = relateAnchorToBaseline(gitInPackage, committed.doc.baseRev, anchor.rev);
+      if (relation.kind === 'behind') {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} trails the baseline at ${baseShort}: it mirrors the older\n` +
+            `   ${anchorShort}, and they differ by ${delta}\n` +
+            `   — expected, and not an error: the anchor is a snapshot of an upstream commit, proved\n` +
+            `   AUTHENTIC rather than current.\n${reanchor}`,
+        );
+      } else if (relation.kind === 'ahead') {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} is AHEAD of the baseline this build resolved: it mirrors\n` +
+            `   ${anchorShort}, a DESCENDANT of the merge base ${baseShort} that HEAD resolves to, and\n` +
+            `   they differ by ${delta}\n` +
+            `   — not an error, and not something to re-anchor: the anchor only ever moves forward, so\n` +
+            `   what closes this gap is bringing HEAD up to date with origin/main (and committing it),\n` +
+            `   never a re-anchor onto the older baseline.\n${reanchor}`,
+        );
+      } else {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} differs from the baseline this build resolved: it mirrors\n` +
+            `   ${anchorShort}, that baseline is at ${baseShort}, and they differ by ${delta}\n` +
+            `   — which of the two is newer could not be established here, so this run names no\n` +
+            `   direction: ${relation.why}.\n` +
+            `   Not an error either way.\n${reanchor}`,
+        );
+      }
     }
   }
 }
@@ -1878,6 +2074,254 @@ if (surfaceChanged && !CHECK) {
       // The locality claim, printed: a PR that touched one category names one
       // shard here, which is the same fact as "two such PRs do not conflict in
       // the merge queue" (#5837).
+      (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
+      (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
+  );
+}
+
+// ─── The default-value ratchet (#4666) ───────────────────────────────
+//
+// The three ratchets above all measure the SHAPE of the contract: which schemas
+// are published, which keys they carry, whether a key is live or tombstoned.
+// None of them can see what a key MEANS WHEN THE AUTHOR OMITS IT — and that is
+// the one change in this file's whole subject matter that alters the behaviour
+// of already-deployed metadata with no error, no warning and no diff on the
+// author's side.
+//
+// Measured, not theorised: on #4661's branch, moving `retryPolicyShape()`'s
+// `maxRetries` default from 0 to 3 — one character — left this entire script
+// green ("✅ Successfully generated 1703 schemas."). The only thing that caught
+// it was a runtime pin an author had remembered to hand-write. Every recording
+// channel missed it for a different reason: the authorable-surface comparison
+// reads key NAMES, `retiredKey()` tombstones fire on live → retired, and
+// spec-changes.json is a projection of the ADR-0087 registries, which a default
+// change need not touch at all.
+//
+// Why defaults specifically, and why now: omitting optional keys is the normal
+// mode of AI-authored metadata (ADR-0033), so a default covers far more live
+// behaviour than it did in the hand-written era. `maxRetries`, `enabled`,
+// `required`, any `allow*` — flipping one of those is a reliability or security
+// event, and a silent one.
+//
+// ⛔ CONSTRAINTS ARE DELIBERATELY NOT RECORDED HERE (maintainer ruling on #4666,
+// direction B). The asymmetry that decided it: tightening `.max()` REJECTS an
+// existing document — loud, diagnosable, discovered from CI — while a default
+// flip rejects nothing and is discovered from a customer incident. Recording
+// both (direction A) covers more but makes this ratchet markedly noisier, and
+// #4535 §1 is already complaining that the authorable surface over-collects.
+// The exclusion is structural rather than a matter of discipline: the
+// fingerprint reads exactly one field of the emitted schema, `default`, so a
+// bound or a `.describe()` cannot move it even by accident.
+const AUTHORABLE_DEFAULTS_DIR = path.resolve(__dirname, `../${AUTHORABLE_DEFAULTS_DIR_NAME}`);
+const DEFAULTS_DIR_LABEL = `${AUTHORABLE_DEFAULTS_DIR_NAME}/`;
+
+const currentDefaults = collectAuthorableDefaults(generatedSchemas);
+
+let defaultsTexts: Map<string, string> | null = null;
+let committedDefaults: Map<string, string> | null = null;
+try {
+  const read = aggregateCategoryShards(AUTHORABLE_DEFAULTS_DIR, 'defaults');
+  if (read) {
+    defaultsTexts = new Map(read.shards.map((s) => [s.name, s.raw]));
+    committedDefaults = parseDefaultEntries(read.entries);
+  }
+} catch (error) {
+  console.error(`\n❌ Failed to read ${DEFAULTS_DIR_LABEL}: ${error instanceof Error ? error.message : error}`);
+  process.exit(1);
+}
+
+// The baseline, in strict preference order. Both halves of a baseline — the
+// recorded defaults AND the authorable keys they belong to — always come from
+// the SAME anchor, or "this key is new" would be decided against one commit
+// while its default was read from another.
+//
+//   `upstream` — authorable-defaults/ at the merge base with origin/main, the
+//      commit under test cannot rewrite it. This is the anchor that matters, and
+//      it is the one every run gets once this ratchet exists upstream.
+//   `in-tree`  — the committed authorable-defaults/ in THIS tree. Weaker: the
+//      commit under test owns these bytes. Used only where the upstream read has
+//      nothing to return — a merge base that predates this ratchet (every branch
+//      in flight when it lands), and the offline builds #5235 describes, which
+//      are immutable already-merged trees with no "what did this PR change
+//      relative to main" question to ask. It is strictly additive: it can only
+//      ADD findings, never remove one the upstream anchor would have made.
+//
+// With NEITHER available the comparison is skipped — and that skip is not the
+// #4690 hole, because it is not reachable by deleting anything: the artifact's
+// staleness check below runs unconditionally, so a tree with no
+// authorable-defaults/ fails there in `--check` mode whatever this block
+// decided. Which anchor was used is PRINTED, every run.
+let defaultsBaseline: { defaults: Map<string, string>; keys: Map<string, boolean>; label: string } | null =
+  null;
+if (resolvedSurfaceBase) {
+  const upstream = readSurfaceKeysAtRev(
+    gitInPackage,
+    resolvedSurfaceBase.rev,
+    AUTHORABLE_DEFAULTS_DIR_NAME,
+    'defaults',
+    `authorable-defaults change check (#4666)`,
+  );
+  if (upstream) {
+    const keys = new Map<string, boolean>();
+    for (const entry of resolvedSurfaceBase.doc.keys ?? []) {
+      keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
+    }
+    defaultsBaseline = {
+      defaults: parseDefaultEntries(upstream.entries),
+      keys,
+      label: `upstream ${resolvedSurfaceBase.rev.slice(0, 12)}`,
+    };
+  }
+}
+if (!defaultsBaseline && committedDefaults && surfaceDoc) {
+  const keys = new Map<string, boolean>();
+  for (const entry of surfaceDoc.keys) {
+    keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
+  }
+  defaultsBaseline = {
+    defaults: committedDefaults,
+    keys,
+    label: 'in-tree (this commit owns these bytes — no upstream baseline was reachable)',
+  };
+}
+
+if (!defaultsBaseline) {
+  console.log(
+    `\nℹ️  ${DEFAULTS_DIR_LABEL} has no baseline to compare against — neither the merge base nor\n` +
+      `   this tree carries one, so this run RECORDS the defaults rather than adjudicating them\n` +
+      `   (#4666). The artifact check below still runs: a tree missing ${DEFAULTS_DIR_LABEL} fails\n` +
+      `   \`check:authorable-surface\` regardless of what this block decided.`,
+  );
+} else {
+  const changes = diffAuthorableDefaults({
+    baseline: defaultsBaseline.defaults,
+    current: currentDefaults,
+    baselineKeys: defaultsBaseline.keys,
+    currentKeys,
+  });
+  const { authorised, unauthorised, stale } = authoriseDefaultChanges(
+    changes,
+    DEFAULT_CHANGES_BY_MAJOR,
+    CURRENT_MAJOR,
+    currentDefaults,
+    currentKeys,
+  );
+
+  // A stale declaration is judged whether or not anything changed today: it is
+  // the property that stops this table decaying into an allowlist. Reported
+  // FIRST, because a chain that no longer describes reality also explains why a
+  // change below looks unauthorised.
+  if (stale.length > 0) {
+    console.error(
+      `\n❌ ${stale.length} DEFAULT_CHANGES_BY_MAJOR declaration(s) at major ${CURRENT_MAJOR} no longer describe reality:`,
+    );
+    for (const s of stale) {
+      console.error(
+        s.why === 'chain-tip-mismatch'
+          ? `     - ${s.key}: declared to end at ${s.claims}, but this build emits ${s.emits}`
+          : `     - ${s.key}: declared hops do not meet (${s.claims})`,
+      );
+    }
+    console.error(
+      `\n   A declared default change is a claim about a value this build EMITS, re-checked on\n` +
+        `   every run — that is what keeps it from becoming an allowlist nobody re-reads. The\n` +
+        `   default moved again (or was reverted) and the declaration was left behind, so it now\n` +
+        `   pre-approves a value nobody wrote down.\n\n` +
+        `   Append the new hop to the key's chain in scripts/lib/default-changes.ts (the chain\n` +
+        `   must be contiguous: each hop's \`from\` is the previous hop's \`to\`), or — if the\n` +
+        `   default should not have moved at all — restore it in the schema.`,
+    );
+    process.exit(1);
+  }
+
+  if (authorised.length > 0) {
+    // Printed in full, every run. An acknowledged flip that passes in silence is
+    // the failure #4690 names; this is the exit announcing itself.
+    console.log(`\n📌 ${authorised.length} declared default change(s) accepted (#4666):`);
+    for (const { change, declared } of authorised) {
+      console.log(`     - ${change.key}: ${change.from} → ${change.to}`);
+      for (const hop of declared) console.log(`       ${hop.reason}`);
+    }
+  }
+
+  if (unauthorised.length > 0) {
+    console.error(
+      `\n❌ ${unauthorised.length} authorable key(s) changed the DEFAULT they apply when the author omits them:`,
+    );
+    for (const c of unauthorised) console.error(`     - ${c.key}: ${c.from} → ${c.to}  (${c.kind})`);
+    console.error(
+      `\n   Baseline: ${defaultsBaseline.label}\n\n` +
+        `   A default decides what already-deployed metadata does when it does NOT write the key,\n` +
+        `   and omitting optional keys is the normal mode of AI-authored metadata (ADR-0033). So\n` +
+        `   this change reaches every document that stayed silent about ${unauthorised.length === 1 ? 'this key' : 'these keys'} — with no\n` +
+        `   parse error, no warning, and nothing in the author's diff. Unlike a tightened\n` +
+        `   constraint, which rejects the document loudly, there is no moment where anyone finds\n` +
+        `   out (#4666, measured on #4661).\n\n` +
+        `   If the change is intended, declare it — exactly, by \`\${defKey}:\${name}\` — in\n` +
+        `   DEFAULT_CHANGES_BY_MAJOR (scripts/lib/default-changes.ts), under \`${CURRENT_MAJOR}: [ … ]\`:\n\n` +
+        unauthorised
+          .map(
+            (c) =>
+              `        {\n` +
+              `          key: '${c.key}',\n` +
+              `          from: '${c.from}',\n` +
+              `          to: '${c.to}',\n` +
+              `          reason: '…what changes for a consumer who relied on ${c.from}, and what they should write to keep it…',\n` +
+              `        },\n`,
+          )
+          .join('') +
+        `\n   \`reason\` is printed by every build that accepts the change, so write it for the\n` +
+        `   consumer who is about to be surprised. Both endpoints are re-checked on every run\n` +
+        `   against sources you do not control — \`from\` against the baseline, \`to\` against what\n` +
+        `   the build emits — so the declaration dies the moment it stops being true.\n\n` +
+        `   If the default was NOT meant to move, restore it in the schema. And if the value\n` +
+        `   genuinely has to change for existing documents too, add a \`semantic\` entry to this\n` +
+        `   major's step in src/migrations/registry.ts so it reaches spec-changes.json, the\n` +
+        `   upgrade guide and \`os migrate meta\`.`,
+    );
+    process.exit(1);
+  }
+
+  if (changes.length === 0) {
+    console.log(
+      `\n🔒 ${DEFAULTS_DIR_LABEL} verified against ${defaultsBaseline.label} — ` +
+        `${currentDefaults.size} default(s) unchanged (#4666).`,
+    );
+  }
+}
+
+// The artifact itself, on the same byte-for-byte terms as its two siblings: a
+// generated file whose every difference must come from the generator (#4662).
+// Reached only after the adjudication above, so `gen:schema` can never absorb an
+// undeclared change into the record it is supposed to be evidence for.
+const canonicalDefaultsTexts = authorableDefaultsShardTexts(currentDefaults);
+const staleDefaultsShards = [...canonicalDefaultsTexts]
+  .filter(([name, text]) => defaultsTexts?.get(name) !== text)
+  .map(([name]) => name);
+const orphanDefaultsShards = [...(defaultsTexts?.keys() ?? [])].filter(
+  (name) => !canonicalDefaultsTexts.has(name),
+);
+const defaultsChanged =
+  defaultsTexts === null || staleDefaultsShards.length > 0 || orphanDefaultsShards.length > 0;
+if (defaultsChanged && CHECK) {
+  console.error(`\n❌ ${DEFAULTS_DIR_LABEL} is out of date or hand-edited (#4666).`);
+  for (const name of staleDefaultsShards) {
+    console.error(`     ~ ${AUTHORABLE_DEFAULTS_DIR_NAME}/${name}.json  (stale)`);
+  }
+  for (const name of orphanDefaultsShards) {
+    console.error(`     - ${AUTHORABLE_DEFAULTS_DIR_NAME}/${name}.json  (no default in this category)`);
+  }
+  console.error(
+    `\n   Any CHANGE to an existing key's default already exited above, so reaching here means\n` +
+      `   the record is behind on a NEW key's default, or its bytes are not what the generator\n` +
+      `   writes. Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result.`,
+  );
+  process.exit(1);
+}
+if (defaultsChanged && !CHECK) {
+  const { written, removed } = writeShards(AUTHORABLE_DEFAULTS_DIR, canonicalDefaultsTexts);
+  console.log(
+    `\n🎚️  ${DEFAULTS_DIR_LABEL} ${defaultsTexts ? 'updated' : 'created'} (${currentDefaults.size} defaults) — commit it.` +
       (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
       (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
   );

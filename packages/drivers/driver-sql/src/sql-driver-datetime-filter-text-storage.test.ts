@@ -69,7 +69,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches $gte against an ISO date string', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gte: '2026-01-01' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -78,7 +77,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches a $gte / $lt window — the dashboard dateRange shape', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gte: '2026-01-01', $lt: '2026-05-01' } },
     });
     expect(rows.map((r: any) => r.id)).toEqual(['l2']);
@@ -86,13 +84,11 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches a full ISO timestamp comparand, to the millisecond', async () => {
     const inclusive = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gte: '2026-05-25T08:30:15.250Z' } },
     });
     expect(inclusive.map((r: any) => r.id)).toEqual(['l3']);
 
     const exclusive = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gt: '2026-05-25T08:30:15.250Z' } },
     });
     expect(exclusive).toEqual([]);
@@ -100,7 +96,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches a JS Date comparand against a TEXT-stored row', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gte: new Date('2026-05-01T00:00:00Z') } },
     });
     expect(rows.map((r: any) => r.id)).toEqual(['l3']);
@@ -108,7 +103,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches equality on the exact stored instant', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: '2026-03-20T12:00:00.000Z' },
     });
     expect(rows.map((r: any) => r.id)).toEqual(['l2']);
@@ -116,20 +110,17 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches $between, $in and $nin', async () => {
     const between = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $between: ['2026-01-01', '2026-04-01'] } },
     });
     expect(between.map((r: any) => r.id)).toEqual(['l2']);
 
     const isIn = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $in: ['2026-03-20T12:00:00.000Z', '2026-05-25T08:30:15.250Z'] } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
     expect(isIn.map((r: any) => r.id)).toEqual(['l2', 'l3']);
 
     const notIn = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $nin: ['2026-03-20T12:00:00.000Z'] } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -138,18 +129,16 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches $ne and the null predicates', async () => {
     const ne = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $ne: '2026-03-20T12:00:00.000Z' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
     expect(ne.map((r: any) => r.id)).toEqual(['l1', 'l3']);
 
     await driver.create('lead', { id: 'l4', name: 'Undated' }, { bypassTenantAudit: true });
-    const missing = await driver.find('lead', { object: 'lead', where: { created_date: { $null: true } } });
+    const missing = await driver.find('lead', { where: { created_date: { $null: true } } });
     expect(missing.map((r: any) => r.id)).toEqual(['l4']);
 
     const present = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $null: false } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -170,7 +159,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('matches inside an $or branch', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { $or: [{ created_date: { $lt: '2025-06-01' } }, { name: 'Newer' }] },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -179,7 +167,6 @@ describe('SqlDriver datetime filters on ISO-TEXT-stored columns (#3912)', () => 
 
   it('leaves the Field.date column on its own YYYY-MM-DD rule', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { closed_on: { $gte: '2026-01-01' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -228,7 +215,6 @@ describe('SqlDriver datetime filters on the created_at audit column (#3912)', ()
     expect(stamped[0]).toEqual({ c: 'text', u: 'text' });
 
     const matched = await driver.find('ticket', {
-      object: 'ticket',
       where: { created_at: { $gte: '2000-01-01' } },
     });
     expect(matched.map((r: any) => r.id)).toEqual(['t1']);
@@ -236,7 +222,6 @@ describe('SqlDriver datetime filters on the created_at audit column (#3912)', ()
     // …and a window that starts after the stamp excludes it, so the match above
     // is a real comparison rather than "the predicate was dropped".
     const future = await driver.find('ticket', {
-      object: 'ticket',
       where: { created_at: { $gte: '2999-01-01' } },
     });
     expect(future).toEqual([]);
@@ -281,7 +266,6 @@ describe('SqlDriver datetime filters on a legacy MIXED-storage column (#3912)', 
 
   it('returns rows of BOTH forms from one window filter', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $gte: '2026-01-01' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });
@@ -290,7 +274,6 @@ describe('SqlDriver datetime filters on a legacy MIXED-storage column (#3912)', 
 
   it('excludes rows of BOTH forms that fall outside the window', async () => {
     const rows = await driver.find('lead', {
-      object: 'lead',
       where: { created_date: { $lt: '2026-01-01' } },
       orderBy: [{ field: 'id', order: 'asc' }],
     });

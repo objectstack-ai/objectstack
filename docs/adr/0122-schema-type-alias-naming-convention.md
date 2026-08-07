@@ -133,10 +133,23 @@ Two alternatives were measured and rejected:
 about types, and isomorphism rots: add a `.default()` three levels down and an alias
 silently joins the covered set with no signal. So every exempt schema carries a
 compile-time assertion that `z.input` and `z.infer` really are the same type, in
-`packages/spec/src/type-alias-convention.pin.test.ts`. tsc proves the exemption on the
-same run that type-checks the package, and the file goes red — naming the alias — the
-day one stops being true. An exemption nobody can state falsely is the only kind worth
-having; this is the same instinct as `check:durability-log-level`'s empty baseline.
+`packages/spec/src/type-alias-convention.pin.test.ts`. tsc proves the exemption on every
+`pnpm typecheck` run, and the file goes red — naming the alias — the day one stops being
+true.
+
+Which of that command's two **steps** proves it is worth stating precisely, because it is
+not the obvious one. `packages/spec`'s `typecheck` script is
+`tsc --noEmit && pnpm check:test-typecheck`, and the bare `tsc` runs the BUILD config,
+whose `**/*.test.ts` exclusion keeps this `*.test.ts` pin file out of its program
+entirely. The proof therefore lands in the **second** step, which puts the test layer back
+in front of tsc over `tsconfig.test.json` (#5286). Measured, by giving a pinned schema a
+`.default()`: the bare `tsc --noEmit` stays at exit 0, and `check:test-typecheck` is what
+turns red, naming the file — `1 type error(s) in a file the ledger does not cover`. That
+last phrase is the other half of the guarantee: the pin file carries no
+`test-typecheck-debt.json` entry, so its baseline on that surface is **zero** errors and a
+single new one fails the gate. An
+exemption nobody can state falsely is the only kind worth having; this is the same instinct
+as `check:durability-log-level`'s empty baseline.
 
 **D7 — The backflow gate.** `pnpm check:spec-parsed-alias`
 (`scripts/check-spec-parsed-alias.mjs`, in lint.yml's `lint` job) requires every bare

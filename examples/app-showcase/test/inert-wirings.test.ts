@@ -96,24 +96,22 @@ describe('declarative jobs resolve their handler (#4774 ①)', () => {
     });
   }
 
-  it('every functions entry is authored in a form `objectstack build` can carry', () => {
-    // `objectstack build` LOWERS each inline callable to a serialisable string
-    // ref before the stack is parsed, and `FlowFunctionEntrySchema` accepts a
-    // bare callable, a declaration whose `handler` is a CALLABLE, or a bare
-    // string ref — but NOT a declaration whose handler has been lowered to a
-    // string, which is exactly what the CLI emits for the declared form
-    // (`{ handler: fn, effect: 'writes' }`, #4396). So authoring the declared
-    // form here builds green from source and fails `pnpm build` with
-    // `functions: invalid_union`. Filed as #4976.
+  it('the sweep DECLARES that it writes — an undeclared writer reads as a broken sweep', () => {
+    // The inverse of the guard that stood here until #4976. That one pinned
+    // every entry to the BARE form, because the declared spelling could not
+    // survive `objectstack build`: the CLI lowers it to
+    // `{ handler: 'sweepProjectHealth', effect: 'writes' }` and
+    // `FlowFunctionEntrySchema` had no member for a declaration whose handler
+    // is a ref, so the reference app was pinned to the dishonest spelling to
+    // keep `pnpm build` green.
     //
-    // Pinning the bare form keeps that failure out of the reference app until
-    // the schema accepts the lowered declaration. Delete this guard — don't
-    // work around it — when #4976 lands.
-    const declared = functionNames().filter((name) => typeof functionEntry(name) !== 'function');
-    expect(
-      declared,
-      `declared-form functions entry/entries cannot survive \`objectstack build\` (#4976): ${declared.join(', ')}`,
-    ).toEqual([]);
+    // #4976 added that member, so the pin inverts rather than disappears — the
+    // thing worth guarding was never "bare", it was that the one entry which
+    // genuinely writes says so. `sweepProjectHealth` is a nightly job with no
+    // downstream declarative node to count its writes, so undeclared it reports
+    // `selected: N, acted: 0` — indistinguishable from the broken sweep #4354
+    // exists to detect, permanently, in `sys_automation_run`.
+    expect(functionEntry('sweepProjectHealth')).toMatchObject({ effect: 'writes' });
   });
 });
 

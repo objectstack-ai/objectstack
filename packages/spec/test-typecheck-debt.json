@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-file tsc error debt of the @objectstack/spec TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed, almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while holding an authored INPUT literal. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/spec gen:test-typecheck-debt ADR-0122 phase 2 (#6083) cut this ledger from 79 files / 691 errors to 59 / 270 in one change, without touching a single fixture: the flip made the bare name mean the INPUT type, so the conflation described above stopped being an error at 421 sites. What is left is real debt of other kinds.",
+  "_comment": "Per-file tsc error debt of the @objectstack/spec TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed, almost all of them fixture literals annotated with a schema OUTPUT type (`z.infer`) while holding an authored INPUT literal. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/spec gen:test-typecheck-debt",
   "entries": {
     "src/ai/conversation.test.ts": 5,
     "src/api/documentation.test.ts": 1,
@@ -58,6 +58,6 @@
     "src/ui/i18n.test.ts": 1,
     "src/ui/report.test.ts": 3,
     "src/ui/view.test.ts": 8,
-    "src/ui/widget.test.ts": 2
+    "src/ui/widget.test.ts": 1
   }
 }

@@ -8,47 +8,31 @@ description: Developer Portal protocol schemas
 # Developer Portal Protocol
 
 Defines schemas for the developer-facing side of the marketplace ecosystem.
-
 Covers the complete developer journey:
 
 ```
-
 Register → Create App → Develop → Validate → Build → Submit → Monitor → Iterate
-
 ```
 
 ## Architecture Alignment
-
 - **Salesforce Partner Portal**: ISV registration, AppExchange publishing, Trialforce
-
 - **Shopify Partner Dashboard**: App management, analytics, billing
-
 - **VS Code Marketplace Management**: Extension publishing, statistics, tokens
 
 ## Identity Integration (better-auth)
-
 Authentication, organization management, and API keys are handled by the
-
 Identity module (`@objectstack/spec` Identity namespace), which follows the
-
 better-auth specification. This module only defines marketplace-specific
-
 extensions on top of the shared identity layer:
 
 - **User & Session** → `Identity.UserSchema`, `Identity.SessionSchema`
-
 - **Organization & Members** → `Identity.OrganizationSchema`, `Identity.MemberSchema`
-
 - **API Keys** → `Identity.ApiKeySchema` (with marketplace scopes)
 
 ## Key Concepts
-
 - **Publisher Profile**: Links an Identity Organization to a marketplace publisher
-
 - **App Listing Management**: CRUD for marketplace listings (draft → published)
-
 - **Version Channels**: alpha / beta / rc / stable release channels
-
 - **Publishing Analytics**: Install trends, revenue, ratings over time
 
 <Callout type="info">

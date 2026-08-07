@@ -10,13 +10,6 @@ import { strictObject } from '../shared/strict-object';
 // closed; two are deliberately left open with the reason recorded, because
 // closing them would gate nothing.
 //
-// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
-// `getFileDescription()` publishes the module's FIRST doc block as the
-// reference page's description (#3746 trap 1). Hence `//`. Note you cannot
-// safely spell that token out here either — see the longer note in
-// `theme.zod.ts`, where quoting it inside a `//` line silently emptied the
-// published page description.
-//
 // CLOSED (real door, three measurements, 2026-08-03):
 //   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
 //   `ChartAnnotationSchema`, `ChartInteractionSchema`.

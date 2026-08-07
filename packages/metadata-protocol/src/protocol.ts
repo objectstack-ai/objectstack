@@ -4201,9 +4201,17 @@ export class ObjectStackProtocolImplementation implements
             // For now, just keep them roughly in order they appear in schema or priority list
             
             return {
+                // [#5948] `object` sits on the CONTAINER, not on the view member.
+                // `ViewSchema` declares it here ("Object this container binds to")
+                // and `ListViewSchema` / `FormViewSchema` are `strictObject` that
+                // never declared it — so the old member-level copy made the real
+                // response fail its own declared schema with `unrecognized_keys`.
+                // Nothing read it (measured: `useView` passes the body through as
+                // `any`, objectui never calls `meta.getView`), so this is a
+                // relocation, not a removal: readers move up one level.
+                object: request.object,
                 list: {
                     type: 'grid' as const,
-                    object: request.object,
                     label: schema.label || schema.name,
                     columns: columns.map(f => ({
                         field: f,
@@ -4237,10 +4245,14 @@ export class ObjectStackProtocolImplementation implements
                 }));
 
              return {
+                // [#5948] Same relocation as the list branch above. The dropped
+                // `label` is NOT relocated: it was `Edit ${…}` — a rendered UI
+                // string, not metadata, and `FormViewSchema` deliberately has no
+                // `label`. The caller already knows the object it asked for, so
+                // the heading is the UI's to compose.
+                object: request.object,
                 form: {
                     type: 'simple' as const,
-                    object: request.object,
-                    label: `Edit ${schema.label || schema.name}`,
                     sections: [
                         {
                             label: 'General Information',
@@ -7354,12 +7366,61 @@ export class ObjectStackProtocolImplementation implements
      * AFTER `put()` resolves successfully, so a failed write — DB error,
      * optimistic-lock conflict, validation failure — never leaks a
      * stale schema into the registry.
+     *
+     * ── OWNERSHIP KEY (#4636, maintainer ruling 2026-08-07, option B) ──
+     *
+     * The contributor is keyed by the row's REAL `package_id`, not by the
+     * `'sys_metadata'` sentinel this used to hard-write. The sentinel
+     * survives for exactly one case — a package-less write, which has no
+     * real id to use.
+     *
+     * Why the key had to move (and not the other side): the ownership key
+     * IS the package-filter key. `SchemaRegistry.getAllObjects(packageId)`
+     * matches `contributor.packageId`, so an object created through
+     * Studio's package workspace was invisible to its own package's filter
+     * until something re-registered it. The written contract in
+     * `objectql/src/registry.ts` (the `isTenantAuthored` header) already
+     * said the real id is the key and the sentinel is a save-path-only
+     * artefact; this makes the save path say the same thing.
+     *
+     * ── `_provenance: 'org'` IS STAMPED HERE, SERVER-SIDE ──
+     *
+     * On a COPY of the body, unconditionally — the request's own
+     * `_provenance` is never consulted, and never wins.
+     *
+     * That is load-bearing, not defensive coding. `applyProtection` (spec)
+     * stamps `_provenance: 'package'` whenever it is handed a package id
+     * and the body has not already answered, and the registry's artifact
+     * lookup reads exactly that key: a row registered under `app.<slug>`
+     * with package provenance IS a code artifact as far as
+     * `getArtifactItem` is concerned, so `isArtifactBacked` turns true and
+     * `saveMetaItem`'s overlay gate refuses the NEXT write to it with
+     * `not_overridable` — `object` declares `allowOrgOverride: false`.
+     * Moving the key without the stamp therefore re-creates cloud#970 (an
+     * app the user just built becomes silently un-editable) on the write
+     * path, one save later instead of one restart later. Measured, not
+     * assumed: see the reverse-verification limb in
+     * `objectql/src/protocol-writepath-object-ownership.test.ts`.
+     *
+     * Client-supplied provenance cannot be trusted here:
+     * `metadata-read-decorations.ts` deliberately does NOT strip
+     * `_provenance`, so a Studio GET → PUT round-trip echoes whatever the
+     * served document carried. Every row this method sees came out of a
+     * `sys_metadata` write, which is tenant-authored by definition
+     * (ADR-0010 `_provenance: 'org'`) — so the server states that fact
+     * rather than reading it back from the caller. Same sentence the boot
+     * re-hydration already writes for the same rows.
      */
-    private applyObjectRegistryMutation(request: { type: string; name: string; item?: any }): void {
+    private applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
         if (request.type !== 'object' && request.type !== 'objects') return;
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
-            this.engine.registry.registerObject(request.item as any, 'sys_metadata');
+            this.engine.registry.registerObject(
+                { ...(request.item as Record<string, unknown>), _provenance: 'org' } as any,
+                // `||`, not `??`: an empty-string binding is "no package", the
+                // same normalisation the boot branch applies to `package_id`.
+                request.packageId || 'sys_metadata',
+            );
         } catch (err: any) {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
@@ -7524,6 +7585,43 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             console.warn(`[Protocol] table sync failed for object '${name}': ${err?.message ?? err}`);
         }
+    }
+
+    /**
+     * [#4636] The package binding of a persisted overlay row, read from the
+     * row itself.
+     *
+     * The write paths that HAVE a `packageId` parameter (`saveMetaItem`, the
+     * publish promotion) pass the caller's binding straight through — the same
+     * value `SysMetadataRepository.put` stamps on the row, so key and row agree
+     * by construction. `rollbackMetaItem` has no such parameter: it addresses a
+     * row that already exists, and the row's own `package_id` is the only
+     * authoritative answer to "who owns this".
+     *
+     * Mirrors the repository's own `whereFor(ref, 'active', undefined)`: no
+     * package predicate (match any package), scoped by org + type + name +
+     * state. Deliberately NOT a `findOne` on the repository — `MetadataItem`
+     * projects the body, not the binding, and widening that shared type to
+     * carry one field for one caller is a contract change PR1 does not need.
+     *
+     * Not caught: a metadata-store outage here means the ownership key would be
+     * a guess, and every caller reads this BEFORE its write, so failing is
+     * still failing closed.
+     */
+    private async resolveOverlayPackageBinding(
+        type: string,
+        name: string,
+        organizationId: string | null,
+    ): Promise<string | null> {
+        const row = await this.engine.findOne('sys_metadata', {
+            where: {
+                type,
+                name,
+                organization_id: organizationId,
+                state: 'active',
+            },
+        });
+        return (row as { package_id?: string | null } | null)?.package_id ?? null;
     }
 
     /**
@@ -10137,6 +10235,19 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: orgId ?? 'env',
         } as Parameters<typeof repo.restoreVersion>[0];
+        // [#4636] The ownership key the write-through below needs, read from
+        // the ROW rather than from the request — `rollbackMetaItem` has no
+        // `packageId` parameter, and inventing one would let a caller re-key
+        // an object it does not own. `restoreVersion` → `put` preserves an
+        // existing non-null `package_id` on update, so the binding read here
+        // is the binding the restored row still carries.
+        //
+        // Read BEFORE the restore, deliberately: the row exists at this point
+        // and a read failure can still fail the whole rollback cleanly. Reading
+        // it afterwards would put a fallible query downstream of a write that
+        // already succeeded — the shape that ends in a `catch {}` swallowing a
+        // real outage (#4867).
+        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
@@ -10148,10 +10259,17 @@ export class ObjectStackProtocolImplementation implements
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
             // after someone lists the type.
+            // #4636 — …under the SAME ownership key `saveMetaItem` used. Left
+            // unpassed, an object row bound to `app.<slug>` re-registered here
+            // under the `'sys_metadata'` sentinel and `registerObject` threw
+            // `already owned by package "app.<slug>"` into the best-effort
+            // `console.warn` — a rollback that reported success while the
+            // registry kept serving the body it was supposed to revert.
             this.applyRegistryWriteThrough({
                 type: singularType,
                 name: request.name,
                 item: result.item.body,
+                packageId: rollbackPackageId,
             });
             return {
                 success: true,
@@ -10351,6 +10469,20 @@ export class ObjectStackProtocolImplementation implements
         }
 
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // #5927 — the fact the four delete receipts below have to tell the
+        // truth about, hoisted to method scope because it is read by BOTH
+        // delete paths (repository and legacy raw-engine) and by `intent`.
+        //
+        // It is the SAME fact the repo path already computed inline for
+        // `intent: 'override-artifact' | 'runtime-only'` — this binding
+        // replaces that call rather than adding one, so the receipt split
+        // costs zero new registry reads. (The two-tier authorization block
+        // above computes it a second time under `request.type`; that one is
+        // block-scoped to `environmentId !== undefined` and cannot be reused
+        // here. Both spellings agree: `canonicalizeMetaRequestType` already
+        // folded `request.type` to singular at the top of this method, which
+        // makes `singularTypeForRepo` a no-op re-fold — see #4432.)
+        const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
         const overlayAllowedForRepoDel = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
         const runtimeCreateAllowedForRepoDel = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);
         const useRepoPath = overlayAllowedForRepoDel || runtimeCreateAllowedForRepoDel;
@@ -10387,9 +10519,18 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         success: true,
                         reset: false,
+                        // #5927 — "already at artifact default" presumes an
+                        // artifact default EXISTS to be at. When nothing is
+                        // shipped under this (type, name), the absent overlay
+                        // row is the absence of the whole item, and the miss
+                        // says that instead of naming a baseline that was
+                        // never there. The draft leg claimed neither and is
+                        // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                            : artifactBacked
+                                ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                                : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
                 }
 
@@ -10405,7 +10546,10 @@ export class ObjectStackProtocolImplementation implements
                     // #4556 — NULL, not 'system', for an actor-less delete.
                     actor: request.actor ?? null,
                     source: 'protocol.deleteMetaItem',
-                    intent: this.isArtifactBacked(singularTypeForRepo, request.name)
+                    // #5927 — was an inline `this.isArtifactBacked(...)` call
+                    // with these exact arguments; now reads the method-scoped
+                    // binding the receipts share. Same fact, one call fewer.
+                    intent: artifactBacked
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
@@ -10460,9 +10604,30 @@ export class ObjectStackProtocolImplementation implements
                     reset: true,
                     seq: result.seq,
                     ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),
+                    // #5927 — the same split #5265/PR #5926 made on the save
+                    // side, on the reset path. `artifactBacked` is exactly the
+                    // difference between the two things a delete can be:
+                    //
+                    //   • override-artifact — a code-shipped artifact sits
+                    //     under this (type, name). Removing the row really
+                    //     does lift a customization layer and really does
+                    //     leave the packaged default in force; the sentence is
+                    //     literally true and is unchanged, byte for byte.
+                    //   • runtime-only — nothing is underneath. The row WAS
+                    //     the item, and after this delete it does not exist in
+                    //     any layer. Telling an admin who just deleted an
+                    //     `object`/`flow`/`hook` they created that it was
+                    //     "reset to artifact default" points them at a
+                    //     baseline that has never existed.
+                    //
+                    // The draft leg discards a pending draft and never claimed
+                    // a reset, so it is unchanged. `[seq=…]` stays on every
+                    // branch — HMR cursors read it.
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`,
+                        : artifactBacked
+                            ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`
+                            : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
                 };
             } catch (err: any) {
                 if (err instanceof ConflictError) {
@@ -10519,7 +10684,10 @@ export class ObjectStackProtocolImplementation implements
                 return {
                     success: true,
                     reset: false,
-                    message: `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                    // #5927 — same split as the repository path's miss above.
+                    message: artifactBacked
+                        ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                        : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                 };
             }
             await this.engine.delete('sys_metadata', { where: { id: existing.id } });
@@ -10539,7 +10707,14 @@ export class ObjectStackProtocolImplementation implements
             return {
                 success: true,
                 reset: true,
-                message: `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`,
+                // #5927 — same split as the repository path's success above.
+                // This branch carries no `[seq=…]`: it writes no history row
+                // and emits no watch event (see the block comment opening this
+                // path), so there is no cursor to report. That asymmetry is
+                // pre-existing and deliberate — the split does not touch it.
+                message: artifactBacked
+                    ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`
+                    : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,
             };
         } catch (err: any) {
             const e = new Error(`Failed to delete customization overlay: ${err.message}`);
@@ -10654,9 +10829,23 @@ export class ObjectStackProtocolImplementation implements
                         // the very next write with `not_overridable`. An app the user
                         // had just built became un-editable at the first kernel
                         // rebuild (cloud#970).
+                        //
+                        // The ownership key is the row's REAL package binding
+                        // (#4636 PR2). These rows come off `engine.find`, so
+                        // their columns are snake_case — `package_id`, never
+                        // `packageId`, exactly as `getMetaItems` and the
+                        // sibling branch below already read them. Reading the
+                        // camelCase key made the expression `undefined ||
+                        // 'sys_metadata'`, so every boot registered even a
+                        // package-bound object under the sentinel and the
+                        // sidebar's `getAllObjects(packageId)` filter lost it
+                        // across a restart. `||` and not `??`, symmetric with
+                        // the write path's `request.packageId || 'sys_metadata'`:
+                        // an empty binding is "no package", and the sentinel
+                        // marks exactly that one thing.
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            record.packageId || 'sys_metadata',
+                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and

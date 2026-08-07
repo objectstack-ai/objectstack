@@ -8,17 +8,12 @@ description: Realtime Shared protocol schemas
 Realtime Shared Protocol
 
 Shared schemas and types for real-time communication protocols.
-
 This module consolidates overlapping definitions between the transport-level
-
 realtime protocol (SSE/Polling/WebSocket) and the WebSocket collaboration protocol.
 
 **Architecture:**
-
 - `realtime-shared.zod.ts` — Shared base schemas (Presence, Event types)
-
 - `realtime.zod.ts` — Transport-layer protocol (Channel, Subscription, Transport selection)
-
 - `websocket.zod.ts` — Collaboration protocol (Cursor, OT editing, Advanced presence)
 
 See also: realtime.zod.ts for transport-layer configuration

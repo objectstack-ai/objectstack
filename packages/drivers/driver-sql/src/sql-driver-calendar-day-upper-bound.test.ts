@@ -102,13 +102,13 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
   });
 
   it('$gte / $gt / $lt keep their midnight anchoring (the issue-table rows marked correct)', async () => {
-    const gte = await driver.find('task', { object: 'task', where: { created_at: { $gte: '2026-07-28' } } });
+    const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } });
     expect(ids(gte)).toEqual(['t_evening', 't_midnight', 't_morning']);
 
-    const gt = await driver.find('task', { object: 'task', where: { created_at: { $gt: '2026-07-28' } } });
+    const gt = await driver.find('task', { where: { created_at: { $gt: '2026-07-28' } } });
     expect(ids(gt)).toEqual(['t_evening', 't_morning']); // excludes the exact-midnight row
 
-    const lt = await driver.find('task', { object: 'task', where: { created_at: { $lt: '2026-07-28' } } });
+    const lt = await driver.find('task', { where: { created_at: { $lt: '2026-07-28' } } });
     expect(ids(lt)).toEqual(['t_old', 't_yesterday']);
   });
 

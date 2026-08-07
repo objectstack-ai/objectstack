@@ -49,9 +49,29 @@
 // The output is a release page's body, so a reader cannot tell a filtered list
 // from a complete one. Hence: the accounting footer is UNCONDITIONAL — every
 // excluded item is counted out loud in the artifact itself, and `--all` names
-// them. Headings group by the level objectui declared; grouping is presentation
-// and must never become a filter again. Declaration over inference, per
-// AGENTS.md Prime Directive #12.
+// them. Grouping into headings is presentation and must never become a filter
+// again. Declaration over inference, per AGENTS.md Prime Directive #12.
+//
+// WHICH HEADING AN ENTRY LANDS UNDER (#6294)
+// ------------------------------------------
+// The section table used to key entirely on the DECLARED LEVEL, `major` →
+// "Breaking changes". objectui does not declare `major` in a release window — it
+// ships a breaking change as `minor` plus a prose annotation the author writes,
+// and `scripts/check-changeset-no-major.mjs` holds that line deliberately. So
+// that heading was structurally unable to render, and the breaking entries were
+// presented to upgraders under "Features". Measured on the same real range
+// #6099 was measured on, `f5bc4c78be76..f995a452d2ca`: 64 releasing changesets,
+// 0 declared `major`, `### Breaking changes` absent, and all four
+// author-annotated breaking entries (`042e09d77` / `6e794a19e` / `8ec406728` /
+// `d22ae31ce`) under `### Features`.
+//
+// The leading section therefore keys on `r.breaking` — the verdict
+// `classifyRange` already computes for every releasing entry ("declared `major`
+// OR the author's own breaking annotation", #6099 / PR #6289). This file
+// CONSUMES that verdict and does not restate it: a second copy would drift, and
+// the first thing it would drift on is this exact class. That is why #6289 put
+// the criterion in the shared implementation rather than in `buildDigest`. The
+// remaining sections still key on the declared level.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -116,12 +136,25 @@ function scopeOf(subject) {
   return m ? m[2] || '' : '';
 }
 
-/** Declared level → the release-page heading it belongs under. */
-const SECTIONS = [
-  ['major', 'Breaking changes'],
+/**
+ * The release-page headings, in page order.
+ *
+ * The LEADING group is keyed on the shared breaking verdict `r.breaking`, not on
+ * a declared level (#6294 — see the header block). The rest key on the level
+ * objectui declared.
+ *
+ * TOTALITY: a `major` entry always satisfies `r.breaking` — `classifyRange`
+ * computes `breaking = level === 'major' || annotated` — so the level table only
+ * has to cover what the breaking group leaves behind, `minor` and `patch`.
+ * `renderRange` still prints anything this table cannot place, under a heading
+ * that says so: grouping is presentation and must never become a filter (#4843).
+ */
+const BREAKING_HEADING = 'Breaking changes';
+const LEVEL_SECTIONS = [
   ['minor', 'Features'],
   ['patch', 'Fixes'],
 ];
+const UNPLACED_HEADING = 'Other changes';
 
 /**
  * Render the Console section for a classified range.
@@ -159,8 +192,19 @@ export function renderRange({ fromSha, toSha, classified, showExcluded = false }
     out.push('', `_Largest areas: ${topAreas.map(([a, n]) => `${a} (${n})`).join(', ')}_`);
   }
 
-  for (const [level, heading] of SECTIONS) {
-    const group = releasing.filter((r) => r.level === level);
+  // Breaking FIRST, keyed on the shared verdict — declared `major` OR the
+  // author's own annotation — then the remainder by declared level (#6294).
+  const rest = releasing.filter((r) => !r.breaking);
+  const groups = [
+    [BREAKING_HEADING, releasing.filter((r) => r.breaking)],
+    ...LEVEL_SECTIONS.map(([level, heading]) => [heading, rest.filter((r) => r.level === level)]),
+  ];
+  // An entry no heading above claims is still printed, never dropped (#4843).
+  const keyed = new Set(LEVEL_SECTIONS.map(([level]) => level));
+  const unplaced = rest.filter((r) => !keyed.has(r.level));
+  if (unplaced.length) groups.push([UNPLACED_HEADING, unplaced]);
+
+  for (const [heading, group] of groups) {
     if (group.length) out.push('', `### ${heading}`, ...group.map(line));
   }
 
@@ -313,7 +357,8 @@ function selfTest() {
 
     const base = commit('chore: base', { 'README.md': 'base\n' });
 
-    // The five shapes measured on 7d9734d5e321..785b8a5d432c.
+    // Shapes 1-5 measured on 7d9734d5e321..785b8a5d432c; shapes 6-7 on
+    // f5bc4c78be76..f995a452d2ca, the range #6099/#6294 were measured on.
     // 1. an ordinary releasing `feat` — the only shape the old filter got right
     commit('feat(grid): aggregate single-call mode for bulk actions (#3201)', {
       '.changeset/bulk-action-aggregate.md':
@@ -345,7 +390,38 @@ function selfTest() {
     commit('fix(ci): never render a budget FAIL for a run that measured nothing (#3198)', {
       '.github/workflows/y.yml': 'on: push\n',
     });
+    // 6. THE RELEASE-WINDOW SHAPE (#6294), after `042e09d77`: breaking, but
+    //    declared `minor` with the author's own `**BREAKING (v17)**` label —
+    //    the only spelling objectui actually uses, and the one a level-keyed
+    //    section table could not represent at all.
+    const annotatedSha = commit(
+      'feat(field): field widgets receive the record, not the raw value (#3244)',
+      {
+        '.changeset/field-widget-record-arg.md':
+          '---\n"@object-ui/plugin-field": minor\n---\n\nField widgets receive the whole record, not the raw value.\n\n' +
+          '**BREAKING (v17)** — a widget that read the raw value must read `record[field]`.\n',
+        'src/field.ts': 'c\n',
+      },
+    );
+    // 7. the NEAR MISS, after `9e9e9a92f`: a `patch` whose prose merely mentions
+    //    "breaking" mid-sentence. Not annotated, so it must stay under Fixes.
+    commit('fix(tree): stop re-sorting children on every keystroke (#3251)', {
+      '.changeset/tree-sort-stability.md':
+        '---\n"@object-ui/plugin-tree": patch\n---\n\nStop re-sorting tree children on every keystroke.\n\n' +
+        'Reordering here is technically breaking for anyone who relied on the churn, but only in the sense that the order was never specified.\n',
+      'src/tree.ts': 'd\n',
+    });
     const head = g('rev-parse', 'HEAD').trim();
+
+    /** The lines under `### <heading>`, up to the next `###` (or the end). */
+    const sectionOf = (md, heading) => {
+      const lines = md.split('\n');
+      const start = lines.indexOf(`### ${heading}`);
+      if (start < 0) return null;
+      const after = lines.slice(start + 1);
+      const end = after.findIndex((l) => l.startsWith('### '));
+      return (end < 0 ? after : after.slice(0, end)).join('\n');
+    };
 
     console.log('objectui-range --self-test');
 
@@ -358,10 +434,15 @@ function selfTest() {
       markdown.includes('PageNodeRenderer') && markdown.includes(breakingSha.slice(0, 9)),
       markdown,
     );
+    // Every conjunct is an EXISTENCE check on a heading this fixture really
+    // renders (`indexOf(...) > -1` first, so a missing heading fails rather than
+    // ordering vacuously against -1). All three sections are populated here:
+    // shape 2 or 6 → Breaking, shapes 1/3 → Features, shape 7 → Fixes.
     check(
-      'breaking changes get their own leading section (declared major)',
+      'the three sections render in page order: Breaking changes, Features, Fixes',
       markdown.indexOf('### Breaking changes') > -1 &&
-        markdown.indexOf('### Breaking changes') < markdown.indexOf('### Features'),
+        markdown.indexOf('### Breaking changes') < markdown.indexOf('### Features') &&
+        markdown.indexOf('### Features') < markdown.indexOf('### Fixes'),
       markdown,
     );
     check(
@@ -370,9 +451,64 @@ function selfTest() {
       markdown,
     );
     check(
-      'commit type never filters: all 3 releasing changesets are listed',
-      classified.releasing.length === 3,
+      'commit type never filters: all 5 releasing changesets are listed',
+      classified.releasing.length === 5,
       `got ${classified.releasing.length}`,
+    );
+
+    // --- #6294: the leading section is keyed on the SHARED breaking verdict ---
+    // objectui never declares `major` in a release window, so a level-keyed
+    // table left `### Breaking changes` structurally unrenderable and filed the
+    // author-annotated breaking entries under "Features".
+    check(
+      'a `minor` entry the AUTHOR annotated breaking is under Breaking changes',
+      (sectionOf(markdown, 'Breaking changes') ?? '').includes('not the raw value'),
+      markdown,
+    );
+    check(
+      'that annotated entry is NOT left under Features',
+      !(sectionOf(markdown, 'Features') ?? '').includes('not the raw value'),
+      markdown,
+    );
+    check(
+      'sectioning consumes the verdict, it does not restate the level: still `minor`/annotation',
+      classified.releasing.find((r) => r.sha === annotatedSha)?.level === 'minor' &&
+        classified.releasing.find((r) => r.sha === annotatedSha)?.breakingSource === 'annotation',
+      JSON.stringify(classified.releasing.find((r) => r.sha === annotatedSha)),
+    );
+    check(
+      'a `patch` merely MENTIONING "breaking" mid-sentence stays under Fixes',
+      (sectionOf(markdown, 'Fixes') ?? '').includes('re-sorting tree children') &&
+        !(sectionOf(markdown, 'Breaking changes') ?? '').includes('re-sorting tree children'),
+      markdown,
+    );
+    check(
+      'grouping never filters: every releasing entry appears exactly once',
+      classified.releasing.every(
+        (r) => markdown.split(`(objectui \`${r.sha.slice(0, 9)}\`)`).length === 2,
+      ),
+      markdown,
+    );
+
+    // The ordering guard above is carried in this fixture by BOTH breaking
+    // sources at once. Pin it a second time on a range whose ONLY breaking entry
+    // is annotation-sourced — the real release-window shape, and the one a
+    // level-keyed table cannot render at all. This is the check that goes red if
+    // the section ever reverts to keying on `r.level === 'major'`.
+    const annotationOnly = renderRange({
+      fromSha: base,
+      toSha: head,
+      classified: {
+        ...classified,
+        releasing: classified.releasing.filter((r) => r.breakingSource !== 'declared-major'),
+      },
+    });
+    check(
+      'with NO declared `major` in range, Breaking changes still renders and still leads',
+      annotationOnly.markdown.indexOf('### Breaking changes') > -1 &&
+        annotationOnly.markdown.indexOf('### Breaking changes') <
+          annotationOnly.markdown.indexOf('### Features'),
+      annotationOnly.markdown,
     );
 
     // --- what ships nothing is excluded, and SAYS SO in the artifact ---
@@ -398,7 +534,7 @@ function selfTest() {
     );
     check(
       'the accounting footer is unconditional and states the totals',
-      markdown.includes('3 releasing of 4 added across 5 non-merge commit(s)'),
+      markdown.includes('5 releasing of 6 added across 7 non-merge commit(s)'),
       markdown,
     );
 
@@ -448,7 +584,7 @@ function selfTest() {
     check(
       'the CLI JSON reports the declared criterion and the excluded counts',
       cliJson.criterion === 'declared-changeset' &&
-        cliJson.count === 3 &&
+        cliJson.count === 5 &&
         cliJson.releaseNothing === 1 &&
         cliJson.noChangeset === 1,
       JSON.stringify(cliJson).slice(0, 200),
@@ -458,6 +594,13 @@ function selfTest() {
       cliJson.releasing.every((r) => ['major', 'minor', 'patch'].includes(r.level)) &&
         cliJson.releasing.filter((r) => r.level === 'major').length === 1,
       JSON.stringify(cliJson.releasing.map((r) => r.level)),
+    );
+    check(
+      'the CLI JSON carries both breaking sources, so a consumer can tell them apart',
+      cliJson.releasing.filter((r) => r.breakingSource === 'declared-major').length === 1 &&
+        cliJson.releasing.filter((r) => r.breakingSource === 'annotation').length === 1 &&
+        cliJson.releasing.filter((r) => r.breaking).length === 2,
+      JSON.stringify(cliJson.releasing.map((r) => r.breakingSource)),
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

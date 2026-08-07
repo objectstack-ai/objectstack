@@ -326,7 +326,7 @@ describe('RemoteTransport $and/$or identity elements (#1073)', () => {
   describe('(f) the same answers through every WHERE-building entry point', () => {
     it('compiles `$or: []` to FALSE on count / deleteMany / updateMany', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await t.count('deal', { object: 'deal', where: { $or: [] } });
+      await t.count('deal', { where: { $or: [] } });
       await t.deleteMany('deal', { where: { $or: [] } } as any);
       await t.updateMany('deal', { where: { $or: [] } } as any, { stage: 'lost' });
       // Pre-fix these were an unfiltered COUNT, a DELETE of the whole table and
@@ -405,8 +405,8 @@ describe('TursoDriver remote — identity elements on real rows (#1073)', () => 
   it('`count` with an absorbed `$or` counts every row and binds nothing', async () => {
     // Executed, not string-matched: a stray bind left over from the absorbed
     // disjunct makes better-sqlite3 reject the statement outright.
-    expect(await driver.count('deal', { object: 'deal', where: { $or: [{ stage: 'won' }, {}] } })).toBe(3);
-    expect(await driver.count('deal', { object: 'deal', where: { $or: [] } })).toBe(0);
+    expect(await driver.count('deal', { where: { $or: [{ stage: 'won' }, {}] } })).toBe(3);
+    expect(await driver.count('deal', { where: { $or: [] } })).toBe(0);
   });
 
   it('a real two-branch `$or` is unchanged', async () => {

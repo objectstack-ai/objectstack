@@ -45,6 +45,11 @@ import { ReportSchema } from '../ui/report.zod';
 import { DatasetSchema } from '../ui/dataset.zod';
 
 import { FlowSchema } from '../automation/flow.zod';
+import { WebhookSchema } from '../automation/webhook.zod';
+
+import { DeclarativeConnectorEntrySchema } from '../integration/connector.zod';
+
+import { SharingRuleSchema } from '../security/sharing.zod';
 
 import { ApiEndpointSchema } from '../api/endpoint.zod';
 
@@ -142,6 +147,67 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   skill: SkillSchema,
 };
 
+/**
+ * Schema bindings for stack collections that are **not** metadata KINDS.
+ *
+ * [#6245, the same shape #5271 closed for `api`] `webhook`, `connector` and
+ * `sharing_rule` are produced and consumed today — artifact ingest maps
+ * `defineStack({ webhooks, connectors, sharingRules })` onto items of exactly
+ * these three type names (`ARTIFACT_FIELD_TO_TYPE`) — yet none of them is a
+ * member of `MetadataTypeSchema`. `getMetadataTypeSchema()` therefore answered
+ * `undefined`, `resolveOverlaySchema()` answered `null`, and `saveMetaItem`
+ * took its documented "unregistered type → store without validation" branch:
+ * `PUT /api/v1/meta/webhook/:name` accepted ANY JSON and returned
+ * `success: true`. Enforced but undeclared — the mirror of declared-but-
+ * unenforced, and the same hole, three more doors.
+ *
+ * This map is separate from `BUILTIN_METADATA_TYPE_SCHEMAS` above because that
+ * one is keyed by `MetadataType`, and these three are deliberately NOT that.
+ * Binding a schema here is a SHAPE check and nothing else:
+ *   - no `MetadataTypeSchema` enum member;
+ *   - no `DEFAULT_METADATA_TYPE_REGISTRY` entry — so every authorization
+ *     verdict (`isRuntimeCreateAllowed` and friends) keeps taking the very same
+ *     "no static entry ⇒ synthesised `allowRuntimeCreate: true`" branch it takes
+ *     today. The write DOOR is byte-identical; only the 422 for a malformed
+ *     body is new;
+ *   - no new capability surface, no permission change.
+ * #2657's B/C decision on whether these should become kinds is untouched and
+ * unprejudged — this is the enforce-what-we-already-accept half only.
+ *
+ * Each entry binds the SAME schema its stack collection is validated against in
+ * `stack.zod.ts`, so no body can be legal in a stack and illegal through `/meta`
+ * or the reverse.
+ */
+const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
+  // `stack.zod.ts`: `webhooks: z.array(WebhookSchema)`
+  webhook: WebhookSchema,
+
+  // `stack.zod.ts`: `connectors: z.array(DeclarativeConnectorEntrySchema)`.
+  //
+  // Bound to the DECLARATIVE ENTRY schema, not the bare `ConnectorSchema`. The
+  // base is a plain object so connector subtypes can `.extend()` it; the entry
+  // schema adds the ADR-0097 cross-field rules that apply to an AUTHORED
+  // connector — a provider-bound instance may not inline credentials via
+  // `authentication` (§3), nor author `actions`/`triggers` the provider derives
+  // (§5). `PUT /meta/connector/:name` is an authoring door in exactly the sense
+  // `connectors:` is, and those rules are the ones a second door must not
+  // reopen: binding the base here would leave the inline-secret shape ADR-0097
+  // forbids in a stack reachable through `/meta`, which is this very bug class
+  // wearing a different key. The rules fire only for provider-bound instances,
+  // so catalog descriptors are unaffected.
+  connector: DeclarativeConnectorEntrySchema as unknown as z.ZodType,
+
+  // `stack.zod.ts`: `sharingRules: z.array(SharingRuleSchema)`.
+  //
+  // This shape is `.strict()` with no stored/stamped envelope, so it is an
+  // AUTHOR-shape check and is applied only where author shapes are submitted:
+  // the write door. It is not a filter on rows already in `sys_sharing_rule`.
+  // Nothing re-parses stored rows through this registry — the read path only
+  // DECORATES a document with `_diagnostics` (`computeMetadataDiagnostics`) and
+  // never refuses one. Same treatment #5271/#5312 gave their strict surfaces.
+  sharing_rule: SharingRuleSchema,
+};
+
 /** Runtime-extensible overlay populated via `registerMetadataTypeSchema`. */
 const EXTRA_METADATA_TYPE_SCHEMAS = new Map<string, z.ZodType>();
 
@@ -153,7 +219,11 @@ const EXTRA_METADATA_TYPE_SCHEMAS = new Map<string, z.ZodType>();
  * which is runtime-created by the datasource Sync wizard — ADR-0062/0088).
  */
 export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
-  return EXTRA_METADATA_TYPE_SCHEMAS.get(type) ?? BUILTIN_METADATA_TYPE_SCHEMAS[type as MetadataType];
+  return EXTRA_METADATA_TYPE_SCHEMAS.get(type)
+    ?? BUILTIN_METADATA_TYPE_SCHEMAS[type as MetadataType]
+    // #6245 — last, so a plugin's `registerMetadataTypeSchema()` override still
+    // wins over a built-in binding here, exactly as it does over the map above.
+    ?? UNREGISTERED_KIND_SCHEMAS[type];
 }
 
 /**
@@ -190,6 +260,16 @@ export function listMetadataTypeSchemaTypes(): string[] {
   for (const t of EXTRA_METADATA_TYPE_SCHEMAS.keys()) types.add(t);
   return Array.from(types).sort();
 }
+// [#6245] `UNREGISTERED_KIND_SCHEMAS` is deliberately NOT enumerated here.
+// This list is the REGISTERED METADATA TYPE set, and the repo treats it as a
+// contract surface, not a convenience index: `metadata-type-schemas.test.ts`
+// walks it to enforce the #4001 unknown-key closure campaign and the ADR-0010
+// protection-envelope declaration on every member, `metadata-create-seeds`
+// requires a create seed per member, and the campaign count is asserted against
+// it. Those are obligations of being a KIND. webhook/connector/sharing_rule are
+// bound above for SHAPE VALIDATION precisely because they are not kinds, so
+// enrolling them here would claim a status this change is careful not to grant
+// (and #2657's B/C decision is exactly the one left open).
 
 // ==========================================
 // Metadata Type Actions (type-level buttons)

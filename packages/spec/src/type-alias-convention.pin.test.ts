@@ -189,8 +189,8 @@ import type * as M111 from './shared/expression.zod.js';
 import type * as M112 from './shared/http.zod.js';
 import type * as M113 from './shared/identifiers.zod.js';
 import type * as M169 from './shared/mapping.zod.js';
-import type * as M170 from './automation/builtin-node-config.zod.js';
-import type * as M171 from './automation/schemaless-node-config.zod.js';
+import type * as M172 from './automation/builtin-node-config.zod.js';
+import type * as M173 from './automation/schemaless-node-config.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -245,7 +245,12 @@ import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
 import type * as M166 from './ui/theme.zod.js';
 import type * as M167 from './ui/view.zod.js';
-import type * as M168 from './ui/widget.zod.js';
+// Appended out of alphabetical order deliberately: the M-indices are positional
+// identifiers the pin lines below reference by number, so a new module takes the
+// next free index rather than renumbering 169 imports and every pin that names
+// one. #5775 is the first entry from this file — `component.zod.ts` had no bare
+// `X = z.infer` alias until `PageContainerProps` arrived.
+import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
 // 717 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -1274,11 +1279,8 @@ export type Iso683 = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer
 export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
 
 // ui/i18n.zod.ts
-export type Iso685 = Assert<Eq< z.input< typeof M161.I18nObjectSchema >, z.infer< typeof M161.I18nObjectSchema > >>;
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
-export type Iso688 = Assert<Eq< z.input< typeof M161.PluralRuleSchema >, z.infer< typeof M161.PluralRuleSchema > >>;
-export type Iso689 = Assert<Eq< z.input< typeof M161.DateFormatSchema >, z.infer< typeof M161.DateFormatSchema > >>;
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1318,8 +1320,13 @@ export type Iso713 = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.i
 export type Iso714 = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
 export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 
-// ui/widget.zod.ts
-export type Iso716 = Assert<Eq< z.input< typeof M168.WidgetLifecycleSchema >, z.infer< typeof M168.WidgetLifecycleSchema > >>;
+// ui/component.zod.ts
+// #5775 — the shared `children` contract for `page:section`/`page:footer`/
+// `page:sidebar`. A lone optional array with no default, transform, catch or
+// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
+// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
+// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
+export type Iso719 = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 
 // ---------------------------------------------------------------------------
 // Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
@@ -1332,45 +1339,45 @@ export type Iso716 = Assert<Eq< z.input< typeof M168.WidgetLifecycleSchema >, z.
 // ---------------------------------------------------------------------------
 
 // api/protocol.zod.ts
-export type Iso719 = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
-export type Iso720 = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z.infer< typeof M28.CreateDataRequestSchema > >>;
-export type Iso721 = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
-export type Iso722 = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
-export type Iso723 = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
-export type Iso724 = Assert<Eq< z.input< typeof M28.ListViewsRequestSchema >, z.infer< typeof M28.ListViewsRequestSchema > >>;
-export type Iso725 = Assert<Eq< z.input< typeof M28.GetViewRequestSchema >, z.infer< typeof M28.GetViewRequestSchema > >>;
-export type Iso726 = Assert<Eq< z.input< typeof M28.DeleteViewRequestSchema >, z.infer< typeof M28.DeleteViewRequestSchema > >>;
-export type Iso727 = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
-export type Iso728 = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
-export type Iso729 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
-export type Iso730 = Assert<Eq< z.input< typeof M28.RealtimeConnectRequestSchema >, z.infer< typeof M28.RealtimeConnectRequestSchema > >>;
-export type Iso731 = Assert<Eq< z.input< typeof M28.RealtimeDisconnectRequestSchema >, z.infer< typeof M28.RealtimeDisconnectRequestSchema > >>;
-export type Iso732 = Assert<Eq< z.input< typeof M28.RealtimeSubscribeRequestSchema >, z.infer< typeof M28.RealtimeSubscribeRequestSchema > >>;
-export type Iso733 = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeRequestSchema >, z.infer< typeof M28.RealtimeUnsubscribeRequestSchema > >>;
-export type Iso734 = Assert<Eq< z.input< typeof M28.SetPresenceRequestSchema >, z.infer< typeof M28.SetPresenceRequestSchema > >>;
-export type Iso735 = Assert<Eq< z.input< typeof M28.GetPresenceRequestSchema >, z.infer< typeof M28.GetPresenceRequestSchema > >>;
-export type Iso736 = Assert<Eq< z.input< typeof M28.RegisterDeviceRequestSchema >, z.infer< typeof M28.RegisterDeviceRequestSchema > >>;
-export type Iso737 = Assert<Eq< z.input< typeof M28.UnregisterDeviceRequestSchema >, z.infer< typeof M28.UnregisterDeviceRequestSchema > >>;
-export type Iso738 = Assert<Eq< z.input< typeof M28.GetNotificationPreferencesRequestSchema >, z.infer< typeof M28.GetNotificationPreferencesRequestSchema > >>;
-export type Iso739 = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
-export type Iso740 = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadRequestSchema >, z.infer< typeof M28.MarkAllNotificationsReadRequestSchema > >>;
-export type Iso741 = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
-export type Iso742 = Assert<Eq< z.input< typeof M28.AiChatRequestSchema >, z.infer< typeof M28.AiChatRequestSchema > >>;
-export type Iso743 = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
-export type Iso744 = Assert<Eq< z.input< typeof M28.CreateAiConversationRequestSchema >, z.infer< typeof M28.CreateAiConversationRequestSchema > >>;
-export type Iso745 = Assert<Eq< z.input< typeof M28.ListAiConversationsRequestSchema >, z.infer< typeof M28.ListAiConversationsRequestSchema > >>;
-export type Iso746 = Assert<Eq< z.input< typeof M28.UpdateAiConversationRequestSchema >, z.infer< typeof M28.UpdateAiConversationRequestSchema > >>;
-export type Iso747 = Assert<Eq< z.input< typeof M28.AiAgentChatRequestSchema >, z.infer< typeof M28.AiAgentChatRequestSchema > >>;
-export type Iso748 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestSchema >, z.infer< typeof M28.ListAiPendingActionsRequestSchema > >>;
-export type Iso749 = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
-export type Iso750 = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
-export type Iso751 = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
+export type Iso720 = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
+export type Iso721 = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z.infer< typeof M28.CreateDataRequestSchema > >>;
+export type Iso722 = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
+export type Iso723 = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
+export type Iso724 = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
+export type Iso725 = Assert<Eq< z.input< typeof M28.ListViewsRequestSchema >, z.infer< typeof M28.ListViewsRequestSchema > >>;
+export type Iso726 = Assert<Eq< z.input< typeof M28.GetViewRequestSchema >, z.infer< typeof M28.GetViewRequestSchema > >>;
+export type Iso727 = Assert<Eq< z.input< typeof M28.DeleteViewRequestSchema >, z.infer< typeof M28.DeleteViewRequestSchema > >>;
+export type Iso728 = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
+export type Iso729 = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
+export type Iso730 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
+export type Iso731 = Assert<Eq< z.input< typeof M28.RealtimeConnectRequestSchema >, z.infer< typeof M28.RealtimeConnectRequestSchema > >>;
+export type Iso732 = Assert<Eq< z.input< typeof M28.RealtimeDisconnectRequestSchema >, z.infer< typeof M28.RealtimeDisconnectRequestSchema > >>;
+export type Iso733 = Assert<Eq< z.input< typeof M28.RealtimeSubscribeRequestSchema >, z.infer< typeof M28.RealtimeSubscribeRequestSchema > >>;
+export type Iso734 = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeRequestSchema >, z.infer< typeof M28.RealtimeUnsubscribeRequestSchema > >>;
+export type Iso735 = Assert<Eq< z.input< typeof M28.SetPresenceRequestSchema >, z.infer< typeof M28.SetPresenceRequestSchema > >>;
+export type Iso736 = Assert<Eq< z.input< typeof M28.GetPresenceRequestSchema >, z.infer< typeof M28.GetPresenceRequestSchema > >>;
+export type Iso737 = Assert<Eq< z.input< typeof M28.RegisterDeviceRequestSchema >, z.infer< typeof M28.RegisterDeviceRequestSchema > >>;
+export type Iso738 = Assert<Eq< z.input< typeof M28.UnregisterDeviceRequestSchema >, z.infer< typeof M28.UnregisterDeviceRequestSchema > >>;
+export type Iso739 = Assert<Eq< z.input< typeof M28.GetNotificationPreferencesRequestSchema >, z.infer< typeof M28.GetNotificationPreferencesRequestSchema > >>;
+export type Iso740 = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
+export type Iso741 = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadRequestSchema >, z.infer< typeof M28.MarkAllNotificationsReadRequestSchema > >>;
+export type Iso742 = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
+export type Iso743 = Assert<Eq< z.input< typeof M28.AiChatRequestSchema >, z.infer< typeof M28.AiChatRequestSchema > >>;
+export type Iso744 = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
+export type Iso745 = Assert<Eq< z.input< typeof M28.CreateAiConversationRequestSchema >, z.infer< typeof M28.CreateAiConversationRequestSchema > >>;
+export type Iso746 = Assert<Eq< z.input< typeof M28.ListAiConversationsRequestSchema >, z.infer< typeof M28.ListAiConversationsRequestSchema > >>;
+export type Iso747 = Assert<Eq< z.input< typeof M28.UpdateAiConversationRequestSchema >, z.infer< typeof M28.UpdateAiConversationRequestSchema > >>;
+export type Iso748 = Assert<Eq< z.input< typeof M28.AiAgentChatRequestSchema >, z.infer< typeof M28.AiAgentChatRequestSchema > >>;
+export type Iso749 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestSchema >, z.infer< typeof M28.ListAiPendingActionsRequestSchema > >>;
+export type Iso750 = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
+export type Iso751 = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
+export type Iso752 = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
 
 // automation/builtin-node-config.zod.ts
-export type Iso752 = Assert<Eq< z.input< typeof M170.ScreenFieldConfigSchema >, z.infer< typeof M170.ScreenFieldConfigSchema > >>;
+export type Iso753 = Assert<Eq< z.input< typeof M172.ScreenFieldConfigSchema >, z.infer< typeof M172.ScreenFieldConfigSchema > >>;
 
 // automation/schemaless-node-config.zod.ts
-export type Iso753 = Assert<Eq< z.input< typeof M171.DecisionConditionSchema >, z.infer< typeof M171.DecisionConditionSchema > >>;
+export type Iso754 = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
 
 // ---------------------------------------------------------------------------
 // Representative spot-checks on the phase-2 FLIP.
@@ -1434,7 +1441,7 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 754 isomorphic pins', () => {
+  it('still declares all 751 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1446,19 +1453,39 @@ describe('ADR-0122 type-alias convention', () => {
     // gains a shape and its alias gains an `XParsed`. Dropping it without that
     // corresponding alias is the edit this case exists to stop.
     //
-    // It also RISES: a NEW isomorphic schema arrives with a bare alias, and
-    // `check:spec-parsed-alias` sends it here rather than to an `XParsed`
-    // (718 -> 719 was `ConnectorActionEffectSchema`, #4395 — a bare `z.enum`,
-    // like the `ConnectorType` / `ConnectorStatus` pins beside it). Phase 2
-    // (#6083) took it 719 -> 754 in one step, for a different reason worth
-    // knowing: those 35 schemas were not new and had not changed. Their bare
-    // alias already read `z.input` before the flip, so phase 1's gate — which
-    // only ever looked at bare `z.infer` aliases — had never asked them the
-    // question. Inverting the gate asked it, and 35 of the 57 it turned up
-    // answered "isomorphic".
+    // It also RISES, which the count had not yet seen when it was written: a
+    // NEW isomorphic schema arrives with a bare alias, and `check:spec-parsed-alias`
+    // sends it here rather than to an `XParsed` (718 -> 719 was
+    // `ConnectorActionEffectSchema`, #4395 — a bare `z.enum`, like the
+    // `ConnectorType` / `ConnectorStatus` pins beside it).
+    //
+    // And it drops by MORE than one when schemas are RETIRED, which is the third
+    // way and the one to read carefully, because from the count alone it looks
+    // exactly like the edit this case exists to stop: #5055 removed
+    // `I18nObjectSchema`, `PluralRuleSchema`, `DateFormatSchema` and
+    // `WidgetLifecycleSchema` under ADR-0049, i.e. -4. What separates it from a
+    // bare deletion is that the SCHEMAS went with the pins —
+    // `check:spec-parsed-alias` has nothing left to exempt, and
+    // `ui/widget-i18n-retirement.test.ts` asserts their absence on every public
+    // entry. A pin deleted while its schema still exports is still the failure
+    // this counts.
+    //
+    // 720 -> 716 is that retirement landing on top of #5775's addition
+    // (`PageContainerProps`, the +1 that had taken the count to 720). Both moves
+    // are in this number at once, which is exactly why it is recomputed from the
+    // source rather than reasoned about: -4 retired, +0 of my own.
+    //
+    // The fourth way is the one ADR-0122 phase 2 (#6083) added, and it is a
+    // BULK rise with no schema change behind it at all: 716 -> 751. Those
+    // 35 schemas are not new and did not move. Their bare alias already read
+    // `z.input` before the flip, so phase 1's gate — which only ever looked at
+    // bare `z.infer` aliases — had never asked them whether their parsed state
+    // was named. Inverting the gate asked, and 35 of the 57 it turned up
+    // answered "isomorphic". A jump this size is normally the shape of a
+    // mistake; this one is a gate widening, and the pins are its receipt.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(754);
+    expect(pins).toHaveLength(751);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

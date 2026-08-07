@@ -139,6 +139,7 @@ export {
   validateVisibilityPredicates,
   VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
+  VISIBILITY_BARE_IDENTIFIER,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,

@@ -122,14 +122,14 @@ describe('TursoDriver — temporal conformance (local mode)', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { object: 'conformance', where: c.filter });
+      const rows = await driver.find('conformance', { where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { object: 'conformance', where: resolveTokens(c.tokenFilter) });
+        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -164,7 +164,7 @@ describe('TursoDriver — Field.time conformance (local mode)', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { object: 'time_conformance', where: c.filter });
+      const rows = await driver.find('time_conformance', { where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -209,7 +209,7 @@ describe('TursoDriver — temporal conformance on un-backfilled legacy storage',
   // already swept above — a divergence here is a repair-path bug by construction.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { object: 'conformance', where: c.filter });
+      const rows = await driver.find('conformance', { where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -252,7 +252,7 @@ describe('TursoDriver — Field.time conformance on un-backfilled legacy storage
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { object: 'time_conformance', where: c.filter });
+      const rows = await driver.find('time_conformance', { where: c.filter });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

@@ -8,29 +8,20 @@ description: Mcp protocol schemas
 Model Context Protocol (MCP) — Reference & Binding Primitives
 
 MCP itself is an external protocol defined by Anthropic
-
 (https://modelcontextprotocol.io). The platform does NOT re-define
-
 MCP's wire format, transport, or message shapes — that is the job
-
 of the `@modelcontextprotocol/sdk` consumed by `@objectstack/mcp`.
 
 This file defines only the two things the *platform* needs:
 
 1. **MCPServerRef** — how a project references an external MCP
-
-server (so an agent can mount its tools).
-
+   server (so an agent can mount its tools).
 2. **MCPToolBinding** — how an MCP tool from a referenced server
-
-is exposed as an ObjectStack `AIToolDefinition` (alias,
-
-visibility, approval policy).
+   is exposed as an ObjectStack `AIToolDefinition` (alias,
+   visibility, approval policy).
 
 Everything else (transport details, capability negotiation,
-
 resource/prompt shapes, streaming, sampling) is handled by the SDK
-
 at runtime and does not need a metadata representation.
 
 <Callout type="info">

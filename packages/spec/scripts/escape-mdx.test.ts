@@ -117,8 +117,20 @@ describe('escapeMdxDescription — shapes the fix must not disturb', () => {
  * carry an unbalanced one inside a code span (`record.amount < 0`,
  * `>=1.2.3`) — 11 such spans, all correct. Nesting for angles is pinned by
  * the positive unit case above instead. Backslash-escaped delimiters are not
- * delimiters: the module-JSDoc path escapes braces as `\{`, so they are
- * dropped before counting.
+ * delimiters and are dropped before counting; that strip no longer has
+ * anything to do in a span (#5553 stopped the module-JSDoc path escaping
+ * braces inside code, where the backslash was content rather than an escape)
+ * but it still guards the invariant against a future path that does.
+ *
+ * A span is extracted per PARAGRAPH, not per line. It used to be per line,
+ * which was only ever right by accident: the module-JSDoc path made every
+ * source line its own paragraph, so no span could span lines. #5553 restored
+ * that layout, and a span may now wrap — `automation/flow-function` opens one
+ * on one line and closes it on the next. Splitting per line saw the opening
+ * half alone (`` `update_record fields: {` ``) and read a wrapped span as an
+ * unbalanced one. A blank line is still a hard boundary, since a code span
+ * cannot cross one, so the paragraph is the correct unit — and #5452's own
+ * defect, a pair cut in half WITHIN one line, is reported exactly as before.
  */
 describe('published reference pages keep inline-code braces balanced (#5452)', () => {
   const pages: string[] = [];
@@ -139,18 +151,34 @@ describe('published reference pages keep inline-code braces balanced (#5452)', (
     const offenders: string[] = [];
     for (const file of pages) {
       const rel = path.relative(REPO, file);
-      fs.readFileSync(file, 'utf-8')
-        .split('\n')
-        .forEach((line, index) => {
-          // Odd segments of a backtick split are the inline-code spans.
-          const segments = line.split('`');
-          for (let i = 1; i < segments.length; i += 2) {
-            const span = segments[i].replace(/\\[{}]/g, '');
-            const opens = span.split('{').length - 1;
-            const closes = span.split('}').length - 1;
-            if (opens !== closes) offenders.push(`${rel}:${index + 1}  \`${segments[i]}\``);
-          }
-        });
+      // Fenced blocks are not inline code and their braces are not ours to
+      // balance, so blank them before the paragraphs are cut.
+      let fenced = false;
+      const prose = fs.readFileSync(file, 'utf-8').split('\n').map(line => {
+        if (/^\s*(?:`{3,}|~{3,})/.test(line)) { fenced = !fenced; return ''; }
+        return fenced ? '' : line;
+      });
+
+      let buffer: string[] = [];
+      let start = 0;
+      const check = () => {
+        if (!buffer.length) return;
+        // Odd segments of a backtick split are the inline-code spans.
+        const segments = buffer.join('\n').split('`');
+        for (let i = 1; i < segments.length; i += 2) {
+          const span = segments[i].replace(/\\[{}]/g, '');
+          const opens = span.split('{').length - 1;
+          const closes = span.split('}').length - 1;
+          if (opens !== closes) offenders.push(`${rel}:${start + 1}  \`${segments[i]}\``);
+        }
+        buffer = [];
+      };
+      prose.forEach((line, index) => {
+        if (line.trim() === '') { check(); return; }
+        if (!buffer.length) start = index;
+        buffer.push(line);
+      });
+      check();
     }
     expect(offenders).toEqual([]);
   });

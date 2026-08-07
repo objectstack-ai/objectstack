@@ -8,35 +8,22 @@ description: Dataset protocol schemas
 Analytics Dataset — the one semantic layer (ADR-0021).
 
 A `dataset` is a named, reusable analytical definition: a base object, the
-
 relationships to include (joins are *derived* from the object graph — the
-
 author never writes an `ON` clause), and the declared **dimensions**
-
 (groupable axes) and **measures** (aggregatable values). It is deliberately
-
 SMALLER than `QuerySchema`: no raw SQL, no hand-authored join predicates,
-
 no window/having grammar in the author surface.
 
 Presentations (`report` / `dashboard`) bind to a dataset by reference and
-
 pick dimensions/measures *by name*. The dataset compiles to the existing
-
 Cube analytics runtime (ADR-0021 D-A=(c)); RLS / tenant scoping is enforced
-
 by the runtime per joined object (D-C), never declared here.
 
 Naming: this module owns the high-prior `dataset` / `dimension` / `measure`
-
 vocabulary (LookML / dbt / Cube / PowerBI). The Zod export identifiers are
-
 `Dataset`-prefixed (`DatasetDimensionSchema`, `DatasetMeasureSchema`) so they
-
 do not clash with the Cube layer's `DimensionSchema` / `MetricSchema` in
-
-`[data/analytics.zod.ts](/docs/references/data/analytics)` while the two layers coexist (Phase 1). The Cube
-
+`data/analytics.zod.ts` while the two layers coexist (Phase 1). The Cube
 layer is absorbed/retired in a later phase (D-A).
 
 <Callout type="info">

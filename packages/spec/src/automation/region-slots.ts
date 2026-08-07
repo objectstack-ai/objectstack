@@ -15,7 +15,8 @@
  * | pass | package | unit it walks |
  * |------|---------|---------------|
  * | `mapFlowNodes` (ADR-0087 conversions) | `spec` | node, copy-on-write rewrite |
- * | `collectFlowGraphs` / `validateControlFlow` / `normalizeControlFlowRegions` | `spec` | graph (nodes + edges) |
+ * | `collectFlowGraphs` / `validateControlFlow` | `spec` | graph (nodes + edges) |
+ * | `parseFlowNodeRegions` (the `FlowNodeSchema` transform, #4415) | `spec` | node's own region slots |
  * | `walkFlowNodes` (lint flow rules) | `lint` | node, with diagnostic path |
  *
  * Each carried its own copy of the table below, and each pinned its own copy

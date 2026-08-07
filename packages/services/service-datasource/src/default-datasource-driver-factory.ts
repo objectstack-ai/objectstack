@@ -457,6 +457,11 @@ export function createDefaultDatasourceDriverFactory(
 
       // memory — ephemeral per datasource unless the author opts into
       // persistence, and then into a destination of its own (#4083).
+      //
+      // `spec.pool` is not read here and never was: `InMemoryDriver` opens no
+      // connection, so there is nothing for one to size. It used to be dropped
+      // in silence; since #5931 the guard above rejects it, which is why this
+      // arm needs no pool handling of its own rather than merely having none.
       const { InMemoryDriver } = await import('@objectstack/driver-memory');
       return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
     },

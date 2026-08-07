@@ -12,7 +12,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const ApiMappingSchema = lazySchema(() => z.object({
   source: z.string().describe('Source field/path'),
   target: z.string().describe('Target field/path'),
-  transform: z.string().optional().describe('Transformation function name'),
+  transform: z.string().optional().describe('Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
 }));
 
 /**
@@ -71,8 +71,8 @@ export const ApiEndpointSchema = z.object({
   description: z.string().optional(),
 
   /** Execution Logic */
-  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe('Implementation type'),
-  target: z.string().describe('Target Flow ID, Script Name, or Proxy URL'),
+  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe("Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary (#5040) and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector"),
+  target: z.string().describe("Target Flow ID or Script Name or Proxy URL, per `type` — but only the Flow ID is reachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'` (an `object_operation` endpoint is addressed by `objectParams.object` / `.operation`; neither the publish gate nor the executor reads `target` for that type)"),
 
   /** Logic Config */
   objectParams: z.object({

@@ -16,6 +16,10 @@ export default defineConfig({
     '@objectstack/driver-sql',
     '@objectstack/driver-sqlite-wasm',
     '@objectstack/driver-mongodb',
+    // OPTIONAL install, loaded through `turso-driver-factory.ts`'s lazy
+    // `import()` (#5820). External so esbuild never tries to resolve/bundle a
+    // package that is deliberately not a dependency of this one.
+    '@objectstack/driver-turso',
     '@objectstack/metadata',
     '@objectstack/objectql',
   ],

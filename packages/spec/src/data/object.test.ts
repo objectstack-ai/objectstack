@@ -935,23 +935,32 @@ describe('ObjectSchema.create()', () => {
     // ADR-0117 (Accepted, D1/D3 scoped) reserves a fourth tier,
     // `ownership: 'business_unit'`, whose contract is: NO `owner_id`, and a
     // kernel-stamped `owning_business_unit_id` instead (D1's table). The
-    // protocol name is already registered —
-    // `SystemFieldName.OWNING_BUSINESS_UNIT_ID` — but the VALUE must not be
-    // added here yet, because `applySystemFields` decides owner injection with
-    // a DENY-list (`packages/objectql/src/registry.ts`):
+    // protocol name is registered (`SystemFieldName.OWNING_BUSINESS_UNIT_ID`)
+    // and, since #5677, open-core INJECTS the column — but the enum VALUE is
+    // still not added here.
     //
-    //   wantOwner = ownership !== 'org' && ownership !== 'none' && …
+    // ⚠️ The ORIGINAL reason recorded here has EXPIRED, and the pin outlived it.
+    // It read: `applySystemFields` decides owner injection with a DENY-list
+    // (`wantOwner = ownership !== 'org' && ownership !== 'none' && …`), so a
+    // fourth value would fall through and be stamped with `owner_id` — the exact
+    // INVERSE of what D1 declares. #5677 flipped that judgement to an ALLOW-list
+    // (`packages/objectql/src/registry.ts`, and the shared derivation
+    // `resolveInjectedSystemColumns` in `./injected-system-columns.ts`), so the
+    // engine now implements D1's `business_unit` row correctly and the inverse-
+    // stamping hazard is gone. Do NOT re-derive the old argument from this pin.
     //
-    // so a fourth value would fall through to the default branch and be
-    // stamped with `owner_id` — the exact INVERSE of what D1 declares. Adding
-    // the value alone therefore converts today's loud rejection into a silent
-    // wrong result: ADR-0049's "spec must not declare what the runtime does not
-    // enforce", in miniature.
+    // What survives is the plain sequencing fact: extending the acceptance
+    // surface is its own change, tracked as #5678 (protocol seat). Until it
+    // lands, the value is rejected, and the rejection is the honest answer — a
+    // tier an author cannot write is not a tier the schema should advertise.
     //
-    // The enum member lands in the SAME PR that flips `wantOwner` to an
-    // allow-list and injects the column. Until then this pin holds the line —
-    // and when that PR arrives, this test failing is the intended signal to
-    // rewrite it (not to delete the guard).
+    // When #5678 arrives, this test failing is the intended signal to REWRITE it
+    // (not to delete the guard) — assert the fourth value is accepted and that a
+    // fifth is still rejected naming four legal values. Co-update targets in the
+    // same PR, both of which currently state "still rejected" in prose:
+    //   • `packages/spec/src/system/constants/system-names.ts` — the
+    //     `OWNING_BUSINESS_UNIT_ID` JSDoc (its "not authorable yet" paragraph);
+    //   • the `systemFields` JSDoc in this directory's `object.zod.ts`.
     //
     // NOTE the direction: 'business_unit' was ALREADY rejected before #4611 —
     // this test does not change behaviour, it PINS the pre-existing rejection

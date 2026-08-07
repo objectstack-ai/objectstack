@@ -44,7 +44,7 @@ describe('SqlDriver Server-Timing db span', () => {
     it('records a db mark with a query count for a real find()', async () => {
         const t = new PerfTiming();
         const rows = await runWithPerfTiming(t, () =>
-            driver.find('orders', { object: 'orders', where: { status: 'open' } }),
+            driver.find('orders', { where: { status: 'open' } }),
         );
         expect(rows).toHaveLength(1);
         const mark = dbMark(t);

@@ -8,19 +8,6 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // MEASURED before anything was tightened, not assumed. Read this before adding
 // a key, and before "finishing" any sibling file by analogy.
 //
-// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
-// `getFileDescription()` publishes the module's FIRST doc block as the
-// reference page's description, so a doc-comment header here would replace the
-// public page's text with an internal note (#3746 trap 1). Hence `//`.
-//
-// And do not spell that hazard out with the literal two-star opener, either —
-// `getFileDescription()` matches it with a bare regex over the raw source, so
-// even INSIDE a `//` line it reads as the file's first doc block. The first
-// draft of this very warning quoted the token, matched as an empty description,
-// and deleted "Color Palette Schema / Defines brand colors and their variants"
-// from the published page. The caution about the trap sprang the trap; caught
-// by `check:docs`, which is exactly what it is for.
-//
 // THE DOOR (three measurements, 2026-08-03, each with controls in the run):
 //
 //   1. CARRIER KEY — `stack.zod.ts` declares `themes: z.array(ThemeSchema)`,

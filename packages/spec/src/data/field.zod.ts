@@ -121,10 +121,17 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   default: z.boolean().optional().describe('Is default option'),
   /**
    * Per-option visibility predicate (CEL) — the option is offered only when this
-   * evaluates TRUE. Omit = always available. Evaluated against the SAME binding
-   * environment as field-level `visibleWhen` (live `record` + `current_user`), so
-   * it expresses BOTH cascading/dependent options (`record.country == 'cn'`) AND
-   * role/context gating (`'admin' in current_user.positions`). When it references
+   * evaluates TRUE. Omit = always available. Evaluated against the live `record`
+   * PLUS the host's global predicate scope, which carries `current_user` — so it
+   * expresses BOTH cascading/dependent options (`record.country == 'cn'`) AND
+   * role/context gating (`'admin' in current_user.positions`).
+   *
+   * This scope is WIDER than field-level `visibleWhen`, not the same (#6146):
+   * options resolve through `resolveCascadingOptions` against the predicate
+   * scope (ADR-0068 / objectui#2284), while field- and section-level rules go
+   * through `evalFieldPredicate`, which binds `record` + `previous` + `parent`
+   * and never `current_user` (objectui#1582). Per-option is the one `*When`
+   * surface where a `current_user` test actually resolves. When it references
    * sibling fields, declare those on the field's `dependsOn` so the form can gate
    * and re-evaluate the option list as the parent changes.
    *
@@ -133,7 +140,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as field visibleWhen (record + current_user). e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user` — wider than field-level visibleWhen, which has no `current_user`. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
 }));
 
 /**

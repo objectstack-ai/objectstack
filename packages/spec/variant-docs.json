@@ -22,6 +22,10 @@
     "  - widget implementation became GOVERNED. protocol/objectui/widget-contract.mdx has",
     "    documented all three variants in a `Widget Source` section the whole time; the gate",
     "    could not see them because its matcher was blind to YAML. Fixed in the matcher.",
+    "    (Since RETIRED: #5055 removed `WidgetSourceSchema` under ADR-0049 — no carrier key,",
+    "    nothing ever parsed it — so the union is gone and its entry went with it, in the same",
+    "    PR. An entry whose union has left the source is a STALE ledger row, which is the",
+    "    #5552 failure mode; `pnpm check:variant-docs` is the gate that says so.)",
     "  - tenant isolation and settings-manifest handler became NOT-AUTHORABLE. Both reasons",
     "    already said the words (`operator-set`, `consumed by Setup/Studio`); the label just",
     "    disagreed with them.",
@@ -70,14 +74,6 @@
       "docs": [
         "content/docs/protocol/knowledge.mdx"
       ]
-    },
-    {
-      "key": "type:inline|npm|remote",
-      "label": "widget implementation",
-      "docs": [
-        "content/docs/protocol/objectui/widget-contract.mdx"
-      ],
-      "note": "Was exempt as generated-reference-only until the #4001 audit: the page's `Widget Source` section documents all three variants, but in YAML examples, which the coverage matcher could not see. The exemption was recording a gate blind-spot as a doc gap."
     },
     {
       "key": "type:cron|interval|once",

@@ -293,7 +293,7 @@ describe('SqlDriver index drift (#3728)', () => {
       expect(Object.values(uniques)).toContainEqual(['COALESCE(organization_id)', 'code']);
 
       // Existing rows survived, and the cross-tenant insert the issue is about works.
-      expect(await driver.count('product', { object: 'product' })).toBe(2);
+      expect(await driver.count('product', {})).toBe(2);
       const b = await driver.create('product', { organization_id: 'org_b', code: 'PROD-00001' });
       expect(b.code).toBe('PROD-00001');
 

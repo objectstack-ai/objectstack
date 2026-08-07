@@ -6,7 +6,6 @@ description: View protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 HTTP Method Enum & HTTP Request Schema
-
 Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here for backward compatibility.
 
 <Callout type="info">
@@ -137,7 +136,7 @@ Column footer summary configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
-| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>` | optional | Field type (auto-infers widget if omitted) |
+| **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
@@ -160,10 +159,62 @@ Column footer summary configuration
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string; placeholder?: string; helpText?: string; … }` | optional | Key column config for record-typed fields |
 | **dependsOn** | `string` | optional | Parent field name for cascading |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'` |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
 | **disclosure** | `Enum<'inline' \| 'popover'>` | optional | Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure). |
 | **fields** | `[FormField](#formfield)[]` | optional | Sub-fields for composite/repeater/record types |
+
+### Allowed Values: `FormField.type`
+
+* `text`
+* `textarea`
+* `email`
+* `url`
+* `phone`
+* `password`
+* `secret`
+* `markdown`
+* `html`
+* `richtext`
+* `number`
+* `currency`
+* `percent`
+* `date`
+* `datetime`
+* `time`
+* `boolean`
+* `toggle`
+* `select`
+* `multiselect`
+* `radio`
+* `checkboxes`
+* `lookup`
+* `master_detail`
+* `tree`
+* `user`
+* `image`
+* `file`
+* `avatar`
+* `video`
+* `audio`
+* `formula`
+* `summary`
+* `autonumber`
+* `composite`
+* `repeater`
+* `record`
+* `location`
+* `address`
+* `code`
+* `json`
+* `color`
+* `rating`
+* `slider`
+* `signature`
+* `qrcode`
+* `progress`
+* `tags`
+* `vector`
 
 
 ---
@@ -179,11 +230,11 @@ Column footer summary configuration
 | **description** | `string` | optional | Optional description rendered under the section header. |
 | **collapsible** | `boolean` | optional |  |
 | **collapsed** | `boolean` | optional |  |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open. |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
-| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … })[]` | ✅ |  |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … })[]` | ✅ |  |
 
 
 ---
@@ -382,7 +433,7 @@ List chart view configuration
 | **wrap** | `boolean` | optional | Allow text wrapping |
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
-| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| … +6 more>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
 | **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
@@ -401,7 +452,7 @@ List chart view configuration
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -490,7 +541,7 @@ List chart view configuration
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -777,8 +828,30 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>` | ✅ | Filter operator |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| … +10 more>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value |
+
+### Allowed Values: `ViewFilterRule.operator`
+
+* `equals`
+* `not_equals`
+* `contains`
+* `not_contains`
+* `starts_with`
+* `ends_with`
+* `greater_than`
+* `less_than`
+* `greater_than_or_equal`
+* `less_than_or_equal`
+* `in`
+* `not_in`
+* `is_empty`
+* `is_not_empty`
+* `is_null`
+* `is_not_null`
+* `before`
+* `after`
+* `between`
 
 
 ---
@@ -967,7 +1040,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | ✅ | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | ✅ | Set as the default active tab |

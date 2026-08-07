@@ -321,7 +321,6 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 | [`@objectstack/service-analytics`](packages/services/service-analytics) | Analytics — aggregations, time series, funnels, dashboards |
 | [`@objectstack/service-automation`](packages/services/service-automation) | Automation engine — flows, triggers, and workflow state machines |
 | [`@objectstack/service-cache`](packages/services/service-cache) | Cache — in-memory, Redis, multi-tier |
-| [`@objectstack/service-feed`](packages/services/service-feed) | Activity feed / chatter |
 | [`@objectstack/service-i18n`](packages/services/service-i18n) | Internationalization service |
 | [`@objectstack/service-job`](packages/services/service-job) | Cron & interval job scheduler |
 | [`@objectstack/service-package`](packages/services/service-package) | Package registry — publish, version, retrieve metadata packages |
@@ -343,7 +342,7 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 | [`@objectstack/cli`](packages/cli) | CLI binary (`os` / `objectstack`) — `init`, `dev`, `start`, `serve`, `compile`, `publish`, `validate`, `generate`, `lint`, `doctor` |
 | [`create-objectstack`](packages/create-objectstack) | Project scaffolder (`npx create-objectstack`) |
 | [`@object-ui/console`](https://github.com/objectstack-ai/objectui/tree/main/apps/console) | Fork-ready runtime console SPA (lives in objectstack-ai/objectui, served via `@object-ui/console` on npm) |
-| [`@objectstack/account`](apps/account) | Account & identity portal — sign in, organizations, connected apps |
+| [`@objectstack/account`](packages/apps/account) | Account & identity portal — sign in, organizations, connected apps |
 | [`@objectstack/docs`](apps/docs) | Documentation site (Fumadocs + Next.js) |
 
 ### Examples

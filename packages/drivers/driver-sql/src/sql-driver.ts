@@ -7,15 +7,19 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
+import type { DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+// The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
+// "the protocol has no such function" refusal cannot drift from what
+// `AggregationNodeSchema.function` actually admits.
+import { AggregationFunction } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
 import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
-import type { IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -486,6 +490,181 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#5907] The aggregate functions this driver LOWERS into SQL, and the SQL
+ * function each becomes.
+ *
+ * The refusals below read their "compiled here" list off THIS table instead of
+ * repeating it. A hand-written copy agrees with the compiler on the day it is
+ * typed and never again — the note already sitting over `driver-memory`'s
+ * `SUPPORTED_FIELD_OPERATORS` (#5345), applied to the aggregate vocabulary.
+ *
+ * A `Map` rather than a plain object on purpose: a caller-supplied name is
+ * looked up here, and `{}['constructor']` answers with a function.
+ */
+const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
+  ['count', 'count'],
+  ['sum', 'sum'],
+  ['avg', 'avg'],
+  ['min', 'min'],
+  ['max', 'max'],
+]);
+
+/**
+ * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
+ * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
+ * "declared" has exactly one definition and this driver cannot drift from it.
+ */
+const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.options;
+
+/**
+ * [#5907] Class 1 — a function name the Query Protocol does not declare.
+ *
+ * The caller wrote something no backend can run (`median`), so this is a
+ * request-shaped mistake: `INVALID_QUERY` / 400, the catalogued
+ * `StandardErrorCode` for "malformed query syntax" and a member of
+ * `@objectstack/rest`'s `isExpectedQueryRejection` list, so a client mistake
+ * stops being logged as an unhandled server fault.
+ *
+ * `INVALID_QUERY` is not a new spelling for this condition — it is the one the
+ * PROTOCOL DOOR already gives it. `metadata-protocol`'s `invalidQueryError`
+ * refuses "a function outside the spec enum" on the aggregations axis with
+ * exactly `400 INVALID_QUERY` (#4254), so a caller who reaches this driver
+ * in-process gets the same wire identity as one who came through REST: one
+ * condition, one code, however the caller arrived — the argument
+ * {@link unsupportedFilterError} makes for `INVALID_FILTER`.
+ *
+ * The FIRST SENTENCE is shared verbatim with the twin in `driver-turso`'s
+ * `remote-transport.ts` (#5240 — one condition, one wording): a caller must not
+ * be able to tell which transport answered from the words it used. The parity is
+ * pinned by a test that compares the two RUNTIME messages, not two copies of a
+ * literal (`remote-transport-aggregate-function-refusal.test.ts`).
+ *
+ * Judged against the declared enum CASE-SENSITIVELY, which is what the enum is:
+ * `COUNT_DISTINCT` is not `count_distinct`, and answering "declared but not
+ * implemented" for it would be false. When this was written the remote transport
+ * still lowercased the name before its own lookup while this driver read it raw,
+ * so classifying on each face's post-normalisation name would have handed
+ * `COUNT_DISTINCT` a 400 here and a 501 there for one query. #6203 has since
+ * removed that lowercasing, so the two faces now normalise alike — but the
+ * case-sensitive judgement here is not merely a survivor of that fork: the enum
+ * IS case-sensitive (`AggregationFunction.parse('COUNT')` throws), so this is
+ * what "declared" means, whatever any transport does before asking.
+ */
+function undeclaredAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is not a declared aggregate function. ` +
+    `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
+    `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
+    `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
+    `not a gap in this one (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#5907] Class 2 — a DECLARED function this backend cannot compile.
+ *
+ * Distinct from {@link undeclaredAggregateFunctionError} on purpose, and this is
+ * the half that must not be collapsed into it: `count_distinct`, `array_agg` and
+ * `string_agg` are declared by `AggregationFunction` and implemented by other
+ * backends (`driver-mongodb` compiles all three, `driver-memory`'s analytics
+ * face compiles `count_distinct`), so telling a dashboard author their
+ * `count_distinct` is a typo would be false — the same line #5345 drew in
+ * `driver-memory`'s `filter-refusal.ts` between `unknownFieldOperatorError` and
+ * `uncompilableFieldOperatorError`.
+ *
+ * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
+ * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
+ * with 501 — so code and status are each other's mirror by construction rather
+ * than by this function's choice. It is the spelling the repo already uses for
+ * every "not supported by this protocol/runtime" answer, and the ledger's rule
+ * for a generic condition is the standard catalog over a registered synonym.
+ * The registered alternatives were measured and rejected: `UNSUPPORTED` is a
+ * 400 in both places that emit it (a share link that does not expose messages),
+ * `UNSUPPORTED_QUERY_PARAM` is a 400 on the client-mistake list, and
+ * `UNSUPPORTED_TRANSFORM` belongs to `@objectstack/rest`'s import mapper.
+ *
+ * Measured consequence, recorded so it is not rediscovered as a bug: on the
+ * `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so
+ * this declared 501 does not survive to the wire — it falls to
+ * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. That is a gap in the REST
+ * boundary — #5582, which this is the first live producer for — not a reason
+ * for the driver to misdescribe the fault as the caller's. The driver's job is
+ * to state the condition truthfully at the throw site (ADR-0112), which is also
+ * what reaches every in-process caller and the operator log.
+ */
+function uncompilableAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is declared but not implemented by this backend. ` +
+    `Compiled here: ${[...SQL_AGGREGATE_FUNCTIONS.keys()].join(', ')}. The name is spelled ` +
+    `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
+    `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
+    `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
+    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
+ * [#5907] Which refusal a name that this face cannot compile deserves.
+ *
+ * The classification is written ONCE per face and shared by both faces'
+ * throw sites, so "is this the caller's mistake or ours?" cannot be answered two
+ * ways for one query. `func` is the name the CALLER wrote — not a normalised
+ * form — because that is what the enum is judged against and what the message
+ * has to quote back.
+ */
+function refuseAggregateFunction(func: string): never {
+  throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
+    ? uncompilableAggregateFunctionError(func)
+    : undeclaredAggregateFunctionError(func);
+}
+
+/**
+ * [#6212] A `groupBy` entry asks for a date BUCKET this face cannot emit.
+ *
+ * `GroupByNodeSchema` declares `{ field, dateGranularity }` and `DateGranularity`
+ * declares all five names, so a granularity this dialect has no expression for is
+ * a CAPABILITY GAP in the backend, not a mistake in the query — the same 501
+ * class {@link uncompilableAggregateFunctionError} answers for a
+ * declared-but-uncompiled aggregate function, and for the same reason (#5907,
+ * ADR-0112). It used to be a bare `throw new Error(...)`: `code`/`status` both
+ * `undefined`, so `mapDataError` served an opaque 500 for a named condition.
+ *
+ * WHICH granularities a backend buckets natively is PUBLISHED, per driver, as
+ * `supports.queryDateGranularity`, and the engine reads that record and falls
+ * back to in-memory bucketing for anything absent from it (objectql `engine.ts`,
+ * aggregate dispatch). Reaching this throw therefore means a caller went around
+ * that bit, so the message names the bit rather than the SQL.
+ *
+ * Written once per FACE — `RemoteTransport` carries the twin, first sentence for
+ * first sentence — because `TursoDriver` picks its face from `url` and one
+ * condition may not have two wire identities (#5240 / #5907). The two faces
+ * refuse different populations (this one refuses what its DIALECT cannot bucket,
+ * the remote transport refuses every granularity because it buckets none), but
+ * both refuse exactly `supports.queryDateGranularity[g] !== true`, which is one
+ * condition stated per face.
+ */
+function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], face: string): never {
+  const err = new Error(
+    `Date bucketing by '${granularity}' is not supported by this backend. ` +
+    `Bucketed here: ${bucketedHere.length > 0 ? bucketedHere.join(', ') : 'none'} (${face}). ` +
+    `The query is spelled correctly and @objectstack/spec DateGranularity declares it — this is ` +
+    `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+    `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
+    `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
+    `in memory for every granularity absent from it, which is always correct (#6212).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
@@ -575,9 +754,10 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
  *
  * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
  * ABSENT: an array is their legitimate comparand, and they compile through
- * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected
- * (for `$field`), never their arity — the existing descriptive `$between`
- * refusal stays the one that answers a malformed range.
+ * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected —
+ * for `$field` (#5041) and, since #5234, for bindability — never their arity:
+ * the existing descriptive `$between` refusal stays the one that answers a
+ * malformed range. See {@link LIST_COMPARAND_OPERATORS}.
  */
 const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
@@ -600,6 +780,54 @@ function isBindableComparand(value: unknown): boolean {
 }
 
 /**
+ * [#5234] Operators whose comparand becomes the TEXT of a `LIKE` pattern, i.e.
+ * the ones {@link SqlDriver.applyLike} serves. Kept separate from
+ * {@link SCALAR_COMPARAND_OPERATORS} because the two ask different questions of
+ * the same value: a scalar operator needs a value a driver can BIND, a pattern
+ * operator needs one that has a faithful TEXT rendering. Every value in the
+ * first set except a binary buffer is also in the second, but the reason is not
+ * the same reason, and the messages a caller needs differ.
+ *
+ * `like` / `ilike` are absent on purpose: they arrive already carrying a
+ * pattern and compile through the scalar bind arm, which already refuses an
+ * object.
+ */
+const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+]);
+
+/**
+ * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
+ * each MEMBER that must be individually compilable.
+ *
+ * Scoping the member scan to these three is what keeps a scalar operator that
+ * received an array answering with its own message ("requires a single
+ * comparable value") instead of reporting the first bad member of a list it
+ * should never have been given.
+ */
+const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
+
+/**
+ * [#5234] Does this value have a faithful rendering as the text of a LIKE
+ * pattern?
+ *
+ * An ALLOW-list, deliberately, and the same one `driver-turso`'s
+ * `RemoteTransport.serializeComparand` settled on for the identical question in
+ * remote mode (cloud#1004 / #1058): a deny-list silently re-admits whatever
+ * value form is invented next, which is exactly how that bug survived its first
+ * fix. `undefined` is inside the fence only because it is not authorable (JSON
+ * has no `undefined`) and the analytics door normalises it to `null` rather than
+ * refusing it (#5526) — refusing it HERE would invent a disagreement rather than
+ * close one. See {@link unrenderableTextComparandError} for the rest.
+ */
+function isRenderableTextComparand(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  const kind = typeof value;
+  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+  return value instanceof Date;
+}
+
+/**
  * [#5041] The one gate every comparison comparand passes before it becomes a
  * bind parameter, covering both halves of the gap the issue measured:
  *
@@ -617,24 +845,67 @@ function isBindableComparand(value: unknown): boolean {
  *    {@link SCALAR_COMPARAND_OPERATORS} so the legitimate array binds keep
  *    working untouched.
  *
- * Deliberately NOT extended to two neighbouring shapes, both of which return
- * zero rows today rather than failing to bind: a non-`$field` object MEMBER of
- * an `$in`/`$nin` list, and the `LIKE` family (`$contains`/`$startsWith`/…),
- * which stringifies its comparand to `[object Object]`. Those are a different
- * defect class — a filter applied nonsensically, not one that cannot be applied
- * — and their direction is fail-closed (they narrow the result set, so they are
- * not a filter bypass). Widening this guard to cover them would change the
- * behaviour of paths that do not throw today, beyond what #5041 measured; see
- * the #5041 PR discussion for the measurement.
+ * 3. **[#5234] The two shapes #5041 deliberately left out** — a non-`$field`
+ *    OBJECT member of an `$in`/`$nin` list, and an object comparand on the
+ *    `LIKE` family. #5041 read them as a lesser class ("a filter applied
+ *    nonsensically, not one that cannot be applied") whose direction was
+ *    fail-closed, and stopped. Both halves of that reading were measured wrong
+ *    on `main` before this change:
+ *
+ *    - The direction is not uniformly fail-closed. `{status: {$nin: [{…}]}}`
+ *      compiles to `NOT IN ('[object Object]')`, which excludes NOTHING — an
+ *      exclusion the caller wrote that silently does not happen. On a
+ *      read-scope lowering that is over-reach, the same direction #5347 / #5324
+ *      ruled on. `$notContains` does it too: it EXCLUDED the one fixture row
+ *      whose text happened to be `[object Object]`.
+ *    - The answers were never merely "zero rows". Against a row literally
+ *      named `[object Object]`, `{name: {$contains: {}}}` MATCHED it. That is
+ *      not a narrowed result set, it is a wrong one.
+ *
+ *    Two more measurements decided the exact fence:
+ *
+ *    - An ARRAY comparand on the LIKE family already forked INSIDE
+ *      `service-analytics`: `{name: {$contains: ['al','be']}}` binds `%al,be%`
+ *      through `read-scope-sql` (and here, via `String(array)`) but `%al%`
+ *      through the analytics `where` door, which reads `values[0]`. Refusing
+ *      the array closes a live split rather than opening one.
+ *    - `driver-turso`'s `RemoteTransport` has refused BOTH of these shapes
+ *      since cloud#1004 / #1058, with the reasoning written out: refusing an
+ *      uncompilable comparand "in one family while tolerating it in the other
+ *      would leave the failure mode alive at a different spelling." So local
+ *      SQLite and remote SQLite answered the same query differently. This
+ *      change is what converges them, and it copies that fix's ALLOW-list
+ *      shape (see {@link isRenderableTextComparand}) rather than inventing a
+ *      second policy.
+ *
+ *    What stays accepted is measured, not assumed: `{$contains: 5}` → `%5%`
+ *    and `{$contains: null}` → `%null%` agree across this driver,
+ *    `driver-memory` and both analytics faces today, and #5526 pinned the
+ *    `null` reading deliberately. Primitives are therefore untouched; only
+ *    objects — for which `String()` has no faithful answer — are refused.
  */
 function assertCompilableComparand(field: string, op: string, value: unknown): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref);
 
+  // [#5234] The pattern family answers first: an array IS an object here, so
+  // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
+  // bad LIST member — a message about a list the operator never takes.
+  if (TEXT_PATTERN_OPERATORS.has(op) && !isRenderableTextComparand(value)) {
+    throw unrenderableTextComparandError(field, op, value);
+  }
+
   if (Array.isArray(value)) {
     for (const [index, member] of value.entries()) {
       const memberRef = fieldReferenceOf(member);
       if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, index);
+      // [#5234] Every member of a list operator's array is a comparand in its
+      // own right and gets the same bind test the whole comparand gets. Scoped
+      // to the operators for which an array is legitimate, so a scalar operator
+      // handed an array keeps answering with its own message below.
+      if (LIST_COMPARAND_OPERATORS.has(op) && !isBindableComparand(member)) {
+        throw unbindableListMemberError(field, op, member, index);
+      }
     }
     // An array IS the comparand for the list operators; only a scalar operator
     // is wrong to receive one, and that falls through to the check below.
@@ -647,6 +918,60 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
       `bound as a SQL parameter. Use a string, number, boolean, null, Date or binary value; ` +
       `for a list use $in/$nin, and for a range use $between.`,
+  );
+}
+
+/**
+ * [#5234] A member of an `$in` / `$nin` / `$between` list that cannot become a
+ * bind parameter.
+ *
+ * The list case is the one that hides. A scalar operator handed an object fails
+ * to bind and at least says so; a LIST simply loses the member — Knex binds it,
+ * the statement is valid, and the offending entry can never equal any stored
+ * value. So `{status: {$in: ['a', {…}]}}` answers exactly as if the author had
+ * written `{$in: ['a']}`, and `{status: {$nin: [{…}]}}` excludes nothing at all
+ * while claiming to exclude something. Neither is reported anywhere.
+ *
+ * The message names the INDEX because that is the only thing distinguishing the
+ * bad entry from its legitimate neighbours — the same reason
+ * {@link crossFieldComparisonError} takes one.
+ */
+function unbindableListMemberError(field: string, op: string, value: unknown, index: number): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" has a value at index ${index} of its list that cannot be ` +
+      `bound as a SQL parameter: ${safeShapePreview(value)}. Every member of an $in/$nin/$between ` +
+      `list is a comparand in its own right — use a string, number, boolean, null, Date or binary ` +
+      `value. Refusing rather than binding it: the member can equal no stored value, so the list ` +
+      `silently loses that entry (and a $nin loses the exclusion the caller wrote).`,
+  );
+}
+
+/**
+ * [#5234] An object where the `LIKE` family expects the text of a pattern.
+ *
+ * `applyLike` reaches the comparand through `String(value)`, and `String({})` is
+ * the literal `'[object Object]'`. The result is a syntactically perfect,
+ * parameterised `LIKE` against a string the author never wrote — and it is not
+ * merely always-false: a stored value that happens to READ `[object Object]`
+ * matches it, which is how this was measured. `$notContains` inverts that into
+ * excluding a real row for a reason nothing records.
+ *
+ * `filter.zod.ts`'s `StringOperatorSchema` declares every one of these
+ * comparands `z.string()`, so this refusal enforces a declaration that already
+ * exists rather than adding a rule (Prime Directive #12 — declared = enforced).
+ * It stops at OBJECTS on purpose: a number, boolean or `null` renders to text
+ * the same way on this driver, on `driver-memory` and on both `service-analytics`
+ * faces, and #5526 pinned `{$contains: null}` → `%null%` deliberately. Refusing
+ * those would break agreement instead of creating it.
+ */
+function unrenderableTextComparandError(field: string, op: string, value: unknown): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" matches against the TEXT of a pattern, but received ` +
+      `${Array.isArray(value) ? 'an array' : 'an object'} (${safeShapePreview(value)}). The spec ` +
+      `declares this comparand a string (filter.zod.ts StringOperatorSchema); a string, number, ` +
+      `boolean, null or Date is accepted. Refusing rather than stringifying it: String({}) is ` +
+      `"[object Object]", so the pattern that ran was one the caller never wrote — valid SQL, ` +
+      `and a row storing that literal text would have matched it.`,
   );
 }
 
@@ -1402,6 +1727,63 @@ export interface IntrospectedTable {
 export interface IntrospectedSchema {
   tables: Record<string, IntrospectedTable>;
 }
+
+// ── Window Function Types (driver-private, #6212) ────────────────────────────
+
+/**
+ * One entry of {@link SqlWindowFunctionQuery.windowFunctions} — the flat shape
+ * {@link SqlDriver.findWithWindowFunctions} actually reads.
+ *
+ * This type lives HERE, not in `packages/spec`, deliberately. #4286 retired the
+ * spec's window cluster (`WindowFunctionNodeSchema` and friends) precisely
+ * because it declared `field` / `over` / `frame` members this door never read —
+ * a vocabulary describing an input no executor accepts. Re-adding a window
+ * vocabulary to the spec would undo that judgement; window functions are a
+ * SQL-driver-private capability (the door is not on `IDataDriver`), so the
+ * driver declares its own shape at the layer that owns it. The spec's own
+ * removal note names this shape verbatim — `{ function, alias, partitionBy?,
+ * orderBy? }`, `packages/spec/src/data/query.zod.ts` — as does the published
+ * migration prescription (`query-window-functions-retired` in
+ * `packages/spec/src/migrations/registry.ts`), which points embedders at this
+ * door. Those two texts and this type must keep saying the same thing.
+ *
+ * Every member is what {@link SqlDriver.buildWindowFunction} consumes and
+ * nothing else:
+ * - `function` is emitted as `FUNC()` — uppercased, ARGUMENT-LESS. `lag(revenue)`
+ *   renders as `LAG()`; the builder has no argument slot, which is why there is
+ *   no `field` member to declare (the skills' aggregation rules say the same).
+ * - `orderBy`'s `order` is optional here even though a `DriverQuery`'s top-level
+ *   `SortNode` requires it: the builder reads `s.order || 'asc'`, so absence is
+ *   a spelling this door genuinely accepts. Declaring it required would reject
+ *   input that works.
+ */
+export interface SqlWindowFunctionSpec {
+  /** Window function name, emitted argument-less and uppercased (`rank` → `RANK()`). */
+  function: string;
+  /** Column alias the computed value is projected as. */
+  alias: string;
+  /** `PARTITION BY` targets, mapped through the driver's storage-name mapping. */
+  partitionBy?: string[];
+  /** `ORDER BY` inside the `OVER (…)` clause; `order` defaults to `asc`. */
+  orderBy?: { field: string; order?: 'asc' | 'desc' }[];
+}
+
+/**
+ * The query {@link SqlDriver.findWithWindowFunctions} takes: a
+ * {@link DriverQuery} — the contract shape, minus the redundant `object` the
+ * first argument already carries (#5181) — carrying this driver's private
+ * `windowFunctions` array.
+ *
+ * `windowFunctions` is `Omit`ed off `DriverQuery` before being re-declared
+ * because the spec key is a `retiredKey()` TOMBSTONE: `QueryAST['windowFunctions']`
+ * resolves to `undefined`, so a plain intersection would leave the property
+ * unwritable and this door's own documented payload would not compile. The
+ * tombstone is correct — the REQUEST surface really has no window functions —
+ * and this type is what keeps the driver-level door open without reopening it.
+ */
+export type SqlWindowFunctionQuery = Omit<DriverQuery, 'windowFunctions'> & {
+  windowFunctions?: SqlWindowFunctionSpec[];
+};
 
 // ── Configuration Types ──────────────────────────────────────────────────────
 
@@ -2293,7 +2675,7 @@ export class SqlDriver implements IDataDriver {
   // CRUD — IDataDriver core
   // ===================================
 
-  async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
     return this.findRows(object, query, options);
   }
 
@@ -2326,7 +2708,7 @@ export class SqlDriver implements IDataDriver {
    */
   private async findRows(
     object: string,
-    query: QueryAST,
+    query: DriverQuery,
     options?: DriverOptions,
     singleRowLookup = false,
   ): Promise<any[]> {
@@ -2453,7 +2835,7 @@ export class SqlDriver implements IDataDriver {
    * `singleRowLookup` ORDER BY decision).
    * Spell an id lookup as what it is: `{ object, where: { id } }`.
    */
-  async findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<any> {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     if (!query || typeof query !== 'object') return null;
     const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
     return results[0] || null;
@@ -3027,7 +3409,7 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  async updateMany(object: string, query: QueryAST, data: any, options?: DriverOptions): Promise<number> {
+  async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'updateMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -3039,7 +3421,7 @@ export class SqlDriver implements IDataDriver {
     return total;
   }
 
-  async deleteMany(object: string, query: QueryAST, options?: DriverOptions): Promise<number> {
+  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'deleteMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -3078,7 +3460,7 @@ export class SqlDriver implements IDataDriver {
     return null;
   }
 
-  async count(object: string, query?: QueryAST, options?: DriverOptions): Promise<number> {
+  async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -3246,7 +3628,16 @@ export class SqlDriver implements IDataDriver {
   // Aggregation
   // ===================================
 
-  async aggregate(object: string, query: any, options?: DriverOptions): Promise<any> {
+  /**
+   * [#6212] `query` is a {@link DriverQuery}, not `any`.
+   *
+   * `any` here was not "the object name goes unchecked", it was every check off
+   * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
+   * union, `aggregations`' node shape. #5181 narrowed the six methods
+   * `IDataDriver` declares and #6075 followed through on five drivers;
+   * `aggregate` is not on that contract, so neither reached it.
+   */
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -3274,7 +3665,12 @@ export class SqlDriver implements IDataDriver {
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
       // field name so the resulting row keys match in-memory bucketDateValue.
-      for (const g of query.groupBy as Array<string | { field: string; dateGranularity?: string }>) {
+      // [#6212] The element type is `GroupByNode` — the spec's own union — so
+      // the local `Array<string | { field, dateGranularity? }>` restatement is
+      // gone. It had drifted from the declaration it was restating: `alias` was
+      // missing from it and `dateGranularity` was widened to `string`, which is
+      // what forced the `as any` on the `buildDateBucketExpr` call below.
+      for (const g of query.groupBy) {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
@@ -3282,11 +3678,15 @@ export class SqlDriver implements IDataDriver {
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, table);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table);
             if (!bucket) {
-              throw new Error(
-                `SqlDriver: dateGranularity '${g.dateGranularity}' not supported on dialect ` +
-                  `'${(this.config as any).client}'. Engine must fall back to in-memory bucketing.`,
+              // [#6212] Was a bare `throw new Error(...)`; see
+              // {@link refuseDateBucketedGroupBy} for why it now carries the
+              // ADR-0112 envelope and what the remote face answers.
+              refuseDateBucketedGroupBy(
+                g.dateGranularity,
+                Object.entries(this.dateGranularityCapabilities).filter(([, on]) => on).map(([k]) => k),
+                `dialect '${(this.config as any).client}'`,
               );
             }
             builder.groupByRaw(bucket.sql, bucket.bindings);
@@ -3301,10 +3701,20 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const aggregates = query.aggregations || query.aggregate;
+    // [#6321] Was `query.aggregations || query.aggregate` / `agg.function ||
+    // agg.func`. Neither `aggregate` nor `func` is declared anywhere in the
+    // Query Protocol — `QueryASTSchema` declares `aggregations` and
+    // `AggregationNodeSchema` declares `function` — so those two limbs were a
+    // private dialect this consumer tolerated, which is what PD#12 rejects. The
+    // only writers were this package's own fixtures and driver-sqlite-wasm's
+    // (#4984's family: a fixture spelling the alias keeps the lenient limb green
+    // forever, and nothing ever measures that deleting it costs nothing). Both
+    // fixture sets now spell the declared keys, the non-test writer count was
+    // zero when measured, and ADR-0049 says an unenforced tolerance goes.
+    const aggregates = query.aggregations;
     if (aggregates) {
       for (const agg of aggregates) {
-        const funcName = agg.function || agg.func;
+        const funcName = agg.function;
         const rawFunc = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
         const fieldExpr = agg.field ?? '*';
@@ -3369,7 +3779,15 @@ export class SqlDriver implements IDataDriver {
   // Window Functions
   // ===================================
 
-  async findWithWindowFunctions(object: string, query: any, options?: DriverOptions): Promise<any[]> {
+  /**
+   * The one live window-function door (#4286): not on `IDataDriver`, callable
+   * directly on a SQL driver instance. Takes {@link SqlWindowFunctionQuery} —
+   * the contract query shape plus this driver's private `windowFunctions`
+   * array — so `where` / `orderBy` / `limit` / `offset` are checked here
+   * exactly as they are on `find()`, instead of being erased along with the
+   * driver-private part (#6212).
+   */
+  async findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
 
     builder.select('*');
@@ -3402,11 +3820,17 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   /** IDataDriver standard: analyze query performance */
-  async explain(object: string, query: any, options?: DriverOptions): Promise<any> {
+  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     return this.analyzeQuery(object, query, options);
   }
 
-  async analyzeQuery(object: string, query: any, options?: DriverOptions): Promise<any> {
+  /**
+   * `explain()`'s implementation, and the only other caller of it. It reads
+   * `fields` / `where` / `orderBy` / `limit` / `offset` — every one of them a
+   * `DriverQuery` member — so it takes `DriverQuery`, which is what `explain()`
+   * already declared and forwarded here (#6212).
+   */
+  async analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
 
     if (query.fields) {
@@ -6576,6 +7000,16 @@ export class SqlDriver implements IDataDriver {
    * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
    * A third hand-copy is the thing to refuse: import from one of the two, or add
    * a consumer to that test.
+   *
+   * **[#5234] `String(value)` is safe here because nothing unrenderable reaches
+   * it.** {@link assertCompilableComparand} refuses an object comparand on this
+   * family before any emitter runs, so the only values arriving are the ones
+   * {@link isRenderableTextComparand} admits — a string, number, bigint,
+   * boolean, `null`, `undefined` or `Date`, each of which `String()` renders
+   * faithfully. Do NOT add a second, tolerant reading of an object here: the
+   * `[object Object]` pattern this used to build was valid SQL matching a
+   * literal nobody wrote, and `service-analytics` refuses the same shape at its
+   * own two doors so one `$contains` still means one thing on every face.
    */
   private applyLike(
     builder: any,
@@ -6990,7 +7424,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected orderKeysFor(
     object: string,
-    query: QueryAST,
+    query: DriverQuery,
     opts?: { singleRowLookup?: boolean },
   ): Array<{ field: string; direction: 'asc' | 'desc' }> {
     const keys: Array<{ field: string; direction: 'asc' | 'desc' }> = [];
@@ -7055,26 +7489,26 @@ export class SqlDriver implements IDataDriver {
     return out;
   }
 
+  /**
+   * The SQL function a declared aggregation lowers to, or a refusal that says
+   * which KIND of "no" this is (#5907).
+   *
+   * The `switch` this replaced answered both conditions with one bare `Error`
+   * carrying no `code` and no `status`, so `mapDataError` fell to its default
+   * branch and a caller's `median` typo arrived as an opaque 500 — the #1116 /
+   * #1117 gap, at the aggregate door. The lowering table is now the single
+   * source of what this face compiles, and {@link refuseAggregateFunction}
+   * decides between the two refusals.
+   */
   protected mapAggregateFunc(func: string): string {
-    switch (func) {
-      case 'count':
-        return 'count';
-      case 'sum':
-        return 'sum';
-      case 'avg':
-        return 'avg';
-      case 'min':
-        return 'min';
-      case 'max':
-        return 'max';
-      default:
-        throw new Error(`Unsupported aggregate function: ${func}`);
-    }
+    const sql = SQL_AGGREGATE_FUNCTIONS.get(func);
+    if (sql !== undefined) return sql;
+    refuseAggregateFunction(func);
   }
 
   // ── Window function builder ─────────────────────────────────────────────────
 
-  protected buildWindowFunction(spec: any): string {
+  protected buildWindowFunction(spec: SqlWindowFunctionSpec): string {
     const func = spec.function.toUpperCase();
     let sql = `${func}()`;
 
@@ -7087,7 +7521,7 @@ export class SqlDriver implements IDataDriver {
 
     if (spec.orderBy && Array.isArray(spec.orderBy) && spec.orderBy.length > 0) {
       const orderFields = spec.orderBy
-        .map((s: any) => {
+        .map((s) => {
           const field = this.mapSortField(s.field);
           const order = (s.order || 'asc').toUpperCase();
           return `${field} ${order}`;

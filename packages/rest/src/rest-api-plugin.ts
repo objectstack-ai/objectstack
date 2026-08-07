@@ -3,9 +3,7 @@
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
-import { registerPackageRoutes } from './package-routes.js';
-import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
-import type { PackageService } from '@objectstack/service-package';
+import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import type { ResolvedSettingValue } from '@objectstack/spec/system';
 // [#4251 B4] Every slot this composition root resolves, named by its contract.
 // The lookup already returns the slot's contract; annotating the result `any`
@@ -349,8 +347,15 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             const serviceExistsProvider = (name: string): boolean => {
                 try { return ctx.getService<unknown>(name) != null; } catch { return false; }
             };
+            // Declared out here, not inside the `try`: the direct-mount
+            // composition below reports the routes it mounts back to this
+            // instance (#5822), and the manager it needs to reach lives on it.
+            // That scoping — the RestServer being invisible at the registrars'
+            // call site — is the whole reason those nine routes bypassed
+            // `RouteManager` in the first place.
+            let restServer: RestServer | undefined;
             try {
-                const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');
@@ -380,41 +385,23 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             const enableProjectScoping = config.api?.api?.enableProjectScoping ?? false;
             const projectResolution = config.api?.api?.projectResolution ?? 'auto';
 
-            // Register package management routes if the service is available.
-            try {
-                const packageService = ctx.getService<PackageService>('package');
-                if (packageService) {
-                    if (enableProjectScoping && projectResolution === 'required') {
-                        // Only register the scoped variant
-                        registerPackageRoutes(server, packageService, `${versionedBase}/environments/:environmentId`, {
-                            protocol,
-                        });
-                    } else {
-                        registerPackageRoutes(server, packageService, versionedBase, { protocol });
-                        if (enableProjectScoping) {
-                            registerPackageRoutes(server, packageService, `${versionedBase}/environments/:environmentId`, {
-                                protocol,
-                            });
-                        }
-                    }
-                    ctx.logger.info('Package management routes registered');
-                }
-            } catch (e) {
-                // Package service not available, skip
-                ctx.logger.debug('Package service not available, package routes skipped');
-            }
-
-            // External Datasource Federation routes (ADR-0015): catalog / draft /
-            // import / validate. Registered unconditionally — they degrade
-            // gracefully (503) when the `external-datasource` service is absent.
-            // NOTE: the datasource *lifecycle* routes (ADR-0015 Addendum:
-            // list / test / create / update / remove) moved to the private
-            // `@objectstack/datasource-admin` package, which registers its own.
-            try {
-                registerExternalDatasourceRoutes(server, ctx, versionedBase);
-                ctx.logger.info('Datasource federation routes registered');
-            } catch (e: any) {
-                ctx.logger.warn('Datasource federation routes registration failed', { error: e?.message });
+            // The RouteManager-bypassing registrars (package management,
+            // external-datasource federation), mounted AND recorded in one
+            // step (#5822) so `restServer.getRoutes()` — and therefore
+            // `GET {apiPath}/openapi.json` — describes this boot's whole
+            // surface. `direct-mount-composition.ts` owns which registrars
+            // those are; the route-ledger conformance guard drives the same
+            // function, so a registrar added there cannot slip past it.
+            if (restServer) {
+                mountAndRecordDirectRoutes({
+                    server,
+                    recorder: restServer,
+                    ctx,
+                    versionedBase,
+                    protocol,
+                    enableProjectScoping,
+                    projectResolution,
+                });
             }
         }
     };

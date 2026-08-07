@@ -10,25 +10,17 @@ Embedding & Vector Store Primitives
 Platform contract for configuring embedding models and vector stores.
 
 Scope (intentionally minimal):
-
 - How to reference an embedding model (provider + model name + secret).
-
 - How to reference a vector store (provider + connection).
 
 NOT in scope (these belong to application code, not the platform):
-
 - Chunking strategies (fixed/semantic/recursive/markdown).
-
 - Retrieval pipelines (rerankers, multi-stage retrieval, filters).
-
 - Document loaders / ingestion DSLs.
-
 - End-to-end RAG pipeline orchestration.
 
 These were removed in v1 because they describe one specific way to
-
 build a RAG application; the platform's job is to expose the embed +
-
 vector primitives so any RAG strategy can be built on top.
 
 <Callout type="info">

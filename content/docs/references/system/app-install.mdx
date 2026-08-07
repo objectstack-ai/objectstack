@@ -8,21 +8,14 @@ description: App Install protocol schemas
 App Installation Protocol
 
 Defines the schemas for installing marketplace apps into tenant databases.
-
 An "app install" injects metadata (objects, views, flows) + schema sync
-
 into a tenant's isolated database.
 
 Install pipeline:
-
 1. Check compatibility (kernel version, existing objects, conflicts)
-
 2. Validate app manifest
-
 3. Apply schema changes (via deploy pipeline)
-
 4. Seed initial data
-
 5. Register app in tenant's metadata registry
 
 <Callout type="info">

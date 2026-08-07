@@ -6,7 +6,12 @@ import { z } from 'zod';
 
 // Dynamic imports from spec source
 import * as API from '../src/api';
-import * as Data from '../src/data';
+// `import * as Data from '../src/data'` used to sit here, bound and never read.
+// It was already a no-op at runtime — TS import elision drops an unused
+// namespace import before tsx ever evaluates it — so this removes a name, not a
+// side effect; `json-schema/openapi.json` is byte-identical across the change
+// (#5475). Restoring the module evaluation, had it been load-bearing, would
+// have meant a bare `import '../src/data';`, which is a different statement.
 import { assertRefsResolve, assertNoDegradedSchemas } from './lib/openapi-self-consistency';
 // The name this generator writes is DECLARED next to `build-schemas.ts`'s clean
 // step, which shares this directory and must not sweep it away (#5371). Imported

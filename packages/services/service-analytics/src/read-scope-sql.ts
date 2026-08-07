@@ -3,6 +3,12 @@
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
+import {
+  isBindableComparand,
+  isRenderableTextComparand,
+  unbindableListMemberMessage,
+  unrenderableTextComparandMessage,
+} from './comparand-shape.js';
 
 /**
  * Compile an RLS / tenant read-scope `FilterCondition` into a parameterized,
@@ -123,9 +129,26 @@ import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
  * remove; the route keys on the DECLARATION instead.
  *
  * The code is what a machine reads: `dispatcher-plugin.errorResponseBase`, the
- * sibling `/analytics/query` exit, puts a thrown `err.code` in
- * `error.details.code` (#3842), so `READ_SCOPE_COMPILE_FAILED` is legible there
- * without anyone parsing prose.
+ * sibling `/analytics/query` exit, puts a thrown `err.code` on the wire at
+ * `error.code` (#3842), so `READ_SCOPE_COMPILE_FAILED` is legible there without
+ * anyone parsing prose.
+ *
+ * ⚠️ At `error.code` — NOT `error.details.code`, which is where this note
+ * pointed until #6123 corrected it. `errorResponseBase` only STAGES the code in
+ * a `details` object; `buildApiError` then runs `splitSemanticCode`
+ * (`@objectstack/runtime`, `src/error-envelope.ts:117`), which PROMOTES it into
+ * the declared `ApiErrorSchema` field and returns the now-empty `details` as
+ * `undefined` — so the key is omitted from the body and `error.details.code` is
+ * never present to read. The measured 500 body is exactly:
+ *
+ * ```json
+ * {"success":false,"error":{"code":"READ_SCOPE_COMPILE_FAILED",
+ *  "message":"Internal server error","httpStatus":500}}
+ * ```
+ *
+ * Pinned end-to-end in `@objectstack/runtime`'s
+ * `analytics-query-read-scope-withhold.test.ts`, which asserts the code at
+ * `error.code` against a real `AnalyticsService` on a real mounted route.
  *
  * ⚠️ Deliberately NOT a 4xx of any flavour, including a 422. Option A on the
  * decision card was `READ_SCOPE_INVALID` / 422 ("not your fault, not a crash");
@@ -133,6 +156,30 @@ import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
  * vocabulary had no measured pull), because a 4xx cannot be fixed by the client
  * and therefore misreports the condition, and because 422 would have left the
  * disclosure question to be re-decided message by message.
+ *
+ * ## An `undefined` comparand is refused, not bound (#6125, PM ruling 2026-08-07)
+ *
+ * That makes ELEVEN refusing sites; the envelope above is what all eleven carry,
+ * and {@link undefinedComparandError} is the eleventh. #6050 ruled on 2026-08-07
+ * that `undefined` in a comparand position is refused everywhere (ruling B), and
+ * implemented it on `driver-sql` / `driver-turso` — the surfaces where the shape
+ * was PROVEN reachable. This module was measured in the same round and answered
+ * a fourth way again: legal SQL, one bound NULL, and not a single log line.
+ *
+ * The #6125 ruling scoped the push-down to THIS file and kept its own envelope
+ * (`READ_SCOPE_COMPILE_FAILED` / 500 — see above): a read scope is compiled by
+ * the platform from CEL and stored metadata, so telling the caller to fix their
+ * request would name the wrong author. `@objectstack/formula` reads the same
+ * value as a THIRD semantics ("the key is absent from the record") and is
+ * deliberately left alone — deciding it here would settle #5299's
+ * key-missing-vs-value-null question as a side effect — and `driver-memory` /
+ * `driver-mongodb` stay pin-only under the #5499 freeze.
+ *
+ * The eleventh message was measured against `looksLikeInternalErrorLeak` before
+ * being added, because the section above turns on that predicate answering FALSE
+ * for this family: it does for all four positions, so the new refusal is
+ * withheld from the response BY DECLARATION exactly like the other ten, and no
+ * message-sniffing list learns a twelfth phrase.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -279,6 +326,12 @@ function compileNode(node: unknown, qAlias: string, params: unknown[]): string {
 function compileField(field: string, value: unknown, qAlias: string, params: unknown[]): string {
   const col = `${qAlias}.${quoteIdent(field, 'field')}`;
 
+  // [#6125] `undefined` in a comparand position, refused before anything binds —
+  // and after `quoteIdent`, so an unsafe identifier (the injection vector) keeps
+  // its own message and its precedence. See {@link assertDefinedComparands} for
+  // why this one call site covers the whole tree.
+  assertDefinedComparands(field, value);
+
   // Scalar / null → implicit equality.
   if (value === null) return `${col} IS NULL`;
   if (typeof value !== 'object' || value instanceof Date) {
@@ -355,6 +408,180 @@ function nullSafeNegative(col: string, test: string): string {
   return `(${col} IS NULL OR ${test})`;
 }
 
+/**
+ * [#5234] The comparand-SHAPE gate for this door.
+ *
+ * `compileScopedFilterToSql` takes a `FilterCondition` that never passes through
+ * `filter-normalizer`'s `fieldLeaves`, so this module needs the two checks in
+ * its own right — same rule, stated once in `comparand-shape.ts`, wrapped in
+ * THIS module's envelope. The envelope difference is the point: a read scope is
+ * compiled from a policy, not authored by the caller, so an uncompilable
+ * comparand here is a 500 fail-closed refusal (see the header) rather than a 400.
+ *
+ * The direction matters more here than anywhere else this rule lands. A
+ * read-scope `{$nin: [{…}]}` compiled to `NOT IN ('[object Object]')`, which
+ * excludes NOTHING — the scope's exclusion silently did not happen, which is
+ * over-reach on a tenant/RLS predicate rather than a loose filter. That is the
+ * same reading #5347 / #5324 made on this very file, and the reason the #5234
+ * issue's "fail-closed, so lower risk" framing does not survive contact with the
+ * `$nin` / `$notContains` half.
+ */
+function assertCompilableMembers(op: string, field: string, members: unknown[]): void {
+  members.forEach((member, index) => {
+    if (!isBindableComparand(member)) {
+      throw readScopeCompileError(`[read-scope-sql] ${unbindableListMemberMessage(op, field, member, index)}`);
+    }
+  });
+}
+
+/** [#5234] See {@link assertCompilableMembers}; this is the LIKE-family half. */
+function assertRenderableText(op: string, field: string, val: unknown): void {
+  if (isRenderableTextComparand(val)) return;
+  throw readScopeCompileError(`[read-scope-sql] ${unrenderableTextComparandMessage(op, field, val)}`);
+}
+
+/**
+ * [#6125, PM ruling 2026-08-07] `undefined` in a COMPARAND position.
+ *
+ * ONE wording for all four positions #6125 measured (#5240 — one condition, one
+ * wording); only `path` varies, because only the position does. What the four
+ * had in common is why a shared sentence is right rather than merely shorter:
+ * every one of them compiled to legal SQL with the JS value `undefined` in the
+ * bind list, which the external driver renders as NULL — and every comparison
+ * against NULL is UNKNOWN, so the scope matched ZERO rows and said nothing.
+ *
+ * Re-measured on `origin/main` (`d8e8d9cbc`) with the refusal disabled, alias
+ * `t`, field `d` — the same four rows #6125's table recorded on `cba7454df`:
+ *
+ * | read scope | compiled to | bind list |
+ * |---|---|---|
+ * | `{ d: undefined }`            | `"t"."d" = ?`                                 | `[undefined]` |
+ * | `{ d: { $gt: undefined } }`   | `"t"."d" > ?`                                 | `[undefined]` |
+ * | `{ d: { $in: [undefined] } }` | `"t"."d" IN (?)`                              | `[undefined]` |
+ * | `{ $not: { d: undefined } }`  | `NOT (("t"."d" IS NOT NULL AND "t"."d" = ?))` | `[undefined]` |
+ *
+ * ⚠️ `[undefined]`, not `[null]` — one correction to the issue's table. Nothing
+ * in this package coerces it: `applyReadScope` (`native-sql-strategy.ts`) pushes
+ * `scopeParams[i]` into the driver's bind array verbatim while it renumbers
+ * `?` → `$N`. So the NULL is the DRIVER's reading of a JS `undefined`, which is
+ * also why the same cell reads as a bare `Undefined binding(s)` crash on the
+ * drivers that refuse to guess (#6050's LOCAL column). Two failure modes from
+ * one bind, decided by which driver the datasource happens to be — the reason
+ * this is refused at the compiler and not repaired at any one consumer.
+ *
+ * ⛔ What deliberately does NOT move: `null`. `{ d: null }`, `{ $eq: null }`,
+ * `{ $ne: null }`, `$null` and `$exists` keep their exact lowering — `null` IS a
+ * declared comparand and IS the null predicate, and the whole point of this
+ * refusal is the JS value that cannot be told apart from an ABSENT key. Pinned
+ * as its own control group in `read-scope-undefined-comparand.test.ts`, because
+ * refusing `null` along with `undefined` is the way this change could do harm.
+ *
+ * ## Why the direction here is not #6050's direction
+ *
+ * On `driver-sql` the same shape was over-reach: `{ owner_id: ctx.user?.id }`
+ * with a missing id compiled to `IS NULL` on Turso's remote transport and
+ * matched every env-wide row. Here it is fail-CLOSED — zero rows, never extra
+ * rows — so this is not a latent permission bypass and was not graded as one.
+ * It is refused anyway because a read scope that answers a question nobody asked,
+ * with no log line, is indistinguishable from one that worked: the value of this
+ * change is turning silence into noise, which is exactly the grading #6125's
+ * ruling recorded.
+ */
+function undefinedComparandError(field: string, path: string): Error {
+  return readScopeCompileError(
+    `[read-scope-sql] comparand at ${path} is undefined — refusing to build read scope (fail-closed). ` +
+      `@objectstack/spec FieldOperatorsSchema declares no undefined comparand, and in JavaScript a key ` +
+      `whose value is undefined cannot be told apart from an ABSENT key — yet the two mean OPPOSITE ` +
+      `things (a predicate versus no constraint at all), so there is no reading of it that is not a ` +
+      `guess. It used to compile: undefined went into the bind list, the driver read it as SQL NULL, ` +
+      `every comparison against NULL is UNKNOWN, and the scope matched ZERO rows in silence. Write null if the null ` +
+      `predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), or omit the key ` +
+      `when the value is genuinely absent. The producer to fix is whoever BUILT this read scope — an ` +
+      `admin-authored sharing rule / permission set, its CEL lowering, or the in-process code that ` +
+      `assembled the FilterCondition — never the caller of this query, who cannot author it (#6050 ` +
+      `ruling B, pushed down to this compiler by #6125).`,
+  );
+}
+
+/**
+ * [#6125] Refuse every `undefined` sitting in a comparand position of ONE field
+ * constraint.
+ *
+ * The positions are enumerated rather than swept, because "comparand" is a
+ * POSITION and not a type:
+ *
+ *   - the DIRECT comparand — `{ d: undefined }`, the implicit `=`;
+ *   - an OPERATOR's comparand — `{ d: { $gt: undefined } }`, `$eq`, `$ne`, the
+ *     LIKE family, every other single-value operator;
+ *   - a MEMBER of a list operator's array — `{ d: { $in: [undefined] } }`,
+ *     `$nin`, `$between`. The array itself IS `$in`'s legitimate comparand;
+ *     each element is a comparand in its own right, which is the same split
+ *     {@link assertCompilableMembers} already makes.
+ *
+ * Three positions are deliberately NOT swept, each because this module already
+ * refuses the enclosing shape with a TRUER diagnosis — #5240's rule read in the
+ * direction that matters here, since a second wording for a shape that is
+ * refused either way only sends the operator to the wrong repair:
+ *
+ *   - `$null` / `$exists`. Their comparand is a declared BOOLEAN — a flag, not a
+ *     value to compare against — so `undefined` there is not a comparand at all.
+ *     `driver-sql`'s twin skips them for the same reason. ⚠️ Unlike that twin,
+ *     THIS module has no boolean-domain gate to hand them to (#5347 / #5369 were
+ *     never pushed down here): `{ $null: undefined }` still lowers by truthiness
+ *     to `IS NOT NULL` and `{ $null: "false" }` — the STRING, which is truthy —
+ *     lands on the side opposite the `false` it was written to mean. That is a
+ *     different cell, measured and filed as #6387 rather than decided as a rider
+ *     on this one.
+ *   - a bare ARRAY in direct comparand position (`{ d: [1, undefined] }`).
+ *     {@link compileField} refuses the array as a whole ("use `{ $in: [...] }`"),
+ *     and inspecting its members here would relabel a shape refused either way.
+ *   - a NON-`$` key inside the constraint object (`{ owner: { manager_id:
+ *     undefined } }`). That is a nested relation, which {@link compileField}
+ *     refuses outright; answering "the comparand is undefined" would send the
+ *     operator to write `null` there, and `{ owner: { manager_id: null } }` does
+ *     not compile either. This is the one deliberate divergence from
+ *     `driver-sql`'s twin, and it comes from THIS module refusing nested
+ *     relations — not from a different reading of #6050.
+ *
+ * ## Why the call site is {@link compileField} and not a pre-pass
+ *
+ * `driver-sql` refuses on its separate validating walk because its emitter
+ * short-circuits: a boolean identity can resolve an enclosing node before a
+ * malformed sibling is ever visited, so a gate in the emitter would be
+ * conditional on evaluation order. THIS compiler has no such blind spot —
+ * {@link compileNode} `.map()`s every `$and`/`$or` child into its own buffer
+ * BEFORE any identity is applied (the `$or` TRUE-absorption and the `$and`
+ * identity filter both read the fully-compiled list), and
+ * {@link nullSafeNegationOperand} rewrites a `$not` operand without dropping a
+ * single leaf. Every comparand therefore reaches `compileField`, which is also
+ * the only path to {@link bind} — one gate, on the one road.
+ *
+ * The other half of `driver-sql`'s "runs FIRST" argument does not transfer
+ * either, and that is worth stating rather than copying: there, the refusal had
+ * to precede the `$not` rewrite because the polarity tables spelled `=== null`
+ * while the `$ne` emitter spelled `== null`, so the two disagreed about
+ * `undefined` itself. Here {@link nullValueSatisfiesOperator},
+ * {@link operatorIsNullTotal} and every arm of {@link compileOperator} spell it
+ * `=== null` alike, so the tables and the emitter agree that `undefined` is "a
+ * value" — the rewrite for a `{ $not: … }` operand runs, produces a leaf, and
+ * that leaf is refused. Nothing inconsistent is being outrun; the silent NULL
+ * bind is.
+ */
+function assertDefinedComparands(field: string, spec: unknown): void {
+  const root = `"${field}"`;
+  if (spec === undefined) throw undefinedComparandError(field, root);
+  if (!isFilterNode(spec)) return;
+  for (const [op, opValue] of Object.entries(spec)) {
+    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    const opPath = `${root}.${op}`;
+    if (opValue === undefined) throw undefinedComparandError(field, opPath);
+    if (!Array.isArray(opValue)) continue;
+    opValue.forEach((member, index) => {
+      if (member === undefined) throw undefinedComparandError(field, `${opPath}[${index}]`);
+    });
+  }
+}
+
 function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
@@ -368,27 +595,32 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$in': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
+      assertCompilableMembers(op, field, val);
       return `${col} IN (${val.map((v) => bind(params, v)).join(', ')})`;
     }
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return '1 = 1'; // NOT IN () excludes nothing
+      assertCompilableMembers(op, field, val);
       // [#5298] NULL-safe: "not among this list" holds vacuously for a value
       // that is not there.
       return nullSafeNegative(col, `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`);
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
+      assertCompilableMembers(op, field, val);
       return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
     // character is bound with it. See {@link bindLike}.
-    case '$contains': return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+    // [#5234] …and it must be a value `String()` can render, which is asserted
+    // BEFORE `likePattern` sees it — see {@link assertRenderableText}.
+    case '$contains': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
-    case '$notContains': return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
-    case '$startsWith': return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
-    case '$endsWith': return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
+    case '$notContains': assertRenderableText(op, field, val); return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
+    case '$startsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
+    case '$endsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
     case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val ? `${col} IS NOT NULL` : `${col} IS NULL`;
     default:

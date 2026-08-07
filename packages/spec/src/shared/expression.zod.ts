@@ -18,9 +18,16 @@ import { z } from 'zod';
  *
  * | dialect | engine | use |
  * |:---|:---|:---|
- * | `cel`   | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
- * | `js`    | sandboxed L2 hook bodies (`isolated-vm` / `quickjs`) | mapping, hook bodies |
- * | `cron`  | `cron-parser` | job schedules |
+ * | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
+ * | `cron`     | `cron-parser` | job schedules |
+ * | `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+ *
+ * Those three are the whole list — it is exactly the `ExpressionDialect` enum
+ * below. Procedural JavaScript is **not** a dialect: it is the L2 authoring
+ * surface, the sandboxed, capability-gated `ScriptBody { language: 'js' }` in
+ * hook/action bodies. A `js` row stood in this table long after the dialect was
+ * retired in #3278 (ADR-0058 addendum); `ExpressionSchema` rejects
+ * `dialect: 'js'`.
  *
  * SQL fragments (analytics joins, partial indexes) are intentionally **not**
  * routed through this schema — they stay driver-native because their security

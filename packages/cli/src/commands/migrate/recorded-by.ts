@@ -126,7 +126,7 @@ export default class MigrateRecordedBy extends Command {
       // ── dry run (default): read-only ─────────────────────────────────
       if (!flags.apply) {
         if (flags.json) {
-          await emitJson({ planId: RECORDED_BY_SENTINEL_PLAN_ID, sentinel: RECORDED_BY_SENTINEL, pending: pending.length, applied: false }, timer.elapsed());
+          await emitJson({ planId: RECORDED_BY_SENTINEL_PLAN_ID, sentinel: RECORDED_BY_SENTINEL, pending: pending.length, applied: false, duration: timer.elapsed() });
           return;
         }
         if (pending.length === 0) {
@@ -141,7 +141,7 @@ export default class MigrateRecordedBy extends Command {
       // ── apply ────────────────────────────────────────────────────────
       if (pending.length === 0) {
         const msg = `No sys_metadata_history row holds the '${RECORDED_BY_SENTINEL}' sentinel — nothing to convert.`;
-        if (flags.json) { await emitJson({ planId: RECORDED_BY_SENTINEL_PLAN_ID, pending: 0, applied: true, status: 'completed', chunksCommitted: 0 }, timer.elapsed()); return; }
+        if (flags.json) { await emitJson({ planId: RECORDED_BY_SENTINEL_PLAN_ID, pending: 0, applied: true, status: 'completed', chunksCommitted: 0, duration: timer.elapsed() }); return; }
         printSuccess(msg);
         return;
       }
@@ -149,7 +149,7 @@ export default class MigrateRecordedBy extends Command {
       if (!flags.yes) {
         const summary = `Rewrite recorded_by '${RECORDED_BY_SENTINEL}' → NULL on ${pending.length} row(s)`;
         if (flags.json || !process.stdin.isTTY) {
-          if (flags.json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes', summary }, timer.elapsed(), { compact: true }); this.exit(1); return; }
+          if (flags.json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes', summary, duration: timer.elapsed() }, 0, { compact: true }); this.exit(1); return; }
           printWarning(`Confirmation required: ${summary}. Re-run with --yes.`);
           this.exit(1);
           return;
@@ -162,7 +162,7 @@ export default class MigrateRecordedBy extends Command {
       const result = await runMigrationJournal(engine, plan);
 
       if (flags.json) {
-        await emitJson({ ...result, pending: pending.length, applied: true, error: result.error ? String(result.error) : undefined }, timer.elapsed());
+        await emitJson({ ...result, pending: pending.length, applied: true, error: result.error ? String(result.error) : undefined, duration: timer.elapsed() });
         this.exit(result.status === 'completed' ? 0 : 1);
         return;
       }
@@ -188,7 +188,7 @@ export default class MigrateRecordedBy extends Command {
       const msg = error instanceof MigrationJournalRefusal
         ? `Refused (${error.code}): ${error.message}`
         : (error?.message || String(error));
-      if (flags.json) { await emitJson({ error: msg }, timer.elapsed(), { compact: true }); this.exit(1); return; }
+      if (flags.json) { await emitJson({ error: msg, duration: timer.elapsed() }, 0, { compact: true }); this.exit(1); return; }
       printError(msg);
       this.exit(1);
     } finally {

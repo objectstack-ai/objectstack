@@ -79,10 +79,20 @@ export function zodChildSchemas(schema: z.ZodType): z.ZodType[] {
 /**
  * Wrapper defs that carry their subject in `innerType` and never change its shape.
  *
- * Deliberately the set `zodShapeOf` already used, byte for byte, so #5317 moves
- * ONLY the pipe direction. `prefault` — which the three sibling walkers below do
- * unwrap — is knowingly absent; adding it is a separate, separately measured
- * change (filed as its own finding, not smuggled in here).
+ * `prefault` closes the last spelling gap against the sibling walkers (#6098).
+ * Measured on the shipped graph at that change: the 25 metadata-type roots reach
+ * **zero** `prefault` nodes, and `.prefault(` has no call site anywhere in
+ * `packages/`, so this entry moves no verdict and no bridge today — it is
+ * parity, not a fix. It is worth having anyway because the alternative is the
+ * #4488 failure class: five walkers over the same Zod vocabulary
+ * (`check-liveness.mts`, `metadata-authoring-lint.ts`,
+ * `metadata-form-zod-reconciliation.test.ts`, `metadata-type-schemas.test.ts`,
+ * `shared/strict-object.ts`) already peel `prefault`, so the first author to
+ * write one would have had exactly this walker — the one feeding the deletion
+ * gate — stop resolving a shape, silently.
+ *
+ * Read by `pipeInIsTransform` as well as `zodShapeOf`, so a preprocess transform
+ * parked behind a `prefault` is now seen from both ends, deliberately.
  */
 const SHAPE_WRAPPER_TYPES = new Set([
   'optional',
@@ -91,6 +101,7 @@ const SHAPE_WRAPPER_TYPES = new Set([
   'catch',
   'readonly',
   'nonoptional',
+  'prefault',
 ]);
 
 /** Does this pipe's IN side resolve to a `transform` — i.e. is it a `z.preprocess`? */
@@ -156,11 +167,58 @@ export function pipeAuthorableSide(def: Record<string, unknown>, depth = 0): z.Z
 }
 
 /**
- * Unwrap pipes/wrappers/lazies down to a plain object def's shape, if any.
+ * The merged shape of a `union` node — every member's keys, first member wins on
+ * a name two members both declare (#6098).
  *
- * Returns `null` for anything that is not (or does not unwrap to) a single
- * object node — a union included. See the `zod-graph.test.ts` pin for what that
- * means for `view`, whose preprocess OUT is a union.
+ * Why merge at all: a metadata type may register a UNION of shapes rather than a
+ * single object (#3095 — `view` is the shipped specimen: a `defineView`
+ * container, a flattened list view, a flattened form view). All three sibling
+ * walkers already cross that node — `keyPosture` and `keysOf` by merging every
+ * member, `check-liveness`'s `shapeOf` by taking the first object member — and
+ * only this one stopped there and returned `null`.
+ *
+ * Why the merging rule and not `check-liveness`'s first-member rule: the two
+ * walkers are asked different questions. `shapeOf` governs a ledger of the
+ * canonical authorable CONTAINER, so "first object member" is its answer by
+ * design. This one feeds reachability, where a missed key can only ever waive a
+ * tombstone — so it takes the widest reading, exactly like `keysOf`.
+ *
+ * ⚠️ The one honest narrowing: the return type is one instance per name, while
+ * the consumer's bridge is keyed by (name, INSTANCE). When two members declare
+ * the same name with different instances — measured: 11 of the 92 union nodes in
+ * the root closure — only the first member's instance survives into this record,
+ * so a bridge that would have matched a later member's instance is not tested
+ * for. Measured at #6098 against a last-member-wins build of this same function:
+ * identical verdicts for all 1610 defs, so nothing turns on the choice today. If
+ * it ever does, the fix belongs in the consumer's bridge (a name → instance SET),
+ * never in a looser test here.
+ */
+function mergedUnionShape(def: Record<string, unknown>, depth: number): Record<string, unknown> | null {
+  if (!Array.isArray(def.options)) return null;
+  let merged: Record<string, unknown> | null = null;
+  for (const option of def.options) {
+    if (!(option instanceof z.ZodType)) continue;
+    const shape = zodShapeOf(option, depth + 1);
+    if (!shape) continue;
+    merged ??= {};
+    for (const [name, prop] of Object.entries(shape)) {
+      if (!(name in merged)) merged[name] = prop;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Unwrap pipes/wrappers/lazies/unions down to an object shape, if any.
+ *
+ * Returns `null` for anything that does not resolve to at least one object node
+ * — a union of primitives included, since it has no keys to contribute.
+ *
+ * A union resolves to the MERGE of its members (see `mergedUnionShape`). In Zod
+ * 4.4.3 `z.discriminatedUnion` carries `def.type === 'union'` too (verified,
+ * #6098), so it needs no branch of its own — the `discriminated_union` arms the
+ * sibling walkers carry match nothing in this version and are deliberately not
+ * copied here.
  */
 export function zodShapeOf(schema: z.ZodType, depth = 0): Record<string, unknown> | null {
   if (depth > 12) return null;
@@ -170,6 +228,7 @@ export function zodShapeOf(schema: z.ZodType, depth = 0): Record<string, unknown
     const shape = def.shape;
     return shape && typeof shape === 'object' ? (shape as Record<string, unknown>) : null;
   }
+  if (def.type === 'union') return mergedUnionShape(def, depth);
   if (def.type === 'pipe') {
     const side = pipeAuthorableSide(def);
     return side ? zodShapeOf(side, depth + 1) : null;
