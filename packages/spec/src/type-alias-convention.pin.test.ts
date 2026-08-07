@@ -241,6 +241,12 @@ import type * as M165 from './ui/responsive.zod.js';
 import type * as M166 from './ui/theme.zod.js';
 import type * as M167 from './ui/view.zod.js';
 import type * as M168 from './ui/widget.zod.js';
+// Appended out of alphabetical order deliberately: the M-indices are positional
+// identifiers the pin lines below reference by number, so a new module takes the
+// next free index rather than renumbering 169 imports and every pin that names
+// one. #5775 is the first entry from this file — `component.zod.ts` had no bare
+// `X = z.infer` alias until `PageContainerProps` arrived.
+import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
 // 717 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -1316,6 +1322,14 @@ export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.
 // ui/widget.zod.ts
 export type Iso716 = Assert<Eq< z.input< typeof M168.WidgetLifecycleSchema >, z.infer< typeof M168.WidgetLifecycleSchema > >>;
 
+// ui/component.zod.ts
+// #5775 — the shared `children` contract for `page:section`/`page:footer`/
+// `page:sidebar`. A lone optional array with no default, transform, catch or
+// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
+// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
+// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
+export type Iso719 = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
+
 // ---------------------------------------------------------------------------
 // Representative spot-checks on the phase-1 ADDITIONS.
 //
@@ -1371,7 +1385,7 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 719 isomorphic pins', () => {
+  it('still declares all 720 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1390,7 +1404,7 @@ describe('ADR-0122 type-alias convention', () => {
     // `ConnectorType` / `ConnectorStatus` pins beside it).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(719);
+    expect(pins).toHaveLength(720);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
