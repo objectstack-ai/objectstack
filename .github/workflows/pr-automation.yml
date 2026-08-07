@@ -251,15 +251,23 @@ jobs:
           # Diffing against BASE_SHA ignores that residue and sees only what the
           # PR itself introduced.
           #
-          # An empty-frontmatter changeset still COUNTS here, and that is
-          # deliberate and unchanged — it remains a legal "this PR releases
-          # nothing" declaration. What #5292 corrected is the PRESCRIPTION, not
-          # the count: this comment used to call it "on par with the
-          # skip-changeset label", and the failure message below used to offer
-          # the two as equals. They are not equal downstream. The label is a
-          # gate-level exemption that produces no input for changesets/action;
-          # an empty changeset is a real input to it. See the message for the
-          # consequence.
+          # An empty-frontmatter changeset still COUNTS here — this step counts
+          # files, and that is deliberately unchanged. What has changed is that
+          # counting is no longer the last word: the step BELOW rejects an empty
+          # changeset this PR newly introduces (#5471), so satisfying this count
+          # with an empty file now trades one red for another.
+          #
+          # The history is worth keeping straight. #5292 corrected the
+          # PRESCRIPTION, not the count: this comment used to call an empty
+          # changeset "on par with the skip-changeset label" and the message
+          # below used to offer the two as equals. They are not equal
+          # downstream — the label is a gate-level exemption that produces no
+          # input for changesets/action, an empty changeset is a real input to
+          # it. #5471 then measured that the prose alone did not hold (empty
+          # files kept accruing after PR #5467 merged) and ruled the route shut
+          # for new files. Splitting it across two steps is what keeps THIS
+          # step's failure mode ("no changeset at all") distinct from that one's
+          # ("the changeset you added declares nothing").
           ADDED=$(git diff --name-only --diff-filter=A "$BASE_SHA" HEAD -- '.changeset/*.md' \
                   | grep -v '/README\.md$' | wc -l | tr -d '[:space:]')
           if [ "$ADDED" -eq 0 ]; then
@@ -271,36 +279,96 @@ jobs:
             # strips that much from every line, so `MSG` lands in column 0 of
             # the generated script. Do not re-indent it.
             cat <<'MSG'
-          This PR adds no changeset. There are three ways forward, and they are NOT
-          equivalent. Pick by what the PR actually releases:
+          This PR adds no changeset. There are TWO ways forward -- route 3 used to be
+          a third and is now closed, see below. Pick by what the PR actually releases:
 
             1. It releases something
                -> run 'pnpm changeset' and name the packages it releases.
 
-            2. It releases nothing (.github/, .claude/, docs/, content/, examples/,
-               tests-only, and the like)
+            2. It releases nothing (.github/, .claude/, skills/, docs/, content/,
+               examples/, tests-only, and the like)
                -> apply the 'skip-changeset' label.   <<< PREFERRED
                The label is a gate-level exemption. It produces NO input for
                changesets/action, so it cannot affect a release.
 
-            3. An empty-frontmatter changeset also satisfies this gate and stays
-               legal -- but it is a LAST RESORT, not the quick way past a red check.
-               Unlike the label it is a REAL INPUT to changesets/action: when every
-               pending changeset is empty, the action takes its
+               'skills/**' is on that list, and it is spelled out because the git
+               log says otherwise (#5947). Changes to PUBLISHED skills have
+               repeatedly shipped with an empty changeset instead -- #4607, #5130,
+               #5451 / PR #5799 -- on the reasoning "skills/ ships with no npm
+               package, so there is no package to name". That premise is true:
+               skills/ is not a workspace member and no package's 'files' field
+               includes it. The conclusion does not follow. Naming no package is
+               precisely what the LABEL is for; an empty changeset names no package
+               EITHER, and pays #4898 for the privilege. Take the label.
+
+            3. (CLOSED) An empty-frontmatter changeset. Still present in the
+               repository's history and still counted by this step, but the step
+               below now REJECTS any that a PR newly adds (#5471). It was never worth
+               taking: it names no package, so its body reaches no CHANGELOG, and it
+               buys nothing the label does not. What it uniquely buys is risk --
+               unlike the label it is a REAL INPUT to changesets/action, and when
+               every pending changeset is empty the action takes its
                "hasChangesets && !hasNonEmptyChangesets" branch, prints
                "All changesets are empty; not creating PR", and returns in 0 seconds
                -- no version PR, no publish, and the Release run still goes GREEN.
-               That is #4898, which silently stalled 17.0.0-rc.2. It also buys you
-               nothing the label does not: an empty changeset names no package, so
-               its body reaches no CHANGELOG.
+               That is #4898, which silently stalled 17.0.0-rc.2. The empty
+               changesets already on main are exempt and stay where they are; only
+               newly introduced ones are rejected.
 
           If you are unsure, take route 2. A wrong 'skip-changeset' label is caught by
           review; a wrong empty changeset is caught by nobody.
           MSG
-            echo "::error::This PR adds no changeset. If it releases nothing, apply the 'skip-changeset' label (preferred); otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset also passes this gate, but it is NOT equivalent to the label -- it is a real input to changesets/action, and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
+            echo "::error::This PR adds no changeset. If it releases nothing (including any 'skills/**' change -- see #5947), apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
             exit 1
           fi
           echo "This PR adds $ADDED changeset(s)."
+
+      # #5471: an empty-frontmatter changeset is rejected when this PR is the one
+      # introducing it. Ruled 2026-08-06 after the #5292 / PR #5467 prose route
+      # failed to hold -- empty files kept accruing at roughly ten a day while
+      # the workflow text called them a LAST RESORT, and the `skills/**`
+      # precedent chain (#4607 / #5130 / #5451 -> PR #5799) kept copying the
+      # downgraded route out of `git log`, where the prescription is invisible.
+      #
+      # A SEPARATE step, not more logic inside the step above, for two reasons.
+      # The two failures are different facts and deserve different messages
+      # ("no changeset at all" vs "the changeset you added declares nothing"),
+      # and a script can be self-tested where an inline shell block cannot.
+      #
+      # Scope, and the two things this deliberately does NOT do:
+      #   - The EXISTING empty changesets (182 at efedd289f) are exempt. The gate
+      #     judges the PR's diff, never the directory, so the exemption needs no
+      #     roster -- a 182-name list would be a high-water mark that rots on the
+      #     first merge. Nothing here cleans them up; that is deferred to the
+      #     next `changeset pre exit`, by the same ruling.
+      #   - Nothing about the release machinery, `.changeset/config.json` or
+      #     changesets/action's behaviour changes. This is a PR-layer gate and
+      #     reverts in one commit.
+      #
+      # The `--self-test` is chained AHEAD of the real run on purpose (the repo
+      # convention for `check-*.mjs` gates): a checker whose own fixtures are
+      # never executed is a phantom check, and this one's fixtures are the only
+      # place the red and green directions are pinned. It builds real temp git
+      # repositories and costs well under a second.
+      #
+      # Label handling: this step carries the same `steps.labels.outputs.skip`
+      # guard as every step above it, so it honours the LIVE label re-read
+      # (#5580 / #5625) and a rerun after labelling converges. That leaves one
+      # cell open and it is recorded rather than implied: a PR carrying BOTH the
+      # `skip-changeset` label AND a new empty changeset is not caught, because
+      # the whole job is exempt. Closing it would mean running this step outside
+      # the job's exemption, where it would fire only when the label arrived
+      # after the event fired -- a gate that reds one PR and greens an identical
+      # one. A consistent exemption beats a nondeterministic gate, and the case
+      # is empty of motive anyway: an author who already has the label gains
+      # nothing by adding the file.
+      - name: Reject an empty-frontmatter changeset added by this PR
+        if: steps.labels.outputs.skip != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          node scripts/check-empty-changeset.mjs --self-test
+          node scripts/check-empty-changeset.mjs --base "$BASE_SHA"
 
       - name: Guard against accidental major bumps (launch window)
         # Every publishable package is in one Changesets "fixed" (lockstep) group,

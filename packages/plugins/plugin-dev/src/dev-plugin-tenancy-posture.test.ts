@@ -56,6 +56,7 @@ import { DevPlugin } from './dev-plugin';
 const OLD_POSTURE = process.env.OS_TENANCY_POSTURE;
 const OLD_LEGACY = process.env.OS_MULTI_ORG_ENABLED;
 const OLD_NODE_ENV = process.env.NODE_ENV;
+const OLD_DEGRADED = process.env.OS_ALLOW_DEGRADED_TENANCY;
 
 /** Boot DevPlugin under a tenancy configuration and report what it tried. */
 const initUnder = async (env: { posture?: string; legacy?: string }) => {
@@ -96,6 +97,15 @@ beforeEach(() => {
   delete process.env.OS_TENANCY_POSTURE;
   delete process.env.OS_MULTI_ORG_ENABLED;
   process.env.NODE_ENV = 'development';
+  // [#5301] This suite observes BRANCH ENTRY, and it reads that entry off the
+  // warning the absent-package path emits. Since #5301 that path is ADR-0093 D5
+  // fail-fast: a walled posture with the enterprise package absent REFUSES to
+  // init unless the operator opted in, so without this hatch every walled case
+  // below would throw before it could be observed. The hatch does not weaken
+  // what is under test here — the degraded path still names the requested
+  // posture in the same line, which is the whole signal #5262 pinned. The
+  // fail-fast itself is pinned next door, in `dev-plugin-tenancy-failfast.test.ts`.
+  process.env.OS_ALLOW_DEGRADED_TENANCY = '1';
 });
 afterEach(() => {
   if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
@@ -104,6 +114,8 @@ afterEach(() => {
   else process.env.OS_MULTI_ORG_ENABLED = OLD_LEGACY;
   if (OLD_NODE_ENV === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = OLD_NODE_ENV;
+  if (OLD_DEGRADED === undefined) delete process.env.OS_ALLOW_DEGRADED_TENANCY;
+  else process.env.OS_ALLOW_DEGRADED_TENANCY = OLD_DEGRADED;
   vi.restoreAllMocks();
 });
 

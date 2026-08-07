@@ -30,6 +30,7 @@ import {
   evaluateBaseline,
   loadEntrySurfaces,
   resolveImports,
+  serializeImportBaseline,
   type CategorySurface,
 } from './lib/docs-import-surface';
 import { escapeMdxDescription } from './lib/escape-mdx';
@@ -248,18 +249,6 @@ const ENTRY_SURFACES: ReadonlyMap<string, CategorySurface> = loadEntrySurfaces(
 
 /** Every unresolvable import name this run met, one stable line each. */
 const importGaps = new Set<string>();
-
-const IMPORT_BASELINE_COMMENT =
-  'Accepted gaps between the reference docs\' import examples and the real export surface of ' +
-  '@objectstack/spec (#4570): a documented JSON Schema whose entry point exports no matching type ' +
-  'alias ("no type export") or no matching schema const ("no schema const export"). The name is ' +
-  'omitted from the generated import line — the docs never advertise an import that cannot compile ' +
-  '— and listed here so the omission is countable instead of silent. Shrink-only ratchet: a NEW gap ' +
-  'fails check:docs (fix it by adding `export type X = z.infer<typeof XSchema>;` next to the schema ' +
-  'and regenerating api-surface/, or by retiring the schema together with its alias), and a ' +
-  'stale entry fails until its line is deleted. Growing this list is a maintainer decision that ' +
-  'shows up as this file in the diff. Regenerate with: ' +
-  'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
 
 /**
  * Resolve a schema name to its page, AS SEEN FROM the category being rendered.
@@ -943,10 +932,11 @@ if (managedCount > 0) {
   const gaps = [...importGaps].sort();
 
   if (UPDATE_IMPORT_BASELINE) {
-    fs.writeFileSync(
-      IMPORT_BASELINE_PATH,
-      JSON.stringify({ _comment: IMPORT_BASELINE_COMMENT, entries: gaps }, null, 2) + '\n',
-    );
+    // Serialized through the lib, never inline: the same function is what the
+    // round-trip pin in `docs-import-surface.test.ts` re-serializes the
+    // committed file with, so this writer and that file cannot drift into two
+    // encodings again (#5990).
+    fs.writeFileSync(IMPORT_BASELINE_PATH, serializeImportBaseline(gaps));
     console.log(`Wrote ${gaps.length} import-surface gap(s) to ${path.relative(REPO_ROOT, IMPORT_BASELINE_PATH)} — review the diff before committing.`);
   } else {
     const baseline: { entries?: string[] } = fs.existsSync(IMPORT_BASELINE_PATH)
