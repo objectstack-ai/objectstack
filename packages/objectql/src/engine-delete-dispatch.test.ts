@@ -103,4 +103,43 @@ describe('engine delete dispatch — the shared predicate IS the engine (#4550)'
     expect(scalarDeleteId({ where: {} })).toBeUndefined();
     expect(scalarDeleteId(undefined)).toBeUndefined();
   });
+
+  // ── objectstack#5747. The twin's `branches on TRUTHINESS` test, on this side.
+  it('branches on TRUTHINESS, so a falsy scalar where.id does not identify a row', () => {
+    expect(resolveEngineDeleteDispatch({ where: { id: 0 } }).kind).toBe('reject');
+    expect(resolveEngineDeleteDispatch({ where: { id: '' } }).kind).toBe('reject');
+    expect(resolveEngineDeleteDispatch({ where: { id: 0 }, multi: true }).kind).toBe('multi');
+    expect(resolveEngineDeleteDispatch({ where: { id: '' }, multi: true }).kind).toBe('multi');
+    // …while `scalarDeleteId` still reports the raw scalar it found. The two
+    // answer different questions and only `resolveEngineDeleteDispatch`
+    // answers the engine's. Same split as `scalarUpdateId` on the twin.
+    expect(scalarDeleteId({ where: { id: 0 } })).toBe(0);
+    expect(scalarDeleteId({ where: { id: '' } })).toBe('');
+  });
+
+  it('a fake pinned to assertEngineDeleteDispatch now refuses the falsy scalar ids too (#5747)', () => {
+    // This is the whole point of the issue: before #5747 both of these
+    // RETURNED `{ kind: 'by-id', id: 0 }` / `{ kind: 'by-id', id: '' }`, so
+    // every double pinned to this line accepted a call the real server
+    // answers `ENGINE_DELETE_REJECT_MESSAGE` to — looser than the producer on
+    // exactly one input, which is the #4434 shape.
+    expect(() => assertEngineDeleteDispatch({ where: { id: 0 } })).toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+    expect(() => assertEngineDeleteDispatch({ where: { id: '' } })).toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+    expect(assertEngineDeleteDispatch({ where: { id: 0 }, multi: true })).toEqual({ kind: 'multi' });
+  });
+
+  it('a falsy-id `multi` delete is still SCOPED by the caller where, not a whole-table purge', () => {
+    // `multi` is the honest verdict for `{ where: { id: 0 }, multi: true }`,
+    // and the reason it is safe is that the caller's own predicate still
+    // rides onto the #2982 AST — the bulk delete filters on `id = 0`, it does
+    // not match every row. Asserted against the REAL engine because that is
+    // the only place the claim is true or false.
+    return (async () => {
+      const { engine, calls } = await makeEngine();
+      await engine.delete('task', { where: { id: 0 }, multi: true } as any);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].fn).toBe('deleteMany');
+      expect(calls[0].arg).toMatchObject({ object: 'task', where: { id: 0 } });
+    })();
+  });
 });

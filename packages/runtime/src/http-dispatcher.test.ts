@@ -3608,7 +3608,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
   const actionUser = (executeAction: any) => executeAction.mock.calls[0]?.[2]?.user;
   const actionSession = (executeAction: any) => executeAction.mock.calls[0]?.[2]?.session;
 
-  it('forwards the session user id + business roles to the action body (not `system`)', async () => {
+  it('forwards the session user id + positions to the action body (not `system`)', async () => {
     const { dispatcher, executeAction, ctx } = captureCtx({
       userId: 'user_42',
       positions: ['sales_rep', 'org_member'],
@@ -3619,8 +3619,14 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     await dispatcher.handleActions('/lead/convert', 'POST', {}, ctx);
     const user = actionUser(executeAction);
     expect(user.id).toBe('user_42');
-    expect(user.roles).toEqual(['sales_rep', 'org_member']);
     expect(user.positions).toEqual(['sales_rep', 'org_member']);
+    // #6011 retired the `roles` alias on ctx.user outright (ADR-0090 D3's
+    // banned spelling; no consumer read it). The assertion that used to sit
+    // here read `user.roles` and is replaced by its inverse rather than
+    // dropped, so a re-added alias fails HERE and not only in the shape test.
+    // ⚠️ ctx.session is a DIFFERENT face and still dual-emits `roles` for
+    // #5613's deprecation window — see the test three cases below.
+    expect('roles' in user).toBe(false);
     expect(user.permissions).toEqual(['convert_lead']);
     expect(user.email).toBe('rep@acme.test');
     // #3280 made `organizationId` the blessed name; the `tenantId` alias was
@@ -3682,8 +3688,11 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
     await selfInvoked.dispatcher.handleActions('/lead/convert', 'POST', {}, selfInvoked.ctx);
     const user = actionUser(selfInvoked.executeAction);
     expect(user.id).toBe('system');
-    expect(user.roles).toEqual([]);
     expect(user.positions).toEqual([]);
+    // The retired alias stays absent on the system principal too (#6011) — a
+    // partial removal that left `roles: []` here would still satisfy a
+    // `toEqual([])` pin, which is why this asserts the key, not the value.
+    expect('roles' in user).toBe(false);
     // No resolved caller → no session (parity with the hook surface).
     expect(actionSession(selfInvoked.executeAction)).toBeUndefined();
 

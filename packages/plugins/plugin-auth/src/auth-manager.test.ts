@@ -1681,7 +1681,7 @@ describe('AuthManager', () => {
   describe('phone-number OTP over SMS (#2780)', () => {
     const PHONE = '+8613800000000';
 
-    const fakeSms = (opts: { failed?: boolean } = {}) => {
+    const fakeSms = (opts: { failed?: boolean; error?: string } = {}) => {
       const sent: any[] = [];
       return {
         sent,
@@ -1689,7 +1689,7 @@ describe('AuthManager', () => {
           async send(input: any) {
             sent.push(input);
             return opts.failed
-              ? { id: 'sms_1', status: 'failed', error: 'provider down' }
+              ? { id: 'sms_1', status: 'failed', error: opts.error ?? 'provider down' }
               : { id: 'sms_1', status: 'sent', messageId: 'prov_1' };
           },
           isConfigured: () => true,
@@ -1783,6 +1783,158 @@ describe('AuthManager', () => {
 
       await expect(opts.sendOTP({ phoneNumber: PHONE, code: '555555' }))
         .rejects.toSatisfy((e: Error) => /provider down/.test(e.message) && !e.message.includes('555555'));
+    });
+
+    // ── #6039 / #2814 — the deployment-wide daily SMS quota wall ───────────
+    //
+    // `SmsService.send()` refuses a send past the deployment's daily cost
+    // ceiling by RETURNING a failed result whose `error` carries the
+    // `TOO_MANY_REQUESTS:` code prefix (#2814) — it cannot throw an HTTP-shaped
+    // error, because it is a kernel service with no idea who is calling.
+    // Rethrowing that envelope as a plain `Error` made better-call answer
+    // **500 with a null body**: its router maps only `APIError`
+    // (`isAPIError = err instanceof APIError || err?.name === 'APIError'`,
+    // better-call@1.3.7 `dist/utils.mjs:57`, consumed at `dist/router.mjs:93`),
+    // and everything else takes the `console.error` + 500 branch. Meanwhile the
+    // per-number wall on the SAME endpoint (`assertPhoneOtpSendAllowed`, in the
+    // admission hook) throws a real `APIError('TOO_MANY_REQUESTS')` and answers
+    // 429 — so one endpoint spoke with two voices, which is the reverse of what
+    // #2814 asked for.
+    describe('daily SMS quota refusal reaches the caller as 429 (#6039)', () => {
+      /**
+       * The refusal envelope an `SmsService` hands back on a quota refusal.
+       * Written out here rather than imported: `@objectstack/service-sms`
+       * already depends on THIS package (its day counter imports
+       * `InProcessCounterStore` / `incrementFixedWindow` from plugin-auth), so
+       * importing its `SMS_QUOTA_EXCEEDED_ERROR` back would close a dependency
+       * cycle. Source of truth: `SMS_QUOTA_EXCEEDED_CODE` /
+       * `SMS_QUOTA_EXCEEDED_ERROR` in
+       * `packages/services/service-sms/src/sms-daily-quota.ts`.
+       */
+      const QUOTA_REFUSAL = 'TOO_MANY_REQUESTS: daily SMS quota exhausted';
+
+      /**
+       * The outward shape a client — and better-call's router — actually
+       * branches on. Message text is deliberately NOT part of it: the two walls
+       * must be indistinguishable in code and status, while each may still say
+       * something true (only the per-number wall can name a retry window).
+       */
+      const outwardShape = (e: any) => ({
+        name: e?.name,
+        status: e?.status,
+        statusCode: e?.statusCode,
+        bodyCode: e?.body?.code,
+      });
+
+      const rejection = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+          await run();
+        } catch (e) {
+          return e;
+        }
+        throw new Error('expected the call to reject, but it resolved');
+      };
+
+      it('OTP send: rejects with an APIError carrying 429 / TOO_MANY_REQUESTS', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '424242' }));
+        // Exactly what better-call reads to choose 429 over 500.
+        const { isAPIError } = await import('better-auth/api');
+        expect(isAPIError(err)).toBe(true);
+        expect(err.name).toBe('APIError');
+        expect(err.status).toBe('TOO_MANY_REQUESTS');
+        expect(err.statusCode).toBe(429);
+        // #2780 standing requirement: the code never travels in an error.
+        expect(String(err.message)).not.toContain('424242');
+      });
+
+      it('invitation SMS: same APIError / 429 at the AuthManager boundary', async () => {
+        const { manager } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        const err = await rejection(() => manager.sendPhoneInviteSms(PHONE));
+        const { isAPIError } = await import('better-auth/api');
+        expect(isAPIError(err)).toBe(true);
+        expect(err.status).toBe('TOO_MANY_REQUESTS');
+        expect(err.statusCode).toBe(429);
+      });
+
+      it('both walls on the endpoint present the SAME outward shape', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        // Wall A — the per-number cooldown, refused in the admission hook (#2780).
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        const perNumber = await rejection(() => manager.assertPhoneOtpSendAllowed(PHONE));
+        // Wall B — the deployment's daily quota, refused inside the send (#2814).
+        const quota = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '111111' }));
+
+        expect(outwardShape(quota)).toEqual(outwardShape(perNumber));
+        expect(outwardShape(quota)).toEqual({
+          name: 'APIError',
+          status: 'TOO_MANY_REQUESTS',
+          statusCode: 429,
+          bodyCode: undefined,
+        });
+      });
+
+      it('matches the CODE prefix, so the service may reword the message half', async () => {
+        const { manager, opts } = await bootOtp();
+        // Only `TOO_MANY_REQUESTS` — an ADR-0112 error code — is restated across
+        // the package boundary; the prose after the colon is service-owned and
+        // free to change without breaking this mapping.
+        manager.setSmsService(
+          fakeSms({ failed: true, error: 'TOO_MANY_REQUESTS: budget spent for today' }).service,
+        );
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '333333' }));
+        expect(err.statusCode).toBe(429);
+      });
+
+      it('does NOT over-tighten: a transport failure keeps its 500 semantics', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true }).service); // 'provider down'
+        const { isAPIError } = await import('better-auth/api');
+
+        const otpErr = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '555555' }));
+        expect(isAPIError(otpErr)).toBe(false);
+        expect(otpErr.name).toBe('Error');
+        expect(String(otpErr.message)).toContain('provider down');
+
+        const inviteErr = await rejection(() => manager.sendPhoneInviteSms(PHONE));
+        expect(isAPIError(inviteErr)).toBe(false);
+        expect(inviteErr.name).toBe('Error');
+        expect(String(inviteErr.message)).toContain('provider down');
+      });
+
+      it('the code must PREFIX the envelope — a provider merely mentioning it stays 500', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(
+          fakeSms({ failed: true, error: 'upstream rejected: TOO_MANY_REQUESTS at carrier' }).service,
+        );
+        const { isAPIError } = await import('better-auth/api');
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '777777' }));
+        expect(isAPIError(err)).toBe(false);
+        expect(err.name).toBe('Error');
+      });
+
+      it('the 429 message carries no quota ceiling, remaining count or reset clock', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        for (const run of [
+          () => opts.sendOTP({ phoneNumber: PHONE, code: '999999' }),
+          () => manager.sendPhoneInviteSms(PHONE),
+        ]) {
+          const message = String((await rejection(run)).message);
+          // No digits at all ⇒ no ceiling, no remaining count, no reset clock.
+          expect(message).not.toMatch(/\d/);
+          // …and not the raw service envelope, which names the budget that was hit.
+          expect(message).not.toContain(QUOTA_REFUSAL);
+          expect(message.toLowerCase()).not.toContain('quota');
+        }
+      });
     });
 
     it('honours phoneOtp knobs (cooldown off ⇒ back-to-back admissions allowed)', async () => {

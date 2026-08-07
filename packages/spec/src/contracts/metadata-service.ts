@@ -254,11 +254,42 @@ export interface IMetadataService {
 
     /**
      * Get a metadata item by type and name
+     *
+     * `undefined` is AMBIGUOUS by construction — it means "not found" *and*
+     * "every loader that could hold it failed". Prefer {@link getDiagnosed}
+     * wherever the difference could change a decision (#5840).
+     *
      * @param type - Metadata type
      * @param name - Item name/identifier
      * @returns The metadata definition, or undefined if not found
      */
     get(type: string, name: string): Promise<unknown | undefined>;
+
+    /**
+     * Get a metadata item, and say whether the answer can be trusted as
+     * complete. Same distinction {@link loadDiagnosed} draws, on the read that
+     * consults the in-memory registry first (ADR-0110 D3).
+     *
+     * [#5840] Declared because the verdict was already being computed and then
+     * discarded: `MetadataManager` defines `get` as
+     * `(await getDiagnosed(…)).data`, so a MISS and an OUTAGE arrive at every
+     * consumer as the same `undefined`. A caller deciding whether something is
+     * ABSENT must check `degraded` — treating a degraded read as an absence is
+     * how an outage becomes an authorization answer, or a positive claim about
+     * what an author declared.
+     *
+     * Callers of `get` cannot substitute `loadDiagnosed`: that one walks only
+     * the loaders, so it would skip the in-memory registry and resolve
+     * different items.
+     *
+     * Optional: implementations that predate it simply cannot report the
+     * distinction, and a consumer that probes for it must keep reading `get`
+     * when it is absent.
+     */
+    getDiagnosed?(
+        type: string,
+        name: string,
+    ): Promise<{ data: unknown | undefined; degraded: boolean; errors: string[] }>;
 
     /**
      * List all metadata items of a given type

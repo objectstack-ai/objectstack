@@ -52,8 +52,9 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
-import { buildAdminPluginSchema } from './auth-schema-config.js';
+import { buildAdminPluginSchema, buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { admin } from 'better-auth/plugins/admin';
+import { organization } from 'better-auth/plugins/organization';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -650,17 +651,30 @@ describe('[#5941] break-glass: the last unbanned administrator cannot be DELETED
     expect(await userExists(engine, 'usr_owner')).toBe(false);
   });
 
-  it('deleting a row on another object is not this guard\'s business', async () => {
+  it('deleting an unrelated row on another object is not this guard\'s business', async () => {
     await seedUser(engine, 'usr_owner', { role: 'owner' });
+    // `usr_member`'s membership carries no administrative grade, so removing it
+    // takes no standing away — the standing halves (#5978) below judge every
+    // `sys_member` delete, and this is what "judged and allowed" looks like.
+    await seedUser(engine, 'usr_member', { role: 'member' });
 
-    // The membership row (the thing that MAKES usr_owner an administrator) is
-    // a different write shape on a different table — filed as #5978, and
-    // deliberately not half-guarded from here. Pinned so the day it IS guarded,
-    // this expectation is the one that has to be changed on purpose.
     await expect(
-      engine.delete('sys_member', { where: { id: 'mem_usr_owner' }, ...SYSTEM }),
+      engine.delete('sys_member', { where: { id: 'mem_usr_member' }, ...SYSTEM }),
+    ).resolves.toBeDefined();
+    // …and a table this guard reads but does not write-guard is untouched.
+    await expect(
+      engine.delete('sys_account', { where: { id: 'nope' }, ...SYSTEM }),
     ).resolves.toBeDefined();
   });
+
+  // NOTE (#5978): the case that used to live here asserted the OPPOSITE — that
+  // `engine.delete('sys_member', { where: { id: 'mem_usr_owner' } })` resolves,
+  // pinning the third-path gap #5941 deliberately left open ("filed as #5978,
+  // and deliberately not half-guarded from here. Pinned so the day it IS
+  // guarded, this expectation is the one that has to be changed on purpose").
+  // Today is that day: the same write is now refused, and that inversion is
+  // the before-red anchor for this whole change — see
+  // `[#5978] path 2` below, which is the same fixture with the verdict flipped.
 });
 
 describe('[#5941] the delete guard holds on predicate (multi) deletes, not only by-id', () => {
@@ -862,5 +876,665 @@ describe('[#5892 / #5941] reverse verification: without the guard, the lockout g
     // …and what is left is the issue's end state: a password holder who can
     // sign in and administer nothing.
     expect(await userExists(engine, 'usr_escape')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5978] The THIRD write shape — the `sys_user` row is never touched
+//
+// "Who is an administrator" is not stored on `sys_user`. It is derived from the
+// two tables `resolveAdminUserIds` enumerates, so it can be taken away by
+// writing THEM while every user row stays exactly as it was. The two halves
+// #5892 / #5941 installed both filter on `object === 'sys_user'`, so they see
+// none of it.
+//
+// Each path below pins the same five things the invariant needs:
+//   (1) the last administrator's standing cannot be revoked,
+//   (2) a non-last administrator's can,
+//   (3) a predicate/bulk write is judged over its whole matched set,
+//   (4) an unverifiable population refuses (fail CLOSED),
+//   (5) the path IS the third path — `sys_user` is untouched by the refused
+//       write, which is what makes it invisible to the first two halves.
+// ---------------------------------------------------------------------------
+
+/** The `sys_member.role` a membership row currently carries. */
+async function memberRole(engine: ObjectQL, memberId: string): Promise<unknown> {
+  const row = await engine.findOne('sys_member', { where: { id: memberId } }, SYSTEM);
+  return row?.role;
+}
+
+async function rowExists(engine: ObjectQL, object: string, id: string): Promise<boolean> {
+  const row = await engine.findOne(object, { where: { id }, fields: ['id'] }, SYSTEM);
+  return Boolean(row);
+}
+
+/**
+ * The assertion that makes these the THIRD path rather than a restatement of
+ * the first two: the user row is present, unbanned, and was never a party to
+ * the write that got refused.
+ */
+async function expectUserRowUntouched(engine: ObjectQL, id: string): Promise<void> {
+  expect(await userExists(engine, id)).toBe(true);
+  expect(await bannedFlag(engine, id)).toBeFalsy();
+}
+
+describe('[#5978] path 1 — downgrading the last administrator\'s sys_member role', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+  });
+
+  /** What better-auth's `updateMemberRole` (and a SCIM group remap) writes. */
+  const setRole = (memberId: string, role: string) =>
+    engine.update('sys_member', { id: memberId, role }, SYSTEM);
+
+  it('two org admins: downgrading the first is allowed, downgrading the last is refused', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+
+    await expect(setRole('mem_usr_admin', 'member')).resolves.toBeTruthy();
+    expect(await memberRole(engine, 'mem_usr_admin')).toBe('member');
+
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'sys_member',
+    });
+    // Nothing was written: the standing survives the refusal.
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
+  });
+
+  it('THE PATH ITSELF: the sys_user row is never touched, which is why #5892/#5941 miss it', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner', accountProvider: 'oidc' });
+    await seedUser(engine, 'usr_escape', { role: 'member', accountProvider: 'credential' });
+
+    // No `banned` write, no `sys_user` delete — the two guarded chokepoints are
+    // not on this path at all. The write lands on `sys_member`, and it is still
+    // refused.
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expectUserRowUntouched(engine, 'usr_owner');
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
+  });
+
+  it('the refusal explains itself: whose standing, which table, why, and the fix', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(
+      /Refusing this membership change/,
+    );
+    // The user who LOSES standing is named, not the membership row id — the
+    // operator needs to know which person is about to be locked out.
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/'usr_owner'/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/last administrator/i);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/sys_member/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
+    // An IdP drove most of these, so the message points at the group mapping.
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/SCIM group mapping/);
+  });
+
+  it('a downgrade to ANOTHER administrative grade is allowed — the grade is not lost', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    // `owner` → `admin` is a demotion in the ladder, but both grades administer
+    // the org, so the environment keeps an administrator and the guard has no
+    // opinion. Nothing here is a role-governance policy.
+    await expect(setRole('mem_usr_owner', 'admin')).resolves.toBeTruthy();
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('admin');
+    // …and the reverse, back up the ladder, likewise.
+    await expect(setRole('mem_usr_owner', 'owner')).resolves.toBeTruthy();
+  });
+
+  it('a comma-joined downgrade that KEEPS an administrative role is allowed', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    // The one grade ruler (`isOrgAdminGrade`, #5939/#5942) reads the whole
+    // comma-joined value, so `member,admin` still administers. A hand-copied
+    // `role === 'owner' || role === 'admin'` in the simulation would have
+    // refused this legal write.
+    await expect(setRole('mem_usr_owner', 'member,admin')).resolves.toBeTruthy();
+  });
+
+  it('a downgrade to `delegated_admin` IS refused (ADR-0105 D8: reach, not authority)', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(setRole('mem_usr_owner', 'delegated_admin')).rejects.toThrow(
+      /last administrator/i,
+    );
+  });
+
+  it('a payload that touches neither `role` nor `user_id` is never guarded', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    // The invariant is scoped to the ENVIRONMENT, so moving the last admin's
+    // membership to another organization cannot reduce the administrator
+    // population — and the guard proves that statically (MEMBER_STANDING_KEYS)
+    // rather than by running four reads on every membership write.
+    await expect(
+      engine.update('sys_member', { id: 'mem_usr_owner', organization_id: 'org_2' }, SYSTEM),
+    ).resolves.toBeTruthy();
+  });
+
+  it('a platform admin elsewhere keeps the downgrade legal', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    // The survivor need not be an org admin: an unscoped `admin_full_access`
+    // grant is the other half of the same enumeration.
+    await expect(setRole('mem_usr_owner', 'member')).resolves.toBeTruthy();
+  });
+
+  it('re-homing the membership onto a BANNED user is refused', async () => {
+    // The patch keeps the `owner` grade but moves it to someone who cannot sign
+    // in — set arithmetic on the doomed row would call this harmless. Only a
+    // real write-after simulation catches it: the after-set is `{usr_banned}`,
+    // and `resolveUnbannedAdmins` empties it.
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_banned', { banned: true });
+
+    await expect(
+      engine.update('sys_member', { id: 'mem_usr_owner', user_id: 'usr_banned' }, SYSTEM),
+    ).rejects.toThrow(/last administrator/i);
+  });
+
+  it('re-homing the membership onto an UNBANNED user is allowed', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_next');
+
+    await expect(
+      engine.update('sys_member', { id: 'mem_usr_owner', user_id: 'usr_next' }, SYSTEM),
+    ).resolves.toBeTruthy();
+  });
+});
+
+describe('[#5978] path 2 — deleting the last administrator\'s sys_member row', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+  });
+
+  const removeMembership = (memberId: string) =>
+    engine.delete('sys_member', { where: { id: memberId }, ...SYSTEM });
+
+  it('two org admins: removing the first is allowed, removing the last is refused', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+
+    await expect(removeMembership('mem_usr_admin')).resolves.toBeDefined();
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_admin')).toBe(false);
+
+    await expect(removeMembership('mem_usr_owner')).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'sys_member',
+    });
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_owner')).toBe(true);
+  });
+
+  it(
+    'THE INVERTED PIN: the exact write #5941 recorded as "not this guard\'s business" ' +
+      'is now refused, and the sys_user row is still untouched',
+    async () => {
+      // Byte-for-byte the fixture that used to assert `.resolves.toBeDefined()`
+      // a few describes up — same seed, same call, opposite verdict. This is
+      // the before-red anchor for the whole change.
+      await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+      await expect(
+        engine.delete('sys_member', { where: { id: 'mem_usr_owner' }, ...SYSTEM }),
+      ).rejects.toThrow(/last administrator/i);
+      await expectUserRowUntouched(engine, 'usr_owner');
+    },
+  );
+
+  it('the refusal names the removal, not a ban or a user delete', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(removeMembership('mem_usr_owner')).rejects.toThrow(
+      /Refusing this membership removal/,
+    );
+    await expect(removeMembership('mem_usr_owner')).rejects.toThrow(/removing it/);
+    await expect(removeMembership('mem_usr_owner')).rejects.toThrow(/ADR-0024 D5\.2/);
+  });
+
+  it('removing a non-administrative membership is allowed even with exactly one admin', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_member', { role: 'member' });
+    await seedUser(engine, 'usr_delegate', { role: 'delegated_admin' });
+
+    await expect(removeMembership('mem_usr_member')).resolves.toBeDefined();
+    await expect(removeMembership('mem_usr_delegate')).resolves.toBeDefined();
+  });
+
+  it('removing the membership of an ALREADY-banned admin is allowed (nothing is taken away)', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner', banned: true });
+
+    await expect(removeMembership('mem_usr_owner')).resolves.toBeDefined();
+  });
+});
+
+describe('[#5978] path 3 — revoking the last administrator\'s admin_full_access grant', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+  });
+
+  const revoke = (grantId: string) =>
+    engine.delete('sys_user_permission_set', { where: { id: grantId }, ...SYSTEM });
+
+  const editGrant = (grantId: string, patch: Record<string, unknown>) =>
+    engine.update('sys_user_permission_set', { id: grantId, ...patch }, SYSTEM);
+
+  it('two platform admins: revoking the first is allowed, revoking the last is refused', async () => {
+    await seedUser(engine, 'usr_p1', { platformAdmin: true });
+    await seedUser(engine, 'usr_p2', { platformAdmin: true });
+
+    await expect(revoke('ups_usr_p1')).resolves.toBeDefined();
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_p1')).toBe(false);
+
+    await expect(revoke('ups_usr_p2')).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'sys_user_permission_set',
+    });
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_p2')).toBe(true);
+  });
+
+  it('THE PATH ITSELF: the sys_user row is never touched', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
+
+    await expect(revoke('ups_usr_platform')).rejects.toThrow(/Refusing this grant removal/);
+    await expectUserRowUntouched(engine, 'usr_platform');
+  });
+
+  it('ORG-SCOPING the last grant is refused — a tenant admin is not a break-glass admin', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    // The row survives and still points at `admin_full_access`; it just stops
+    // being the UNSCOPED grant `resolveAuthzContext` derives `platform_admin`
+    // from. Same end state, no delete anywhere.
+    await expect(editGrant('ups_usr_platform', { organization_id: ORG })).rejects.toThrow(
+      /Refusing this grant change/,
+    );
+    const row = await engine.findOne(
+      'sys_user_permission_set',
+      { where: { id: 'ups_usr_platform' } },
+      SYSTEM,
+    );
+    expect(row?.organization_id).toBeFalsy();
+  });
+
+  it('EXPIRING the last grant is refused (ADR-0091 window, consumed as-is)', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+
+    await expect(editGrant('ups_usr_platform', { valid_until: past })).rejects.toThrow(
+      /last administrator/i,
+    );
+  });
+
+  it('back-DATING `valid_from` past now is refused too (the other half of the window)', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+
+    await expect(editGrant('ups_usr_platform', { valid_from: future })).rejects.toThrow(
+      /last administrator/i,
+    );
+  });
+
+  it('RE-POINTING the last grant at another permission set is refused', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    // The row is neither deleted nor scoped nor expired — it simply stops
+    // granting `admin_full_access`. The simulation re-tests which set the grant
+    // points at rather than trusting the enumeration's own `where`.
+    await expect(editGrant('ups_usr_platform', { permission_set_id: 'ps_member' })).rejects.toThrow(
+      /last administrator/i,
+    );
+  });
+
+  it('EXTENDING the window, or editing a grant while another admin exists, is allowed', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+
+    // A standing key is touched, so the guard does run — and allows it.
+    await expect(editGrant('ups_usr_platform', { valid_until: future })).resolves.toBeTruthy();
+
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await expect(revoke('ups_usr_platform')).resolves.toBeDefined();
+  });
+
+  it('revoking an ALREADY-org-scoped grant is untouched — it never conferred standing', async () => {
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_scoped', { grant: { organization_id: ORG } });
+
+    await expect(revoke('ups_usr_scoped')).resolves.toBeDefined();
+  });
+
+  it('revoking an ALREADY-expired grant is untouched', async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    await seedUser(engine, 'usr_expired', { grant: { valid_until: past } });
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(revoke('ups_usr_expired')).resolves.toBeDefined();
+  });
+
+  it('the non-loginable `usr_system` grant is never counted as the survivor', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await seedUser(engine, SystemUserId.SYSTEM, { platformAdmin: true });
+
+    await expect(revoke('ups_usr_platform')).rejects.toThrow(/last administrator/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5978] Predicate / bulk writes on the standing tables
+// ---------------------------------------------------------------------------
+
+describe('[#5978] the standing halves hold on predicate (multi) writes, not only by-id', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+    await seedUser(engine, 'usr_member', { role: 'member' });
+  });
+
+  it('a predicate downgrade that would sweep every administrative membership is refused', async () => {
+    // One `where`, every administrator: `input.id` is unbound on this dispatch,
+    // so the guard resolves the matched set itself and simulates the payload
+    // over all of it.
+    await expect(
+      engine.update(
+        'sys_member',
+        { role: 'member' },
+        { multi: true, where: { role: { $ne: 'member' } }, ...SYSTEM },
+      ),
+    ).rejects.toThrow(/last administrators/i);
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
+    expect(await memberRole(engine, 'mem_usr_admin')).toBe('admin');
+  });
+
+  it('an unpredicated `multi` membership delete — the one that empties the table — is refused', async () => {
+    await expect(engine.delete('sys_member', { multi: true, ...SYSTEM })).rejects.toThrow(
+      /last administrators/i,
+    );
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_owner')).toBe(true);
+  });
+
+  it('an `$in` predicate naming both administrative memberships is refused', async () => {
+    await expect(
+      engine.delete('sys_member', {
+        multi: true,
+        where: { id: { $in: ['mem_usr_owner', 'mem_usr_admin'] } },
+        ...SYSTEM,
+      }),
+    ).rejects.toThrow(/last administrators/i);
+  });
+
+  it('a predicate that spares one administrator proceeds', async () => {
+    await expect(
+      engine.update(
+        'sys_member',
+        { role: 'member' },
+        { multi: true, where: { id: { $in: ['mem_usr_admin', 'mem_usr_member'] } }, ...SYSTEM },
+      ),
+    ).resolves.toBeDefined();
+    expect(await memberRole(engine, 'mem_usr_admin')).toBe('member');
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
+  });
+
+  it('a predicate revoke that would sweep every admin_full_access grant is refused', async () => {
+    const grantEngine = await boot();
+    await seedAdminPermissionSet(grantEngine);
+    await seedUser(grantEngine, 'usr_p1', { platformAdmin: true });
+    await seedUser(grantEngine, 'usr_p2', { platformAdmin: true });
+
+    await expect(
+      grantEngine.delete('sys_user_permission_set', {
+        multi: true,
+        where: { permission_set_id: PS_ADMIN },
+        ...SYSTEM,
+      }),
+    ).rejects.toThrow(/last administrators/i);
+    expect(await rowExists(grantEngine, 'sys_user_permission_set', 'ups_usr_p1')).toBe(true);
+    expect(await rowExists(grantEngine, 'sys_user_permission_set', 'ups_usr_p2')).toBe(true);
+  });
+
+  it('a predicate grant EDIT that would expire every admin grant at once is refused', async () => {
+    const grantEngine = await boot();
+    await seedAdminPermissionSet(grantEngine);
+    await seedUser(grantEngine, 'usr_p1', { platformAdmin: true });
+    await seedUser(grantEngine, 'usr_p2', { platformAdmin: true });
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+
+    await expect(
+      grantEngine.update(
+        'sys_user_permission_set',
+        { valid_until: past },
+        { multi: true, where: { permission_set_id: PS_ADMIN }, ...SYSTEM },
+      ),
+    ).rejects.toThrow(/last administrators/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5978] Fail-closed, on the standing halves too
+// ---------------------------------------------------------------------------
+
+describe('[#5978] the standing halves fail CLOSED', () => {
+  it('a failing identity read refuses the membership removal and names the reason', async () => {
+    const engine = await boot({
+      readThrough: (real) => ({
+        registerHook: (event, handler, options) => real.registerHook(event, handler, options),
+        find: async () => {
+          throw new Error('sys_member is unreadable');
+        },
+      }),
+    });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+
+    // Two admins exist — this removal WOULD be legal. It is refused anyway.
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_admin' }, ...SYSTEM }),
+    ).rejects.toThrow(/Refusing this membership removal/);
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_admin' }, ...SYSTEM }),
+    ).rejects.toThrow(/could not be verified/i);
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_admin' }, ...SYSTEM }),
+    ).rejects.toThrow(/sys_member is unreadable/);
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_admin')).toBe(true);
+  });
+
+  it('a failing identity read refuses the role downgrade too', async () => {
+    const engine = await boot({
+      readThrough: (real) => ({
+        registerHook: (event, handler, options) => real.registerHook(event, handler, options),
+        find: async () => {
+          throw new Error('identity tables are unreadable');
+        },
+      }),
+    });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+
+    await expect(
+      engine.update('sys_member', { id: 'mem_usr_admin', role: 'member' }, SYSTEM),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', object: 'sys_member' });
+    expect(await memberRole(engine, 'mem_usr_admin')).toBe('admin');
+  });
+
+  it('a failing identity read refuses the grant revoke too', async () => {
+    const engine = await boot({
+      readThrough: (real) => ({
+        registerHook: (event, handler, options) => real.registerHook(event, handler, options),
+        find: async () => {
+          throw new Error('identity tables are unreadable');
+        },
+      }),
+    });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_p1', { platformAdmin: true });
+    await seedUser(engine, 'usr_p2', { platformAdmin: true });
+
+    await expect(
+      engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_p1' }, ...SYSTEM }),
+    ).rejects.toThrow(/Refusing this grant removal/);
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_p1')).toBe(true);
+  });
+
+  it('a population larger than the guard can enumerate refuses, in the op\'s own words', async () => {
+    const engine = await boot({ maxScan: 1 });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+    await seedUser(engine, 'usr_admin', { role: 'admin' });
+
+    // The advice is about the table the caller wrote — "a narrower set of
+    // memberships", not "of users".
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_admin' }, ...SYSTEM }),
+    ).rejects.toThrow(/more than 1 rows/);
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_admin' }, ...SYSTEM }),
+    ).rejects.toThrow(/Remove a narrower set of memberships/);
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_admin')).toBe(true);
+  });
+
+  it('an environment with no administrator at all is not blocked (nothing to protect)', async () => {
+    const engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_a', { role: 'member' });
+
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_a' }, ...SYSTEM }),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5978] Face 2 — the better-auth `updateMemberRole` / organization path
+// ---------------------------------------------------------------------------
+
+describe('[#5978] the updateMemberRole path: refused as a 403, not an opaque 500', () => {
+  let engine: ObjectQL;
+  let adapter: {
+    update: (args: { model: string; where: unknown[]; update: Record<string, unknown> }) => Promise<unknown>;
+  };
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner', accountProvider: 'oidc' });
+    await seedUser(engine, 'usr_admin', { role: 'admin', accountProvider: 'oidc' });
+    // The organization plugin has to be in the options for the same reason the
+    // admin plugin does in the #5892 block: `createAdapterFactory` resolves
+    // `member` → `sys_member` off ITS schema (`buildOrganizationPluginSchema`,
+    // the mapping `AuthManager` passes), so without it the write would not
+    // reach the guarded table at all.
+    adapter = (createObjectQLAdapterFactory(engine) as unknown as (o: unknown) => typeof adapter)({
+      plugins: [organization({ schema: buildOrganizationPluginSchema() })],
+    });
+  });
+
+  /** What better-auth's `updateMemberRole` ultimately writes. */
+  const changeRole = (memberId: string, role: string) =>
+    adapter.update({
+      model: 'member',
+      where: [{ field: 'id', value: memberId, operator: 'eq', connector: 'AND' }],
+      update: { role },
+    });
+
+  it('downgrading the second-to-last administrator succeeds', async () => {
+    await expect(changeRole('mem_usr_admin', 'member')).resolves.toBeTruthy();
+    expect(await memberRole(engine, 'mem_usr_admin')).toBe('member');
+  });
+
+  it('downgrading the LAST administrator is refused with a 403 APIError', async () => {
+    await changeRole('mem_usr_admin', 'member');
+
+    let caught: unknown;
+    try {
+      await changeRole('mem_usr_owner', 'member');
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeDefined();
+    expect(isAPIError(caught)).toBe(true);
+    const api = caught as { statusCode: number; body: { code?: string; message?: string } };
+    expect(api.statusCode).toBe(403);
+    expect(api.body.code).toBe('PERMISSION_DENIED');
+    expect(api.body.message).toMatch(/last administrator/i);
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5978] Reverse verification — the same fixtures with the guard NOT registered
+//
+// Direction, decided before running: RED, the usual one. With
+// `registerLastAdminGuard` not called, every case in the three path blocks
+// above is "the write succeeds and the standing is gone". These three re-run
+// that on the same fixtures rather than describing it.
+// ---------------------------------------------------------------------------
+
+describe('[#5978] reverse verification: without the guard, the third path locks the env out', () => {
+  it('the unguarded engine downgrades the last administrator and reports success', async () => {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner', accountProvider: 'oidc' });
+    await seedUser(engine, 'usr_escape', { role: 'member', accountProvider: 'credential' });
+
+    await expect(
+      engine.update('sys_member', { id: 'mem_usr_owner', role: 'member' }, SYSTEM),
+    ).resolves.toBeTruthy();
+    expect(await memberRole(engine, 'mem_usr_owner')).toBe('member');
+    // The issue's end state, spelled out: every user row is present and
+    // unbanned — which is exactly why #5892 and #5941 see nothing wrong — and
+    // no row in either standing table grades as an administrator any more.
+    expect(await userExists(engine, 'usr_owner')).toBe(true);
+    expect(await bannedFlag(engine, 'usr_owner')).toBeFalsy();
+    const admins = await engine.find(
+      'sys_member',
+      { where: { role: { $ne: 'member' } } },
+      SYSTEM,
+    );
+    expect(admins).toHaveLength(0);
+  });
+
+  it('the unguarded engine DELETES the last administrative membership', async () => {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(
+      engine.delete('sys_member', { where: { id: 'mem_usr_owner' }, ...SYSTEM }),
+    ).resolves.toBeDefined();
+    expect(await rowExists(engine, 'sys_member', 'mem_usr_owner')).toBe(false);
+    expect(await userExists(engine, 'usr_owner')).toBe(true);
+  });
+
+  it('the unguarded engine REVOKES the last admin_full_access grant', async () => {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(
+      engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_platform' }, ...SYSTEM }),
+    ).resolves.toBeDefined();
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(false);
+    expect(await userExists(engine, 'usr_platform')).toBe(true);
   });
 });

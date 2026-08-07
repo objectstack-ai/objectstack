@@ -52,6 +52,15 @@ import {
   type DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
+// [#5979] The ONE shared "which read failure is benign?" predicate (#4825
+// family). Imported from the leaf `/errors` subpath — which exists precisely
+// so a cross-package consumer gets the 40-line predicate without the manager,
+// the loaders or the YAML/filesystem machinery behind `@objectstack/metadata`'s
+// root entry. Asking the shared predicate rather than hand-rolling a
+// `code === '42P01'` test here is load-bearing, not stylistic: a second
+// vocabulary of "benign driver error" is the exact debt that module exists to
+// retire, and `check:durability-log-level` exempts only this declared name.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -2099,8 +2108,20 @@ export class ObjectQL implements IObjectQLEngine {
         if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
       }
       return max;
-    } catch {
-      return 0;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
     }
   }
 
