@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/core",
-  "version": "17.0.0-rc.2",
+  "version": "17.0.0-rc.3",
   "license": "Apache-2.0",
   "description": "Microkernel Core for ObjectStack",
   "type": "module",
@@ -24,6 +24,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@objectstack/metadata-core": "workspace:*",
     "@types/node": "^26.1.2",
     "esbuild": "^0.28.1",
     "typescript": "^6.0.3",

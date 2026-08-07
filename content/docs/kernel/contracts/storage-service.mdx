@@ -25,9 +25,6 @@ export interface IStorageService {
   exists(key: string): Promise<boolean>;
   getInfo(key: string): Promise<StorageFileInfo>;
 
-  // Listing (optional — adapter may not implement)
-  list?(prefix: string): Promise<StorageFileInfo[]>;
-
   // Signed URL (optional)
   getSignedUrl?(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string>;
 
@@ -55,8 +52,8 @@ export interface IStorageService {
 ```
 
 <Callout type="warn">
-Only `upload`, `download`, `delete`, `exists`, and `getInfo` are required. Listing,
-signed/presigned URLs, and chunked upload are optional — call them only after checking
+Only `upload`, `download`, `delete`, `exists`, and `getInfo` are required.
+Signed/presigned URLs and chunked upload are optional — call them only after checking
 the method exists on the active adapter (the local and S3 adapters implement them).
 </Callout>
 
@@ -172,22 +169,22 @@ export interface StorageUploadOptions {
 
 ## Listing Files
 
-### list
+<Callout type="warn">
+**`list(prefix)` was removed** in `@objectstack/spec` 5.x — the contract has no
+prefix-enumeration method. It was declared but never consumed, and the two shipped
+adapters answered it differently while both silently returned an incomplete answer:
+the local adapter listed a single level and reported directories as files, the S3
+adapter recursed and stopped at 1000 objects without reading `IsTruncated` /
+`ContinuationToken`.
 
-Lists files under a key prefix. This method is optional — verify the active
-adapter implements it before calling. It takes a single `prefix` argument
-(no pagination options) and returns `StorageFileInfo[]`.
-
-```typescript
-// List all attachments for a task
-const files = await storageService.list?.(
-  'attachments/tasks/tsk_01HQ4A7B/'
-) ?? [];
-
-for (const file of files) {
-  console.log(`${file.key} (${file.size} bytes)`);
-}
-```
+There is no drop-in replacement, deliberately — a prefix listing that cannot paginate
+is the wrong shape to keep. If you were enumerating a prefix, track the keys you wrote
+(the `sys_file` / file-reference records already do this, and are queryable through
+ObjectQL with real pagination) instead of asking the bucket. When a first-party caller
+genuinely needs bucket enumeration, it returns cursor-shaped —
+`list(prefix, { cursor, limit })` — with adapter-conformance cases proving both
+backends agree.
+</Callout>
 
 ---
 
@@ -273,7 +270,7 @@ const key = await storageService.completeChunkedUpload?.(uploadId, [
 
 ## StorageFileInfo
 
-The return type for file metadata (`getInfo`, `list`).
+The return type for file metadata (`getInfo`).
 
 {/* os:check */}
 ```typescript

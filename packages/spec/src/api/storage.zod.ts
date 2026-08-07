@@ -87,11 +87,21 @@ export const RawUploadResponseSchema = lazySchema(() => BaseResponseSchema.exten
 }));
 
 export type GetPresignedUrlRequest = z.infer<typeof GetPresignedUrlRequestSchema>;
+/** Post-parse shape of {@link GetPresignedUrlRequest} — defaults applied, transforms run (ADR-0122). */
+export type GetPresignedUrlRequestParsed = z.infer<typeof GetPresignedUrlRequestSchema>;
 export type CompleteUploadRequest = z.infer<typeof CompleteUploadRequestSchema>;
 export type PresignedUrlResponse = z.infer<typeof PresignedUrlResponseSchema>;
+/** Post-parse shape of {@link PresignedUrlResponse} — defaults applied, transforms run (ADR-0122). */
+export type PresignedUrlResponseParsed = z.infer<typeof PresignedUrlResponseSchema>;
 export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
+/** Post-parse shape of {@link FileUploadResponse} — defaults applied, transforms run (ADR-0122). */
+export type FileUploadResponseParsed = z.infer<typeof FileUploadResponseSchema>;
 export type FileDownloadUrlResponse = z.infer<typeof FileDownloadUrlResponseSchema>;
+/** Post-parse shape of {@link FileDownloadUrlResponse} — defaults applied, transforms run (ADR-0122). */
+export type FileDownloadUrlResponseParsed = z.infer<typeof FileDownloadUrlResponseSchema>;
 export type RawUploadResponse = z.infer<typeof RawUploadResponseSchema>;
+/** Post-parse shape of {@link RawUploadResponse} — defaults applied, transforms run (ADR-0122). */
+export type RawUploadResponseParsed = z.infer<typeof RawUploadResponseSchema>;
 
 // ==========================================
 // Chunked / Resumable Upload Protocol
@@ -136,6 +146,8 @@ export const InitiateChunkedUploadRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.string()).optional().describe('Custom metadata key-value pairs'),
 }));
 export type InitiateChunkedUploadRequest = z.infer<typeof InitiateChunkedUploadRequestSchema>;
+/** Post-parse shape of {@link InitiateChunkedUploadRequest} — defaults applied, transforms run (ADR-0122). */
+export type InitiateChunkedUploadRequestParsed = z.infer<typeof InitiateChunkedUploadRequestSchema>;
 
 /**
  * Initiate Chunked Upload Response
@@ -152,6 +164,8 @@ export const InitiateChunkedUploadResponseSchema = lazySchema(() => BaseResponse
   }),
 }));
 export type InitiateChunkedUploadResponse = z.infer<typeof InitiateChunkedUploadResponseSchema>;
+/** Post-parse shape of {@link InitiateChunkedUploadResponse} — defaults applied, transforms run (ADR-0122). */
+export type InitiateChunkedUploadResponseParsed = z.infer<typeof InitiateChunkedUploadResponseSchema>;
 
 /**
  * Upload Chunk Request
@@ -178,6 +192,8 @@ export const UploadChunkResponseSchema = lazySchema(() => BaseResponseSchema.ext
   }),
 }));
 export type UploadChunkResponse = z.infer<typeof UploadChunkResponseSchema>;
+/** Post-parse shape of {@link UploadChunkResponse} — defaults applied, transforms run (ADR-0122). */
+export type UploadChunkResponseParsed = z.infer<typeof UploadChunkResponseSchema>;
 
 /**
  * Complete Chunked Upload Request
@@ -209,6 +225,8 @@ export const CompleteChunkedUploadResponseSchema = lazySchema(() => BaseResponse
   }),
 }));
 export type CompleteChunkedUploadResponse = z.infer<typeof CompleteChunkedUploadResponseSchema>;
+/** Post-parse shape of {@link CompleteChunkedUploadResponse} — defaults applied, transforms run (ADR-0122). */
+export type CompleteChunkedUploadResponseParsed = z.infer<typeof CompleteChunkedUploadResponseSchema>;
 
 /**
  * Upload Progress Schema
@@ -233,6 +251,8 @@ export const UploadProgressSchema = lazySchema(() => BaseResponseSchema.extend({
   }),
 }));
 export type UploadProgress = z.infer<typeof UploadProgressSchema>;
+/** Post-parse shape of {@link UploadProgress} — defaults applied, transforms run (ADR-0122). */
+export type UploadProgressParsed = z.infer<typeof UploadProgressSchema>;
 
 // ==========================================
 // Storage API Contract Registry

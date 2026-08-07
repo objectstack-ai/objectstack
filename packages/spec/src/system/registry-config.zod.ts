@@ -179,4 +179,8 @@ export const RegistryConfigSchema = lazySchema(() => z.object({
 
 export type RegistrySyncPolicy = z.infer<typeof RegistrySyncPolicySchema>;
 export type RegistryUpstream = z.infer<typeof RegistryUpstreamSchema>;
+/** Post-parse shape of {@link RegistryUpstream} — defaults applied, transforms run (ADR-0122). */
+export type RegistryUpstreamParsed = z.infer<typeof RegistryUpstreamSchema>;
 export type RegistryConfig = z.infer<typeof RegistryConfigSchema>;
+/** Post-parse shape of {@link RegistryConfig} — defaults applied, transforms run (ADR-0122). */
+export type RegistryConfigParsed = z.infer<typeof RegistryConfigSchema>;

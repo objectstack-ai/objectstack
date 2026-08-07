@@ -29,6 +29,15 @@ workspace package declares a `typecheck` script or carries a measured DEBT/EXEMP
 in `scripts/check-type-check-coverage.mjs`. New packages must arrive covered; a package
 that graduates deletes its ledger entry in the same PR.
 
+The ledger numbers are ratcheted too (`pnpm check:type-check-debt`, run in the same CI
+job after its build step): every DEBT/TEST_DEBT count is re-run through `tsc --noEmit`,
+and a count ABOVE its recorded number fails. Below is only an informational
+"can be lowered" line — improvements never owe CI a bookkeeping edit. Before #5278 the
+gate asserted only that *some* positive number was written down, so the real counts had
+drifted up to 2.25x while it reported success. When a re-measure makes you raise an
+entry, rewrite its `note` as well: the composition drifts too, and a note that still
+names only the old errors reads as "nearly graduated" to the next author.
+
 **Do not `exclude` `*.test.ts` / `*.spec.ts` from a package's `tsconfig.json`.** `tsc
 --noEmit` reads that config, so an exclusion there hides the tests from the check the
 `typecheck` script advertises — a green gate over source nothing read, which is the
@@ -112,7 +121,7 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 
    When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`. See #1382.
 10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug, gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub issue (`gh issue create`) with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake coverage. Example: the spec once declared 9 validation-rule types while the write-path validator enforced only 3 (`state_machine`/`script`/`cross_field`); the gap was filed as #1475 rather than demoed in the showcase, then closed by **trimming** what could never be enforced (`unique`/`async`/`custom`) and **implementing** the rest — the spec now declares 6 and `rule-validator.ts` handles all 6. Note how narrow that claim stayed even so: the evaluator was wired into insert and single-id update only, so a bulk `updateMany` silently skipped every rule — a second `declared ≠ enforced` gap one layer down, at the **call site** rather than the `switch`; filed as #3106 and closed by evaluating the bulk match set per row. A `case` label is not enforcement; check the **call site**.
-11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**; the shared `main` tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work. Before your **first file edit**, you MUST be in a dedicated worktree on a feature branch: `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. A PreToolUse hook (`.claude/hooks/guard-main-checkout.sh`) **enforces** this — it blocks `Edit`/`Write`/`NotebookEdit` unless the edited file is in a dedicated **worktree** — a feature branch on the *shared* checkout is **not** enough (it still gets switched under you) — and it checks the **edited file's own repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (override for a deliberate non-task fix with `OS_ALLOW_MAIN_EDITS=1`). Full playbook below.
+11. **Worktree-first — never edit on the shared `main` checkout.** This repo is edited by **multiple agents at once**; the shared `main` tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work. Before your **first file edit**, you MUST be in a dedicated worktree on a feature branch: `git worktree add ../objectstack-<task> -b <branch> main && cd ../objectstack-<task> && pnpm install`. Two PreToolUse hooks **enforce** this — `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`, and `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>` redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — unless the target is in a dedicated **worktree** — a feature branch on the *shared* checkout is **not** enough (it still gets switched under you) — and both check the **target file's own repo**, so sibling repos (`objectui`/`cloud`) you touch are covered too (override for a deliberate non-task fix with `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through — the rule still outranks the hook. Full playbook below.
 12. **Contract-first — fix the metadata, not the runtime.** This is a metadata-driven framework: `packages/spec` is the one contract between metadata *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**: *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the **producer** and **reject it at authoring/publish** (validation / lint) so the error surfaces loudly — do **not** add a lenient alias or `??` fallback in the consumer (a node executor, the REST layer, a renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto contract, dilutes the spec, and hides the producer's bug — one strict contract beats N dialects. This is an **internal** contract (we own both ends), so "be liberal in what you accept" (Postel) does **not** apply — that's for untrusted boundaries. Change the **spec** only when the spec itself is genuinely wrong, and then deliberately (edit the Zod schema + migrate), never by accreting consumer-side fallbacks. The `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` fallbacks the flow executors once carried are **debt to pay down, not a pattern to copy** — and the way they are being paid down is the pattern to copy. `filters` → `filter` has **graduated** into the ADR-0087 D2 conversion layer (`flow-node-crud-filter-alias`): rewritten to the canonical key at load, including the `AutomationEngine.registerFlow` rehydration seam, so the CRUD executors read `cfg.filter` directly and no consumer-side fallback survives. `object` → `objectName` and the six open-coded stragglers #3796 tracked (notify `to`/`subject`/`body`/`url`, script `functionName`/`input`) graduated the same way at protocol 17 (`flow-node-crud-object-alias`, `flow-node-notify-config-aliases`, `flow-node-script-config-aliases`), emptying the `readAliasedConfig` executor shim — deleted with them. When you must tolerate an alias at all, declare it as a conversion-layer entry (never a bare `??`, and no new executor shims) so it is declared, loud, tested, and *removable on a schedule*. Stored `sys_metadata` rows (data at rest) are covered from the other side: every rehydration seam replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (#3903, ADR-0087 addendum), so a consumer never needs its own accommodation for a legacy stored shape either. *Worked example:* an AI-authored `create_record` used `fieldValues` / `today()` / `{{trigger.record.id}}` while the executor reads `fields` / `{TODAY()}` / `{record.id}` → the fix was correcting the authoring skill + a publish-gate lint that rejects the wrong shape (cloud#688), **not** a `cfg.fields ?? cfg.fieldValues` runtime alias (framework#2419, rejected). Strengthens #5.
 13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are touching** — the decision is often older and broader than the code comment in front of you. *Worked example:* three accepted ADRs said `sys_member.role` must never carry RBAC authority (ADR-0057 D4 "never as the authority for RBAC", ADR-0090 D3's word ban "distribution = `position`", ADR-0095 D3 "no enforcement-time code path may consult the better-auth role"). A patch-level changeset made app-declared names storable there anyway; a follow-up made it automatic in every host; the reversal held for a day and the tracking issue was closed, reopened and rewritten three times while the cause moved (#3723 → ADR-0108). The mechanism was not carelessness — **the file being edited never named the ADRs that governed it**, so the author could not have known. Hence the corollary: when you implement an ADR's decision, **leave its id in the code**, and anchor load-bearing spots in `scripts/adr-anchors.json` (`pnpm check:adr-anchors`) so the next author is told which decision they are standing on. A decision nobody can find is a decision that will be reversed.
 
@@ -251,11 +260,27 @@ Even inside your own worktree, operate defensively:
 11. **Generated artifacts don't text-merge — a driver defers them and
    `pre-commit` collects the debt.** §10's "never trust git's textual merge of a
    generated file" is now mechanical (#4675). `.gitattributes` routes the
-   generator-owned artifacts (`spec-changes.json`, `authorable-surface.json`,
-   `api-surface*.json`, `json-schema.manifest.json`,
+   generator-owned artifacts (`spec-changes.json`, `authorable-surface/**`,
+   `authorable-surface.base.json`, `api-surface/**`,
+   `api-surface-signatures.json`, `json-schema.manifest/**`,
    `docs/protocol-upgrade-guide.md`, `content/docs/references/**`) to
    `merge=os-regen`, so a merge that used to stop on conflicts across all of
    them now stops only on the hand-written files that actually need you.
+
+   **The driver is a LOCAL facility, and #5837 is where that bound showed.** The
+   GitHub merge queue rebuilds each PR server-side, where no custom merge driver
+   runs — so two PRs that both touched `authorable-surface.json` (a 310KB sorted
+   array every spec PR rewrites) were a plain textual conflict there and the
+   second was evicted, capping the spec lane at one PR at a time. The three
+   hottest artifacts are therefore **sharded**: `authorable-surface/<category>.json`,
+   `json-schema.manifest/<category>.json`, `api-surface/<entry>.json`. PRs
+   touching different categories now touch disjoint files, and the driver keeps
+   the residue (two PRs in the same category). Every gate reads the whole
+   directory as one set, so the ratchet semantics are unchanged — see
+   `packages/spec/scripts/lib/sharded-artifacts.ts`. Deliberately still single
+   files: `spec-changes.json` (keyed by version), `api-surface-signatures.json`
+   (1.3KB) and `authorable-surface.base.json` (written only by an explicit
+   `--update-base`, so never on the churn path).
 
    The driver does **not** regenerate. Git runs merge drivers *while* it merges,
    in index order, so the worktree still holds pre-merge sources — a generator
@@ -382,7 +407,7 @@ regenerate up front:
 | The react-blocks contract | `check:react-blocks` | `gen:react-blocks` |
 
 A `.describe()` string counts — it is not "just a comment", it lands in
-`content/docs/references/`. Adding one export counts — it lands in `api-surface.json`.
+`content/docs/references/`. Adding one export counts — it lands in `api-surface/`.
 Both were learned the hard way in #4040: two separate red builds, neither a logic error.
 
 Don't match by hand — one command runs **every** gate and reports **all** stale
@@ -398,6 +423,20 @@ pnpm --filter @objectstack/spec check:generated --fix   # regenerate ONLY the on
 signal: it rewrites artifacts whose staleness you never saw, so a real semantic change
 lands silently inside a mechanical diff. Let the check tell you which are stale, then
 regenerate those.
+
+**No `check:` script regenerates anything — that is the point of the split, not an
+oversight.** `check:docs` used to begin with `pnpm gen:schema`, which rewrites two
+*tracked* files (`json-schema.manifest/`, `authorable-surface/`) whenever they
+are behind: running the gate edited your working tree and reported nothing, so a
+`check:generated` run on a stale manifest printed a red `check:authorable-surface`
+over a file the gate two lines below had already quietly fixed (#4711, #4723). The
+generation belongs to the **caller** now — `pnpm build`, or the
+`check:authorable-surface` gate that runs before `check:docs` in both CI and
+`check:generated`, whose `--check` mode writes the gitignored `json-schema/` tree and
+refuses to touch a tracked one. Consequence for you: **`check:docs` is not
+self-sufficient**. Run the `build` line above first (it is already required for the
+`dist` caveat below) — `build-docs.ts` refuses on a missing or stale tree and names
+the command, so the failure is loud, never a wrong verdict.
 
 The script carries its own ledger of gate → generator and **reconciles it against
 `package.json` on every run**, in both directions. A new `check:`/`gen:` script that
@@ -415,12 +454,12 @@ believe it, and before you file a bug about `main` being red. (Two phantom "brea
 removals" this way while writing this section; `check:generated` now prints this caveat
 inline when that gate is the one failing.)
 
-`check:liveness`, `check:empty-state`, `check:skill-examples`,
-`check:react-declaration-parity`, `check:exported-any` and `check:dual-source-exports` are
+`check:liveness`, `check:empty-state`, `check:skill-examples`, `check:exported-any` and
+`check:dual-source-exports` are
 pure checks with no generator — a failure there is a real finding to fix, not an artifact
 to regenerate. `check:generated` names them as deliberately not run, so its "all up to
 date" never reads as "everything passed". The last one asks the third question about the
-export surface (#4446): `api-surface.json` shows a name on two entries but not whether
+export surface (#4446): `api-surface/` shows a name on two entries but not whether
 that is one declaration re-exported (fine) or two declarations sharing a name — the #4411
 trap, judged by symbol identity against the built dist, with the accepted cases in the
 shrink-only `dual-source-exports.baseline.json` (hand-edited under review, never
@@ -436,9 +475,25 @@ and #4413 shipped four dead blocks straight through a green run of it. Renamed a
 re-scoped in #4472. The gate is still worth having (`spec-only`, `registry-only` and
 `missing` are real signals) — just don't read it as proof anything renders.
 
+⚠️ **It is also the one gate `check:generated` cannot run at all**, and it says so in its
+own bucket (`EXTERNAL_INPUT_REQUIRED`, "cannot run here") rather than beside the source
+audits that are merely *deliberately* not run. Its right-hand side is objectui's
+`sdui.manifest.json`, and nothing here can produce one: the registry is a browser app, so
+the manifest exists only after `pnpm sdui:manifest` builds objectui at `.objectui-sha` and
+enumerates it in a real browser — `packages/console/dist/` is gitignored, the console
+build deliberately does not dump one, and the published `@objectstack/console` carries
+none either. Until #4690 that combined with a manual run that printed `⚠ manifest
+unavailable` and **exited 0**, so no path existed on which this gate could go red; it now
+**exits 1** when it has no usable manifest, because "could not run" is a failure, not a
+skip (Route & surface ownership §3, *Absence must be loud*). Run it the one way that
+works: `pnpm sdui:manifest` (or `OBJECTUI_ROOT=../objectui pnpm objectui:build` first),
+which dumps the manifest and runs the ratchet against it. Where the manifest *should* come
+from in CI is an open provenance question, tracked separately — do not "fix" the red by
+re-adding a skip.
+
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the
-`api-surface.json` question: that snapshot records an export *exists*, never what it
+`api-surface/` question: that snapshot records an export *exists*, never what it
 *resolves to*, which is how five exported symbols sat at `any` for a whole major with
 every gate green (#4171). A recursive Zod schema needs an annotation to break its
 circular inference, and `z.ZodType<any>` compiles, validates correctly, and silently
@@ -716,7 +771,7 @@ it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    working tree.
 3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
-4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface.json`; a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
+4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point since #5837); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
 5. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
 6. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
 

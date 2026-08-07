@@ -1244,6 +1244,7 @@ export const contractExpirationCheck: Flow = {
   label: 'Contract Expiration Check',
   type: 'schedule',
   status: 'active',
+  runAs: 'system', // a schedule run has no trigger user — elevate explicitly
   nodes: [
     {
       id: 'start',

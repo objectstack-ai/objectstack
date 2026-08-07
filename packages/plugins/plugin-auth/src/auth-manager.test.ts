@@ -1681,7 +1681,7 @@ describe('AuthManager', () => {
   describe('phone-number OTP over SMS (#2780)', () => {
     const PHONE = '+8613800000000';
 
-    const fakeSms = (opts: { failed?: boolean } = {}) => {
+    const fakeSms = (opts: { failed?: boolean; error?: string } = {}) => {
       const sent: any[] = [];
       return {
         sent,
@@ -1689,7 +1689,7 @@ describe('AuthManager', () => {
           async send(input: any) {
             sent.push(input);
             return opts.failed
-              ? { id: 'sms_1', status: 'failed', error: 'provider down' }
+              ? { id: 'sms_1', status: 'failed', error: opts.error ?? 'provider down' }
               : { id: 'sms_1', status: 'sent', messageId: 'prov_1' };
           },
           isConfigured: () => true,
@@ -1783,6 +1783,158 @@ describe('AuthManager', () => {
 
       await expect(opts.sendOTP({ phoneNumber: PHONE, code: '555555' }))
         .rejects.toSatisfy((e: Error) => /provider down/.test(e.message) && !e.message.includes('555555'));
+    });
+
+    // ── #6039 / #2814 — the deployment-wide daily SMS quota wall ───────────
+    //
+    // `SmsService.send()` refuses a send past the deployment's daily cost
+    // ceiling by RETURNING a failed result whose `error` carries the
+    // `TOO_MANY_REQUESTS:` code prefix (#2814) — it cannot throw an HTTP-shaped
+    // error, because it is a kernel service with no idea who is calling.
+    // Rethrowing that envelope as a plain `Error` made better-call answer
+    // **500 with a null body**: its router maps only `APIError`
+    // (`isAPIError = err instanceof APIError || err?.name === 'APIError'`,
+    // better-call@1.3.7 `dist/utils.mjs:57`, consumed at `dist/router.mjs:93`),
+    // and everything else takes the `console.error` + 500 branch. Meanwhile the
+    // per-number wall on the SAME endpoint (`assertPhoneOtpSendAllowed`, in the
+    // admission hook) throws a real `APIError('TOO_MANY_REQUESTS')` and answers
+    // 429 — so one endpoint spoke with two voices, which is the reverse of what
+    // #2814 asked for.
+    describe('daily SMS quota refusal reaches the caller as 429 (#6039)', () => {
+      /**
+       * The refusal envelope an `SmsService` hands back on a quota refusal.
+       * Written out here rather than imported: `@objectstack/service-sms`
+       * already depends on THIS package (its day counter imports
+       * `InProcessCounterStore` / `incrementFixedWindow` from plugin-auth), so
+       * importing its `SMS_QUOTA_EXCEEDED_ERROR` back would close a dependency
+       * cycle. Source of truth: `SMS_QUOTA_EXCEEDED_CODE` /
+       * `SMS_QUOTA_EXCEEDED_ERROR` in
+       * `packages/services/service-sms/src/sms-daily-quota.ts`.
+       */
+      const QUOTA_REFUSAL = 'TOO_MANY_REQUESTS: daily SMS quota exhausted';
+
+      /**
+       * The outward shape a client — and better-call's router — actually
+       * branches on. Message text is deliberately NOT part of it: the two walls
+       * must be indistinguishable in code and status, while each may still say
+       * something true (only the per-number wall can name a retry window).
+       */
+      const outwardShape = (e: any) => ({
+        name: e?.name,
+        status: e?.status,
+        statusCode: e?.statusCode,
+        bodyCode: e?.body?.code,
+      });
+
+      const rejection = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+          await run();
+        } catch (e) {
+          return e;
+        }
+        throw new Error('expected the call to reject, but it resolved');
+      };
+
+      it('OTP send: rejects with an APIError carrying 429 / TOO_MANY_REQUESTS', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '424242' }));
+        // Exactly what better-call reads to choose 429 over 500.
+        const { isAPIError } = await import('better-auth/api');
+        expect(isAPIError(err)).toBe(true);
+        expect(err.name).toBe('APIError');
+        expect(err.status).toBe('TOO_MANY_REQUESTS');
+        expect(err.statusCode).toBe(429);
+        // #2780 standing requirement: the code never travels in an error.
+        expect(String(err.message)).not.toContain('424242');
+      });
+
+      it('invitation SMS: same APIError / 429 at the AuthManager boundary', async () => {
+        const { manager } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        const err = await rejection(() => manager.sendPhoneInviteSms(PHONE));
+        const { isAPIError } = await import('better-auth/api');
+        expect(isAPIError(err)).toBe(true);
+        expect(err.status).toBe('TOO_MANY_REQUESTS');
+        expect(err.statusCode).toBe(429);
+      });
+
+      it('both walls on the endpoint present the SAME outward shape', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        // Wall A — the per-number cooldown, refused in the admission hook (#2780).
+        await manager.assertPhoneOtpSendAllowed(PHONE);
+        const perNumber = await rejection(() => manager.assertPhoneOtpSendAllowed(PHONE));
+        // Wall B — the deployment's daily quota, refused inside the send (#2814).
+        const quota = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '111111' }));
+
+        expect(outwardShape(quota)).toEqual(outwardShape(perNumber));
+        expect(outwardShape(quota)).toEqual({
+          name: 'APIError',
+          status: 'TOO_MANY_REQUESTS',
+          statusCode: 429,
+          bodyCode: undefined,
+        });
+      });
+
+      it('matches the CODE prefix, so the service may reword the message half', async () => {
+        const { manager, opts } = await bootOtp();
+        // Only `TOO_MANY_REQUESTS` — an ADR-0112 error code — is restated across
+        // the package boundary; the prose after the colon is service-owned and
+        // free to change without breaking this mapping.
+        manager.setSmsService(
+          fakeSms({ failed: true, error: 'TOO_MANY_REQUESTS: budget spent for today' }).service,
+        );
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '333333' }));
+        expect(err.statusCode).toBe(429);
+      });
+
+      it('does NOT over-tighten: a transport failure keeps its 500 semantics', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true }).service); // 'provider down'
+        const { isAPIError } = await import('better-auth/api');
+
+        const otpErr = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '555555' }));
+        expect(isAPIError(otpErr)).toBe(false);
+        expect(otpErr.name).toBe('Error');
+        expect(String(otpErr.message)).toContain('provider down');
+
+        const inviteErr = await rejection(() => manager.sendPhoneInviteSms(PHONE));
+        expect(isAPIError(inviteErr)).toBe(false);
+        expect(inviteErr.name).toBe('Error');
+        expect(String(inviteErr.message)).toContain('provider down');
+      });
+
+      it('the code must PREFIX the envelope — a provider merely mentioning it stays 500', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(
+          fakeSms({ failed: true, error: 'upstream rejected: TOO_MANY_REQUESTS at carrier' }).service,
+        );
+        const { isAPIError } = await import('better-auth/api');
+        const err = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '777777' }));
+        expect(isAPIError(err)).toBe(false);
+        expect(err.name).toBe('Error');
+      });
+
+      it('the 429 message carries no quota ceiling, remaining count or reset clock', async () => {
+        const { manager, opts } = await bootOtp();
+        manager.setSmsService(fakeSms({ failed: true, error: QUOTA_REFUSAL }).service);
+
+        for (const run of [
+          () => opts.sendOTP({ phoneNumber: PHONE, code: '999999' }),
+          () => manager.sendPhoneInviteSms(PHONE),
+        ]) {
+          const message = String((await rejection(run)).message);
+          // No digits at all ⇒ no ceiling, no remaining count, no reset clock.
+          expect(message).not.toMatch(/\d/);
+          // …and not the raw service envelope, which names the budget that was hit.
+          expect(message).not.toContain(QUOTA_REFUSAL);
+          expect(message.toLowerCase()).not.toContain('quota');
+        }
+      });
     });
 
     it('honours phoneOtp knobs (cooldown off ⇒ back-to-back admissions allowed)', async () => {
@@ -3657,5 +3809,196 @@ describe('getPublicConfig devSeedAdmin (dev-only login hint)', () => {
     const manager = makeManager();
     manager.devSeedResult = { email: 'admin@objectos.ai', password: 'admin123' };
     expect((manager.getPublicConfig() as any).devSeedAdmin).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#5942] `isOrgOrPlatformAdmin` — the ADR-0024 `/sso/register` admin gate's
+// criterion — asks "does this membership administer the org" through the ONE
+// grade ladder (`isOrgAdminGrade`, `invitation-role-cap.ts`), not a hand-copied
+// `role === 'owner' || role === 'admin'`.
+//
+// The hand-copy it replaces did `.split(',').map(trim).some(=== 'owner' ||
+// === 'admin')` — case-SENSITIVE, and blind to the array spelling. The grade
+// ladder additionally `.toLowerCase()`s and joins arrays, so the two answered
+// differently on `Owner` / `ADMIN` / `['owner']`: this gate refused a real
+// administrator (false negative) while the break-glass ban guard
+// (`last-admin-ban-guard.ts`, same ladder) counted the same row AS an
+// administrator. Two spellings of one security question, diverging silently.
+//
+// Direction of the change, measured (see the PR body): every difference is a
+// WIDENING, and only over values the old spelling judged wrongly. There is no
+// value that was admin before and is not admin now — the closed ADR-0108
+// vocabulary (all lowercase) answers identically on both sides, which is why
+// no user could hit this today.
+//
+// NOTE on `' admin '`: it is a regression pin, NOT a before-red case. The
+// hand-copy already trimmed, so it answered `true` before the change too. Only
+// the CASE and ARRAY spellings actually move.
+//
+// The platform-admin half of this method is deliberately untouched (#5942 is
+// scoped to the org ruler); the platform-admin cases below pin that.
+// ---------------------------------------------------------------------------
+describe('isOrgOrPlatformAdmin – one grade ruler for "is this membership an admin" (#5942)', () => {
+  const SECRET = 'test-secret-at-least-32-chars-long';
+
+  /**
+   * Read-only engine stub: `members` are the `sys_member` rows, `platformAdmin`
+   * controls the org-less `admin_full_access` link. `find` honours the `where`
+   * the gate actually passes (`user_id`, and `organization_id` when an active
+   * org is set) so the org-scoping half is the product's, not the fixture's.
+   */
+  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean } = {}) => ({
+    find: vi.fn(async (object: string, query?: any) => {
+      if (opts.throws) throw new Error('db down');
+      if (object === 'sys_user_permission_set') {
+        return opts.platformAdmin
+          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: null }]
+          : [];
+      }
+      if (object === 'sys_permission_set') return [{ id: 'ps-admin', name: 'admin_full_access' }];
+      if (object === 'sys_member') {
+        const where = query?.where ?? {};
+        return (opts.members ?? []).filter((row) =>
+          Object.entries(where).every(([k, v]) => row[k] === v),
+        );
+      }
+      return [];
+    }),
+    findOne: vi.fn(),
+  });
+
+  /** The gate's criterion, invoked exactly as the `/sso/register` hook does. */
+  const judge = async (
+    engine: any,
+    activeOrgId?: string,
+    userId = 'u-1',
+  ): Promise<boolean> => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      dataEngine: engine,
+    });
+    warn.mockRestore();
+    return (manager as any).isOrgOrPlatformAdmin(userId, activeOrgId);
+  };
+
+  const memberRow = (role: unknown) => ({
+    id: 'm-1',
+    user_id: 'u-1',
+    organization_id: 'org-1',
+    role,
+  });
+
+  // -- (1) the fix itself: values the hand-copy refused, the ladder admits ----
+  describe('case-insensitive + array spellings (before: refused, after: admitted)', () => {
+    it.each([
+      ['Owner', 'better-auth owner, capitalized by an import'],
+      ['ADMIN', 'shout-cased by a hand-written SQL insert'],
+      [' Admin ', 'padded AND capitalized'],
+      ['OWNER', 'shout-cased owner'],
+      ['member,Owner', 'comma-joined with one capitalized administrative role'],
+    ])('grades %j as an administrator (%s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(true);
+    });
+
+    it('grades the ARRAY spelling ["owner"] as an administrator', async () => {
+      // The hand-copy read `typeof m.role === 'string' ? m.role : ''`, so any
+      // array-valued role graded as nothing at all.
+      expect(await judge(makeEngine({ members: [memberRow(['owner'])] }), 'org-1')).toBe(true);
+    });
+
+    it('grades the ARRAY spelling ["member","Admin"] as an administrator', async () => {
+      expect(
+        await judge(makeEngine({ members: [memberRow(['member', 'Admin'])] }), 'org-1'),
+      ).toBe(true);
+    });
+  });
+
+  // -- (2) regression: the closed ADR-0108 vocabulary answers identically -----
+  describe('closed membership vocabulary (ADR-0108) — unchanged by the new ruler', () => {
+    it.each([
+      ['owner', true],
+      ['admin', true],
+      ['delegated_admin', false],
+      ['member', false],
+    ] as const)('grades the built-in %j as admin=%s', async (role, expected) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(expected);
+    });
+
+    it.each([
+      ['owner,member', true],
+      ['member,admin', true],
+      [' admin ', true],
+      ['member,delegated_admin', false],
+    ] as const)(
+      'grades the comma/whitespace spelling %j as admin=%s (already true before #5942)',
+      async (role, expected) => {
+        expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(expected);
+      },
+    );
+  });
+
+  // -- (3) non-administrative values still refused (no widening past admin) ---
+  describe('fail-closed floor — nothing else is admitted', () => {
+    it.each([
+      ['manager', 'an app-registered name that is not an administrative grade'],
+      ['administrator', 'a near-miss that is not the vocabulary'],
+      ['adminx', 'a prefix collision'],
+      ['', 'an empty role'],
+    ])('refuses %j (%s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(false);
+    });
+
+    it.each([
+      [null, 'null'],
+      [undefined, 'undefined'],
+      [42, 'a number'],
+      [{ role: 'owner' }, 'an object that merely mentions owner'],
+    ])('refuses a non-string role (%s: %s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(false);
+    });
+
+    it('refuses when the user has no membership row at all', async () => {
+      expect(await judge(makeEngine({ members: [] }), 'org-1')).toBe(false);
+    });
+
+    it('refuses when the engine read throws (fail CLOSED — ADR-0024)', async () => {
+      expect(await judge(makeEngine({ throws: true }), 'org-1')).toBe(false);
+    });
+  });
+
+  // -- (4) org scoping and the untouched platform-admin half -----------------
+  describe('scoping and the platform-admin half (untouched by #5942)', () => {
+    it('judges only the ACTIVE org when one is set', async () => {
+      const engine = makeEngine({
+        members: [
+          { id: 'm-1', user_id: 'u-1', organization_id: 'org-other', role: 'Owner' },
+          { id: 'm-2', user_id: 'u-1', organization_id: 'org-1', role: 'member' },
+        ],
+      });
+      // Administrative elsewhere, plain member here → refused for org-1 …
+      expect(await judge(engine, 'org-1')).toBe(false);
+      // … and admitted when that other org is the active one.
+      expect(await judge(engine, 'org-other')).toBe(true);
+    });
+
+    it('accepts an administrative membership in ANY org when no active org is set', async () => {
+      const engine = makeEngine({
+        members: [{ id: 'm-1', user_id: 'u-1', organization_id: 'org-other', role: 'ADMIN' }],
+      });
+      expect(await judge(engine, undefined)).toBe(true);
+    });
+
+    it('still admits a platform admin whose membership is a plain member', async () => {
+      const engine = makeEngine({ platformAdmin: true, members: [memberRow('member')] });
+      expect(await judge(engine, 'org-1')).toBe(true);
+    });
+
+    it('still refuses a non-platform-admin with no administrative membership', async () => {
+      const engine = makeEngine({ platformAdmin: false, members: [memberRow('member')] });
+      expect(await judge(engine, 'org-1')).toBe(false);
+    });
   });
 });

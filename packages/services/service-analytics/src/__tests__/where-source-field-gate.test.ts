@@ -39,7 +39,8 @@
  * `??`-chain order was touched — the one thing that could have inverted here is
  * `resolveMemberSource`'s bag order, and `kind` is a NEW parameter, not a
  * reordered one. **Predicted 15 red / 16 green, naming the 15; measured exactly
- * that set.**
+ * that set** — as of #5669. #5739 later moved ONE case out of the red set; see
+ * the third bullet.
  *
  * Two departures from "block 1+2 red, block 3 green" are deliberate, and are
  * named here rather than left for the next reader to trip over:
@@ -47,14 +48,18 @@
  * - In block 1, "is answered about its MEASURE first" stays GREEN — the #4437
  *   gate produces that rejection, and the case exists to pin the ORDER, not the
  *   `where` verdict.
- * - In block 3, "answers a dotted member on the INFERENCE path exactly as the
- *   shipped dimension gate does" goes RED. It sits in the must-NOT-do block
- *   because it bounds the gate's reach, but what it pins is a VERDICT (and its
- *   agreement with #5520's), not a stand-down. Reading it as green-before/red-
- *   after is correct; reading the block heading as a promise of greenness is not.
  * - In block 2, "the pre-fix driver error carried the statement" stays GREEN by
  *   design: it asserts the OLD behaviour on a cube the gate stands down for, the
  *   control proving this harness can still produce the leak the gate removes.
+ *
+ * [#5739] The third departure has since gone away, and the count with it. Block
+ * 3's inference-path case pinned a VERDICT under #5669 (dotted member → the same
+ * `INVALID_FIELD` the #5520 dimension gate gave), so it read green-before /
+ * red-after and belonged to the red set. #5739 ruled that the ad-hoc path serves
+ * the traversal, so the cube that case reads now mints `{sql: 'owner.region'}`,
+ * `resolveMemberSource` answers `source: null`, and the case pins a STAND-DOWN
+ * like the rest of block 3 — green in both directions. The gate's own code did
+ * not move; **14 red / 17 green from #5739 onward**.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -132,7 +137,9 @@ async function rejection<T extends Error = Error & { code?: string }>(call: Prom
 }
 
 /** How a call settled: the error it rejected with, or `{}` when it resolved. */
-async function settle(call: Promise<unknown>): Promise<{ code?: string; message?: string }> {
+async function settle(
+    call: Promise<unknown>,
+): Promise<{ code?: string; message?: string; field?: string; member?: string; param?: string }> {
     try {
         await call;
         return {};
@@ -578,10 +585,19 @@ describe('#5669 — what the gate must NOT do', () => {
         // may well be a column of the RELATED object, and reporting it as missing
         // from `crm_account` would be a lie. Whether the query can run is the
         // strategy's call and the join allowlist's (ADR-0021 D-C); either way the
-        // answer must not be this gate's INVALID_FIELD. Measured on both
+        // answer must not be THIS GATE's verdict. Measured on both
         // strategies: NativeSQL joins it
         // (`LEFT JOIN "owner" … WHERE "owner"."region" = $1`), ObjectQL declines it
         // with its own cross-object message.
+        //
+        // [#5716] The assertion used to be `code !== 'INVALID_FIELD'`, which was a
+        // PROXY for "not this gate" — available only while the strategy's own
+        // refusal carried no code at all. It now carries `INVALID_FIELD` / 400 too
+        // (both name a member the request cannot be served with; one wire shape
+        // for one class of mistake), so the proxy is dead and is replaced by the
+        // facts it stood for: the message is the strategy's, and the gate's own
+        // `field` — the base column it reports as missing, set on every one of its
+        // three verdicts and on none of the strategies' — is absent.
         const joined: Cube = {
             name: 'joined_cube',
             title: 'Joined',
@@ -596,7 +612,14 @@ describe('#5669 — what the gate must NOT do', () => {
             service.query({ cube: 'joined_cube', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
         );
 
-        expect(settled.code).not.toBe('INVALID_FIELD');
+        expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
+        // The lie this case exists to prevent, asserted as itself.
+        expect(settled.message).not.toMatch(/constrains field 'region'/);
+        expect(settled.field).toBeUndefined();
+        // …and positively, the strategy's envelope: the member as the request
+        // spelled it, under the request key it was written on.
+        expect(settled.member).toBe('owner.region');
+        expect(settled.param).toBe('where');
     });
 
     it('reads a NESTED relation filter as the same dotted member the strategies do', async () => {
@@ -621,27 +644,37 @@ describe('#5669 — what the gate must NOT do', () => {
             service.query({ cube: 'joined_cube', measures: ['count'], where: { owner: { region: 'NA' } } } as any),
         );
 
-        expect(settled.code).not.toBe('INVALID_FIELD');
+        // [#5716] Same substitution as the case above: `code !== 'INVALID_FIELD'`
+        // no longer separates the two producers, `field` does.
         expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
+        expect(settled.message).not.toMatch(/constrains field 'owner'/);
+        expect(settled.field).toBeUndefined();
+        // Both spellings reach the SAME refusal, envelope included — which is the
+        // invariant this case is really about.
+        expect(settled.member).toBe('owner.region');
     });
 
-    it('answers a dotted member on the INFERENCE path exactly as the shipped dimension gate does', async () => {
-        // Not a stand-down, and reported rather than papered over. On the
-        // auto-inference path `inferCubeFromQuery` mints `stripPrefix(member)` —
-        // `region` — as a dimension, and `lookupMember`'s legacy second-segment
-        // lookup then finds it, so the member resolves to BASE column `region`.
-        // That is what actually reaches the engine there (measured on
-        // `origin/main`: `executeAggregate` received `{region: 'NA'}`, because the
-        // ad-hoc cube is single-table and `planCrossObject` never sees a dotted
-        // name to classify), so naming `region` as missing is the honest answer.
+    it('stands down for a dotted member on the INFERENCE path, exactly as the shipped dimension gate does', async () => {
+        // The invariant this case exists for is unchanged: ONE dotted member gets
+        // ONE answer across the `where` and `dimensions` request keys, because both
+        // resolve through `resolveMemberSource`. What the answer IS changed once,
+        // for both keys at the same time — which is precisely what the shared
+        // resolution was built to guarantee.
         //
-        // The point of pinning it: `dimensions: ['owner.region']` on the same path
-        // ALREADY answers the identical `INVALID_FIELD`/`region` on `main` (#5520),
-        // so this is one behaviour shared through `resolveMemberSource`, not a new
-        // over-reach invented by the `where` gate. If that reading is ever judged
-        // wrong it must change for both keys at once — which is exactly why the
-        // resolution lives in one function.
-        const { service } = makeService();
+        // Until #5739, `inferCubeFromQuery` minted `stripPrefix(member)` — `region`
+        // — as a dimension, `lookupMember`'s legacy second-segment lookup found it,
+        // and the member resolved to BASE column `region`; both keys answered
+        // `INVALID_FIELD` naming a field the caller never wrote (and, where the
+        // base HAD a `region` column, filtered/grouped it silently). The maintainer
+        // ruled on 2026-08-06 that the ad-hoc path serves the traversal, so the
+        // mint is now verbatim (`{sql: 'owner.region'}`), `BARE_IDENTIFIER` rejects
+        // the dotted `sql`, and `resolveMemberSource` answers `source: null` — this
+        // gate stands down on both keys, as it always has for a relation traversal
+        // on an AUTHORED cube (the two cases above).
+        //
+        // The gate's own code is untouched by #5739; what moved is the cube it
+        // reads. Both keys are asserted here for that reason.
+        const { service, aggregated } = makeService({ native: true });
 
         const viaWhere = await settle(
             service.query({ cube: 'crm_account', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
@@ -650,11 +683,14 @@ describe('#5669 — what the gate must NOT do', () => {
             service.query({ cube: 'crm_account', measures: ['count'], dimensions: ['owner.region'] } as any),
         );
 
-        expect(viaWhere.code).toBe('INVALID_FIELD');
-        expect(viaWhere.message).toMatch(/constrains field 'region'/);
-        // The #5520 half, unchanged by this PR — the two keys agree.
-        expect(viaDimension.code).toBe('INVALID_FIELD');
-        expect(viaDimension.message).toMatch(/groups by field 'region'/);
+        expect(viaWhere.code).not.toBe('INVALID_FIELD');
+        expect(viaDimension.code).not.toBe('INVALID_FIELD');
+        // Load-bearing rather than a bare "not refused": the queries reached the
+        // driver, and what they compiled to is the traversal — not the base column
+        // the gate used to report as missing.
+        expect(aggregated).toEqual(['crm_account', 'crm_account']);
+        expect(viaWhere.message).toBeUndefined();
+        expect(viaDimension.message).toBeUndefined();
     });
 
     it('leaves a declared dimension whose `sql` is an expression alone', async () => {

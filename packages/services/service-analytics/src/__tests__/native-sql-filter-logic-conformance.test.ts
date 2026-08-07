@@ -52,7 +52,7 @@ const CUBE: Cube = {
   sql: 't',
   measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
   dimensions: Object.fromEntries(
-    ['id', 'a', 'b', 'c', 'owner', 'status', 'parent_object', 'parent_id'].map((n) => [
+    ['id', 'a', 'b', 'c', 'd', 'owner', 'status', 'parent_object', 'parent_id'].map((n) => [
       n,
       { name: n, label: n, type: 'string', sql: n },
     ]),
@@ -89,16 +89,19 @@ describe('NativeSQLStrategy — filter logic conformance', () => {
       CREATE TABLE "t" (
         "id" TEXT PRIMARY KEY,
         "a" TEXT, "b" TEXT, "c" TEXT,
+        -- [#5298] Nullable on purpose: rows 3-4 of the fixture have no "d", and
+        -- the no-value cases measure nothing against a NOT NULL column.
+        "d" TEXT,
         "owner" TEXT, "status" TEXT,
         "parent_object" TEXT, "parent_id" TEXT
       );
     `);
     const insert = db.prepare(
-      `INSERT INTO "t" ("id","a","b","c","owner","status","parent_object","parent_id")
-       VALUES (?,?,?,?,?,?,?,?)`,
+      `INSERT INTO "t" ("id","a","b","c","d","owner","status","parent_object","parent_id")
+       VALUES (?,?,?,?,?,?,?,?,?)`,
     );
     for (const r of FILTER_LOGIC_ROWS) {
-      insert.run([r.id, r.a, r.b, r.c, r.owner, r.status, r.parent_object, r.parent_id]);
+      insert.run([r.id, r.a, r.b, r.c, r.d, r.owner, r.status, r.parent_object, r.parent_id]);
     }
     insert.free();
 

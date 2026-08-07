@@ -1,72 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { FieldMappingTransformSchema, FieldMappingSchema } from './mapping.zod';
-
-describe('FieldMappingTransformSchema', () => {
-  it('should accept constant transform', () => {
-    const result = FieldMappingTransformSchema.parse({ type: 'constant', value: 'hello' });
-    expect(result).toEqual({ type: 'constant', value: 'hello' });
-  });
-
-  it('should accept constant transform with any value type', () => {
-    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: 42 })).not.toThrow();
-    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: null })).not.toThrow();
-    expect(() => FieldMappingTransformSchema.parse({ type: 'constant', value: true })).not.toThrow();
-  });
-
-  it('should accept cast transform with valid target types', () => {
-    const validTypes = ['string', 'number', 'boolean', 'date'];
-    validTypes.forEach((t) => {
-      const result = FieldMappingTransformSchema.parse({ type: 'cast', targetType: t });
-      expect(result).toEqual({ type: 'cast', targetType: t });
-    });
-  });
-
-  it('should reject cast transform with invalid target type', () => {
-    expect(() => FieldMappingTransformSchema.parse({ type: 'cast', targetType: 'array' })).toThrow();
-  });
-
-  it('should accept lookup transform', () => {
-    const result = FieldMappingTransformSchema.parse({
-      type: 'lookup',
-      table: 'users',
-      keyField: 'id',
-      valueField: 'name',
-    });
-    expect(result).toEqual({
-      type: 'lookup',
-      table: 'users',
-      keyField: 'id',
-      valueField: 'name',
-    });
-  });
-
-  it('should reject lookup transform missing required fields', () => {
-    expect(() => FieldMappingTransformSchema.parse({ type: 'lookup', table: 'users' })).toThrow();
-  });
-
-  it('should accept javascript transform', () => {
-    const result = FieldMappingTransformSchema.parse({
-      type: 'javascript',
-      expression: 'value.toUpperCase()',
-    });
-    expect(result).toEqual({ type: 'javascript', expression: { dialect: 'cel', source: 'value.toUpperCase()' } });
-  });
-
-  it('should accept map transform', () => {
-    const result = FieldMappingTransformSchema.parse({
-      type: 'map',
-      mappings: { Active: 'active', Inactive: 'inactive' },
-    });
-    expect(result).toEqual({
-      type: 'map',
-      mappings: { Active: 'active', Inactive: 'inactive' },
-    });
-  });
-
-  it('should reject unknown transform type', () => {
-    expect(() => FieldMappingTransformSchema.parse({ type: 'unknown' })).toThrow();
-  });
-});
+import { FieldMappingSchema } from './mapping.zod';
+import { ConnectorFieldMappingSchema } from '../integration/connector.zod';
+import { ExternalFieldMappingSchema } from '../data/external-lookup.zod';
 
 describe('FieldMappingSchema', () => {
   it('should accept minimal valid mapping', () => {
@@ -80,15 +15,6 @@ describe('FieldMappingSchema', () => {
     });
   });
 
-  it('should accept mapping with transform', () => {
-    const result = FieldMappingSchema.parse({
-      source: 'user_name',
-      target: 'name',
-      transform: { type: 'cast', targetType: 'string' },
-    });
-    expect(result.transform).toEqual({ type: 'cast', targetType: 'string' });
-  });
-
   it('should accept mapping with defaultValue', () => {
     const result = FieldMappingSchema.parse({
       source: 'user_name',
@@ -98,16 +24,14 @@ describe('FieldMappingSchema', () => {
     expect(result.defaultValue).toBe('Unknown');
   });
 
-  it('should accept mapping with all fields', () => {
+  it('should accept mapping with all live fields', () => {
     const result = FieldMappingSchema.parse({
       source: 'FirstName',
       target: 'first_name',
-      transform: { type: 'cast', targetType: 'string' },
       defaultValue: '',
     });
     expect(result.source).toBe('FirstName');
     expect(result.target).toBe('first_name');
-    expect(result.transform).toBeDefined();
     expect(result.defaultValue).toBe('');
   });
 
@@ -119,12 +43,78 @@ describe('FieldMappingSchema', () => {
     expect(() => FieldMappingSchema.parse({ source: 'name' })).toThrow();
   });
 
-  it('should have optional transform and defaultValue', () => {
+  it('should have optional defaultValue', () => {
     const result = FieldMappingSchema.parse({
       source: 'a',
       target: 'b',
     });
-    expect(result.transform).toBeUndefined();
     expect(result.defaultValue).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// [#5552] `transform` and the whole FieldMappingTransform union are RETIRED
+// ============================================================================
+//
+// The pins below replace an entire `describe('FieldMappingTransformSchema')`
+// block that asserted all five members parsed. Every one of those cases was
+// green for the wrong reason: they proved the union *parsed*, which was never in
+// doubt — nothing anywhere ever *executed* one. Re-spelling them was not an
+// option and neither was keeping them; the fixture they pinned is exactly what
+// was removed, so they are replaced with pins on the surviving behaviour: the
+// prescription, and the strip.
+//
+// The reverse-verification direction, decided before running it: put the union
+// and the `transform` key back and these three go RED — the first two because
+// no error is raised at all (the parse succeeds and returns the transform), the
+// third because `toHaveProperty` finds the key it asserts is gone. That is the
+// ordinary direction, not one of the inverted ones, because the tombstone is
+// the *only* thing producing these verdicts: there is no schema-level rejection
+// underneath it to fall through to (`FieldMappingSchema` is a plain `z.object`,
+// so without the tombstone an authored `transform` is either accepted or
+// silently stripped — never named).
+
+describe('[#5552] FieldMapping.transform is retired, and says so', () => {
+  const RETIRED = {
+    source: 'order_value',
+    target: 'order_total',
+    transform: { type: 'javascript', expression: 'value / 100' },
+  };
+
+  it('the base schema rejects it with the prescription, not a generic error', () => {
+    const result = FieldMappingSchema.safeParse(RETIRED);
+    expect(result.success).toBe(false);
+    // The `s` flag: the guidance spans lines once a reporter wraps it.
+    expect(result.error!.issues[0]!.message).toMatch(
+      /`FieldMapping\.transform`.*removed.*17\.0\.0.*#5552/s,
+    );
+    // It must name the live mechanism, not merely refuse: an author who wrote a
+    // transform wants to know where transforms actually run.
+    expect(result.error!.issues[0]!.message).toMatch(/mapping\.fieldMapping\[\]\.transform/s);
+    // And the migration command, since the conversion rewrites sources.
+    expect(result.error!.issues[0]!.message).toMatch(/os migrate meta --from 16/s);
+  });
+
+  it('both extenders inherit the tombstone — one retirement, three authorable spellings', () => {
+    // `ConnectorFieldMappingSchema` and `ExternalFieldMappingSchema` are
+    // `.extend()`s of the base, so the retired property is copied into their
+    // shapes. This is why `RETIRED_KEYS_BY_MAJOR` registers three keys for one
+    // tombstone; if `.extend()` ever stopped copying it, this goes red.
+    for (const [name, schema] of [
+      ['ConnectorFieldMapping', ConnectorFieldMappingSchema],
+      ['ExternalFieldMapping', ExternalFieldMappingSchema],
+    ] as const) {
+      const result = schema.safeParse(RETIRED);
+      expect(result.success, `${name} must reject the retired key`).toBe(false);
+      expect(result.error!.issues.some((i) => i.path.join('.') === 'transform')).toBe(true);
+    }
+  });
+
+  it('a mapping without the key parses and carries no `transform` at all', () => {
+    // The positive half: the strip path. `not.toHaveProperty` rather than
+    // `toBeUndefined` — a key present with an undefined value would still let a
+    // consumer's `'transform' in mapping` check succeed.
+    const parsed = FieldMappingSchema.parse({ source: 'order_value', target: 'order_total' });
+    expect(parsed).not.toHaveProperty('transform');
   });
 });

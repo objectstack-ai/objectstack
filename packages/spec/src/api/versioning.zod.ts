@@ -203,6 +203,8 @@ export const VersioningConfigSchema = lazySchema(() => z.object({
 }));
 
 export type VersioningConfig = z.infer<typeof VersioningConfigSchema>;
+/** Post-parse shape of {@link VersioningConfig} — defaults applied, transforms run (ADR-0122). */
+export type VersioningConfigParsed = z.infer<typeof VersioningConfigSchema>;
 export type VersioningConfigInput = z.input<typeof VersioningConfigSchema>;
 
 // ==========================================

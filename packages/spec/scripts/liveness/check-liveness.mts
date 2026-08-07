@@ -41,6 +41,17 @@
 // (see proof-registry.mts), a `live` classification MUST carry a valid proof —
 // the file must exist and declare the `@proof: <id>` tag. CI fails otherwise.
 //
+// EVIDENCE POINTERS (ADR-0087): a `live` verdict IS its evidence pointer — "this
+// property has a runtime consumer, here it is". A cited path that is repo-rooted
+// and attributed to THIS repo must resolve against this checkout, or CI fails:
+// an unresolvable pointer makes the claim unfalsifiable, and a directory move or
+// a rename is all it takes (see evidence.mts). Cross-repo attribution
+// (`objectui: …`, `cloud: …`, `packages/services/service-ai/…`) is counted, not
+// resolved — those files are legitimately absent here. This was a ⚠ until #5623,
+// for one historical reason: the pre-#3857 `evidence.split(':')[0]` parser
+// flagged 48 of 227 entries with a ~100% false-positive rate, so failing on it
+// would have failed every build. The parse fix is what turned a hit into signal.
+//
 // RE-VERIFICATION CLOCK (`verifiedAt`): a ledger entry is a claim with a
 // timestamp, and code moves under it in BOTH directions — `flow.status` (#3711)
 // and `action.undoable` (#3714) were both understated by entries that were
@@ -56,6 +67,10 @@
 //   tsx check-liveness.mts --stale-verification   # print the re-verification worklist
 //   tsx check-liveness.mts --stale-verification=90  # ...with a custom staleness threshold
 //   tsx check-liveness.mts --undrilled            # print the undrilled-container worklist
+//   tsx check-liveness.mts --ledger-root=<dir>    # read the ledgers from <dir> instead of
+//                                                 # packages/spec/liveness — how the self-test
+//                                                 # runs the REAL gate against a mutated copy
+//                                                 # of the real ledgers without touching them
 
 process.env.OS_EAGER_SCHEMAS = '1';
 
@@ -93,7 +108,22 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
 const repoRoot = resolve(specRoot, '../..');
-const ledgerRoot = join(specRoot, 'liveness');
+
+const args = process.argv.slice(2);
+
+// `--ledger-root=<dir>` points the walk at a COPY of packages/spec/liveness.
+// It exists because the evidence gate below now fails the build, and a gate that
+// fails is only worth as much as the proof that it fails — which needs a rotted
+// pointer to fail ON. Committing one to a shipped ledger is not an option (it
+// would fail every other run), and mutating a tracked file mid-test leaves the
+// worktree dirty when the test crashes. So the self-test copies the real ledgers
+// to a temp dir, breaks exactly one pointer there, and runs THIS script — same
+// code path CI runs, no repo state touched. Everything else still resolves
+// against the real repoRoot, so the resulting exit 1 has exactly one cause.
+const ledgerRootArg = args.find((a) => a.startsWith('--ledger-root='));
+const ledgerRoot = ledgerRootArg
+  ? resolve(ledgerRootArg.slice('--ledger-root='.length))
+  : join(specRoot, 'liveness');
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
@@ -262,7 +292,6 @@ function loadLedger(type: string): any {
 }
 
 // ---- dump mode ----
-const args = process.argv.slice(2);
 const dumpIdx = args.indexOf('--dump');
 if (dumpIdx !== -1) {
   const type = args[dumpIdx + 1];
@@ -300,8 +329,15 @@ const report: any = {
   deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
   deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
-  evidenceLocal: 0, // repo-rooted evidence paths actually resolved against this checkout
-  evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here
+  // The three evidence counters, and the distinction between the first two is
+  // the whole point: `evidenceLocal` is how many repo-rooted paths `live` entries
+  // DECLARE, `evidenceMissing` is how many of those do not exist here. The
+  // summary line used to print `evidenceLocal` under the word "resolved", so
+  // breaking five pointers left the count at 330 and the run still said
+  // "330 resolved" (#5623). Count and word now agree.
+  evidenceLocal: 0, // repo-rooted evidence paths attributed to THIS repo — DECLARED, not yet proven
+  evidenceMissing: 0, // ...of which this many do not exist here (=== staleEvidence.length) — FAILS the gate
+  evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here, never failed
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -324,6 +360,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     const ev = checkEvidence(led.evidence, (p) => existsSync(join(repoRoot, p)));
     report.evidenceForeign += ev.foreign.length;
     report.evidenceLocal += ev.local.length;
+    report.evidenceMissing += ev.missing.length;
     for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
   }
   // ── ADR-0054 prove-it-runs ──
@@ -507,6 +544,11 @@ const totalProofFailures = report.proofErrors.length + report.proofMissing.lengt
 const failed =
   totalUnclassified > 0 ||
   totalProofFailures > 0 ||
+  // A `live` entry whose repo-local evidence path is gone. Red since #5623 — the
+  // ⚠ it replaces was calibrated for the false-positive era, not for the parser
+  // that now resolves 330 paths and reports zero. Cross-repo attribution never
+  // reaches this list: checkEvidence only resolves the LOCAL bucket.
+  report.staleEvidence.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
   report.ungoverned.length > 0 ||
@@ -524,13 +566,39 @@ if (asJson) {
   }
   const boundClasses = HIGH_RISK_CLASSES.filter((c) => c.bound).map((c) => c.label);
   console.log(`\nprove-it-runs (ADR-0054): proof REQUIRED for bound high-risk classes — ${boundClasses.join(', ') || 'none'}`);
+  // Two numbers, because one cannot carry both facts. "Declared" is the
+  // extraction-health signal (#3857's unit test guards it against degrading to
+  // "extracts nothing"); "resolved" is the verdict. They are equal on a green
+  // run, which is exactly why printing only the first read as a pass.
   console.log(
-    `\nevidence paths: ${report.evidenceLocal} resolved against this checkout, ` +
-    `${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
+    `\nevidence paths: ${report.evidenceLocal} repo-local path(s) declared by 'live' entries, ` +
+    `${report.evidenceLocal - report.evidenceMissing} resolved against this checkout` +
+    (report.evidenceMissing ? `, ${report.evidenceMissing} MISSING` : '') +
+    `; ${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
   );
   if (report.staleEvidence.length) {
-    console.log(`\n⚠ ${report.staleEvidence.length} 'live' entr(ies) cite a missing file:`);
+    console.log(`\n✗ ${report.staleEvidence.length} 'live' entr(ies) cite a file that is missing from THIS repo:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   A `live` verdict IS its evidence pointer — "this property has a runtime consumer,\n' +
+      '   here it is". When the cited file is gone from this checkout the claim is no longer\n' +
+      '   falsifiable: declared, but nothing enforces that anything still reads the property,\n' +
+      '   and a directory move or a rename is the whole cost of getting there.\n\n' +
+      '   Three repairs, and picking the right one is the work:\n' +
+      '     • the consumer MOVED inside this repo → repoint the path, and stamp `verifiedAt`\n' +
+      '       while you have the call graph open;\n' +
+      '     • the consumer moved to ANOTHER repo → say so with a realm marker\n' +
+      '       (`objectui: packages/app-shell/…`, `cloud: …`). Attributed paths are counted,\n' +
+      '       never resolved, and never fail here — that boundary is deliberate;\n' +
+      '     • the consumer is GONE → the verdict is not `live` any more. Re-classify under\n' +
+      '       ADR-0049 enforce-or-remove instead of repointing at a plausible survivor.\n\n' +
+      '   This was a ⚠ until #5623 for one reason: the pre-#3857 parser took\n' +
+      '   `evidence.split(":")[0]` as the filename, flagged 48 of 227 entries and every one\n' +
+      '   was a false positive — so it could not fail the build, and the one real rot it was\n' +
+      '   burying (`object.enable.clone`, whose consumer had moved packages) sat unread.\n' +
+      '   evidence.mts fixed the parse; the list has been empty since, which is what makes\n' +
+      '   a hit worth stopping for.',
+    );
   }
   if (report.orphanProofs.length) {
     console.log(`\n⚠ ${report.orphanProofs.length} unregistered dogfood proof tag(s) — add to proof-registry.mts:`);
@@ -659,7 +727,8 @@ if (asJson) {
     console.log(
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
-      'every container inheritance is declared, and all bound high-risk proofs resolve.',
+      'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
+      'resolves, and all bound high-risk proofs resolve.',
     );
     if (report.undrilledChildKeys) {
       console.log(

@@ -431,6 +431,8 @@ export const ExternalDatasourceSettingsSchema = z.object({
   .describe('External datasource federation settings (schemaMode != "managed")');
 
 export type ExternalDatasourceSettings = z.infer<typeof ExternalDatasourceSettingsSchema>;
+/** Post-parse shape of {@link ExternalDatasourceSettings} — defaults applied, transforms run (ADR-0122). */
+export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasourceSettingsSchema>;
 
 /**
  * Replay a driver-config parse onto the datasource's own issue list (#4410).
@@ -589,6 +591,8 @@ export const DatasourceSchema = lazySchema(() => z.object({
 }));
 
 export type Datasource = z.infer<typeof DatasourceSchema>;
+/** Post-parse shape of {@link Datasource} — defaults applied, transforms run (ADR-0122). */
+export type DatasourceParsed = z.infer<typeof DatasourceSchema>;
 /** Authoring input for {@link Datasource} — defaulted fields are optional. */
 export type DatasourceInput = z.input<typeof DatasourceSchema>;
 

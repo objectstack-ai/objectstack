@@ -35,7 +35,23 @@
  * touching call sites.
  */
 
-import type { HookBody, ScriptBody, ExpressionBody } from '@objectstack/spec/data';
+import type { HookBody, ScriptBody, ExpressionBody, HookContext } from '@objectstack/spec/data';
+import type { ActionSession } from '@objectstack/spec/ui';
+
+/**
+ * The caller session a sandboxed body receives on `ctx.session` — the union of
+ * the two DECLARED producer shapes this one seam carries (#5613).
+ *
+ * It is a union rather than a single type because the seam is genuinely
+ * generic over both body kinds, and collapsing it to either one would be a
+ * contract lie in the other direction: a hook body's session is not an
+ * {@link ActionSession}, and an action body's is not a `HookContext['session']`.
+ * The two agree on exactly the keys they are documented to agree on — `userId`,
+ * `organizationId` and, since #5605 hook-side plus #5613 action-side,
+ * `positions` — so a consumer that reads only those needs no discrimination,
+ * which is the practical payoff of the rename.
+ */
+export type ScriptSession = ActionSession | HookContext['session'];
 
 /**
  * Identity / origin information used by the sandbox for diagnostics, capability
@@ -73,24 +89,34 @@ export interface ScriptContext {
    * this interface is a single generic seam over both body kinds:
    *
    *  - a HOOK body gets `HookContext.session` (`@objectstack/spec/data`) —
-   *    `userId` / `actor` / `organizationId` / `accessToken` / `isSystem` /
-   *    the skip flags, built by ObjectQL's `buildSession()`;
-   *  - an ACTION body gets `ActionSession` (`@objectstack/spec/ui`,
-   *    {@link ActionSessionSchema}) — `userId` / `organizationId` / `roles`,
-   *    built by `buildActionSession()`.
+   *    `userId` / `actor` / `organizationId` / `positions` / `accessToken` /
+   *    `isSystem` / the skip flags, built by ObjectQL's `buildSession()`;
+   *  - an ACTION body gets `ActionSession` (`@objectstack/spec/ui`) —
+   *    `userId` / `organizationId` / `positions` and, for the length of the
+   *    #5613 deprecation window, its deprecated alias `roles`; built by
+   *    `buildActionSession()` (`../action-execution.ts`).
    *
-   * They are NOT the same object and never converge: `roles` exists on the
-   * action side only (and is deprecated there — #5613 phase 2 renames it to
-   * `positions`), while the hook side retired that key at #5050.
+   * They are NOT the same object and do not converge into one: `roles` exists
+   * on the action side only (deprecated there, removed hook-side at #5050),
+   * and the hook side carries an `actor` / skip-flag vocabulary the action side
+   * has no counterpart for. What they DO now share is the position vocabulary
+   * under one spelling — `positions` on both (#5605 hook-side, #5613
+   * action-side) — which is the point of #5613's rename.
    *
-   * Left `unknown` rather than typed as the union on purpose (#5697, which is
-   * a zero-behaviour-change declaration): narrowing this field would force
-   * every consumer of the seam — `quickjs-runner`'s `installCtx`, the body
-   * runners, the hook path's own producers — to discriminate a body kind this
-   * type does not carry. Typing it belongs with whatever change is willing to
-   * pay that, not with declaring what the producers already build.
+   * Typed as {@link ScriptSession}, the union of those two DECLARED shapes,
+   * since #5613. It was `unknown` while #5697 declared the action half without
+   * changing behaviour; the cost that deferral named — that narrowing forces
+   * seam consumers to discriminate a body kind this type does not carry — was
+   * MEASURED here rather than re-assumed: the two writers (`body-runner`'s
+   * `buildSandboxContext` / `buildActionSandboxContext`) assign from an `any`
+   * engine context, and the only reader (`quickjs-runner`'s `installCtx`, via
+   * `setObjectJson`) takes `unknown`. So no site discriminates today, and the
+   * union is what makes a future site that needs to. It is deliberately NOT
+   * narrowed to `ActionSession` alone: this seam really does carry hook
+   * sessions, and declaring otherwise would be the same
+   * "one key, two realities" defect #5613 exists to close.
    */
-  session?: unknown;
+  session?: ScriptSession;
   /**
    * The lifecycle event name the hook is firing for (e.g. `beforeInsert`,
    * `afterUpdate`). Required for hooks that subscribe to multiple events

@@ -12,9 +12,15 @@
  *      engine middleware AND-s into every read query. Callers must
  *      treat `null` as "object is public, do not filter".
  *
- *   2. **Per-record gating** — `canEdit()` answers the access question
- *      for `update` / `delete` operations. Returns `true` when the
- *      caller may modify the record, `false` otherwise.
+ *   2. **Per-record gating** — two SEPARATE gates, one per write verb.
+ *      `canEdit()` answers the access question for `update`: ownership
+ *      (widened by write DEPTH), a write-level (`edit`) share, or the
+ *      `modifyAllRecords` super-user bypass. `canDelete()` answers it
+ *      for `delete` and is deliberately NARROWER (ADR-0111 D3) — a
+ *      share widens which ROWS a principal reaches, never which VERBS
+ *      they may use, so an `edit` share does NOT confer delete:
+ *      ownership or the bypass only. Each returns `true` when the
+ *      caller may perform that operation, `false` otherwise.
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
@@ -393,9 +399,40 @@ export interface IBusinessUnitGraphService {
  */
 export type HierarchyScope = 'unit' | 'unit_and_below' | 'own_and_reports';
 
+/**
+ * Caller identity a {@link IHierarchyScopeResolver} resolves a
+ * {@link HierarchyScope} against.
+ *
+ * **`organizationId` is the AUTHORITATIVE tenancy field** — the one a resolver
+ * scopes its owner-set query by. It is REQUIRED (`string | null`, never
+ * omitted) so a producer that forgets to supply it fails to compile instead of
+ * silently handing every resolver an `undefined` org: two sides can each look
+ * contract-compliant while the pair leaks across organizations (#5852/#5858).
+ * The name follows the repo-wide convention: #3280 made `organizationId` the
+ * blessed developer-facing name for the caller's active org (matching the
+ * `organization_id` column and `current_user.organizationId` in RLS) and #3290
+ * removed the `session.tenantId` alias in v11; `scripts/check-org-identifier.mjs`
+ * keeps it that way.
+ */
 export interface HierarchyScopeContext {
   userId: string;
-  organizationId?: string | null;
+  /**
+   * AUTHORITATIVE. Active organization ID of the caller (`null` =
+   * platform/unscoped) — same meaning as `EvalUser.organizationId`. A resolver
+   * MUST scope its owner set by this field; see
+   * {@link IHierarchyScopeResolver.resolveOwnerIds} for the `null` obligation.
+   */
+  organizationId: string | null;
+  /**
+   * Generic driver-layer tenancy knob, carried through for kernels that key
+   * isolation off something other than the organization (database-per-tenant
+   * deployments legitimately put an *environment* id here).
+   *
+   * @deprecated Not the authority for hierarchy scoping — a resolver MUST NOT
+   * depend on it alone, and MUST NOT treat it as a substitute for a `null`
+   * {@link HierarchyScopeContext.organizationId}. Read `organizationId`.
+   * Retained for compatibility only; removal goes through the retirement flow.
+   */
   tenantId?: string | null;
 }
 
@@ -420,6 +457,13 @@ export interface IHierarchyScopeResolver {
   /**
    * Owner ids whose records the caller may see under `scope` (must include the
    * caller). Empty/throw → caller falls back to owner-only.
+   *
+   * **Fail CLOSED on a missing organization.** When the authoritative
+   * {@link HierarchyScopeContext.organizationId} is `null`, an implementation
+   * MUST NOT build the owner set as though no tenancy constraint applied —
+   * "no org" is not "every org". Return owner-only (or throw, which the sharing
+   * layer treats the same way); never widen. Falling back to
+   * {@link HierarchyScopeContext.tenantId} instead is not fail-closed either.
    */
   resolveOwnerIds(context: HierarchyScopeContext, scope: HierarchyScope): Promise<string[]>;
 }

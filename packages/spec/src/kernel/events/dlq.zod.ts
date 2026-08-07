@@ -50,6 +50,8 @@ export const DeadLetterQueueEntrySchema = lazySchema(() => z.object({
 }));
 
 export type DeadLetterQueueEntry = z.infer<typeof DeadLetterQueueEntrySchema>;
+/** Post-parse shape of {@link DeadLetterQueueEntry} — defaults applied, transforms run (ADR-0122). */
+export type DeadLetterQueueEntryParsed = z.infer<typeof DeadLetterQueueEntrySchema>;
 
 // ==========================================
 // Event Log
@@ -98,3 +100,5 @@ export const EventLogEntrySchema = lazySchema(() => z.object({
 }));
 
 export type EventLogEntry = z.infer<typeof EventLogEntrySchema>;
+/** Post-parse shape of {@link EventLogEntry} — defaults applied, transforms run (ADR-0122). */
+export type EventLogEntryParsed = z.infer<typeof EventLogEntrySchema>;

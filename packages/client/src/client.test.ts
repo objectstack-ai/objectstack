@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 // the suites build them through `createQuery` / `createFilter`, so importing the
 // classes themselves left two unused bindings (TS6133) the moment this file
 // entered a tsc program (#5449).
+import { WELL_KNOWN_CAPABILITY_KEYS } from '@objectstack/spec/api';
 import { ObjectStackClient, createQuery, createFilter } from './index';
 
 /** Helper: create a client with mocked fetch that returns the given response body */
@@ -33,17 +34,49 @@ describe('ObjectStackClient', () => {
     });
 
     it('should make discovery request on connect', async () => {
+        // [#5787] This double is shaped on the REAL `/discovery` body, measured
+        // off `ObjectStackProtocolImplementation.getDiscovery()`
+        // (`packages/metadata-protocol/src/protocol.ts`) — not invented.
+        //
+        // It used to spell two shapes no producer has ever emitted:
+        //
+        //   capabilities: ['metadata', 'data', 'ui'],   // an array
+        //   endpoints: {}                               // retired in #4828
+        //
+        // `endpoints` was the dispatcher-only verbatim copy of `routes`, removed
+        // under ADR-0049; the producer emits `routes` (`ApiRoutesSchema`, and
+        // REQUIRED by `DiscoverySchema`). `capabilities` was a string array in
+        // some pre-history and is now a CLOSED object over the one vocabulary,
+        // each entry a `CapabilityDescriptor` (#5672 ruling A).
+        //
+        // Both were inert — the assertion below only counts the fetch — which is
+        // exactly why they survived two retirements. The harm is authoring-time:
+        // a test double is the most-copied artifact there is, and this one
+        // taught a producer shape that never existed (#5674's 25 siblings in
+        // `packages/rest` were the same defect). `discovery-double-retired-key.test.ts`
+        // beside this file pins both keys so the next copy cannot reintroduce them.
+        //
+        // The capability map is BUILT from `WELL_KNOWN_CAPABILITY_KEYS` rather
+        // than hand-listed: that constant is the vocabulary's single source of
+        // truth precisely so no consumer becomes a fourth dialect of it, and a
+        // hand-written key list here would silently fall behind the day the
+        // vocabulary grows.
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ 
-                version: 'v1', 
-                apiName: 'ObjectStack',
-                capabilities: ['metadata', 'data', 'ui'],
-                endpoints: {}
+            json: async () => ({
+                version: '1.0',
+                name: 'ObjectStack API',
+                environment: 'development',
+                routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+                locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
+                services: {},
+                capabilities: Object.fromEntries(
+                    WELL_KNOWN_CAPABILITY_KEYS.map((key) => [key, { enabled: false }]),
+                ),
             })
         });
 
-        const client = new ObjectStackClient({ 
+        const client = new ObjectStackClient({
             baseUrl: 'http://localhost:3000',
             fetch: fetchMock
         });
@@ -92,26 +125,62 @@ describe('ObjectStackClient', () => {
     });
 
     it('should get metadata item by type and name', async () => {
+        // The server's body is the spec-declared `GetMetaItemResponseSchema`
+        // envelope — `{ type, name, item }`, with the metadata document under
+        // `item`. This double used to serve the bare document, which is what
+        // the route's DEFAULT (cached) path really answered while its
+        // non-cached path answered the envelope; #5563 converged the route on
+        // the declared shape, so the double speaks it too.
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ 
+            json: async () => ({
+                type: 'object',
                 name: 'customer',
-                fields: []
+                item: { name: 'customer', label: 'Customer', fields: [] },
             })
         });
 
-        const client = new ObjectStackClient({ 
+        const client = new ObjectStackClient({
             baseUrl: 'http://localhost:3000',
             fetch: fetchMock
         });
 
         const result = await client.meta.getItem('object', 'customer');
         expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/v1/meta/object/customer', expect.any(Object));
-        // `meta.getItem` has no declared return type (unlike the `getItems`
-        // beside it — #5545), so its unwrapped payload is `unknown`. Asserted
-        // structurally rather than cast: same assertion strength, without
-        // pretending this surface is typed (#5449).
-        expect(result).toMatchObject({ name: 'customer' });
+        // #5545: `meta.getItem` now declares `Promise< GetMetaItemResponse >`,
+        // matching the `getItems` beside it. These are TYPED field reads, not a
+        // `toMatchObject` shape probe over an `unknown` payload — `result.type`
+        // and `result.name` compile only while the annotation is there, so
+        // removing it turns these two lines red (TS18046) instead of silently
+        // weakening the assertion. No cast: the `as any` this test carried
+        // (#5449) existed solely because the surface was untyped.
+        expect(result.type).toBe('object');
+        expect(result.name).toBe('customer');
+        // Load-bearing: the document lives under `item`, not spread at the top
+        // level. A regression to the bare shape fails HERE, not on a missing key.
+        // `item` is `unknown` in the spec schema (the envelope is typed, the
+        // document it carries is not), so the document's own keys stay a
+        // structural assertion — that is the schema's shape, not a gap.
+        expect(result.item).toMatchObject({ name: 'customer', label: 'Customer' });
+    });
+
+    it('meta.saveItem surfaces the ADR-0008 OCC carriers the save response declares (#5545)', async () => {
+        // The real `PUT /api/v1/meta/:type/:name` body, as
+        // `SaveMetaItemResponseSchema` has declared it since #5745: `version`
+        // is the `If-Match` token the optimistic-concurrency chain runs on,
+        // and it is reachable from the SDK without a cast only because
+        // `saveItem` names that type.
+        const { client } = createMockClient({
+            success: true,
+            version: 'sha256:' + 'a'.repeat(64),
+            seq: 7,
+            state: 'active',
+        });
+        const saved = await client.meta.saveItem('object', 'customer', { name: 'customer' });
+        expect(saved.success).toBe(true);
+        expect(saved.version).toBe('sha256:' + 'a'.repeat(64));
+        expect(saved.seq).toBe(7);
+        expect(saved.state).toBe('active');
     });
 
     it('meta.getView speaks the path-param dialect both surfaces accept (#3611)', async () => {

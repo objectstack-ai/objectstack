@@ -6,6 +6,13 @@
  * ObjectQL fallback, ADR-0049 exposure gate inside). On a multi-tenant
  * host (a KernelResolver is registered) an unresolved environment answers
  * 428 instead of silently serving the control plane.
+ *
+ * D11 invariant: the body stays HERE. `HttpDispatcher.handleData` is a thin
+ * back-compat delegate, so folding this module back into it — the tempting
+ * "the indirection buys nothing" cleanup — re-couples the data plane to
+ * dispatcher state and restarts the accretion D11 decomposed. Dispatcher
+ * facilities are reachable only through `DomainHandlerDeps`. Anchored in
+ * scripts/adr-anchors.json.
  */
 
 import * as actionExec from '../action-execution.js';

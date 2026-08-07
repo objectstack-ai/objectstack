@@ -41,6 +41,7 @@ import type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
 } from './contracts/index.js';
+import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 
 /**
  * Driver-id resolution comes from the spec since #4410 — this file used to keep
@@ -334,6 +335,14 @@ export function createDefaultDatasourceDriverFactory(
       if (!kind) {
         throw new Error(`Unsupported driver id '${spec.driver}'.`);
       }
+
+      // A `pool` block this driver cannot honour is rejected here rather than
+      // dropped on the floor two arms down (#5714). This is the LAST door — the
+      // wizard's create/update and the boot-time pre-pass in
+      // `DatasourceConnectionService` reject it earlier and with better context
+      // — but it is the one every host that builds through this factory passes
+      // through, so it is where "declared = honoured" is actually guaranteed.
+      assertDatasourcePoolSupported({ driver: spec.driver, pool: spec.pool, name: spec.name });
 
       // ADR-0015's ownership mode. `spec.schemaMode` — the datasource's own
       // declared key — is FIRST since #4410; before that the first two arms

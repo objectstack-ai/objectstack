@@ -44,14 +44,6 @@ export interface MappingArtifactLike {
 export type MappingFailure = { ok: false; status: number; code: string; error: string };
 export type ResolveMappingResult = { ok: true; artifact: MappingArtifactLike } | MappingFailure;
 
-/** Unwrap `{ item }` meta envelopes returned by protocol getMetaItem. */
-function unwrapEnvelope(r: unknown): unknown {
-    if (r && typeof r === 'object' && 'item' in (r as Record<string, unknown>)) {
-        return (r as Record<string, unknown>).item;
-    }
-    return r;
-}
-
 /**
  * Resolve a named mapping artifact and check it against the request:
  * target object must match the URL object, and the artifact's declared
@@ -67,7 +59,12 @@ export async function resolveNamedMapping(
     }
     let artifact: MappingArtifactLike | undefined;
     try {
-        artifact = unwrapEnvelope(await p.getMetaItem({ type: 'mapping', name: mappingName })) as MappingArtifactLike | undefined;
+        // [#5563] `getMetaItem` answers the `{ type, name, item, … }` envelope on
+        // every read path, so the artifact is read straight off `.item` — the
+        // conditional "unwrap if it looks wrapped" this used to do was the same
+        // shape sniff the single-item route carried, and had the same cause.
+        const res = await p.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
+        artifact = res?.item as MappingArtifactLike | undefined;
     } catch { /* treated as not found below */ }
     if (!artifact || typeof artifact !== 'object' || !Array.isArray(artifact.fieldMapping)) {
         return { ok: false, status: 404, code: 'MAPPING_NOT_FOUND', error: `No mapping artifact named "${mappingName}" is registered` };

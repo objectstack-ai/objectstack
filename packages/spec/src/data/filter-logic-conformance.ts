@@ -6,7 +6,7 @@
  *
  * ## Why this exists
  *
- * `FilterCondition` is evaluated by five independent implementations, and they
+ * `FilterCondition` is evaluated by SEVEN independent implementations, and they
  * had drifted:
  *
  * | Backend | Where |
@@ -16,13 +16,26 @@
  * | Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |
  * | Read-scope SQL lowering | `service-analytics` `read-scope-sql` |
  * | MongoDB query translator | `driver-mongodb` `translateFilter` |
+ * | Turso REMOTE filter compiler | `driver-turso` `RemoteTransport.buildWhereSQL` |
+ * | Cube filter lowering | `service-analytics` `filter-normalizer` |
  *
- * #3774 said "four" and enrolled four: `translateFilter` was missed, not
- * excluded, and ran unchecked against this standard until #4405 — the one
- * backend whose target language has no document-level `$not` at all, so a
- * negation leaves it as `$nor`. `driver-sqlite-wasm` runs the table too; it
- * *inherits* the SQL compiler, so what its suite adds is the sql.js engine
- * executing the compiled predicate rather than a sixth way of building one.
+ * The count has been wrong twice, in the same direction, and both corrections
+ * cost a real divergence first. #3774 said "four" and enrolled four:
+ * `translateFilter` was missed, not excluded, and ran unchecked against this
+ * standard until #4405 — the one backend whose target language has no
+ * document-level `$not` at all, so a negation leaves it as `$nor`. Then the
+ * header said "five" while two more had already been enrolled as harnesses:
+ * `RemoteTransport.buildWhereSQL` and `filter-normalizer` are each a hand-written
+ * emitter with its own operator vocabulary and its own combinator nesting, and
+ * #5298 measured both answering the NULL family differently from the other five.
+ *
+ * The lesson is worth more than the number: "does a suite for it exist" is not
+ * the same question as "is it an independent implementation". `driver-sqlite-wasm`
+ * and `driver-turso` LOCAL run the table too and are NOT on this list — both
+ * *inherit* `SqlDriver`, so what their suites add is a real engine executing the
+ * compiled predicate rather than another way of building one. Turso REMOTE is on
+ * the list precisely because it inherits nothing, which is also why it is the
+ * backend this table keeps catching (#5590, #5769, #5903).
  *
  * In #3774 the SQL compiler OR-ed the contents *within* a `$or` branch instead
  * of AND-ing them, so every `$or` filter matched more rows than it should —
@@ -45,42 +58,56 @@
  *   > combine.
  *
  * The predicates are deliberately boring: string equality, `$in`, `$ne`, `$gte`
- * / `$lt` on lexicographic strings. Nothing here exercises null handling, dates,
- * numeric coercion, `LIKE` escaping, or case sensitivity — those legitimately
- * differ between a SQL engine and a JS matcher, and folding them in would make
- * the table unpassable rather than more useful. Keep it that way: a case belongs
- * here only if **every** backend must agree on it.
+ * / `$lt` on lexicographic strings. Dates, numeric coercion, `LIKE` escaping and
+ * case sensitivity are still out — those legitimately differ between a SQL
+ * engine and a JS matcher, and folding them in would make the table unpassable
+ * rather than more useful. Keep it that way: a case belongs here only if
+ * **every** backend must agree on it.
+ *
+ * **Null handling is IN, as of #5298** — it used to be excluded by the same
+ * sentence, on the assumption that a three-valued SQL engine and a two-valued JS
+ * matcher could not be held to one answer. Two rulings removed that assumption:
+ * #5146 made `$not` NULL-safe and #5298 did the same for the non-negated
+ * `$ne` / `$nin` / `$notContains`, so "the column has no value" now has ONE
+ * cross-backend answer and belongs to the standard like any other. The
+ * {@link FilterLogicRow.d} column carries it, and the four `d`-column cases
+ * below enforce it on every backend.
  *
  * ## Case families that are RULED but not yet enrolled
  *
- * Both remaining families were ruled by the maintainer and are implemented in
- * some backends. Neither is in the table yet — a red row here does not enforce
- * a ruling, it just turns another lane's unfinished work into this table's
- * failure, and each family still has one blocker standing, named per family
- * below. Both were re-measured at the 2026-08-05 sync against `cdfbee2f0`, so
- * the next author does not have to re-measure. Add the rows in the PR that
- * closes the gap, not before.
+ * The one family left was ruled by the maintainer and is implemented in some
+ * backends. It is not in the table yet — a red row here does not enforce a
+ * ruling, it just turns another lane's unfinished work into this table's
+ * failure, and the family still has a blocker standing, named below. Add the
+ * rows in the PR that closes the gap, not before.
  *
- * (Family 1 of this note — the boolean identities of the empty combinators —
- * is GONE because it graduated: the #5322 ruling took the identity reduction,
- * both analytics compilers aligned, and its four rows now sit in
- * {@link FILTER_LOGIC_CASES} below, enrolled on every backend. The family
- * numbering of the two that remain is kept as their historical ids.)
+ * Two families have GRADUATED out of this note, and how they did is the note's
+ * own instruction manual. Family 1 — the boolean identities of the empty
+ * combinators — went first: the #5322 ruling took the identity reduction, both
+ * analytics compilers aligned, and its four rows moved into
+ * {@link FILTER_LOGIC_CASES}. Family 2 — NULL-safe negation, `$not` (#5146) and
+ * `$ne`/`$nin`/`$notContains` (#5298), one family and not two because the second
+ * ruling extended the first — followed it in #5903, and is worth a sentence
+ * because of the shape of its blocker list rather than its content. It stood at
+ * two backends: `service-analytics`'s `filter-normalizer` (the Cube face)
+ * answered `['2']` for `$ne` while already answering `$not` correctly, and
+ * `driver-turso` REMOTE answered `['2']` for both. #5977 cleared the first by
+ * emitting the guard as tree STRUCTURE, so all three compilers of that tree
+ * agreed; #5903 cleared the second, and the two rows enrolled with it.
  *
- * ### 2. NULL-safe `$not` (#5146)
+ * `driver-turso` remote is the one to remember, and the reason the pre-#5298
+ * version of this note was WRONG where it said "every surface answers this
+ * family the same way — no backend blocker remains". `TursoDriver` extends
+ * `SqlDriver`, so local mode inherited #5146 for free; remote mode compiles
+ * filters in `RemoteTransport.buildWhereSQL`, an independent emitter that
+ * inherited none of it. One driver, two answers, chosen by connection mode —
+ * exactly what this table exists to catch, and exactly what it could not see
+ * while the fixture had no nullable column. The lesson generalises past this
+ * family: enrolment is what makes a ruling enforceable, and a "no blocker
+ * remains" written from a reading of the backend LIST rather than from a
+ * measurement is the sentence that hides the next one.
  *
- * A row whose column is NULL does not satisfy the negated condition and IS
- * returned. Landed in `driver-sql` via PR #5296; `driver-memory`, `formula`,
- * `driver-sqlite-wasm` and `driver-mongodb` already agreed; `read-scope-sql`
- * was aligned by #5326 (closing #5297) and `filter-normalizer` by #5335
- * (closing #5325), so as of the 2026-08-05 sync (`cdfbee2f0`) every surface
- * answers this family the same way — no backend blocker remains.
- *
- * What still keeps it out of the table is the fixture: every column of
- * {@link FILTER_LOGIC_ROWS} is non-null by construction, so a NULL-bearing
- * column has to be added here AND declared in all seven harnesses that seed
- * it. That is the whole remaining work item, and it is why this family is not
- * a one-line addition.
+ * The family numbering of the one that remains is kept as its historical id.
  *
  * ### 3. `{ field: {} }` — a field constrained by zero operators (#5240)
  *
@@ -101,7 +128,10 @@
 
 import type { FilterCondition } from './filter.zod';
 
-/** A row in the conformance fixture. All columns are plain strings. */
+/**
+ * A row in the conformance fixture. Every column is a plain string except
+ * {@link FilterLogicRow.d}, which is nullable — see below.
+ */
 export interface FilterLogicRow {
   id: string;
   /** 2x2 truth table over (a, b) — see {@link FILTER_LOGIC_ROWS}. */
@@ -109,6 +139,22 @@ export interface FilterLogicRow {
   b: string;
   /** Constant across every row; a predicate on it never changes a result. */
   c: string;
+  /**
+   * [#5298] The NULL-bearing column — the fixture's only one, and the whole
+   * reason the null family could not be enrolled before it existed.
+   *
+   * Rows 1-2 carry a value (`v1`, `v2`), rows 3-4 are NULL. Harnesses MUST
+   * declare it nullable in their DDL / schema: a `NOT NULL` column, or a seed
+   * that substitutes `''` for `null`, turns every case below green for the
+   * wrong reason — the divergence these cases exist to catch is exactly what a
+   * row with no value does, so a fixture without one measures nothing.
+   *
+   * Deliberately a separate column rather than nulling part of `a`/`b`: the
+   * (a, b) truth table is what makes a wrongly-OR-ed pair of predicates show up
+   * as extra ids, and punching a hole in it would weaken every combinator case
+   * to pay for the null cases.
+   */
+  d: string | null;
   /** Record-scope columns, for the shapes read scopes are actually written in. */
   owner: string;
   status: string;
@@ -119,14 +165,16 @@ export interface FilterLogicRow {
 /**
  * The fixture. Rows 1-4 are the 2x2 truth table over `(a, b)` — every
  * combination appears exactly once, so a wrongly-OR-ed pair of predicates always
- * shows up as extra ids rather than by luck of the data. Rows 5-8 carry the
- * record-scope columns used by the read-scope cases.
+ * shows up as extra ids rather than by luck of the data. The same four rows
+ * carry the record-scope columns used by the read-scope cases, and (since
+ * #5298) the nullable `d`: valued on rows 1-2, NULL on rows 3-4, so a filter
+ * that silently drops no-value rows loses exactly half the table.
  */
 export const FILTER_LOGIC_ROWS: readonly FilterLogicRow[] = [
-  { id: '1', a: 'x',  b: 'y',  c: 'z', owner: 'u1', status: 'active',   parent_object: 'case', parent_id: 'c1' },
-  { id: '2', a: 'x',  b: 'zz', c: 'z', owner: 'u1', status: 'archived', parent_object: 'case', parent_id: 'c2' },
-  { id: '3', a: 'qq', b: 'y',  c: 'z', owner: 'u2', status: 'active',   parent_object: 'todo', parent_id: 't1' },
-  { id: '4', a: 'qq', b: 'zz', c: 'z', owner: 'u2', status: 'archived', parent_object: 'todo', parent_id: 'c1' },
+  { id: '1', a: 'x',  b: 'y',  c: 'z', d: 'v1',  owner: 'u1', status: 'active',   parent_object: 'case', parent_id: 'c1' },
+  { id: '2', a: 'x',  b: 'zz', c: 'z', d: 'v2',  owner: 'u1', status: 'archived', parent_object: 'case', parent_id: 'c2' },
+  { id: '3', a: 'qq', b: 'y',  c: 'z', d: null,  owner: 'u2', status: 'active',   parent_object: 'todo', parent_id: 't1' },
+  { id: '4', a: 'qq', b: 'zz', c: 'z', d: null,  owner: 'u2', status: 'archived', parent_object: 'todo', parent_id: 'c1' },
 ] as const;
 
 /** One conformance case: a filter and the ids it must match, in id order. */
@@ -251,6 +299,44 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     filter: { $not: {} },
     expected: [],
     note: '#5322: emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass (#5297).',
+  },
+
+  // ── NULL / no-value semantics (#5146, #5298) ──────────────────────────────
+  //
+  // Rows 3 and 4 have no `d`. The `$null` partition at the bottom of this
+  // section is what makes that true of every harness: a fixture that quietly
+  // stored `''` instead of NULL, or a `NOT NULL` column that rejected the seed,
+  // fails THERE rather than by turning one of the two cases here green for the
+  // wrong reason. Read the four together — a no-value row is either inside the
+  // negation or outside it, and the partition says which rows are which.
+  //
+  // The family completed here in #5903, the PR that made `driver-turso` REMOTE
+  // answer them: it was the last backend of eleven still returning `['2']`, and
+  // until it did, enrolling these two rows would have been a gate that reports a
+  // known red — which teaches every agent reading CI to discount the colour.
+  {
+    name: '$ne returns the rows with no value',
+    filter: { d: { $ne: 'v1' } },
+    expected: ['2', '3', '4'],
+    note: '#5298: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
+  },
+  {
+    name: '$not returns the rows with no value',
+    filter: { $not: { d: 'v1' } },
+    expected: ['2', '3', '4'],
+    note: '#5146: the same ruling reached through the combinator. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
+  },
+  {
+    name: '$null true selects exactly the no-value rows',
+    filter: { d: { $null: true } },
+    expected: ['3', '4'],
+    note: 'The control for the two above: it pins WHICH rows have no value, so a case that returns 2-4 cannot be passing because the seed lost a value it should have kept.',
+  },
+  {
+    name: '$null false selects exactly the valued rows',
+    filter: { d: { $null: false } },
+    expected: ['1', '2'],
+    note: 'The complement, so `$null` is pinned as a partition of the table rather than one half of one. Together with the row-count control this makes a NOT NULL fixture column fail loudly instead of quietly passing everything.',
   },
 
   // ── Shapes read scopes are actually written in ────────────────────────────

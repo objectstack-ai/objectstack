@@ -36,16 +36,20 @@ is a flow property and the region only supplies the evidence. The region is name
 in the **message** so you can find the node:
 
 ```
-flow 'nightly_sweep' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a
-schedule run has no trigger user — so its data node 'touch' (update_record), in loop
-'loop_rows' body, has no identity to scope to and will be REFUSED at run time.
+flow 'nightly_sweep' · runAs: schedule-triggered flow runs under `runAs:'user'`
+(the default when none is declared), but a schedule run has no trigger user — so its
+data node 'touch' (update_record), in loop 'loop_rows' body, has no identity to scope
+to and will be REFUSED at run time.
 ```
 
+(The sentence's opening was re-worded by #5693 in this same release window; the
+sample above is the wording that actually ships.)
+
 **Nothing about the top-level case moved.** A flow whose evidence is a top-level
-data node produces the byte-identical message it always did (no region clause),
-and when a flow has data nodes at both altitudes the top-level one is still the
-node cited — `collectFlowGraphs` yields the flow's own graph before it descends.
-Both are pinned by tests.
+data node produces the same message with no region clause, and when a flow has
+data nodes at both altitudes the top-level one is still the node cited —
+`collectFlowGraphs` yields the flow's own graph before it descends. Both are
+pinned by tests.
 
 **If this newly fails your build:** the flow was already broken at run time. Add
 `runAs: 'system'` to declare the elevation the sweep needs (a schedule /

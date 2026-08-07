@@ -119,8 +119,8 @@
  *    field-existence / bare-reference verdicts, which it never did before.
  */
 
-import { Environment } from '@marcbachmann/cel-js';
-import type { ASTNode } from '@marcbachmann/cel-js';
+import { parseCelToAst } from '@objectstack/formula';
+import type { CelAstNode } from '@objectstack/formula';
 
 /**
  * The corrective sentence, lifted **verbatim** from `unevaluableRuleError` in
@@ -160,19 +160,9 @@ export interface NullGuardFinding {
   hasOnlyGuard: boolean;
 }
 
-// A check-only parse environment: no evaluation, no stdlib needed, every
-// identifier stays `dyn` so any authored predicate parses. Built once.
-let parseEnv: Environment | undefined;
-function getParseEnv(): Environment {
-  if (!parseEnv) {
-    parseEnv = new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true });
-  }
-  return parseEnv;
-}
-
 type AnyNode = { op?: string; args?: unknown };
 
-function isNode(v: unknown): v is AnyNode & ASTNode {
+function isNode(v: unknown): v is AnyNode & CelAstNode {
   return !!v && typeof v === 'object' && typeof (v as AnyNode).op === 'string';
 }
 
@@ -332,8 +322,26 @@ function collectHasOperands(node: unknown, roots: readonly string[], out: Set<st
 /**
  * Find every ordering/arithmetic operand that resolves to a nullable declared
  * field and is not dominated by a real null guard. Returns `[]` for anything
- * that does not parse (syntax is reported by `validateExpression`, not here) —
- * this pass never invents a second syntax verdict.
+ * that does not parse — this pass never invents a second syntax verdict.
+ *
+ * "Does not parse" is deliberately **not** this module's own opinion (#4812).
+ * The AST comes from `@objectstack/formula`'s `parseCelToAst`, the same front
+ * end `celEngine.compile`/`evaluate` use, so the set of sources this gate can
+ * reason about is exactly the set the platform accepts — rewrite (#3306) and
+ * `DEFAULT_LIMITS` included. This module used to build its own bare
+ * `new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true })`,
+ * which carried **no limits**: it parsed, and then adjudicated, predicates that
+ * `compile()` rejects outright at `Exceeded maxAstNodes (256)` / `maxDepth (32)`
+ * / `maxListElements (64)`. Two parse entries, two answers to "what can be
+ * parsed" — and this gate held the more permissive one.
+ *
+ * A source the canonical front end will not parse is therefore left entirely to
+ * the gate that owns that verdict: `validateExpression` runs at the very same
+ * call sites (`validate-expressions.ts` calls `check()` alongside
+ * `checkNullGuards()`) and reports the syntax fault or the bounds fault as a
+ * blocking error, with a message written for self-correction. Nothing is lost
+ * by staying silent here — and once the author fixes the fault the null-guard
+ * verdict comes back on the next run.
  */
 export function findUnguardedNullableOperands(
   source: string,
@@ -343,12 +351,8 @@ export function findUnguardedNullableOperands(
   if (opts.nullableFields.size === 0) return [];
   const roots = opts.roots ?? DEFAULT_RECORD_ROOTS;
 
-  let ast: ASTNode;
-  try {
-    ast = getParseEnv().parse(source).ast;
-  } catch {
-    return [];
-  }
+  const ast = parseCelToAst(source);
+  if (!ast) return [];
 
   const hasOperands = new Set<string>();
   collectHasOperands(ast, roots, hasOperands);

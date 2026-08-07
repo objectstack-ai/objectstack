@@ -43,8 +43,8 @@
 
 /**
  * ⚠️ `@objectstack/driver-memory` is imported here ON PURPOSE, and this is the
- * ONLY place in the repository that still consumes it from a test. It is NOT a
- * migration leftover — do not "finish the job" by deleting or replacing it.
+ * only PERMANENT test consumer of it in the repository. It is NOT a migration
+ * leftover — do not "finish the job" by deleting or replacing it.
  *
  * Why it has to stay: the whole point of this file is a PRODUCT divergence
  * between two driver families — writing an undeclared field is rejected as a
@@ -68,6 +68,25 @@
  * do not even depend on the driver. #5704/#5784 renamed them all to
  * `makeStubDriver`, precisely so that grepping for the driver lands here, and
  * only here.
+ *
+ * [#5830] "Only here" was briefly untrue and is being restored in two steps,
+ * so the grep is honest about what it finds today. Two consumers arrived in
+ * plugin-auth AFTER #5704's survey (#5812 and #5844, the identity lane):
+ *
+ *   - `plugin-auth/src/auth-where-operator-coverage.test.ts` — migrated to
+ *     sqlite `:memory:` by #5830. Its defect (#5813) was a DROPPED predicate,
+ *     which any backend that really executes the filter witnesses.
+ *   - `plugin-auth/src/auth-contains-filter.test.ts` — still on driver-memory,
+ *     pending a maintainer ruling, and NOT an oversight. Its pin is #5710's
+ *     `contains` → `$regex` flip, and driver-sql routes `$regex` through the
+ *     same `applyContainsLike` as `$contains` (the `case '$regex':`
+ *     fallthrough in `sql-driver.ts`), so a SQL witness answers identically
+ *     either way. Measured in #5830: with the defect restored, the memory
+ *     backend fails 3 behavioural pins and a sqlite backend passes all 4.
+ *     Migrating it would leave assertions that pass because nothing
+ *     distinguishes them. Its disposition rides on #5702 (the driver-side
+ *     `$regex` refusal) — once `$regex` is refused rather than aliased, the
+ *     SQL arm can witness it and the file can move.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';

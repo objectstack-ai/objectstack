@@ -64,20 +64,30 @@ const CUBE: Cube = {
  */
 const CASES: Array<{ op: string; filter: FilterCondition; expected: string[]; note?: string }> = [
   { op: '$eq', filter: { name: { $eq: 'alpha-one' } }, expected: ['a_alpha'] },
-  { op: '$ne', filter: { name: { $ne: 'alpha-one' } }, expected: ['b_alphex', 'c_beta'] },
+  {
+    op: '$ne',
+    filter: { name: { $ne: 'alpha-one' } },
+    expected: ['b_alphex', 'c_beta', 'd_null'],
+    note: '#5298: `d_null` has no `name`, and "has no value" satisfies "is not alpha-one" on every backend. It was excluded while this path emitted a bare `name != ?`, which SQL evaluates UNKNOWN for NULL.',
+  },
   { op: '$gt', filter: { score: { $gt: 20 } }, expected: ['c_beta', 'd_null'] },
   { op: '$gte', filter: { score: { $gte: 20 } }, expected: ['b_alphex', 'c_beta', 'd_null'] },
   { op: '$lt', filter: { score: { $lt: 20 } }, expected: ['a_alpha'] },
   { op: '$lte', filter: { score: { $lte: 20 } }, expected: ['a_alpha', 'b_alphex'] },
   { op: '$in', filter: { name: { $in: ['alpha-one', 'beta-one'] } }, expected: ['a_alpha', 'c_beta'] },
-  { op: '$nin', filter: { name: { $nin: ['alpha-one'] } }, expected: ['b_alphex', 'c_beta'] },
+  {
+    op: '$nin',
+    filter: { name: { $nin: ['alpha-one'] } },
+    expected: ['b_alphex', 'c_beta', 'd_null'],
+    note: '#5298: same ruling as `$ne` — `NOT IN` is UNKNOWN for a NULL column, so `d_null` used to fall out of a set it is not a member of.',
+  },
   { op: '$between', filter: { score: { $between: [20, 30] } }, expected: ['b_alphex', 'c_beta'], note: '#4128: was dropped → every row.' },
   { op: '$contains', filter: { name: { $contains: 'one' } }, expected: ['a_alpha', 'c_beta'] },
   {
     op: '$notContains',
     filter: { name: { $notContains: 'one' } },
-    expected: ['b_alphex'],
-    note: 'On the ObjectQL path this had no arm and fell to the default, compiling "does not contain" as an EQUALITY.',
+    expected: ['b_alphex', 'd_null'],
+    note: 'On the ObjectQL path this had no arm and fell to the default, compiling "does not contain" as an EQUALITY. #5298 added `d_null`: `NOT LIKE` is UNKNOWN for a NULL column, so a row with no `name` was dropped from "name does not contain one".',
   },
   {
     op: '$startsWith',

@@ -302,11 +302,23 @@ export const RollbackPackageResponseSchema = lazySchema(() => z.object({
 
 export type MetadataChangeType = z.infer<typeof MetadataChangeTypeSchema>;
 export type MetadataDiffItem = z.infer<typeof MetadataDiffItemSchema>;
+/** Post-parse shape of {@link MetadataDiffItem} — defaults applied, transforms run (ADR-0122). */
+export type MetadataDiffItemParsed = z.infer<typeof MetadataDiffItemSchema>;
 export type UpgradeImpactLevel = z.infer<typeof UpgradeImpactLevelSchema>;
 export type UpgradePlan = z.infer<typeof UpgradePlanSchema>;
+/** Post-parse shape of {@link UpgradePlan} — defaults applied, transforms run (ADR-0122). */
+export type UpgradePlanParsed = z.infer<typeof UpgradePlanSchema>;
 export type UpgradeSnapshot = z.infer<typeof UpgradeSnapshotSchema>;
+/** Post-parse shape of {@link UpgradeSnapshot} — defaults applied, transforms run (ADR-0122). */
+export type UpgradeSnapshotParsed = z.infer<typeof UpgradeSnapshotSchema>;
 export type UpgradePackageRequest = z.infer<typeof UpgradePackageRequestSchema>;
+/** Post-parse shape of {@link UpgradePackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpgradePackageRequestParsed = z.infer<typeof UpgradePackageRequestSchema>;
 export type UpgradePhase = z.infer<typeof UpgradePhaseSchema>;
 export type UpgradePackageResponse = z.infer<typeof UpgradePackageResponseSchema>;
+/** Post-parse shape of {@link UpgradePackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type UpgradePackageResponseParsed = z.infer<typeof UpgradePackageResponseSchema>;
 export type RollbackPackageRequest = z.infer<typeof RollbackPackageRequestSchema>;
+/** Post-parse shape of {@link RollbackPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type RollbackPackageRequestParsed = z.infer<typeof RollbackPackageRequestSchema>;
 export type RollbackPackageResponse = z.infer<typeof RollbackPackageResponseSchema>;

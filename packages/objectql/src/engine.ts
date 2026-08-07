@@ -41,6 +41,11 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import {
+  aggregateSummaryValue,
+  summaryEmptySetValue,
+  type SummaryDescriptor,
+} from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
@@ -52,6 +57,15 @@ import {
   type DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
+// [#5979] The ONE shared "which read failure is benign?" predicate (#4825
+// family). Imported from the leaf `/errors` subpath — which exists precisely
+// so a cross-package consumer gets the 40-line predicate without the manager,
+// the loaders or the YAML/filesystem machinery behind `@objectstack/metadata`'s
+// root entry. Asking the shared predicate rather than hand-rolling a
+// `code === '42P01'` test here is load-bearing, not stylistic: a second
+// vocabulary of "benign driver error" is the exact debt that module exists to
+// retire, and `check:durability-log-level` exempts only this declared name.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -529,15 +543,39 @@ function planFormulaProjection(
 }
 
 /**
- * Evaluate read-time formula virtual fields against the raw rows.
+ * Evaluate formula virtual fields against the raw rows a driver handed back —
+ * the read path (`find` / `findOne`) and, since #5504, the write path's
+ * response hydration.
  *
- * The eval context mirrors `applyFieldDefaults` so formula and default
- * expressions see the same shape: a `now` pinned ONCE per operation (every row
- * and every formula field in one `find()` observes the same instant —
- * determinism, and no per-eval `new Date()` drift), plus `os.user` / `os.org`
- * resolved from the execution context (so a computed field can reference the
- * caller, e.g. `os.user.id`). Previously this passed only `{ record }`, so
- * `now()`/`today()` ran against live wall-clock and user/org were unreachable.
+ * The eval context is built ONCE per call and reused for every row × every
+ * formula field, and that is where this function's determinism comes from: one
+ * `now`, so a `now()`/`today()` formula cannot drift mid-operation, plus
+ * `os.user` / `os.org` resolved from the execution context (so a computed field
+ * can reference the caller, e.g. `os.user.id`). Previously this passed only
+ * `{ record }`, so `now()`/`today()` ran against live wall-clock and user/org
+ * were unreachable.
+ *
+ * That context has the same SHAPE as `applyFieldDefaults`' — the same keys, so
+ * one expression vocabulary serves `formula` and `defaultValue` alike — but NOT
+ * the same `now` value, and the two are sourced independently on purpose
+ * (#5699):
+ *  - `applyFieldDefaults` is handed the insert's `nowSnapshot`, so every
+ *    defaulted field of every row in one write carries the same PRE-write
+ *    instant;
+ *  - this function reads the clock itself, once per call, because a formula is
+ *    evaluated when a record is MATERIALIZED — at read time, and on the write
+ *    response — not at the moment that row's defaults were resolved.
+ *
+ * So inside a single `insert` a `NOW()` default and a `now()` formula observe
+ * two instants one driver round-trip apart (sub-millisecond in practice; across
+ * a second/day boundary they can land on different calendar days). Making them
+ * share one instant would hand the write path a determinism guarantee the read
+ * path cannot have — a semantic decision, not a tidy-up, argued in #5699. Until
+ * it is decided this function takes NO snapshot parameter: the zero-caller
+ * `nowSnapshot?: Date` it carried from birth was retired there, in the same
+ * enforce-or-remove reflex ADR-0049 applies to spec properties, because a
+ * dormant parameter reads as a live one and anyone reasoning from it concludes
+ * the two sides already share an instant.
  *
  * (ADR-0053 Phase 2 will additionally thread `timezone` here once
  * `ExecutionContext.timezone` exists — see #1980; this change is independent
@@ -547,10 +585,9 @@ function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContextInput,
-  nowSnapshot?: Date,
 ): void {
   if (!plan.length) return;
-  const now = nowSnapshot ?? new Date();
+  const now = new Date();
   const timezone = execCtx?.timezone;
   const user = execCtx?.userId ? { id: String(execCtx.userId), positions: execCtx?.positions ?? [] } : undefined;
   const org = execCtx?.tenantId ? { id: String(execCtx.tenantId) } : undefined;
@@ -764,22 +801,12 @@ function resolveMetadataItemName(key: string, item: any): string | undefined {
  * - CoreServiceName.data (CRUD)
  * - CoreServiceName.metadata (Schema Registry)
  */
-/** A roll-up `summary` field on a parent object that aggregates a child. */
-interface SummaryDescriptor {
-  parentObject: string;
-  summaryField: string;
-  /** FK field on the child pointing back to the parent. */
-  fkField: string;
-  fn: 'count' | 'sum' | 'min' | 'max' | 'avg';
-  /** Child field aggregated (unused for count). */
-  sourceField: string;
-  /**
-   * Optional predicate (a query `where` FilterCondition) restricting which child
-   * rows are aggregated. ANDed with the parent-FK match when the aggregate runs.
-   * Undefined ⇒ aggregate every child of the parent.
-   */
-  filter?: Record<string, unknown>;
-}
+// [#6063] `SummaryDescriptor`, `summaryEmptySetValue` and the single-descriptor
+// aggregate moved to `./summary-aggregate.js` — unchanged, and still the one
+// place each is written down. The move exists so the one-off backfill of
+// pre-#6013 `NULL` rows computes its value through the SAME code this engine
+// does, instead of a second implementation that agrees only until one of them
+// is edited.
 
 // `implements IObjectQLEngine` is the verification step of #4251 B3: every
 // member the `objectql` slot's contract declares is checked against this class
@@ -2059,8 +2086,20 @@ export class ObjectQL implements IObjectQLEngine {
         if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
       }
       return max;
-    } catch {
-      return 0;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
     }
   }
 
@@ -2186,8 +2225,17 @@ export class ObjectQL implements IObjectQLEngine {
         // Automation Protocol
         'flows', 'workflows', 'approvals', 'webhooks',
         'jobs',
-        // Security Protocol
-        'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+        // Security Protocol — `capabilities` is here for the same reason as
+        // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
+        // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
+        // collection missing from this list reaches no registry with a
+        // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
+        // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+        // sat outside this list the first half could never be satisfied and
+        // `readDeclared(ql, 'capability')` returned nothing, which made the
+        // author-side `packageId` — documented as the FALLBACK — mandatory,
+        // and its omission a silent, unenforced authorization declaration.
+        'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
         // AI Protocol
         'agents', 'tools', 'skills', 'ragPipelines',
         // API Protocol
@@ -2351,7 +2399,11 @@ export class ObjectQL implements IObjectQLEngine {
       const metadataArrayKeys = [
           'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
           'flows', 'workflows', 'approvals', 'webhooks',
-          'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+          // `capabilities` per #5870 — same stamping seam, one level down: a
+          // nested plugin's declarations must carry the parent package's
+          // provenance too, or the same declared-≠-enforced hole reopens for
+          // packages that ship their capabilities from a nested plugin.
+          'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
           'agents', 'ragPipelines', 'apis',
           'hooks', 'mappings', 'analyticsCubes', 'connectors',
           'docs', 'books',
@@ -3878,10 +3930,20 @@ export class ObjectQL implements IObjectQLEngine {
    * order — the certificate is already in the ledger and the contradicting
    * value lands afterwards, which is reachable whenever the deployment is
    * still lenient at that moment (`OS_ALLOW_LAX_MEDIA_VALUES` /
-   * `OS_ALLOW_LAX_VALUE_SHAPES`, or a seed that finishes in the background
-   * after its budget). Without this the ledger would keep asserting a fact the
-   * store contradicts, and the NEXT boot would enforce it against exactly the
-   * data this one wrote.
+   * `OS_ALLOW_LAX_VALUE_SHAPES`) or whenever a writer runs after the
+   * attestation point at all — the `os dev` hot-reload seeder and a runtime
+   * marketplace install both seed on a store this boot created. Without this
+   * the ledger would keep asserting a fact the store contradicts, and the NEXT
+   * boot would enforce it against exactly the data this one wrote.
+   *
+   * The boot's own inline seed used to head that list, via the background
+   * continuation of a run that overran `OS_INLINE_SEED_BUDGET_MS` — the
+   * attestation's `kernel:ready` backstop fired mid-seed and the tail landed
+   * against the certificate it had just issued. #4795 closed that ordering at
+   * the source: the attestation now defers while the `seed-settlement` contract
+   * reports a source outstanding, so the inline seed can no longer contradict
+   * a certificate this boot issued. This stays the safety net rather than the
+   * first line of defence for it.
    *
    * Deliberately narrow:
    *
@@ -4120,6 +4182,15 @@ export class ObjectQL implements IObjectQLEngine {
    *  parent objects that aggregate it. Invalidated when packages register. */
   private summaryIndex: Map<string, SummaryDescriptor[]> | null = null;
 
+  /** The SAME descriptors, indexed the other way: parent object name → the
+   *  roll-up summary fields that object OWNS. Built in the same pass as
+   *  {@link summaryIndex} and invalidated with it. The child index answers
+   *  "whose summaries must I recompute after writing this row"; this one answers
+   *  "which of my own summary fields must be seeded when I create this row"
+   *  (#5749) — the question the child index structurally cannot answer, because
+   *  a parent that has never had a child appears in no child write. */
+  private summaryIndexByParent: Map<string, SummaryDescriptor[]> | null = null;
+
   /**
    * Retry options for roll-up summary recompute (framework#3147). Public so a
    * test can inject a no-op sleep for deterministic backoff; production uses
@@ -4130,12 +4201,20 @@ export class ObjectQL implements IObjectQLEngine {
   /** Invalidate the cached roll-up summary index (call when metadata changes). */
   private invalidateSummaryIndex(): void {
     this.summaryIndex = null;
+    this.summaryIndexByParent = null;
   }
 
-  /** Scan all registered objects for `summary` fields and index them by the
-   *  child object they aggregate, resolving the child→parent FK field. */
-  private buildSummaryIndex(): Map<string, SummaryDescriptor[]> {
+  /** Scan all registered objects for `summary` fields and index them BOTH ways
+   *  — by the child object they aggregate and by the parent object that owns
+   *  them — resolving the child→parent FK field. One scan, two views of the
+   *  identical descriptor objects, so the two indexes can never disagree about
+   *  which roll-ups exist. */
+  private buildSummaryIndex(): {
+    byChild: Map<string, SummaryDescriptor[]>;
+    byParent: Map<string, SummaryDescriptor[]>;
+  } {
     const index = new Map<string, SummaryDescriptor[]>();
+    const byParent = new Map<string, SummaryDescriptor[]>();
     let objects: any[] = [];
     try { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }
     for (const parent of objects) {
@@ -4168,18 +4247,34 @@ export class ObjectQL implements IObjectQLEngine {
         const filter = so.filter && typeof so.filter === 'object' && !Array.isArray(so.filter)
           ? so.filter as Record<string, unknown>
           : undefined;
+        const descriptor: SummaryDescriptor = {
+          parentObject: parent.name, summaryField, childObject, fkField, fn, sourceField: so.field, filter,
+        };
         const list = index.get(childObject) ?? [];
-        list.push({ parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter });
+        list.push(descriptor);
         index.set(childObject, list);
+        // Same descriptor, parent-side view. Only descriptors that made it this
+        // far are indexed either way, so "seeded at insert" and "maintained by
+        // recompute" are the same set by construction — a roll-up whose
+        // relationship could not be resolved (the `continue` above) is left
+        // untouched on both paths rather than seeded with a 0 nothing updates.
+        const owned = byParent.get(parent.name) ?? [];
+        owned.push(descriptor);
+        byParent.set(parent.name, owned);
       }
     }
-    return index;
+    return { byChild: index, byParent };
   }
 
   /** `registry.objectRevision` the cached {@link summaryIndex} was built at. */
   private summaryIndexRevision = -1;
 
-  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+  /**
+   * Ensure both roll-up indexes are present and current. Split out of
+   * {@link getSummaryDescriptors} so the parent-side view (#5749) shares the
+   * exact same staleness rule instead of re-deriving one.
+   */
+  private ensureSummaryIndexes(): void {
     // Rebuild whenever the REGISTRY's object set has moved since the index was
     // built — not only when someone remembered to call
     // `invalidateSummaryIndex`. That single site (`registerApp`) is bypassed by
@@ -4192,11 +4287,73 @@ export class ObjectQL implements IObjectQLEngine {
     // "已完成任务数" shipped empty over correct metadata (cloud#970).
     const revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;
     const stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;
-    if (!this.summaryIndex || stale) {
-      this.summaryIndex = this.buildSummaryIndex();
+    if (!this.summaryIndex || !this.summaryIndexByParent || stale) {
+      const built = this.buildSummaryIndex();
+      this.summaryIndex = built.byChild;
+      this.summaryIndexByParent = built.byParent;
       if (typeof revision === 'number') this.summaryIndexRevision = revision;
     }
-    return this.summaryIndex.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for summaries that aggregate `childObject` — i.e. the
+   *  ones a write to `childObject` must recompute. Semantics unchanged. */
+  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndex!.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
+   *  i.e. the ones a NEW row of `parentObject` must have seeded.
+   *
+   *  Public since #6063: the one-off backfill of pre-#6013 `NULL` rows
+   *  (`os migrate summary-nulls`) iterates parents, and reading the engine's
+   *  OWN index is what makes it see exactly the roll-ups the engine maintains —
+   *  same FK resolution, same filter, same staleness rule. Re-deriving them
+   *  would be a second index that disagrees the first time either moves. */
+  getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndexByParent!.get(parentObject) ?? [];
+  }
+
+  /**
+   * Seed the roll-up `summary` fields a freshly-created row owns (#5749).
+   *
+   * `recomputeSummaries` only ever visits parents named by a child write, so a
+   * parent that has NEVER had a child is never visited and its summary column
+   * keeps whatever insert put there — `null`. Delete the last child and the
+   * parent DOES get visited (via `previous`) and lands on 0. Same logical state,
+   * two different values: `filter ["task_count","=",0]` silently skipped every
+   * parent that never had a child, and so did sorting, GROUP BY and any formula
+   * reading the field (null propagation).
+   *
+   * The fix is at the producer: write the empty-collection value at create time,
+   * so `count`/`sum` start at 0 and only ever move to another number.
+   * `min`/`max`/`avg` have no empty-set value and deliberately stay `null` —
+   * {@link summaryEmptySetValue} is the single list both this and the recompute
+   * fallback read.
+   *
+   * Author-supplied values are never overwritten. The `!= null` test matches
+   * {@link applyFieldDefaults} exactly (#2706): on INSERT an explicit `null` is
+   * "no value supplied", any real value — including a deliberate 0 or a seeded
+   * count — is respected. Runs before the `beforeInsert` hooks for the same
+   * reason defaults do, so a hook still has the final say.
+   *
+   * Existing rows are untouched: this is create-time only, so parents already
+   * stored with `null` stay `null` until a child write recomputes them.
+   */
+  private initializeSummaryFields(object: string, record: any): any {
+    const descriptors = this.getOwnedSummaryDescriptors(object);
+    if (descriptors.length === 0) return record;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let out: Record<string, unknown> = record;
+    for (const desc of descriptors) {
+      const seed = summaryEmptySetValue(desc.fn);
+      if (seed == null) continue; // min/max/avg — undefined on an empty set
+      if (out[desc.summaryField] != null) continue; // author supplied a value
+      if (out === record) out = { ...record };
+      out[desc.summaryField] = seed;
+    }
+    return out;
   }
 
   /**
@@ -4227,21 +4384,12 @@ export class ObjectQL implements IObjectQLEngine {
           // aggregate/update) with backoff — a network blip here used to leave
           // the parent summary silently stale (framework#3147).
           await withTransientRetry(async () => {
-            // AND the parent-FK match with the optional per-summary filter so
-            // only matching child rows are aggregated (e.g. received receipts).
-            const fkMatch = { [desc.fkField]: parentId };
-            const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
-            const rows = await this.aggregate(childObject, {
-              where,
-              aggregations: [{
-                function: desc.fn,
-                ...(desc.fn === 'count' ? {} : { field: desc.sourceField }),
-                alias: 'value',
-              }],
-              context: execCtx,
-            } as any);
-            let value = rows?.[0]?.value;
-            if (value == null) value = (desc.fn === 'count' || desc.fn === 'sum') ? 0 : null;
+            // The aggregate — parent-FK match ANDed with the optional
+            // per-summary filter, empty-set fallback included — is
+            // `aggregateSummaryValue` (#6063). Behaviour unchanged; it simply
+            // lives where the insert-time seed and the one-off NULL backfill
+            // can read the identical computation instead of copying it.
+            const value = await aggregateSummaryValue(this, desc, parentId, execCtx);
             await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: execCtx } as any);
           }, this.summaryRetryOptions);
         } catch (err) {
@@ -5001,13 +5149,28 @@ export class ObjectQL implements IObjectQLEngine {
       // (#2703). The hook still has final say — it runs after and may override
       // any defaulted field. `applyFieldDefaults` returns a fresh copy and only
       // fills fields left `undefined`, so client-supplied values are untouched.
+      //
+      // [#5749] Roll-up `summary` fields this object OWNS are seeded in the same
+      // pass, right after the declared defaults: `count`/`sum` over the empty
+      // child collection is 0, and a brand-new parent HAS an empty child
+      // collection. Without it the row stored `null` and stayed there until some
+      // child write happened to name it — so "never had a child" (null) and
+      // "had one, deleted it" (0) read differently and `= 0` filters dropped
+      // rows. Same placement rules as the defaults above: caller-supplied values
+      // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
-            this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            this.initializeSummaryFields(
+              object,
+              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            ),
           )
-        : this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap);
+        : this.initializeSummaryFields(
+            object,
+            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap),
+          );
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
       // exact single-record context shape (`input.data` = one row, `result` =

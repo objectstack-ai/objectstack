@@ -14,6 +14,8 @@ import {
   GetDiscoveryResponse,
   GetMetaTypesResponse,
   GetMetaItemsResponse,
+  GetMetaItemResponse,
+  SaveMetaItemResponse,
   LoginRequest,
   SessionResponse,
   GetPresignedUrlRequest,
@@ -550,15 +552,21 @@ export class ObjectStackClient {
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
      * @param options - Optional filters (e.g., packageId to scope by package)
+     *
+     * Answers the spec's `GetMetaItemResponseSchema` envelope: the metadata
+     * document lives under `item`, NOT spread at the top level. Naming that
+     * type here is honest only because #5563 converged every serving path on
+     * it — the cached path (the default one) used to answer the bare document,
+     * so before that convergence no annotation could describe both (#5545).
      */
-    getItem: async (type: string, name: string, options?: { packageId?: string }) => {
+    getItem: async (type: string, name: string, options?: { packageId?: string }): Promise<GetMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}/${name}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse(res);
+        return this.unwrapResponse<GetMetaItemResponse>(res);
     },
 
     /**
@@ -566,14 +574,22 @@ export class ObjectStackClient {
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name
      * @param item - The metadata content to save
+     *
+     * The resolved `version` is the ADR-0008 optimistic-concurrency token:
+     * echo it back as the `If-Match` request header on the next write to the
+     * same item and a concurrent edit is reported as 409 `metadata_conflict`
+     * instead of silently overwriting. It is nameable here only because
+     * `SaveMetaItemResponseSchema` declares the full body since #5745 — the
+     * declaration used to stop at `{ success, message }`, and annotating
+     * against that subset would have hidden the OCC carrier (#5545).
      */
-    saveItem: async (type: string, name: string, item: any) => {
+    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}`, {
             method: 'PUT',
             body: JSON.stringify(item)
         });
-        return this.unwrapResponse(res);
+        return this.unwrapResponse<SaveMetaItemResponse>(res);
     },
 
     /**
@@ -4689,19 +4705,21 @@ export class ScopedProjectClient {
       const res = await this.parent._fetch(this.url(`/meta/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
     },
-    getItem: async (type: string, name: string, options?: { packageId?: string }) => {
+    /** Same `{ type, name, item }` envelope as the unscoped surface (#5563). */
+    getItem: async (type: string, name: string, options?: { packageId?: string }): Promise<GetMetaItemResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
       const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs ? `?${qs}` : ''}`));
-      return this.parent._unwrap(res);
+      return this.parent._unwrap<GetMetaItemResponse>(res);
     },
-    saveItem: async (type: string, name: string, item: any) => {
+    /** Carries the ADR-0008 OCC token in `version` — see the unscoped twin. */
+    saveItem: async (type: string, name: string, item: any): Promise<SaveMetaItemResponse> => {
       const res = await this.parent._fetch(this.url(`/meta/${type}/${name}`), {
         method: 'PUT',
         body: JSON.stringify(item),
       });
-      return this.parent._unwrap(res);
+      return this.parent._unwrap<SaveMetaItemResponse>(res);
     },
     deleteItem: async (type: string, name: string): Promise<{ type: string; name: string; deleted: boolean }> => {
       const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}`), {
@@ -5043,6 +5061,8 @@ export type {
   GetDiscoveryResponse,
   GetMetaTypesResponse,
   GetMetaItemsResponse,
+  GetMetaItemResponse,
+  SaveMetaItemResponse,
   CheckPermissionRequest,
   CheckPermissionResponse,
   GetObjectPermissionsResponse,

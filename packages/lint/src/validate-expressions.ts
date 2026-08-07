@@ -80,6 +80,7 @@ import { validateExpression, collectCelRootIdentifiers } from '@objectstack/form
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
+import { injectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 
@@ -106,7 +107,24 @@ function asArray(v: unknown): AnyRec[] {
   return [];
 }
 
-/** object name → set of its field names, for schema-aware field checks. */
+/**
+ * object name → set of its field names, for schema-aware field checks.
+ *
+ * Authored fields UNION the system columns the platform injects on that object
+ * (#5378). Both halves are needed because the runtime resolves both: a predicate
+ * saying `has(record.owner_id)` on an object that never declares `owner_id`
+ * evaluates fine, because the registry provisioned the column — so rejecting it
+ * here was the platform's own linter denying the platform's own contract, and it
+ * pushed apps into re-declaring system columns purely to satisfy this pass
+ * (hotcrm#548 declared `owner_id` on all 12 business objects for that reason).
+ *
+ * The injected half is CONDITIONAL, per object, via the spec derivation the
+ * registry itself consumes — not a blanket allowance of every system name. That
+ * distinction is the whole value: on `ownership: 'none'` the platform injects no
+ * `owner_id`, so `record.owner_id` there stays the error it should be. A blanket
+ * union would have traded a false positive for a false negative and called it
+ * fixed.
+ */
 function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
   const idx = new Map<string, string[]>();
   for (const obj of objects) {
@@ -116,7 +134,10 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     let names: string[] = [];
     if (Array.isArray(fields)) names = fields.map(f => (f as AnyRec).name).filter((n): n is string => typeof n === 'string');
     else if (fields && typeof fields === 'object') names = Object.keys(fields as AnyRec);
-    idx.set(name, names);
+    // Injected columns come second, de-duplicated by insertion order: a DECLARED
+    // `owner_id` is the author's field (the registry lets it win), so the
+    // authored spelling keeps its position in the "did you mean?" candidates.
+    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj)])]);
   }
   return idx;
 }
@@ -125,6 +146,14 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
  * object name → (field name → field type), for the #1928 tier-4 type-soundness
  * check. Handles both `fields` shapes (array of `{name, type}` and name-keyed
  * map). Fields with a non-string `type` are simply omitted (treated as `dyn`).
+ *
+ * DECLARED fields only — deliberately NOT widened with the injected columns
+ * {@link buildFieldIndex} resolves (#5378). Their TYPES are the registry's
+ * (`AUDIT_FIELD_DEFS` and its siblings own what each column looks like; the spec
+ * derivation owns only which ones exist), so typing them here would be the
+ * hand-copied second table this change exists to avoid. Omitted ⇒ `dyn` ⇒ no
+ * type-soundness verdict on an injected column, which is the safe direction: the
+ * pass gains no false finding, it simply does not cover them yet.
  */
 function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, string>> {
   const idx = new Map<string, Record<string, string>>();
@@ -186,7 +215,18 @@ function isNullableField(def: AnyRec): boolean {
   return true;
 }
 
-/** object name → set of field names that may hold `null` (#4763). */
+/**
+ * object name → set of field names that may hold `null` (#4763).
+ *
+ * DECLARED fields only, like {@link buildFieldTypeIndex} and for a sharper
+ * reason: this index feeds a BUILD-BREAKING verdict, so adding the injected
+ * columns {@link buildFieldIndex} now resolves would turn `record.created_at`
+ * comparisons into errors on stacks that ship today. Nullability there is also
+ * genuinely per-column and not derivable from the existence plan — the driver
+ * always populates `created_at`, while `owner_id` really can be NULL — so it
+ * needs the registry's column definitions, not this module's guesses. Leaving
+ * them out costs coverage, never a false error.
+ */
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {

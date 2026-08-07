@@ -8,10 +8,10 @@ description: >
   relationships (see objectstack-data) or for designing the API endpoint
   that exposes a query (see objectstack-api).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: query
   tags: query, filter, sort, paginate, aggregate, ObjectQL, full-text
 ---

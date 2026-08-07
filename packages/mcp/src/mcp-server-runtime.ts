@@ -13,7 +13,13 @@ import type {
   RegisterObjectToolsOptions,
   RegisterActionToolsOptions,
 } from './mcp-http-tools.js';
-import { renderSkillMarkdown, type RenderSkillOptions } from './skill.js';
+import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
+import {
+  listSkillPrompts,
+  registerSkillPrompts,
+  skillPromptResult,
+  type McpSkillBridge,
+} from './skill-prompts.js';
 import { z } from 'zod';
 
 /**
@@ -69,7 +75,9 @@ const DESTRUCTIVE_TOOLS = new Set([
  * 1. Bridge ToolRegistry → MCP tools (all registered AI tools)
  * 2. Bridge IMetadataService → MCP resources (object schemas, metadata types)
  * 3. Bridge IDataEngine → MCP resources (record access by URI)
- * 4. Bridge Agent definitions → MCP prompts (agent instructions)
+ * 4. Bridge Agent definitions + `skill` metadata → MCP prompts (#3905:
+ *    the `instructions` half of an authored skill is what an MCP client can
+ *    list and fetch — see `skill-prompts.ts`)
  *
  * Architecture:
  * ```
@@ -406,14 +414,25 @@ export class MCPServerRuntime {
   // ── Prompt Bridge ──────────────────────────────────────────────
 
   /**
-   * Bridge registered agents to MCP prompts.
+   * Bridge registered agents **and authored skills** to MCP prompts.
    *
-   * Each active agent becomes an MCP prompt with:
-   * - Name matching the agent name
-   * - System message from agent instructions
-   * - Optional context arguments (objectName, recordId, viewName)
+   * Two prompt families land here:
+   *
+   * 1. `agent_prompt` — one dynamic prompt that loads an agent's system prompt
+   *    by name, with optional UI context (objectName, recordId, viewName).
+   * 2. One prompt per authored `skill` that carries `instructions` (#3905).
+   *    This is the open distribution's consumer for skill metadata: a tenant
+   *    writes `*.skill.ts`, and its instructions become a prompt any MCP client
+   *    connected to this server can list and fetch. See `skill-prompts.ts` for
+   *    why only the instructions half projects.
+   *
+   * The skill **list** is a snapshot taken here (the stdio transport registers
+   * prompts with the SDK, which owns `prompts/list` for this server); each
+   * prompt's **body** is re-read from metadata at `prompts/get` time, so an
+   * edited skill serves fresh text without a restart. The HTTP transport builds
+   * its server per request and is live on both — see {@link handleHttpRequest}.
    */
-  bridgePrompts(metadataService: IMetadataService): void {
+  async bridgePrompts(metadataService: IMetadataService): Promise<void> {
     const logger = this.config.logger;
 
     // Register a dynamic prompt that loads agents at call time
@@ -474,6 +493,49 @@ export class MCPServerRuntime {
     );
 
     logger?.info('[MCP] Agent prompts bridged');
+
+    // ── Skill metadata → MCP prompts (#3905) ──
+    const skillBridge: McpSkillBridge = {
+      listSkills: async () => (await metadataService.list('skill')) ?? [],
+    };
+
+    let skills: Awaited<ReturnType<typeof listSkillPrompts>>;
+    try {
+      skills = await listSkillPrompts(skillBridge);
+    } catch (err) {
+      // A metadata service that cannot list this type is not a boot failure —
+      // the server keeps its tools, resources and agent prompt.
+      const message = err instanceof Error ? err.message : String(err);
+      logger?.warn(`[MCP] Could not read skill metadata for the prompt surface: ${message}`);
+      return;
+    }
+
+    let bridged = 0;
+    for (const skill of skills) {
+      if (skill.name === 'agent_prompt') {
+        // The one reserved name on this surface. Never silently dropped: the
+        // author is told which skill collided and what it costs them.
+        logger?.warn(
+          `[MCP] Skill "${skill.name}" is not exposed as a prompt — that name is reserved by the built-in agent prompt. Rename the skill to make its instructions reachable over MCP.`,
+        );
+        continue;
+      }
+      this.mcpServer.registerPrompt(
+        skill.name,
+        {
+          ...(skill.title ? { title: skill.title } : {}),
+          ...(skill.description ? { description: skill.description } : {}),
+        },
+        async () => {
+          // Re-read at call time so an edited skill serves fresh instructions.
+          const current = (await listSkillPrompts(skillBridge)).find((s) => s.name === skill.name);
+          return skillPromptResult(current ?? skill);
+        },
+      );
+      bridged++;
+    }
+
+    logger?.info(`[MCP] Bridged ${bridged} skill prompts`);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────
@@ -545,8 +607,18 @@ export class MCPServerRuntime {
    * toolRegistry (which can mutate metadata) is deliberately NOT bridged onto
    * the external surface.
    *
+   * **Prompts (#3905).** When the bridge can also read this environment's
+   * `skill` metadata (`listSkills`), the server additionally serves the MCP
+   * `prompts` primitive: every authored skill that carries `instructions`
+   * becomes a prompt the client can `prompts/list` and `prompts/get`. The
+   * projection is read from the SAME per-request, environment-scoped bridge the
+   * tools use — never from server-held state — so a multi-tenant host cannot
+   * serve one environment's skills to another. A bridge without `listSkills`
+   * does not declare the capability at all (graceful degradation, as with the
+   * action tools).
+   *
    * @param request    The inbound Web `Request` (headers/method/url).
-   * @param opts.bridge       Principal-bound data (+ optional action) accessor (required to expose tools).
+   * @param opts.bridge       Principal-bound data (+ optional action / skill) accessor (required to expose tools).
    * @param opts.parsedBody   Pre-parsed JSON-RPC body (the dispatcher already read it).
    * @param opts.authInfo     Optional auth info forwarded to message handlers.
    * @param opts.toolOptions  Tool exposure options (system objects, query limits).
@@ -554,22 +626,34 @@ export class MCPServerRuntime {
   async handleHttpRequest(
     request: Request,
     opts: {
-      bridge?: McpDataBridge & Partial<McpActionBridge>;
+      bridge?: McpDataBridge & Partial<McpActionBridge> & Partial<McpSkillBridge>;
       parsedBody?: unknown;
       authInfo?: unknown;
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
     } = {},
   ): Promise<Response> {
+    // The prompt surface is wired by capability, like the action tools: a
+    // bridge that cannot read skill metadata gets no `prompts` capability and
+    // no handlers, rather than a capability that answers nothing.
+    const skillBridge =
+      opts.bridge && typeof opts.bridge.listSkills === 'function'
+        ? (opts.bridge as McpSkillBridge)
+        : undefined;
+
     // Fresh, isolated server per request (stateless).
     const server = new McpServer(
       { name: this.config.name, version: this.config.version },
       {
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, ...(skillBridge ? { prompts: {} } : {}) },
         instructions:
           this.config.instructions ??
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
       },
     );
+
+    if (skillBridge) {
+      registerSkillPrompts(server, skillBridge);
+    }
 
     if (opts.bridge) {
       registerObjectTools(server, opts.bridge, opts.toolOptions);

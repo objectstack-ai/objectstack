@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   HttpMethod,
-  HttpMethodSchema,
+  HttpMethodSubsetSchema,
   HttpRequestSchema,
   CorsConfigSchema,
   RateLimitConfigSchema,
@@ -138,19 +138,20 @@ describe('StaticMountSchema', () => {
 });
 
 // ============================================================================
-// Issue #8: HttpMethodSchema and HttpRequestSchema migrated to shared
+// Issue #8: the view data-source subset and HttpRequestSchema migrated to shared
+// (renamed HttpMethodSchema -> HttpMethodSubsetSchema at #5832)
 // ============================================================================
-describe('HttpMethodSchema (migrated from view.zod)', () => {
+describe('HttpMethodSubsetSchema (migrated from view.zod)', () => {
   it('should accept common HTTP methods', () => {
     const valid = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
     valid.forEach(m => {
-      expect(HttpMethodSchema.parse(m)).toBe(m);
+      expect(HttpMethodSubsetSchema.parse(m)).toBe(m);
     });
   });
 
   it('should reject HEAD and OPTIONS (subset for UI data sources)', () => {
-    expect(() => HttpMethodSchema.parse('HEAD')).toThrow();
-    expect(() => HttpMethodSchema.parse('OPTIONS')).toThrow();
+    expect(() => HttpMethodSubsetSchema.parse('HEAD')).toThrow();
+    expect(() => HttpMethodSubsetSchema.parse('OPTIONS')).toThrow();
   });
 });
 

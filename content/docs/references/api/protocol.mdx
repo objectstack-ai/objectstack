@@ -5,14 +5,6 @@ description: Protocol protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Response for `GET /api/v1/automation/actions` (ADR-0018).
-
-Returns the live action/node registry — the platform's built-in actions plus
-
-any plugin-contributed ones — backing the designer palette and flow
-
-validation. Each entry is a canonical `ActionDescriptorSchema`.
-
 <Callout type="info">
 **Source:** `packages/spec/src/api/protocol.zod.ts`
 </Callout>
@@ -448,7 +440,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **ids** | `string[]` | ✅ | Array of record IDs to delete (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Delete options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Delete options |
 | **object** | `string` | ✅ | Object name |
 
 
@@ -1024,7 +1016,7 @@ Get package response
 | **skip** | `number` | optional | Records to skip (offset). |
 | **expand** | `string` | optional | Comma-separated list of lookup/master_detail field names to expand. Resolved to populate array and passed to the engine for batch $in expansion. |
 | **search** | `string` | optional | Full-text search query. |
-| **distinct** | `any` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
+| **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
 | **count** | `boolean` | optional | Include total count in response. |
 
 
@@ -1550,7 +1542,7 @@ Uninstall package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **records** | `{ id: string; data: Record<string, any> }[]` | ✅ | Array of records to update (server caps the count — see batch.maxBatchSize) |
-| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean; validateOnly?: any }` | optional | Update options |
+| **options** | `{ atomic: boolean; returnRecords: boolean; continueOnError: boolean }` | optional | Update options |
 | **object** | `string` | ✅ | Object name |
 
 

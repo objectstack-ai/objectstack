@@ -2,7 +2,9 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { ISmsTransport } from '@objectstack/spec/contracts';
+import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
+import { SmsDailyQuota } from './sms-daily-quota.js';
 import { makeSmsTransport, type SmsProviderTag } from './transports/index.js';
 
 /**
@@ -97,9 +99,48 @@ export class SmsServicePlugin implements Plugin {
 
   private readonly options: SmsServicePluginOptions;
   private service?: SmsService;
+  private dailyQuota?: SmsDailyQuota;
 
   constructor(options: SmsServicePluginOptions = {}) {
     this.options = options;
+  }
+
+  /**
+   * Build the daily cost gate (#2814) over the kernel `cache` service.
+   *
+   * `resolveCache` is copied in shape from `AuthPlugin.init()` on purpose, for
+   * the two reasons stated there: the `cache` service is registered ASYNC (so
+   * `getService` throws for it and `getServiceAsync` is the only accessor that
+   * works), and resolution has to happen when a counter is CONSUMED rather than
+   * at init, or a deployment that registers its cache after this plugin freezes
+   * a "no shared store" answer for the life of the process (#4772). The
+   * degraded case is announced by `createLazyCounterStore` itself, named for
+   * this subject.
+   */
+  private buildDailyQuota(ctx: PluginContext): SmsDailyQuota {
+    const resolveCache = async (): Promise<CounterStore | undefined> => {
+      let cache: any;
+      try {
+        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
+          .getServiceAsync?.('cache');
+      } catch {
+        return undefined;
+      }
+      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
+      return undefined;
+    };
+    return new SmsDailyQuota({
+      resolveStore: createLazyCounterStore({
+        resolveCache,
+        logger: ctx.logger,
+        logPrefix: '[sms]',
+        subject: 'daily SMS send quota (#2814)',
+        degradedImpact:
+          'The ceiling is still enforced, but PER NODE: an N-node deployment can spend up to N× the ' +
+          'configured number of PAID SMS per day, which is exactly the total-cost hole this gate exists to close',
+      }),
+      logger: ctx.logger,
+    });
   }
 
   private resolveInitialTransport(ctx: PluginContext): { transport: ISmsTransport; configured: boolean } {
@@ -129,11 +170,13 @@ export class SmsServicePlugin implements Plugin {
     } else {
       ctx.logger.info(`SmsServicePlugin: using '${this.options.provider ?? 'custom'}' provider`);
     }
+    this.dailyQuota = this.buildDailyQuota(ctx);
     this.service = new SmsService({
       transport,
       configured,
       retries: this.options.retries,
       logger: ctx.logger,
+      dailyQuota: this.dailyQuota,
     });
     ctx.registerService('sms', this.service);
     ctx.logger.info('SmsServicePlugin: sms service registered');
@@ -142,9 +185,6 @@ export class SmsServicePlugin implements Plugin {
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
       if (!this.service) return;
-      // A host-injected transport is authoritative — settings only manage
-      // the provider-tag path.
-      if (this.options.transport) return;
       try {
         const settings = ctx.getService<any>('settings');
         if (!settings || typeof settings.getNamespace !== 'function') return;
@@ -156,7 +196,17 @@ export class SmsServicePlugin implements Plugin {
             for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
               values[k] = v?.value;
             }
-            this.applySmsSettings(values, ctx);
+            // #2814 — the daily cost ceiling binds for EVERY composition,
+            // including a host-injected transport: "how much may this
+            // deployment spend today" is an operator policy about the
+            // deployment, not a property of whichever transport delivers.
+            // Read by VALUE, never by `ResolvedSettingValue.source` — an
+            // env-locked `OS_SMS_DAILY_QUOTA` and an admin-saved row are the
+            // same instruction to this reader (#5536).
+            this.dailyQuota?.setQuota(values.daily_quota);
+            // A host-injected transport, by contrast, IS authoritative — the
+            // settings form only manages the provider-tag path.
+            if (!this.options.transport) this.applySmsSettings(values, ctx);
           } catch (err: any) {
             ctx.logger.warn('SmsServicePlugin: failed to apply sms settings: ' + (err?.message ?? err));
           }
@@ -169,8 +219,10 @@ export class SmsServicePlugin implements Plugin {
 
         // `sms/test` action — validate the (possibly unsaved) form values by
         // sending a real test message through a one-shot transport, mirroring
-        // the `mail/test` handler in EmailServicePlugin.
-        if (typeof settings.registerAction === 'function') {
+        // the `mail/test` handler in EmailServicePlugin. Still skipped when the
+        // host injected its own transport: the form's provider fields describe
+        // nothing that composition uses, so testing them would be theatre.
+        if (!this.options.transport && typeof settings.registerAction === 'function') {
           const svc = this.service;
           settings.registerAction('sms', 'test', async ({ values, payload, ctx: actionCtx }: any) => {
             const overrides = (payload && typeof payload === 'object' && payload.values && typeof payload.values === 'object')

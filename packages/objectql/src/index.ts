@@ -144,6 +144,25 @@ export type {
     ValueShapeScanOptions,
     ValueShapeScanLogger,
 } from './validation/scan-value-shapes.js';
+// [#6063 / #5749] The one-off backfill behind `os migrate summary-nulls`, and
+// the roll-up core it shares with the engine. Same package as the roll-up it
+// repairs (the owning-package half of the migration-family shape: the CLI holds
+// only the command shell).
+export {
+    backfillSummaryNulls,
+    formatSummaryBackfillReport,
+    summaryBackfillComplete,
+} from './summary-backfill.js';
+export type {
+    SummaryBackfillReport,
+    SummaryBackfillFieldOutcome,
+    SummaryBackfillFailure,
+    SummaryBackfillEngine,
+    SummaryBackfillLogger,
+    SummaryBackfillOptions,
+} from './summary-backfill.js';
+export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
+export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 export {

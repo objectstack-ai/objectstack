@@ -66,6 +66,7 @@ import type { TranslationBundle, TranslationData } from '@objectstack/spec/syste
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { expandViewContainer } from '@objectstack/spec/ui';
 import { walkPageComponents } from '@objectstack/lint';
 
 // ─── Public types ──────────────────────────────────────────────────────
@@ -172,6 +173,48 @@ function viewObjectName(view: any): string | undefined {
     view?.list?.data?.object ??
     view?.form?.data?.object
   );
+}
+
+/**
+ * The bare `_views` key the RUNTIME assigns to a container's default `list`.
+ *
+ * Asked of the composer (`expandViewContainer`, `spec/src/ui/view.zod.ts`)
+ * rather than re-derived here — that function is the single producer of a
+ * view's runtime identity, and the whole point of #5164 is that a second
+ * derivation drifts from it. This walker used to spell the key
+ * `view.list.name ?? 'list'` while the composer named the very same view
+ * `<object>.default`, so a container declaring only a default `list` got a
+ * bundle skeleton keyed `list`, a registry entry keyed `default`, and an
+ * English label on screen forever. Ruled 2026-08-06 (#5164): canonical = the
+ * runtime identity's bare key.
+ *
+ * Two facts live in the composer and nowhere else, both load-bearing here:
+ *
+ *  1. a nameless default list is keyed **`default`** (never `list`), and a
+ *     named one keeps the author's `list.name`;
+ *  2. a default list whose STRUCTURE merely restates a `listViews` entry is
+ *     **collapsed into that entry** and has no key of its own — the
+ *     `examples/app-crm` shape, where `list` is signature-identical to
+ *     `listViews.all` and the live key is therefore `all`. This returns `all`
+ *     there, and the caller skips the emit because the `listViews` loop
+ *     already covered it. Emitting a second key for the collapsed view would
+ *     scaffold a translation no lookup can reach — the same defect one shape
+ *     over.
+ *
+ * A key renamed by a collision (`default` → `default_2`, when `listViews`
+ * already claimed `default`) is returned as renamed, because that rename is
+ * the registry key too.
+ *
+ * Returns `undefined` when the container declares no default `list`.
+ */
+function defaultListViewKey(object: string, container: any): string | undefined {
+  if (!container?.list || typeof container.list !== 'object') return undefined;
+  const item = expandViewContainer(object, container).find(
+    (i) => i.viewKind === 'list' && i.isDefault,
+  );
+  if (!item) return undefined;
+  const prefix = `${object}.`;
+  return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
 }
 
 /**
@@ -609,11 +652,20 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       continue;
     }
 
-    // The container's default list. The console ids an unnamed default as
-    // `primary.name || 'list'` (app-shell `ObjectView`), so it resolves under
-    // `_views.list`.
+    // The container's default list, keyed exactly as the runtime registry keys
+    // it — see `defaultListViewKey`. `undefined` means the container declares
+    // no default list; a key the container's own `listViews` also declares
+    // means the composer collapsed the two, and the loop below emits it.
     if (view.list && typeof view.list === 'object') {
-      pushViewEntries(out, viewObjectName(view.list) ?? containerObject, view.list.name ?? 'list', view.list);
+      const key = defaultListViewKey(containerObject, view);
+      const collapsedIntoListViews =
+        key !== undefined
+        && view.listViews
+        && typeof view.listViews === 'object'
+        && Object.prototype.hasOwnProperty.call(view.listViews, key);
+      if (key !== undefined && !collapsedIntoListViews) {
+        pushViewEntries(out, viewObjectName(view.list) ?? containerObject, key, view.list);
+      }
     }
     if (view.listViews && typeof view.listViews === 'object') {
       for (const [viewName, raw] of Object.entries<any>(view.listViews)) {

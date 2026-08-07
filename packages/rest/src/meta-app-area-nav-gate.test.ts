@@ -73,7 +73,13 @@ function setup(perms: string[], services: string[] = ['org-scoping']) {
             const t = String(type ?? '');
             return t === 'app' || t === 'apps' ? [JSON.parse(JSON.stringify(AREA_APP))] : [];
         }),
-        getMetaItem: vi.fn(async () => JSON.parse(JSON.stringify(AREA_APP))),
+        // `getMetaItem` answers the `{ type, name, item }` envelope (#5563),
+        // with `type` folded to the canonical singular the way the real
+        // protocol folds it (#4432) — the route is addressed as `/meta/apps/…`
+        // here, and the producer answers `app`.
+        getMetaItem: vi.fn(async ({ name }: any) => ({
+            type: 'app', name, item: JSON.parse(JSON.stringify(AREA_APP)),
+        })),
         findData: vi.fn().mockResolvedValue([]),
     };
     const rest: any = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false } } as any);
@@ -102,10 +108,17 @@ async function getItem(rest: any, name = 'crm', type = 'apps') {
     return res;
 }
 
-const appFrom = (body: any): any => {
-    const raw = Array.isArray(body) ? body[0] : (body?.items ? body.items[0] : body);
-    return raw && raw.item ? raw.item : raw;
-};
+/**
+ * The LIST body's elements are metadata documents (`{ type, items: [...] }`,
+ * or a bare array). [#5563] This used to end with a `raw.item ? raw.item : raw`
+ * shape sniff, because the single-item route answered either shape depending on
+ * server config; each surface has exactly one shape now, so each reader names
+ * the one it reads.
+ */
+const appFrom = (body: any): any =>
+    Array.isArray(body) ? body[0] : (body?.items ? body.items[0] : body);
+/** The SINGLE-ITEM body is the `{ type, name, item }` envelope. */
+const appFromItem = (body: any): any => body?.item;
 const areaNav = (app: any, areaId: string): string[] =>
     (app?.areas?.find((a: any) => a.id === areaId)?.navigation ?? []).map((e: any) => e.id);
 
@@ -138,9 +151,11 @@ describe('#4722 — `/meta` strips gated nav entries inside `areas[]`, on both r
         const res = await getItem(rest);
 
         expect(res.statusCode).toBe(200);
-        const app = appFrom(res.body);
+        const app = appFromItem(res.body);
         expect(areaNav(app, 'area_sales')).toEqual(['nav_leads', 'nav_widget']);
         expect(app.areas.map((a: any) => a.id)).toEqual(['area_sales']);
+        // The envelope is the body; the gated document sits inside it.
+        expect(res.body).toMatchObject({ type: 'app', name: 'crm' });
 
         const wire = JSON.stringify(res.body);
         expect(wire).not.toContain('secret_forecast');
@@ -151,7 +166,7 @@ describe('#4722 — `/meta` strips gated nav entries inside `areas[]`, on both r
     it('a caller who HOLDS the permissions still receives the whole tree (no over-filtering)', async () => {
         const { rest } = setup(['sales.admin', 'admin.access']);
         const list = appFrom((await getList(rest)).body);
-        const single = appFrom((await getItem(rest)).body);
+        const single = appFromItem((await getItem(rest)).body);
 
         for (const app of [list, single]) {
             expect(app.areas.map((a: any) => a.id)).toEqual(['area_sales', 'area_admin']);
@@ -164,7 +179,7 @@ describe('#4722 — `/meta` strips gated nav entries inside `areas[]`, on both r
         // Holds every permission — only the capability gate can remove the item.
         const { rest } = setup(['sales.admin', 'admin.access'], []);
         const list = appFrom((await getList(rest)).body);
-        const single = appFrom((await getItem(rest)).body);
+        const single = appFromItem((await getItem(rest)).body);
 
         for (const app of [list, single]) {
             expect(areaNav(app, 'area_sales')).toEqual(['nav_leads', 'nav_forecast', 'nav_ops_page']);

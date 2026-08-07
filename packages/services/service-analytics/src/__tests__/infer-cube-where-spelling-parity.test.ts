@@ -44,14 +44,24 @@
  * `conjunctFieldKeys` deliberately does not descend `$or`. Those two cases pin a
  * deliberate NON-change; reading the table as "13 red" would be wrong.
  *
- * Block 3 is GREEN IN BOTH DIRECTIONS, and that is the point rather than a gap.
- * It pins the DOTTED residue — the one shape #5353 left answering per spelling —
- * so restoring the guard changes nothing there. Reading block 3 as part of the
- * fix would be wrong; it is the fence around what the fix could not decide, and
- * it is what makes a future `collectFilterLeaves` refactor (which would flatten
- * `{owner: {region: 'NA'}}` to the leaf `owner.region` and mint `region`) fail
- * loudly instead of quietly changing a verdict #5740 shares with the `dimensions`
- * request key.
+ * Block 3 was #5353's fence around the one shape it could not decide: a DOTTED
+ * `where` key, which answered per spelling — the object spelling minting the
+ * stripped tail as a base column (a `400 INVALID_FIELD` naming `region`, or a
+ * silent wrong-column filter where the base had one), the array spelling minting
+ * nothing and compiling the traversal.
+ *
+ * [#5739] The maintainer ruled on 2026-08-06: mint the traversal VERBATIM. Block
+ * 3 is therefore no longer a fence but the parity's dotted half — both spellings
+ * mint `owner.region` and compile the same `LEFT JOIN`. It is still green under
+ * the `!Array.isArray` reverse verification above (that guard is not what decided
+ * the dotted answer); what turns it red is restoring the blanket `stripPrefix` in
+ * `inferCubeFromQuery`, which is #5739's own reverse direction and is measured in
+ * `infer-cube-relation-traversal.test.ts`.
+ *
+ * The case that still holds the line against a `collectFilterLeaves` refactor is
+ * `a nested relation object seeds its RELATION key, not the tail`: flattening
+ * `{owner: {region: 'NA'}}` to the leaf `owner.region` would change which key
+ * this bag mints, and that must fail loudly rather than drift.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -345,44 +355,60 @@ describe('[#5353] the seeded dimensions change no verdict and no statement', () 
   });
 });
 
-// ── 3. The #5739 residue: dotted keys, NOT unified, and why ──────────────────
+// ── 3. Dotted keys, unified by #5739 ─────────────────────────────────────────
 
 /**
- * These pin what #5353 deliberately did NOT fix. A dotted `where` key still
- * answers per spelling, because unifying it means choosing a direction that
- * belongs to #5739 — and both directions are measured here so the choice is made
- * on facts rather than on which spelling someone tried first.
+ * #5353 left a dotted `where` key answering per SPELLING, because unifying it
+ * meant choosing a direction that belonged to #5739. The maintainer ruled on
+ * 2026-08-06: mint the traversal VERBATIM, so the object spelling converges on
+ * the JOIN the array spelling already compiled. These cases were the residue's
+ * fence; they are now the parity's dotted half, and they carry the ruling's
+ * weight — both spellings must produce the SAME statement, and it must be the
+ * traversal.
+ *
+ * The traversal's own coverage (all four strategy × request-key combinations,
+ * the base-column-shadowing case that made the defect silent, and the
+ * `<cube>.`-qualifier cases that must NOT move) lives in
+ * `infer-cube-relation-traversal.test.ts`. What stays here is what this file is
+ * about: one filter, two spellings, one answer.
  */
-describe('[#5353] a dotted `where` key keeps its per-spelling answer (#5739 owns it)', () => {
+describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal', () => {
   /** No base `region` column — the shape a relation filter is normally written against. */
   const NO_REGION = { fields: ['id', 'stage', 'owner', 'amount', 'closed_at'], native: true };
 
-  it('the OBJECT spelling still mints the stripped tail as a base-table dimension', async () => {
-    // `origin/main`'s behaviour, reproduced verbatim by the residue loop. The
-    // minted `region` is then found by `declaredMemberEntry`'s dotted tail lookup,
-    // so #5669's gate resolves the member `owner.region` to a base column `deal`
-    // does not have and refuses — which #5740 pinned as the honest answer given
-    // what actually reaches the driver on this path.
-    const err = await rejection(
-      makeService(NO_REGION).service.query({
-        cube: 'deal',
-        measures: ['count'],
-        where: { 'owner.region': 'NA' },
-      } as never),
-    );
-    expect((err as { code?: string }).code).toBe('INVALID_FIELD');
-    expect(err.message).toMatch(/constrains field 'region'/);
+  it('mints the traversal verbatim and compiles the JOIN — both spellings, one statement', async () => {
+    // The flip. Before the ruling the OBJECT spelling minted the stripped tail as
+    // a base-table dimension, `declaredMemberEntry`'s dotted tail lookup found it,
+    // and #5669's gate refused `owner.region` by naming a base column `deal` does
+    // not have (`constrains field 'region'`) — while the ARRAY spelling of the
+    // same filter minted nothing and compiled the traversal. One filter, two
+    // spellings, a 400 and a JOIN.
+    const object = await inferredDimensions({ 'owner.region': 'NA' }, NO_REGION);
+    const array = await inferredDimensions([['owner.region', '=', 'NA']], NO_REGION);
+
+    // Load-bearing in both halves: the same cube AND the same statement, pinned
+    // to the JOIN so the pair cannot agree by both producing nothing.
+    expect(object.dimensions).toEqual(['owner.region']);
+    expect(array.dimensions).toEqual(object.dimensions);
+    expect(array.sqls).toEqual(object.sqls);
+    expect(object.sqls[0]).toContain('LEFT JOIN "owner" ON "deal"."owner" = "owner"."id"');
+    expect(object.sqls[0]).toContain('WHERE "owner"."region" = ');
+    // The mis-cast's own spellings, named so a regression cannot hide behind the
+    // parity: neither the stripped dimension nor the base-column predicate.
+    expect(object.dimensions).not.toContain('region');
+    expect(object.sqls[0]).not.toContain('WHERE region = ');
   });
 
-  it('the ARRAY spelling still mints nothing, and compiles the traversal', async () => {
-    // The other half of the residue. Propagating the mint to this spelling is the
-    // measured REGRESSION #5353 refused: this query runs today and would become
-    // either a base-column filter over different rows or — as the case above
-    // shows — a 400.
-    const { dimensions, sqls } = await inferredDimensions([['owner.region', '=', 'NA']], NO_REGION);
+  it('runs the query the object spelling used to be refused for', async () => {
+    // The other half of the flip, stated as a verdict rather than a statement:
+    // `deal` has no `region` column, so before the ruling this exact query was a
+    // `400 INVALID_FIELD` naming a field the caller never wrote. The traversal
+    // does not need one.
+    const { service, sqls } = makeService(NO_REGION);
 
-    expect(dimensions).toEqual([]);
-    expect(sqls[0]).toContain('LEFT JOIN "owner" ON "deal"."owner" = "owner"."id"');
+    await expect(
+      service.query({ cube: 'deal', measures: ['count'], where: { 'owner.region': 'NA' } } as never),
+    ).resolves.toBeTruthy();
     expect(sqls[0]).toContain('WHERE "owner"."region" = ');
   });
 
@@ -396,14 +422,23 @@ describe('[#5353] a dotted `where` key keeps its per-spelling answer (#5739 owns
     expect(sqls[0]).toContain('WHERE "owner"."region" = ');
   });
 
-  it('bare keys reach parity even when a dotted key rides along', async () => {
-    // The residue is scoped to the dotted key alone: `stage` is unified, and the
-    // whole query is still refused for `region` — one rejection at a time, naming
-    // a real mistake either way.
-    const { dimensions } = await inferredDimensions(
-      [['stage', '=', 'won'], ['owner.region', '=', 'NA']],
+  it('bare and dotted keys reach parity together when both ride along', async () => {
+    // Before the ruling only `stage` was unified and the whole query was refused
+    // for `region`; now both keys are minted, on both spellings, and the query
+    // runs. The bare column stays BARE in the statement — `qualifyAndRegisterJoin`
+    // qualifies plain identifiers only for a cube declaring `joins`, and minting a
+    // dotted dimension does not give an inferred cube one (block 2's rule, still
+    // holding with a traversal in the same filter).
+    const both = [['stage', '=', 'won'], ['owner.region', '=', 'NA']];
+    const array = await inferredDimensions(both, NO_REGION);
+    const object = await inferredDimensions(
+      { $and: [{ stage: 'won' }, { 'owner.region': 'NA' }] },
       NO_REGION,
     );
-    expect(dimensions).toEqual(['stage']);
+
+    expect(array.dimensions).toEqual(['owner.region', 'stage']);
+    expect(object.dimensions).toEqual(array.dimensions);
+    expect(object.sqls).toEqual(array.sqls);
+    expect(array.sqls[0]).toContain('WHERE (stage = $1 AND "owner"."region" = $2)');
   });
 });

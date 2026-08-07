@@ -75,6 +75,8 @@ export const SSLConfigSchema = lazySchema(() => z.object({
 }));
 
 export type SSLConfig = z.infer<typeof SSLConfigSchema>;
+/** Post-parse shape of {@link SSLConfig} — defaults applied, transforms run (ADR-0122). */
+export type SSLConfigParsed = z.infer<typeof SSLConfigSchema>;
 
 /**
  * SQL Driver Configuration Schema
@@ -134,6 +136,8 @@ export const SQLDriverConfigSchema = lazySchema(() => DriverConfigSchema.extend(
 }));
 
 export type SQLDriverConfig = z.infer<typeof SQLDriverConfigSchema>;
+/** Post-parse shape of {@link SQLDriverConfig} — defaults applied, transforms run (ADR-0122). */
+export type SQLDriverConfigParsed = z.infer<typeof SQLDriverConfigSchema>;
 
 // ==========================================================================
 // SQLite-Specific Constants

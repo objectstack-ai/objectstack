@@ -85,6 +85,8 @@ export const TraceContextSchema = lazySchema(() => z.object({
 }).describe('Trace context (W3C Trace Context)'));
 
 export type TraceContext = z.infer<typeof TraceContextSchema>;
+/** Post-parse shape of {@link TraceContext} — defaults applied, transforms run (ADR-0122). */
+export type TraceContextParsed = z.infer<typeof TraceContextSchema>;
 
 /**
  * Span Kind Enum
@@ -173,6 +175,8 @@ export const SpanLinkSchema = lazySchema(() => z.object({
 }).describe('Span link'));
 
 export type SpanLink = z.infer<typeof SpanLinkSchema>;
+/** Post-parse shape of {@link SpanLink} — defaults applied, transforms run (ADR-0122). */
+export type SpanLinkParsed = z.infer<typeof SpanLinkSchema>;
 
 /**
  * Span Schema
@@ -247,6 +251,8 @@ export const SpanSchema = lazySchema(() => z.object({
 }).describe('OpenTelemetry span'));
 
 export type Span = z.infer<typeof SpanSchema>;
+/** Post-parse shape of {@link Span} — defaults applied, transforms run (ADR-0122). */
+export type SpanParsed = z.infer<typeof SpanSchema>;
 
 /**
  * Sampling Decision Enum
@@ -378,6 +384,8 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
 }).describe('Trace sampling configuration'));
 
 export type TraceSamplingConfig = z.infer<typeof TraceSamplingConfigSchema>;
+/** Post-parse shape of {@link TraceSamplingConfig} — defaults applied, transforms run (ADR-0122). */
+export type TraceSamplingConfigParsed = z.infer<typeof TraceSamplingConfigSchema>;
 
 /**
  * Trace Context Propagation Format Enum
@@ -460,6 +468,8 @@ export const TraceContextPropagationSchema = lazySchema(() => z.object({
 }).describe('Trace context propagation'));
 
 export type TraceContextPropagation = z.infer<typeof TraceContextPropagationSchema>;
+/** Post-parse shape of {@link TraceContextPropagation} — defaults applied, transforms run (ADR-0122). */
+export type TraceContextPropagationParsed = z.infer<typeof TraceContextPropagationSchema>;
 
 /**
  * OpenTelemetry Exporter Type Enum
@@ -610,6 +620,8 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
 }).describe('OpenTelemetry compatibility configuration'));
 
 export type OpenTelemetryCompatibility = z.infer<typeof OpenTelemetryCompatibilitySchema>;
+/** Post-parse shape of {@link OpenTelemetryCompatibility} — defaults applied, transforms run (ADR-0122). */
+export type OpenTelemetryCompatibilityParsed = z.infer<typeof OpenTelemetryCompatibilitySchema>;
 
 /**
  * Tracing Configuration Schema
@@ -700,3 +712,5 @@ export const TracingConfigSchema = lazySchema(() => z.object({
 }).describe('Tracing configuration'));
 
 export type TracingConfig = z.infer<typeof TracingConfigSchema>;
+/** Post-parse shape of {@link TracingConfig} — defaults applied, transforms run (ADR-0122). */
+export type TracingConfigParsed = z.infer<typeof TracingConfigSchema>;

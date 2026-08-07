@@ -95,29 +95,16 @@ jobs:
         run: pnpm check:query-options-erasure
 
       # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
-      # tracked TEXT file for a raw ASCII control byte — 0x00-0x08, 0x0b, 0x0c,
-      # 0x0e-0x1f and 0x7f, i.e. everything except tab/LF/CR. Two distinct
-      # harms, one gate:
-      #   • A literal U+0000 makes grep/ripgrep treat the whole file as binary and
-      #     silently return ZERO matches — the file drops out of code search and
-      #     out of every grep-based lint, with no error saying so. Nothing else
-      #     catches it: git sniffs only the first 8000 bytes to decide binary-ness,
-      #     and protocol.ts carried its NUL at offset 147230, so it kept diffing as
-      #     ordinary text through review. That blind spot let six files accumulate
-      #     the same defect.
-      #   • The other C0 controls still match in grep but RENDER AS NOTHING, so a
-      #     load-bearing separator reads as an empty string in the diff and in
-      #     review: `keyParts.join('<0x01>')` shows up as `keyParts.join('')`.
-      #     Four tracked source files carried those past the NUL-only gate until
-      #     #5157 widened the scan surface; PR #5140 is the case that found it,
-      #     when a 0x01 sitting 14 bytes from a caught NUL went unfixed.
-      #   • DEL (0x7f) is in the set for the same reason, added by #5460. It is
-      #     not a C0 control — it sits alone past the printable range — so the
-      #     C0-shaped set could not reach it, and two raw specimens survived in
-      #     the CLI's password prompts nine lines below a 0x03 #5157 had just
-      #     escaped, reading as `case ''`. The set is drawn by the accident
-      #     source (a tool materialising an escape into its byte), and that
-      #     source does not pick byte values.
+      # tracked TEXT file for a raw ASCII control byte and fails on any hit.
+      # WHICH bytes are in the set and WHY each is rejected are stated and argued
+      # once, in the gate script's header — `scripts/check-nul-bytes.mjs`. That
+      # header is authoritative and this comment cites it rather than restating it
+      # (#5579 established the footing, #5681 applied it here). The one-line
+      # summary, for whoever is reading this because the step just went red: the
+      # set is every ASCII control character except tab/LF/CR, drawn by the
+      # ACCIDENT SOURCE — an editing tool materialising an escape into its byte —
+      # and not by byte semantics, so "mine is not a NUL" is never a reason to read
+      # a hit as a false positive.
       # The command name stays `check:nul-bytes` for continuity — see the script's
       # header for why. Authors must write the unicode escape instead of the byte.
       - name: Raw control-byte guard
@@ -399,6 +386,51 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
+      # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
+      # registries, the api-surface baselines) from text-merging into a
+      # plausible-looking wrong file: the driver defers the path and records it,
+      # and `.githooks/pre-commit` refuses the commit until the regeneration has
+      # actually happened. Both halves are CONFIG — `.gitattributes` routing on
+      # one side, the table in scripts/regen-artifacts.mjs on the other — and
+      # they drift apart in either direction with nothing failing: a path
+      # declared in the table but unmapped still text-merges, and a path mapped
+      # but undeclared leaves the merge CONFLICTED with no explanation. The
+      # self-test reconciles them both ways, checks the gen:/check: names the
+      # driver advises still resolve, that the hook is executable IN THE INDEX
+      # (git ignores a non-executable hook and says only `advice.ignoredHook`),
+      # that the driver registered in THIS clone resolves here (#4868: it
+      # pointed at a deleted worktree for weeks while every other check stayed
+      # green), and proves the behaviour end to end against real git. The
+      # second half pins the staleness rules' dangerous direction — "says fresh
+      # when stale".
+      # It ran nowhere until now: `pre-commit` runs check-regen-pending's MAIN
+      # path (which exits immediately with no pending marker), never
+      # `--self-test`, and no workflow named the command — so the reconciliation
+      # was verified only when someone happened to run the root script by hand
+      # (#4690's family: a gate archived as "runs elsewhere" that ran nowhere).
+      # Pure git + fs, no build, seconds — so it belongs in this job.
+      - name: Merge-driver wiring gate
+        run: pnpm check:merge-driver
+
+      # ADR-0122 type-alias convention gate (#5551). `packages/spec` spelled the
+      # same idea two ways for its whole life — 1384 bare aliases meaning the
+      # PARSED state, 86 meaning the AUTHOR state — and three first-hand sources
+      # each called the 8-file minority "the house convention". ADR-0122 settles
+      # it (bare = author state, `XParsed` = parsed state) and lands phase 1
+      # additively: an `XParsed` wherever the parsed state is a distinct type, so
+      # the major-window flip of the bare names has a migration target everywhere
+      # it changes meaning. This gate is what stops that coverage from decaying —
+      # a new bare `z.infer` alias must either declare its `XParsed` or be pinned
+      # isomorphic in `packages/spec/src/type-alias-convention.pin.test.ts`, where
+      # tsc proves the exemption rather than a comment asserting it. Static text
+      # scan, no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while every alias is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family).
+      - name: Spec type-alias convention gate (ADR-0122)
+        run: pnpm check:spec-parsed-alias
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
@@ -482,7 +514,10 @@ jobs:
       # failure: every package either declares `typecheck` (run by the turbo
       # step below) or carries a measured DEBT/EXEMPT entry in the script's
       # ledger, reconciled in both directions so the ledger can only shrink.
-      # Reads package.json files only; no build, sub-second.
+      # Reads package.json files only; no build, sub-second. The other half of
+      # this gate — re-running tsc against each ledger number — needs the built
+      # dist/*.d.ts and therefore lives after the build step, near the bottom of
+      # this job ("Re-measure the type-check DEBT / TEST_DEBT ledger").
       - name: Check every package is type-check covered or ledgered
         run: pnpm check:type-check-coverage
 
@@ -548,18 +583,27 @@ jobs:
       # generated page and the filter kept watching the old path, so hand-edits
       # went unchecked for months; #3855 listed specific spec paths but no schema
       # dirs, so `check:authorable-surface` went dormant on exactly the PRs that
-      # remove an authorable key; and `json-schema.manifest.json` — the #2978
+      # remove an authorable key; and the json-schema manifest — the #2978
       # ratchet that is the ONLY durable record of every emitted schema, since
       # json-schema/ is gitignored — was never watched at all, so a PR retiring a
       # key from it skipped its own verifier. Six gates had already escaped to
       # this job one at a time, each with a comment saying the filter had failed
       # it; these four finish the migration and retire the duplicate ledger.
       #
-      # Affordable because the work was already being done here: `check:docs`
-      # below runs `gen:schema` — the same scripts/build-schemas.ts that backs
-      # `check:authorable-surface` — and that whole step measures 4s in CI. All
-      # four read source via tsx and need no build, so they run before the
-      # workspace build, as the gates below already do.
+      # Affordable because the work was already being done here: one run of
+      # scripts/build-schemas.ts serves both `check:authorable-surface` and the
+      # `check:docs` gate below, and that whole step measures 4s in CI. All four
+      # read source via tsx and need no build, so they run before the workspace
+      # build, as the gates below already do.
+      #
+      # It used to be `check:docs` that ran `gen:schema`, and that is the half
+      # #4723 removed: `gen:schema` is a generator, so a step named `check:` was
+      # rewriting two TRACKED files (json-schema.manifest.json,
+      # authorable-surface.json) whenever they were behind — silently repairing
+      # locally what it was supposed to report, and running the same ~1600-schema
+      # generation twice per job. The generation now happens once, in the
+      # `check:authorable-surface` step below, whose `--check` mode writes the
+      # gitignored json-schema/ tree and refuses to touch a tracked file (#4711).
       - name: Check skill docs are generated from SKILL.md frontmatter
         run: pnpm --filter @objectstack/spec check:skill-docs
 
@@ -570,12 +614,20 @@ jobs:
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
       # The authorable KEY surface — what a metadata author may write, which for
-      # this platform is the third-party API. `api-surface.json` records exported
+      # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript
       # PRINTS them (a reference, never structurally expanded), so neither sees a
       # key added to or removed from a schema. #3883 removed three authorable keys
       # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
       # this gate until a narrowing actually slipped both — it has.
+      #
+      # ⚠ ORDER: this step must stay ABOVE the `check:docs` step below. Its
+      # `--check` run of scripts/build-schemas.ts writes the gitignored
+      # packages/spec/json-schema/ tree that `check:docs` renders from — the
+      # explicit generation that replaced the `gen:schema` `check:docs` used to run
+      # itself (#4723). Nothing here silently depends on that: `build-docs.ts`
+      # refuses on a missing or stale tree, so a reordering fails loudly with the
+      # prescription rather than reporting on last run's schemas.
       - name: Check the authorable key surface is recorded and nothing vanished
         run: pnpm --filter @objectstack/spec check:authorable-surface
 
@@ -591,6 +643,11 @@ jobs:
       # job has no paths filter and is a required status check, so the gate cannot go
       # dormant. It reads src/ + json-schema/ via tsx and needs no build, so it runs
       # before the workspace build and fails in ~2s.
+      #
+      # It CONSUMES the json-schema/ tree the `check:authorable-surface` step above
+      # generated; it no longer generates one itself (#4723). Two things came off
+      # this step with that: the duplicate ~1600-schema generation, and the tracked
+      # files a `check:` script had no business writing.
       - name: Check generated reference docs are in sync with the spec
         run: pnpm --filter @objectstack/spec check:docs
 
@@ -671,6 +728,42 @@ jobs:
       - name: Type check workspace packages
         run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
 
+      # The MEASURED half of the coverage gate (#5278). The cheap structural
+      # check near the top of this job asserts that a package without a
+      # `typecheck` script carries a DEBT/TEST_DEBT entry with a positive number
+      # written down — and, until now, nothing more: `errors: 28` and
+      # `errors: 1` were equally acceptable to it, because the ledger was never
+      # re-measured. So a ledgered package's real error count could grow without
+      # bound while the gate reported success. It had: metadata-protocol
+      # recorded 28 and reported 63, service-analytics 3 -> 7, service-automation
+      # 2 -> 5, and the wholesale re-measure this step ships with found 17 of the
+      # 34 entries understated and not one overstated. A number that has drifted
+      # 2.25x no longer describes the debt it claims to freeze.
+      #
+      # Asymmetric, on purpose: a count ABOVE its recorded number fails, a count
+      # below prints an informational "can be lowered / graduation candidate"
+      # line and stays green. Fixing errors must not also require editing a
+      # bookkeeping number before CI will go green, or the ledger charges a toll
+      # on exactly the work it exists to encourage.
+      #
+      # Here rather than beside its structural half because it runs the real
+      # compiler over ~34 projects, and tsc resolves workspace imports through
+      # each dependency's built `dist/*.d.ts` — so it needs the build steps
+      # above, which this job already pays for. The build filter is widened to
+      # the nested package groups (packages/services/*, packages/drivers/*,
+      # packages/plugins/*, …) because most ledgered packages have no
+      # `typecheck` script and therefore never entered the turbo task graph that
+      # would otherwise have built their dependencies; it is a superset of what
+      # the steps above already built, so it is cache hits plus the remainder.
+      # Measured cost of the re-measure itself: ~4 min, sequential by design
+      # (parallel tsc processes trade wall clock for an OOM risk on a job that
+      # has just built the whole workspace).
+      - name: Build the ledgered packages' dependencies
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
+
+      - name: Re-measure the type-check DEBT / TEST_DEBT ledger
+        run: pnpm check:type-check-debt
+
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck
 
@@ -690,7 +783,7 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
-      # Same surface, the other axis: api-surface.json records that an export
+      # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers
       # to replace a local declaration with the spec import, which for those four
@@ -703,7 +796,7 @@ jobs:
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
 
-      # Third axis on the same surface: api-surface.json shows a name on two
+      # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
       # or TWO declarations sharing a name — the #4411 trap, where which type a
       # consumer gets depends on nothing but the import path and the copy that

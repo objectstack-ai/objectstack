@@ -179,6 +179,8 @@ export const EnvironmentSchema = lazySchema(() => z.object({
 }));
 
 export type Environment = z.infer<typeof EnvironmentSchema>;
+/** Post-parse shape of {@link Environment} — defaults applied, transforms run (ADR-0122). */
+export type EnvironmentParsed = z.infer<typeof EnvironmentSchema>;
 
 // ---------------------------------------------------------------------------
 // Credential (rotatable)
@@ -233,6 +235,8 @@ export const EnvironmentCredentialSchema = lazySchema(() => z.object({
 }));
 
 export type EnvironmentCredential = z.infer<typeof EnvironmentCredentialSchema>;
+/** Post-parse shape of {@link EnvironmentCredential} — defaults applied, transforms run (ADR-0122). */
+export type EnvironmentCredentialParsed = z.infer<typeof EnvironmentCredentialSchema>;
 
 // ---------------------------------------------------------------------------
 // Environment-scoped RBAC
@@ -308,6 +312,8 @@ export const ProvisionEnvironmentRequestSchema = lazySchema(() => z.object({
 }));
 
 export type ProvisionEnvironmentRequest = z.infer<typeof ProvisionEnvironmentRequestSchema>;
+/** Post-parse shape of {@link ProvisionEnvironmentRequest} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionEnvironmentRequestParsed = z.infer<typeof ProvisionEnvironmentRequestSchema>;
 
 /**
  * Response of a successful environment provisioning call.
@@ -317,9 +323,38 @@ export const ProvisionEnvironmentResponseSchema = lazySchema(() => z.object({
   credential: EnvironmentCredentialSchema.describe('Freshly-minted credential for the environment DB'),
   durationMs: z.number().describe('Total provisioning duration in milliseconds'),
   warnings: z.array(z.string()).optional().describe('Non-fatal warnings emitted during provisioning'),
+  /**
+   * Loud rename receipt: the control plane auto-renames a colliding hostname
+   * (canonical hostnames are UNIQUE) by appending a short suffix instead of
+   * failing the call. Present ONLY when that rename actually happened — a
+   * provisioning call that got the hostname it asked for omits this key
+   * entirely, so `hostnameAssignment !== undefined` is itself the signal.
+   *
+   * Declared here rather than in the control plane so the fact survives
+   * `z.object` stripping and reaches generated provisioning clients, which
+   * are built from this protocol's published surface (`api-surface.json`).
+   * It is deliberately NOT carried in the free-form `metadata` bag: a caller
+   * must not be able to suppress or forge a trust signal the server emits.
+   */
+  hostnameAssignment: z.object({
+    requestedHostname: z
+      .string()
+      .describe('Hostname the caller asked for (explicitly, or as auto-derived from displayName)'),
+    assignedHostname: z
+      .string()
+      .describe('Hostname actually assigned after the collision-avoiding rename; equals `environment.hostname`'),
+  })
+    .optional()
+    .describe(
+      'Populated ONLY when the control plane auto-renamed the requested hostname to avoid a '
+      + 'collision. Absent means the requested hostname was assigned unchanged — never read '
+      + 'absence as "unknown".',
+    ),
 }));
 
 export type ProvisionEnvironmentResponse = z.infer<typeof ProvisionEnvironmentResponseSchema>;
+/** Post-parse shape of {@link ProvisionEnvironmentResponse} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionEnvironmentResponseParsed = z.infer<typeof ProvisionEnvironmentResponseSchema>;
 
 /**
  * Request to bootstrap a brand-new organization — allocates the default
@@ -340,6 +375,8 @@ export const ProvisionOrganizationRequestSchema = lazySchema(() => z.object({
 }));
 
 export type ProvisionOrganizationRequest = z.infer<typeof ProvisionOrganizationRequestSchema>;
+/** Post-parse shape of {@link ProvisionOrganizationRequest} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionOrganizationRequestParsed = z.infer<typeof ProvisionOrganizationRequestSchema>;
 
 /**
  * Response of a successful organization bootstrap.
@@ -351,3 +388,5 @@ export const ProvisionOrganizationResponseSchema = lazySchema(() => z.object({
 }));
 
 export type ProvisionOrganizationResponse = z.infer<typeof ProvisionOrganizationResponseSchema>;
+/** Post-parse shape of {@link ProvisionOrganizationResponse} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionOrganizationResponseParsed = z.infer<typeof ProvisionOrganizationResponseSchema>;

@@ -114,6 +114,8 @@ export const RouteHandlerMetadataSchema = lazySchema(() => z.object({
 }));
 
 export type RouteHandlerMetadata = z.infer<typeof RouteHandlerMetadataSchema>;
+/** Post-parse shape of {@link RouteHandlerMetadata} — defaults applied, transforms run (ADR-0122). */
+export type RouteHandlerMetadataParsed = z.infer<typeof RouteHandlerMetadataSchema>;
 export type RouteHandlerMetadataInput = z.input<typeof RouteHandlerMetadataSchema>;
 
 // ==========================================
@@ -187,6 +189,8 @@ export const MiddlewareConfigSchema = lazySchema(() => z.object({
 }));
 
 export type MiddlewareConfig = z.infer<typeof MiddlewareConfigSchema>;
+/** Post-parse shape of {@link MiddlewareConfig} — defaults applied, transforms run (ADR-0122). */
+export type MiddlewareConfigParsed = z.infer<typeof MiddlewareConfigSchema>;
 export type MiddlewareConfigInput = z.input<typeof MiddlewareConfigSchema>;
 
 // ==========================================
@@ -282,6 +286,8 @@ export const ServerCapabilitiesSchema = lazySchema(() => z.object({
 }));
 
 export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>;
+/** Post-parse shape of {@link ServerCapabilities} — defaults applied, transforms run (ADR-0122). */
+export type ServerCapabilitiesParsed = z.infer<typeof ServerCapabilitiesSchema>;
 export type ServerCapabilitiesInput = z.input<typeof ServerCapabilitiesSchema>;
 
 // ==========================================

@@ -94,6 +94,40 @@
  * `NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))` is the same predicate —
  * so it buys portability for one redundant conjunct.
  *
+ * # `$ne` / `$nin` / `$notContains` are NULL-safe too (#5298)
+ *
+ * Same rule, same reason, one ruling later. The operators that carry their OWN
+ * negation had the defect #5146 fixed for `$not`: a bare `col <> ?` is UNKNOWN
+ * for a NULL column and the `WHERE` drops the row, while the JS backends return
+ * it. Measured on this package's own fixture before the fix (#5977), for
+ * `{stage: {$ne: 'won'}}` over rows whose `stage` is NULL:
+ *
+ *   | path                                   | was       | now (= JS family) |
+ *   |----------------------------------------|-----------|-------------------|
+ *   | `NativeSQLStrategy` (raw SQL)          | `2`       | `2,3,4`           |
+ *   | `ObjectQLStrategy` display SQL echo    | `2`       | `2,3,4`           |
+ *   | `ObjectQLStrategy` → engine condition  | `2,3,4`   | `2,3,4`           |
+ *
+ * The engine column was already right, and that is the whole argument for
+ * fixing it HERE: it was right because `driver-sql` guards for itself (#5962),
+ * so the Cube face's answer depended on which compiler downstream caught the
+ * leaf — three emitters, two answers. `fieldLeaves` now emits the guard as
+ * STRUCTURE, an `or` of `notSet` with the comparison, so all three compile the
+ * same predicate and none of them needs to know the rule. That is the same
+ * trade the `$not` rewrite above took, including its cost: the engine path
+ * guards twice, which is idempotent (`c IS NULL OR (c IS NULL OR c <> v)`).
+ *
+ * Which operators get the guard is NOT a new list — it is
+ * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, the same
+ * pair `nullGuardForFieldSpec` consults for the `$not` rewrite, asked about one
+ * operator instead of a whole field spec. A leaf is guarded exactly when a NULL
+ * value SATISFIES the operator and the compiled leaf is not already total, which
+ * is that pair's `allowNull` verdict. Hard-coding the three names would have put
+ * a second polarity table in this file, free to drift from the first — and the
+ * `$eq`/`$ne` arms of the existing one already turn on the COMPARAND (`$ne:
+ * null` compiles to `set`, which is total and must never be widened), so a name
+ * list would have been wrong as well as duplicated.
+ *
  * # A `null` COMPARAND is a null predicate, not a value (#5332)
  *
  * `{stage: null}` compiled to `IS NULL` while `{stage: {$eq: null}}` compiled to
@@ -524,7 +558,20 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           );
         }
         const v = wrapper[opKey];
-        leaf(cubeOp, Array.isArray(v) ? v.map(comparand) : [comparand(v)]);
+        const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
+        // [#5298] The operators that carry their own negation are NULL-safe,
+        // here as everywhere else — see the module header's section on it.
+        if (nullValueSatisfiesOperator(opKey, v) && !operatorIsNullTotal(opKey, v)) {
+          out.push({
+            kind: 'or',
+            children: [
+              { kind: 'leaf', member: key, operator: 'notSet', values: [] },
+              { kind: 'leaf', member: key, operator: cubeOp, values },
+            ],
+          });
+          continue;
+        }
+        leaf(cubeOp, values);
       }
       return out;
     }

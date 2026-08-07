@@ -131,6 +131,8 @@ export const EvalUserSchema = lazySchema(() =>
 );
 
 export type EvalUser = z.infer<typeof EvalUserSchema>;
+/** Post-parse shape of {@link EvalUser} — defaults applied, transforms run (ADR-0122). */
+export type EvalUserParsed = z.infer<typeof EvalUserSchema>;
 /** Authoring input for EvalUser — defaulted fields are optional. */
 export type EvalUserInput = z.input<typeof EvalUserSchema>;
 

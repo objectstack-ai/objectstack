@@ -1291,9 +1291,44 @@ export class HttpDispatcher {
             // `getEnv('NODE_ENV', 'development')` raw — so `NODE_ENV=test` (what
             // vitest sets) or `staging` advertised a value outside the declared
             // enum on a machine-readable surface. The mapping table and the
-            // reasoning per row live with the enum, in `@objectstack/spec/api`,
-            // so both discovery producers answer identically.
-            environment: resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'development')),
+            // reasoning per row live with the enum, in `@objectstack/spec/api`.
+            //
+            // [#5673] The DEFAULT — what this producer says when the host set no
+            // `NODE_ENV` at all — flipped from `development` to `production` per
+            // the maintainer's 2026-08-06 ruling. Two facts made the old default
+            // the wrong one:
+            //
+            //   • Every other reader of the same absence already said
+            //     `production`. `os start` forces `NODE_ENV='production'` when
+            //     unset (`packages/cli/src/commands/start.ts:248`), `os serve`
+            //     resolves its `.env*` cascade for `NODE_ENV || 'production'`
+            //     (`serve.ts:532-533`), and `os doctor` derives the identical
+            //     expression (`doctor.ts` `doctorNodeEnv()`). Discovery was the
+            //     one surface reading that absence the other way.
+            //   • `environment` is a MACHINE-READABLE field: a client reads it to
+            //     answer "am I talking to production?" and may skip production
+            //     warnings or loosen a destructive action's confirmation on the
+            //     answer. Of the two ways to be wrong here, claiming
+            //     `development` on a real production deployment whose operator
+            //     forgot the variable is the dangerous one.
+            //
+            // #4828's rule is untouched and is a DIFFERENT rule: a value that IS
+            // set but is not a spelling this repo recognises (`qa`, `preview`)
+            // still degrades to `development` inside the mapper, so nothing here
+            // ever CLAIMS production on a guess. Absence is not a guess — it is
+            // the host declining to say, and the conservative answer to that is
+            // `production`.
+            //
+            // The default is passed as `getEnv`'s second argument rather than
+            // moved into `resolveDiscoveryEnvironment` because the mapper lives
+            // in `@objectstack/spec`, which this issue's ruling put out of scope.
+            // Consequence, stated rather than hidden: the second discovery
+            // producer (`getDiscovery()` in `@objectstack/metadata-protocol`,
+            // served by `@objectstack/rest`) passes a genuinely-absent
+            // `NODE_ENV` straight into the mapper and therefore still answers
+            // `development` for the unset case. Filed as a follow-up (#5936);
+            // do not "fix" it by re-defaulting a consumer somewhere else.
+            environment: resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'production')),
             routes,
             // [#4828] `endpoints` (a verbatim duplicate of `routes`, commented
             // "Alias for backward compatibility with some clients") and the
@@ -1762,6 +1797,16 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
+        // ── Gates run BEFORE any domain body (ADR-0076 D11 step ③) ──
+        // Scope resolution plus the two gates below are the dispatcher's half of
+        // the D11 contract: a body extracted to `./domains/` receives an
+        // already-scoped, already-gated request. Domains add their OWN
+        // authorization on top (`/ai`'s declared per-route `auth`, `/keys`'
+        // identity gate), but NOTHING downstream re-runs these two — so the
+        // ordering is not overhead to optimize away: moving the domain-registry
+        // resolve (further down) above these lines would un-gate every migrated
+        // domain at once and hand handlers a context whose per-request kernel was
+        // never resolved (#5155). Anchored in scripts/adr-anchors.json.
         await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──

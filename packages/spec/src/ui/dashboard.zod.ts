@@ -807,14 +807,22 @@ export const DashboardSchema = lazySchema(() => strictObject({
 }));
 
 export type Dashboard = z.infer<typeof DashboardSchema>;
+/** Post-parse shape of {@link Dashboard} — defaults applied, transforms run (ADR-0122). */
+export type DashboardParsed = z.infer<typeof DashboardSchema>;
 export type DashboardInput = z.input<typeof DashboardSchema>;
 export type DashboardWidget = z.infer<typeof DashboardWidgetSchema>;
+/** Post-parse shape of {@link DashboardWidget} — defaults applied, transforms run (ADR-0122). */
+export type DashboardWidgetParsed = z.infer<typeof DashboardWidgetSchema>;
 export type DashboardWidgetOptions = z.infer<typeof DashboardWidgetOptionsSchema>;
 export type DashboardHeader = z.infer<typeof DashboardHeaderSchema>;
+/** Post-parse shape of {@link DashboardHeader} — defaults applied, transforms run (ADR-0122). */
+export type DashboardHeaderParsed = z.infer<typeof DashboardHeaderSchema>;
 export type DashboardHeaderAction = z.infer<typeof DashboardHeaderActionSchema>;
 export type WidgetColorVariant = z.infer<typeof WidgetColorVariantSchema>;
 export type WidgetActionType = z.infer<typeof WidgetActionTypeSchema>;
 export type GlobalFilter = z.infer<typeof GlobalFilterSchema>;
+/** Post-parse shape of {@link GlobalFilter} — defaults applied, transforms run (ADR-0122). */
+export type GlobalFilterParsed = z.infer<typeof GlobalFilterSchema>;
 export type GlobalFilterOptionsFrom = z.infer<typeof GlobalFilterOptionsFromSchema>;
 
 /**

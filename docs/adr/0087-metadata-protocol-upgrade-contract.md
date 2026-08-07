@@ -201,6 +201,11 @@ chain** — the database-migration model applied to metadata source files.
 
 ### D4 — Machine-readable-first release artifacts, and an MCP surface
 
+> **Amended 2026-08-06 (#5837), paths only.** `api-surface.json` became the directory
+> `api-surface/` (one shard per entry point) and ships in the npm artifact as such; the
+> release diff reads whichever layout the previously published tarball carried. `spec-changes.json`
+> is deliberately unsharded — it is keyed by version, which has never been a conflict surface.
+
 - The Release workflow diffs the current `api-surface.json` against the previously
   published one (reusing the ADR-0059 §3 gate artifact instead of discarding it),
   joins the conversion table and migration set, and emits **`spec-changes.json`**:

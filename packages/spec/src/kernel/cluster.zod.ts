@@ -105,6 +105,8 @@ export const EventClusterOptionsSchema = lazySchema(() => z.object({
 }).describe('Per-emit cluster routing & ordering options.'));
 
 export type EventClusterOptions = z.infer<typeof EventClusterOptionsSchema>;
+/** Post-parse shape of {@link EventClusterOptions} — defaults applied, transforms run (ADR-0122). */
+export type EventClusterOptionsParsed = z.infer<typeof EventClusterOptionsSchema>;
 
 // ==========================================================================
 // Service Cluster Scope & Leader Strategy
@@ -189,6 +191,8 @@ export const ServiceClusterAnnotationsSchema = lazySchema(() => z.object({
 }).describe('Service-registration annotations governing cluster behaviour.'));
 
 export type ServiceClusterAnnotations = z.infer<typeof ServiceClusterAnnotationsSchema>;
+/** Post-parse shape of {@link ServiceClusterAnnotations} — defaults applied, transforms run (ADR-0122). */
+export type ServiceClusterAnnotationsParsed = z.infer<typeof ServiceClusterAnnotationsSchema>;
 
 // ==========================================================================
 // Cluster Capability (top-level stack config)
@@ -313,6 +317,8 @@ export const ClusterCapabilityConfigSchema = lazySchema(() => z.object({
 }).describe('Cluster capability configuration for the stack.'));
 
 export type ClusterCapabilityConfig = z.infer<typeof ClusterCapabilityConfigSchema>;
+/** Post-parse shape of {@link ClusterCapabilityConfig} — defaults applied, transforms run (ADR-0122). */
+export type ClusterCapabilityConfigParsed = z.infer<typeof ClusterCapabilityConfigSchema>;
 export type ClusterCapabilityConfigInput = z.input<typeof ClusterCapabilityConfigSchema>;
 
 // ==========================================================================

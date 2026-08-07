@@ -20,7 +20,7 @@ import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
-import { resolveRunDataContext } from '../runtime-identity.js';
+import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
 
 /**
  * A filter condition that an author WROTE but that interpolation erased
@@ -300,7 +300,17 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 }
 
                 // #1888 — honor flow.runAs (system → RLS-bypassing; user → trigger user).
+                // #5494 — a BORN row must not escape the platform stamps. The run
+                // context now carries the trigger's user + org even under system
+                // elevation (so the audit hook stamps `created_by` and the driver's
+                // tenant machinery fills `organization_id`, exactly like a user-path
+                // insert); the ownership anchor has no such engine-side channel for
+                // system writes — the security middleware that stamps it
+                // short-circuits on `isSystem` — so the writer fills it here.
+                // Fill-only — flow-authored `fields` win. Policy + rationale live
+                // beside `resolveRunDataContext` in runtime-identity.ts.
                 const dataCtx = resolveRunDataContext(context);
+                stampSystemInsertOwner(fields, dataCtx, data, objectName);
                 try {
                     // #3407 — symmetric with update_record. Today the engine's
                     // insert path strips nothing (INSERT is readonly-exempt and

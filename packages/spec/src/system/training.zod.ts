@@ -213,5 +213,9 @@ export const TrainingPlanSchema = lazySchema(() => z.object({
 export type TrainingCategory = z.infer<typeof TrainingCategorySchema>;
 export type TrainingCompletionStatus = z.infer<typeof TrainingCompletionStatusSchema>;
 export type TrainingCourse = z.infer<typeof TrainingCourseSchema>;
+/** Post-parse shape of {@link TrainingCourse} — defaults applied, transforms run (ADR-0122). */
+export type TrainingCourseParsed = z.infer<typeof TrainingCourseSchema>;
 export type TrainingRecord = z.infer<typeof TrainingRecordSchema>;
 export type TrainingPlan = z.infer<typeof TrainingPlanSchema>;
+/** Post-parse shape of {@link TrainingPlan} — defaults applied, transforms run (ADR-0122). */
+export type TrainingPlanParsed = z.infer<typeof TrainingPlanSchema>;

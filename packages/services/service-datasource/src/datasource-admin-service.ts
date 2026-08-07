@@ -22,6 +22,7 @@
  */
 
 import { validateDriverConfig } from '@objectstack/spec/data';
+import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -235,6 +236,11 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     this.assertValidName(input?.name);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
+    // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
+    // record is persisted: `tryRegisterPool` swallows its failures into a
+    // warning, so a datasource saved with an unhonourable pool would sit in the
+    // store with the block still in it, exactly as silently as before.
+    assertDatasourcePoolSupported({ driver: input.driver, pool: input.pool, name: input.name });
 
     const existing = await this.config.getDatasourceRecord(input.name);
     if (existing) {
@@ -297,6 +303,15 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // that takes a misconfigured datasource out of service.
     if (patch.config !== undefined || patch.driver !== undefined) {
       this.assertValidConfig(merged.driver, merged.config);
+    }
+    // Same judgement, same "only when this write touches the pairing" rule
+    // (#5714): a new `pool`, or a new `driver` that reinterprets the stored
+    // one. An edit that renames a datasource or flips `active` must not be
+    // blocked by a pool block it is not touching — otherwise a record written
+    // before this gate becomes uneditable, including the `active: false` that
+    // takes it out of service.
+    if (patch.pool !== undefined || patch.driver !== undefined) {
+      assertDatasourcePoolSupported({ driver: merged.driver, pool: merged.pool, name });
     }
 
     if (secret) {

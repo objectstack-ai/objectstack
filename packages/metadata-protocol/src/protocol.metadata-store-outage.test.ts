@@ -406,3 +406,348 @@ describe('[#5707] the layered read stops painting an outage as "nothing was cust
 function p_layered(engine: any, request: Record<string, unknown>): Promise<any> {
     return new ObjectStackProtocolImplementation(engine).getMetaItemLayered(request as any);
 }
+
+// ---------------------------------------------------------------------------
+// [#5840] The OTHER read in these same two methods — the MetadataService one
+// ---------------------------------------------------------------------------
+// Everything above is about the `sys_metadata` overlay read, whose failure the
+// protocol can see because it arrives as a throw. The second source each of
+// these methods consults — the `metadata` SERVICE, i.e. the loader chain
+// (filesystem, database, attached repository) — failed silently: a loader that
+// throws is warn-logged and skipped inside `MetadataManager`, and its `get()`
+// dropped the `degraded` verdict `loadDiagnosed` had already computed. So an
+// unreachable metadata database arrived here as the ordinary `undefined` of a
+// name nobody declared, and the SAME two methods that now refuse to guess on
+// their overlay half went on guessing on this one:
+//
+//   getMetaItem        → falls through, item stays undefined → 404 "not found"
+//   getMetaItemLayered → `code: null` → `lockSource = code ?? overlay ?? {}`
+//                        → `editable: true, deletable: true` on an item whose
+//                          code layer may declare `_lock: 'full'`
+//
+// The second is the sharper one, and it is the shape ADR-0110 D3 names
+// outright: an availability failure widening an affordance. `getDiagnosed`
+// (#5840) is the seam that makes the failure visible at all; these cases pin
+// what each method does with it.
+//
+// Reverse verification, direction predicted BEFORE running: ordinary red, and
+// it must be taken on the CONSUMER, not the producer. These doubles feed the
+// return contract directly, so reverting `MetadataManager.getDiagnosed` cannot
+// turn them red — only deleting the two `if (… degraded)` branches in
+// `protocol.ts` can. Two laps therefore prove two different halves, and
+// neither substitutes for the other.
+//
+// Predicted for the consumer lap: 5 red / 3 green across the two describes
+// below — every case that expects a 503, and only those, with all three
+// narrowness/back-compat cases green (they assert the branch does NOT fire).
+// Measured: exactly that, and the 18 #5532/#5707 cases above stayed green,
+// which is what shows this is the third read joining the rule rather than a
+// blanket "these methods now throw".
+
+/** A services registry holding one `metadata` service — what the protocol probes. */
+function servicesWith(metadata: unknown): () => Map<string, any> {
+    const registry = new Map<string, any>([['metadata', metadata]]);
+    return () => registry;
+}
+
+const LOADER_FAILURE = 'database: connect ECONNREFUSED 10.0.0.5:5432';
+
+/**
+ * A `metadata` service whose loader chain is DOWN. `get()` answers exactly what
+ * it answered before this issue — `undefined`, indistinguishable from a miss —
+ * and `getDiagnosed()` reports the verdict that was being computed and thrown
+ * away all along.
+ */
+const metadataServiceInOutage = () => ({
+    get: vi.fn(async () => undefined),
+    getDiagnosed: vi.fn(async () => ({ data: undefined, degraded: true, errors: [LOADER_FAILURE] })),
+});
+
+/** A `metadata` service that answered, and simply does not hold the item. */
+const metadataServiceWithMiss = () => ({
+    get: vi.fn(async () => undefined),
+    getDiagnosed: vi.fn(async () => ({ data: undefined, degraded: false, errors: [] })),
+});
+
+/** A `metadata` service that holds `body`. */
+const metadataServiceHolding = (body: unknown) => ({
+    get: vi.fn(async () => body),
+    getDiagnosed: vi.fn(async () => ({ data: body, degraded: false, errors: [] })),
+});
+
+/** A service that predates #5840: `get` only, no way to report the difference. */
+const legacyMetadataService = (body?: unknown) => ({ get: vi.fn(async () => body) });
+
+/** The outage envelope, for a cause built from loader messages rather than a driver error. */
+function expectLoaderOutage(caught: any) {
+    expect(caught?.status).toBe(503);
+    expect(caught?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(ErrorCode.safeParse(caught?.code).success).toBe(true);
+    expect(caught.message).toContain('unknown');
+    expect(caught.message.toLowerCase()).not.toContain('not found');
+    // The failing loaders' own words reach the operator on `cause`, which is
+    // what `logWithheldServerFault` prints (#5437) — the protocol never sees a
+    // driver error here, because `MetadataManager` already absorbed it.
+    expect(String((caught.cause as Error)?.message)).toContain(LOADER_FAILURE);
+}
+
+/** A protocol whose overlay store is healthy and empty — only the SERVICE half varies. */
+function protocolWithService(metadata: unknown, registryItems: Record<string, any> = {}) {
+    return new ObjectStackProtocolImplementation(
+        engineWithRows([], registryItems),
+        servicesWith(metadata),
+    );
+}
+
+describe('[#5840] a MetadataService outage stops arriving as "nobody declared this"', () => {
+    it('the singular read throws 503 instead of falling through to a 404', async () => {
+        const p = protocolWithService(metadataServiceInOutage());
+
+        const caught = await rejection(() => p.getMetaItem({ type: 'object', name: 'acct' } as any));
+        expectLoaderOutage(caught);
+    });
+
+    it('getMetaItemCached stops relabelling that outage "Metadata item object/acct not found"', async () => {
+        const p = protocolWithService(metadataServiceInOutage());
+
+        const caught = await rejection(() => p.getMetaItemCached({ type: 'object', name: 'acct' } as any));
+        expectLoaderOutage(caught);
+        // The comment above that 404 claims "reaching here now means a real
+        // miss". This is the half that used to make it untrue.
+        expect(caught.message).not.toContain('Metadata item object/acct not found');
+    });
+
+    it('a miss and an outage are told apart by code alone — the whole point', async () => {
+        const missP = protocolWithService(metadataServiceWithMiss());
+        const outageP = protocolWithService(metadataServiceInOutage());
+
+        const miss = await rejection(() => missP.getMetaItemCached({ type: 'object', name: 'ghost' } as any));
+        const outage = await rejection(() => outageP.getMetaItemCached({ type: 'object', name: 'ghost' } as any));
+
+        expect([miss.status, miss.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect([outage.status, outage.code]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+    });
+
+    it('the layered read refuses to publish a `code: null` it never verified', async () => {
+        const p = protocolWithService(metadataServiceInOutage());
+
+        const caught = await rejection(
+            () => p.getMetaItemLayered({ type: 'object', name: 'acct' } as any),
+        );
+        expectLoaderOutage(caught);
+    });
+
+    it('and that is what stops an outage from unlocking a locked artifact', async () => {
+        // The concrete widening. `lockSource = code ?? overlay ?? {}`, so a
+        // code layer that never arrived resolves the protection envelope from
+        // `{}` — `editable: true, deletable: true` on an item the packager
+        // locked. Left column: what the truth looks like. Right column: what
+        // the outage used to render, and now cannot.
+        const locked = { name: 'acct', label: 'Account', _lock: 'full' };
+
+        const healthy: any = await protocolWithService(
+            metadataServiceHolding(locked),
+        ).getMetaItemLayered({ type: 'object', name: 'acct' } as any);
+        expect(healthy.lock).toBe('full');
+        expect([healthy.editable, healthy.deletable]).toEqual([false, false]);
+
+        const caught = await rejection(
+            () => protocolWithService(metadataServiceInOutage())
+                .getMetaItemLayered({ type: 'object', name: 'acct' } as any),
+        );
+        expectLoaderOutage(caught);
+        // Never the silently-permissive envelope.
+        expect(caught.editable).toBeUndefined();
+    });
+});
+
+describe('[#5840] the narrowness is the design — three things it deliberately does not do', () => {
+    it('a registry hit still answers, degraded service or not', async () => {
+        // A registry item IS a real declaration, so the answer contains no
+        // unfounded claim and is served exactly as before. The 503 fires only
+        // where the alternative would have been "this does not exist".
+        const p = protocolWithService(metadataServiceInOutage(), {
+            acct: { name: 'acct', label: 'Account (packaged)' },
+        });
+
+        const res: any = await p.getMetaItem({ type: 'object', name: 'acct' } as any);
+        expect(res.item?.label).toBe('Account (packaged)');
+
+        const layered: any = await p.getMetaItemLayered({ type: 'object', name: 'acct' } as any);
+        expect(layered.code).toMatchObject({ label: 'Account (packaged)' });
+    });
+
+    it('a clean MISS still renders the all-null layered envelope, not a 503', async () => {
+        const p = protocolWithService(metadataServiceWithMiss());
+
+        const res: any = await p.getMetaItemLayered({ type: 'object', name: 'ghost' } as any);
+        expect(res.code).toBeNull();
+        expect(res.overlay).toBeNull();
+        expect(res.effective).toBeNull();
+    });
+
+    it('a service that predates `getDiagnosed` behaves exactly as it did', async () => {
+        // It cannot report the distinction, so it is read as "not degraded" —
+        // precisely what it could express before, unchanged. The alternative
+        // (treating an un-probeable service as suspect) would 503 every host
+        // whose `metadata` slot is a shim.
+        const holding = protocolWithService(legacyMetadataService({ name: 'acct', label: 'From shim' }));
+        const res: any = await holding.getMetaItem({ type: 'object', name: 'acct' } as any);
+        expect(res.item?.label).toBe('From shim');
+
+        const empty = protocolWithService(legacyMetadataService(undefined));
+        const caught = await rejection(() => empty.getMetaItemCached({ type: 'object', name: 'ghost' } as any));
+        expect([caught.status, caught.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#5980] The SAME rule on the ADR-0067 commit timeline — `listCommits`
+// ---------------------------------------------------------------------------
+// A fourth read in this same file, and the one whose invented emptiness points
+// at a WRITE. `listCommits` reads `sys_metadata_commit` and its `catch` answered
+// `[]` for every failure, with no log and no error-type discrimination — its own
+// JSDoc said so ("Returns [] if the commit store is unavailable"), which is how
+// a defect gets read as a design decision by everyone who arrives after it.
+//
+// Why it lives in this file rather than beside the commit tests: it is the same
+// DEFECT and the same prescription (`rethrowUnlessMetadataStoreUnprovisioned`)
+// as the #5532 / #5707 / #5840 reads above, so `expectStoreUnavailable` holds
+// the envelope identical across all four seams and a future edit that re-widens
+// one catch and not the others is a diff in one file.
+//
+// What the emptiness costs, and why this seam is worse than a 404. The timeline
+// is `revertCommit`'s SELECTION surface:
+//
+//   GET /packages/:id/commits  → `{ commits: [] }` — "nothing to roll back",
+//                                 rendered as an empty history in the Studio at
+//                                 the exact moment an operator is trying to roll
+//                                 something back;
+//   rollbackToPackageCommit    → filters that same `[]`, reverts nothing, and
+//                                 returns `success: true` — an operation that
+//                                 reports having done the job it never started.
+//
+// The second is the sharp one and it is asserted below: every other read in this
+// file mis-answers a QUESTION, this one mis-reports a WRITE as complete.
+//
+// Reverse verification, direction predicted BEFORE running: ordinary red, on
+// the outage half only. Restoring `} catch { return []; }` turns the 4 outage
+// cases below red (they resolve instead of throwing) and leaves the 3
+// benign/healthy cases green — that separation is what shows the change is the
+// outage split and not a blanket "listCommits now throws". The baseline entry
+// `packages/metadata-protocol/src/protocol.ts::listCommits` is removed in the
+// same PR, and its gate is shrink-only, so a lap with the limb restored and the
+// entry already removed must ALSO fail `check-durability-degradation-log-level`
+// — the ledger and the code are pinned to each other in both directions.
+
+/** One `sys_metadata_commit` row, in the driver's snake_case wire shape. */
+function commitRow(id: string, createdAt: string, operation = 'apply') {
+    return {
+        id,
+        package_id: 'pkg_crm',
+        operation,
+        message: `commit ${id}`,
+        actor: 'alice',
+        item_count: 1,
+        items: JSON.stringify([{ type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 }]),
+        created_at: createdAt,
+    };
+}
+
+describe('[#5980] an unreadable commit store is a 503, not "this package has no history"', () => {
+    it('the timeline read stops inventing an empty history it never verified', async () => {
+        const err = connectionRefused();
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('a timeout is an outage too — the discrimination is by TYPE, not by phrasing', async () => {
+        // The guard's conservative direction: an error it does not recognise is
+        // NOT benign. A driver phrasing nobody enumerated must cost one
+        // retryable 503, never a silent "no history".
+        const err = Object.assign(new Error('Query read timeout after 30000ms'), { code: 'ETIMEDOUT' });
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('a permission failure is an outage, not an empty package', async () => {
+        const err = Object.assign(new Error('permission denied for table sys_metadata_commit'), {
+            code: '42501',
+        });
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('rollbackToPackageCommit stops reporting `success: true` for a rollback it never performed', async () => {
+        // The consequence that points at a write. The target commit is found
+        // (that read is a separate `findOne` and it succeeds), then the TIMELINE
+        // read fails — and the filter over `[]` selected nothing to revert, so
+        // the method reported a clean success for having done nothing. An
+        // operator reads that as "the rollback went through".
+        const err = connectionRefused();
+        const engine = engineWithRows([]);
+        engine.findOne = vi.fn(async () => commitRow('cmt_target', '2026-08-01T00:00:00.000Z'));
+        engine.find = vi.fn(async () => { throw err; });
+
+        const p = new ObjectStackProtocolImplementation(engine);
+        const caught = await rejection(
+            () => p.rollbackToPackageCommit({ commitId: 'cmt_target' }),
+        );
+        expectStoreUnavailable(caught, err);
+        // The regression this replaces, verbatim: never a success envelope.
+        expect(caught.success).toBeUndefined();
+        expect(caught.revertedCommits).toBeUndefined();
+    });
+});
+
+describe('[#5980] the benign case and the healthy timeline are untouched', () => {
+    it('an unprovisioned sys_metadata_commit still reads as an empty history', async () => {
+        // First boot, before migrations: there genuinely are no commits, so `[]`
+        // IS the truth and the packages screen must render rather than 503.
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(missingTable));
+
+        await expect(p.listCommits({ packageId: 'pkg_crm' })).resolves.toEqual([]);
+    });
+
+    it('a healthy store with no commits for this package is still `[]`', async () => {
+        const p = new ObjectStackProtocolImplementation(engineWithRows([]));
+
+        await expect(p.listCommits({ packageId: 'pkg_crm' })).resolves.toEqual([]);
+    });
+
+    it('a healthy store still maps the rows and still orders them newest-first', async () => {
+        // The regression half: the mapping and the sort are the behaviour every
+        // consumer depends on, and neither is touched by the catch change. Rows
+        // are handed over oldest-first on purpose — the sort, not the driver, is
+        // what makes the timeline newest-first.
+        const p = new ObjectStackProtocolImplementation(
+            engineWithRows([
+                commitRow('cmt_old', '2026-08-01T00:00:00.000Z'),
+                commitRow('cmt_new', '2026-08-03T00:00:00.000Z'),
+                commitRow('cmt_mid', '2026-08-02T00:00:00.000Z', 'revert'),
+            ]),
+        );
+
+        const commits = await p.listCommits({ packageId: 'pkg_crm' });
+        expect(commits.map((c) => c.id)).toEqual(['cmt_new', 'cmt_mid', 'cmt_old']);
+        expect(commits[1]!.operation).toBe('revert');
+        expect(commits[0]).toMatchObject({
+            id: 'cmt_new',
+            operation: 'apply',
+            message: 'commit cmt_new',
+            actor: 'alice',
+            itemCount: 1,
+            createdAt: '2026-08-03T00:00:00.000Z',
+        });
+        // `items` arrives as a JSON string from the driver and is parsed here.
+        expect(commits[0]!.items).toEqual([
+            { type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 },
+        ]);
+    });
+});

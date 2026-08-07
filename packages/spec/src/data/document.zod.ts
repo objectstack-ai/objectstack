@@ -368,6 +368,14 @@ export const DocumentSchema = lazySchema(() => z.object({
 
 // Type exports
 export type Document = z.infer<typeof DocumentSchema>;
+/** Post-parse shape of {@link Document} — defaults applied, transforms run (ADR-0122). */
+export type DocumentParsed = z.infer<typeof DocumentSchema>;
 export type DocumentVersion = z.infer<typeof DocumentVersionSchema>;
+/** Post-parse shape of {@link DocumentVersion} — defaults applied, transforms run (ADR-0122). */
+export type DocumentVersionParsed = z.infer<typeof DocumentVersionSchema>;
 export type DocumentTemplate = z.infer<typeof DocumentTemplateSchema>;
+/** Post-parse shape of {@link DocumentTemplate} — defaults applied, transforms run (ADR-0122). */
+export type DocumentTemplateParsed = z.infer<typeof DocumentTemplateSchema>;
 export type ESignatureConfig = z.infer<typeof ESignatureConfigSchema>;
+/** Post-parse shape of {@link ESignatureConfig} — defaults applied, transforms run (ADR-0122). */
+export type ESignatureConfigParsed = z.infer<typeof ESignatureConfigSchema>;

@@ -127,6 +127,8 @@ export const TenantDatabaseSchema = lazySchema(() => z.object({
 }));
 
 export type TenantDatabase = z.infer<typeof TenantDatabaseSchema>;
+/** Post-parse shape of {@link TenantDatabase} — defaults applied, transforms run (ADR-0122). */
+export type TenantDatabaseParsed = z.infer<typeof TenantDatabaseSchema>;
 
 /**
  * Package Installation Status
@@ -196,6 +198,8 @@ export const PackageInstallationSchema = lazySchema(() => z.object({
 }));
 
 export type PackageInstallation = z.infer<typeof PackageInstallationSchema>;
+/** Post-parse shape of {@link PackageInstallation} — defaults applied, transforms run (ADR-0122). */
+export type PackageInstallationParsed = z.infer<typeof PackageInstallationSchema>;
 
 /**
  * Tenant Context
@@ -303,6 +307,8 @@ export const TenantRoutingConfigSchema = lazySchema(() => z.object({
 }));
 
 export type TenantRoutingConfig = z.infer<typeof TenantRoutingConfigSchema>;
+/** Post-parse shape of {@link TenantRoutingConfig} — defaults applied, transforms run (ADR-0122). */
+export type TenantRoutingConfigParsed = z.infer<typeof TenantRoutingConfigSchema>;
 
 /**
  * Tenant Provisioning Request
@@ -337,6 +343,8 @@ export const ProvisionTenantRequestSchema = lazySchema(() => z.object({
 }));
 
 export type ProvisionTenantRequest = z.infer<typeof ProvisionTenantRequestSchema>;
+/** Post-parse shape of {@link ProvisionTenantRequest} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionTenantRequestParsed = z.infer<typeof ProvisionTenantRequestSchema>;
 
 /**
  * Tenant Provisioning Response
@@ -361,3 +369,5 @@ export const ProvisionTenantResponseSchema = lazySchema(() => z.object({
 }));
 
 export type ProvisionTenantResponse = z.infer<typeof ProvisionTenantResponseSchema>;
+/** Post-parse shape of {@link ProvisionTenantResponse} — defaults applied, transforms run (ADR-0122). */
+export type ProvisionTenantResponseParsed = z.infer<typeof ProvisionTenantResponseSchema>;

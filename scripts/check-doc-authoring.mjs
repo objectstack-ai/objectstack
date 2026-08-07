@@ -62,6 +62,28 @@
 // at startup and an unresolvable one fails the gate **by name**. There is no
 // optional root and no empty catch — see `assertRootsResolvable` for why a
 // whitelist would be the wrong shape here rather than merely unnecessary.
+//
+// ## A scan that finds nothing is a hard error too (#4932)
+//
+// #4916 closed one spelling of the evaporation: the ROOT no longer resolves.
+// This closes the other, which that assertion cannot see — the root resolves and
+// the corpus is no longer inside it. A subtree moves out, a `SKIP_PATHS` entry
+// widens, an authoring convention changes the extension: the root is still a
+// directory, so `assertRootsResolvable` is satisfied, the walk returns fewer
+// files, and the printed count drops in silence. `✓ 362 files clean` and
+// `✓ 0 files clean` are the same sentence to every reader and the same exit code
+// to CI — which is all of #4932: the count was printed and never asserted.
+//
+// The floor is PER ROOT, not on the total. A total floor is held up by whichever
+// root still has files while another empties (`.claude` alone keeps it positive),
+// and "part of the corpus was read" is precisely the verdict this gate must not
+// resolve in the corpus's favour. It is a floor of one file per declared root,
+// derived from the walk that just ran — deliberately NOT a ratchet against a
+// recorded high-water mark, which would have to be maintained and would turn
+// every legitimate deletion into an argument with a number.
+//
+// It lives in `collectFiles`, not in `main`, so the self-test drives the
+// invariant itself rather than a proxy for it.
 import {
   mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
@@ -174,16 +196,45 @@ function assertRootsResolvable(roots = ROOTS) {
 }
 
 /**
+ * A declared ROOT that resolved to a directory and yielded no file to scan.
+ * Carries the names, and the total the run would otherwise have reported.
+ */
+class EmptyRootError extends Error {
+  constructor(empty, total) {
+    super(`ROOT(s) contributed no Markdown/MDX file: ${empty.join(', ')} (total scanned: ${total})`);
+    this.name = 'EmptyRootError';
+    /** @type {string[]} the roots that yielded nothing. */
+    this.roots = empty;
+    /** @type {number} files found across all roots — 0 when the whole scan evaporated. */
+    this.total = total;
+  }
+}
+
+/**
  * Every Markdown/MDX file in scope, relative to the current working directory.
  *
  * Nothing here is wrapped in a catch: an unreadable root fails loudly above, and an
  * error *inside* `walk` (a vanished file, a permission fault) means the corpus was
  * only partly read — which must not be reported as a clean scan either.
+ *
+ * Each root must also actually YIELD something (#4932). A root that resolves but
+ * holds no Markdown is the same evaporation as a root that does not resolve, minus
+ * the ENOENT that made the first kind detectable: the walk succeeds, the count
+ * shrinks, and nothing in the output distinguishes "clean" from "never read".
+ *
+ * @throws {DeadRootError} a declared ROOT is not a directory.
+ * @throws {EmptyRootError} a declared ROOT resolved but contributed no file.
  */
 function collectFiles() {
   assertRootsResolvable();
   const files = [];
-  for (const r of ROOTS) walk(r, files);
+  const empty = [];
+  for (const r of ROOTS) {
+    const before = files.length;
+    walk(r, files);
+    if (files.length === before) empty.push(r);
+  }
+  if (empty.length) throw new EmptyRootError(empty, files.length);
   return files;
 }
 
@@ -325,6 +376,41 @@ function selfTest() {
     // ...and restoring both roots restores the green, so the red above was caused
     // by the broken root and nothing else.
     expect('restoring the roots makes the scan green again', collectFiles().length, files.length);
+
+    // --- Reverse proof for the empty-scan hard error (#4932), same discipline. ---
+    // The direction was decided before it was run: a root that resolves and yields
+    // nothing must be RED, and the red must name that root only. This is the case
+    // #4916's assertion cannot reach — nothing is renamed, nothing is unreadable,
+    // the corpus is simply not there any more.
+    const emptiedRoot = join(dir, 'skills', 'legit', 'SKILL.md');
+    rmSync(emptiedRoot);
+    let emptyErr = null;
+    try { collectFiles(); } catch (err) { emptyErr = err; }
+    writeFileSync(emptiedRoot, wrapped);
+
+    expect('a root that resolves but yields nothing is red', emptyErr instanceof EmptyRootError, true);
+    expect('the failure names the empty root', emptyErr?.roots?.join(',') ?? '<none>', 'skills');
+    expect('the failure does not blame the populated roots', /\.claude|docs|content/.test(emptyErr?.roots?.join(',') ?? ''), false);
+    // The other roots were still scanned, so the total proves the run was not
+    // simply aborted: 8 files minus the one just removed.
+    expect('the failure reports what the run did find', emptyErr?.total ?? -1, files.length - 1);
+    expect('restoring the file makes the scan green again', collectFiles().length, files.length);
+
+    // ...and the extreme the issue named: every root resolves, the whole scan
+    // finds nothing, and the old code printed `✓ 0 files clean` and exited 0.
+    const bare2 = mkdtempSync(join(tmpdir(), 'doc-authoring-selftest-empty-'));
+    let allEmptyErr = null;
+    try {
+      for (const r of ROOTS) mkdirSync(join(bare2, r), { recursive: true });
+      process.chdir(bare2);
+      try { collectFiles(); } catch (err) { allEmptyErr = err; }
+    } finally {
+      process.chdir(dir);
+      rmSync(bare2, { recursive: true, force: true });
+    }
+    expect('a scan that finds nothing at all is red, not "0 files clean"', allEmptyErr instanceof EmptyRootError, true);
+    expect('every empty root is named', allEmptyErr?.roots?.join(',') ?? '<none>', ROOTS.join(','));
+    expect('the zero total is reported', allEmptyErr?.total ?? -1, 0);
   } finally {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
@@ -334,7 +420,7 @@ function selfTest() {
     console.error(`\n✗ check-doc-authoring self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);
   }
-  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.');
+  console.log('✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in, .claude/worktrees and docs/{audits,handoff,plans} out), detection, the dead-root hard error (red when a ROOT is renamed, green when restored) and the empty-scan hard error (red when a root yields nothing and when the whole scan does, green when restored) all hold.');
 }
 
 function main() {
@@ -344,18 +430,38 @@ function main() {
   try {
     files = collectFiles();
   } catch (err) {
-    if (!(err instanceof DeadRootError)) throw err;
-    console.error(`\n✗ doc authoring guard: declared ROOT(s) do not resolve, so the scan would have been silently narrower:\n`);
-    for (const d of err.dead) console.error(`  ${d.root} — ${d.reason}`);
-    console.error(
-      `\nEvery entry in ROOTS (scripts/check-doc-authoring.mjs) must be a directory in the checkout,` +
-      `\nand this check runs from the repo root. If a corpus directory was renamed or moved, update` +
-      `\nROOTS to follow it; if it was deleted, remove the entry deliberately. Do NOT restore a` +
-      `\ntolerant skip: this used to be \`catch {}\`, and a dead root simply shrank the reported file` +
-      `\ncount while the gate kept printing green (#4916).\n`,
-    );
-    process.exit(1);
-    return;
+    if (err instanceof DeadRootError) {
+      console.error(`\n✗ doc authoring guard: declared ROOT(s) do not resolve, so the scan would have been silently narrower:\n`);
+      for (const d of err.dead) console.error(`  ${d.root} — ${d.reason}`);
+      console.error(
+        `\nEvery entry in ROOTS (scripts/check-doc-authoring.mjs) must be a directory in the checkout,` +
+        `\nand this check runs from the repo root. If a corpus directory was renamed or moved, update` +
+        `\nROOTS to follow it; if it was deleted, remove the entry deliberately. Do NOT restore a` +
+        `\ntolerant skip: this used to be \`catch {}\`, and a dead root simply shrank the reported file` +
+        `\ncount while the gate kept printing green (#4916).\n`,
+      );
+      process.exit(1);
+      return;
+    }
+    if (err instanceof EmptyRootError) {
+      console.error(
+        `\n✗ doc authoring guard: declared ROOT(s) resolved but contributed no Markdown/MDX file, so` +
+        `\nthis run would have reported a clean corpus it never read:\n`,
+      );
+      for (const r of err.roots) console.error(`  ${r} — 0 files`);
+      console.error(
+        `\n${err.total} file(s) were found in total across all of ROOTS.` +
+        `\n\nEvery entry in ROOTS (scripts/check-doc-authoring.mjs) must yield at least one .md/.mdx` +
+        `\nfile. The root still being a directory is not enough — that is all #4916's check can see.` +
+        `\nIf the corpus moved to a new directory, point ROOTS at it; if a subtree was deliberately` +
+        `\nemptied or removed, remove its ROOT entry in the same change. Do NOT lower this to a total` +
+        `\ncount: one populated root would then cover for every evaporated one, which is the silent` +
+        `\nnarrowing this assertion exists to stop (#4932).\n`,
+      );
+      process.exit(1);
+      return;
+    }
+    throw err;
   }
   const violations = files.flatMap((file) => findViolations(readFileSync(file, 'utf8'), file));
 

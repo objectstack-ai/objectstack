@@ -113,6 +113,8 @@ export const SecurityVulnerabilitySchema = lazySchema(() => z.object({
 }).describe('A known security vulnerability in a package dependency'));
 
 export type SecurityVulnerability = z.infer<typeof SecurityVulnerabilitySchema>;
+/** Post-parse shape of {@link SecurityVulnerability} — defaults applied, transforms run (ADR-0122). */
+export type SecurityVulnerabilityParsed = z.infer<typeof SecurityVulnerabilitySchema>;
 
 /**
  * Security Scan Result
@@ -197,6 +199,8 @@ export const SecurityScanResultSchema = lazySchema(() => z.object({
 }).describe('Result of a security scan performed on a plugin'));
 
 export type SecurityScanResult = z.infer<typeof SecurityScanResultSchema>;
+/** Post-parse shape of {@link SecurityScanResult} — defaults applied, transforms run (ADR-0122). */
+export type SecurityScanResultParsed = z.infer<typeof SecurityScanResultSchema>;
 
 /**
  * Security Policy
@@ -299,6 +303,8 @@ export const SecurityPolicySchema = lazySchema(() => z.object({
 }).describe('Security policy governing plugin scanning and enforcement'));
 
 export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
+/** Post-parse shape of {@link SecurityPolicy} — defaults applied, transforms run (ADR-0122). */
+export type SecurityPolicyParsed = z.infer<typeof SecurityPolicySchema>;
 
 // ============================================================================
 // Dependency Resolution
@@ -343,6 +349,8 @@ export const ResolvedPackageDependencySchema = lazySchema(() => z.object({
 }).describe('A resolver-side package dependency: version constraint plus its resolution outcome'));
 
 export type ResolvedPackageDependency = z.infer<typeof ResolvedPackageDependencySchema>;
+/** Post-parse shape of {@link ResolvedPackageDependency} — defaults applied, transforms run (ADR-0122). */
+export type ResolvedPackageDependencyParsed = z.infer<typeof ResolvedPackageDependencySchema>;
 
 /**
  * Dependency Graph Node
@@ -385,6 +393,8 @@ export const DependencyGraphNodeSchema = lazySchema(() => z.object({
 }).describe('A node in the dependency graph representing a resolved package'));
 
 export type DependencyGraphNode = z.infer<typeof DependencyGraphNodeSchema>;
+/** Post-parse shape of {@link DependencyGraphNode} — defaults applied, transforms run (ADR-0122). */
+export type DependencyGraphNodeParsed = z.infer<typeof DependencyGraphNodeSchema>;
 
 /**
  * Dependency Graph
@@ -423,6 +433,8 @@ export const DependencyGraphSchema = lazySchema(() => z.object({
 }).describe('Complete dependency graph for a package and its transitive dependencies'));
 
 export type DependencyGraph = z.infer<typeof DependencyGraphSchema>;
+/** Post-parse shape of {@link DependencyGraph} — defaults applied, transforms run (ADR-0122). */
+export type DependencyGraphParsed = z.infer<typeof DependencyGraphSchema>;
 
 /**
  * Dependency Conflict
@@ -504,6 +516,8 @@ export const PackageDependencyResolutionResultSchema = lazySchema(() => z.object
 }).describe('Result of a dependency resolution process'));
 
 export type PackageDependencyResolutionResult = z.infer<typeof PackageDependencyResolutionResultSchema>;
+/** Post-parse shape of {@link PackageDependencyResolutionResult} — defaults applied, transforms run (ADR-0122). */
+export type PackageDependencyResolutionResultParsed = z.infer<typeof PackageDependencyResolutionResultSchema>;
 
 // ============================================================================
 // Supply Chain Security
@@ -559,6 +573,8 @@ export const SBOMEntrySchema = lazySchema(() => z.object({
 }).describe('A single entry in a Software Bill of Materials'));
 
 export type SBOMEntry = z.infer<typeof SBOMEntrySchema>;
+/** Post-parse shape of {@link SBOMEntry} — defaults applied, transforms run (ADR-0122). */
+export type SBOMEntryParsed = z.infer<typeof SBOMEntrySchema>;
 
 /**
  * Software Bill of Materials (SBOM)
@@ -603,6 +619,8 @@ export const SBOMSchema = lazySchema(() => z.object({
 }).describe('Software Bill of Materials for a plugin'));
 
 export type SBOM = z.infer<typeof SBOMSchema>;
+/** Post-parse shape of {@link SBOM} — defaults applied, transforms run (ADR-0122). */
+export type SBOMParsed = z.infer<typeof SBOMSchema>;
 
 /**
  * Plugin Provenance
@@ -688,6 +706,8 @@ export const PluginProvenanceSchema = lazySchema(() => z.object({
 }).describe('Verifiable provenance and chain of custody for a plugin artifact'));
 
 export type PluginProvenance = z.infer<typeof PluginProvenanceSchema>;
+/** Post-parse shape of {@link PluginProvenance} — defaults applied, transforms run (ADR-0122). */
+export type PluginProvenanceParsed = z.infer<typeof PluginProvenanceSchema>;
 
 // ============================================================================
 // Trust & Verification
@@ -761,6 +781,8 @@ export const PluginTrustScoreSchema = lazySchema(() => z.object({
 }).describe('Trust score and verification status for a plugin'));
 
 export type PluginTrustScore = z.infer<typeof PluginTrustScoreSchema>;
+/** Post-parse shape of {@link PluginTrustScore} — defaults applied, transforms run (ADR-0122). */
+export type PluginTrustScoreParsed = z.infer<typeof PluginTrustScoreSchema>;
 
 // ============================================================================
 // Export All

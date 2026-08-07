@@ -66,6 +66,20 @@
  * it produces, and the absent contract is pinned separately through the loader
  * seam. Both facts are still here — one of them changed how it is spelled,
  * because the fact it used to spell was the defect.
+ *
+ * ── What #5429 changed under this file ───────────────────────────────────
+ *
+ * All three rows above lived inside the D5e advisory block, so they only
+ * existed under the `isolated` posture — which is why every case here sets
+ * `OS_TENANCY_POSTURE=isolated` and why they all still do. #5429 promoted the
+ * readability check out from under that gate, and the rows moved with it: their
+ * name column is `Installed packages` rather than `Unique scope`, because under
+ * `single` and `group` there is no unique-scope check to name. Every other
+ * assertion in this file is unchanged, and deliberately so — the isolated-posture
+ * report is the one that must NOT drift while the check becomes reachable from
+ * the other postures. That the rows now also appear under those postures, and
+ * appear only once when both checks are live, is pinned next door in
+ * `doctor-ledger-posture-independence.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
@@ -108,6 +122,17 @@ const SKIPPED_HEADLINE = 'installed-package ledger entr';
  * say when this row is the one on screen.
  */
 const READER_HEADLINE = 'Could not load the installed-package ledger reader';
+
+/**
+ * The name column all three rows take since #5429.
+ *
+ * It was `Unique scope` while these rows only existed inside the D5e advisory:
+ * the row an operator scans for had to be present rather than missing. Once the
+ * check became posture-independent that name stopped being true — `single` and
+ * `group` run no unique-scope check at all — so the rows say what they are
+ * about instead.
+ */
+const LEDGER_ROW_NAME = 'Installed packages';
 
 /**
  * ── Why this file needs a preflight (#5612) ──────────────────────────────
@@ -197,13 +222,19 @@ describe('installedPackageLedgerFailureCheck — the finding the shared catch us
     expect(check.fix).toContain("scandir '/p/.objectstack'");
   });
 
-  it('takes the `Unique scope` name column, so the row is present rather than missing', () => {
+  it('takes the `Installed packages` name column, so the row is present rather than missing', () => {
     const check = installedPackageLedgerFailureCheck(new Error('boom'));
 
     // Load-bearing, not cosmetic. An operator scans the report by its name
-    // column; a separately-named row would leave `Unique scope` simply absent,
-    // which is the same silence this issue is about wearing a different hat.
-    expect(check.name).toBe('Unique scope');
+    // column, and this row has to be somewhere findable rather than absent —
+    // absence is the silence this issue is about wearing a different hat.
+    //
+    // #5429 moved WHICH column. It was `Unique scope`, correct while the row
+    // could only be produced inside the D5e advisory; now that the check runs
+    // under every posture, a row named for a check that does not exist under
+    // `single` or `group` would be its own small lie. The `Unique scope` name
+    // still exists and still belongs to the unique-scope verdict alone.
+    expect(check.name).toBe(LEDGER_ROW_NAME);
   });
 
   it('stays a warning — the environment runs, doctor’s sight of it is what broke', () => {
@@ -253,13 +284,13 @@ describe('installedPackageLedgerReaderFailureCheck — the finding one boundary 
     expect(check.fix).toContain('dist/index.js');
   });
 
-  it('takes the `Unique scope` name column and stays a warning, like its two siblings', () => {
+  it('takes the `Installed packages` name column and stays a warning, like its two siblings', () => {
     const check = installedPackageLedgerReaderFailureCheck(new Error('boom'));
 
-    // Same reasoning as #5412: an operator scans the report by its name column,
-    // and a row under a different name leaves `Unique scope` simply missing —
-    // the silence this family of issues is about, wearing a different hat.
-    expect(check.name).toBe('Unique scope');
+    // All three readability rows share one name column, so an operator scanning
+    // for the ledger finds it in one place whichever of the three fired
+    // (#5429 moved that column off `Unique scope`; see the sibling case above).
+    expect(check.name).toBe(LEDGER_ROW_NAME);
     // The environment still runs; what broke is doctor's sight of part of it.
     expect(check.status).toBe('warning');
   });
@@ -393,7 +424,7 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     expect(run.out).toContain(LEDGER_HEADLINE);
     expect(run.out).toContain('ENOTDIR');
     // Rendered through the ONE renderer, so it carries a name column.
-    expect(run.out).toContain('Unique scope');
+    expect(run.out).toContain(LEDGER_ROW_NAME);
     // Gauge: warning, the report finishes, exit stays 0.
     expect(run.out).toContain('Environment is functional but has some warnings');
     expect(run.exitCode).toBeUndefined();
@@ -524,9 +555,10 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     expect(run.out).toContain('broken.json');
     // ② With the parser's own words, not a summary doctor invented.
     expect(run.out).toMatch(/JSON/i);
-    // ③ Under the `Unique scope` name column, like its directory-level sibling,
-    //    so the row an operator scans for is present rather than missing.
-    expect(run.out).toContain('Unique scope');
+    // ③ Under the `Installed packages` name column, like its directory-level
+    //    sibling, so the row an operator scans for is present rather than
+    //    missing.
+    expect(run.out).toContain(LEDGER_ROW_NAME);
     // ④ NOT the directory-level row: the directory read fine. Two distinct
     //    facts, two distinct headlines (#5412 vs #5413).
     expect(run.out).not.toContain(LEDGER_HEADLINE);
@@ -685,7 +717,7 @@ describe('the optional package INSTALLED BUT UNLOADABLE is reported (#5644)', ()
     expect(out).not.toContain(CLEAN_BILL);
     // ② …replaced by a row that names what could not be loaded.
     expect(out).toContain(READER_HEADLINE);
-    expect(out).toContain('Unique scope');
+    expect(out).toContain(LEDGER_ROW_NAME);
     // ③ NOT the directory-level row: the directory was never reached, and its
     //    text asserts a ledger exists — which doctor cannot know from here.
     expect(out).not.toContain(LEDGER_HEADLINE);

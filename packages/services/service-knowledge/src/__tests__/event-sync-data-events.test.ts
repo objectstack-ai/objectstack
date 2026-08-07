@@ -141,12 +141,30 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     // record, so there is nothing to upsert or delete — the adapters take
     // neither a count nor a predicate. The index is now stale in a way this
     // subscription cannot repair, and a silent no-op here would read exactly
-    // like "nothing happened". Reconciliation is tracked in #4672.
+    // like "nothing happened".
     expect(upsert).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect(harness.ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('may now be stale'),
       expect.objectContaining({ object: 'task', matched: 12 }),
     );
+  });
+
+  it('[#4672] the warn draws the honest line: reap covered, application predicate writes not', async () => {
+    // #4672 shipped the reap guard, which covers the platform's OWN predicate
+    // delete (the retention sweep). It did NOT cover a caller's `multi: true`
+    // write, and the decision was to say so rather than imply a reconciliation
+    // pass that does not exist. The warn is the signal that stays honest, so
+    // its two halves are pinned: a message that stopped naming either one
+    // would be over- or under-claiming coverage.
+    const harness = makeCtx();
+    const { deliver } = await harness.boot(new KnowledgeServicePlugin());
+
+    await deliver(BULK_DELETED);
+
+    const [message] = harness.ctx.logger.warn.mock.calls.at(-1) as [string];
+    expect(message).toContain('#4639');
+    expect(message).toContain('lifecycle reap guard (#4672)');
+    expect(message).toContain('application-level predicate writes are not');
   });
 });

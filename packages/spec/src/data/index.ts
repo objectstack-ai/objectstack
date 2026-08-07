@@ -113,6 +113,12 @@ export * from './field-group-layout';
 // create/edit/detail opens by default (full page vs drawer/modal overlay).
 export * from './record-surface';
 
+// injected-system-column derivation (#5378) — the single source for WHICH system
+// columns an object carries without declaring them. Consumed by the registry's
+// `applySystemFields` (which owns the column definitions) and by author-time
+// tooling that must resolve a reference to one but cannot load a runtime.
+export * from './injected-system-columns';
+
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).
 export * from './feed.zod';
