@@ -60,7 +60,7 @@ export const EnvironmentTypeSchema = lazySchema(() => z
   .enum(['production', 'sandbox', 'development', 'test', 'staging', 'preview', 'trial'])
   .describe('Environment categorical tag (prod/sandbox/dev/test/…)'));
 
-export type EnvironmentType = z.infer<typeof EnvironmentTypeSchema>;
+export type EnvironmentType = z.input<typeof EnvironmentTypeSchema>;
 
 /**
  * Environment lifecycle status.
@@ -73,7 +73,7 @@ export const EnvironmentStatusSchema = lazySchema(() => z
   .enum(['provisioning', 'active', 'suspended', 'archived', 'failed', 'migrating'])
   .describe('Environment lifecycle status'));
 
-export type EnvironmentStatus = z.infer<typeof EnvironmentStatusSchema>;
+export type EnvironmentStatus = z.input<typeof EnvironmentStatusSchema>;
 
 /**
  * Backend driver registry — keys used by the data-plane driver factory.
@@ -85,7 +85,7 @@ export const EnvironmentDriverSchema = lazySchema(() => z
   .min(1)
   .describe('Data-plane driver key (e.g. `turso`, `libsql`, `sqlite`, `postgres`)'));
 
-export type EnvironmentDriver = z.infer<typeof EnvironmentDriverSchema>;
+export type EnvironmentDriver = z.input<typeof EnvironmentDriverSchema>;
 
 /**
  * Public exposure of an environment's compiled artifacts.
@@ -98,7 +98,7 @@ export const EnvironmentVisibilitySchema = lazySchema(() => z
   .enum(['private', 'unlisted', 'public'])
   .describe('Public exposure of this environment artifacts (private | unlisted | public).'));
 
-export type EnvironmentVisibility = z.infer<typeof EnvironmentVisibilitySchema>;
+export type EnvironmentVisibility = z.input<typeof EnvironmentVisibilitySchema>;
 
 /**
  * Environment — one logical runtime of an organization's data.
@@ -190,7 +190,7 @@ export const EnvironmentSchema = lazySchema(() => z.object({
     .describe('Public exposure of this environment artifacts (private | unlisted | public).'),
 }));
 
-export type Environment = z.infer<typeof EnvironmentSchema>;
+export type Environment = z.input<typeof EnvironmentSchema>;
 /** Post-parse shape of {@link Environment} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentParsed = z.infer<typeof EnvironmentSchema>;
 
@@ -205,7 +205,7 @@ export const EnvironmentCredentialStatusSchema = lazySchema(() => z
   .enum(['active', 'rotating', 'revoked'])
   .describe('Credential lifecycle status'));
 
-export type EnvironmentCredentialStatus = z.infer<typeof EnvironmentCredentialStatusSchema>;
+export type EnvironmentCredentialStatus = z.input<typeof EnvironmentCredentialStatusSchema>;
 
 /**
  * Encrypted credential for an environment's database.
@@ -246,7 +246,7 @@ export const EnvironmentCredentialSchema = lazySchema(() => z.object({
   revokedAt: z.string().datetime().optional().describe('Revocation timestamp (if revoked)'),
 }));
 
-export type EnvironmentCredential = z.infer<typeof EnvironmentCredentialSchema>;
+export type EnvironmentCredential = z.input<typeof EnvironmentCredentialSchema>;
 /** Post-parse shape of {@link EnvironmentCredential} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentCredentialParsed = z.infer<typeof EnvironmentCredentialSchema>;
 
@@ -261,7 +261,7 @@ export const EnvironmentRoleSchema = lazySchema(() => z
   .enum(['owner', 'admin', 'maker', 'reader', 'guest'])
   .describe('Per-environment role'));
 
-export type EnvironmentRole = z.infer<typeof EnvironmentRoleSchema>;
+export type EnvironmentRole = z.input<typeof EnvironmentRoleSchema>;
 
 /**
  * Environment membership — grants a user access to a specific environment.
@@ -291,7 +291,7 @@ export const EnvironmentMemberSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp (ISO-8601)'),
 }));
 
-export type EnvironmentMember = z.infer<typeof EnvironmentMemberSchema>;
+export type EnvironmentMember = z.input<typeof EnvironmentMemberSchema>;
 
 // ---------------------------------------------------------------------------
 // Provisioning requests / responses
@@ -323,7 +323,7 @@ export const ProvisionEnvironmentRequestSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type ProvisionEnvironmentRequest = z.infer<typeof ProvisionEnvironmentRequestSchema>;
+export type ProvisionEnvironmentRequest = z.input<typeof ProvisionEnvironmentRequestSchema>;
 /** Post-parse shape of {@link ProvisionEnvironmentRequest} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionEnvironmentRequestParsed = z.infer<typeof ProvisionEnvironmentRequestSchema>;
 
@@ -364,7 +364,7 @@ export const ProvisionEnvironmentResponseSchema = lazySchema(() => z.object({
     ),
 }));
 
-export type ProvisionEnvironmentResponse = z.infer<typeof ProvisionEnvironmentResponseSchema>;
+export type ProvisionEnvironmentResponse = z.input<typeof ProvisionEnvironmentResponseSchema>;
 /** Post-parse shape of {@link ProvisionEnvironmentResponse} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionEnvironmentResponseParsed = z.infer<typeof ProvisionEnvironmentResponseSchema>;
 
@@ -386,7 +386,7 @@ export const ProvisionOrganizationRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Free-form metadata'),
 }));
 
-export type ProvisionOrganizationRequest = z.infer<typeof ProvisionOrganizationRequestSchema>;
+export type ProvisionOrganizationRequest = z.input<typeof ProvisionOrganizationRequestSchema>;
 /** Post-parse shape of {@link ProvisionOrganizationRequest} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionOrganizationRequestParsed = z.infer<typeof ProvisionOrganizationRequestSchema>;
 
@@ -399,6 +399,6 @@ export const ProvisionOrganizationResponseSchema = lazySchema(() => z.object({
   warnings: z.array(z.string()).optional().describe('Non-fatal warnings'),
 }));
 
-export type ProvisionOrganizationResponse = z.infer<typeof ProvisionOrganizationResponseSchema>;
+export type ProvisionOrganizationResponse = z.input<typeof ProvisionOrganizationResponseSchema>;
 /** Post-parse shape of {@link ProvisionOrganizationResponse} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionOrganizationResponseParsed = z.infer<typeof ProvisionOrganizationResponseSchema>;

@@ -29,7 +29,7 @@ import { z } from 'zod';
 export const SqlAutoMigrateSchema = z.enum(['off', 'safe'])
   .describe('Dev-only non-destructive schema self-heal (#2186)');
 
-export type SqlAutoMigrate = z.infer<typeof SqlAutoMigrateSchema>;
+export type SqlAutoMigrate = z.input<typeof SqlAutoMigrateSchema>;
 
 /**
  * `schemaMode` written inside `config`. Shared by every SQL driver: the factory

@@ -228,15 +228,26 @@ describe('[#6125] the null control group is UNTOUCHED — SQL and binds, byte fo
 });
 
 describe('[#6125] what the sweep deliberately leaves alone', () => {
-  it('$null / $exists take a declared BOOLEAN — not a comparand position', () => {
-    // Their comparand is a flag, so `undefined` there is not the shape #6050
-    // ruled on. `driver-sql`'s twin skips them for the same reason — but it can
-    // hand them to a boolean-domain gate (#5347 / #5369) and THIS module has
-    // none, so today they lower by truthiness. That is a different cell,
-    // measured and filed as #6387 rather than decided as a rider here; when it
-    // is ruled on, these two lines are what changes.
-    expect(compileScopedFilterToSql({ d: { $null: undefined } }, ALIAS).sql).toBe('"t"."d" IS NOT NULL');
-    expect(compileScopedFilterToSql({ d: { $exists: undefined } }, ALIAS).sql).toBe('"t"."d" IS NULL');
+  it('$null / $exists take a declared BOOLEAN — refused by DOMAIN, not by position', () => {
+    // ⚠️ [#6387] These are the two lines this block said would change "when it is
+    // ruled on", and they have. What #6125 left alone is still exactly what it
+    // said it left alone: `undefined` in these two slots is not a COMPARAND
+    // POSITION, so `assertDefinedComparands` skips them by name to this day, and
+    // the sentence above it in `read-scope-sql.ts` is unchanged.
+    //
+    // What changed is the OTHER side of that skip. #6125 recorded that
+    // `driver-sql`'s twin skips them to a boolean-domain gate (#5347 / #5369)
+    // while this module had none, so they lowered by truthiness. #6387 pushed
+    // that gate down, so `undefined` is now refused HERE too — as a value
+    // outside a declared domain, with the domain's own wording, which is the
+    // truer diagnosis for a flag. Two rulings, two reasons, one outcome.
+    for (const filter of [{ d: { $null: undefined } }, { d: { $exists: undefined } }] as const) {
+      const err = refusalFor(filter);
+      expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(String(err?.message)).toContain('is not a boolean');
+      // NOT #6125's wording: the position gate is still the one that skipped them.
+      expect(String(err?.message)).not.toContain('is undefined');
+    }
   });
 
   it('a bare array keeps its OWN refusal, undefined member or not', () => {

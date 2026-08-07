@@ -19,7 +19,7 @@ export const NoSQLDatabaseTypeSchema = lazySchema(() => z.enum([
   'orientdb',
 ]));
 
-export type NoSQLDatabaseType = z.infer<typeof NoSQLDatabaseTypeSchema>;
+export type NoSQLDatabaseType = z.input<typeof NoSQLDatabaseTypeSchema>;
 
 /**
  * NoSQL Query Operation Types
@@ -39,7 +39,7 @@ export const NoSQLOperationTypeSchema = lazySchema(() => z.enum([
   'dropIndex',      // Drop index
 ]));
 
-export type NoSQLOperationType = z.infer<typeof NoSQLOperationTypeSchema>;
+export type NoSQLOperationType = z.input<typeof NoSQLOperationTypeSchema>;
 
 /**
  * NoSQL Consistency Level
@@ -62,7 +62,7 @@ export const ConsistencyLevelSchema = lazySchema(() => z.enum([
   'eventual',
 ]));
 
-export type ConsistencyLevel = z.infer<typeof ConsistencyLevelSchema>;
+export type ConsistencyLevel = z.input<typeof ConsistencyLevelSchema>;
 
 /**
  * NoSQL Index Type
@@ -79,7 +79,7 @@ export const NoSQLIndexTypeSchema = lazySchema(() => z.enum([
   'sparse',         // Sparse index (only indexed documents with field)
 ]));
 
-export type NoSQLIndexType = z.infer<typeof NoSQLIndexTypeSchema>;
+export type NoSQLIndexType = z.input<typeof NoSQLIndexTypeSchema>;
 
 /**
  * NoSQL Sharding Configuration
@@ -92,7 +92,7 @@ export const ShardingConfigSchema = lazySchema(() => z.object({
   numShards: z.number().int().positive().optional().describe('Number of shards'),
 }));
 
-export type ShardingConfig = z.infer<typeof ShardingConfigSchema>;
+export type ShardingConfig = z.input<typeof ShardingConfigSchema>;
 /** Post-parse shape of {@link ShardingConfig} — defaults applied, transforms run (ADR-0122). */
 export type ShardingConfigParsed = z.infer<typeof ShardingConfigSchema>;
 
@@ -112,7 +112,7 @@ export const ReplicationConfigSchema = lazySchema(() => z.object({
     .describe('Write concern level'),
 }));
 
-export type ReplicationConfig = z.infer<typeof ReplicationConfigSchema>;
+export type ReplicationConfig = z.input<typeof ReplicationConfigSchema>;
 /** Post-parse shape of {@link ReplicationConfig} — defaults applied, transforms run (ADR-0122). */
 export type ReplicationConfigParsed = z.infer<typeof ReplicationConfigSchema>;
 
@@ -127,7 +127,7 @@ export const DocumentSchemaValidationSchema = lazySchema(() => z.object({
   jsonSchema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema for validation'),
 }));
 
-export type DocumentSchemaValidation = z.infer<typeof DocumentSchemaValidationSchema>;
+export type DocumentSchemaValidation = z.input<typeof DocumentSchemaValidationSchema>;
 /** Post-parse shape of {@link DocumentSchemaValidation} — defaults applied, transforms run (ADR-0122). */
 export type DocumentSchemaValidationParsed = z.infer<typeof DocumentSchemaValidationSchema>;
 
@@ -163,7 +163,7 @@ export const NoSQLDataTypeMappingSchema = lazySchema(() => z.object({
   geopoint: z.string().optional().describe('NoSQL type for geospatial point fields'),
 }));
 
-export type NoSQLDataTypeMapping = z.infer<typeof NoSQLDataTypeMappingSchema>;
+export type NoSQLDataTypeMapping = z.input<typeof NoSQLDataTypeMappingSchema>;
 
 /**
  * NoSQL Driver Configuration Schema
@@ -280,7 +280,7 @@ export const NoSQLDriverConfigSchema = lazySchema(() => DriverConfigSchema.exten
   collectionPrefix: z.string().optional().describe('Prefix for collection/table names'),
 }));
 
-export type NoSQLDriverConfig = z.infer<typeof NoSQLDriverConfigSchema>;
+export type NoSQLDriverConfig = z.input<typeof NoSQLDriverConfigSchema>;
 /** Post-parse shape of {@link NoSQLDriverConfig} — defaults applied, transforms run (ADR-0122). */
 export type NoSQLDriverConfigParsed = z.infer<typeof NoSQLDriverConfigSchema>;
 
@@ -330,7 +330,7 @@ export const NoSQLQueryOptionsSchema = lazySchema(() => z.object({
   hint: z.string().optional().describe('Index hint for query optimization'),
 }));
 
-export type NoSQLQueryOptions = z.infer<typeof NoSQLQueryOptionsSchema>;
+export type NoSQLQueryOptions = z.input<typeof NoSQLQueryOptionsSchema>;
 
 /**
  * NoSQL Aggregation Pipeline Stage
@@ -348,7 +348,7 @@ export const AggregationStageSchema = lazySchema(() => z.object({
   options: z.record(z.string(), z.unknown()).describe('Stage-specific options'),
 }));
 
-export type AggregationStage = z.infer<typeof AggregationStageSchema>;
+export type AggregationStage = z.input<typeof AggregationStageSchema>;
 
 /**
  * NoSQL Aggregation Pipeline
@@ -371,7 +371,7 @@ export const AggregationPipelineSchema = lazySchema(() => z.object({
   options: NoSQLQueryOptionsSchema.optional().describe('Query options'),
 }));
 
-export type AggregationPipeline = z.infer<typeof AggregationPipelineSchema>;
+export type AggregationPipeline = z.input<typeof AggregationPipelineSchema>;
 
 /**
  * NoSQL Index Definition
@@ -423,7 +423,7 @@ export const NoSQLIndexSchema = lazySchema(() => z.object({
   background: z.boolean().default(false).describe('Create index in background'),
 }));
 
-export type NoSQLIndex = z.infer<typeof NoSQLIndexSchema>;
+export type NoSQLIndex = z.input<typeof NoSQLIndexSchema>;
 /** Post-parse shape of {@link NoSQLIndex} — defaults applied, transforms run (ADR-0122). */
 export type NoSQLIndexParsed = z.infer<typeof NoSQLIndexSchema>;
 
@@ -455,4 +455,4 @@ export const NoSQLTransactionOptionsSchema = lazySchema(() => z.object({
   maxCommitTimeMS: z.number().int().positive().optional().describe('Transaction commit timeout (ms)'),
 }));
 
-export type NoSQLTransactionOptions = z.infer<typeof NoSQLTransactionOptionsSchema>;
+export type NoSQLTransactionOptions = z.input<typeof NoSQLTransactionOptionsSchema>;

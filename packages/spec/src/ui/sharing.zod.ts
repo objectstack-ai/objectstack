@@ -139,6 +139,6 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
 // a route that honours the origins first, the vocabulary second.
 
 // Type Exports
-export type SharingConfig = z.infer<typeof SharingConfigSchema>;
+export type SharingConfig = z.input<typeof SharingConfigSchema>;
 /** Post-parse shape of {@link SharingConfig} — defaults applied, transforms run (ADR-0122). */
 export type SharingConfigParsed = z.infer<typeof SharingConfigSchema>;

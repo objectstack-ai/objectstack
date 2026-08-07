@@ -173,7 +173,6 @@ const actionParamUnknownKeyError = strictUnknownKeyError({
     'config shipped as a control that quietly ignored it.',
 });
 
-
 export const ActionParamSchema = lazySchema(() => z.object({
   /** Request-body key. Defaults to `field` when `field` is set. */
   name: z.string().optional(),
@@ -479,7 +478,7 @@ export const ACTION_LOCATIONS = [
 ] as const;
 
 export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
-export type ActionLocation = z.infer<typeof ActionLocationSchema>;
+export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
 /**
  * Tool category values for {@link ActionAiSchema.category}.
@@ -609,7 +608,7 @@ export const ActionAiSchema = strictObject({
   requiresConfirmation: z.boolean().optional().describe('Override HITL confirmation for AI invocations.'),
 });
 
-export type ActionAi = z.infer<typeof ActionAiSchema>;
+export type ActionAi = z.input<typeof ActionAiSchema>;
 /** Post-parse shape of {@link ActionAi} — defaults applied, transforms run (ADR-0122). */
 export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
 
@@ -1099,13 +1098,12 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   path: ['ai', 'paramHints'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
-export type Action = z.infer<typeof ActionSchema>;
+export type Action = z.input<typeof ActionSchema>;
 /** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */
 export type ActionParsed = z.infer<typeof ActionSchema>;
-export type ActionParam = z.infer<typeof ActionParamSchema>;
+export type ActionParam = z.input<typeof ActionParamSchema>;
 /** Post-parse shape of {@link ActionParam} — defaults applied, transforms run (ADR-0122). */
 export type ActionParamParsed = z.infer<typeof ActionParamSchema>;
-export type ActionInput = z.input<typeof ActionSchema>;
 
 /**
  * Legacy spellings an inline action may carry, folded to canonical on parse.
@@ -1194,10 +1192,9 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }),
 ));
 
-export type InlineAction = z.infer<typeof InlineActionSchema>;
+export type InlineAction = z.input<typeof InlineActionSchema>;
 /** Post-parse shape of {@link InlineAction} — defaults applied, transforms run (ADR-0122). */
 export type InlineActionParsed = z.infer<typeof InlineActionSchema>;
-export type InlineActionInput = z.input<typeof InlineActionSchema>;
 
 /**
  * Action Factory Helper
@@ -1211,6 +1208,6 @@ export const Action = {
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Action` literal.
  */
-export function defineAction(config: z.input<typeof ActionSchema>): Action {
+export function defineAction(config: z.input<typeof ActionSchema>): ActionParsed {
   return ActionSchema.parse(config);
 }

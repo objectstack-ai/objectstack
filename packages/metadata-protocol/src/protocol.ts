@@ -30,7 +30,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
-    type DroppedFieldsEvent, type QueryAST, type EngineQueryOptions,
+    type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
@@ -4140,7 +4140,7 @@ export class ObjectStackProtocolImplementation implements
             // `.strict()`), which left this query running ascending — the
             // OLDEST `limit` audit events, i.e. the beginning of an object's
             // life and never its recent changes (#4674). The `as any` is gone
-            // for the same reason: `EngineQueryOptions` rejects the wrong key,
+            // for the same reason: `EngineQueryOptionsParsed` rejects the wrong key,
             // and erasing the type is what let it through.
             const rows = await this.engine.find('sys_metadata_audit', {
                 where,
@@ -5983,7 +5983,7 @@ export class ObjectStackProtocolImplementation implements
                 // truncated away the recently-edited records a searcher is most
                 // likely to want (#4674). Typed rather than `any` so the
                 // contract rejects the wrong key at the call site.
-                const opts: EngineQueryOptions = {
+                const opts: EngineQueryOptionsParsed = {
                     where,
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],

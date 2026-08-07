@@ -158,6 +158,6 @@ export const FieldWidgetPropsSchema = lazySchema(() => z.object({
 /**
  * TypeScript type for Field Widget Props
  */
-export type FieldWidgetProps = z.infer<typeof FieldWidgetPropsSchema>;
+export type FieldWidgetProps = z.input<typeof FieldWidgetPropsSchema>;
 /** Post-parse shape of {@link FieldWidgetProps} — defaults applied, transforms run (ADR-0122). */
 export type FieldWidgetPropsParsed = z.infer<typeof FieldWidgetPropsSchema>;

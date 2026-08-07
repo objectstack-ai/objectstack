@@ -38,7 +38,7 @@
  */
 
 import { isGrantActive } from '@objectstack/core';
-import type { AdminScope, PermissionSet } from '@objectstack/spec/security';
+import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import { PermissionDeniedError } from './errors.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -121,7 +121,14 @@ export interface DelegableScopeReport {
 interface HeldScope {
   /** The set that carries the scope (for error messages). */
   setName: string;
-  scope: AdminScope & { assignablePermissionSets: string[] };
+  /**
+   * The scope as `resolveHeldScopes` NORMALISES it, not as it was authored:
+   * every flag there is forced to a boolean (`!== false` / `=== true`) and the
+   * allowlist to a string[]. So this names the PARSED shape (ADR-0122) — the
+   * authored one, which arrives as raw JSON and may state none of them, is
+   * `AdminScope` and appears at the two `parseMaybeJson` sites below.
+   */
+  scope: AdminScopeParsed & { assignablePermissionSets: string[] };
   /** Resolved BU ids covered (root + descendants when includeSubtree). Empty = misconfigured → approves nothing. */
   subtree: Set<string>;
 }

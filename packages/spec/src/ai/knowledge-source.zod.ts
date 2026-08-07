@@ -115,9 +115,9 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
   aiExposed: z.boolean().default(true).optional(),
 }));
 
-export type KnowledgeRefreshPolicy = z.infer<typeof KnowledgeRefreshPolicySchema>;
-export type ObjectKnowledgeSource = z.infer<typeof ObjectKnowledgeSourceSchema>;
-export type FileKnowledgeSource = z.infer<typeof FileKnowledgeSourceSchema>;
-export type HttpKnowledgeSource = z.infer<typeof HttpKnowledgeSourceSchema>;
-export type KnowledgeSourceKind = z.infer<typeof KnowledgeSourceKindSchema>;
-export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
+export type KnowledgeRefreshPolicy = z.input<typeof KnowledgeRefreshPolicySchema>;
+export type ObjectKnowledgeSource = z.input<typeof ObjectKnowledgeSourceSchema>;
+export type FileKnowledgeSource = z.input<typeof FileKnowledgeSourceSchema>;
+export type HttpKnowledgeSource = z.input<typeof HttpKnowledgeSourceSchema>;
+export type KnowledgeSourceKind = z.input<typeof KnowledgeSourceKindSchema>;
+export type KnowledgeSource = z.input<typeof KnowledgeSourceSchema>;

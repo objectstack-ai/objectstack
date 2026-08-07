@@ -21,7 +21,7 @@ export const ApiMethod = z.enum([
   'create', 'update', 'delete', // Write
   'bulk',                       // Batch operations
 ]);
-export type ApiMethod = z.infer<typeof ApiMethod>;
+export type ApiMethod = z.input<typeof ApiMethod>;
 
 /**
  * The eight RETIRED legacy `apiMethods` values (#3543, P2 of #3391). Each is
@@ -574,8 +574,8 @@ export const ObjectRequiredPermissionsSchema = z.union([
   z.array(z.string()),
   PerOperationRequiredPermissionsSchema,
 ]);
-export type PerOperationRequiredPermissions = z.infer<typeof PerOperationRequiredPermissionsSchema>;
-export type ObjectRequiredPermissions = z.infer<typeof ObjectRequiredPermissionsSchema>;
+export type PerOperationRequiredPermissions = z.input<typeof PerOperationRequiredPermissionsSchema>;
+export type ObjectRequiredPermissions = z.input<typeof ObjectRequiredPermissionsSchema>;
 
 /**
  * Data Lifecycle (ADR-0057)
@@ -777,7 +777,6 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }
 }));
 
-
 /**
  * Object Field Group Schema — MVP (data-layer protocol)
  * 
@@ -900,10 +899,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum."),
 }));
 
-export type ObjectFieldGroup = z.infer<typeof ObjectFieldGroupSchema>;
+export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 /** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
 export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
-export type ObjectFieldGroupInput = z.input<typeof ObjectFieldGroupSchema>;
 
 /**
  * Base Object Schema Definition
@@ -988,7 +986,7 @@ export const ObjectExternalBindingSchema = strictObject({
     .describe('Remote columns to skip during validation (dev convenience).'),
 }).describe('External datasource binding (ADR-0015)');
 
-export type ObjectExternalBinding = z.infer<typeof ObjectExternalBindingSchema>;
+export type ObjectExternalBinding = z.input<typeof ObjectExternalBindingSchema>;
 /** Post-parse shape of {@link ObjectExternalBinding} — defaults applied, transforms run (ADR-0122). */
 export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSchema>;
 
@@ -1025,10 +1023,9 @@ export const RowCrudActionOverrideSchema = z.object({
     'Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft.',
   ),
 }).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
-export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
+export type RowCrudActionOverride = z.input<typeof RowCrudActionOverrideSchema>;
 /** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
 export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
-export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
 
 /**
  * Unknown-key error for {@link ObjectSchemaBase}, built on FIRST USE.
@@ -1422,7 +1419,6 @@ const ObjectSchemaBase = z.object({
    */
   external: ObjectExternalBindingSchema.optional()
     .describe('Remote table binding for federated (external) objects.'),
-
 
   /**
    * Data Model
@@ -2200,22 +2196,21 @@ export const ObjectSchema = lazySchema(() => {
   });
 });
 
-export type ServiceObject = z.infer<typeof ObjectSchemaBase>;
+export type ServiceObject = z.input<typeof ObjectSchemaBase>;
 /** Post-parse shape of {@link ServiceObject} — defaults applied, transforms run (ADR-0122). */
 export type ServiceObjectParsed = z.infer<typeof ObjectSchemaBase>;
-export type ServiceObjectInput = z.input<typeof ObjectSchemaBase>;
-export type ObjectCapabilities = z.infer<typeof ObjectCapabilities>;
+export type ObjectCapabilities = z.input<typeof ObjectCapabilities>;
 /** Post-parse shape of {@link ObjectCapabilities} — defaults applied, transforms run (ADR-0122). */
 export type ObjectCapabilitiesParsed = z.infer<typeof ObjectCapabilities>;
-export type ObjectIndex = z.infer<typeof IndexSchema>;
+export type ObjectIndex = z.input<typeof IndexSchema>;
 /** Post-parse shape of {@link ObjectIndex} — defaults applied, transforms run (ADR-0122). */
 export type ObjectIndexParsed = z.infer<typeof IndexSchema>;
-export type TenancyConfig = z.infer<typeof TenancyConfigSchema>;
-export type ObjectAccessConfig = z.infer<typeof ObjectAccessConfigSchema>;
+export type TenancyConfig = z.input<typeof TenancyConfigSchema>;
+export type ObjectAccessConfig = z.input<typeof ObjectAccessConfigSchema>;
 /** Post-parse shape of {@link ObjectAccessConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectAccessConfigParsed = z.infer<typeof ObjectAccessConfigSchema>;
-export type LifecycleClass = z.infer<typeof LifecycleClassSchema>;
-export type Lifecycle = z.infer<typeof LifecycleSchema>;
+export type LifecycleClass = z.input<typeof LifecycleClassSchema>;
+export type Lifecycle = z.input<typeof LifecycleSchema>;
 
 /**
  * Resolved CRUD affordance matrix for an object — what generic
@@ -2381,7 +2376,7 @@ function normalizeRowCrudOverride(
  *   object name = database table name, globally unique, no namespace prefix.
  */
 export const ObjectOwnershipEnum = z.enum(['own', 'extend']);
-export type ObjectOwnership = z.infer<typeof ObjectOwnershipEnum>;
+export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 
 /**
  * Object Extension Entry — used in `objectExtensions` array.
@@ -2457,17 +2452,15 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
 }));
 
-export type ObjectExtension = z.infer<typeof ObjectExtensionSchema>;
+export type ObjectExtension = z.input<typeof ObjectExtensionSchema>;
 /** Post-parse shape of {@link ObjectExtension} — defaults applied, transforms run (ADR-0122). */
 export type ObjectExtensionParsed = z.infer<typeof ObjectExtensionSchema>;
-/** Authoring input for {@link ObjectExtension} — defaulted fields are optional. */
-export type ObjectExtensionInput = z.input<typeof ObjectExtensionSchema>;
 
 /**
  * Type-safe factory for an extension to an object owned by another package. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: ObjectExtension` literal.
  */
-export function defineObjectExtension(config: z.input<typeof ObjectExtensionSchema>): ObjectExtension {
+export function defineObjectExtension(config: z.input<typeof ObjectExtensionSchema>): ObjectExtensionParsed {
   return ObjectExtensionSchema.parse(config);
 }

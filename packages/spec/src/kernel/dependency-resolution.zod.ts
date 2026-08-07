@@ -40,7 +40,7 @@ export const DependencyStatusEnum = z.enum([
   'conflict',       // Conflicts with another package's dependency
 ]).describe('Resolution status for a dependency');
 
-export type DependencyStatus = z.infer<typeof DependencyStatusEnum>;
+export type DependencyStatus = z.input<typeof DependencyStatusEnum>;
 
 // ==========================================
 // Resolved Dependency
@@ -73,7 +73,7 @@ export const ResolvedDependencySchema = lazySchema(() => z.object({
     .describe('Explanation of the conflict'),
 }).describe('Resolution result for a single dependency'));
 
-export type ResolvedDependency = z.infer<typeof ResolvedDependencySchema>;
+export type ResolvedDependency = z.input<typeof ResolvedDependencySchema>;
 
 // ==========================================
 // Required Action
@@ -94,7 +94,7 @@ export const RequiredActionSchema = lazySchema(() => z.object({
   description: z.string().describe('Human-readable action description'),
 }).describe('Action required before installation can proceed'));
 
-export type RequiredAction = z.infer<typeof RequiredActionSchema>;
+export type RequiredAction = z.input<typeof RequiredActionSchema>;
 
 // ==========================================
 // Dependency Resolution Result
@@ -126,4 +126,4 @@ export const DependencyResolutionResultSchema = lazySchema(() => z.object({
     .describe('Circular dependency chains detected (e.g. [["A", "B", "A"]])'),
 }).describe('Complete dependency resolution result'));
 
-export type DependencyResolutionResult = z.infer<typeof DependencyResolutionResultSchema>;
+export type DependencyResolutionResult = z.input<typeof DependencyResolutionResultSchema>;

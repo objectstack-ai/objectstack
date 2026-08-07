@@ -44,7 +44,7 @@ export const CacheStrategySchema = lazySchema(() => z.enum([
   'ttl',          // Time To Live only
 ]).describe('Cache eviction strategy'));
 
-export type CacheStrategy = z.infer<typeof CacheStrategySchema>;
+export type CacheStrategy = z.input<typeof CacheStrategySchema>;
 
 export const CacheTierSchema = lazySchema(() => z.object({
   name: z.string().describe('Unique cache tier name'),
@@ -55,10 +55,9 @@ export const CacheTierSchema = lazySchema(() => z.object({
   warmup: z.boolean().default(false).describe('Pre-populate cache on startup'),
 }).describe('Configuration for a single cache tier in the hierarchy'));
 
-export type CacheTier = z.infer<typeof CacheTierSchema>;
+export type CacheTier = z.input<typeof CacheTierSchema>;
 /** Post-parse shape of {@link CacheTier} — defaults applied, transforms run (ADR-0122). */
 export type CacheTierParsed = z.infer<typeof CacheTierSchema>;
-export type CacheTierInput = z.input<typeof CacheTierSchema>;
 
 export const CacheInvalidationSchema = lazySchema(() => z.object({
   trigger: z.enum(['create', 'update', 'delete', 'manual']).describe('Event that triggers invalidation'),
@@ -67,7 +66,7 @@ export const CacheInvalidationSchema = lazySchema(() => z.object({
   tags: z.array(z.string()).optional().describe('Cache tags to invalidate'),
 }).describe('Rule defining when and how cached entries are invalidated'));
 
-export type CacheInvalidation = z.infer<typeof CacheInvalidationSchema>;
+export type CacheInvalidation = z.input<typeof CacheInvalidationSchema>;
 
 export const CacheConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable application-level caching'),
@@ -78,10 +77,9 @@ export const CacheConfigSchema = lazySchema(() => z.object({
   encryption: z.boolean().default(false).describe('Enable encryption for cached data'),
 }).describe('Top-level application cache configuration'));
 
-export type CacheConfig = z.infer<typeof CacheConfigSchema>;
+export type CacheConfig = z.input<typeof CacheConfigSchema>;
 /** Post-parse shape of {@link CacheConfig} — defaults applied, transforms run (ADR-0122). */
 export type CacheConfigParsed = z.infer<typeof CacheConfigSchema>;
-export type CacheConfigInput = z.input<typeof CacheConfigSchema>;
 
 /**
  * Distributed Cache Consistency Schema
@@ -100,7 +98,7 @@ export const CacheConsistencySchema = lazySchema(() => z.enum([
   'refresh_ahead',
 ]).describe('Distributed cache write consistency strategy'));
 
-export type CacheConsistency = z.infer<typeof CacheConsistencySchema>;
+export type CacheConsistency = z.input<typeof CacheConsistencySchema>;
 
 /**
  * Cache Avalanche Prevention Schema
@@ -137,7 +135,7 @@ export const CacheAvalanchePreventionSchema = lazySchema(() => z.object({
   }).optional().describe('Lock-based stampede prevention'),
 }).describe('Cache avalanche/stampede prevention configuration'));
 
-export type CacheAvalanchePrevention = z.infer<typeof CacheAvalanchePreventionSchema>;
+export type CacheAvalanchePrevention = z.input<typeof CacheAvalanchePreventionSchema>;
 /** Post-parse shape of {@link CacheAvalanchePrevention} — defaults applied, transforms run (ADR-0122). */
 export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreventionSchema>;
 
@@ -160,7 +158,7 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
   concurrency: z.number().default(10).describe('Maximum concurrent warmup operations'),
 }).describe('Cache warmup strategy'));
 
-export type CacheWarmup = z.infer<typeof CacheWarmupSchema>;
+export type CacheWarmup = z.input<typeof CacheWarmupSchema>;
 /** Post-parse shape of {@link CacheWarmup} — defaults applied, transforms run (ADR-0122). */
 export type CacheWarmupParsed = z.infer<typeof CacheWarmupSchema>;
 
@@ -200,7 +198,6 @@ export const DistributedCacheConfigSchema = lazySchema(() => CacheConfigSchema.e
   warmup: CacheWarmupSchema.optional().describe('Cache warmup strategy'),
 }).describe('Distributed cache configuration with consistency and avalanche prevention'));
 
-export type DistributedCacheConfig = z.infer<typeof DistributedCacheConfigSchema>;
+export type DistributedCacheConfig = z.input<typeof DistributedCacheConfigSchema>;
 /** Post-parse shape of {@link DistributedCacheConfig} — defaults applied, transforms run (ADR-0122). */
 export type DistributedCacheConfigParsed = z.infer<typeof DistributedCacheConfigSchema>;
-export type DistributedCacheConfigInput = z.input<typeof DistributedCacheConfigSchema>;

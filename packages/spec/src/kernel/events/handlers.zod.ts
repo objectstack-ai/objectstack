@@ -60,7 +60,7 @@ export const EventHandlerSchema = lazySchema(() => z.object({
     .describe('Optional filter to determine if handler should execute'),
 }));
 
-export type EventHandler = z.infer<typeof EventHandlerSchema>;
+export type EventHandler = z.input<typeof EventHandlerSchema>;
 /** Post-parse shape of {@link EventHandler} — defaults applied, transforms run (ADR-0122). */
 export type EventHandlerParsed = z.infer<typeof EventHandlerSchema>;
 
@@ -74,7 +74,7 @@ export const EventRouteSchema = lazySchema(() => z.object({
   transform: z.unknown().optional().describe('Optional function to transform payload'),
 }));
 
-export type EventRoute = z.infer<typeof EventRouteSchema>;
+export type EventRoute = z.input<typeof EventRouteSchema>;
 
 /**
  * Event Persistence Schema
@@ -88,6 +88,6 @@ export const EventPersistenceSchema = lazySchema(() => z.object({
     .describe('Storage backend for persisted events'),
 }));
 
-export type EventPersistence = z.infer<typeof EventPersistenceSchema>;
+export type EventPersistence = z.input<typeof EventPersistenceSchema>;
 /** Post-parse shape of {@link EventPersistence} — defaults applied, transforms run (ADR-0122). */
 export type EventPersistenceParsed = z.infer<typeof EventPersistenceSchema>;

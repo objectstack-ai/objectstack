@@ -392,8 +392,9 @@ export function resolveFilterTokens<T>(
  * `current_user.organization_id`).
  *
  * Typed structurally, not as `ExecutionContext`, so both the parsed context
- * (defaults applied) and the pre-parse `ExecutionContextInput` a caller holds
- * mid-pipeline satisfy it. The three fields read here are optional in both.
+ * (`ExecutionContextParsed`, defaults applied) and the pre-parse
+ * `ExecutionContext` a caller holds mid-pipeline satisfy it. The three fields
+ * read here are optional in both.
  */
 export function filterTokenContextFrom(
   execCtx: ExecutionContextLike | undefined,

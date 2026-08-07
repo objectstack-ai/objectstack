@@ -343,32 +343,32 @@ export const MetadataDependentsResponseSchema = lazySchema(() => BaseResponseSch
 // Type Exports
 // ==========================================
 
-export type ObjectDefinitionResponse = z.infer<typeof ObjectDefinitionResponseSchema>;
+export type ObjectDefinitionResponse = z.input<typeof ObjectDefinitionResponseSchema>;
 /** Post-parse shape of {@link ObjectDefinitionResponse} — defaults applied, transforms run (ADR-0122). */
 export type ObjectDefinitionResponseParsed = z.infer<typeof ObjectDefinitionResponseSchema>;
-export type AppDefinitionResponse = z.infer<typeof AppDefinitionResponseSchema>;
+export type AppDefinitionResponse = z.input<typeof AppDefinitionResponseSchema>;
 /** Post-parse shape of {@link AppDefinitionResponse} — defaults applied, transforms run (ADR-0122). */
 export type AppDefinitionResponseParsed = z.infer<typeof AppDefinitionResponseSchema>;
-export type ConceptListResponse = z.infer<typeof ConceptListResponseSchema>;
+export type ConceptListResponse = z.input<typeof ConceptListResponseSchema>;
 /** Post-parse shape of {@link ConceptListResponse} — defaults applied, transforms run (ADR-0122). */
 export type ConceptListResponseParsed = z.infer<typeof ConceptListResponseSchema>;
-export type MetadataRegisterRequest = z.infer<typeof MetadataRegisterRequestSchema>;
-export type MetadataItemResponse = z.infer<typeof MetadataItemResponseSchema>;
+export type MetadataRegisterRequest = z.input<typeof MetadataRegisterRequestSchema>;
+export type MetadataItemResponse = z.input<typeof MetadataItemResponseSchema>;
 /** Post-parse shape of {@link MetadataItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataItemResponseParsed = z.infer<typeof MetadataItemResponseSchema>;
-export type MetadataListResponse = z.infer<typeof MetadataListResponseSchema>;
+export type MetadataListResponse = z.input<typeof MetadataListResponseSchema>;
 /** Post-parse shape of {@link MetadataListResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataListResponseParsed = z.infer<typeof MetadataListResponseSchema>;
-export type MetadataNamesResponse = z.infer<typeof MetadataNamesResponseSchema>;
+export type MetadataNamesResponse = z.input<typeof MetadataNamesResponseSchema>;
 /** Post-parse shape of {@link MetadataNamesResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataNamesResponseParsed = z.infer<typeof MetadataNamesResponseSchema>;
-export type MetadataExistsResponse = z.infer<typeof MetadataExistsResponseSchema>;
+export type MetadataExistsResponse = z.input<typeof MetadataExistsResponseSchema>;
 /** Post-parse shape of {@link MetadataExistsResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataExistsResponseParsed = z.infer<typeof MetadataExistsResponseSchema>;
-export type MetadataDeleteResponse = z.infer<typeof MetadataDeleteResponseSchema>;
+export type MetadataDeleteResponse = z.input<typeof MetadataDeleteResponseSchema>;
 /** Post-parse shape of {@link MetadataDeleteResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataDeleteResponseParsed = z.infer<typeof MetadataDeleteResponseSchema>;
-export type MetadataQueryResponse = z.infer<typeof MetadataQueryResponseSchema>;
+export type MetadataQueryResponse = z.input<typeof MetadataQueryResponseSchema>;
 /** Post-parse shape of {@link MetadataQueryResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataQueryResponseParsed = z.infer<typeof MetadataQueryResponseSchema>;
 /**
@@ -381,33 +381,35 @@ export type MetadataQueryResponseParsed = z.infer<typeof MetadataQueryResponseSc
  * `MetadataBulkRegisterRequest(Schema)` now.
  */
 export type MetadataBulkRegisterRequest = z.input<typeof MetadataBulkRegisterRequestSchema>;
-export type MetadataBulkResponse = z.infer<typeof MetadataBulkResponseSchema>;
+/** Post-parse shape of {@link MetadataBulkRegisterRequest} — defaults applied, transforms run (ADR-0122). */
+export type MetadataBulkRegisterRequestParsed = z.infer<typeof MetadataBulkRegisterRequestSchema>;
+export type MetadataBulkResponse = z.input<typeof MetadataBulkResponseSchema>;
 /** Post-parse shape of {@link MetadataBulkResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataBulkResponseParsed = z.infer<typeof MetadataBulkResponseSchema>;
-export type MetadataOverlayResponse = z.infer<typeof MetadataOverlayResponseSchema>;
+export type MetadataOverlayResponse = z.input<typeof MetadataOverlayResponseSchema>;
 /** Post-parse shape of {@link MetadataOverlayResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataOverlayResponseParsed = z.infer<typeof MetadataOverlayResponseSchema>;
-export type MetadataEffectiveResponse = z.infer<typeof MetadataEffectiveResponseSchema>;
+export type MetadataEffectiveResponse = z.input<typeof MetadataEffectiveResponseSchema>;
 /** Post-parse shape of {@link MetadataEffectiveResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataEffectiveResponseParsed = z.infer<typeof MetadataEffectiveResponseSchema>;
-export type MetadataExportResponse = z.infer<typeof MetadataExportResponseSchema>;
+export type MetadataExportResponse = z.input<typeof MetadataExportResponseSchema>;
 /** Post-parse shape of {@link MetadataExportResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataExportResponseParsed = z.infer<typeof MetadataExportResponseSchema>;
-export type MetadataImportResponse = z.infer<typeof MetadataImportResponseSchema>;
+export type MetadataImportResponse = z.input<typeof MetadataImportResponseSchema>;
 /** Post-parse shape of {@link MetadataImportResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataImportResponseParsed = z.infer<typeof MetadataImportResponseSchema>;
-export type MetadataValidateResponse = z.infer<typeof MetadataValidateResponseSchema>;
+export type MetadataValidateResponse = z.input<typeof MetadataValidateResponseSchema>;
 /** Post-parse shape of {@link MetadataValidateResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataValidateResponseParsed = z.infer<typeof MetadataValidateResponseSchema>;
-export type MetadataTypesResponse = z.infer<typeof MetadataTypesResponseSchema>;
+export type MetadataTypesResponse = z.input<typeof MetadataTypesResponseSchema>;
 /** Post-parse shape of {@link MetadataTypesResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataTypesResponseParsed = z.infer<typeof MetadataTypesResponseSchema>;
-export type MetadataTypeInfoResponse = z.infer<typeof MetadataTypeInfoResponseSchema>;
+export type MetadataTypeInfoResponse = z.input<typeof MetadataTypeInfoResponseSchema>;
 /** Post-parse shape of {@link MetadataTypeInfoResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataTypeInfoResponseParsed = z.infer<typeof MetadataTypeInfoResponseSchema>;
-export type MetadataDependenciesResponse = z.infer<typeof MetadataDependenciesResponseSchema>;
+export type MetadataDependenciesResponse = z.input<typeof MetadataDependenciesResponseSchema>;
 /** Post-parse shape of {@link MetadataDependenciesResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataDependenciesResponseParsed = z.infer<typeof MetadataDependenciesResponseSchema>;
-export type MetadataDependentsResponse = z.infer<typeof MetadataDependentsResponseSchema>;
+export type MetadataDependentsResponse = z.input<typeof MetadataDependentsResponseSchema>;
 /** Post-parse shape of {@link MetadataDependentsResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataDependentsResponseParsed = z.infer<typeof MetadataDependentsResponseSchema>;

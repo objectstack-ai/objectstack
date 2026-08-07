@@ -176,7 +176,7 @@ export const MutualTLSConfigSchema = lazySchema(() => z.object({
     .describe('Certificate pinning configuration'),
 }));
 
-export type MutualTLSConfig = z.infer<typeof MutualTLSConfigSchema>;
+export type MutualTLSConfig = z.input<typeof MutualTLSConfigSchema>;
 /** Post-parse shape of {@link MutualTLSConfig} — defaults applied, transforms run (ADR-0122). */
 export type MutualTLSConfigParsed = z.infer<typeof MutualTLSConfigSchema>;
 
@@ -228,8 +228,8 @@ export const OidcProvidersConfigSchema = lazySchema(() => z.array(OidcProviderCo
   'Product or enterprise packages can pass this directly or contribute it through auth:configure.'
 ));
 
-export type OidcProviderConfig = z.infer<typeof OidcProviderConfigSchema>;
-export type OidcProvidersConfig = z.infer<typeof OidcProvidersConfigSchema>;
+export type OidcProviderConfig = z.input<typeof OidcProviderConfigSchema>;
+export type OidcProvidersConfig = z.input<typeof OidcProvidersConfigSchema>;
 
 
 export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
@@ -333,18 +333,18 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   mutualTls: MutualTLSConfigSchema.optional().describe('Mutual TLS (mTLS) configuration'),
 }).catchall(z.unknown()));
 
-export type AuthProviderConfig = z.infer<typeof AuthProviderConfigSchema>;
-export type AuthPluginConfig = z.infer<typeof AuthPluginConfigSchema>;
+export type AuthProviderConfig = z.input<typeof AuthProviderConfigSchema>;
+export type AuthPluginConfig = z.input<typeof AuthPluginConfigSchema>;
 /** Post-parse shape of {@link AuthPluginConfig} — defaults applied, transforms run (ADR-0122). */
 export type AuthPluginConfigParsed = z.infer<typeof AuthPluginConfigSchema>;
-export type SocialProviderConfig = z.infer<typeof SocialProviderConfigSchema>;
+export type SocialProviderConfig = z.input<typeof SocialProviderConfigSchema>;
 /** Post-parse shape of {@link SocialProviderConfig} — defaults applied, transforms run (ADR-0122). */
 export type SocialProviderConfigParsed = z.infer<typeof SocialProviderConfigSchema>;
-export type EmailAndPasswordConfig = z.infer<typeof EmailAndPasswordConfigSchema>;
+export type EmailAndPasswordConfig = z.input<typeof EmailAndPasswordConfigSchema>;
 /** Post-parse shape of {@link EmailAndPasswordConfig} — defaults applied, transforms run (ADR-0122). */
 export type EmailAndPasswordConfigParsed = z.infer<typeof EmailAndPasswordConfigSchema>;
-export type EmailVerificationConfig = z.infer<typeof EmailVerificationConfigSchema>;
-export type AdvancedAuthConfig = z.infer<typeof AdvancedAuthConfigSchema>;
-export type AuthConfig = z.infer<typeof AuthConfigSchema>;
+export type EmailVerificationConfig = z.input<typeof EmailVerificationConfigSchema>;
+export type AdvancedAuthConfig = z.input<typeof AdvancedAuthConfigSchema>;
+export type AuthConfig = z.input<typeof AuthConfigSchema>;
 /** Post-parse shape of {@link AuthConfig} — defaults applied, transforms run (ADR-0122). */
 export type AuthConfigParsed = z.infer<typeof AuthConfigSchema>;

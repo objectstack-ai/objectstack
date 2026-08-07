@@ -54,5 +54,5 @@ export const AIUsageRecordSchema = lazySchema(() => z.object({
   timestamp: z.string().datetime().optional(),
 }));
 
-export type TokenUsage = z.infer<typeof TokenUsageSchema>;
-export type AIUsageRecord = z.infer<typeof AIUsageRecordSchema>;
+export type TokenUsage = z.input<typeof TokenUsageSchema>;
+export type AIUsageRecord = z.input<typeof AIUsageRecordSchema>;

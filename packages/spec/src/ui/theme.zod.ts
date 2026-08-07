@@ -455,24 +455,22 @@ export const ThemeSchema = lazySchema(() => strictObject(
   },
 ));
 
-export type Theme = z.infer<typeof ThemeSchema>;
+export type Theme = z.input<typeof ThemeSchema>;
 /** Post-parse shape of {@link Theme} — defaults applied, transforms run (ADR-0122). */
 export type ThemeParsed = z.infer<typeof ThemeSchema>;
-/** Authoring input for {@link Theme} — defaulted fields are optional. */
-export type ThemeInput = z.input<typeof ThemeSchema>;
 
 /**
  * Type-safe factory for a UI theme. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Theme` literal.
  */
-export function defineTheme(config: z.input<typeof ThemeSchema>): Theme {
+export function defineTheme(config: z.input<typeof ThemeSchema>): ThemeParsed {
   return ThemeSchema.parse(config);
 }
-export type ColorPalette = z.infer<typeof ColorPaletteSchema>;
-export type Typography = z.infer<typeof TypographySchema>;
-export type BorderRadius = z.infer<typeof BorderRadiusSchema>;
-export type Shadow = z.infer<typeof ShadowSchema>;
+export type ColorPalette = z.input<typeof ColorPaletteSchema>;
+export type Typography = z.input<typeof TypographySchema>;
+export type BorderRadius = z.input<typeof BorderRadiusSchema>;
+export type Shadow = z.input<typeof ShadowSchema>;
 // `Animation` and `ZIndex` were exported here until #5021, alongside the two
 // schemas they were inferred from.
-export type ThemeMode = z.infer<typeof ThemeModeSchema>;
+export type ThemeMode = z.input<typeof ThemeModeSchema>;

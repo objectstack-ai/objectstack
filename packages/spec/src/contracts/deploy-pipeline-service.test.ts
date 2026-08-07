@@ -84,7 +84,7 @@ describe('Deploy Pipeline Service Contract', () => {
           deploymentId: `deploy_${++counter}`,
           status: 'ready',
           durationMs: 1500,
-          statementsExecuted: plan.statements.length,
+          statementsExecuted: plan.statements?.length ?? 0,
           completedAt: new Date().toISOString(),
         };
         deployments.set(result.deploymentId, result);

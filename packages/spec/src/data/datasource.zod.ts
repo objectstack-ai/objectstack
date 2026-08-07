@@ -2,7 +2,6 @@
 
 import { z } from 'zod';
 
-
 /**
  * Driver Identifier
  * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
@@ -321,7 +320,6 @@ const poolUnknownKeyError = strictUnknownKeyError({
     + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
 });
 
-
 const sslUnknownKeyError = strictUnknownKeyError({
   surface: "this datasource's ssl config",
   knownKeys: SSL_KEYS,
@@ -345,9 +343,6 @@ const sslUnknownKeyError = strictUnknownKeyError({
     'Until #4001 these were dropped silently — which meant a TLS setting that never took '
     + 'effect looked identical to one that did.',
 });
-
-
-
 
 export const DriverType = z.string().describe('Underlying driver identifier');
 
@@ -382,8 +377,7 @@ export const DriverDefinitionSchema = lazySchema(() => z.object({
 }, { error: driverDefinitionUnknownKeyError }).strict());
 
 /** A driver definition — {@link DriverDefinitionSchema}'s parsed shape. */
-export type DriverDefinition = z.infer<typeof DriverDefinitionSchema>;
-
+export type DriverDefinition = z.input<typeof DriverDefinitionSchema>;
 
 /**
  * Schema Ownership Mode (ADR-0015)
@@ -400,7 +394,7 @@ export const SchemaModeSchema = z
   .enum(['managed', 'external', 'validate-only'])
   .describe('Schema ownership mode');
 
-export type SchemaMode = z.infer<typeof SchemaModeSchema>;
+export type SchemaMode = z.input<typeof SchemaModeSchema>;
 
 /**
  * External Datasource Settings (ADR-0015)
@@ -430,7 +424,7 @@ export const ExternalDatasourceSettingsSchema = z.object({
 }, { error: externalSettingsUnknownKeyError }).strict()
   .describe('External datasource federation settings (schemaMode != "managed")');
 
-export type ExternalDatasourceSettings = z.infer<typeof ExternalDatasourceSettingsSchema>;
+export type ExternalDatasourceSettings = z.input<typeof ExternalDatasourceSettingsSchema>;
 /** Post-parse shape of {@link ExternalDatasourceSettings} — defaults applied, transforms run (ADR-0122). */
 export type ExternalDatasourceSettingsParsed = z.infer<typeof ExternalDatasourceSettingsSchema>;
 
@@ -508,7 +502,6 @@ export const DatasourceSchema = lazySchema(() => z.object({
     cert: z.string().optional().describe('Client certificate (PEM format or path to file)'),
     key: z.string().optional().describe('Client private key (PEM format or path to file)'),
   }, { error: sslUnknownKeyError }).strict().optional().describe('SSL/TLS configuration for secure database connections'),
-
 
   /** Description */
   description: z.string().optional().describe('Internal description'),
@@ -590,17 +583,15 @@ export const DatasourceSchema = lazySchema(() => z.object({
   }
 }));
 
-export type Datasource = z.infer<typeof DatasourceSchema>;
+export type Datasource = z.input<typeof DatasourceSchema>;
 /** Post-parse shape of {@link Datasource} — defaults applied, transforms run (ADR-0122). */
 export type DatasourceParsed = z.infer<typeof DatasourceSchema>;
-/** Authoring input for {@link Datasource} — defaulted fields are optional. */
-export type DatasourceInput = z.input<typeof DatasourceSchema>;
 
 /**
  * Type-safe factory for an external data connection (datasource). Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Datasource` literal.
  */
-export function defineDatasource(config: z.input<typeof DatasourceSchema>): Datasource {
+export function defineDatasource(config: z.input<typeof DatasourceSchema>): DatasourceParsed {
   return DatasourceSchema.parse(config);
 }

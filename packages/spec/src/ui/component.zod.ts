@@ -189,7 +189,7 @@ const EmptyProps = z.object({});
 export const PageContainerProps = z.object({
   children: z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order'),
 });
-export type PageContainerProps = z.infer<typeof PageContainerProps>;
+export type PageContainerProps = z.input<typeof PageContainerProps>;
 
 /**
  * ----------------------------------------------------------------------

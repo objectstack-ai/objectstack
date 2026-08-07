@@ -132,17 +132,15 @@ export const EVERYONE_POSITION = 'everyone';
 export const GUEST_POSITION = 'guest';
 export const AUDIENCE_ANCHOR_POSITIONS = [EVERYONE_POSITION, GUEST_POSITION] as const;
 
-export type Position = z.infer<typeof PositionSchema>;
+export type Position = z.input<typeof PositionSchema>;
 /** Post-parse shape of {@link Position} — defaults applied, transforms run (ADR-0122). */
 export type PositionParsed = z.infer<typeof PositionSchema>;
-/** Authoring input for {@link Position} — defaulted fields are optional. */
-export type PositionInput = z.input<typeof PositionSchema>;
 
 /**
  * Type-safe factory for a position (flat capability-distribution group).
  * Validates at authoring time via `.parse()` and accepts input-shape config —
  * preferred over a bare `: Position` literal.
  */
-export function definePosition(config: z.input<typeof PositionSchema>): Position {
+export function definePosition(config: z.input<typeof PositionSchema>): PositionParsed {
   return PositionSchema.parse(config);
 }

@@ -10,7 +10,7 @@ import {
 // ─── [#4740] `EnvironmentArtifact(Schema)` has ONE declaration — ./system ───
 //
 // `./cloud` and `./system` both exported `EnvironmentArtifact` /
-// `EnvironmentArtifactInput` / `EnvironmentArtifactSchema` for two DIFFERENT
+// `EnvironmentArtifactInput` (as it was then spelled) / `EnvironmentArtifactSchema` for two DIFFERENT
 // declarations (the #4411 trap — which shape a consumer got depended only on
 // the import path):
 //
@@ -108,7 +108,12 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
     //    by resolving nothing.
     const systemExports = exportsOf('./system');
     expect(systemExports.length, './system must export a non-trivial surface').toBeGreaterThan(100);
-    const names = ['EnvironmentArtifact', 'EnvironmentArtifactInput', 'EnvironmentArtifactSchema'] as const;
+    // `EnvironmentArtifactInput` was retired by ADR-0122 phase 2 (#6083) — the
+    // bare name IS the author state now, and the parsed state moved onto
+    // `EnvironmentArtifactParsed`. The pin follows the surviving names: the
+    // dual-source hazard is about WHICH DECLARATION a name resolves to, so it
+    // must track the names that exist, not the ones that used to.
+    const names = ['EnvironmentArtifact', 'EnvironmentArtifactParsed', 'EnvironmentArtifactSchema'] as const;
     const canonical: Record<string, string> = {};
     for (const name of names) {
       const sym = systemExports.find((e) => e.getName() === name);
@@ -144,7 +149,7 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
     }
 
     // 3. Uniqueness — the dual-source pin proper: across EVERY public entry,
-    //    an export named `EnvironmentArtifact(Input|Schema)` must resolve to
+    //    an export named `EnvironmentArtifact(Parsed|Schema)` must resolve to
     //    the ONE ./system declaration. Re-adding a second declaration under
     //    any entry (S1/S2 sabotage) turns this red.
     for (const sub of Object.keys(entries)) {

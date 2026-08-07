@@ -47,7 +47,7 @@ export const CoreServiceName = z.enum([
   // quoted token in this block as an enum member, comments included.)
 ]);
 
-export type CoreServiceName = z.infer<typeof CoreServiceName>;
+export type CoreServiceName = z.input<typeof CoreServiceName>;
 
 /**
  * Which published package actually fills each service slot — or `null` when

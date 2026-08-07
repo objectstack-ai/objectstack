@@ -325,7 +325,7 @@ export const APPROVAL_REVISE_NODE_TYPE = 'approval_revise' as const;
  * (see {@link ApprovalNodeConfigSchema}).
  */
 export const ApprovalDecision = z.enum(['approve', 'reject']);
-export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
+export type ApprovalDecision = z.input<typeof ApprovalDecision>;
 
 /**
  * Edge labels an Approval node's out-edges use to declare which branch a
@@ -501,7 +501,7 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
     xRef: { kind: 'organization', symbols: [...APPROVER_ORG_SYMBOLS] },
   }),
 }, { error: approvalApproverUnknownKeyError }).strict());
-export type ApprovalNodeApprover = z.infer<typeof ApprovalNodeApproverSchema>;
+export type ApprovalNodeApprover = z.input<typeof ApprovalNodeApproverSchema>;
 
 /**
  * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
@@ -550,7 +550,7 @@ export const DecisionOutputDefSchema = lazySchema(() => z.object({
    */
   required: z.boolean().optional().describe('Approver must supply this output to approve'),
 }, { error: decisionOutputUnknownKeyError }).strict());
-export type DecisionOutputDef = z.infer<typeof DecisionOutputDefSchema>;
+export type DecisionOutputDef = z.input<typeof DecisionOutputDefSchema>;
 
 /**
  * Normalize a `decisionOutputs` array (bare keys and typed declarations mixed)
@@ -617,7 +617,7 @@ export const ApprovalEscalationSchema = lazySchema(() => z.object({
   }),
   notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),
 }, { error: approvalEscalationUnknownKeyError }).strict());
-export type ApprovalEscalation = z.infer<typeof ApprovalEscalationSchema>;
+export type ApprovalEscalation = z.input<typeof ApprovalEscalationSchema>;
 /** Post-parse shape of {@link ApprovalEscalation} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalEscalationParsed = z.infer<typeof ApprovalEscalationSchema>;
 
@@ -781,7 +781,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
   maxRevisions: z.number().int().min(0).default(3)
     .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
 }, { error: approvalNodeConfigUnknownKeyError }).strict());
-export type ApprovalNodeConfig = z.infer<typeof ApprovalNodeConfigSchema>;
+export type ApprovalNodeConfig = z.input<typeof ApprovalNodeConfigSchema>;
 /** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalNodeConfigParsed = z.infer<typeof ApprovalNodeConfigSchema>;
 

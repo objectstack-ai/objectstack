@@ -2,15 +2,15 @@
 
 import type { IDataEngine, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
 import type {
-  SeedLoaderRequest,
-  SeedLoaderResult,
+  SeedLoaderRequestParsed,
+  SeedLoaderResultParsed,
   SeedLoaderConfig,
-  SeedLoaderConfigInput,
-  ObjectDependencyGraph,
-  ObjectDependencyNode,
-  ReferenceResolution,
+  SeedLoaderConfigParsed,
+  ObjectDependencyGraphParsed,
+  ObjectDependencyNodeParsed,
+  ReferenceResolutionParsed,
   ReferenceResolutionError,
-  SeedLoadResult,
+  SeedLoadResultParsed,
   Seed,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
@@ -160,7 +160,7 @@ export class SeedLoaderService implements ISeedLoaderService {
   // Public API
   // ==========================================================================
 
-  async load(request: SeedLoaderRequest): Promise<SeedLoaderResult> {
+  async load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
     const startTime = Date.now();
     // Pin the environment `Seed.env` is gated on BEFORE anything reads config.
     // Resolving it here — the one funnel every seeding path goes through — is
@@ -173,7 +173,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     // seven free to re-open the same hole (framework#4704).
     const config = this.resolveEnvConfig(request.config, request.seeds);
     const allErrors: ReferenceResolutionError[] = [];
-    const allResults: SeedLoadResult[] = [];
+    const allResults: SeedLoadResultParsed[] = [];
     // Per-load counter — a service instance can be reused across loads.
     this.summariesStale = 0;
 
@@ -256,14 +256,14 @@ export class SeedLoaderService implements ISeedLoaderService {
     return this.buildResult(config, graph, allResults, allErrors, durationMs);
   }
 
-  async buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraph> {
-    const nodes: ObjectDependencyNode[] = [];
+  async buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraphParsed> {
+    const nodes: ObjectDependencyNodeParsed[] = [];
     const objectSet = new Set(objectNames);
 
     for (const objectName of objectNames) {
       const objDef = await this.resolveObjectDefinition(objectName);
       const dependsOn: string[] = [];
-      const references: ReferenceResolution[] = [];
+      const references: ReferenceResolutionParsed[] = [];
 
       if (objDef && objDef.fields) {
         const fields = objDef.fields as Record<string, any>;
@@ -331,9 +331,14 @@ export class SeedLoaderService implements ISeedLoaderService {
     return fromMetadata;
   }
 
-  async validate(datasets: Seed[], config?: SeedLoaderConfigInput): Promise<SeedLoaderResult> {
+  async validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResultParsed> {
     const parsedConfig = SeedLoaderConfigSchema.parse({ ...config, dryRun: true });
-    return this.load({ seeds: datasets, config: parsedConfig });
+    // `datasets` is the AUTHOR state (that is what `validate` takes); `load`
+    // takes the parsed request, and `SeedLoaderSchema` fills the per-seed defaults
+    // this cast stands in for. Parsing each dataset here would be a second
+    // validation pass with its own failure mode — `load` already reports every
+    // seed problem it finds, which is the whole point of `dryRun`.
+    return this.load({ seeds: datasets, config: parsedConfig } as SeedLoaderRequestParsed);
   }
 
   // ==========================================================================
@@ -342,12 +347,12 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   private async loadDataset(
     dataset: Seed,
-    config: SeedLoaderConfig,
-    refMap: Map<string, ReferenceResolution[]>,
+    config: SeedLoaderConfigParsed,
+    refMap: Map<string, ReferenceResolutionParsed[]>,
     insertedRecords: Map<string, Map<string, string>>,
     deferredUpdates: DeferredUpdate[],
     allErrors: ReferenceResolutionError[],
-  ): Promise<SeedLoadResult> {
+  ): Promise<SeedLoadResultParsed> {
     const objectName = dataset.object;
     const mode = dataset.mode || config.defaultMode;
     const externalId = dataset.externalId || 'name';
@@ -1090,7 +1095,7 @@ export class SeedLoaderService implements ISeedLoaderService {
   private async resolveDeferredUpdates(
     deferredUpdates: DeferredUpdate[],
     insertedRecords: Map<string, Map<string, string>>,
-    allResults: SeedLoadResult[],
+    allResults: SeedLoadResultParsed[],
     allErrors: ReferenceResolutionError[],
     organizationId?: string,
   ): Promise<void> {
@@ -1341,7 +1346,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private recordDeferredError(
     deferred: DeferredUpdate,
-    allResults: SeedLoadResult[],
+    allResults: SeedLoadResultParsed[],
     allErrors: ReferenceResolutionError[],
     message: string,
   ): void {
@@ -1428,7 +1433,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * while everything looks normal"), so it logs at `error` naming the
    * consequence and the remedy.
    *
-   * It is also COUNTED, into `SeedLoadResult.summariesStale` /
+   * It is also COUNTED, into `SeedLoadResultParsed.summariesStale` /
    * `summary.totalSummariesStale`, because a log line is not something a
    * caller can branch on. `success` deliberately stays `true`: the rows landed,
    * and every consumer of this result treats `success: false` as "the write
@@ -1674,7 +1679,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * Kahn's algorithm for topological sort with cycle detection.
    */
   private topologicalSort(
-    nodes: ObjectDependencyNode[],
+    nodes: ObjectDependencyNodeParsed[],
   ): { insertOrder: string[]; circularDependencies: string[][] } {
     const inDegree = new Map<string, number>();
     const adjacency = new Map<string, string[]>();
@@ -1738,7 +1743,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     return { insertOrder, circularDependencies };
   }
 
-  private findCycles(nodes: ObjectDependencyNode[]): string[][] {
+  private findCycles(nodes: ObjectDependencyNodeParsed[]): string[][] {
     const cycles: string[][] = [];
     const nodeMap = new Map(nodes.map(n => [n.object, n]));
     const visited = new Set<string>();
@@ -1801,7 +1806,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * paths pin `NODE_ENV` — so this is the embedded-host case, and it is now
    * signposted rather than silent.
    */
-  private resolveEnvConfig(config: SeedLoaderConfig, seeds: Seed[]): SeedLoaderConfig {
+  private resolveEnvConfig(config: SeedLoaderConfigParsed, seeds: Seed[]): SeedLoaderConfigParsed {
     if (config.env) return config;
 
     const resolved = resolveSeedEnvFromNodeEnv();
@@ -1861,10 +1866,10 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   private buildReferenceMap(
-    graph: ObjectDependencyGraph,
+    graph: ObjectDependencyGraphParsed,
     externalIdByObject?: Map<string, string | string[]>,
-  ): Map<string, ReferenceResolution[]> {
-    const map = new Map<string, ReferenceResolution[]>();
+  ): Map<string, ReferenceResolutionParsed[]> {
+    const map = new Map<string, ReferenceResolutionParsed[]>();
     for (const node of graph.nodes) {
       if (node.references.length > 0) {
         // Resolve against the TARGET dataset's declared externalId when this
@@ -1978,7 +1983,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     return Array.isArray(externalId) ? externalId.join('+') : externalId;
   }
 
-  private buildEmptyResult(config: SeedLoaderConfig, durationMs: number): SeedLoaderResult {
+  private buildEmptyResult(config: SeedLoaderConfigParsed, durationMs: number): SeedLoaderResultParsed {
     return {
       success: true,
       dryRun: config.dryRun,
@@ -2003,12 +2008,12 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   private buildResult(
-    config: SeedLoaderConfig,
-    graph: ObjectDependencyGraph,
-    results: SeedLoadResult[],
+    config: SeedLoaderConfigParsed,
+    graph: ObjectDependencyGraphParsed,
+    results: SeedLoadResultParsed[],
     errors: ReferenceResolutionError[],
     durationMs: number,
-  ): SeedLoaderResult {
+  ): SeedLoaderResultParsed {
     const summary = {
       objectsProcessed: results.length,
       totalRecords: results.reduce((sum, r) => sum + r.total, 0),

@@ -32,7 +32,7 @@ export const PackageVisibilitySchema = lazySchema(() => z
     'Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry'
   ));
 
-export type PackageVisibility = z.infer<typeof PackageVisibilitySchema>;
+export type PackageVisibility = z.input<typeof PackageVisibilitySchema>;
 
 /**
  * Category hint for marketplace discovery and filtering.
@@ -43,7 +43,7 @@ export const PackageCategorySchema = lazySchema(() => z
   .min(1)
   .describe('Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools")'));
 
-export type PackageCategory = z.infer<typeof PackageCategorySchema>;
+export type PackageCategory = z.input<typeof PackageCategorySchema>;
 
 /**
  * Provenance tier of a package publisher.
@@ -59,7 +59,7 @@ export const PackagePublisherSchema = lazySchema(() => z
   .enum(['objectstack', 'partner', 'community', 'private'])
   .describe('Package publisher provenance tier'));
 
-export type PackagePublisher = z.infer<typeof PackagePublisherSchema>;
+export type PackagePublisher = z.input<typeof PackagePublisherSchema>;
 
 // ---------------------------------------------------------------------------
 // Per-locale translations for package listings
@@ -77,7 +77,7 @@ export const PackageLocaleSchema = lazySchema(() => z
   .regex(/^[a-z]{2,3}(-[A-Z]{2})?$/, 'must be a BCP-47 locale (e.g. en, zh, zh-CN)')
   .describe('BCP-47 locale tag'));
 
-export type PackageLocale = z.infer<typeof PackageLocaleSchema>;
+export type PackageLocale = z.input<typeof PackageLocaleSchema>;
 
 /**
  * Per-locale overrides for a package's display metadata.
@@ -123,7 +123,7 @@ export const PackageTranslationSchema = lazySchema(() => z.object({
     .describe('Per-index screenshot caption overrides'),
 }).describe('Per-locale overrides for a package listing'));
 
-export type PackageTranslation = z.infer<typeof PackageTranslationSchema>;
+export type PackageTranslation = z.input<typeof PackageTranslationSchema>;
 
 /**
  * Locale-keyed translation map.
@@ -140,7 +140,7 @@ export const PackageTranslationsSchema = lazySchema(() => z
   .record(PackageLocaleSchema, PackageTranslationSchema)
   .describe('Locale-keyed overrides; missing keys fall back to base columns'));
 
-export type PackageTranslations = z.infer<typeof PackageTranslationsSchema>;
+export type PackageTranslations = z.input<typeof PackageTranslationsSchema>;
 
 // ---------------------------------------------------------------------------
 // sys_package — Package identity
@@ -238,7 +238,7 @@ export const PackageSchema = lazySchema(() => z.object({
   createdBy: z.string().describe('User ID that created the package'),
 }));
 
-export type Package = z.infer<typeof PackageSchema>;
+export type Package = z.input<typeof PackageSchema>;
 /** Post-parse shape of {@link Package} — defaults applied, transforms run (ADR-0122). */
 export type PackageParsed = z.infer<typeof PackageSchema>;
 
@@ -266,7 +266,7 @@ export const CreatePackageRequestSchema = lazySchema(() => z.object({
   createdBy: z.string().describe('User ID creating the package'),
 }).describe('Register a new package in the Control Plane'));
 
-export type CreatePackageRequest = z.infer<typeof CreatePackageRequestSchema>;
+export type CreatePackageRequest = z.input<typeof CreatePackageRequestSchema>;
 
 /**
  * Request to update mutable package metadata (visibility, description, tags…).
@@ -287,4 +287,4 @@ export const UpdatePackageRequestSchema = lazySchema(() => z.object({
   translations: PackageTranslationsSchema.optional(),
 }).describe('Update mutable package metadata'));
 
-export type UpdatePackageRequest = z.infer<typeof UpdatePackageRequestSchema>;
+export type UpdatePackageRequest = z.input<typeof UpdatePackageRequestSchema>;

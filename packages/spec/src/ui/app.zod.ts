@@ -635,15 +635,15 @@ export const NavigationContributionSchema = lazySchema(() => z.object({
       'package injected its menu into the wrong place, or nowhere.',
   }),
 }).strict().describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
-export type NavigationContribution = z.infer<typeof NavigationContributionSchema>;
-/** Post-parse shape of {@link NavigationContribution} — defaults applied, transforms run (ADR-0122). */
-export type NavigationContributionParsed = z.infer<typeof NavigationContributionSchema>;
 /**
  * The authoring shape of a contribution (#4195) — `priority` is `.default(200)`
  * and each item is a {@link NavigationItemInput}, so this is what a package
- * declaring its menu entries actually writes.
+ * declaring its menu entries actually writes. Spelled
+ * `NavigationContributionInput` until ADR-0122 phase 2 retired that synonym.
  */
-export type NavigationContributionInput = z.input<typeof NavigationContributionSchema>;
+export type NavigationContribution = z.input<typeof NavigationContributionSchema>;
+/** Post-parse shape of {@link NavigationContribution} — defaults applied, transforms run (ADR-0122). */
+export type NavigationContributionParsed = z.infer<typeof NavigationContributionSchema>;
 
 /**
  * App Branding Configuration
@@ -1001,7 +1001,7 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
   }),
 }).strict());
 
-export type AppContextSelector = z.infer<typeof AppContextSelectorSchema>;
+export type AppContextSelector = z.input<typeof AppContextSelectorSchema>;
 /** Post-parse shape of {@link AppContextSelector} — defaults applied, transforms run (ADR-0122). */
 export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
 
@@ -1096,7 +1096,6 @@ const HOME_PAGE_ID_RETIRED =
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
   + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
   + 'automatically.';
-
 
 const appUnknownKeyError = strictUnknownKeyError({
   surface: 'this app',
@@ -1384,42 +1383,41 @@ export const App = {
  * });
  * ```
  */
-export function defineApp(config: z.input<typeof AppSchema>): App {
+export function defineApp(config: z.input<typeof AppSchema>): AppParsed {
   return AppSchema.parse(config);
 }
 
 // Main Types
-export type App = z.infer<typeof AppSchema>;
+export type App = z.input<typeof AppSchema>;
 /** Post-parse shape of {@link App} — defaults applied, transforms run (ADR-0122). */
 export type AppParsed = z.infer<typeof AppSchema>;
-export type AppInput = z.input<typeof AppSchema>;
-export type AppBranding = z.infer<typeof AppBrandingSchema>;
+export type AppBranding = z.input<typeof AppBrandingSchema>;
 // `NavigationItem` is declared next to NavigationItemSchema — it IS that
 // schema's annotation, so it cannot be inferred back out of it (#4171).
-export type NavigationArea = z.infer<typeof NavigationAreaSchema>;
+export type NavigationArea = z.input<typeof NavigationAreaSchema>;
 /** Post-parse shape of {@link NavigationArea} — defaults applied, transforms run (ADR-0122). */
 export type NavigationAreaParsed = z.infer<typeof NavigationAreaSchema>;
 
 // Discriminated Item Types (Helper exports)
-export type ObjectNavItem = z.infer<typeof ObjectNavItemSchema>;
+export type ObjectNavItem = z.input<typeof ObjectNavItemSchema>;
 /** Post-parse shape of {@link ObjectNavItem} — defaults applied, transforms run (ADR-0122). */
 export type ObjectNavItemParsed = z.infer<typeof ObjectNavItemSchema>;
-export type DashboardNavItem = z.infer<typeof DashboardNavItemSchema>;
+export type DashboardNavItem = z.input<typeof DashboardNavItemSchema>;
 /** Post-parse shape of {@link DashboardNavItem} — defaults applied, transforms run (ADR-0122). */
 export type DashboardNavItemParsed = z.infer<typeof DashboardNavItemSchema>;
-export type PageNavItem = z.infer<typeof PageNavItemSchema>;
+export type PageNavItem = z.input<typeof PageNavItemSchema>;
 /** Post-parse shape of {@link PageNavItem} — defaults applied, transforms run (ADR-0122). */
 export type PageNavItemParsed = z.infer<typeof PageNavItemSchema>;
-export type UrlNavItem = z.infer<typeof UrlNavItemSchema>;
+export type UrlNavItem = z.input<typeof UrlNavItemSchema>;
 /** Post-parse shape of {@link UrlNavItem} — defaults applied, transforms run (ADR-0122). */
 export type UrlNavItemParsed = z.infer<typeof UrlNavItemSchema>;
-export type ReportNavItem = z.infer<typeof ReportNavItemSchema>;
+export type ReportNavItem = z.input<typeof ReportNavItemSchema>;
 /** Post-parse shape of {@link ReportNavItem} — defaults applied, transforms run (ADR-0122). */
 export type ReportNavItemParsed = z.infer<typeof ReportNavItemSchema>;
-export type ActionNavItem = z.infer<typeof ActionNavItemSchema>;
+export type ActionNavItem = z.input<typeof ActionNavItemSchema>;
 /** Post-parse shape of {@link ActionNavItem} — defaults applied, transforms run (ADR-0122). */
 export type ActionNavItemParsed = z.infer<typeof ActionNavItemSchema>;
-export type ComponentNavItem = z.infer<typeof ComponentNavItemSchema>;
+export type ComponentNavItem = z.input<typeof ComponentNavItemSchema>;
 /** Post-parse shape of {@link ComponentNavItem} — defaults applied, transforms run (ADR-0122). */
 export type ComponentNavItemParsed = z.infer<typeof ComponentNavItemSchema>;
 export type GroupNavItem = z.infer<typeof GroupNavItemSchema> & { children: NavigationItem[] };

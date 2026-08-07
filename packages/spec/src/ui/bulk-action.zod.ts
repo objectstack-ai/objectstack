@@ -98,11 +98,11 @@ import { FieldType } from '../data/field.zod';
 
 /** How the executor mutates the selected records. */
 export const BulkActionOperationSchema = z.enum(['update', 'delete', 'custom']);
-export type BulkActionOperation = z.infer<typeof BulkActionOperationSchema>;
+export type BulkActionOperation = z.input<typeof BulkActionOperationSchema>;
 
 /** How many dispatches a `custom` def makes for a selection of N records. */
 export const BulkActionExecutionSchema = z.enum(['perRecord', 'aggregate']);
-export type BulkActionExecution = z.infer<typeof BulkActionExecutionSchema>;
+export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
 
 /**
  * One input collected ONCE by the bulk dialog before the run (never re-prompted
@@ -131,7 +131,7 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
   multiple: z.boolean().optional().describe('Allow picking multiple values — the param value becomes an array and is written to the patch as-is.'),
   placeholder: z.string().optional().describe('Placeholder text.'),
 }).passthrough());
-export type BulkActionParam = z.infer<typeof BulkActionParamSchema>;
+export type BulkActionParam = z.input<typeof BulkActionParamSchema>;
 
 /** Declared keys of a bulk-action def — the "did you mean" pool. */
 const BULK_ACTION_DEF_KEYS = [
@@ -283,6 +283,6 @@ export const BulkActionDefSchema = lazySchema(() => z.object({
       });
     }
   }));
-export type BulkActionDef = z.infer<typeof BulkActionDefSchema>;
+export type BulkActionDef = z.input<typeof BulkActionDefSchema>;
 /** Post-parse shape of {@link BulkActionDef} — defaults applied, transforms run (ADR-0122). */
 export type BulkActionDefParsed = z.infer<typeof BulkActionDefSchema>;

@@ -244,7 +244,7 @@ Complete, production-grade integration with external systems. Includes authentic
 
 ### Example
 
-> **`ConnectorInput` is the AUTHOR shape.** It is `z.input` of
+> **The bare `Connector` is the AUTHOR shape.** It is `z.input` of
 > `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
 > `status`, `connectionTimeoutMs`, `requestTimeoutMs`, all of `syncConfig`'s
 > `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
@@ -254,29 +254,29 @@ Complete, production-grade integration with external systems. Includes authentic
 > the schema wraps for you. Annotate the **result** of
 > `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
 > there those keys are all present and `schedule` is already the
-> `{ dialect: 'cron', source }` envelope. (The bare **`Connector`** still means
-> that same parsed shape today, and both names are live — but `ConnectorParsed`
-> is the one that keeps meaning it.) Note the asymmetry with L2 above, where the
-> bare `ETLPipeline` *is* the author shape and the parse result is
-> `ETLPipelineParsed`. That asymmetry is real and is being removed, in the
-> direction L2 already points: **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
-> makes the bare name the author state and `XParsed` the parsed state**
+> `{ dialect: 'cron', source }` envelope. This matches L2 above, where the bare
+> `ETLPipeline` is the author shape and the parse result is `ETLPipelineParsed`
+> — the two halves of the spec agree now, and
+> **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
+> is why**: the bare name is the author state and `XParsed` is the parsed state,
 > repo-wide. Earlier revisions of this note called L2's spelling "the house
 > convention" and said connector had not caught up; #5551 measured the corpus and
 > that was backwards — connector's spelling was the 1384-alias majority and L2's
 > the 8-file minority, with neither recorded anywhere. ADR-0122 is that record.
-> Its phase 1 (additive, no break) has already given every schema with two
-> distinct shapes its `XParsed` name, `Connector` included; phase 2 flips the
-> bare names in a major. The example below states the defaulted
+> Its phase 1 (#5551, additive) gave every schema with two distinct shapes its
+> `XParsed` name; phase 2 (#6083, protocol 17) flipped the bare names and retired
+> the `XInput` synonyms the flip created — `ConnectorInput` among them, so write
+> `Connector` where you used to write `ConnectorInput`, and `ConnectorParsed`
+> where you used to write `Connector`. The example below states the defaulted
 > keys anyway, because it is a tour of the surface; the Migration Guide's
 > sketches omit them, because that is what ordinary authoring looks like.
 > To have the literal validated as you write it, prefer `defineConnector(…)`,
 > which takes this same input shape and returns the parsed one.
 
 ```typescript
-import type { ConnectorInput } from '@objectstack/spec/integration';
+import type { Connector } from '@objectstack/spec/integration';
 
-const sapConnector: ConnectorInput = {
+const sapConnector: Connector = {
   name: 'sap_erp_connector',
   label: 'SAP ERP Integration',
   type: 'saas',
@@ -453,7 +453,7 @@ aggregations, or a per-field convert that `fieldMappings` cannot do (#5552):
 
 **Before (L3 `syncConfig`):**
 ```typescript
-const connector: ConnectorInput = {
+const connector: Connector = {
   name: 'orders',
   type: 'saas',
   authentication: { type: 'api-key', ... },
@@ -499,7 +499,7 @@ const pipeline: ETLPipeline = {
 
 **After (L3):**
 ```typescript
-const connector: ConnectorInput = {
+const connector: Connector = {
   authentication: { type: 'oauth2', ... },
   webhooks: [...],
   retryConfig: { ... }

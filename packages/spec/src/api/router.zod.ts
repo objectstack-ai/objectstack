@@ -20,7 +20,7 @@ export const RouteCategory = z.enum([
   'plugin'    // Plugin extensions
 ]);
 
-export type RouteCategory = z.infer<typeof RouteCategory>;
+export type RouteCategory = z.input<typeof RouteCategory>;
 
 /**
  * Route Conflict Resolution Strategy
@@ -52,7 +52,7 @@ export const ConflictResolutionStrategy = z.enum([
   'last-wins',   // Last registered endpoint wins (override mode)
 ]);
 
-export type ConflictResolutionStrategy = z.infer<typeof ConflictResolutionStrategy>;
+export type ConflictResolutionStrategy = z.input<typeof ConflictResolutionStrategy>;
 
 /**
  * Route Definition Schema
@@ -99,7 +99,7 @@ export const RouteDefinitionSchema = lazySchema(() => z.object({
   rateLimit: z.string().optional().describe('Rate limit policy name'),
 }));
 
-export type RouteDefinition = z.infer<typeof RouteDefinitionSchema>;
+export type RouteDefinition = z.input<typeof RouteDefinitionSchema>;
 /** Post-parse shape of {@link RouteDefinition} — defaults applied, transforms run (ADR-0122). */
 export type RouteDefinitionParsed = z.infer<typeof RouteDefinitionSchema>;
 
@@ -157,6 +157,6 @@ export const RouterConfigSchema = lazySchema(() => z.object({
   staticMounts: z.array(StaticMountSchema).optional(),
 }));
 
-export type RouterConfig = z.infer<typeof RouterConfigSchema>;
+export type RouterConfig = z.input<typeof RouterConfigSchema>;
 /** Post-parse shape of {@link RouterConfig} — defaults applied, transforms run (ADR-0122). */
 export type RouterConfigParsed = z.infer<typeof RouterConfigSchema>;

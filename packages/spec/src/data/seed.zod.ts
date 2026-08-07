@@ -107,14 +107,11 @@ export const SeedSchema = lazySchema(() => strictObject({
 }));
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
-export type Seed = z.infer<typeof SeedSchema>;
+export type Seed = z.input<typeof SeedSchema>;
 /** Post-parse shape of {@link Seed} — defaults applied, transforms run (ADR-0122). */
 export type SeedParsed = z.infer<typeof SeedSchema>;
 
-/** Input type — fields with defaults (env, mode, externalId) are optional */
-export type SeedInput = z.input<typeof SeedSchema>;
-
-export type SeedImportMode = z.infer<typeof SeedMode>;
+export type SeedImportMode = z.input<typeof SeedMode>;
 
 /**
  * Per-field value type for a seed record.
@@ -171,7 +168,7 @@ export function defineSeed<
   const TObj extends { name: string; fields: Record<string, unknown> }
 >(
   objectDef: TObj,
-  config: Omit<SeedInput, 'object' | 'records'> & {
+  config: Omit<Seed, 'object' | 'records'> & {
     records: Array<SeedRecord<TObj['fields']>>;
   }
 ): Seed {

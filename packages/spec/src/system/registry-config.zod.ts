@@ -177,10 +177,10 @@ export const RegistryConfigSchema = lazySchema(() => z.object({
     .describe('Mirror registries for redundancy'),
 }));
 
-export type RegistrySyncPolicy = z.infer<typeof RegistrySyncPolicySchema>;
-export type RegistryUpstream = z.infer<typeof RegistryUpstreamSchema>;
+export type RegistrySyncPolicy = z.input<typeof RegistrySyncPolicySchema>;
+export type RegistryUpstream = z.input<typeof RegistryUpstreamSchema>;
 /** Post-parse shape of {@link RegistryUpstream} — defaults applied, transforms run (ADR-0122). */
 export type RegistryUpstreamParsed = z.infer<typeof RegistryUpstreamSchema>;
-export type RegistryConfig = z.infer<typeof RegistryConfigSchema>;
+export type RegistryConfig = z.input<typeof RegistryConfigSchema>;
 /** Post-parse shape of {@link RegistryConfig} — defaults applied, transforms run (ADR-0122). */
 export type RegistryConfigParsed = z.infer<typeof RegistryConfigSchema>;

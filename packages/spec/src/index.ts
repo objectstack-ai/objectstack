@@ -198,7 +198,7 @@ export {
   ORGANIZATION_ADMIN_NO_BYPASS,
   ORGANIZATION_ADMIN_GRANTS,
 } from './identity/eval-user.zod';
-export type { EvalUser, EvalUserInput, BuiltinIdentityName } from './identity/eval-user.zod';
+export type { EvalUser, BuiltinIdentityName } from './identity/eval-user.zod';
 
 // #3723 / ADR-0108: organization membership roles — the closed, framework-owned
 // vocabulary behind better-auth's role registry AND the `sys_invitation` /

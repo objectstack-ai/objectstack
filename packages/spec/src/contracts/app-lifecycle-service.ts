@@ -13,7 +13,7 @@
  * 4. Registers metadata (objects, views, flows) in the tenant registry
  */
 
-import type { AppManifest, AppCompatibilityCheck, AppInstallResult } from '../system/app-install.zod.js';
+import type { AppManifest, AppCompatibilityCheckParsed, AppInstallResult } from '../system/app-install.zod.js';
 
 // ==========================================================================
 // Service Interface
@@ -28,7 +28,7 @@ export interface IAppLifecycleService {
    * @param manifest - App manifest to check
    * @returns Compatibility check result
    */
-  checkCompatibility(tenantId: string, manifest: AppManifest): Promise<AppCompatibilityCheck>;
+  checkCompatibility(tenantId: string, manifest: AppManifest): Promise<AppCompatibilityCheckParsed>;
 
   /**
    * Install an app into a tenant's database.

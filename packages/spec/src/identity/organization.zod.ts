@@ -57,7 +57,7 @@ export const OrganizationSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type Organization = z.infer<typeof OrganizationSchema>;
+export type Organization = z.input<typeof OrganizationSchema>;
 
 /**
  * Organization Member Schema
@@ -97,14 +97,14 @@ export const MemberSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type Member = z.infer<typeof MemberSchema>;
+export type Member = z.input<typeof MemberSchema>;
 
 /**
  * Invitation Status Enum
  */
 export const InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired']);
 
-export type InvitationStatus = z.infer<typeof InvitationStatus>;
+export type InvitationStatus = z.input<typeof InvitationStatus>;
 
 /**
  * Organization Invitation Schema
@@ -158,6 +158,6 @@ export const InvitationSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type Invitation = z.infer<typeof InvitationSchema>;
+export type Invitation = z.input<typeof InvitationSchema>;
 /** Post-parse shape of {@link Invitation} — defaults applied, transforms run (ADR-0122). */
 export type InvitationParsed = z.infer<typeof InvitationSchema>;

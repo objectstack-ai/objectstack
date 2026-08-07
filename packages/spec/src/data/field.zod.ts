@@ -76,7 +76,7 @@ export const FieldType = z.enum([
   'vector',       // Vector embeddings for AI/ML (semantic search, RAG)
 ]);
 
-export type FieldType = z.infer<typeof FieldType>;
+export type FieldType = z.input<typeof FieldType>;
 
 /**
  * Select Option Schema
@@ -864,27 +864,29 @@ export const FieldSchema = lazySchema(() => strictObject({
   }
 }));
 
-export type Field = z.infer<typeof FieldSchema>;
+/**
+ * Author-facing shape of a field — what `FieldSchema.parse(...)` accepts. Since
+ * protocol 17 (#3855) it no longer carries the removed `conditionalRequired`
+ * alias — the key is tombstoned, so writing it is a `tsc` error at the authoring
+ * site as well as a parse error. Distinct from the `FieldInput` factory-helper
+ * type further down, which is `Omit<Partial<Field>, 'type'>`, and from
+ * {@link FieldParsed}, which is what a parse returns.
+ *
+ * Spelled `FieldParseInput` until protocol 17; ADR-0122 phase 2 moved the author
+ * state onto the bare name and retired that synonym.
+ */
+export type Field = z.input<typeof FieldSchema>;
 /** Post-parse shape of {@link Field} — defaults applied, transforms run (ADR-0122). */
 export type FieldParsed = z.infer<typeof FieldSchema>;
-/**
- * Author-facing parse INPUT for a field. Since protocol 17 (#3855) it no longer
- * carries the removed `conditionalRequired` alias — the key is tombstoned, so
- * writing it is a `tsc` error at the authoring site as well as a parse error.
- * Distinct from the `FieldInput` factory-helper type further down, which is
- * `Partial<Field>`.
- */
-export type FieldParseInput = z.input<typeof FieldSchema>;
-export type SelectOption = z.infer<typeof SelectOptionSchema>;
+export type SelectOption = z.input<typeof SelectOptionSchema>;
 /** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
 export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
-export type LocationCoordinates = z.infer<typeof LocationCoordinatesSchema>;
-export type Address = z.infer<typeof AddressSchema>;
-export type CurrencyConfig = z.infer<typeof CurrencyConfigSchema>;
+export type LocationCoordinates = z.input<typeof LocationCoordinatesSchema>;
+export type Address = z.input<typeof AddressSchema>;
+export type CurrencyConfig = z.input<typeof CurrencyConfigSchema>;
 /** Post-parse shape of {@link CurrencyConfig} — defaults applied, transforms run (ADR-0122). */
 export type CurrencyConfigParsed = z.infer<typeof CurrencyConfigSchema>;
-export type CurrencyConfigInput = z.input<typeof CurrencyConfigSchema>;
-export type CurrencyValue = z.infer<typeof CurrencyValueSchema>;
+export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 
 /**
  * Field Factory Helper

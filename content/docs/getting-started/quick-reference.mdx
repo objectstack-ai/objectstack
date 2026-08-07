@@ -298,10 +298,10 @@ is gated at publish and, once it passes, serves real traffic. Full contract:
 
 {/* os:check */}
 ```typescript
-import type { ApiEndpointInput } from '@objectstack/spec/api';
+import type { ApiEndpoint } from '@objectstack/spec/api';
 
 // With `manifest: { namespace: 'acme', … }` on the same stack.
-export const leadFeed: ApiEndpointInput = {
+export const leadFeed: ApiEndpoint = {
   name: 'acme_lead_feed',
   path: '/api/v1/apps/acme/leads',   // /api/v1/apps/<namespace>/<subpath>
   method: 'GET',

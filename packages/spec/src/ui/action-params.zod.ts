@@ -404,7 +404,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
  * type, so the schema and the handler-facing type cannot drift into two shapes
  * for one object.
  */
-export type ActionSession = z.infer<typeof ActionSessionSchema>;
+export type ActionSession = z.input<typeof ActionSessionSchema>;
 
 /**
  * The runtime context an action handler receives (ADR-0104 D2). `params` is

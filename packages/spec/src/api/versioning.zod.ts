@@ -37,7 +37,7 @@ export const VersioningStrategy = z.enum([
   'dateBased',
 ]);
 
-export type VersioningStrategy = z.infer<typeof VersioningStrategy>;
+export type VersioningStrategy = z.input<typeof VersioningStrategy>;
 
 // ==========================================
 // Version Lifecycle
@@ -61,7 +61,7 @@ export const VersionStatus = z.enum([
   'retired',
 ]);
 
-export type VersionStatus = z.infer<typeof VersionStatus>;
+export type VersionStatus = z.input<typeof VersionStatus>;
 
 // ==========================================
 // Version Definition
@@ -121,7 +121,7 @@ export const VersionDefinitionSchema = lazySchema(() => z.object({
     .describe('List of breaking changes (for preview/new versions)'),
 }));
 
-export type VersionDefinition = z.infer<typeof VersionDefinitionSchema>;
+export type VersionDefinition = z.input<typeof VersionDefinitionSchema>;
 
 // ==========================================
 // Versioning Configuration
@@ -202,10 +202,9 @@ export const VersioningConfigSchema = lazySchema(() => z.object({
     .describe('Include version information in the API discovery endpoint'),
 }));
 
-export type VersioningConfig = z.infer<typeof VersioningConfigSchema>;
+export type VersioningConfig = z.input<typeof VersioningConfigSchema>;
 /** Post-parse shape of {@link VersioningConfig} — defaults applied, transforms run (ADR-0122). */
 export type VersioningConfigParsed = z.infer<typeof VersioningConfigSchema>;
-export type VersioningConfigInput = z.input<typeof VersioningConfigSchema>;
 
 // ==========================================
 // Version Negotiation Response
@@ -248,7 +247,7 @@ export const VersionNegotiationResponseSchema = lazySchema(() => z.object({
     .describe('Full version definitions with lifecycle metadata'),
 }));
 
-export type VersionNegotiationResponse = z.infer<typeof VersionNegotiationResponseSchema>;
+export type VersionNegotiationResponse = z.input<typeof VersionNegotiationResponseSchema>;
 
 // ==========================================
 // Default Versioning Configuration
@@ -258,7 +257,7 @@ export type VersionNegotiationResponse = z.infer<typeof VersionNegotiationRespon
  * Default versioning configuration for ObjectStack.
  * Uses URL path strategy with v1 as the current/default version.
  */
-export const DEFAULT_VERSIONING_CONFIG: VersioningConfigInput = {
+export const DEFAULT_VERSIONING_CONFIG: VersioningConfig = {
   strategy: 'urlPath',
   current: 'v1',
   default: 'v1',

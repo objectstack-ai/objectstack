@@ -33,7 +33,7 @@ export const VulnerabilitySeverity = z.enum([
   'info',
 ]).describe('Severity level of a security vulnerability');
 
-export type VulnerabilitySeverity = z.infer<typeof VulnerabilitySeverity>;
+export type VulnerabilitySeverity = z.input<typeof VulnerabilitySeverity>;
 
 /**
  * Security Vulnerability
@@ -112,7 +112,7 @@ export const SecurityVulnerabilitySchema = lazySchema(() => z.object({
   mitigation: z.string().optional().describe('Recommended steps to mitigate the vulnerability'),
 }).describe('A known security vulnerability in a package dependency'));
 
-export type SecurityVulnerability = z.infer<typeof SecurityVulnerabilitySchema>;
+export type SecurityVulnerability = z.input<typeof SecurityVulnerabilitySchema>;
 /** Post-parse shape of {@link SecurityVulnerability} — defaults applied, transforms run (ADR-0122). */
 export type SecurityVulnerabilityParsed = z.infer<typeof SecurityVulnerabilitySchema>;
 
@@ -198,7 +198,7 @@ export const SecurityScanResultSchema = lazySchema(() => z.object({
   nextScanAt: z.string().datetime().optional().describe('ISO 8601 timestamp for the next scheduled scan'),
 }).describe('Result of a security scan performed on a plugin'));
 
-export type SecurityScanResult = z.infer<typeof SecurityScanResultSchema>;
+export type SecurityScanResult = z.input<typeof SecurityScanResultSchema>;
 /** Post-parse shape of {@link SecurityScanResult} — defaults applied, transforms run (ADR-0122). */
 export type SecurityScanResultParsed = z.infer<typeof SecurityScanResultSchema>;
 
@@ -302,7 +302,7 @@ export const SecurityPolicySchema = lazySchema(() => z.object({
   }).optional().describe('Sandbox restrictions for plugin execution'),
 }).describe('Security policy governing plugin scanning and enforcement'));
 
-export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
+export type SecurityPolicy = z.input<typeof SecurityPolicySchema>;
 /** Post-parse shape of {@link SecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type SecurityPolicyParsed = z.infer<typeof SecurityPolicySchema>;
 
@@ -348,7 +348,7 @@ export const ResolvedPackageDependencySchema = lazySchema(() => z.object({
   resolvedVersion: z.string().optional().describe('Concrete version resolved during dependency resolution'),
 }).describe('A resolver-side package dependency: version constraint plus its resolution outcome'));
 
-export type ResolvedPackageDependency = z.infer<typeof ResolvedPackageDependencySchema>;
+export type ResolvedPackageDependency = z.input<typeof ResolvedPackageDependencySchema>;
 /** Post-parse shape of {@link ResolvedPackageDependency} — defaults applied, transforms run (ADR-0122). */
 export type ResolvedPackageDependencyParsed = z.infer<typeof ResolvedPackageDependencySchema>;
 
@@ -392,7 +392,7 @@ export const DependencyGraphNodeSchema = lazySchema(() => z.object({
   }).optional().describe('Additional metadata about the package'),
 }).describe('A node in the dependency graph representing a resolved package'));
 
-export type DependencyGraphNode = z.infer<typeof DependencyGraphNodeSchema>;
+export type DependencyGraphNode = z.input<typeof DependencyGraphNodeSchema>;
 /** Post-parse shape of {@link DependencyGraphNode} — defaults applied, transforms run (ADR-0122). */
 export type DependencyGraphNodeParsed = z.infer<typeof DependencyGraphNodeSchema>;
 
@@ -432,7 +432,7 @@ export const DependencyGraphSchema = lazySchema(() => z.object({
   }).describe('Summary statistics for the dependency graph'),
 }).describe('Complete dependency graph for a package and its transitive dependencies'));
 
-export type DependencyGraph = z.infer<typeof DependencyGraphSchema>;
+export type DependencyGraph = z.input<typeof DependencyGraphSchema>;
 /** Post-parse shape of {@link DependencyGraph} — defaults applied, transforms run (ADR-0122). */
 export type DependencyGraphParsed = z.infer<typeof DependencyGraphSchema>;
 
@@ -475,7 +475,7 @@ export const PackageDependencyConflictSchema = lazySchema(() => z.object({
   severity: z.enum(['error', 'warning', 'info']).describe('Severity level of the dependency conflict'),
 }).describe('A detected conflict between dependency version requirements'));
 
-export type PackageDependencyConflict = z.infer<typeof PackageDependencyConflictSchema>;
+export type PackageDependencyConflict = z.input<typeof PackageDependencyConflictSchema>;
 
 /**
  * Dependency Resolution Result
@@ -515,7 +515,7 @@ export const PackageDependencyResolutionResultSchema = lazySchema(() => z.object
   resolvedIn: z.number().int().min(0).optional().describe('Time taken to resolve dependencies in milliseconds'),
 }).describe('Result of a dependency resolution process'));
 
-export type PackageDependencyResolutionResult = z.infer<typeof PackageDependencyResolutionResultSchema>;
+export type PackageDependencyResolutionResult = z.input<typeof PackageDependencyResolutionResultSchema>;
 /** Post-parse shape of {@link PackageDependencyResolutionResult} — defaults applied, transforms run (ADR-0122). */
 export type PackageDependencyResolutionResultParsed = z.infer<typeof PackageDependencyResolutionResultSchema>;
 
@@ -572,7 +572,7 @@ export const SBOMEntrySchema = lazySchema(() => z.object({
   })).default([]).describe('External references related to the component'),
 }).describe('A single entry in a Software Bill of Materials'));
 
-export type SBOMEntry = z.infer<typeof SBOMEntrySchema>;
+export type SBOMEntry = z.input<typeof SBOMEntrySchema>;
 /** Post-parse shape of {@link SBOMEntry} — defaults applied, transforms run (ADR-0122). */
 export type SBOMEntryParsed = z.infer<typeof SBOMEntrySchema>;
 
@@ -618,7 +618,7 @@ export const SBOMSchema = lazySchema(() => z.object({
   }).optional().describe('Tool used to generate this SBOM'),
 }).describe('Software Bill of Materials for a plugin'));
 
-export type SBOM = z.infer<typeof SBOMSchema>;
+export type SBOM = z.input<typeof SBOMSchema>;
 /** Post-parse shape of {@link SBOM} — defaults applied, transforms run (ADR-0122). */
 export type SBOMParsed = z.infer<typeof SBOMSchema>;
 
@@ -705,7 +705,7 @@ export const PluginProvenanceSchema = lazySchema(() => z.object({
   })).default([]).describe('Verification attestations for the plugin'),
 }).describe('Verifiable provenance and chain of custody for a plugin artifact'));
 
-export type PluginProvenance = z.infer<typeof PluginProvenanceSchema>;
+export type PluginProvenance = z.input<typeof PluginProvenanceSchema>;
 /** Post-parse shape of {@link PluginProvenance} — defaults applied, transforms run (ADR-0122). */
 export type PluginProvenanceParsed = z.infer<typeof PluginProvenanceSchema>;
 
@@ -780,7 +780,7 @@ export const PluginTrustScoreSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('ISO 8601 timestamp when the trust score was last updated'),
 }).describe('Trust score and verification status for a plugin'));
 
-export type PluginTrustScore = z.infer<typeof PluginTrustScoreSchema>;
+export type PluginTrustScore = z.input<typeof PluginTrustScoreSchema>;
 /** Post-parse shape of {@link PluginTrustScore} — defaults applied, transforms run (ADR-0122). */
 export type PluginTrustScoreParsed = z.infer<typeof PluginTrustScoreSchema>;
 
