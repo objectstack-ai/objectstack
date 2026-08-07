@@ -162,16 +162,22 @@ and their header says "DO NOT migrate these". Phase 1 deliberately leaves every
 
 ## Consequences
 
-- `@objectstack/spec` gains **660 exported type aliases**, all type-only: no runtime
-  code, no bundle size, no JSON Schema, no authorable surface. `api-surface.json` grows
-  by the same 660 names; `json-schema/` and `authorable-surface.json` do not move, which
-  was verified rather than assumed.
+- `@objectstack/spec` gains **657 exported type aliases**, all type-only: no runtime
+  code, no bundle size, no JSON Schema, no authorable surface. The `api-surface` shards
+  grow by the corresponding names; `json-schema/` and the `authorable-surface` shards do
+  not move, which was verified rather than assumed.
 - Consumers holding a parsed value can migrate to `XParsed` **now**, incrementally,
   under a minor — which is the point. A consumer that does nothing is equally fine
   until the major.
-- The 717 pinned schemas will occasionally graduate: one gains a `.default()`, the pin
-  goes red, and the fix is one alias plus one deleted pin line. That is the intended
-  maintenance, and it is loud.
+- The 718 pinned schemas will occasionally graduate **in both directions**, and both are
+  loud. A schema that gains a `.default()` turns its pin red, and the fix is one alias
+  plus one deleted pin line. A schema that *loses* its last defaulted key turns the gate
+  red instead, and the fix is the mirror image — retire the `XParsed`, add the pin. The
+  second direction is not hypothetical: it happened during this change's own final sync,
+  when protocol 17 (#5552, ADR-0049) retired `FieldMapping.transform` and the whole
+  `FieldMappingTransform` union. `FieldMappingTransform` stopped existing altogether, and
+  `FieldMapping` — which had two shapes only because of that key — became isomorphic and
+  moved from the covered set to the pinned set. Neither move needed a human to notice it.
 - #5507 (two `automation/` files that have not honoured `X` / `XParsed`) is re-scoped
   by this record rather than closed by it: those files are already in family A, so what
   remains there is phase-2 work.
@@ -258,22 +264,41 @@ was found.
 
 ### F. What phase 1 actually changed
 
+Measured against `main` **as delivered** — that is, after the final sync that absorbed
+protocol 17's `FieldMapping.transform` retirement (#5552) and the generated-artifact
+sharding (#5837). Where these differ from the sections above, the sections above are the
+census that *chose* the criterion and these are what applying it produced.
+
 | | count |
 |:---|---:|
-| `XParsed` aliases added | **660** |
-| `*.zod.ts` files edited | **151** |
+| `XParsed` aliases added | **657** |
+| `*.zod.ts` files edited | **149** |
 | existing declarations modified, renamed or removed | **0** |
-| schemas pinned isomorphic | **717** |
-| final: bare `z.infer` aliases paired with an `XParsed` | 667 |
-| final: bare `z.infer` aliases pinned isomorphic | 717 |
+| final: bare `z.infer` aliases | **1383** |
+| final: paired with an `XParsed` | **665** |
+| final: pinned isomorphic | **718** |
 
-667 + 717 = 1384, the whole population, which is the gate's own arithmetic on every run.
-The 667 is 663 covered by D5 plus 4 isomorphic aliases in `automation/execution.zod.ts`
-that already carried an `XParsed` from a half-finished earlier pass; those are left
-alone (D4 removes nothing) and simply do not need a pin.
+665 + 718 = 1383, the whole population, which is the gate's own arithmetic on every run.
 
-151 files were edited rather than the 152 that contain a differing alias, because
-`automation/execution.zod.ts`'s three differing aliases already had their `XParsed`.
+The drift from the census (659 aliases / 151 files / 1384 bare / 717 pinned) is entirely
+#5552, and it is worth reading because it exercises both of D6's directions at once:
+
+- `FieldMappingTransform` and its schema were **retired outright**, so its bare alias and
+  the `FieldMappingTransformParsed` this change had added both cease to exist: 1384 bare
+  aliases become 1383, and one covered alias disappears.
+- `FieldMapping` had two shapes *only* because of the `transform` key. With the key
+  tombstoned, `z.input` and `z.infer` coincide, so under D5 it is no longer covered and
+  under D3 it must **not** keep a second name. `FieldMappingParsed` was therefore dropped
+  and a pin added: 717 pins become 718, 667 paired become 665.
+
+Neither move was noticed by a human. The gate reported `FieldMapping` as "neither paired
+nor pinned" on the merged tree, and the direction was then settled by measurement (a
+probe carrying a deliberate control assertion, so a vacuous pass was not mistaken for
+isomorphism) rather than by assuming which way the retirement had pushed it.
+
+149 files were edited rather than the 151 of the census: `shared/mapping.zod.ts` no longer
+carries a net addition, and `automation/execution.zod.ts`'s differing aliases already had
+their `XParsed`.
 
 ### G. Two findings the gate produced on its first real run
 

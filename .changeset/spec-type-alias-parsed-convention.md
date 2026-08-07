@@ -17,7 +17,7 @@ deciding argument is the keystroke every author writes first — `const c: Conne
 — which should be correct by default in every domain, without knowing which file you are in.
 
 **This release is phase 1, and it is purely additive. Nothing is renamed or removed;
-no existing annotation stops compiling.** It declares `XParsed` for the **660** aliases
+no existing annotation stops compiling.** It declares `XParsed` for the **657** aliases
 whose schema genuinely has two distinct shapes, so that every consumer whose meaning
 phase 2 will change already has a name to move to:
 
@@ -34,9 +34,15 @@ export type ConnectorInput = z.input< typeof ConnectorSchema >;    // unchanged
 
 Schemas whose `z.input` and `z.infer` are the *same* type (enums, plain unions, objects
 with no defaults or transforms anywhere in their tree) deliberately get **no** `XParsed`
-— a permanent synonym is a name you can only pick wrongly. All 717 of them are pinned
+— a permanent synonym is a name you can only pick wrongly. All 718 of them are pinned
 with compile-time assertions so the exemption cannot rot silently when one later gains
 a `.default()`.
+
+One name to note if you are upgrading across protocol 17: `FieldMapping` does **not**
+gain a `FieldMappingParsed`. #5552 retired `FieldMapping.transform` and the whole
+`FieldMappingTransform` union in the same release, and that key was the only reason the
+schema had two shapes — so it is now isomorphic, and under this convention it correctly
+keeps exactly one name.
 
 **What to do now (optional, and cheap).** If you hold the result of a `.parse()` — or of
 a `defineX()` factory, which returns it — move that annotation to `XParsed`:

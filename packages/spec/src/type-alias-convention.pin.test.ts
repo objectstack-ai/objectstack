@@ -185,6 +185,7 @@ import type * as M110 from './shared/enums.zod.js';
 import type * as M111 from './shared/expression.zod.js';
 import type * as M112 from './shared/http.zod.js';
 import type * as M113 from './shared/identifiers.zod.js';
+import type * as M169 from './shared/mapping.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -973,6 +974,11 @@ export type Iso497 = Assert<Eq< z.input< typeof M113.SystemIdentifierSchema >, z
 export type Iso498 = Assert<Eq< z.input< typeof M113.SnakeCaseIdentifierSchema >, z.infer< typeof M113.SnakeCaseIdentifierSchema > >>;
 export type Iso499 = Assert<Eq< z.input< typeof M113.EventNameSchema >, z.infer< typeof M113.EventNameSchema > >>;
 
+// shared/mapping.zod.ts
+// Graduated INTO the isomorphic set at protocol 17: #5552 retired `transform` and the
+// whole `FieldMappingTransform` union, which is what used to give this schema two shapes.
+export type Iso717 = Assert<Eq< z.input< typeof M169.FieldMappingSchema >, z.infer< typeof M169.FieldMappingSchema > >>;
+
 // shared/metadata-types.zod.ts
 export type Iso500 = Assert<Eq< z.input< typeof M114.MetadataFormatSchema >, z.infer< typeof M114.MetadataFormatSchema > >>;
 export type Iso501 = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >, z.infer< typeof M114.BaseMetadataRecordSchema > >>;
@@ -1355,7 +1361,7 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 717 isomorphic pins', () => {
+  it('still declares all 718 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1368,7 +1374,7 @@ describe('ADR-0122 type-alias convention', () => {
     // corresponding alias is the edit this case exists to stop.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(717);
+    expect(pins).toHaveLength(718);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
