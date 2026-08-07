@@ -19,9 +19,14 @@
  *     filters bind the driver call where no handler can widen them. So the one
  *     field the docs pointed at resolved `undefined`.
  *   - `insert` was documented as `{ doc: Record, ... }`; the engine builds
- *     `{ data: row, ... }`. (`trigger-record-change` still carries a defensive
- *     `input.doc` alias read for that reason — filed separately, not fixed
- *     here.)
+ *     `{ data: row, ... }`. That wrong sentence was the whole reason consumers
+ *     carried defensive `input.doc` alias reads — branches guarding against a
+ *     producer that has never existed. All of them are now gone:
+ *     `trigger-record-change` in #5671, and the last three — service-storage's
+ *     attachment lifecycle, plugin-sharing's primary-BU projection, and the
+ *     runtime hook sandbox (which aliased the top-level `doc`/`previousDoc` of
+ *     the same family) — in #5906. No consumer defends against this key today,
+ *     so the assertions below are what keeps it that way.
  *
  * The table was also silent about #5038: since ADR-0058's bulk-write addendum
  * the `after*` events on a bulk write fire PER MATCHED ROW on a
