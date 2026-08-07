@@ -42,7 +42,7 @@
     "integration/ConnectorFieldMapping:source",
     "integration/ConnectorFieldMapping:syncMode",
     "integration/ConnectorFieldMapping:target",
-    "integration/ConnectorFieldMapping:transform",
+    "integration/ConnectorFieldMapping:transform [RETIRED]",
     "integration/ConnectorHealth:circuitBreaker",
     "integration/ConnectorHealth:healthCheck",
     "integration/ConnectorInstanceAPIKeyAuth:credentialRef",
