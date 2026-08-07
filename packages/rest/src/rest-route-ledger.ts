@@ -22,11 +22,17 @@
  * `/api/v1/environments/:environmentId` (rest-server.ts registerRoutes); the
  * mirror is a mechanical duplication and is deliberately not re-ledgered.
  *
- * SOURCES. `route-manager` rows are enumerable via `RestServer.getRoutes()`.
- * `direct-mount` rows come from the two registrars that bypass RouteManager
- * and register straight on `IHttpServer` (`package-routes.ts`,
- * `external-datasource-routes.ts`) — the conformance test enumerates those by
- * capturing a mock server's registration calls, so they are guarded too.
+ * SOURCES. Both are enumerable through `RestServer.getRoutes()`, and since
+ * #5822 that is the ONLY enumeration the conformance test runs. `route-manager`
+ * rows are the ones this server registered itself; `direct-mount` rows come
+ * from the two registrars that bypass RouteManager and register straight on
+ * `IHttpServer` (`package-routes.ts`, `external-datasource-routes.ts`), which
+ * now return what they mounted so the composition step can record it (see
+ * `direct-mount.ts`). Each mounted route reports its own `source`, so the two
+ * halves of this ledger stay audited separately from one table. Before that,
+ * the direct-mount half was enumerated by capturing a mock server's
+ * registration calls — a second enumeration that guarded the ledger but left
+ * the routes out of `/openapi.json` and every other runtime introspection.
  *
  * NOT COVERED HERE (the third surface): services that autonomously mount
  * routes on the host `IHttpServer` — `service-storage` (`storage-routes.ts`,
