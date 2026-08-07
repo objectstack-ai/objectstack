@@ -1306,18 +1306,35 @@ same environment — its own container and fresh clone, decoupled from the PM
 session's lifetime. Use it when devs need resources/lifetime beyond one
 container, or the maintainer asks for it. Requires the `Claude_Code_Remote`
 MCP tools (available in remote/web sessions; if absent, say so and fall back
-to `mode:subagent`). Per issue:
+to `mode:subagent`).
 
-1. `create_trigger` with `create_new_session_on_fire: true` and no schedule
-   (poke-only), name `pm-dispatch-issue-<n>`, prompt = the dispatch template
-   below **made fully standalone**: the fired session starts with zero
-   conversation context (it does get the repo clone, so it can be told to
-   follow `.claude/agents/os-dev.md`), and — since an independent session
-   cannot return a message to the PM — it must be told to **post the JSON
-   report as a comment on the issue** (prefixed `<!-- os-dev-report -->`)
-   instead of returning it, in addition to opening the draft PR.
-2. `fire_trigger` to launch it, then `delete_trigger` once the report has
-   been collected (step 6) so poke-only triggers don't accumulate.
+**一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire**(维护者
+2026-08-07 拍板;trigger 流只保留给**定时/重复**型 —— 座位 Routine 一节)。
+实测三课,#6083 首派一天踩齐,每一条都写进派发动作:
+
+1. **授权面随 source,不随环境。** trigger 拉起的会话**没有仓库授权** ——
+   clone(匿名只读)可用,push / 开 PR / 发评论全 403(`not in this
+   session's authorized repository set`),`permission_mode: auto` 下也没有
+   可弹的授权窗,dev 只能做只读勘察。`create_session` 带 `source_url` 的
+   会话**出生即持推送授权**。同时带 `outcome_branch`(= 认领分支,平台托管
+   推送)与显式 `model`(trigger 流不可指模型 —— sonnet 默认惊吓即此出处)、
+   `title`(客户端卡片名 —— **以车道名开头,⛔ 不叫 os-dev**,维护者
+   2026-08-07 拍板:多车道并行时卡片按车道可扫;形如
+   `⚡ spec #5599 view 身份前置(裁 B)`,即 `⚡ <车道> #<单号> <短语>`)。
+2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态 —— 回合结束
+   就停下等输入,不像 subagent 一口气跑完;不写这条,dev 会在中期汇报或提问
+   处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
+   开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
+   (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
+3. **交付通道写明降级路径。** 云会话通常没有 GitHub API 工具(连接器不随
+   create_session/trigger 传递),派发词写明:开 PR / 发评论失败 ⛔ 不视为
+   阻塞 —— 推送 outcome branch + 终报作最后一条会话消息,**PM 代开 draft
+   PR、代转录报告**到 issue(权限面不因此放大)。
+
+**监控与转向**:`get_session` 读实时状态(status / model / token 用量;
+IDLE + 分支未推送 = 停摆待 poke);投递消息用**绑定会话的 poke 触发器**
+(`create_trigger` 带 `persistent_session_id` + `fire_trigger` + 用后即
+`delete_trigger`)。收报:巡检主动读会话终报与分支推送,⛔ 不等推送通知。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 

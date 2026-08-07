@@ -11,6 +11,10 @@
  *
  * Rules applied (in order, stop at first error per field):
  *
+ *  - operator object  a value carrying declared filter operators (`{ $in: […] }`)
+ *                   is refused on every field whose declared value is a SCALAR
+ *                   — a `where` clause pasted into the SET half of a write
+ *                   (#5922).
  *  - `required`     ADR-0113 write contract: on INSERT a missing/null/empty
  *                   value is rejected; on UPDATE a SUPPLIED missing value is
  *                   rejected (a PATCH may not null out a required field) while
@@ -36,6 +40,9 @@
 import {
   isMultiValueField as specIsMultiValueField,
   valueSchemaFor,
+  isPlainRecord,
+  ALL_OPERATORS,
+  RETIRED_FILTER_OPERATORS,
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
@@ -281,6 +288,75 @@ function isMultiValueField(def: FieldDef): boolean {
 }
 
 /**
+ * [#5922] Filter-operator keys, as a lookup set — **derived from the spec's own
+ * vocabulary, never restated here.**
+ *
+ * `ALL_OPERATORS` is `FILTER_OPERATORS` + `LOGICAL_OPERATORS`: the keys every
+ * backend is expected to evaluate, plus the three combinators. The retired ones
+ * (`$regex` / `$options`) are folded in from `RETIRED_FILTER_OPERATORS` because
+ * this rule asks *"was a filter written here?"*, and a filter carrying a retired
+ * spelling is still a filter — `plugin-auth`'s ObjectQL adapter emits `$regex`
+ * today, so the shape is live, not historical.
+ *
+ * ## Why derived and not `key.startsWith('$')`
+ *
+ * The repo already carries five hand-rolled `keys.some(k => k.startsWith('$'))`
+ * shape tests (`having-filter.ts`, `driver-memory`'s matcher and
+ * `filter-refusal.ts`, `driver-mongodb`'s `mongodb-filter.ts`, `driver-turso`'s
+ * `remote-transport.ts`). None of them is exported, and none is reachable from
+ * this package without inverting the layering — `@objectstack/objectql` depends
+ * on no driver. Writing a sixth `startsWith('$')` here is the accident #5659
+ * names: one question, N private answers, and the day one of them changes only
+ * some of them follow.
+ *
+ * So this consumes the **shared vocabulary** instead, which is exactly what the
+ * two blessed consumers of `FILTER_OPERATORS` already do (`driver-memory`'s
+ * `SUPPORTED_FIELD_OPERATORS` and `service-analytics`' coverage test — the
+ * spec's own note calls deriving enforcement from it "the right design"). An
+ * operator added to the protocol is refused here the same day it is declared,
+ * with nothing to remember.
+ *
+ * The deliberate consequence: an **undeclared** `$`-spelling (`{ $inn: … }`) is
+ * NOT matched. It is not a filter any backend can execute, so it is not this
+ * rule's business — judging every plain object on a scalar field is the broader
+ * question (#5922's option A), and answering it here by accident would be a
+ * scope this ruling did not take.
+ */
+const FILTER_OPERATOR_KEYS: ReadonlySet<string> = new Set<string>([
+  ...ALL_OPERATORS,
+  ...Object.keys(RETIRED_FILTER_OPERATORS),
+]);
+
+/**
+ * [#5922] The declared filter operators this value carries as own keys — empty
+ * when the value is not an operator object at all.
+ *
+ * `isPlainRecord` (the spec's, shared with the authoring-key lint) is the
+ * object test: a `Date`, an array, a class instance and a `null` are all
+ * comparands or plain garbage, never a filter node.
+ */
+function filterOperatorKeysIn(value: unknown): string[] {
+  if (!isPlainRecord(value) || value instanceof Date) return [];
+  return Object.keys(value).filter((k) => FILTER_OPERATOR_KEYS.has(k));
+}
+
+/**
+ * [#5922] May this field's declared value legitimately BE an object?
+ *
+ * Two classes, and only two: a multi-value field stores an ARRAY (and is
+ * refused as `invalid_type_array` below when it is not one), and the
+ * structured-JSON class (`json` / `composite` / `repeater` / `record` /
+ * `location` / `address` / `vector`) stores an object BY DEFINITION — a `json`
+ * column holding `{ "$in": ["a","b"] }` is a user's data, not a mis-written
+ * filter, and this validator has no way to tell those apart nor any business
+ * trying. Every other declared type stores a SCALAR, which is what makes the
+ * operator-object rejection decidable at all.
+ */
+function valueMayBeAnObject(def: FieldDef): boolean {
+  return isMultiValueField(def) || STRUCTURED_JSON_TYPES.has(def.type);
+}
+
+/**
  * Coerce lone scalars into single-element arrays for multi-value fields,
  * IN PLACE, before validation (#2552). Legacy clients (e.g. pre-#2186
  * console bulk-edit) PATCH `{ labels: "frontend" }` at a multiselect —
@@ -373,6 +449,55 @@ function validateOne(
   if (isMissing(value)) return null; // nothing else to check
 
   const t = def.type;
+
+  // ── [#5922] an operator object is a FILTER, never a scalar VALUE ─
+  // `{ title: { $in: ['a','b'] } }` in a write payload is a `where` clause that
+  // was pasted into the SET half. Before this check the two halves of the same
+  // mistake had two fates chosen by the field's type: `number` said "n must be
+  // a number" and never reached the driver, while `text` handed the operator
+  // object to `driver.update` verbatim — the row then holds a serialized
+  // `{"$in":["a","b"]}` (or whatever the driver makes of it) and the damage
+  // surfaces far from its cause, as "this record's title turned into garbage".
+  //
+  // It runs BEFORE the per-type branches for two reasons. The near one: the
+  // ADR-0104 reference / structured-JSON branch below WARNS and reports the
+  // value to `onAdmittedValueShapeViolation` before returning null, and that
+  // sink means *this deployment stored a non-conforming value* — recording it
+  // for a write we are about to refuse would enter a counterexample against a
+  // contract nothing actually broke (see `AdmittedValueShapeViolation`). The
+  // far one: the branches that happen to refuse this shape today mostly do so
+  // by ACCIDENT — `select`/`url`/`email`/`phone` only because
+  // `String({ $in: [...] })` is `"[object Object]"`, which fails their regex or
+  // their option list. An accident that fires on four types and not on the
+  // other eleven is not a rule; this is.
+  //
+  // Reachability is external, not theoretical (#5922): flow's `update_record`
+  // spreads authored fields straight into `data`
+  // (`service-automation/src/builtin/crud-nodes.ts`), and a REST PATCH body is
+  // the same shape. An AI-authored filter builder emitting into `fields`
+  // instead of `filter` produces exactly this payload — PD #12's lenient
+  // consumer is precisely where such an error would otherwise hide.
+  if (!valueMayBeAnObject(def)) {
+    const ops = filterOperatorKeysIn(value);
+    if (ops.length > 0) {
+      const plural = ops.length > 1 ? 'are filter operators' : 'is a filter operator';
+      return fail(
+        'invalid_type',
+        {
+          type: t,
+          detail:
+            `${ops.join(', ')} ${plural}, not a value — a filter belongs in the query ` +
+            `'where', not in the write payload`,
+        },
+        // Same wire code and same catalog entry as the ADR-0104 shape refusal
+        // one branch down: one sentence for "this value's SHAPE is wrong for
+        // this field's declared type", already localized in all four bundles.
+        // A fifth near-duplicate message key would be catalog drift, not
+        // clarity — the key is keyed by SENTENCE, and this is that sentence.
+        'invalid_value_shape',
+      );
+    }
+  }
 
   // ── string types ────────────────────────────────────────────────
   if (t === 'text' || t === 'textarea' || t === 'email' || t === 'url' || t === 'phone' || t === 'password' || t === 'markdown' || t === 'html' || t === 'richtext' || t === 'code') {

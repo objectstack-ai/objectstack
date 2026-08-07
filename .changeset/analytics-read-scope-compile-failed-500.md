@@ -67,7 +67,12 @@ the disclosure question to be re-decided message by message).
   `@objectstack/service-analytics` (ADR-0112 D3) and typed as
   `RegisteredErrorCode` at the constructor, so an unregistered code is a compile
   error. It is legible on the wire through the sibling `/analytics/query` exit,
-  which puts a thrown `err.code` in `error.details.code` (#3842).
+  which puts a thrown `err.code` at **`error.code`** (#3842) — read it there.
+  `errorResponseBase` only stages the code inside a `details` object;
+  `buildApiError` then runs `splitSemanticCode`, which promotes it into the
+  declared `error.code` field and drops the now-empty `details`, so the key is
+  omitted from the body and `error.details.code` is never present:
+  `{"success":false,"error":{"code":"READ_SCOPE_COMPILE_FAILED","message":"Internal server error","httpStatus":500}}`.
 
 **Which inputs are refused did not change.** No refusal condition moved: nothing
 that used to lower now throws, and nothing that used to throw now lowers. That is
