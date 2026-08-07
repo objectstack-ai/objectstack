@@ -6,7 +6,13 @@ import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
-import type { II18nService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type {
+  II18nService,
+  IObjectQLEngine,
+  ISeedSettlementService,
+  SeedSettlementSnapshot,
+} from '@objectstack/spec/contracts';
+import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
 
 
 /**
@@ -48,7 +54,10 @@ import type { II18nService, IObjectQLEngine } from '@objectstack/spec/contracts'
  *    seed), whichever services are composed. Not before: emptiness settles
  *    a claim about CONTENT, and a boot that certifies itself and then seeds
  *    rows contradicting the certificate leaves every later boot enforcing
- *    it against data this one wrote (#4769).
+ *    it against data this one wrote (#4769). The `kernel:ready` fallback
+ *    additionally asks the `seed-settlement` contract whether a seed is
+ *    still in flight, so an over-budget background seed is waited out
+ *    rather than certified over (#4795).
  *  - **Translation bundles** — `SetupAppTranslations` (the static Setup
  *    App + sys_* dashboards) and `MetadataFormsTranslations`
  *    (`metadataForms.*` for object/field/agent/flow/view configuration
@@ -116,7 +125,26 @@ export class PlatformObjectsPlugin {
     // (above; #4243 — moved here with the registration from
     // service-storage). A store that was found rather than created attests
     // nothing and keeps producing evidence by scan.
-    const attest = async () => {
+    // #4795 — "has this boot's own seed finished landing?", asked through the
+    // published `seed-settlement` contract rather than by sniffing the
+    // runtime's internal `seed-datasets` service. That array's presence says a
+    // seed source EXISTS; it can never say whether it has SETTLED, and the gap
+    // between those two facts IS the bug. An absent service means no seed
+    // pipeline registered on this kernel — a fact by `kernel:ready`, since
+    // every source is declared in Phase 2 `start()`.
+    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => {
+      try {
+        const svc = ctx.getService?.(SEED_SETTLEMENT_SERVICE) as
+          | ISeedSettlementService
+          | undefined;
+        if (!svc || typeof svc.snapshot !== 'function') return undefined;
+        return svc.snapshot();
+      } catch {
+        return undefined;
+      }
+    };
+
+    const attest = async (phase: 'app:seeded' | 'kernel:ready') => {
       let engine: IObjectQLEngine | undefined;
       try {
         engine = ctx.getService?.('objectql');
@@ -126,6 +154,15 @@ export class PlatformObjectsPlugin {
       if (!engine || typeof engine.wasDatastoreCreatedFromEmpty !== 'function') return;
       try {
         if (engine.wasDatastoreCreatedFromEmpty()) {
+          // Asked AFTER the created-from-empty check on purpose: a store that
+          // was found rather than created attests nothing either way, and
+          // announcing a deferral there would be noise about a decision that
+          // was never going to be made.
+          const seed = readSeedSettlement();
+          if (seed && seed.pending > 0) {
+            if (phase === 'kernel:ready') reportDeferral(ctx, seed);
+            return;
+          }
           await attestFreshDatastore(engine, { logger: ctx.logger });
           // The engine memoizes the flag read on first use; this write
           // may already have raced it on a fast boot.
@@ -151,8 +188,20 @@ export class PlatformObjectsPlugin {
     // (it is the same moment as before for those). Both land in the same
     // idempotent call: the first one to find an id unattested and
     // uncontradicted writes it, the other finds the row and skips.
-    ctx?.hook?.('app:seeded', attest);
-    ctx?.hook?.('kernel:ready', attest);
+    //
+    // #4795 — subscribing to both is necessary but not sufficient, because the
+    // two can arrive in EITHER order. When the inline seed overruns its budget
+    // the runtime hands it to the background and `kernel:ready` arrives first,
+    // so the backstop fired mid-seed: it certified the store, flipped the gates
+    // to strict, and the tail of the same seed run met a contract its head had
+    // never seen — one boot, two contracts. Measured on a showcase cold boot at
+    // `OS_INLINE_SEED_BUDGET_MS=1`: attestation +0.470s, seed settled +3.617s.
+    // Neither hook may certify while the pipeline reports work outstanding, so
+    // the settlement check lives inside `attest` and guards both — `app:seeded`
+    // included, since a bundle with several config apps fires it once per app
+    // and the first one is not the last.
+    ctx?.hook?.('app:seeded', () => attest('app:seeded'));
+    ctx?.hook?.('kernel:ready', () => attest('kernel:ready'));
 
     ctx?.hook?.('kernel:ready', async () => {
       let i18n: II18nService | undefined;
@@ -192,6 +241,62 @@ export class PlatformObjectsPlugin {
       }
     });
   }
+}
+
+/**
+ * Say, once, why `kernel:ready` did not attest — and what closes the gate.
+ *
+ * ## The ADR-0104 posture for deployments that never settle a boot seed (#4795)
+ *
+ * Two shapes register seed datasets and deliberately do not run them at boot,
+ * so `app:seeded` never fires and the tally stays pending for the life of the
+ * process: **multi-tenant** (seeds replay per organization on
+ * `sys_organization` insert) and **`skipSeedData`** (an `os migrate` planning
+ * boot that must not write to the target database at all, #3917).
+ *
+ * Their posture is **do not self-certify at boot; wait for `os migrate`** —
+ * ruled 2026-08-06 and recorded on #4795. It is not a gap this check leaves
+ * behind, it is the answer:
+ *
+ *  - the fresh-datastore attestation infers "created empty, therefore no
+ *    legacy value can exist". On a multi-tenant deployment the rows that
+ *    inference is about have not been written yet — they land org by org,
+ *    later. Certifying at startup that a replay which has not happened holds
+ *    no violating value is exactly #4769's error with a longer fuse;
+ *  - a `skipSeedData` boot writes nothing, so it observes nothing, so it has
+ *    no evidence to certify from;
+ *  - standing down is the *recoverable* direction. The deployment stays
+ *    warn-first — true, and closable at any time by `os migrate value-shapes
+ *    --apply` / `os migrate files-to-references --apply`, which record the flag
+ *    on a real scan of what the store actually holds. The opposite error is not
+ *    recoverable in the same way: a certificate issued over rows nobody looked
+ *    at is enforced by every later boot against data it never examined.
+ *
+ * Logged at `info`, not `warn`. This is a functional posture, not a durability
+ * degradation: nothing claims to have persisted and failed, and the gate that
+ * stays open is the lenient one. A `warn` on every boot of every multi-tenant
+ * deployment for behaviour that is correct by design is precisely what trains
+ * operators to skim the level that matters (AGENTS.md, degradation log levels).
+ */
+function reportDeferral(ctx: any, seed: SeedSettlementSnapshot): void {
+  if (seed.suppressed.length > 0) {
+    const reasons = [...new Set(seed.suppressed)].join(', ');
+    ctx?.logger?.info?.(
+      `[platform-objects] not attesting this fresh datastore at boot: seed data is registered but ` +
+        `this boot does not write it (${reasons}). Multi-tenant deployments replay seeds per org on ` +
+        `sys_organization insert, and a skipSeedData boot writes nothing at all — so nothing observed ` +
+        `now could prove or disprove the claim. The deployment stays warn-first until ` +
+        `\`os migrate value-shapes --apply\` / \`os migrate files-to-references --apply\` records the ` +
+        `flag on a real scan (ADR-0104, #4795).`,
+    );
+    return;
+  }
+  ctx?.logger?.info?.(
+    `[platform-objects] fresh-datastore attestation deferred at kernel:ready: ${seed.inFlight} seed ` +
+      `source(s) still writing (an inline seed overran OS_INLINE_SEED_BUDGET_MS and continues in the ` +
+      `background). Attesting now would flip this boot to strict half-way through its own seed run. ` +
+      `It runs on \`app:seeded\` once the seed settles (ADR-0104, #4795).`,
+  );
 }
 
 /** Convenience factory mirroring the rest of the plugin ecosystem. */

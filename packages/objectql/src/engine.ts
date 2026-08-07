@@ -3931,10 +3931,20 @@ export class ObjectQL implements IObjectQLEngine {
    * order — the certificate is already in the ledger and the contradicting
    * value lands afterwards, which is reachable whenever the deployment is
    * still lenient at that moment (`OS_ALLOW_LAX_MEDIA_VALUES` /
-   * `OS_ALLOW_LAX_VALUE_SHAPES`, or a seed that finishes in the background
-   * after its budget). Without this the ledger would keep asserting a fact the
-   * store contradicts, and the NEXT boot would enforce it against exactly the
-   * data this one wrote.
+   * `OS_ALLOW_LAX_VALUE_SHAPES`) or whenever a writer runs after the
+   * attestation point at all — the `os dev` hot-reload seeder and a runtime
+   * marketplace install both seed on a store this boot created. Without this
+   * the ledger would keep asserting a fact the store contradicts, and the NEXT
+   * boot would enforce it against exactly the data this one wrote.
+   *
+   * The boot's own inline seed used to head that list, via the background
+   * continuation of a run that overran `OS_INLINE_SEED_BUDGET_MS` — the
+   * attestation's `kernel:ready` backstop fired mid-seed and the tail landed
+   * against the certificate it had just issued. #4795 closed that ordering at
+   * the source: the attestation now defers while the `seed-settlement` contract
+   * reports a source outstanding, so the inline seed can no longer contradict
+   * a certificate this boot issued. This stays the safety net rather than the
+   * first line of defence for it.
    *
    * Deliberately narrow:
    *

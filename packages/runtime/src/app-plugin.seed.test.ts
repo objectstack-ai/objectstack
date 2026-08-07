@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
+import { readSeedSettlement } from './seed-settlement.js';
 import type { PluginContext } from '@objectstack/core';
 
 /**
@@ -121,5 +122,115 @@ describe('AppPlugin inline-seed settle signal (app:seeded, #2996)', () => {
 
         expect(insert).not.toHaveBeenCalled();
         expect(trigger).not.toHaveBeenCalledWith('app:seeded', expect.anything());
+    });
+
+    /**
+     * #4795 — the same three branches, seen through the `seed-settlement`
+     * contract. `app:seeded` alone cannot answer "is a seed still landing?"
+     * because the two branches that never emit it are exactly the two where
+     * the answer is "yes, and it never will be" — so the settle signal needs a
+     * standing tally beside it, declared before the branch is chosen.
+     */
+    describe('seed-settlement signal (#4795)', () => {
+        /** Like `makeContext`, but with a service map the tally can live in. */
+        const makeSettlementContext = (): PluginContext => {
+            const services = new Map<string, unknown>();
+            return makeContext({
+                registerService: vi.fn((name: string, svc: unknown) => {
+                    if (services.has(name)) throw new Error(`service '${name}' already registered`);
+                    services.set(name, svc);
+                }),
+                getService: vi.fn((name: string) => {
+                    if (name === 'objectql') return { insert };
+                    if (services.has(name)) return services.get(name);
+                    return undefined; // `metadata` absent → basic-insert fallback
+                }),
+            } as unknown as Partial<PluginContext>);
+        };
+
+        it('an over-budget seed stays pending until the background run settles', async () => {
+            process.env.OS_INLINE_SEED_BUDGET_MS = '10';
+            insert = vi.fn(() => new Promise((resolve) => setTimeout(resolve, 60)));
+            const ctx = makeSettlementContext();
+
+            await new AppPlugin(bundleWithUser()).start(ctx);
+
+            // start() returned on the budget; the rows are still landing. This
+            // is the window in which `kernel:ready` used to certify the store.
+            expect(readSeedSettlement(ctx)).toEqual({ pending: 1, inFlight: 1, suppressed: [] });
+
+            await vi.waitFor(() => {
+                expect(readSeedSettlement(ctx)).toEqual({ pending: 0, inFlight: 0, suppressed: [] });
+            });
+            expect(trigger).toHaveBeenCalledWith('app:seeded', {
+                appId: 'seed-test-app',
+                overBudget: true,
+            });
+        });
+
+        it('a seed that fits its budget has already settled when start() returns', async () => {
+            process.env.OS_INLINE_SEED_BUDGET_MS = '8000';
+            insert = vi.fn(async () => undefined);
+            const ctx = makeSettlementContext();
+
+            await new AppPlugin(bundleWithUser()).start(ctx);
+
+            expect(readSeedSettlement(ctx)).toEqual({ pending: 0, inFlight: 0, suppressed: [] });
+        });
+
+        it('multi-tenant suppresses its source, which therefore never settles', async () => {
+            process.env.OS_MULTI_ORG_ENABLED = 'true';
+            insert = vi.fn(async () => undefined);
+            const ctx = makeSettlementContext();
+
+            await new AppPlugin(bundleWithUser()).start(ctx);
+
+            expect(readSeedSettlement(ctx)).toEqual({
+                pending: 1,
+                inFlight: 0,
+                suppressed: ['multi-tenant-replay'],
+            });
+        });
+
+        it('skipSeedData suppresses its source, which therefore never settles', async () => {
+            insert = vi.fn(async () => undefined);
+            const ctx = makeSettlementContext();
+
+            await new AppPlugin(bundleWithUser(), undefined, { skipSeedData: true }).start(ctx);
+
+            expect(insert).not.toHaveBeenCalled();
+            expect(readSeedSettlement(ctx)).toEqual({
+                pending: 1,
+                inFlight: 0,
+                suppressed: ['skip-seed-data'],
+            });
+        });
+
+        it('registers no tally at all when the app has no seed datasets', async () => {
+            insert = vi.fn(async () => undefined);
+            const ctx = makeSettlementContext();
+
+            await new AppPlugin({ id: 'seed-test-app' }).start(ctx);
+
+            // Nothing to wait for — the attestation backstop runs unchanged.
+            expect(readSeedSettlement(ctx)).toBeUndefined();
+        });
+
+        /**
+         * The settle must land before the `trigger` guard, not after it: a
+         * kernel context with no `trigger()` still finished its seed, and
+         * leaving the tally pending there would strand every consumer waiting
+         * on a signal that cannot arrive.
+         */
+        it('settles even when the kernel context has no trigger()', async () => {
+            process.env.OS_INLINE_SEED_BUDGET_MS = '8000';
+            insert = vi.fn(async () => undefined);
+            const base = makeSettlementContext();
+            const ctx = { ...base, trigger: undefined } as unknown as PluginContext;
+
+            await new AppPlugin(bundleWithUser()).start(ctx);
+
+            expect(readSeedSettlement(ctx)).toEqual({ pending: 0, inFlight: 0, suppressed: [] });
+        });
     });
 });

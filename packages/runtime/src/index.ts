@@ -33,6 +33,8 @@ export type { SeedSourceOutcome } from './seed-summary.js';
 // contract shared by AppPlugin and the marketplace install path so a new org
 // replays the UNION of every seed source, not just the first one.
 export { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
+export { declareSeedSource, readSeedSettlement } from './seed-settlement.js';
+export type { SeedSourceHandle } from './seed-settlement.js';
 // External Datasource Federation — boot-validation gate (ADR-0015, Gate 2)
 export { ExternalValidationPlugin, createExternalValidationPlugin } from './external-validation-plugin.js';
 export type { ExternalSchemaDriftEvent } from './external-validation-plugin.js';

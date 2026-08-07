@@ -263,4 +263,170 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
       expect(engine.rows.map((r: any) => r.id)).toEqual(['adr-0104-value-shapes']);
     });
   });
+
+  /**
+   * #4795 — `app:seeded` and `kernel:ready` can arrive in EITHER order.
+   *
+   * When the inline seed overruns `OS_INLINE_SEED_BUDGET_MS` the runtime hands
+   * it to the background, so `kernel:ready` lands first and the #4769 backstop
+   * fired mid-seed: it certified the store, flipped the gates to strict, and
+   * the tail of the same seed run met a contract its head never saw — one
+   * boot, two contracts. Measured on a showcase cold boot at
+   * `OS_INLINE_SEED_BUDGET_MS=1`: attestation +0.470s, seed settled +3.617s.
+   *
+   * The fix asks the published `seed-settlement` contract instead of guessing
+   * from the runtime's internal `seed-datasets` array — see the contract's own
+   * TSDoc for why an array's presence cannot answer this.
+   */
+  describe('defers while this boot own seed is still landing (#4795)', () => {
+    /** Fake `seed-settlement` service over mutable state a test can advance. */
+    function seedSettlementFake(state: {
+      inFlight?: number;
+      suppressed?: Array<'multi-tenant-replay' | 'skip-seed-data'>;
+    }) {
+      return {
+        snapshot: () => ({
+          pending: (state.inFlight ?? 0) + (state.suppressed?.length ?? 0),
+          inFlight: state.inFlight ?? 0,
+          suppressed: [...(state.suppressed ?? [])],
+        }),
+      };
+    }
+
+    async function bootWithSeed(engine: unknown, state: Parameters<typeof seedSettlementFake>[0]) {
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engine);
+      ctx.registerService('seed-settlement', seedSettlementFake(state));
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+      return ctx;
+    }
+
+    /**
+     * The nail for this issue: at `kernel:ready` the background seed is still
+     * writing, so nothing may be certified yet — and once it settles, the
+     * certificate lands normally. One contract for the whole seed run.
+     */
+    it('kernel:ready writes no attestation while a seed source is still in flight', async () => {
+      const engine = engineWith(true);
+      const state = { inFlight: 1 };
+
+      const ctx = await bootWithSeed(engine, state);
+      await ctx._flushReady();
+
+      expect(engine.rows).toHaveLength(0);
+
+      // The background seed finishes and the runtime emits `app:seeded`.
+      state.inFlight = 0;
+      await ctx._flush('app:seeded');
+
+      expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0104-file-references',
+        'adr-0104-value-shapes',
+      ]);
+    });
+
+    /**
+     * `app:seeded` fires once per config app, so the FIRST one is not the
+     * settle point for the boot. Guarding only `kernel:ready` would move the
+     * same split-contract window onto multi-app bundles.
+     */
+    it('an app:seeded from one config app does not certify while another is still writing', async () => {
+      const engine = engineWith(true);
+      const state = { inFlight: 2 };
+
+      const ctx = await bootWithSeed(engine, state);
+
+      state.inFlight = 1; // app A settled; app B still writing
+      await ctx._flush('app:seeded');
+      expect(engine.rows).toHaveLength(0);
+
+      state.inFlight = 0; // app B settled
+      await ctx._flush('app:seeded');
+      expect(engine.rows).toHaveLength(2);
+    });
+
+    /**
+     * The #4795 ruling (2026-08-06), pinned: a deployment whose seed never runs
+     * at boot does not self-certify — it waits for `os migrate`. Falls out of
+     * the same predicate rather than needing a branch of its own.
+     */
+    it.each([
+      ['multi-tenant', 'multi-tenant-replay' as const],
+      ['skipSeedData', 'skip-seed-data' as const],
+    ])('%s: attests nothing at boot, without erroring', async (_label, reason) => {
+      const engine = engineWith(true);
+
+      const ctx = await bootWithSeed(engine, { suppressed: [reason] });
+      await expect(ctx._flushReady()).resolves.toBeUndefined();
+
+      expect(engine.rows).toHaveLength(0);
+    });
+
+    it('says why it stood down, and names the command that closes the gate', async () => {
+      const engine = engineWith(true);
+
+      const ctx = await bootWithSeed(engine, { suppressed: ['multi-tenant-replay'] });
+      await ctx._flushReady();
+
+      const said = ctx._logs.info.join('\n');
+      expect(said).toContain('multi-tenant-replay');
+      expect(said).toContain('os migrate value-shapes --apply');
+      // A posture that is correct by design must not spend the level that
+      // means "something you trusted did not persist" (AGENTS.md).
+      expect(ctx._logs.warn.join('\n')).not.toContain('not attesting');
+    });
+
+    it('an in-flight deferral says it will be picked up on app:seeded', async () => {
+      const engine = engineWith(true);
+
+      const ctx = await bootWithSeed(engine, { inFlight: 1 });
+      await ctx._flushReady();
+
+      expect(ctx._logs.info.join('\n')).toContain('app:seeded');
+    });
+
+    /**
+     * Regression guard for the two paths this change must leave untouched:
+     * a seed that fits inside its budget (settled before `kernel:ready`), and
+     * a kernel with no seed pipeline at all — the backstop #4769 kept for
+     * exactly that case, which is the same moment as before for it.
+     */
+    it('a settled seed attests at kernel:ready exactly as before', async () => {
+      const engine = engineWith(true);
+
+      const ctx = await bootWithSeed(engine, { inFlight: 0 });
+      await ctx._flushReady();
+
+      expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+        'adr-0104-file-references',
+        'adr-0104-value-shapes',
+      ]);
+    });
+
+    it('a kernel with no seed pipeline still attests on the kernel:ready backstop', async () => {
+      const engine = engineWith(true);
+      const plugin = new PlatformObjectsPlugin();
+      const ctx = makeCtx();
+      ctx.registerService('objectql', engine); // no `seed-settlement` service
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+
+      await ctx._flushReady();
+
+      expect(engine.rows).toHaveLength(2);
+    });
+
+    /**
+     * A store that was FOUND was never going to be attested, so announcing a
+     * deferral over it would explain a decision nobody was making.
+     */
+    it('says nothing about deferral on a store that already existed', async () => {
+      const ctx = await bootWithSeed(engineWith(false), { inFlight: 1 });
+      await ctx._flushReady();
+
+      expect(ctx._logs.info.join('\n')).not.toContain('attestation deferred');
+    });
+  });
 });
