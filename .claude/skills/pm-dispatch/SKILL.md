@@ -1254,6 +1254,23 @@ regression passes) drop to `batch:2`, or dispatch that issue via
 `mode:cloud` so it gets its own container. If an agent dies with a
 heap/OOM signature, redispatch it alone rather than into a full batch.
 
+**单容器化任务在选择期单独派卡片(维护者 2026-08-07 拍板)。** 上一段的
+「重活走 `mode:cloud`」不是事后救火,而是**批次选择时的分类动作**:每轮选单时
+PM 先给每张候选卡判定验证重量,命中任一判据即**单独派一张 `mode:cloud` 卡**
+(独享容器),⛔ 不混进共享容器批次:
+
+- **判据(任一命中即单容器)**:`size/l` / `size/xl`;全量重生成类(动 tracked
+  生成物需整套 regen,#5837 分片即此形);验证半径跨 3 个以上包的全量测试;
+  dogfood / 浏览器验证;依赖族升级、全量回归;预计持 heavy-verify 锁超过
+  ~10 分钟的验证管线。
+- **轻卡不升舱**:S/M 级(文档、JSDoc、单文件面)留 `mode:subagent` 共享容器
+  —— 为轻卡单开容器是纯开销,规则的两个方向同等硬。
+- **判定写进认领评论**(「容器判定:S 级,`mode:subagent` 共享容器」/「L 级,
+  `mode:cloud` 单容器」),台账可审计,交接会话不用重判。
+- 实测背景(2026-08-06/07 夜班):9 dev 共享一容器,重验证在 flock 后串行,
+  一张重卡(#5837 级,数十分钟级验证管线)拖长**整批**墙钟;把它单容器化,
+  批内轻卡不再排它的队,重卡自己也不用和八个邻居分内存。
+
 #### Dispatch backends
 
 **`mode:subagent` (default).** The `Agent` tool, as described above. The devs
