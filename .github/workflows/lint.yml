@@ -509,7 +509,10 @@ jobs:
       # failure: every package either declares `typecheck` (run by the turbo
       # step below) or carries a measured DEBT/EXEMPT entry in the script's
       # ledger, reconciled in both directions so the ledger can only shrink.
-      # Reads package.json files only; no build, sub-second.
+      # Reads package.json files only; no build, sub-second. The other half of
+      # this gate — re-running tsc against each ledger number — needs the built
+      # dist/*.d.ts and therefore lives after the build step, near the bottom of
+      # this job ("Re-measure the type-check DEBT / TEST_DEBT ledger").
       - name: Check every package is type-check covered or ledgered
         run: pnpm check:type-check-coverage
 
@@ -719,6 +722,42 @@ jobs:
       # they are distinct gates, not bulk coverage.
       - name: Type check workspace packages
         run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
+
+      # The MEASURED half of the coverage gate (#5278). The cheap structural
+      # check near the top of this job asserts that a package without a
+      # `typecheck` script carries a DEBT/TEST_DEBT entry with a positive number
+      # written down — and, until now, nothing more: `errors: 28` and
+      # `errors: 1` were equally acceptable to it, because the ledger was never
+      # re-measured. So a ledgered package's real error count could grow without
+      # bound while the gate reported success. It had: metadata-protocol
+      # recorded 28 and reported 63, service-analytics 3 -> 7, service-automation
+      # 2 -> 5, and the wholesale re-measure this step ships with found 17 of the
+      # 34 entries understated and not one overstated. A number that has drifted
+      # 2.25x no longer describes the debt it claims to freeze.
+      #
+      # Asymmetric, on purpose: a count ABOVE its recorded number fails, a count
+      # below prints an informational "can be lowered / graduation candidate"
+      # line and stays green. Fixing errors must not also require editing a
+      # bookkeeping number before CI will go green, or the ledger charges a toll
+      # on exactly the work it exists to encourage.
+      #
+      # Here rather than beside its structural half because it runs the real
+      # compiler over ~34 projects, and tsc resolves workspace imports through
+      # each dependency's built `dist/*.d.ts` — so it needs the build steps
+      # above, which this job already pays for. The build filter is widened to
+      # the nested package groups (packages/services/*, packages/drivers/*,
+      # packages/plugins/*, …) because most ledgered packages have no
+      # `typecheck` script and therefore never entered the turbo task graph that
+      # would otherwise have built their dependencies; it is a superset of what
+      # the steps above already built, so it is cache hits plus the remainder.
+      # Measured cost of the re-measure itself: ~4 min, sequential by design
+      # (parallel tsc processes trade wall clock for an OOM risk on a job that
+      # has just built the whole workspace).
+      - name: Build the ledgered packages' dependencies
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
+
+      - name: Re-measure the type-check DEBT / TEST_DEBT ledger
+        run: pnpm check:type-check-debt
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck

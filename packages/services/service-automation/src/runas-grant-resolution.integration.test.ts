@@ -119,7 +119,13 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
     await automation.execute('sys', { userId: 'u1', params: { noteId: 'n1' } });
     const update = crud.find((c) => c.op === 'update' && c.obj === 'runas_thing');
     expect(update!.ctx.isSystem).toBe(true);
-    expect(update!.ctx.userId).toBeUndefined();
+    // #5494 — the acting user rides the elevated context as ATTRIBUTION (it
+    // drives the created_by/updated_by stamps and the audit actor; the
+    // isSystem short-circuit precedes every gate that reads it). What proves
+    // "the resolver is not consulted" is the untouched authz envelope:
+    expect(update!.ctx.userId).toBe('u1');
+    expect(update!.ctx.positions).toEqual([]);
+    expect(update!.ctx.permissions).toEqual([]);
 
     await kernel.shutdown();
   });
