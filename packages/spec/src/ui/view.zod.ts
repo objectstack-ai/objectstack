@@ -1412,8 +1412,18 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
    * (ADR-0089, canonical `*When` name). Binding root depends on the surface:
    * runtime record forms bind `record` + `current_user`; metadata-editing forms
    * (`*.form.ts`) bind the row under edit as `data`.
+   *
+   * **Inside a repeater, `data` is the ROW, not the whole document** (#6254).
+   * A sub-field of a `type: 'record'` / repeater field is rendered with its own
+   * activation — the metadata form renderer evaluates each sub-field predicate
+   * as `evaluatePredicate(spec.visibleOn, { data: row })` — so `data.type`
+   * means *this row's* `type`, which is what a per-entry rule wants. The root
+   * is still spelled `data` at every depth: there is no implicit row scope, so
+   * a BARE identifier (`type == 'formula'`) is unbound and the predicate faults
+   * open, showing the field for every row. Prefix every reference with `data.`
+   * whether the field sits at the top level or inside a repeater.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open. e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
